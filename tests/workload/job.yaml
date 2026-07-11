@@ -1,0 +1,38 @@
+# Standalone job definition for the e2e test workload (tests/workload/train.py, built as
+# the openresearch-workload image — see Dockerfile.train). This is a domain.JobSpec: the
+# platform's own DSL, never a raw Kubernetes manifest (see
+# controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
+# reference, including distributed training). tests/e2e-flow.sh reads this file as-is and
+# submits it verbatim as the `job` field of every POST /experiments call — the per-run bits
+# (hypothesis, agent, platform experiment) live in the request's `metadata`, not here,
+# because this file describes how the job runs, which is identical for every agent in the
+# e2e run.
+#
+# Kept deliberately plain/single-node: e2e-flow.sh sizes its platform-experiment budget
+# assuming exactly 1 GPU per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
+# here would double the GPU-hours cost per submission and starve the budget. The
+# distributed-training path (num_nodes, topology, acceptable_gpu_types) is verified
+# separately via direct API calls, not through this shared smoke-test fixture.
+image: localhost/openresearch-workload:latest
+
+# Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster
+# would leave these unset to pick up its own operator-set defaults instead. cpu is kept
+# well above what the workload actually uses at steady state because a too-tight cpu limit
+# starves the container during its runtime-level startup handshake (a short burst of
+# forks/execs), which can fail the container outright instead of just running it slower —
+# see node-agent-daemonset.yaml's resources comment for the full mechanism.
+cpu: "250m"
+memory: "128Mi"
+
+gpu_type: T4
+gpu_count: 1
+
+# acceptable_gpu_types: the e2e run tolerates landing on any of these instead of requiring
+# exactly T4 — demonstrates the platform's variability tolerance (see
+# controlplane/settings/examples/experiment-submission.yaml's acceptable_gpu_types doc). All
+# NVIDIA (same vendor plumbing), so one nodeAffinity OR covers them all. Actually exercised
+# only if the local cluster has nodes of more than one of these types — see
+# localdev/add-fake-nodes.sh, which labels extra simulated nodes with exactly this spread.
+# The billed rate adjusts to whichever type the job actually lands on; e2e-flow.sh's BUDGET
+# is sized for the most expensive of these (A100) so landing on any of them still fits.
+acceptable_gpu_types: [T4, L40, A100]

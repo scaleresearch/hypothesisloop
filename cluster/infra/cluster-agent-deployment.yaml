@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openresearch-cluster-agent
+  namespace: openresearch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openresearch-cluster-agent
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    # nodes: read live CPU capacity/allocatable off real cluster nodes (replaces the old
+    # fake-GPU-only capacity accounting) — see workload's "get live CPU capacity" step.
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    # pods: cluster-wide list to compute actual per-node utilization (workload_client.go's
+    # nodeCapacity/nodeUsage path) — same capacity-accounting feature as the nodes rule above.
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    # services: one ClusterIP per submitted job (for distributed/multi-node jobs' pod-to-pod
+    # discovery), created alongside the Job and deleted with it (workload_client.go create/
+    # delete paths).
+    resources: ["services"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    # ConfigMaps: read this cluster's operator-set JobDefaults (see
+    # cluster/infra/job-defaults-configmap.yaml) — falls back to hardcoded defaults if
+    # absent/unreadable, so this permission is an optimization, not a hard requirement.
+    resources: ["configmaps"]
+    verbs: ["get"]
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openresearch-cluster-agent
+subjects:
+  - kind: ServiceAccount
+    name: openresearch-cluster-agent
+    namespace: openresearch
+roleRef:
+  kind: ClusterRole
+  name: openresearch-cluster-agent
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openresearch-cluster-agent
+  namespace: openresearch
+  labels:
+    app: openresearch-cluster-agent
+spec:
+  # Every replica independently reconciles (desired-state fetch is a read-only GET, and
+  # Job create/delete are idempotent), so no leader election is needed — safe to scale this
+  # up for availability without any coordination. One is enough for most deployments.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openresearch-cluster-agent
+  template:
+    metadata:
+      labels:
+        app: openresearch-cluster-agent
+    spec:
+      serviceAccountName: openresearch-cluster-agent
+      containers:
+        - name: cluster-agent
+          image: localhost/openresearch-cluster-agent:latest
+          imagePullPolicy: Never
+          env:
+            - name: CLUSTER_NAME
+              value: "__CLUSTER_NAME__"
+            - name: CONTROLPLANE_URL
+              value: "__CONTROLPLANE_URL__"
+            - name: REGISTRY_URL
+              value: "__REGISTRY_URL__"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            # See node-agent-daemonset.yaml's resources comment: a tight cpu limit starves
+            # the container's own startup handshake, not just its steady-state work.
+            limits:
+              cpu: "300m"
+              memory: "64Mi"

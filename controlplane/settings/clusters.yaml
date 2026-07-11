@@ -1,0 +1,27 @@
+# Registry of target Kubernetes clusters the control plane can admit
+# experiments onto. Each entry corresponds to one cluster that has had the
+# cluster-agent bundle installed via `cluster/infra/install.sh` (or
+# `make cluster-agent-up CLUSTER=<name>`).
+#
+# Loaded by control-service and metrics-service (CLUSTERS_CONFIG_PATH env
+# var, see controlplane/infra/docker-compose.yaml). kubeconfig_path is
+# resolved from inside the container, so it must point at a path mounted into
+# that container, not a host path. No env var expansion is performed.
+#
+# If this file is absent, both services fall back to a single "default"
+# cluster built from the KUBE_CONTEXT / KUBECONFIG env vars — today's
+# single-cluster behavior is unaffected either way.
+clusters:
+  - name: local
+    kubeconfig_path: /root/.kube/config
+    context: k3s-local
+
+  # Add one entry per additional target cluster. Each one needs its own
+  # kubeconfig mounted into control-service and metrics-service at the
+  # path referenced here, e.g. in docker-compose.yaml:
+  #   volumes:
+  #     - ${GPU_EAST_KUBECONFIG_PATH}:/etc/openresearch/kubeconfigs/gpu-east.yaml:ro
+  #
+  # - name: gpu-cluster-east
+  #   kubeconfig_path: /etc/openresearch/kubeconfigs/gpu-east.yaml
+  #   context: gpu-cluster-east

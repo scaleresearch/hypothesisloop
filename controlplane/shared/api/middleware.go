@@ -1,0 +1,80 @@
+package api
+
+import (
+	"net/http"
+	"runtime/debug"
+	"time"
+
+	"go.uber.org/zap"
+)
+
+// CORSMiddleware adds permissive CORS headers to every response. Suitable for
+// PoC use; tighten allowed origins before production.
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+
+		// Respond immediately to preflight requests.
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// LoggingMiddleware returns a middleware that logs method, path, status code,
+// and request duration at INFO level.
+func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+			next.ServeHTTP(rw, r)
+
+			logger.Info("http request",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+				zap.Int("status", rw.status),
+				zap.Duration("duration", time.Since(start)),
+				zap.String("remote_addr", r.RemoteAddr),
+			)
+		})
+	}
+}
+
+// RecoveryMiddleware returns a middleware that catches panics, logs them with a
+// stack trace, and responds with HTTP 500.
+func RecoveryMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.Error("panic recovered",
+						zap.Any("panic", rec),
+						zap.String("stack", string(debug.Stack())),
+						zap.String("method", r.Method),
+						zap.String("path", r.URL.Path),
+					)
+					http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// statusRecorder wraps http.ResponseWriter to capture the written status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.status = code
+	sr.ResponseWriter.WriteHeader(code)
+}

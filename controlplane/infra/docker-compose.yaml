@@ -1,0 +1,99 @@
+networks:
+  openresearch-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  greptimedb-data:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openresearch
+      POSTGRES_USER: openresearch
+      POSTGRES_PASSWORD: openresearch
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../shared/db/schema.sql:/schema/schema.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - openresearch-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openresearch -d openresearch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Hosts quota-service and scheduler-service on their historical ports 8081/8082 —
+  # scheduler already calls straight into the quota package for refunds/adjustments,
+  # so they share one Postgres connection pool instead of duplicating it.
+  control-service:
+    image: openresearch-control-service:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://openresearch:openresearch@postgres:5432/openresearch?sslmode=disable
+      QUOTA_PORT: "8081"
+      SCHEDULER_PORT: "8082"
+      CLUSTERS_CONFIG_PATH: /app/settings/clusters.yaml
+    volumes:
+      - ../settings/clusters.yaml:/app/settings/clusters.yaml:ro
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    networks:
+      - openresearch-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Hosts registry-service and metric-controller on their historical ports 8083/8084 —
+  # registry writes samples to GreptimeDB and metric-controller reads them back to
+  # drive eviction, so they're the write/read halves of the same metrics pipeline.
+  metrics-service:
+    image: openresearch-metrics-service:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://openresearch:openresearch@postgres:5432/openresearch?sslmode=disable
+      REGISTRY_PORT: "8083"
+      METRIC_CONTROLLER_PORT: "8084"
+      GREPTIMEDB_URL: http://greptimedb:4000
+      CLUSTERS_CONFIG_PATH: /app/settings/clusters.yaml
+    volumes:
+      - ../settings/clusters.yaml:/app/settings/clusters.yaml:ro
+    ports:
+      - "8083:8083"
+      - "8084:8084"
+    networks:
+      - openresearch-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      greptimedb:
+        condition: service_started
+
+  # GreptimeDB (standalone) replaces Prometheus + Pushgateway as the metrics storage
+  # backend. It is Prometheus remote-write and PromQL compatible: registry-service
+  # pushes samples to /v1/prometheus/write, and metric-controller/registry-service
+  # read them back via /v1/prometheus/api/v1/query. The per-service /metrics endpoints
+  # (client_golang, promhttp) are unchanged and remain in Prometheus exposition format.
+  greptimedb:
+    image: greptime/greptimedb:latest
+    restart: unless-stopped
+    command:
+      - "standalone"
+      - "start"
+      - "--http-addr=0.0.0.0:4000"
+      - "--rpc-bind-addr=0.0.0.0:4001"
+    volumes:
+      - greptimedb-data:/tmp/greptimedb-data
+    ports:
+      - "4000:4000" # HTTP / PromQL / remote-write
+      - "4001:4001" # gRPC
+    networks:
+      - openresearch-net
+
+  # ui: run separately with `cd ui && npm run dev` (no container Dockerfile yet)

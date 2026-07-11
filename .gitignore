@@ -1,0 +1,84 @@
+# Go
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Compiled service binaries in repo root
+/control-service
+/metrics-service
+/node-agent
+/cluster-agent
+
+# Go workspace
+go.work
+go.work.sum
+
+# Build output
+dist/
+
+# Next.js
+controlplane/ui/.next/
+controlplane/ui/out/
+controlplane/ui/node_modules/
+controlplane/ui/.env.local
+controlplane/ui/.env.development.local
+controlplane/ui/.env.test.local
+controlplane/ui/.env.production.local
+controlplane/ui/npm-debug.log*
+controlplane/ui/yarn-debug.log*
+controlplane/ui/yarn-error.log*
+controlplane/ui/tsconfig.tsbuildinfo
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/wandb/
+**/outputs/
+**/checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# k3s
+localdev/kubeconfig
+*.kubeconfig
+*.pem
+*.key
+*.crt
+
+# Docker / secrets
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Secrets / credentials
+*.secret
+secrets/
+
+# Go module vendor directory (not tracked)
+vendor/

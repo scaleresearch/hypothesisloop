@@ -1,0 +1,17 @@
+FROM golang:1.25-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+
+COPY . .
+COPY vendor ./vendor
+RUN CGO_ENABLED=0 go build -mod=vendor -o /control-service ./controlplane/cmd/control-service
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /control-service /control-service
+COPY --from=builder /app/controlplane/settings /settings
+ENV QUOTA_PORT=8081
+ENV SCHEDULER_PORT=8082
+ENV OPENRESEARCH_CONFIG=/settings/openresearch.yaml
+EXPOSE 8081 8082
+CMD ["/control-service"]

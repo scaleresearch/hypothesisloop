@@ -1,0 +1,52 @@
+# Default dockerignore for Go service builds
+# Used by Dockerfile.control-service, Dockerfile.metrics-service,
+# Dockerfile.node-agent, Dockerfile.cluster-agent
+
+# Version control
+.git/
+.gitignore
+
+# CI / editor
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docs / specs
+*.md
+docs/
+
+# UI (not needed in Go images)
+controlplane/ui/
+
+# Python workload (not needed in Go images)
+tests/workload/
+tests/workload-robotics/
+
+# Infra definitions (not needed at runtime)
+controlplane/infra/
+cluster/infra/
+localdev/
+tests/*.sh
+
+# Go test artifacts
+*_test.go
+coverage.txt
+coverage.html
+*.out
+
+# Secrets / env
+.env
+.env.*
+secrets/
+*.secret
+*.pem
+*.key
+*.crt
+
+# Logs
+*.log
+logs/

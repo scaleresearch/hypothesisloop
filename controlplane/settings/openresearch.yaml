@@ -1,0 +1,212 @@
+# OpenResearch platform configuration.
+# All scheduling constants, GPU definitions, and cluster topology live here.
+
+
+# GPU types — canonical compute units. The catalog is entirely operator-defined here — any
+# vendor's model name is valid (NVIDIA, AMD, ...); nothing in the code is a closed enum.
+# Each type has:
+#   name:             display name; the value agents put in job.yaml's gpu_type/acceptable_gpu_types
+#   t4h_rate:         cost in T4-GPU-hours per GPU-hour (T4 = 1.0 is the base unit)
+#   flavor:           internal flavor name used for capacity accounting (native k8s Job
+#                     scheduling — no external queueing operator)
+#   cluster_gpus:     number of GPUs of this type in the cluster
+#   node_label_value: the node label value real nodes of this type carry (set by the
+#                     vendor's device-plugin/feature-discovery add-on). Required for every
+#                     type agents can request: the backend builds a nodeAffinity from this
+#                     for every job (job.gpu_type alone, or the OR of job.acceptable_gpu_types)
+#                     — a plain gpu_type with no acceptable_gpu_types still must land on
+#                     hardware of exactly that model, since the extended resource request
+#                     alone only guarantees *a* GPU node, never *the requested model*.
+#   node_label_key:   the node label KEY carrying node_label_value. Defaults to
+#                     "nvidia.com/gpu.product" (NVIDIA GPU Feature Discovery) if omitted —
+#                     only needed for non-NVIDIA types (see the AMD example below).
+#   resource_name:    the k8s extended resource requested per GPU of this type. Defaults to
+#                     the top-level gpu_resource_name if omitted — only needed for
+#                     non-NVIDIA types (AMD's device plugin advertises "amd.com/gpu").
+#   taint_key:        the taint key nodes of this type carry. Defaults to the top-level
+#                     gpu_taint_key if omitted.
+#
+# GPUs are the primary resource dimension admitted/preempted on. CPU/RAM/storage are
+# additional, optional dimensions (see quota.* below and each platform experiment's own
+# budget_cpu_core_hours/budget_ram_gb_hours/budget_storage_gb_hours) — 0/unset means "not
+# tracked," so existing GPU-only platform experiments are unaffected. Agents declare GPU
+# count as a plain integer in job.yaml's gpu_count (see settings/examples/experiment-submission.yaml) — never
+# a k8s resource string. gpu_resource_name/gpu_taint_key below are cluster-wide fallbacks
+# used only for GPU types that don't set their own resource_name/taint_key above; set
+# gpu_resource_name to "cpu" as a temporary substitution on a cluster with no GPU
+# nodes/device plugin yet.
+gpu_resource_name: nvidia.com/gpu
+gpu_taint_key: nvidia.com/gpu
+
+gpu_types:
+  - name:       T4
+    t4h_rate:   1.0
+    flavor:     flavor-t4
+    cluster_gpus: 64
+    node_label_value: NVIDIA-T4
+
+  - name:       L40
+    t4h_rate:   2.0
+    flavor:     flavor-l40
+    cluster_gpus: 16
+    node_label_value: NVIDIA-L40
+
+  - name:       A100
+    t4h_rate:   3.0
+    flavor:     flavor-a100
+    cluster_gpus: 8
+    node_label_value: NVIDIA-A100-80GB-PCIe
+
+  - name:       H100
+    t4h_rate:   8.0
+    flavor:     flavor-h100
+    cluster_gpus: 4
+    node_label_value: NVIDIA-H100-80GB-HBM3
+
+  - name:       H200
+    t4h_rate:   10.0
+    flavor:     flavor-h200
+    cluster_gpus: 2
+    node_label_value: NVIDIA-H200-141GB-HBM3
+
+  # AMD example — demonstrates the multi-vendor catalog. A cluster can mix this entry with
+  # the NVIDIA ones above; each GPU type carries its own resource/taint/label plumbing, so
+  # the backend requests the right extended resource and builds the right nodeAffinity per
+  # job depending on which type it asked for. Uncomment and adjust cluster_gpus to actually
+  # use it — commented out by default since most clusters won't have this hardware.
+  # - name:       MI300X
+  #   t4h_rate:   9.0
+  #   flavor:     flavor-mi300x
+  #   cluster_gpus: 4
+  #   node_label_value: AMD-Instinct-MI300X
+  #   node_label_key: amd.com/gpu.device-id
+  #   resource_name: amd.com/gpu
+  #   taint_key: amd.com/gpu
+
+# GPU types that are interchangeable for admission purposes (same Hopper SM architecture).
+# An H100 request may be satisfied with an H200; the control plane adjusts cost accordingly.
+# Only list types that share the same vendor plumbing (resource_name/taint_key/node_label_key)
+# — see settings/examples/experiment-submission.yaml's acceptable_gpu_types doc for why mixing vendors in one
+# group doesn't work (the k8s resource request is a single specific name).
+interchangeable_groups:
+  - [H100, H200]
+
+# Flat per-unit quota rates for the non-GPU resource dimensions — 1.0 by default (no
+# hardware-tier variation to normalize away, unlike GPU). Override here if you want, e.g.,
+# CPU-hours to cost differently than 1 credit/core-hour.
+cpu_core_hour_rate: 1.0
+ram_gb_hour_rate: 1.0
+storage_gb_hour_rate: 1.0
+
+
+# Quota & scheduling constants
+
+quota:
+  # Fraction of base_share added as a bonus for top-3 placement in any prior experiment.
+  top3_bonus_fraction: 0.25
+
+  # burst_quota = guaranteed_quota * burst_fraction (2× overcommit, best-effort).
+  burst_fraction: 2.0
+
+  # Maximum number of experiments an agent may submit per hour within a single platform
+  # experiment. Prevents queue flooding. 0 = unlimited.
+  max_submissions_per_hour: 100
+
+  # Fraction of estimated_duration_hours after which a monotonically declining primary
+  # metric triggers eviction. E.g. 0.3 = evict if metrics decline for 30% of runtime.
+  metric_decline_fraction: 0.3
+
+  # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
+  # submission can never consume an entire guaranteed/burst budget in a single shot. This is
+  # independent of (and on top of) budget sizing: size these relative to your smallest
+  # expected burst pool, not just to "a sane job." 0 = unlimited.
+  max_gpu_count_per_job: 16
+  max_cpu_cores_per_job: 64
+  max_ram_gb_per_job: 512
+  max_storage_gb_per_job: 1000
+
+
+
+# Scheduler & controller timing
+
+scheduler:
+  # How often the admission loop ticks (picks up queued experiments).
+  loop_heartbeat_seconds: 10
+
+  # How long to wait for a preempted k8s Job to be deleted before continuing.
+  preempt_timeout_seconds: 30
+
+  # How often the JobWatcher polls a running k8s Job for phase transitions.
+  job_poll_interval_seconds: 5
+
+  # How often the JobWatcher scans for newly ADMITTED/SUBMITTED jobs to watch.
+  admitted_scan_interval_seconds: 10
+
+  # How long a job may stay SUBMITTED/ADMITTED without reporting RUNNING before job_watcher
+  # evicts it (reason stuck_pending) and fully refunds its reservation. Bounds capacity held by
+  # jobs that never actually start (e.g. unschedulable) far tighter than the native
+  # ActiveDeadlineSeconds ceiling.
+  stuck_pending_timeout_seconds: 300
+
+  # How stale a cluster-agent's heartbeat may be before the cluster is treated as Unreachable:
+  # its live-reported capacity ages out of admission (freezing new jobs to it) and it shows
+  # Disconnected in the UI. Jobs already RUNNING there are left alone until it reconnects.
+  # ~15 missed polls at the ~2s desired-state cadence.
+  cluster_unreachable_after_seconds: 30
+
+  # Age-bucket width for guaranteed-tier admission fairness: jobs queued within this window of
+  # each other are ordered by least-used-quota agent first instead of exact FIFO timestamp,
+  # bounding how far a steady-submitting agent's own jobs can jump ahead of other agents'
+  # equally-entitled jobs.
+  guaranteed_fairness_window_seconds: 60
+
+  # Control-plane-side GC sweep: how often to look for SUBMITTED/ADMITTED/RUNNING experiments
+  # with no recent cluster_job_reports row, and how stale "no recent report" means. Alert-only.
+  stale_desired_state_sweep_interval_seconds: 600
+  stale_desired_state_threshold_seconds: 300
+
+  # How often the metric controller reconciles running experiments.
+  reconcile_interval_seconds: 30
+
+  # Fallback silence window when a platform experiment has no report_interval_seconds set.
+  default_report_interval_seconds: 30
+
+  # Multiplier on report_interval_seconds; no metric push for this many intervals triggers eviction.
+  silence_multiplier: 3.0
+
+  # Floor on the silence window (silence_multiplier * report_interval_seconds), regardless of
+  # how short a platform experiment's own report_interval_seconds is configured. Must comfortably
+  # exceed realistic node-death -> reschedule -> pod-running-again recovery time, or a fast
+  # reporting cadence turns a normal self-heal into a false permanent eviction.
+  min_silence_window_seconds: 60
+
+  # Multiplier on estimated_duration_hours beyond which a job is considered overrunning.
+  # E.g. 1.5 = evict if job has run for 150% of its estimated duration.
+  overrun_multiplier: 1.5
+
+  # Number of most-recent metric datapoints retained per experiment for decline detection.
+  metric_window_size: 20
+
+  # Kubernetes Job retries (RestartPolicy=OnFailure) before k8s marks the Job Failed.
+  # Absorbs transient pod flakes; a persistently crashing job exhausts these retries and is
+  # failed natively by k8s (job watcher then records FAILED and refunds unused T4h).
+  job_backoff_limit: 3
+
+  # k8s ActiveDeadlineSeconds hard ceiling, as a multiple of estimated_duration_hours.
+  # Backstop for the overrun guard. E.g. 1.5 = hard-kill at 150% of estimated runtime.
+  job_deadline_multiplier: 1.5
+
+  # Floor for ActiveDeadlineSeconds so very short jobs still get a sane minimum budget.
+  min_job_deadline_seconds: 300
+
+
+# Phase 2 (signal-gated competition)
+
+phase2:
+  # Fraction of total experiment budget consumed before phase 2 triggers.
+  boundary_fraction: 0.40
+
+  # Metric percentile cut at phase-2 boundary. Agents whose best metric value falls
+  # above this percentile (maximize) or below 1-percentile (minimize) advance to phase 2.
+  # 0.75 means top-quartile agents advance; bottom 25% are held.
+  admission_percentile: 0.75

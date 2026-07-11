@@ -1,0 +1,12 @@
+FROM golang:1.25-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+
+COPY . .
+COPY vendor ./vendor
+RUN CGO_ENABLED=0 go build -mod=vendor -o /node-agent ./cluster/cmd/node-agent
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /node-agent /node-agent
+CMD ["/node-agent"]

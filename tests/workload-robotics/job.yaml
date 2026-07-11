@@ -1,0 +1,21 @@
+# Standalone job definition for the robotics (VLA-style) demo workload
+# (tests/workload-robotics/train.py, built as the openresearch-robotics-workload image —
+# see Dockerfile.train). This is a domain.JobSpec: the platform's own DSL, never a raw
+# Kubernetes manifest. tests/robotics-demo.sh reads this file as-is and submits it
+# verbatim as the `job` field of every POST /experiments call — the per-run bits
+# (hypothesis, agent, platform experiment, policy arch) live in the request's `metadata`
+# / `env`, not here.
+#
+# Sized for the local single-node dev cluster (podman VM) — a real cluster would leave
+# cpu/memory unset to pick up its own operator-set defaults instead.
+image: localhost/openresearch-robotics-workload:latest
+
+cpu: "100m"
+memory: "128Mi"
+
+gpu_type: A100
+gpu_count: 1
+
+# Demonstrates the platform's hardware-tier tolerance — lands on whichever of these is
+# available, billed at whichever rate it actually lands on.
+acceptable_gpu_types: [A100, L40, T4]

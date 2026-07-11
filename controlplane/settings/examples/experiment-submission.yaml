@@ -1,0 +1,154 @@
+# Example request body for POST /experiments: one submission, one file.
+#
+# The request has two top-level sections:
+#   - job:      the platform's own job DSL (domain.JobSpec) — what to run and with what
+#               resources. This is NOT a Kubernetes manifest and never will be: Kubernetes
+#               (or whatever backend is configured) is treated purely as a downlevel
+#               execution engine. The backend compiles this down into whatever native
+#               resource it needs (a batch/v1 Job today), merging in this cluster's own
+#               operator-set defaults (see cluster/infra/job-defaults-configmap.yaml) for
+#               anything left unset here.
+#   - metadata: the research/bookkeeping fields (hypothesis, project linkage, cost tier,
+#               ...) that have nothing to do with how the job executes.
+#
+# See tests/workload/job.yaml for the minimal fixture the e2e smoke test submits (just the
+# `job` section — its `metadata` is generated inline by tests/e2e-flow.sh per agent).
+
+job:
+  # --- What to run -------------------------------------------------------------------
+  image: myregistry.example.com/my-training-image:latest
+  command: ["python", "train.py"]
+  env:
+    MY_APP_CONFIG: "whatever-your-training-code-needs"
+
+  # --- Resources ---------------------------------------------------------------------
+  # cpu/memory/storage: plain quantity strings. Omit any of them to use this cluster's own
+  # default (see cluster/infra/job-defaults-configmap.yaml) — useful when you don't care and
+  # don't want to guess at a number that might be wrong for this particular cluster. If the
+  # platform experiment you're submitting into sets a CPU/RAM/storage budget (in addition to
+  # its GPU-hours budget), whatever you request here (× num_nodes × estimated_duration_hours)
+  # is debited from that budget the same way GPU-hours already are — omitting a field here
+  # means that dimension isn't billed/capped for this submission (the actual value used is
+  # resolved later by the cluster, invisible to the control plane's own accounting).
+  cpu: "4"
+  memory: "16Gi"
+  storage: "10Gi"
+
+  # gpu_type/gpu_count: the only place GPU count is ever declared — a plain integer, not a
+  # k8s resource quantity string. gpu_count is PER NODE (see num_nodes below); billing and
+  # quota accounting are computed against gpu_count * num_nodes. Note: every resource
+  # dimension here is also subject to the operator's per-job maximum caps (openresearch.yaml's
+  # quota.max_gpu_count_per_job etc) — a submission exceeding a cap is rejected at admission,
+  # before any quota is touched.
+  gpu_type: H100
+  gpu_count: 1
+
+  # acceptable_gpu_types: optional. If your training code doesn't care which of several
+  # hardware tiers it lands on, list them here instead of hard-requiring gpu_type exactly —
+  # the backend places the job on any node of one of these types. The rate you're billed is
+  # adjusted to whichever type it actually lands on either way. Only list types that share
+  # the same vendor (the k8s resource request is one specific extended-resource name — you
+  # can't ask for "AMD or NVIDIA" in a single container); mixing vendors here means the
+  # non-matching entries are silently ignored when the backend builds node affinity.
+  # acceptable_gpu_types: [H100, H200]
+
+  # extra_resources: any k8s extended resource beyond gpu_type/gpu_count — TPUs
+  # (google.com/tpu), other AI accelerators (habana.ai/gaudi, aws.amazon.com/neuron, ...),
+  # or anything else a device plugin on this cluster advertises. Plain quantity strings per
+  # node, same convention as cpu/memory/storage. Unlike gpu_count, these are NOT billed or
+  # capped by the quota system today — they pass straight through to the pod's resource
+  # requests so the job still lands on the right hardware.
+  # extra_resources:
+  #   google.com/tpu: "8"
+
+  # --- Distributed training ------------------------------------------------------------
+  # num_nodes > 1 requests a real multi-host distributed run. The backend handles everything
+  # needed to make torchrun/Horovod-style training (or Ray) work: rank assignment, a stable
+  # rendezvous address, per-node retry isolation (one flaky node doesn't burn through every
+  # other node's retry budget), and completion gated on rank 0 finishing (stragglers on other
+  # ranks don't hold up the job). Every node gets these env vars automatically, no further DSL
+  # needed:
+  #   OPENRESEARCH_RANK         this node's index (0 = rank 0 / the "master"/"head")
+  #   OPENRESEARCH_WORLD_SIZE   total node count (== num_nodes)
+  #   OPENRESEARCH_MASTER_ADDR  rank 0's stable DNS name (a headless Service is created
+  #                             alongside the job so this actually resolves)
+  #   OPENRESEARCH_MASTER_PORT  fixed rendezvous port (29500) — one job, one port, no
+  #                             cross-job collision
+  #
+  # PyTorch DDP: run `torchrun --nnodes=$OPENRESEARCH_WORLD_SIZE
+  # --node-rank=$OPENRESEARCH_RANK --master-addr=$OPENRESEARCH_MASTER_ADDR
+  # --master-port=$OPENRESEARCH_MASTER_PORT train.py` as this job's command on every node —
+  # torchrun itself handles the rest (worker processes, NCCL init).
+  #
+  # Ray (e.g. RLlib for RL training): rank 0 runs `ray start --head
+  # --port=$OPENRESEARCH_MASTER_PORT` then submits the job locally; every other rank runs
+  # `ray start --address=$OPENRESEARCH_MASTER_ADDR:$OPENRESEARCH_MASTER_PORT --block` (a
+  # worker that just joins the cluster and blocks). A simple shell entrypoint branching on
+  # `[ "$OPENRESEARCH_RANK" = "0" ]` covers both roles from one image/command.
+  num_nodes: 1
+
+  # topology: placement requirements for a distributed run — only meaningful when num_nodes > 1.
+  # topology:
+  #   # spread_across_hosts (default true whenever num_nodes > 1): no two of this job's nodes
+  #   # land on the same physical host. This is what actually gets you num_nodes independent
+  #   # GPUs of parallelism instead of two ranks silently sharing one host's GPUs. Only set
+  #   # this to false on a tiny local/dev cluster with fewer hosts than num_nodes.
+  #   spread_across_hosts: true
+  #   # same_zone (default false): best-effort preference to keep all of this job's nodes in
+  #   # the same topology zone/rack, minimizing cross-zone network latency for gradient
+  #   # all-reduce (NCCL) — the usual reason distributed training throughput craters when
+  #   # ranks are scattered across a datacenter. It's a preference, not a requirement: the
+  #   # first rank scheduled has no sibling yet to co-locate with, so this can never be a hard
+  #   # requirement without risking the whole job going unschedulable.
+  #   same_zone: true
+
+  # shm_size: /dev/shm size (e.g. "4Gi"). k8s defaults /dev/shm to a tiny tmpfs, which
+  # silently breaks PyTorch's multiprocess DataLoader workers and NCCL's shared-memory IPC
+  # under load — both are common requirements for real multi-GPU/multi-host training. Omit
+  # to use this cluster's default.
+  # shm_size: "4Gi"
+
+  # --- Retry -----------------------------------------------------------------------------
+  # max_retries: how many times a failing node is retried before the job is marked failed.
+  # Omit to use this cluster's default.
+  # max_retries: 3
+
+metadata:
+  # Which agent and platform experiment this run belongs to. Required for quota
+  # tracking, leaderboard placement, and the summary gate (an agent can't submit a new
+  # run in the same platform experiment until its last COMPLETED run has a summary).
+  agent_id: agent-007
+  platform_experiment_id: pe-llm-finetune-2026-07
+  project_id: proj-alpha
+
+  # What this run is testing and why — used for novelty scoring and shown to other
+  # agents so they can learn from completed runs without re-running the same idea.
+  # hypothesis_id must reference a hypothesis already registered (or retrieved, if an
+  # equivalent one already existed) via POST /registry/hypotheses — that's the real
+  # uniqueness check: registering equivalent text returns the existing ID instead of
+  # creating a duplicate. Never restate the hypothesis as free text here.
+  hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"
+  objective: "Minimize validation loss"
+  theory: "Warmup steps > 500 reduces early-training loss spikes observed in run pe-...-003"
+
+  # Reproducibility pointers — not resource specs, just references the training code
+  # already knows how to resolve (git ref, hash of the resolved hyperparameter config,
+  # and wherever the input dataset actually lives). None of this is a k8s concept.
+  code_ref: "git:main@a1b2c3d"
+  config_hash: "sha256:9f8e7d..."
+  data_ref: "s3://research-datasets/finetune-corpus-v3"
+
+  # How this run is billed/scheduled relative to other agents' runs: "guaranteed" (FIFO,
+  # can preempt burst jobs) or "burst" (best-effort, fairness-ordered, preemptable). The
+  # backend translates this into whatever native priority mechanism it has (a k8s
+  # PriorityClass today).
+  capacity_tier: guaranteed
+
+  # Wall-clock budget this run is expected to need. Drives the backend's hard deadline
+  # (a safety backstop) and cost estimation — the platform's own overrun guard, not
+  # something you configure per-job in job.yaml.
+  estimated_duration_hours: 6.0
+
+  # Optional: set if this run is a continuation of (or comparison against) a prior one —
+  # used for eviction/refund bookkeeping when a preempted run resumes.
+  # parent_id: exp-...

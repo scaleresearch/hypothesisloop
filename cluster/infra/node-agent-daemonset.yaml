@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openresearch
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openresearch-node-agent
+  namespace: openresearch
+---
+# ClusterRole (not a namespaced Role) deliberately: openresearch-jobs — where the pods this
+# agent needs to read actually live — doesn't exist yet at apply time. It's created later,
+# idempotently, by cluster-agent's own startup (see install.sh). A ClusterRole grants the
+# permission cluster-wide up front so it's already in effect whenever that namespace shows up,
+# with no dependency on apply order between this file and cluster-agent's deployment. The agent
+# itself still only ever lists pods in openresearch-jobs on its own node (see
+# podExperimentIDs in main.go) — this is broader than it uses, not broader than it needs to.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openresearch-node-agent-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openresearch-node-agent-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: openresearch-node-agent
+    namespace: openresearch
+roleRef:
+  kind: ClusterRole
+  name: openresearch-node-agent-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: openresearch-node-agent
+  namespace: openresearch
+  labels:
+    app: openresearch-node-agent
+spec:
+  selector:
+    matchLabels:
+      app: openresearch-node-agent
+  template:
+    metadata:
+      labels:
+        app: openresearch-node-agent
+    spec:
+      serviceAccountName: openresearch-node-agent
+      hostPID: true
+      containers:
+        - name: node-agent
+          image: localhost/openresearch-node-agent:latest
+          imagePullPolicy: Never
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Identifies which target cluster this agent bundle is reporting for,
+            # so the control plane can attribute metrics/quota to the right cluster
+            # once multi-cluster routing lands. Templated by install.sh from
+            # $CLUSTER_NAME. node-agent does not yet read this env var.
+            - name: CLUSTER_NAME
+              value: "__CLUSTER_NAME__"
+            - name: OPENRESEARCH_CONTROL_PLANE_URL
+              value: "http://host.docker.internal:8084"
+          volumeMounts:
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            # cpu limit: kept well above the request (unlike memory, which the process
+            # genuinely never exceeds) because a too-tight CPU quota starves the container
+            # right at startup — the runtime's own namespace-setup handshake (a few
+            # synchronous forks/execs) needs a short burst, and if the cgroup throttles that
+            # burst the container can fail to start entirely ("runc create failed ...
+            # namespace path: lstat /proc/<pid>/ns/ipc: no such file", "sync with stage-1")
+            # instead of just running slower. Bit for bit this looks like a runtime bug, but
+            # it's actually a starved-cgroup symptom — seen repeatedly at 50m under any real
+            # contention (several agents/pods starting at once).
+            limits:
+              cpu: "250m"
+              memory: "32Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+      tolerations:
+        - operator: Exists
