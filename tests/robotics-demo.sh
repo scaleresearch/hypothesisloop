@@ -105,6 +105,46 @@ echo ""
 echo "==> Submitting jobs (one per agent, same VLA baseline, different hypothesis)..."
 declare -a JOB_IDS
 
+TMPDIR_T="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_T"' EXIT
+
+cat > "$TMPDIR_T/mk_hyp_body.py" <<'PYEOF'
+import json, sys
+print(json.dumps({"agent_id": sys.argv[1], "platform_experiment_id": sys.argv[2], "text": sys.argv[3]}))
+PYEOF
+
+cat > "$TMPDIR_T/mk_submit_body.py" <<'PYEOF'
+import json, sys, yaml
+
+job_id, agent, pe_id, job_hours, job_file, lr, chunk, cam, hypothesis_id = sys.argv[1:10]
+
+with open(job_file) as f:
+    job = yaml.safe_load(f)
+
+job['env'] = {
+    'OPENRESEARCH_LEARNING_RATE': lr,
+    'OPENRESEARCH_CHUNK_LEN': chunk,
+    'OPENRESEARCH_CAMERA_VIEWS': cam,
+    'OPENRESEARCH_REPORT_INTERVAL_SECONDS': sys.argv[10],
+    'OPENRESEARCH_BASELINE': '0.30',
+}
+
+print(json.dumps({
+    'id': job_id,
+    'metadata': {
+        'agent_id': agent,
+        'platform_experiment_id': pe_id,
+        'project_id': 'robotics-vla-demo',
+        'hypothesis_id': hypothesis_id,
+        'theory': f"lr={lr} chunk_len={chunk} cameras={cam}, same VLA baseline architecture as every other agent in this experiment",
+        'objective': 'maximize task_success_rate above 0.30 baseline',
+        'estimated_duration_hours': float(job_hours),
+        'code_ref': 'git://openresearch/robotics-vla@main',
+    },
+    'job': job,
+}))
+PYEOF
+
 for idx in "${!AGENTS[@]}"; do
   AGENT="${AGENTS[$idx]}"
   LR="${LRS[$idx]}"
@@ -113,44 +153,17 @@ for idx in "${!AGENTS[@]}"; do
   HYPOTHESIS="${HYPOTHESES[$idx]}"
   JOB_ID="job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN_TS}"
 
-  # Every experiment must reference a registered hypothesis (hypothesis_id), not restate
-  # free text ad hoc — register (or retrieve, if an equivalent one already exists) it first.
+  # Every experiment must reference a hypothesis registered under the same platform
+  # experiment it's submitted into (hypothesis_id), not restate free text ad hoc — register
+  # (or retrieve, if an equivalent one already exists in this platform experiment's idea
+  # pool) it first.
   HYP_RESP=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" \
     -H 'Content-Type: application/json' \
-    -d "$(AGENT="$AGENT" HYPOTHESIS="$HYPOTHESIS" py "import json,os; print(json.dumps({'agent_id': os.environ['AGENT'], 'text': os.environ['HYPOTHESIS']}))")")
+    -d "$(python3 "$TMPDIR_T/mk_hyp_body.py" "$AGENT" "$PE_ID" "$HYPOTHESIS")")
   HYPOTHESIS_ID=$(echo "$HYP_RESP" | py "import sys,json; print(json.load(sys.stdin)['id'])")
 
-  SUBMIT_BODY=$(JOB_ID="$JOB_ID" AGENT="$AGENT" PE_ID="$PE_ID" JOB_HOURS="$JOB_HOURS" \
-    JOB_FILE="$JOB_FILE" LR="$LR" CHUNK="$CHUNK" CAM="$CAM" HYPOTHESIS_ID="$HYPOTHESIS_ID" \
-    REPORT_INTERVAL_SECONDS="$REPORT_INTERVAL_SECONDS" py "
-import json, os, yaml
-
-with open(os.environ['JOB_FILE']) as f:
-    job = yaml.safe_load(f)
-
-job['env'] = {
-    'OPENRESEARCH_LEARNING_RATE': os.environ['LR'],
-    'OPENRESEARCH_CHUNK_LEN': os.environ['CHUNK'],
-    'OPENRESEARCH_CAMERA_VIEWS': os.environ['CAM'],
-    'OPENRESEARCH_REPORT_INTERVAL_SECONDS': os.environ['REPORT_INTERVAL_SECONDS'],
-    'OPENRESEARCH_BASELINE': '0.30',
-}
-
-print(json.dumps({
-    'id': os.environ['JOB_ID'],
-    'metadata': {
-        'agent_id': os.environ['AGENT'],
-        'platform_experiment_id': os.environ['PE_ID'],
-        'project_id': 'robotics-vla-demo',
-        'hypothesis_id': os.environ['HYPOTHESIS_ID'],
-        'theory': f\"lr={os.environ['LR']} chunk_len={os.environ['CHUNK']} cameras={os.environ['CAM']}, same VLA baseline architecture as every other agent in this experiment\",
-        'objective': 'maximize task_success_rate above 0.30 baseline',
-        'estimated_duration_hours': float(os.environ['JOB_HOURS']),
-        'code_ref': 'git://openresearch/robotics-vla@main',
-    },
-    'job': job,
-}))
-")
+  SUBMIT_BODY=$(python3 "$TMPDIR_T/mk_submit_body.py" \
+    "$JOB_ID" "$AGENT" "$PE_ID" "$JOB_HOURS" "$JOB_FILE" "$LR" "$CHUNK" "$CAM" "$HYPOTHESIS_ID" "$REPORT_INTERVAL_SECONDS")
 
   SUBMIT_RESP=$(curl -sf -X POST "$SCHED_URL/experiments" \
     -H 'Content-Type: application/json' \

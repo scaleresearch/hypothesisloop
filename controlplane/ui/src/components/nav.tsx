@@ -44,10 +44,10 @@ export function Nav() {
 
   return (
     <nav className="wa-nav flex h-screen w-56 flex-col">
-      <div className="wa-nav-logo">
+      <Link href="/" className="wa-nav-logo" style={{ textDecoration: 'none', color: 'inherit' }}>
         <span className="wa-nav-mark">O</span>
         <span>OpenResearch</span>
-      </div>
+      </Link>
       <div className="mt-4">
         <CommandPaletteTrigger />
       </div>

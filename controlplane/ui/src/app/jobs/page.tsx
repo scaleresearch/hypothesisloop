@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperiments, fetchAgents, cancelExperiment, fetchClusters } from '@/lib/api'
-import type { Experiment, Agent, ClustersResponse } from '@/types'
+import { fetchExperiments, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
+import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
@@ -28,16 +29,19 @@ const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 export default function JobsPage() {
   const router = useRouter()
   const [agentFilter, setAgentFilter] = useState('')
+  const [peFilter, setPEFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [cancelling, setCancelling] = useState<string | null>(null)
 
   const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
+  const { data: platformExperiments } = useSWR<PlatformExperiment[]>('platform-experiments-all', () => fetchPlatformExperiments())
+  const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
 
   const { data: jobs, error, isLoading, mutate } = useSWR<Experiment[]>(
-    ['jobs', agentFilter],
-    () => fetchExperiments({ agent_id: agentFilter || undefined, limit: 200 }),
+    ['jobs', agentFilter, peFilter],
+    () => fetchExperiments({ agent_id: agentFilter || undefined, platform_experiment_id: peFilter || undefined, limit: 200 }),
     { refreshInterval: 8_000 },
   )
 
@@ -120,6 +124,31 @@ export default function JobsPage() {
             <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
           )}
         </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="uppercase-label">Platform Experiment</span>
+          <select
+            value={peFilter}
+            onChange={e => setPEFilter(e.target.value)}
+            className="mono"
+            style={{
+              fontSize: 12,
+              padding: '5px 10px',
+              border: '1px solid rgba(255,255,255,.16)',
+              borderRadius: 6,
+              background: 'var(--surface-2)',
+              color: 'var(--foreground)',
+            }}
+          >
+            <option value="">All experiments</option>
+            {(platformExperiments ?? []).map(pe => (
+              <option key={pe.id} value={pe.id}>{pe.name}</option>
+            ))}
+          </select>
+          {peFilter && (
+            <Button variant="link" onClick={() => setPEFilter('')}>Clear</Button>
+          )}
+        </div>
       </div>
 
       {isLoading && <Loading />}
@@ -152,7 +181,11 @@ export default function JobsPage() {
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={12}>
-                    <div className="empty-state">No jobs found{statusFilter ? ` for status "${statusFilter}"` : ''}.</div>
+                    <div className="empty-state">
+                      No jobs found{statusFilter ? ` for status "${statusFilter}"` : ''}
+                      {agentFilter ? ` from agent "${agentFilter}"` : ''}
+                      {peFilter ? ` in "${peByID.get(peFilter)?.name ?? peFilter}"` : ''}.
+                    </div>
                   </td>
                 </tr>
               ) : visible.map((job: Experiment) => {
@@ -170,8 +203,16 @@ export default function JobsPage() {
                   >
                     <td className="mono text-dim" style={{ fontSize: 11 }}>{job.id.slice(0, 8)}…</td>
                     <td className="mono">{job.agent_id}</td>
-                    <td className="mono text-dim" style={{ fontSize: 11 }}>
-                      {j.platform_experiment_id ? j.platform_experiment_id.slice(0, 12) + '…' : '—'}
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {j.platform_experiment_id ? (
+                        <Link
+                          href={`/platform-experiments/${j.platform_experiment_id}`}
+                          className="text-link"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          {peByID.get(j.platform_experiment_id)?.name ?? j.platform_experiment_id.slice(0, 12) + '…'}
+                        </Link>
+                      ) : '—'}
                     </td>
                     <td>
                       <Badge status={status}>{status}</Badge>

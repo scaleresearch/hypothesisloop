@@ -80,24 +80,31 @@ CREATE TABLE platform_experiments (
 );
 
 -- ---------------------------------------------------------------------------
--- hypotheses — the research-claim registry. Agents register (or retrieve, if an
--- equivalent one already exists) a hypothesis here before submitting an experiment that
--- tests it. normalized_text (lowercased, whitespace-collapsed) carries a UNIQUE index —
--- this is the real uniqueness check: registering the same claim twice returns the existing
--- row instead of a fake always-novel stub. See services/registry.RegisterHypothesis and
--- services/dedup (novelty scoring, which is advisory and separate from this hard constraint).
+-- hypotheses — the research-claim registry, scoped to a single platform experiment. Each
+-- platform experiment accumulates its own shared pool of ideas: agents register (or
+-- retrieve, if an equivalent one already exists *within that platform experiment*) a
+-- hypothesis here before submitting a job that tests it. normalized_text (lowercased,
+-- whitespace-collapsed) carries a UNIQUE index scoped per platform_experiment_id — the real
+-- uniqueness check: registering the same claim twice within the same platform experiment
+-- returns the existing row instead of a fake always-novel stub. The same wording in two
+-- different platform experiments is intentionally allowed to register separately — they are
+-- different research programs with independent idea pools. See
+-- services/registry.RegisterHypothesis and services/dedup (novelty scoring, which is
+-- advisory and separate from this hard constraint).
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE hypotheses (
-    id              TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    agent_id        TEXT        NOT NULL REFERENCES agents(id),
-    text            TEXT        NOT NULL,
-    normalized_text TEXT        NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                     TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    agent_id               TEXT        NOT NULL REFERENCES agents(id),
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
+    text                   TEXT        NOT NULL,
+    normalized_text        TEXT        NOT NULL,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX idx_hypotheses_normalized_text ON hypotheses(normalized_text);
-CREATE INDEX idx_hypotheses_agent ON hypotheses(agent_id);
+CREATE UNIQUE INDEX idx_hypotheses_platform_normalized_text ON hypotheses(platform_experiment_id, normalized_text);
+CREATE INDEX idx_hypotheses_agent    ON hypotheses(agent_id);
+CREATE INDEX idx_hypotheses_platform ON hypotheses(platform_experiment_id);
 
 -- ---------------------------------------------------------------------------
 -- experiments
@@ -109,7 +116,10 @@ CREATE TABLE experiments (
     agent_id                 TEXT              NOT NULL REFERENCES agents(id),
     project_id               TEXT              NOT NULL,
     cluster_name             TEXT              NOT NULL DEFAULT 'default',
-    platform_experiment_id   TEXT              REFERENCES platform_experiments(id),
+    -- Every job must belong to exactly one platform experiment — there is no such thing as
+    -- an unscoped job. Required so quota, the summary gate, and the hypothesis pool below
+    -- all have an unambiguous platform experiment to key off.
+    platform_experiment_id   TEXT              NOT NULL REFERENCES platform_experiments(id),
     code_ref                 TEXT              NOT NULL,
     config_hash              TEXT              NOT NULL,
     data_ref                 TEXT              NOT NULL,
@@ -118,7 +128,6 @@ CREATE TABLE experiments (
     hypothesis               TEXT              NOT NULL,
     objective                TEXT              NOT NULL,
     theory                   TEXT              NOT NULL DEFAULT '',
-    summary                  TEXT              NOT NULL DEFAULT '',
     novelty_score            DOUBLE PRECISION  NOT NULL DEFAULT 0,
     gpu_type                 TEXT              NOT NULL,
     gpu_count                INTEGER           NOT NULL DEFAULT 1,
@@ -155,6 +164,28 @@ CREATE INDEX idx_experiments_status     ON experiments(status);
 CREATE INDEX idx_experiments_project    ON experiments(project_id);
 CREATE INDEX idx_experiments_platform   ON experiments(platform_experiment_id);
 CREATE INDEX idx_experiments_hypothesis ON experiments(hypothesis_id);
+
+-- ---------------------------------------------------------------------------
+-- hypothesis_findings — the post-run write-up an agent files after a job reaches a
+-- terminal state, attached to the hypothesis the job tested (not the job itself). This is
+-- deliberately where write-ups live: a hypothesis is the shared, reusable unit of research
+-- knowledge in a platform experiment's idea pool, while a job is just one attempt at testing
+-- it — other agents deciding whether to test the same hypothesis again want the accumulated
+-- findings across every job that tried it, not one buried on a single job record. One
+-- finding per job (UNIQUE on experiment_id): a job produces exactly one write-up, but a
+-- hypothesis accumulates one per job that tested it. See services/scheduler.WriteExperimentSummary.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE hypothesis_findings (
+    id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
+    experiment_id  TEXT        NOT NULL REFERENCES experiments(id) UNIQUE,
+    agent_id       TEXT        NOT NULL REFERENCES agents(id),
+    summary        TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesis_id);
 
 -- ---------------------------------------------------------------------------
 -- credit_ledger

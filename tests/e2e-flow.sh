@@ -20,7 +20,7 @@ RUN_TS="$(date +%s)"
 if [[ -n "${AGENTS:-}" ]]; then
   read -ra AGENTS <<< "$AGENTS"
 else
-  AGENTS=("agent-alice2" "agent-bob2" "agent-carol")
+  AGENTS=("agent-alpha" "agent-beta" "agent-gamma")
 fi
 
 AGENT_COUNT="${#AGENTS[@]}"
@@ -54,7 +54,10 @@ PE_RESP=$(curl -sf -X POST "$QUOTA_URL/platform-experiments" \
     \"name\": \"e2e-${RUN_TS}\",
     \"budget_t4_hours\": ${BUDGET},
     \"max_agents\": ${AGENT_COUNT},
-    \"metrics\": [{\"key\": \"val_accuracy\", \"direction\": \"maximize\"}],
+    \"metrics\": [
+      {\"key\": \"val_accuracy\", \"direction\": \"maximize\"},
+      {\"key\": \"val_loss\", \"direction\": \"minimize\"}
+    ],
     \"phase2_boundary\": 0.40
   }")
 PE_ID=$(echo "$PE_RESP" | py "import sys,json; print(json.load(sys.stdin)['id'])")
@@ -89,14 +92,28 @@ echo ""
 echo "==> Submitting jobs..."
 declare -a JOB_IDS
 
+TMPDIR_T="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_T"' EXIT
+
+cat > "$TMPDIR_T/mk_hyp_body.py" <<'PYEOF'
+import json, sys
+print(json.dumps({
+    "agent_id": sys.argv[1],
+    "platform_experiment_id": sys.argv[2],
+    "text": f"tune hyperparameters for {sys.argv[1]}",
+}))
+PYEOF
+
 for AGENT in "${AGENTS[@]}"; do
   JOB_ID="job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN_TS}"
 
-  # Every experiment must reference a registered hypothesis (hypothesis_id), not restate
-  # free text ad hoc — register (or retrieve, if an equivalent one already exists) it first.
+  # Every experiment must reference a hypothesis registered under the same platform
+  # experiment it's submitted into (hypothesis_id), not restate free text ad hoc — register
+  # (or retrieve, if an equivalent one already exists in this platform experiment's idea
+  # pool) it first.
   HYP_RESP=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" \
     -H 'Content-Type: application/json' \
-    -d "$(AGENT="$AGENT" py "import json,os; print(json.dumps({'agent_id': os.environ['AGENT'], 'text': f\"tune hyperparameters for {os.environ['AGENT']}\"}))")")
+    -d "$(python3 "$TMPDIR_T/mk_hyp_body.py" "$AGENT" "$PE_ID")")
   HYPOTHESIS_ID=$(echo "$HYP_RESP" | py "import sys,json; print(json.load(sys.stdin)['id'])")
 
   # The job definition itself (image, gpu_type/count — how the workload runs) is read

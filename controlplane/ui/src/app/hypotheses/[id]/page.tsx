@@ -3,10 +3,11 @@
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchHypothesis } from '@/lib/api'
+import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
+import type { PlatformExperiment } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
-import { Loading } from '@/components/ui/status-message'
+import { Loading, EmptyState } from '@/components/ui/status-message'
 import { formatT4h } from '@/lib/format'
 
 function relTime(iso: string) {
@@ -24,6 +25,11 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   const { data, error } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
 
+  const { data: pe } = useSWR<PlatformExperiment>(
+    data ? ['pe', data.platform_experiment_id] : null,
+    () => fetchPlatformExperiment(data!.platform_experiment_id),
+  )
+
   if (error) return (
     <div>
       <div className="wa-title"><h1>Hypothesis Not Found</h1></div>
@@ -35,11 +41,20 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   if (!data) return <Loading />
 
   const jobs = data.jobs ?? []
+  const findings = data.findings ?? []
+  const jobByID = new Map(jobs.map(j => [j.id, j]))
 
   return (
     <div>
       <div className="wa-title" style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
         <div style={{ flex: 1 }}>
+          <div
+            className="text-dim"
+            style={{ marginBottom: 6, cursor: 'pointer', fontSize: 12 }}
+            onClick={() => router.push(`/platform-experiments/${data.platform_experiment_id}`)}
+          >
+            ← {pe?.name ?? data.platform_experiment_id.slice(0, 12) + '…'}
+          </div>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="mono text-dim" style={{ fontSize: 14 }}>{data.id.slice(0, 8)}…</span>
           </h1>
@@ -50,6 +65,40 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         </div>
         <Link href="/hypotheses" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All hypotheses</Link>
       </div>
+
+      <Pod>
+        <PodHeader>
+          Findings
+          {findings.length > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({findings.length})</span>}
+        </PodHeader>
+        <PodContent>
+          {findings.length === 0 ? (
+            <EmptyState>
+              No findings filed yet — agents write a summary via POST /experiments/{'{id}'}/summary once a job testing
+              this hypothesis reaches a terminal state.
+            </EmptyState>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {findings.map(f => {
+                const job = jobByID.get(f.experiment_id)
+                return (
+                  <div key={f.id} className="wa-mini-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="mono" style={{ fontWeight: 600 }}>{f.agent_id}</span>
+                        <Link href={`/jobs/${f.experiment_id}`} className="mono text-link">{f.experiment_id.slice(0, 8)}…</Link>
+                        {job && <Badge status={job.status}>{job.status}</Badge>}
+                      </span>
+                      <span className="text-dim mono">{relTime(f.created_at)}</span>
+                    </div>
+                    <p style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{f.summary}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </PodContent>
+      </Pod>
 
       <Pod>
         <PodHeader>

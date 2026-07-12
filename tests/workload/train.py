@@ -104,9 +104,9 @@ def lr_schedule(f: float) -> float:
 # Registry helpers
 
 
-def post_metric(fraction: float, value: float) -> None:
+def post_metric(fraction: float, value: float, metric_name: str = METRIC) -> None:
     url = f"{REG_URL}/registry/experiments/{EXP_ID}/metrics"
-    payload = json.dumps({"metric_name": METRIC, "fraction_complete": fraction, "metric_value": value}).encode()
+    payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
         urllib.request.urlopen(req, timeout=5)
@@ -166,7 +166,12 @@ def main() -> None:
         final_value = v_acc
 
         primary = v_acc if METRIC == "val_accuracy" else (v_loss if METRIC == "val_loss" else v_acc)
-        post_metric(fraction, primary)
+        post_metric(fraction, primary, metric_name=METRIC)
+        # Secondary metrics: always emitted alongside the primary so the dashboard has more
+        # than one series to plot per job, same as a real training run's eval sweep would.
+        for name, value in (("val_loss", v_loss), ("train_accuracy", t_acc), ("train_loss", t_loss)):
+            if name != METRIC:
+                post_metric(fraction, value, metric_name=name)
 
         print(
             f"  [{step:3d}] epoch={epoch:2d}  val_acc={v_acc:.4f}  val_loss={v_loss:.4f}  "

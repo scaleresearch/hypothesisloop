@@ -137,25 +137,32 @@ def tool_get_experiment(experiment_id: str) -> dict:
     return {"status": status, "body": body}
 
 
-def tool_register_hypothesis(text: str) -> dict:
-    """Register (or retrieve, if an equivalent one already exists) a hypothesis. Returns a
-    hypothesis_id that must be passed to submit_experiment. This is the real uniqueness
-    check: registering text equivalent to an already-registered hypothesis (modulo
-    case/whitespace) returns the existing hypothesis_id instead of creating a duplicate —
-    use it to check whether your idea has already been claimed before running an experiment."""
-    status, body = _reg_post("/hypotheses", {"agent_id": AGENT_ID, "text": text})
+def tool_register_hypothesis(platform_experiment_id: str, text: str) -> dict:
+    """Register (or retrieve, if an equivalent one already exists in the same platform
+    experiment) a hypothesis. Returns a hypothesis_id that must be passed to
+    submit_experiment. Hypotheses are scoped to one platform experiment — this is the real
+    uniqueness check: registering text equivalent to an already-registered hypothesis
+    (modulo case/whitespace) *in the same platform experiment* returns the existing
+    hypothesis_id instead of creating a duplicate — use it to check whether your idea has
+    already been claimed before running an experiment."""
+    status, body = _reg_post(
+        "/hypotheses",
+        {"agent_id": AGENT_ID, "platform_experiment_id": platform_experiment_id, "text": text},
+    )
     return {"status": status, "body": body}
 
 
-def tool_list_hypotheses() -> dict:
-    """List every hypothesis registered so far, across all agents — check this before
-    registering a new one to see what's already been claimed or tested."""
-    status, body = _reg_get("/hypotheses")
+def tool_list_hypotheses(platform_experiment_id: str) -> dict:
+    """List every hypothesis registered so far in a platform experiment, across all agents —
+    check this before registering a new one to see what's already been claimed or tested."""
+    status, body = _reg_get(f"/hypotheses?platform_experiment_id={platform_experiment_id}")
     return {"status": status, "body": body}
 
 
 def tool_get_hypothesis(hypothesis_id: str) -> dict:
-    """Get a hypothesis and every job (experiment) submitted against it so far."""
+    """Get a hypothesis, every job (experiment) submitted against it, and every finding
+    (post-run write-up) filed against it so far — read the findings before deciding whether
+    to test this hypothesis again yourself."""
     status, body = _reg_get(f"/hypotheses/{hypothesis_id}")
     return {"status": status, "body": body}
 
@@ -317,28 +324,37 @@ TOOLS = [
     {
         "name": "register_hypothesis",
         "description": (
-            "Register (or retrieve, if an equivalent one already exists) a scientific hypothesis. "
-            "Returns a hypothesis_id required by submit_experiment. Registering text equivalent "
-            "(modulo case/whitespace) to an already-registered hypothesis returns the existing "
-            "hypothesis_id instead of creating a duplicate — call this to validate/retrieve a "
-            "hypothesis before running an experiment against it."
+            "Register (or retrieve, if an equivalent one already exists in the same platform "
+            "experiment) a scientific hypothesis, scoped to one platform experiment's shared "
+            "idea pool. Returns a hypothesis_id required by submit_experiment. Registering text "
+            "equivalent (modulo case/whitespace) to an already-registered hypothesis in the "
+            "same platform experiment returns the existing hypothesis_id instead of creating a "
+            "duplicate — call this to validate/retrieve a hypothesis before running an "
+            "experiment against it."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "platform_experiment_id": {"type": "string"},
                 "text": {"type": "string", "description": "The hypothesis statement"},
             },
-            "required": ["text"],
+            "required": ["platform_experiment_id", "text"],
         },
     },
     {
         "name": "list_hypotheses",
-        "description": "List every hypothesis registered so far, across all agents.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
+        "description": "List every hypothesis registered so far in a platform experiment, across all agents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "platform_experiment_id": {"type": "string"},
+            },
+            "required": ["platform_experiment_id"],
+        },
     },
     {
         "name": "get_hypothesis",
-        "description": "Get a hypothesis and every job submitted against it so far.",
+        "description": "Get a hypothesis, every job submitted against it, and every finding (post-run write-up) filed against it so far.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -426,8 +442,8 @@ TOOL_FN = {
     "get_experiment_quota":       lambda inp: tool_get_experiment_quota(inp["platform_experiment_id"]),
     "list_experiments":           lambda inp: tool_list_experiments(inp.get("agent_id", ""), inp.get("status", "")),
     "get_experiment":             lambda inp: tool_get_experiment(inp["experiment_id"]),
-    "register_hypothesis":        lambda inp: tool_register_hypothesis(inp["text"]),
-    "list_hypotheses":            lambda inp: tool_list_hypotheses(),
+    "register_hypothesis":        lambda inp: tool_register_hypothesis(inp["platform_experiment_id"], inp["text"]),
+    "list_hypotheses":            lambda inp: tool_list_hypotheses(inp["platform_experiment_id"]),
     "get_hypothesis":             lambda inp: tool_get_hypothesis(inp["hypothesis_id"]),
     "submit_experiment":          lambda inp: tool_submit_experiment(
         inp["platform_experiment_id"],

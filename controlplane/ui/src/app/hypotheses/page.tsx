@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import { fetchHypotheses, fetchExperimentsByPlatformExperiment, fetchPlatformExperiment } from '@/lib/api'
-import type { Hypothesis, PlatformExperiment } from '@/types'
+import { useState } from 'react'
+import { fetchAllHypotheses, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
+import type { Hypothesis, PlatformExperiment, Agent } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button } from '@/components/ui/button'
@@ -31,46 +32,95 @@ export default function HypothesesPage() {
 function HypothesesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const peID = searchParams.get('pe')
+  const peID = searchParams.get('pe') ?? ''
+  const [agentFilter, setAgentFilter] = useState('')
+
+  const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
+
+  // Every hypothesis belongs to exactly one platform experiment's shared idea pool — there is
+  // no unscoped registry on the backend. To show a combined view here we fetch every platform
+  // experiment, then that hypothesis pool per platform experiment, and merge — the "Platform
+  // Experiment" column plus the filter below is what makes that structure visible instead of
+  // flattening it away.
+  const { data: platformExperiments } = useSWR<PlatformExperiment[]>(
+    'platform-experiments-all',
+    () => fetchPlatformExperiments(),
+    { refreshInterval: 30_000 },
+  )
+  const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
+  const peIDs = (platformExperiments ?? []).map(pe => pe.id)
 
   const { data: hypotheses, error, isLoading, mutate } = useSWR<Hypothesis[]>(
-    'hypotheses',
-    fetchHypotheses,
+    peIDs.length > 0 ? ['hypotheses-all', peIDs.join(',')] : null,
+    () => fetchAllHypotheses(peIDs),
     { refreshInterval: 15_000 },
   )
 
-  // Hypothesis is a global registry (no platform_experiment_id of its own) — when scoped to a
-  // platform experiment, filter down to hypotheses actually referenced by that experiment's jobs.
-  const { data: pe } = useSWR<PlatformExperiment>(
-    peID ? ['pe', peID] : null,
-    () => fetchPlatformExperiment(peID as string),
-  )
-  const { data: peExperiments } = useSWR(
-    peID ? ['pe-experiments', peID] : null,
-    () => fetchExperimentsByPlatformExperiment(peID as string),
-  )
-
   const list = (() => {
-    const all = hypotheses ?? []
-    if (!peID) return all
-    const usedIDs = new Set((peExperiments ?? []).map(e => e.hypothesis_id).filter(Boolean))
-    return all.filter(h => usedIDs.has(h.id))
+    let all = hypotheses ?? []
+    if (peID) all = all.filter(h => h.platform_experiment_id === peID)
+    if (agentFilter) all = all.filter(h => h.agent_id === agentFilter)
+    return all
   })()
+
+  function setPEFilter(next: string) {
+    if (next) router.push(`/hypotheses?pe=${next}`)
+    else router.push('/hypotheses')
+  }
 
   return (
     <div>
       <PageHeader
         title="Hypotheses"
-        description="Registered research claims — every experiment must reference one of these. Registering text equivalent to an existing hypothesis returns the existing row instead of creating a duplicate."
+        description="Registered research claims, scoped per platform experiment — every platform experiment accumulates its own shared idea pool, and every job must reference a hypothesis registered under the same one it's submitted into. Registering text equivalent to an existing hypothesis within the same platform experiment returns the existing row instead of creating a duplicate."
         actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
-      {peID && (
-        <div className="text-dim" style={{ marginBottom: 12, fontSize: 13 }}>
-          Filtered to hypotheses used in <strong>{pe?.name ?? peID}</strong>.{' '}
-          <Link href="/hypotheses" className="text-link">Clear filter</Link>
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <span className="uppercase-label">Platform Experiment</span>
+        <select
+          value={peID}
+          onChange={e => setPEFilter(e.target.value)}
+          className="mono"
+          style={{
+            fontSize: 12,
+            padding: '5px 10px',
+            border: '1px solid rgba(255,255,255,.16)',
+            borderRadius: 6,
+            background: 'var(--surface-2)',
+            color: 'var(--foreground)',
+          }}
+        >
+          <option value="">All ({(hypotheses ?? []).length})</option>
+          {(platformExperiments ?? []).map(pe => (
+            <option key={pe.id} value={pe.id}>{pe.name}</option>
+          ))}
+        </select>
+        {peID && <Link href="/hypotheses" className="text-link" style={{ fontSize: 12 }}>Clear filter</Link>}
+
+        <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
+        <select
+          value={agentFilter}
+          onChange={e => setAgentFilter(e.target.value)}
+          className="mono"
+          style={{
+            fontSize: 12,
+            padding: '5px 10px',
+            border: '1px solid rgba(255,255,255,.16)',
+            borderRadius: 6,
+            background: 'var(--surface-2)',
+            color: 'var(--foreground)',
+          }}
+        >
+          <option value="">All agents</option>
+          {(agents ?? []).map(a => (
+            <option key={a.id} value={a.id}>{a.name ?? a.id}</option>
+          ))}
+        </select>
+        {agentFilter && (
+          <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
+        )}
+      </div>
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
@@ -86,6 +136,7 @@ function HypothesesPageContent() {
               <tr>
                 <th>ID</th>
                 <th>Text</th>
+                <th>Platform Experiment</th>
                 <th>Registered by</th>
                 <th>Created</th>
               </tr>
@@ -93,27 +144,43 @@ function HypothesesPageContent() {
             <tbody>
               {list.length === 0 ? (
                 <tr>
-                  <td colSpan={4}>
-                    <div className="empty-state">No hypotheses registered yet.</div>
+                  <td colSpan={5}>
+                    <div className="empty-state">
+                      No hypotheses found
+                      {peID ? ` in "${peByID.get(peID)?.name ?? peID}"` : ''}
+                      {agentFilter ? ` from agent "${agentFilter}"` : ''}.
+                    </div>
                   </td>
                 </tr>
-              ) : list.map(h => (
-                <tr
-                  key={h.id}
-                  tabIndex={0}
-                  role="link"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => router.push(`/hypotheses/${h.id}`)}
-                  onKeyDown={e => { if (e.key === 'Enter') router.push(`/hypotheses/${h.id}`) }}
-                >
-                  <td className="mono text-dim" style={{ fontSize: 11 }}>{h.id.slice(0, 8)}…</td>
-                  <td style={{ maxWidth: 480, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.text}>
-                    {h.text}
-                  </td>
-                  <td className="mono">{h.agent_id}</td>
-                  <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{relTime(h.created_at)}</td>
-                </tr>
-              ))}
+              ) : list.map(h => {
+                const pe = peByID.get(h.platform_experiment_id)
+                return (
+                  <tr
+                    key={h.id}
+                    tabIndex={0}
+                    role="link"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => router.push(`/hypotheses/${h.id}`)}
+                    onKeyDown={e => { if (e.key === 'Enter') router.push(`/hypotheses/${h.id}`) }}
+                  >
+                    <td className="mono text-dim" style={{ fontSize: 11 }}>{h.id.slice(0, 8)}…</td>
+                    <td style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.text}>
+                      {h.text}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      <Link
+                        href={`/platform-experiments/${h.platform_experiment_id}`}
+                        className="text-link"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {pe?.name ?? h.platform_experiment_id.slice(0, 8) + '…'}
+                      </Link>
+                    </td>
+                    <td className="mono">{h.agent_id}</td>
+                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{relTime(h.created_at)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </PodContent>

@@ -25,7 +25,6 @@ type Store interface {
 	CreateExperiment(ctx context.Context, exp *domain.Experiment) error
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
-	UpdateExperimentSummary(ctx context.Context, id, summary string) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	MarkQueued(ctx context.Context, id string) error
 	GetRunningAndQueued(ctx context.Context) ([]*domain.Experiment, error)
@@ -35,6 +34,9 @@ type Store interface {
 	// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment
 	// without a summary in the given platform experiment.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
+	// CreateHypothesisFinding records the agent's post-run write-up, attached to the
+	// hypothesis the completed job tested (see domain.HypothesisFinding).
+	CreateHypothesisFinding(ctx context.Context, hypothesisID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
 	// CountRecentSubmissions counts experiments created by the agent in the platform
 	// experiment since the given time. Used to enforce hourly submission rate limits.
 	CountRecentSubmissions(ctx context.Context, agentID, platformExpID string, since time.Time) (int, error)
@@ -563,9 +565,12 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 	}
 }
 
-// WriteExperimentSummary stores the agent's post-run write-up on a terminal experiment.
-// Only allowed on COMPLETED, FAILED, or EVICTED experiments so that agents summarise
-// what they learned — this data is visible to other agents via GET /experiments/{id}.
+// WriteExperimentSummary files the agent's post-run write-up on a terminal experiment,
+// attached to the hypothesis that job tested (not the job itself — see
+// domain.HypothesisFinding) so the write-up joins the shared, accumulated evidence trail
+// other agents see when deciding whether to test the same hypothesis again. Only allowed on
+// COMPLETED, FAILED, EVICTED, or REJECTED experiments so that agents summarise what they
+// learned — findings are visible to other agents via GET /registry/hypotheses/{id}.
 func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string) error {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {
@@ -583,8 +588,8 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string
 			Message: fmt.Sprintf("summary can only be written on terminal experiments (got %s)", exp.Status),
 		}
 	}
-	if err := s.store.UpdateExperimentSummary(ctx, id, summary); err != nil {
-		return fmt.Errorf("summary: update: %w", err)
+	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, id, exp.AgentID, summary); err != nil {
+		return fmt.Errorf("summary: create finding: %w", err)
 	}
 	return nil
 }

@@ -239,6 +239,11 @@ func newSchedulerServer(store *db.Store, peFullStore *db.PlatformExperimentsFull
 	clusterAgentHandler.Routes(clusterAgentRouter)
 
 	outer := chi.NewRouter()
+	// Same CORS policy as the quota-service router above (api.CORSMiddleware) — without it,
+	// the UI's cross-origin calls into this port (fetchClusters, cancelExperiment, job
+	// submission) succeed at the network level but the browser silently blocks the response,
+	// which surfaces as a misleading "Cannot reach scheduler service" rather than a CORS error.
+	outer.Use(api.CORSMiddleware)
 	outer.Handle("/metrics", promhttp.Handler())
 	outer.Mount("/internal/clusters", clusterAgentRouter)
 	outer.Mount("/", gwHandler)

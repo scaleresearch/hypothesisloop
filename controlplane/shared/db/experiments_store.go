@@ -26,7 +26,7 @@ func NewExperimentsStore(pool *Pool) *ExperimentsStore {
 const experimentColumns = `
 	id, parent_id, agent_id, platform_experiment_id, project_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec,
-	hypothesis_id, hypothesis, objective, theory, summary,
+	hypothesis_id, hypothesis, objective, theory,
 	gpu_type, gpu_count,
 	estimated_duration_hours, estimated_cost_t4h,
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
@@ -85,7 +85,7 @@ INSERT INTO experiments (
 	}
 
 	_, err = s.pool.pool.Exec(ctx, q,
-		exp.ID, exp.ParentID, exp.AgentID, nullableStr(exp.PlatformExperimentID), exp.ProjectID, exp.ClusterName,
+		exp.ID, exp.ParentID, exp.AgentID, exp.PlatformExperimentID, exp.ProjectID, exp.ClusterName,
 		exp.CodeRef, exp.ConfigHash, exp.DataRef, jobSpec,
 		exp.HypothesisID, exp.Hypothesis, exp.Objective, exp.Theory,
 		string(exp.GPUType), exp.GPUCount,
@@ -101,13 +101,6 @@ INSERT INTO experiments (
 		return fmt.Errorf("experiments_store.CreateExperiment: %w", err)
 	}
 	return nil
-}
-
-func nullableStr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 // GetExperiment fetches a single experiment by ID.
@@ -261,16 +254,6 @@ WHERE id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED')`
 // ListExperimentsWithStatus returns all experiments in the given status.
 func (s *ExperimentsStore) ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error) {
 	return s.ListExperiments(ctx, domain.ExperimentFilter{Status: status})
-}
-
-// UpdateExperimentSummary stores the agent's post-run write-up.
-func (s *ExperimentsStore) UpdateExperimentSummary(ctx context.Context, id, summary string) error {
-	const q = `UPDATE experiments SET summary = $2, updated_at = NOW() WHERE id = $1`
-	_, err := s.pool.pool.Exec(ctx, q, id, summary)
-	if err != nil {
-		return fmt.Errorf("experiments_store.UpdateExperimentSummary: %w", err)
-	}
-	return nil
 }
 
 // UpdateExperimentPriority updates only the priority_score field.
@@ -508,17 +491,19 @@ ORDER BY queued_at ASC`
 }
 
 // HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment
-// in the given platform experiment without a summary. Agents must document successful
+// in the given platform experiment without a finding filed against the hypothesis it
+// tested (see hypothesis_findings, one row per job). Agents must document successful
 // runs before submitting new jobs so the collective learning loop is maintained.
 // FAILED and EVICTED runs are excluded — documenting unsuccessful infrastructure
 // outcomes adds little signal and would unfairly block agents after noisy failures.
 func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error) {
 	const q = `SELECT EXISTS(
-		SELECT 1 FROM experiments
-		WHERE agent_id = $1
-		  AND platform_experiment_id = $2
-		  AND status = 'COMPLETED'
-		  AND (summary IS NULL OR summary = '')
+		SELECT 1 FROM experiments e
+		LEFT JOIN hypothesis_findings f ON f.experiment_id = e.id
+		WHERE e.agent_id = $1
+		  AND e.platform_experiment_id = $2
+		  AND e.status = 'COMPLETED'
+		  AND f.id IS NULL
 	)`
 	var exists bool
 	err := s.pool.pool.QueryRow(ctx, q, agentID, platformExpID).Scan(&exists)
@@ -547,15 +532,14 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
 	var gpuType, capacityTier, status string
 	var artifacts []string
-	var platformExpID *string
 	var evictionReason *string
 	var notAdmittedReason *string
 	var jobSpec []byte
 
 	if err := row.Scan(
-		&exp.ID, &exp.ParentID, &exp.AgentID, &platformExpID, &exp.ProjectID, &exp.ClusterName,
+		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ProjectID, &exp.ClusterName,
 		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec,
-		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory, &exp.Summary,
+		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory,
 		&gpuType, &exp.GPUCount,
 		&exp.EstimatedDurationHours, &exp.EstimatedCostT4H,
 		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
@@ -577,9 +561,6 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp.GPUType = domain.GPUType(gpuType)
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
-	if platformExpID != nil {
-		exp.PlatformExperimentID = *platformExpID
-	}
 	if evictionReason != nil {
 		exp.EvictionReason = *evictionReason
 	}
@@ -595,7 +576,11 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 }
 
 func collectExperiments(rows pgx.Rows) ([]*domain.Experiment, error) {
-	var out []*domain.Experiment
+	// Non-nil even when empty: a nil slice serializes to JSON `null` instead of `[]`, which
+	// breaks any client-side code that assumes a list endpoint always returns an array (see
+	// hypotheses_store.ListHypotheses for the same fix and the bug it caused on the
+	// hypotheses UI page).
+	out := []*domain.Experiment{}
 	for rows.Next() {
 		exp, err := scanExperiment(rows)
 		if err != nil {

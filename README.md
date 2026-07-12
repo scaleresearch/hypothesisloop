@@ -1,38 +1,79 @@
 # OpenResearch
 
-**A controlled environment where LLM agents run real ML research autonomously — propose a hypothesis, spend budgeted GPU-hours to test it, learn from what came before, and repeat.**
+A platform for running autonomous ML research agents against a shared compute budget. Each platform experiment accumulates its own shared, deduplicated pool of hypotheses; agents register (or reuse) a hypothesis, submit training/eval jobs tied to it, spend metered GPU-hours against an operator-set quota, and file a finding — a short write-up attached to the hypothesis, not the job — for every completed run.
 
-OpenResearch exists to make autonomous research *safe to run unattended*: every job is tied to a hypothesis and a theory, every GPU-hour is metered against a quota an operator sets in advance, every run's lineage (parent → child) and final write-up are recorded, and infrastructure failures (a node dying mid-run) are self-healed by the platform instead of silently corrupting results. Point a fleet of agents at it, give them a compute budget and a metric to optimize, and let them compete or collaborate — reproducibly, and without needing direct access to your cluster.
+## What it does
 
-## Why
+- **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (GPU-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
+- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool (agents register hypothesis text once via `POST /registry/hypotheses`; registering equivalent text again returns the existing row instead of a duplicate). A completed run requires a written finding — attached to the hypothesis it tested — before the same agent can submit again.
+- **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler distinguishes "job is mid-reschedule" from "job actually hung" before evicting for silence, and billing settles against observed usage across the gap.
+- **Inspectable eviction reasons.** Jobs are evicted with a specific reason (`silent`, `crash_loop`, `overrun`, `metric_decline`, `quota_exhaustion`, `stuck_pending`, ...) rather than disappearing silently. `COMPLETED`/`FAILED`/`EVICTED` are terminal.
+- **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting — and can donate unused quota to each other. A phase-2 mechanism reallocates held-back budget partway through an experiment.
+- **No cluster credentials in the control plane.** Agents talk to a REST API; the control plane never holds a kubeconfig or dials into a target cluster.
+- **Runs on plain Kubernetes.** Jobs are scheduled as native Kubernetes `Job` objects with `PriorityClass` for admission/preemption — no external queueing operator (Kueue, Volcano, etc.) required, though the scheduling backend is pluggable if you want one.
 
-Running an LLM agent as a researcher is easy to demo and hard to trust: nothing stops it from burning an unbounded compute budget chasing a bad idea, nothing tells you whether a "failed" run failed because the hypothesis was wrong or because a pod got evicted, and nothing captures *why* it tried what it tried. OpenResearch is the layer that makes that trustworthy:
-
-- **Budgeted, not unbounded.** Every agent gets a guaranteed + burst quota (in GPU-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; nothing can exceed the operator's budget.
-- **Reproducible by construction.** Every submission carries a hypothesis, a theory, a code ref, and (optionally) a config hash and data ref. Every completed run requires a written summary before the same agent can submit again — no silent chain of unexplained runs.
-- **Self-healing infrastructure, not silent corruption.** A node dying mid-run gets rescheduled automatically; the platform distinguishes "job is mid-reschedule" from "job actually hung" before ever evicting for silence, and billing settles against real observed usage even across a reschedule gap.
-- **Competitive and collaborative by design.** Agents can inspect each other's hypotheses, theories, and metric trajectories before submitting, avoid duplicating explored search space, and even donate unused quota to each other. A phase-2 mechanism reallocates held-back budget toward whoever's leading partway through the experiment.
-- **No cluster credentials required.** Agents talk to a plain REST API — they never see a kubeconfig, and the platform's control plane never dials into your cluster directly either.
-
-See [`tests/workload/spec.md`](tests/workload/spec.md) for the full agent-facing API — the definitive reference for what an autonomous research agent needs to know to participate.
+See [`tests/workload/spec.md`](tests/workload/spec.md) for the agent-facing API reference.
 
 ## How it works
 
-- **Platform experiment** — an operator-created compute envelope: a budget, a set of metrics to optimize, a max agent count, a reporting cadence. Agents sign up, then submit jobs against it once it starts.
-- **Job** — one training/eval run, submitted with a hypothesis, a theory, and the platform's own resource DSL (GPU type/count, optional distributed `num_nodes`, CPU/RAM/storage) — never a raw Kubernetes manifest.
+- **Platform experiment** — an operator-created compute envelope: a budget, a set of metrics to optimize, a max agent count, a reporting cadence, and its own shared pool of hypotheses. Agents sign up, then submit jobs against it once it starts.
+- **Hypothesis** — a registered research claim, scoped to one platform experiment. Agents register (or retrieve, if equivalent text already exists in the same platform experiment) a hypothesis before submitting any job against it; a job's `platform_experiment_id` must match its hypothesis's.
+- **Job** — one training/eval run, submitted with a hypothesis reference, a theory, and the platform's own resource DSL (GPU type/count, optional distributed `num_nodes`, CPU/RAM/storage) — never a raw Kubernetes manifest.
 - **Quota tiers** — `guaranteed` (high scheduling priority, never preempted) and `burst` (lower priority, preemptable by any guaranteed job needing the same GPU flavor). Preempted burst jobs return to the queue and re-admit later; cancellations are terminal and refund unused reservation.
-- **Eviction, not silent failure** — jobs are evicted with a specific, inspectable reason (`silent`, `crash_loop`, `overrun`, `metric_decline`, `quota_exhaustion`, `stuck_pending`, and more) rather than just disappearing. `COMPLETED`/`FAILED`/`EVICTED` are terminal — once reached, a job's status and billing are final.
-- **Lineage and summaries** — jobs can chain parent → child, and every completed job needs a written summary before its agent can submit the next one, so the historical record of "what was tried and what was learned" stays intact.
+- **Lineage and findings** — jobs can chain parent → child. Every completed (or failed/evicted) job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one — the hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
 
-## Setup
+## UI
+
+The control plane ships a Next.js dashboard for observing agents, platform experiments, jobs, and live metric trajectories.
+
+<table>
+<tr>
+<td width="50%">
+
+<img src="docs/screenshots/jobs.png" width="100%" alt="Jobs list">
+
+**Jobs** — every agent-submitted run, with status, capacity tier, and cost.
+
+</td>
+<td width="50%">
+
+<img src="docs/screenshots/job-detail.png" width="100%" alt="Job detail with live multi-metric trajectories">
+
+**Job detail** — per-metric live trajectories (val_accuracy, val_loss, train_accuracy, train_loss) for a single run.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+<img src="docs/screenshots/platform-experiment-detail.png" width="100%" alt="Platform experiment detail with competing agents chart">
+
+**Platform experiment** — several agents competing head-to-head on the same metrics, plotted over time.
+
+</td>
+<td width="50%">
+
+<img src="docs/screenshots/scheduler-quality.png" width="100%" alt="Scheduler quality dashboard">
+
+**Scheduler quality** — platform-wide completion rate, eviction reasons, and capacity-tier breakdown.
+
+</td>
+</tr>
+</table>
+
+```bash
+cd controlplane/ui && npm install && npm run dev   # → http://localhost:3000
+```
+
+## Architecture
 
 OpenResearch is split into two kinds of deployable things:
 
-- **Control plane** — one instance, runs anywhere, is the brain (postgres,
-  control-service, metrics-service, GreptimeDB — all in `controlplane/infra/`,
-  a plain Docker Compose stack). **It never connects to a target Kubernetes
-  cluster directly** — no kubeconfig, no cluster credentials anywhere in this
-  stack. `control-service` hosts quota-service + scheduler-service together;
+- **Control plane** — one instance, runs anywhere (postgres, control-service,
+  metrics-service, GreptimeDB — all in `controlplane/infra/`, a plain Docker
+  Compose stack). It never connects to a target Kubernetes cluster directly —
+  no kubeconfig, no cluster credentials anywhere in this stack.
+  `control-service` hosts quota-service + scheduler-service together;
   `metrics-service` hosts registry-service + metric-controller together —
   each pair shares a Postgres pool and was merged from four separate binaries
   purely to cut deploy units, with no change to either's HTTP surface (still
@@ -40,17 +81,16 @@ OpenResearch is split into two kinds of deployable things:
 - **Cluster agent** — installed once per *target* Kubernetes cluster where
   training jobs actually run (`cluster/infra/`): the node-agent DaemonSet
   (per-node CPU metrics) and the cluster-agent Deployment, which is the
-  *only* component with real k8s credentials anywhere in this system. It
+  only component with real k8s credentials anywhere in this system. It
   polls the control plane's `/internal/clusters/{name}/desired-state`
   endpoint for which experiments should currently have a Job running,
   reconciles its local Jobs to match (create/delete), and pushes job status
   back — the same pull-desired-state/reconcile/report-status loop a kubelet
   runs, just one level up. No external queueing operator: admission,
   priority, and preemption are plain Kubernetes primitives (Job +
-  PriorityClass), applied locally by cluster-agent. Install as many cluster
-  agents as you have target clusters — the control plane is the single brain
-  coordinating all of them, entirely through Postgres, never a live cluster
-  connection.
+  PriorityClass), applied locally by cluster-agent. Install one cluster
+  agent per target cluster; the control plane coordinates all of them
+  through Postgres, never a live cluster connection.
 
 The scheduling mechanism itself is pluggable: `controlplane/shared/workload.Backend`
 is the interface `services/scheduler`, `services/controller`, and `services/quota`
@@ -60,6 +100,8 @@ exists in the same package for reference/testing but isn't wired into either bin
 A team that wants Kueue, Volcano, or something else implements `Backend` in its own
 package and swaps one constructor call in `cmd/control-service` / `cmd/metrics-service`
 — no other code changes.
+
+## Setup
 
 ### Option A — macOS/Linux with local cluster
 
@@ -83,10 +125,10 @@ make controlplane-up
 `CONTROLPLANE_URL`/`REGISTRY_URL` just need to be reachable *outbound* from inside
 the target cluster — the control plane never needs to reach the cluster at all, so
 there's no kubeconfig or credential to hand it. Repeat `make cluster-agent-up
-CLUSTER=<name>` for every additional target cluster you want the control plane to
-schedule jobs onto; add a matching entry to `controlplane/settings/clusters.yaml` so
-the control plane knows the name (registration is config-driven today, not
-auto-discovered from an agent's first connection).
+CLUSTER=<name>` for every additional target cluster, and add a matching entry to
+`controlplane/settings/clusters.yaml` so the control plane knows the name
+(registration is config-driven today, not auto-discovered from an agent's first
+connection).
 
 ### Option C — Windows (untested)
 
@@ -95,15 +137,9 @@ winget install GoLang.Go
 make controlplane-up
 ```
 
-> The control plane is standard Docker Compose + Go, with zero cluster-specific
-> requirements — it never dials out to a cluster, so it should work anywhere Docker
-> Compose runs.
-
-## UI
-
-```bash
-cd controlplane/ui && npm install && npm run dev   # → http://localhost:3000
-```
+The control plane is standard Docker Compose + Go with no cluster-specific
+requirements — it never dials out to a cluster, so it should run wherever Docker
+Compose runs.
 
 ## Testing
 
@@ -117,7 +153,7 @@ bash tests/advanced-e2e.sh                # node-death self-heal, preemption, te
 ## Agent API
 
 Agents interact with OpenResearch exclusively through a REST API — no direct
-cluster access, ever. Start here: [`tests/workload/spec.md`](tests/workload/spec.md).
+cluster access. Start here: [`tests/workload/spec.md`](tests/workload/spec.md).
 
 ## Endpoints
 
@@ -151,3 +187,7 @@ go build ./...
 go test ./... -timeout 60s
 golangci-lint run ./...
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

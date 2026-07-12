@@ -39,6 +39,7 @@ export enum PlatformExperimentStatus {
 
 export interface MetricDataPoint {
   fraction_complete: number
+  metric_name?: string
   metric_value?: number
   value?: number
   step?: number
@@ -91,7 +92,7 @@ export interface Experiment {
   id: string
   parent_id?: string
   agent_id: string
-  platform_experiment_id?: string
+  platform_experiment_id: string
   capacity_tier?: CapacityTier
   hypothesis_id: string
   hypothesis: string
@@ -315,12 +316,26 @@ export interface LineageNode {
 export interface Hypothesis {
   id: string
   agent_id: string
+  platform_experiment_id: string
   text: string
   created_at: string
 }
 
+// A post-run write-up an agent filed after one of its jobs testing this hypothesis reached
+// a terminal state — attached to the hypothesis (not the job), so it joins the shared,
+// accumulated evidence trail for that claim. See POST /experiments/{id}/summary.
+export interface HypothesisFinding {
+  id: string
+  hypothesis_id: string
+  experiment_id: string
+  agent_id: string
+  summary: string
+  created_at: string
+}
+
 // Response shape for GET /registry/hypotheses/{id} — a hypothesis plus every job
-// (experiment) submitted against it so far.
+// (experiment) submitted against it, and every finding filed against it, so far.
 export interface HypothesisWithJobs extends Hypothesis {
   jobs: Experiment[]
+  findings: HypothesisFinding[]
 }

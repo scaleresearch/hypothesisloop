@@ -110,7 +110,7 @@ agent_loop() {
     # free text ad hoc — register (or retrieve, if an equivalent one already exists) it first.
     hyp_resp=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" \
       -H 'Content-Type: application/json' \
-      -d "$(AGENT="$AGENT" HYPOTHESIS="$HYPOTHESIS" ROUND="$round" py "import json,os; print(json.dumps({'agent_id': os.environ['AGENT'], 'text': f\"Round {os.environ['ROUND']}: {os.environ['HYPOTHESIS']}\"}))")")
+      -d "$(AGENT="$AGENT" PE_ID="$PE_ID" HYPOTHESIS="$HYPOTHESIS" ROUND="$round" py "import json,os; print(json.dumps({'agent_id': os.environ['AGENT'], 'platform_experiment_id': os.environ['PE_ID'], 'text': f\"Round {os.environ['ROUND']}: {os.environ['HYPOTHESIS']}\"}))")")
     hypothesis_id=$(echo "$hyp_resp" | py "import sys,json; print(json.load(sys.stdin)['id'])")
 
     body=$(JOB_ID="$job_id" AGENT="$AGENT" PE_ID="$PE_ID" JOB_HOURS="$JOB_HOURS" \

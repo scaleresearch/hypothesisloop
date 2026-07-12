@@ -15,9 +15,10 @@ import {
   fetchPhase2Status,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
+  fetchHypotheses,
 } from '@/lib/api'
 import type { Phase2Status } from '@/lib/api'
-import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries, MetricDefinition } from '@/types'
+import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries, MetricDefinition, Hypothesis } from '@/types'
 import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
@@ -412,6 +413,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 10_000 },
   )
 
+  const { data: hypotheses } = useSWR<Hypothesis[]>(
+    ['pe-hypotheses', id],
+    () => fetchHypotheses(id),
+    { refreshInterval: 15_000 },
+  )
+
   // Fetch the full timeseries for every objective metric so the scoreboard can compute each
   // agent's best value per metric (needed for Pareto winner detection below).
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
@@ -493,7 +500,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 {new Date(pe.starts_at).toLocaleDateString()} – {pe.ends_at ? new Date(pe.ends_at).toLocaleDateString() : '?'}
               </span>
             )}
-            <Link href={`/hypotheses?pe=${pe.id}`} className="text-link" style={{ fontSize: 12 }}>Hypotheses →</Link>
+            <Link href={`/hypotheses?pe=${pe.id}`} className="text-link" style={{ fontSize: 12 }}>
+              {(hypotheses?.length ?? 0)} Hypotheses →
+            </Link>
           </div>
         </div>
       </div>
@@ -611,12 +620,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stats row */}
       <Pod>
         <PodContent>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 16 }}>
             <StatTile label="Budget" value={`${pe.budget_t4_hours} T4h`} />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
             <StatTile label="Budget Used" value={`${formatT4h(totalUsed)} T4h`} />
             <StatTile label="Jobs" value={(experiments?.length ?? 0).toString()} />
             <StatTile label="Running" value={running.length.toString()} color={running.length > 0 ? semantic.success : undefined} />
+            <StatTile label="Hypotheses" value={(hypotheses?.length ?? 0).toString()} color={semantic.accent} />
           </div>
         </PodContent>
       </Pod>

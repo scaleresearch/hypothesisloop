@@ -10,7 +10,7 @@ import type { MetricDataPoint } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
-import { semantic } from '@/lib/colors'
+import { semantic, agentPalette } from '@/lib/colors'
 import { formatT4h } from '@/lib/format'
 import { EVICTION_REASON_LABELS } from '@/lib/eviction'
 
@@ -46,10 +46,24 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const j = job as any
   const evictionLabel = j.eviction_reason ? (EVICTION_REASON_LABELS[j.eviction_reason] ?? j.eviction_reason) : null
 
-  const chartData = (metrics ?? []).map((p: MetricDataPoint) => ({
-    frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
-    value: p.metric_value ?? (p as any).value,
-  }))
+  // Jobs report one or more metrics (the objective plus any secondary ones the workload
+  // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
+  // own chart instead of interleaving unrelated scales on a single line.
+  const primaryMetricName = j.objective ? String(j.objective).split(/\s+/).pop() : undefined
+  const seriesByMetric = new Map<string, { frac: number; value: number }[]>()
+  for (const p of (metrics ?? []) as MetricDataPoint[]) {
+    const name = p.metric_name ?? primaryMetricName ?? 'metric'
+    if (!seriesByMetric.has(name)) seriesByMetric.set(name, [])
+    seriesByMetric.get(name)!.push({
+      frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
+      value: p.metric_value ?? (p as any).value,
+    })
+  }
+  const metricNames = Array.from(seriesByMetric.keys()).sort((a, b) => {
+    if (a === primaryMetricName) return -1
+    if (b === primaryMetricName) return 1
+    return a.localeCompare(b)
+  })
 
   const costEstimate = j.estimated_cost_t4h != null ? formatT4h(j.estimated_cost_t4h) : null
   const costActual = j.actual_cost_t4h != null ? formatT4h(j.actual_cost_t4h) : null
@@ -122,40 +136,49 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         </PodContent>
       </Pod>
 
-      {/* Metric trajectory chart */}
+      {/* Metric trajectories — one chart per reported metric, primary (the objective) first */}
       <Pod style={{ marginBottom: 12 }}>
-        <PodHeader>Metric Trajectory — {j.objective ?? 'metric'}</PodHeader>
+        <PodHeader>Metric Trajectories{j.objective ? ` — ${j.objective}` : ''}</PodHeader>
         <PodContent>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-                <XAxis
-                  dataKey="frac"
-                  type="number"
-                  domain={[0, 100]}
-                  tickFormatter={(v) => `${v}%`}
-                  tick={{ fontSize: 11, fill: axisColor }}
-                  stroke={gridColor}
-                  label={{ value: 'Training progress', position: 'insideBottom', offset: -2, fontSize: 11, fill: axisColor }}
-                />
-                <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} />
-                <Tooltip
-                  formatter={(v: number) => v.toFixed(4)}
-                  labelFormatter={(l) => `${l}% complete`}
-                  contentStyle={{ background: 'var(--surface-raised)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: 'var(--foreground)' }}
-                />
-                <Line
-                  dataKey="value"
-                  name={j.objective ?? 'metric'}
-                  stroke={semantic.accentStrong}
-                  dot={false}
-                  strokeWidth={2}
-                  type="monotone"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+          {metricNames.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: metricNames.length > 1 ? '1fr 1fr' : '1fr', gap: 16 }}>
+              {metricNames.map((name, i) => (
+                <div key={name}>
+                  <div className="mono text-muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                    {name}{name === primaryMetricName ? ' (objective)' : ''}
+                  </div>
+                  <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
+                    <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis
+                        dataKey="frac"
+                        type="number"
+                        domain={[0, 100]}
+                        tickFormatter={(v) => `${v}%`}
+                        tick={{ fontSize: 11, fill: axisColor }}
+                        stroke={gridColor}
+                        label={{ value: 'Training progress', position: 'insideBottom', offset: -2, fontSize: 11, fill: axisColor }}
+                      />
+                      <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} />
+                      <Tooltip
+                        formatter={(v: number) => v.toFixed(4)}
+                        labelFormatter={(l) => `${l}% complete`}
+                        contentStyle={{ background: 'var(--surface-raised)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 8, fontSize: 12 }}
+                        labelStyle={{ color: 'var(--foreground)' }}
+                      />
+                      <Line
+                        dataKey="value"
+                        name={name}
+                        stroke={name === primaryMetricName ? semantic.accentStrong : agentPalette[i % agentPalette.length]}
+                        dot={false}
+                        strokeWidth={2}
+                        type="monotone"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ))}
+            </div>
           ) : (
             <EmptyState>No metric data yet — waiting for job to start reporting.</EmptyState>
           )}

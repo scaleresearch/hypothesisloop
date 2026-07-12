@@ -25,11 +25,13 @@ type Store interface {
 	UpdateExperiment(ctx context.Context, exp *domain.Experiment) error
 	MarkStarted(ctx context.Context, id string) (bool, error)
 	GetLineage(ctx context.Context, experimentID string) ([]*domain.Experiment, error)
-	// FindOrCreateHypothesis registers a hypothesis, or returns the existing row (and true)
-	// if one with equivalent normalized text already exists — the real uniqueness check.
-	FindOrCreateHypothesis(ctx context.Context, agentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error)
+	// FindOrCreateHypothesis registers a hypothesis within a platform experiment, or returns
+	// the existing row (and true) if one with equivalent normalized text already exists in
+	// that same platform experiment — the real uniqueness check.
+	FindOrCreateHypothesis(ctx context.Context, agentID, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
-	ListHypotheses(ctx context.Context) ([]*domain.Hypothesis, error)
+	ListHypotheses(ctx context.Context, platformExperimentID string) ([]*domain.Hypothesis, error)
+	ListFindingsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisFinding, error)
 }
 
 // Service manages experiments and their metric timeseries.
@@ -82,6 +84,24 @@ func newUUIDv7() (string, error) {
 
 // Register assigns a new UUIDv7 ID and persists the experiment.
 func (s *Service) Register(ctx context.Context, exp *domain.Experiment) error {
+	if exp.PlatformExperimentID == "" {
+		return fmt.Errorf("registry.Register: platform_experiment_id is required")
+	}
+	if exp.HypothesisID == "" {
+		return fmt.Errorf("registry.Register: hypothesis_id is required")
+	}
+	hyp, err := s.store.GetHypothesis(ctx, exp.HypothesisID)
+	if err != nil {
+		return fmt.Errorf("registry.Register: get hypothesis: %w", err)
+	}
+	if hyp == nil {
+		return fmt.Errorf("registry.Register: hypothesis %q not found", exp.HypothesisID)
+	}
+	if hyp.PlatformExperimentID != exp.PlatformExperimentID {
+		return fmt.Errorf("registry.Register: hypothesis %q belongs to platform experiment %q, not %q — hypotheses cannot be tested outside the platform experiment they were registered under",
+			exp.HypothesisID, hyp.PlatformExperimentID, exp.PlatformExperimentID)
+	}
+
 	id, err := newUUIDv7()
 	if err != nil {
 		return fmt.Errorf("registry.Register: generate id: %w", err)
@@ -142,17 +162,19 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status domain.Exp
 	return nil
 }
 
-// RegisterHypothesis registers a new hypothesis, or returns the existing one (with
-// alreadyExisted=true) if an equivalent one (by normalized text) was already registered.
-// Agents should call this — and retrieve the returned ID — before submitting an experiment,
-// since ExperimentMeta.HypothesisID is required.
-func (s *Service) RegisterHypothesis(ctx context.Context, agentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error) {
-	h, alreadyExisted, err = s.store.FindOrCreateHypothesis(ctx, agentID, text)
+// RegisterHypothesis registers a new hypothesis within a platform experiment, or returns the
+// existing one (with alreadyExisted=true) if an equivalent one (by normalized text) was
+// already registered *in that same platform experiment*. Agents should call this — and
+// retrieve the returned ID — before submitting an experiment, since ExperimentMeta.HypothesisID
+// is required and must belong to the same platform experiment as the job being submitted.
+func (s *Service) RegisterHypothesis(ctx context.Context, agentID, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error) {
+	h, alreadyExisted, err = s.store.FindOrCreateHypothesis(ctx, agentID, platformExperimentID, text)
 	if err != nil {
 		return nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
 	s.logger.Info("hypothesis registered",
-		zap.String("id", h.ID), zap.String("agent", agentID), zap.Bool("already_existed", alreadyExisted))
+		zap.String("id", h.ID), zap.String("agent", agentID),
+		zap.String("platform_experiment_id", platformExperimentID), zap.Bool("already_existed", alreadyExisted))
 	return h, alreadyExisted, nil
 }
 
@@ -165,13 +187,23 @@ func (s *Service) GetHypothesis(ctx context.Context, id string) (*domain.Hypothe
 	return h, nil
 }
 
-// ListHypotheses returns every registered hypothesis, most recent first.
-func (s *Service) ListHypotheses(ctx context.Context) ([]*domain.Hypothesis, error) {
-	hs, err := s.store.ListHypotheses(ctx)
+// ListHypotheses returns every hypothesis registered within a platform experiment, most
+// recent first — the shared idea pool agents draw from and add to for that platform experiment.
+func (s *Service) ListHypotheses(ctx context.Context, platformExperimentID string) ([]*domain.Hypothesis, error) {
+	hs, err := s.store.ListHypotheses(ctx, platformExperimentID)
 	if err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
 	return hs, nil
+}
+
+// ListHypothesisFindings returns every finding filed against a hypothesis, oldest first.
+func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID string) ([]*domain.HypothesisFinding, error) {
+	fs, err := s.store.ListFindingsByHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
+	}
+	return fs, nil
 }
 
 // GetLineage returns the ancestor chain of an experiment (oldest first).
@@ -206,7 +238,14 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName str
 		"metric_name":            metricName,
 	}
 
-	if err := metricsdb.WriteGauge(ctx, s.metricsDBURL, "experiment_metric_value", labels, value); err != nil {
+	// Both samples share one timestamp so GetTimeseries/GetPlatformExperimentTimeseries can
+	// zip the two series back together index-for-index (both are pushed at the same cadence).
+	at := time.Now().UTC()
+	samples := []metricsdb.GaugeSample{
+		{MetricName: "experiment_metric_value", Labels: labels, Value: value, At: at},
+		{MetricName: "experiment_metric_fraction", Labels: labels, Value: fractionComplete, At: at},
+	}
+	if err := metricsdb.WriteGaugesAt(ctx, s.metricsDBURL, samples); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
 	}
 	return nil
@@ -237,6 +276,13 @@ func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformE
 	step := lookback / 500 // cap at ~500 points/series regardless of window size
 	if step < time.Second {
 		step = time.Second
+	}
+	// A short-lived job (demo runs report every few seconds and finish in minutes) would
+	// otherwise get 1-2 buckets under a long lookback window and look like a single dot;
+	// cap the step so recent, fast-moving experiments still render with real resolution.
+	const maxStep = 15 * time.Second
+	if step > maxStep {
+		step = maxStep
 	}
 
 	query := fmt.Sprintf(`experiment_metric_value{platform_experiment_id=%q, metric_name=%q}`, platformExpID, metricName)
@@ -297,33 +343,17 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 	end := time.Now().UTC()
 	start := end.Add(-24 * time.Hour)
 
-	query := fmt.Sprintf(`experiment_metric_value{job_id=%q}`, experimentID)
-	apiURL := fmt.Sprintf("%s/v1/prometheus/api/v1/query_range?query=%s&start=%d&end=%d&step=5s",
-		s.metricsDBURL, url.QueryEscape(query), start.Unix(), end.Unix())
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	valueSeries, err := s.queryRange(ctx, fmt.Sprintf(`experiment_metric_value{job_id=%q}`, experimentID), start, end)
 	if err != nil {
-		return nil, fmt.Errorf("registry.GetTimeseries: build request: %w", err)
+		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}
-
-	resp, err := http.DefaultClient.Do(req)
+	fractionByTS, err := s.queryFractionsByTimestamp(ctx, fmt.Sprintf(`experiment_metric_fraction{job_id=%q}`, experimentID), start, end)
 	if err != nil {
-		return nil, fmt.Errorf("registry.GetTimeseries: query prometheus: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("registry.GetTimeseries: read body: %w", err)
-	}
-
-	var result prometheusRangeResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("registry.GetTimeseries: decode response: %w", err)
+		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}
 
 	var out []*domain.MetricDataPoint
-	for _, r := range result.Data.Result {
+	for _, r := range valueSeries.Data.Result {
 		for _, v := range r.Values {
 			var ts float64
 			if t, ok := v[0].(float64); ok {
@@ -334,11 +364,63 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 				fmt.Sscanf(s, "%f", &val)
 			}
 			out = append(out, &domain.MetricDataPoint{
-				ExperimentID: experimentID,
-				MetricName:   r.Metric["metric_name"],
-				MetricValue:  val,
-				RecordedAt:   time.Unix(int64(ts), 0).UTC(),
+				ExperimentID:     experimentID,
+				MetricName:       r.Metric["metric_name"],
+				MetricValue:      val,
+				FractionComplete: fractionByTS[int64(ts)],
+				RecordedAt:       time.Unix(int64(ts), 0).UTC(),
 			})
+		}
+	}
+	return out, nil
+}
+
+// queryRange runs a PromQL range query against GreptimeDB and returns the raw matrix result.
+func (s *Service) queryRange(ctx context.Context, query string, start, end time.Time) (*prometheusRangeResult, error) {
+	apiURL := fmt.Sprintf("%s/v1/prometheus/api/v1/query_range?query=%s&start=%d&end=%d&step=5s",
+		s.metricsDBURL, url.QueryEscape(query), start.Unix(), end.Unix())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query prometheus: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	var result prometheusRangeResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// queryFractionsByTimestamp runs a PromQL range query and indexes the results by unix timestamp,
+// so GetTimeseries can zip a value sample back up with the fraction_complete recorded alongside
+// it (see RecordMetric, which writes both gauges at the same instant).
+func (s *Service) queryFractionsByTimestamp(ctx context.Context, query string, start, end time.Time) (map[int64]float64, error) {
+	result, err := s.queryRange(ctx, query, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]float64)
+	for _, r := range result.Data.Result {
+		for _, v := range r.Values {
+			var ts float64
+			if t, ok := v[0].(float64); ok {
+				ts = t
+			}
+			var val float64
+			if s, ok := v[1].(string); ok {
+				fmt.Sscanf(s, "%f", &val)
+			}
+			out[int64(ts)] = val
 		}
 	}
 	return out, nil

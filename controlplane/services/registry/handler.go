@@ -197,14 +197,17 @@ type hypothesisResponse struct {
 }
 
 // POST /registry/hypotheses
-// Body: {"agent_id": "...", "text": "..."}. Idempotent: registering text equivalent (modulo
-// case/whitespace) to an already-registered hypothesis returns that existing row instead of
-// creating a duplicate — this is the real uniqueness check agents should use to validate a
-// hypothesis before submitting an experiment against it.
+// Body: {"agent_id": "...", "platform_experiment_id": "...", "text": "..."}. Idempotent:
+// registering text equivalent (modulo case/whitespace) to an already-registered hypothesis
+// *within the same platform experiment* returns that existing row instead of creating a
+// duplicate — this is the real uniqueness check agents should use to validate a hypothesis
+// before submitting an experiment against it. Every job must reference a hypothesis
+// registered under the same platform_experiment_id it is submitted into.
 func (h *Handler) registerHypothesis(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		AgentID string `json:"agent_id"`
-		Text    string `json:"text"`
+		AgentID              string `json:"agent_id"`
+		PlatformExperimentID string `json:"platform_experiment_id"`
+		Text                 string `json:"text"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -214,11 +217,15 @@ func (h *Handler) registerHypothesis(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent_id is required")
 		return
 	}
+	if body.PlatformExperimentID == "" {
+		writeError(w, http.StatusBadRequest, "platform_experiment_id is required")
+		return
+	}
 	if body.Text == "" {
 		writeError(w, http.StatusBadRequest, "text is required")
 		return
 	}
-	hyp, existed, err := h.svc.RegisterHypothesis(r.Context(), body.AgentID, body.Text)
+	hyp, existed, err := h.svc.RegisterHypothesis(r.Context(), body.AgentID, body.PlatformExperimentID, body.Text)
 	if err != nil {
 		h.logger.Error("register hypothesis", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -231,9 +238,14 @@ func (h *Handler) registerHypothesis(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed})
 }
 
-// GET /registry/hypotheses
+// GET /registry/hypotheses?platform_experiment_id=...
 func (h *Handler) listHypotheses(w http.ResponseWriter, r *http.Request) {
-	hs, err := h.svc.ListHypotheses(r.Context())
+	platformExpID := r.URL.Query().Get("platform_experiment_id")
+	if platformExpID == "" {
+		writeError(w, http.StatusBadRequest, "platform_experiment_id is required")
+		return
+	}
+	hs, err := h.svc.ListHypotheses(r.Context(), platformExpID)
 	if err != nil {
 		h.logger.Error("list hypotheses", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -242,12 +254,14 @@ func (h *Handler) listHypotheses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, hs)
 }
 
-// hypothesisWithJobs bundles a hypothesis with the experiments (jobs) submitted against it,
-// so the UI and agents can see the full picture — how many jobs already tested this
-// hypothesis, and what came of them — from a single request.
+// hypothesisWithJobs bundles a hypothesis with the experiments (jobs) submitted against it
+// and the findings (post-run write-ups) agents have filed against it, so the UI and agents
+// can see the full picture — how many jobs already tested this hypothesis, and what came of
+// them — from a single request.
 type hypothesisWithJobs struct {
 	*domain.Hypothesis
-	Jobs []*domain.Experiment `json:"jobs"`
+	Jobs     []*domain.Experiment        `json:"jobs"`
+	Findings []*domain.HypothesisFinding `json:"findings"`
 }
 
 // GET /registry/hypotheses/{id}
@@ -269,7 +283,13 @@ func (h *Handler) getHypothesis(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, hypothesisWithJobs{Hypothesis: hyp, Jobs: jobs})
+	findings, err := h.svc.ListHypothesisFindings(r.Context(), id)
+	if err != nil {
+		h.logger.Error("list findings for hypothesis", zap.String("id", id), zap.Error(err))
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, hypothesisWithJobs{Hypothesis: hyp, Jobs: jobs, Findings: findings})
 }
 
 // PATCH /registry/experiments/{id}/status

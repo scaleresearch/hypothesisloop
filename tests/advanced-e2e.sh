@@ -87,7 +87,10 @@ PE_RESP=$(curl -sf -X POST "$QUOTA_URL/platform-experiments" -H 'Content-Type: a
   \"name\": \"advanced-e2e-${RUN_TS}\",
   \"budget_t4_hours\": ${BUDGET},
   \"max_agents\": ${AGENT_COUNT},
-  \"metrics\": [{\"key\": \"val_accuracy\", \"direction\": \"maximize\"}],
+  \"metrics\": [
+    {\"key\": \"val_accuracy\", \"direction\": \"maximize\"},
+    {\"key\": \"val_loss\", \"direction\": \"minimize\"}
+  ],
   \"phase2_boundary\": 0.90,
   \"report_interval_seconds\": 10
 }")
@@ -108,7 +111,11 @@ trap 'rm -rf "$TMPDIR_T"' EXIT
 
 cat > "$TMPDIR_T/mk_hyp_body.py" <<'PYEOF'
 import json, os, sys
-print(json.dumps({"agent_id": sys.argv[1], "text": f"advanced e2e run for {sys.argv[1]}"}))
+print(json.dumps({
+    "agent_id": sys.argv[1],
+    "platform_experiment_id": sys.argv[2],
+    "text": f"advanced e2e run for {sys.argv[1]}",
+}))
 PYEOF
 
 cat > "$TMPDIR_T/mk_submit_body.py" <<'PYEOF'
@@ -153,7 +160,7 @@ submit_job() {
   local JOB_ID="job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN_TS}"
   local HYP_RESP HYPOTHESIS_ID SUBMIT_BODY
   HYP_RESP=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" -H 'Content-Type: application/json' \
-    -d "$(python3 "$TMPDIR_T/mk_hyp_body.py" "$AGENT")")
+    -d "$(python3 "$TMPDIR_T/mk_hyp_body.py" "$AGENT" "$PE_ID")")
   HYPOTHESIS_ID=$(echo "$HYP_RESP" | py "import sys,json; print(json.load(sys.stdin)['id'])")
   SUBMIT_BODY=$(python3 "$TMPDIR_T/mk_submit_body.py" "$JOB_ID" "$AGENT" "$PE_ID" "$HOURS_OVERRIDE" "$JOB_FILE" "$HYPOTHESIS_ID" "$TIER" "$GPU_OVERRIDE" "$GPU_COUNT_OVERRIDE" "$NUM_NODES_OVERRIDE")
   # Must check explicitly: a trailing `echo` as this function's last command means a failed
