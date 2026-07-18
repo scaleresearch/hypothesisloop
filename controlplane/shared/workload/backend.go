@@ -53,11 +53,14 @@ type Backend interface {
 	// just return exp.GPUType.
 	GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment) domain.GPUType
 
-	// GetFlavorCapacity reports available capacity broken out per cluster per flavor —
-	// guaranteed[cluster][flavor] and burst[cluster][flavor] — used by the scheduler loop's
-	// admission math to place each job on a cluster that actually has room, instead of a
-	// single pooled total that hides which cluster is overloaded and which is idle.
-	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]map[string]int64, err error)
+	// GetFlavorCapacity reports available capacity broken out per cluster, as a canonical
+	// domain.Footprint (CPU millicores + per-accelerator-flavor counts today — see
+	// domain.CapacityFootprint) — guaranteed[cluster] and burst[cluster] — used by the
+	// scheduler loop's admission math (domain.Fits) to place each job on a cluster that
+	// actually has room across every dimension it requests jointly, instead of a single
+	// pooled total or a per-dimension check that hides which cluster is overloaded and which
+	// is idle.
+	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
 
 	// ClusterNames returns the configured target cluster names in stable order, used by
 	// admission to pick a cluster for a newly-admitted experiment.

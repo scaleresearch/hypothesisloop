@@ -116,6 +116,29 @@ func (e *Experiment) RequestedCPUCores() float64 {
 	return e.EstimatedCPUCoreHours / e.EstimatedDurationHours
 }
 
+// Footprint returns e's physical resource footprint in canonical units for the two dimensions
+// that have real live per-cluster capacity reporting today: CPU (millicores, preserving
+// fractional-CPU precision — see RequestedCPUCores) and its accelerator, if any (whole units,
+// keyed by GPUType.FlavorName() to match capacity's own key convention). e.GPUCount is already
+// the job's TOTAL footprint (per-node GPUCount x NumNodes, set once at submission — see
+// JobSpec.TotalGPUs), so no further node-scaling is needed here.
+//
+// RAM/storage are validated as a hard physical-fit requirement at submission (see
+// ValidateExperiment) but are not yet part of the joint Fits() check the admission loop runs,
+// because no live per-cluster RAM/storage capacity is reported yet (SCHEDULING_GENERALIZATION_PLAN.md
+// Class B step 2 — cluster-agent capacity piggyback extension — has not landed). Once it does,
+// this method should grow those two dimensions the same way.
+func (e *Experiment) Footprint() Footprint {
+	fp := NewFootprint()
+	if millicores := int64(e.RequestedCPUCores() * 1000); millicores > 0 {
+		fp.Add(ResourceKey{Kind: ResourceKindCPU}, millicores)
+	}
+	if e.GPUCount > 0 {
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: e.GPUType.FlavorName()}, int64(e.GPUCount))
+	}
+	return fp
+}
+
 // ExperimentFilter constrains which experiments are returned from the store.
 // It is the unified filter type used by all services; unused fields are ignored.
 type ExperimentFilter struct {

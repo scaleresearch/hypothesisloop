@@ -12,11 +12,15 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
 )
 
-// preempt selects and evicts burst victims until neededGPUs are freed.
-// Returns the number of GPUs actually freed.
-func (l *Loop) preempt(ctx context.Context, neededGPUs int64, burstRunning []*domain.Experiment) (int64, error) {
-	if len(burstRunning) == 0 {
-		return 0, nil
+// preempt selects and evicts a set of burst victims sufficient to cover needed — a shortage
+// Footprint that may span multiple dimensions at once (e.g. a mixed CPU+accelerator job that's
+// short on both). The whole victim set is planned and verified before anything is evicted (see
+// the fill-back pass below) — vector preemption, not a scalar count. Returns the Footprint
+// actually freed (only for victims whose deletion was positively confirmed — see the wait loop
+// at the bottom).
+func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunning []*domain.Experiment) (domain.Footprint, error) {
+	if len(burstRunning) == 0 || len(needed) == 0 {
+		return domain.NewFootprint(), nil
 	}
 
 	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job that spent most of its
@@ -35,43 +39,54 @@ func (l *Loop) preempt(ctx context.Context, neededGPUs int64, burstRunning []*do
 		elapsed[exp.ID] = hours
 	}
 
-	// Sort victims: least elapsed time first (minimize wasted work), largest footprint
-	// (GPU count, or CPU cores for CPU-only jobs) tiebreak so we free the needed capacity by
-	// evicting the fewest possible jobs.
+	// footprintSize collapses a heterogeneous multi-dimension footprint into one comparable
+	// scalar (sum of all dimensions' canonical units) purely for the "largest footprint first"
+	// tiebreak below — not used anywhere accounting actually happens.
+	footprintSize := func(exp *domain.Experiment) int64 {
+		var n int64
+		for _, v := range exp.Footprint() {
+			n += v
+		}
+		return n
+	}
+
+	// Sort victims: least elapsed time first (minimize wasted work), largest footprint tiebreak
+	// so we free the needed capacity by evicting the fewest possible jobs.
 	sort.Slice(burstRunning, func(i, j int) bool {
 		ei, ej := elapsed[burstRunning[i].ID], elapsed[burstRunning[j].ID]
 		if ei != ej {
 			return ei < ej
 		}
-		_, ni := admissionUnit(burstRunning[i])
-		_, nj := admissionUnit(burstRunning[j])
-		return ni > nj
+		return footprintSize(burstRunning[i]) > footprintSize(burstRunning[j])
 	})
 
-	// Select victims to free enough capacity.
+	// Select victims until their combined footprint covers every dimension of needed.
 	var selected []*domain.Experiment
-	var freed int64
+	freed := domain.NewFootprint()
 	for _, victim := range burstRunning {
-		if freed >= neededGPUs {
+		if domain.Fits(freed, needed) {
 			break
 		}
-		_, need := admissionUnit(victim)
 		selected = append(selected, victim)
-		freed += need
+		freed.AddFootprint(victim.Footprint())
 	}
 
 	if len(selected) == 0 {
-		return 0, nil
+		return domain.NewFootprint(), nil
 	}
 
 	// Fill-back pass: footprints are heterogeneous, so the loop above can overshoot (e.g.
-	// victim N-1 alone already covers neededGPUs but victim N still got selected). Walk
-	// backward and reprieve any victim whose removal from the selected set still leaves enough
-	// freed capacity — minimizes total evictions instead of evicting whatever fit first.
+	// victim N-1 alone already covers needed but victim N still got selected). Walk backward
+	// and reprieve any victim whose removal from the selected set still leaves the remaining
+	// freed footprint covering needed — minimizes total evictions instead of evicting whatever
+	// fit first. This is the "verify the post-preemption vector fits" step the plan calls for,
+	// applied per-candidate-removal rather than once at the end, so it also states the fewest-
+	// victims objective explicitly.
 	for i := len(selected) - 1; i >= 0; i-- {
-		_, vn := admissionUnit(selected[i])
-		if freed-vn >= neededGPUs {
-			freed -= vn
+		vfp := selected[i].Footprint()
+		trial := freed.Sub(vfp)
+		if domain.Fits(trial, needed) {
+			freed = trial
 			selected = append(selected[:i], selected[i+1:]...)
 		}
 	}
@@ -148,7 +163,7 @@ func (l *Loop) preempt(ctx context.Context, neededGPUs int64, burstRunning []*do
 	// victims stay requeued (out of the running set) but their capacity is simply not counted
 	// this tick — the next tick reads fresh live capacity and will pick it up once actually gone.
 	var mu sync.Mutex
-	var actualFreed int64
+	actualFreed := domain.NewFootprint()
 	var wg sync.WaitGroup
 	for _, victim := range requeued {
 		wg.Add(1)
@@ -158,9 +173,8 @@ func (l *Loop) preempt(ctx context.Context, neededGPUs int64, burstRunning []*do
 				l.logger.Warn("wait for job deletion", zap.String("id", v.ID), zap.Error(err))
 				return
 			}
-			_, need := admissionUnit(v)
 			mu.Lock()
-			actualFreed += need
+			actualFreed.AddFootprint(v.Footprint())
 			mu.Unlock()
 		}(victim)
 	}
@@ -221,13 +235,16 @@ func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map
 	return result
 }
 
-// notAdmittedReasonFor classifies a skipped job: if current availability for its flavor still
-// equals what it was before this tick touched it, nothing was ever available (capacity never
-// existed this tick, independent of competition); if it's lower, other jobs admitted earlier in
-// this same tick's sort order consumed it (outranked).
-func notAdmittedReasonFor(current, initial int64) string {
-	if current < initial {
-		return domain.NotAdmittedOutranked
+// notAdmittedReasonFor classifies a skipped job: if current availability, for every dimension
+// the job actually needs, still equals what it was before this tick touched it, nothing was
+// ever available (capacity never existed this tick, independent of competition); if any needed
+// dimension is now lower, other jobs admitted earlier in this same tick's sort order consumed
+// it (outranked).
+func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint) string {
+	for k := range footprint {
+		if current[k] < initial[k] {
+			return domain.NotAdmittedOutranked
+		}
 	}
 	return domain.NotAdmittedCapacityUnavailable
 }

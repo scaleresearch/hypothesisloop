@@ -122,10 +122,6 @@ func (b *Backend) GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment
 	return report.AdmittedGPUType
 }
 
-// cpuFlavor is the pseudo-flavor key used for CPU-only jobs (no GPU request) in the same
-// guaranteed/burst maps GPU flavors use — see scheduler/loop.go's admissionUnit.
-const cpuFlavor = "cpu"
-
 // GetFlavorCapacity returns available capacity per cluster per flavor: guaranteed[cluster][flavor]
 // and burst[cluster][flavor]. Every configured cluster (b.clusterNames) always gets an entry, so
 // callers can enumerate clusters purely from these maps. Both CPU and GPU capacity are real and
@@ -135,7 +131,7 @@ const cpuFlavor = "cpu"
 // given resource contributes zero for it, never a stale or nominal-config number. Guaranteed and
 // burst share the same physical pool per cluster — preemption is what enforces the tier boundary,
 // not a capacity split.
-func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]map[string]int64, err error) {
+func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error) {
 	cpuAvail, err := b.store.GetLiveCPUCapacityByCluster(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: live CPU capacity: %w", err)
@@ -145,21 +141,23 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 		return nil, nil, fmt.Errorf("queuebackend: live GPU capacity: %w", err)
 	}
 
-	guaranteed = make(map[string]map[string]int64, len(b.clusterNames))
-	burst = make(map[string]map[string]int64, len(b.clusterNames))
+	guaranteed = make(map[string]domain.Footprint, len(b.clusterNames))
+	burst = make(map[string]domain.Footprint, len(b.clusterNames))
 	for _, cluster := range b.clusterNames {
-		flavors := make(map[string]int64, len(b.flavorOrder)+1)
+		gpuByFlavor := make(map[string]int64, len(b.flavorOrder))
 		for _, flavor := range b.flavorOrder {
-			flavors[flavor] = gpuAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
+			gpuByFlavor[flavor] = gpuAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
 		}
-		// truncates down: never round available capacity up in the admission loop's favor
-		flavors[cpuFlavor] = int64(cpuAvail[cluster])
-		guaranteed[cluster] = flavors
-		burstFlavors := make(map[string]int64, len(flavors))
-		for flavor, n := range flavors {
-			burstFlavors[flavor] = n
+		fp := domain.CapacityFootprint(cpuAvail[cluster], gpuByFlavor)
+		guaranteed[cluster] = fp
+		// Guaranteed and burst share the same physical pool per cluster — preemption is what
+		// enforces the tier boundary, not a capacity split. Copy so tick()'s mutation of one
+		// view never aliases the other.
+		burstCopy := make(domain.Footprint, len(fp))
+		for k, v := range fp {
+			burstCopy[k] = v
 		}
-		burst[cluster] = burstFlavors
+		burst[cluster] = burstCopy
 	}
 	return guaranteed, burst, nil
 }

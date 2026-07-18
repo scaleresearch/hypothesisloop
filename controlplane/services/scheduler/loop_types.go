@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"math"
 	"sync/atomic"
 	"time"
 
@@ -11,39 +10,27 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 )
 
-// cpuFlavor is the pseudo-flavor key GetFlavorCapacity uses for live-reported CPU-core
-// capacity (see queuebackend.Backend.GetFlavorCapacity). Kept in sync with that constant.
-const cpuFlavor = "cpu"
-
-// admissionUnit returns the capacity-map key and unit count exp consumes: GPU count against
-// its GPU flavor for GPU jobs, or requested CPU cores against the cpuFlavor pseudo-flavor for
-// CPU-only jobs (GPUCount == 0). One admission unit shared by the SUBMITTED-footprint
-// subtraction, both admission passes, and preemption victim accounting, so all four always
-// agree on what a job actually costs.
+// exp's admission footprint is domain.Experiment.Footprint() — CPU (millicores) and its
+// accelerator (if any), jointly. One footprint shared by the SUBMITTED-footprint subtraction,
+// both admission passes, and preemption victim accounting, so all three always agree on what a
+// job actually costs across every dimension it requests, not just one flavor.
 //
 // For a distributed job (JobSpec.NumNodes > 1), exp.GPUCount is already the job's TOTAL
 // footprint — JobSpec.TotalGPUs(), i.e. per-node GPUCount x NumNodes, set once at submission
-// (see handler.go) — so tick()'s check (need > avail[cluster][flavor]) already requires the
-// *whole* job's GPUs to fit before admitting anything, and submitJob creates the entire k8s
+// (see handler.go) — so tick()'s check (domain.Fits(avail[cluster], fp)) already requires the
+// *whole* job's demand to fit before admitting anything, and submitJob creates the entire k8s
 // Job (every rank/index) in a single CreateWorkload call. Admission is therefore atomic:
-// either the whole job's GPU demand fits and every rank is created together, or none of it is
+// either the whole job's demand fits and every rank is created together, or none of it is
 // created and the job stays QUEUED — there is no code path that admits/creates a subset of a
 // distributed job's ranks.
 //
-// KNOWN GAP: "fits" here means the cluster's *aggregate* free GPU count for the flavor is
-// enough, not that NumNodes *distinct* hosts each have a full rank's GPUCount free. Distributed
+// KNOWN GAP: "fits" here means the cluster's *aggregate* free capacity per dimension is
+// enough, not that NumNodes *distinct* hosts each have a full rank's footprint free. Distributed
 // jobs get a hard per-host anti-affinity rule at Job-build time (see job_affinity.go's
 // spreadAcrossHosts), so aggregate headroom spread across fewer hosts than NumNodes can still
 // leave some ranks permanently Pending after admission — see job_affinity.go's KNOWN GAP comment
-// for the failure mode. A real fix needs per-node (not just per-cluster-per-flavor) capacity
-// reporting from GetFlavorCapacity, which does not exist yet; that's future work, out of scope
-// here.
-func admissionUnit(exp *domain.Experiment) (flavor string, need int64) {
-	if exp.GPUCount > 0 {
-		return exp.GPUType.FlavorName(), int64(exp.GPUCount)
-	}
-	return cpuFlavor, int64(math.Ceil(exp.RequestedCPUCores())) // ceil: round demand up, mirrors rounding available capacity down (queue_backend.go) — both directions err conservative
-}
+// for the failure mode. A real fix needs per-node (not just per-cluster) capacity reporting from
+// GetFlavorCapacity, which does not exist yet; that's future work, out of scope here.
 
 // LoopStore is the persistence interface required by the scheduler loop.
 type LoopStore interface {
@@ -90,10 +77,10 @@ type LoopQuotaStore interface {
 type LoopWorkloadClient interface {
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
 	WaitForJobDeletion(ctx context.Context, exp *domain.Experiment, timeout time.Duration) error
-	// GetFlavorCapacity returns available capacity as guaranteed[cluster][flavor] and
-	// burst[cluster][flavor] — every configured cluster has an entry, even at zero, so the
-	// loop can enumerate clusters from these maps alone.
-	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]map[string]int64, err error)
+	// GetFlavorCapacity returns available capacity as a canonical domain.Footprint per cluster
+	// — guaranteed[cluster] and burst[cluster] — every configured cluster has an entry, even at
+	// zero, so the loop can enumerate clusters from these maps alone.
+	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
 }
 
 // Reprioritizer recomputes priority scores for all queued experiments.

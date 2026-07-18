@@ -132,9 +132,9 @@ func (cs *ClusterSet) WaitForJobDeletion(ctx context.Context, exp *domain.Experi
 // cluster (guaranteed[cluster][flavor], burst[cluster][flavor]) — capacity is derived from
 // static config (not live cluster state) and is identical across clusters today, but each
 // cluster still gets its own entry so admission can reason about per-cluster room.
-func (cs *ClusterSet) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]map[string]int64, err error) {
-	guaranteed = make(map[string]map[string]int64, len(cs.order))
-	burst = make(map[string]map[string]int64, len(cs.order))
+func (cs *ClusterSet) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error) {
+	guaranteed = make(map[string]domain.Footprint, len(cs.order))
+	burst = make(map[string]domain.Footprint, len(cs.order))
 	for _, name := range cs.order {
 		g, b, err := cs.clients[name].GetFlavorCapacity(ctx)
 		if err != nil {

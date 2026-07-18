@@ -19,8 +19,9 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 	if got := fp[ResourceKey{Kind: ResourceKindCPU}]; got != 2000 {
 		t.Errorf("cpu millicores = %d, want 2000", got)
 	}
-	// Accelerator: 2 GPUs/node * 4 nodes = 8, matches TotalGPUs().
-	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: "H100"}]; got != int64(j.TotalGPUs()) {
+	// Accelerator: 2 GPUs/node * 4 nodes = 8, matches TotalGPUs(). Flavor key uses
+	// GPUType.FlavorName() ("flavor-h100"), matching capacity reporting's key convention.
+	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: GPUH100.FlavorName()}]; got != int64(j.TotalGPUs()) {
 		t.Errorf("accelerator count = %d, want %d", got, j.TotalGPUs())
 	}
 	// Memory: 1GiB/node * 4 nodes.

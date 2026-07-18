@@ -65,6 +65,14 @@ func (f Footprint) Scale(n int64) Footprint {
 	return out
 }
 
+// AddFootprint adds every dimension of other into f in place — used to accumulate a running
+// "freed so far" or "occupied so far" total across several experiments' individual footprints.
+func (f Footprint) AddFootprint(other Footprint) {
+	for k, v := range other {
+		f[k] += v
+	}
+}
+
 // Sub returns a new Footprint of f minus other, dimension by dimension. Dimensions present only
 // in other are included as negative entries in the result (capacity going negative is exactly
 // what a caller needs to detect "doesn't fit").
@@ -98,6 +106,24 @@ func Fits(capacity, footprint Footprint) bool {
 		}
 	}
 	return true
+}
+
+// CapacityFootprint builds a per-cluster capacity Footprint from live CPU-core and
+// per-accelerator-flavor availability — the shape every workload.Backend.GetFlavorCapacity
+// implementation reports today (RAM/storage are not part of this yet — see the plan's Class B
+// step 2, not landed). cpuCores is floored to whole millicores (never rounded up in the
+// admission loop's favor, same directionality the old whole-core truncation used, but with
+// millicore granularity so a capacity check against a fractional-CPU job doesn't lose
+// precision). gpuByFlavor keys must already be GPUType.FlavorName()-shaped, matching
+// JobSpec.Footprint()/Experiment.Footprint()'s accelerator key convention, or Fits() will never
+// match them.
+func CapacityFootprint(cpuCores float64, gpuByFlavor map[string]int64) Footprint {
+	fp := NewFootprint()
+	fp.Add(ResourceKey{Kind: ResourceKindCPU}, int64(cpuCores*1000))
+	for flavor, n := range gpuByFlavor {
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: flavor}, n)
+	}
+	return fp
 }
 
 // Footprint computes j's total resource footprint in canonical units: millicores for CPU,
@@ -138,7 +164,10 @@ func (j JobSpec) Footprint() (Footprint, error) {
 		if j.GPUType == "" {
 			return nil, fmt.Errorf("job.gpu_type is required when job.gpu_count > 0")
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: string(j.GPUType)}, int64(j.GPUCount))
+		// Flavor uses the same GPUType.FlavorName() convention capacity reporting keys on
+		// (e.g. "flavor-t4", not "T4") so Fits() actually matches a job's accelerator dimension
+		// against the right capacity entry.
+		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: j.GPUType.FlavorName()}, int64(j.GPUCount))
 	}
 	for name, qty := range j.ExtraResources {
 		q, err := resource.ParseQuantity(qty)

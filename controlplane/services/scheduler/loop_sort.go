@@ -18,14 +18,16 @@ func filterTier(exps []*domain.Experiment, tier domain.CapacityTier) []*domain.E
 	return out
 }
 
-// filterTierFlavorCluster returns experiments of the given tier and cluster whose
-// admission-unit flavor (GPU flavor, or the cpuFlavor pseudo-flavor for CPU-only jobs)
-// matches flavorName. Scoped to one cluster because freeing capacity on a different cluster
-// wouldn't make room for a job being admitted onto this one.
-func filterTierFlavorCluster(exps []*domain.Experiment, tier domain.CapacityTier, flavorName, clusterName string) []*domain.Experiment {
+// filterTierCluster returns experiments of the given tier and cluster — candidates preempt()
+// can evict to cover a shortage Footprint that may span multiple dimensions at once, so
+// candidates are no longer narrowed to a single matching flavor here (preempt() itself decides
+// which victims' combined footprint actually covers the shortage). Scoped to one cluster
+// because freeing capacity on a different cluster wouldn't make room for a job being admitted
+// onto this one.
+func filterTierCluster(exps []*domain.Experiment, tier domain.CapacityTier, clusterName string) []*domain.Experiment {
 	var out []*domain.Experiment
 	for _, e := range exps {
-		if f, _ := admissionUnit(e); e.CapacityTier == tier && f == flavorName && e.ClusterName == clusterName {
+		if e.CapacityTier == tier && e.ClusterName == clusterName {
 			out = append(out, e)
 		}
 	}

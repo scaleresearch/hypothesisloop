@@ -190,7 +190,7 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	flavor, need := admissionUnit(exp)
+	fp := exp.Footprint()
 	avail, ok := gAvail[req.ClusterName]
 	if !ok {
 		writeError(w, http.StatusBadRequest, "cluster_name is not a configured cluster")
@@ -205,13 +205,21 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 		if o.ClusterName != req.ClusterName {
 			continue
 		}
-		oFlavor, oNeed := admissionUnit(o)
-		if oFlavor != flavor || flavor == cpuFlavor {
-			continue
+		// CPU is skipped here the same way tick() skips it (see loop_tick.go's step-2 comment):
+		// the live-reported CPU number already reflects every SUBMITTED/ADMITTED/RUNNING job's
+		// request once its pod exists, so subtracting it again would double-count.
+		ofp := o.Footprint()
+		for k, v := range ofp {
+			if k.Kind == domain.ResourceKindCPU {
+				continue
+			}
+			avail[k] -= v
+			if avail[k] < 0 {
+				avail[k] = 0
+			}
 		}
-		avail[flavor] -= oNeed
 	}
-	if avail[flavor] < need {
+	if !domain.Fits(avail, fp) {
 		writeError(w, http.StatusUnprocessableEntity, "insufficient capacity on requested cluster")
 		return
 	}

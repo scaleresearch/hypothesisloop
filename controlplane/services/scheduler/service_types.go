@@ -78,11 +78,11 @@ type WorkloadClient interface {
 	// admission to pick a cluster for a newly-admitted experiment. Single-cluster
 	// deployments return exactly one name ("default").
 	ClusterNames() []string
-	// GetFlavorCapacity returns available physical capacity as guaranteed[cluster][flavor] and
-	// burst[cluster][flavor] (see LoopWorkloadClient.GetFlavorCapacity). Used by the operator
-	// admit endpoint to verify the requested target cluster actually has room before admitting
-	// onto it, instead of admitting unconditionally.
-	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]map[string]int64, err error)
+	// GetFlavorCapacity returns available physical capacity as a canonical domain.Footprint per
+	// cluster, guaranteed[cluster] and burst[cluster] (see LoopWorkloadClient.GetFlavorCapacity).
+	// Used by the operator admit endpoint to verify the requested target cluster actually has
+	// room, jointly across every dimension the job requests, before admitting onto it.
+	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
 }
 
 // NoveltyDetector computes the novelty of a hypothesis relative to existing experiments.

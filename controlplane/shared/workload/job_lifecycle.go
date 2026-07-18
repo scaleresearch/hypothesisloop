@@ -219,17 +219,20 @@ func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID
 	return fmt.Errorf("workload: timed out waiting for job %s deletion", name)
 }
 
-// GetFlavorCapacity returns nominal GPU slot capacity per flavor from config.
-// demo: not reading live reservation state from the GPU cluster
-func (c *JobWorkloadClient) GetFlavorCapacity(_ context.Context) (guaranteed, burst map[string]int64, err error) {
+// GetFlavorCapacity returns nominal GPU + live CPU slot capacity as a canonical
+// domain.Footprint. demo: GPU is not reading live reservation state from the cluster (nominal
+// config only); CPU uses the same live allocatable-minus-requested number GetLiveCPUCapacity
+// computes, so a mixed CPU+accelerator job's joint fit can be checked against one vector.
+func (c *JobWorkloadClient) GetFlavorCapacity(ctx context.Context) (guaranteed, burst domain.Footprint, err error) {
 	nominal := c.gpuNominalCapacity()
-	guaranteed = make(map[string]int64, len(nominal))
-	burst = make(map[string]int64, len(nominal))
-	for flavor, n := range nominal {
-		guaranteed[flavor] = n
-		burst[flavor] = n
+	cpuAvail, _, err := c.GetLiveCPUCapacity(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
-	return guaranteed, burst, nil
+	fp := domain.CapacityFootprint(cpuAvail, nominal)
+	// Guaranteed and burst share the same physical pool here, same as queuebackend.Backend —
+	// preemption enforces the tier boundary, not a capacity split.
+	return fp, fp, nil
 }
 
 type JobPhase int
