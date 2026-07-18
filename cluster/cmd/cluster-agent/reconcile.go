@@ -119,6 +119,29 @@ func (a *agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 		url = url + sep + q.Encode()
 	}
 
+	// RAM/ephemeral-storage: Class B (hard-cap, no billing) dimensions — see
+	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2. Same fast-poll piggyback as CPU/GPU
+	// above, in bytes, so the control plane can joint-fit a mixed job's memory/storage request
+	// against real cluster state instead of trusting it fits unconditionally.
+	if ramAvail, ramTotal, err := a.jwc.GetLiveRAMCapacity(ctx); err != nil {
+		fmt.Printf("[cluster-agent] get live RAM capacity: %v\n", err)
+	} else {
+		sep := "&"
+		if !strings.Contains(url, "?") {
+			sep = "?"
+		}
+		url = fmt.Sprintf("%s%sram_available_bytes=%d&ram_total_bytes=%d", url, sep, ramAvail, ramTotal)
+	}
+	if storageAvail, storageTotal, err := a.jwc.GetLiveStorageCapacity(ctx); err != nil {
+		fmt.Printf("[cluster-agent] get live storage capacity: %v\n", err)
+	} else {
+		sep := "&"
+		if !strings.Contains(url, "?") {
+			sep = "?"
+		}
+		url = fmt.Sprintf("%s%sstorage_available_bytes=%d&storage_total_bytes=%d", url, sep, storageAvail, storageTotal)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

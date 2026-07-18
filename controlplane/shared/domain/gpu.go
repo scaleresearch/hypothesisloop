@@ -61,27 +61,32 @@ func (g GPUType) LookupCost() (float64, bool) {
 	return r, ok
 }
 
-// cpuCoreHourRate/ramGBHourRate/storageGBHourRate are flat per-unit rates (1.0 by default —
-// unlike GPU there is no hardware-tier variation to normalize away), operator-overridable via
-// openresearch.yaml so tiering (e.g. "fast NVMe" vs "standard" storage) can be introduced later
-// without another migration. There is deliberately no cross-resource exchange rate between
-// these and gpuRateRegistry — CPU-hours, RAM-GB-hours, and storage-GB-hours are independent
-// pools, not converted into T4h credits.
+// cpuCoreHourRate is a flat per-unit rate (1.0 by default — unlike GPU there is no
+// hardware-tier variation to normalize away), operator-overridable via openresearch.yaml.
+//
+// ramGBHourRate/storageGBHourRate: Deprecated, kept only so SetRAMGBHourRate/SetStorageGBHourRate
+// and RAMGBHourRate/StorageGBHourRate remain valid no-op-ish calls for any config/caller that
+// still references them — nothing in this codebase reads these two rates to compute a bill
+// anymore (RAM/storage moved to Class B, hard-fit-checked only — see ResourceRAMGBHours' doc
+// comment for the full migration note).
 var (
 	cpuCoreHourRate   = 1.0
 	ramGBHourRate     = 1.0
 	storageGBHourRate = 1.0
 )
 
-// SetCPUCoreHourRate/SetRAMGBHourRate/SetStorageGBHourRate register the flat per-unit rate for
-// each non-GPU resource dimension, loaded from config at startup. Zero/negative is ignored
-// (keeps the 1.0 default) so an absent config key doesn't zero out the rate.
+// SetCPUCoreHourRate registers the flat per-unit CPU-hour rate, loaded from config at startup.
+// Zero/negative is ignored (keeps the 1.0 default) so an absent config key doesn't zero out the
+// rate.
 func SetCPUCoreHourRate(rate float64) {
 	if rate > 0 {
 		cpuCoreHourRate = rate
 	}
 }
 
+// SetRAMGBHourRate/SetStorageGBHourRate: Deprecated — see ramGBHourRate's doc comment. Still
+// registers the value (so an operator's existing openresearch.yaml with these keys doesn't
+// error), but nothing reads it for billing anymore.
 func SetRAMGBHourRate(rate float64) {
 	if rate > 0 {
 		ramGBHourRate = rate
@@ -94,8 +99,7 @@ func SetStorageGBHourRate(rate float64) {
 	}
 }
 
-// CPUCoreHourRate/RAMGBHourRate/StorageGBHourRate return the current per-unit rate for each
-// resource dimension (see the SetX functions above).
+// CPUCoreHourRate returns the current per-unit CPU-hour rate.
 func CPUCoreHourRate() float64   { return cpuCoreHourRate }
 func RAMGBHourRate() float64     { return ramGBHourRate }
 func StorageGBHourRate() float64 { return storageGBHourRate }
@@ -109,15 +113,28 @@ const (
 )
 
 // ResourceType identifies one quota-tracked resource dimension. GPU-hours is the original,
-// always-populated dimension (billed at GPUType's own tiered rate); the other three are flat
-// per-unit pools (see cpuCoreHourRate/ramGBHourRate/storageGBHourRate) with no exchange rate
-// between dimensions — each is checked/debited/refunded independently against its own
-// guaranteed/burst pool on AgentQuota.
+// always-populated dimension (billed at GPUType's own tiered rate); CPU-hours is a flat
+// per-unit pool (see cpuCoreHourRate) checked/debited/refunded against its own guaranteed/burst
+// pool on AgentQuota, same as GPU-hours.
 type ResourceType string
 
 const (
-	ResourceGPUHours       ResourceType = "gpu_hours"
-	ResourceCPUCoreHours   ResourceType = "cpu_core_hours"
+	ResourceGPUHours     ResourceType = "gpu_hours"
+	ResourceCPUCoreHours ResourceType = "cpu_core_hours"
+
+	// ResourceRAMGBHours/ResourceStorageGBHours: Deprecated. RAM and ephemeral-storage moved to
+	// Class B under SCHEDULING_GENERALIZATION_PLAN.md — hard physical-fit-checked at admission
+	// (domain.Experiment.Footprint()/domain.Fits) but never hours-budgeted, debited, or
+	// preemption-rescaled. Nothing in this codebase computes a non-zero amount for either
+	// resource type anymore (see scheduler.Service.Submit's estimate step) — every debit/refund
+	// call site skips them via their existing "amount <= 0" guard, so they are dead weight, not
+	// live billing dimensions. Kept defined (not deleted) purely so historical rows already
+	// written against them (AgentQuota's ram_gb_hours/storage_gb_hours columns, historical
+	// Experiment.EstimatedRAMGBHours/ActualRAMGBHours values, metricsdb reservation series
+	// keyed by these ResourceTypes) remain readable/interpretable rather than becoming orphaned
+	// magic strings. A platform experiment created before this migration with a non-zero
+	// BudgetRAMGBHours/BudgetStorageGBHours (see PlatformExperiment) keeps that number in the
+	// DB, but nothing reads it anymore — its guaranteed/burst pools simply stop moving forward.
 	ResourceRAMGBHours     ResourceType = "ram_gb_hours"
 	ResourceStorageGBHours ResourceType = "storage_gb_hours"
 )

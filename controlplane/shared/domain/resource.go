@@ -108,21 +108,26 @@ func Fits(capacity, footprint Footprint) bool {
 	return true
 }
 
-// CapacityFootprint builds a per-cluster capacity Footprint from live CPU-core and
-// per-accelerator-flavor availability — the shape every workload.Backend.GetFlavorCapacity
-// implementation reports today (RAM/storage are not part of this yet — see the plan's Class B
-// step 2, not landed). cpuCores is floored to whole millicores (never rounded up in the
-// admission loop's favor, same directionality the old whole-core truncation used, but with
-// millicore granularity so a capacity check against a fractional-CPU job doesn't lose
-// precision). gpuByFlavor keys must already be GPUType.FlavorName()-shaped, matching
+// CapacityFootprint builds a per-cluster capacity Footprint from live CPU-core,
+// per-accelerator-flavor, and RAM/ephemeral-storage availability — the shape
+// workload.Backend.GetFlavorCapacity implementations report (see
+// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). cpuCores is floored to whole millicores
+// (never rounded up in the admission loop's favor, same directionality the old whole-core
+// truncation used, but with millicore granularity so a capacity check against a fractional-CPU
+// job doesn't lose precision). ramBytes/storageBytes are already integer bytes — pass 0 if a
+// cluster has no fresh report for that dimension (Fits() then fails closed for any job that
+// actually needs it, per the plan's "fail closed on stale/missing capacity" fix). gpuByFlavor
+// keys must already be GPUType.FlavorName()-shaped, matching
 // JobSpec.Footprint()/Experiment.Footprint()'s accelerator key convention, or Fits() will never
 // match them.
-func CapacityFootprint(cpuCores float64, gpuByFlavor map[string]int64) Footprint {
+func CapacityFootprint(cpuCores float64, gpuByFlavor map[string]int64, ramBytes, storageBytes int64) Footprint {
 	fp := NewFootprint()
 	fp.Add(ResourceKey{Kind: ResourceKindCPU}, int64(cpuCores*1000))
 	for flavor, n := range gpuByFlavor {
 		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: flavor}, n)
 	}
+	fp.Add(ResourceKey{Kind: ResourceKindMemory}, ramBytes)
+	fp.Add(ResourceKey{Kind: ResourceKindStorage}, storageBytes)
 	return fp
 }
 

@@ -380,15 +380,16 @@ CREATE TABLE cluster_heartbeats (
 -- onStuckPending/onFinished (evicted/completed without a pod ever needing to be counted), or a
 -- rolled-back submission (workload creation failed, job returned to QUEUED).
 --
--- Only the two dimensions with live per-cluster capacity today (CPU + one accelerator flavor)
--- are tracked — matches Experiment.Footprint()'s current scope; RAM/storage join this table
--- once their own capacity piggyback lands (see Class B step 2).
+-- Tracks every dimension Experiment.Footprint() reports: CPU, one accelerator flavor, and (once
+-- Class B step 2's capacity piggyback landed) RAM/ephemeral-storage in bytes.
 CREATE TABLE pending_capacity_reservations (
     experiment_id       TEXT        PRIMARY KEY REFERENCES experiments(id) ON DELETE CASCADE,
     cluster_name        TEXT        NOT NULL,
     cpu_millicores       BIGINT      NOT NULL DEFAULT 0,
     accelerator_flavor   TEXT        NOT NULL DEFAULT '',
     accelerator_count    BIGINT      NOT NULL DEFAULT 0,
+    ram_bytes            BIGINT      NOT NULL DEFAULT 0,
+    storage_bytes        BIGINT      NOT NULL DEFAULT 0,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

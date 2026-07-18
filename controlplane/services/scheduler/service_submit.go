@@ -142,30 +142,33 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 
 	// 4. Compute estimated cost if not already set. GPU-hours is the primary/always-populated
-	// dimension. CPU/RAM/storage are only estimated (and therefore only debited/capped) when
-	// BOTH (a) this platform experiment actually tracks that dimension (non-zero budget —
-	// most platform experiments are GPU-only, and their agents' CPU/RAM/storage quota pools
-	// are correctly 0/0, so debiting anything against them would always fail) and (b) the
-	// agent explicitly set JobSpec.CPU/Memory/Storage — if left unset, the actual value used
-	// is a per-cluster default resolved later by the execution engine (see
-	// workload.JobDefaults), invisible to this control-plane layer, so it can't be billed or
-	// capped here either. 0 correctly means "not tracked" for that submission.
+	// dimension; CPU-hours is only estimated (and therefore only debited/capped) when this
+	// platform experiment actually tracks that dimension (non-zero budget — most platform
+	// experiments are GPU-only, and their agents' CPU quota pool is correctly 0/0, so debiting
+	// anything against it would always fail). 0 correctly means "not tracked" for that
+	// submission. CPU/Memory/Storage are always set on JobSpec now (see ValidateExperiment's
+	// "explicit resource requests" cross-cutting fix), so there is no more "left unset,
+	// resolved later by a cluster-side default" case to work around here.
+	//
+	// RAM/storage are Class B (SCHEDULING_GENERALIZATION_PLAN.md): hard physical-fit-checked
+	// at admission (see domain.Experiment.Footprint()/domain.Fits, wired into loop_tick.go) but
+	// deliberately never estimated/debited as hours here — EstimatedRAMGBHours/
+	// EstimatedStorageGBHours are left at 0 for every new submission from this point on. This
+	// is an intentional migration decision, not an oversight: PlatformExperiment.BudgetRAMGBHours/
+	// BudgetStorageGBHours, AgentQuota's RAM/storage guaranteed/burst columns, and
+	// domain.ResourceRAMGBHours/ResourceStorageGBHours all remain defined (deprecated, not
+	// deleted — see their own doc comments) so existing rows/history are never silently
+	// dropped or rewritten. A platform experiment created before this change with a non-zero
+	// RAM/storage budget keeps that number in the DB, but it is no longer read by anything: no
+	// new debit ever happens against it, so its guaranteed/burst pools simply stop moving.
+	// Historical ActualRAMGBHours/ActualStorageGBHours on already-terminal experiments are
+	// untouched (this is a forward-only behavior change, not a backfill/rewrite).
 	if exp.EstimatedCostT4H == 0 {
 		exp.EstimatedCostT4H = exp.GPUType.Cost() * float64(exp.GPUCount) * exp.EstimatedDurationHours
 	}
 	if exp.EstimatedCPUCoreHours == 0 && pe.BudgetCPUCoreHours > 0 {
 		if cores, err := workload.ParseCPUCores(exp.Job.CPU); err == nil && cores > 0 {
 			exp.EstimatedCPUCoreHours = cores * float64(exp.Job.Nodes()) * exp.EstimatedDurationHours * domain.CPUCoreHourRate()
-		}
-	}
-	if exp.EstimatedRAMGBHours == 0 && pe.BudgetRAMGBHours > 0 {
-		if gb, err := workload.ParseMemoryGB(exp.Job.Memory); err == nil && gb > 0 {
-			exp.EstimatedRAMGBHours = gb * float64(exp.Job.Nodes()) * exp.EstimatedDurationHours * domain.RAMGBHourRate()
-		}
-	}
-	if exp.EstimatedStorageGBHours == 0 && pe.BudgetStorageGBHours > 0 {
-		if gb, err := workload.ParseStorageGB(exp.Job.Storage); err == nil && gb > 0 {
-			exp.EstimatedStorageGBHours = gb * float64(exp.Job.Nodes()) * exp.EstimatedDurationHours * domain.StorageGBHourRate()
 		}
 	}
 

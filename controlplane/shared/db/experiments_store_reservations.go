@@ -15,6 +15,8 @@ import (
 // conflicting with it.
 func (s *ExperimentsStore) UpsertPendingReservation(ctx context.Context, experimentID, clusterName string, fp domain.Footprint) error {
 	cpuKey := domain.ResourceKey{Kind: domain.ResourceKindCPU}
+	memKey := domain.ResourceKey{Kind: domain.ResourceKindMemory}
+	storageKey := domain.ResourceKey{Kind: domain.ResourceKindStorage}
 	var accelFlavor string
 	var accelCount int64
 	for k, v := range fp {
@@ -25,15 +27,17 @@ func (s *ExperimentsStore) UpsertPendingReservation(ctx context.Context, experim
 		}
 	}
 	const q = `
-INSERT INTO pending_capacity_reservations (experiment_id, cluster_name, cpu_millicores, accelerator_flavor, accelerator_count, created_at)
-VALUES ($1, $2, $3, $4, $5, NOW())
+INSERT INTO pending_capacity_reservations (experiment_id, cluster_name, cpu_millicores, accelerator_flavor, accelerator_count, ram_bytes, storage_bytes, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 ON CONFLICT (experiment_id) DO UPDATE SET
     cluster_name = EXCLUDED.cluster_name,
     cpu_millicores = EXCLUDED.cpu_millicores,
     accelerator_flavor = EXCLUDED.accelerator_flavor,
     accelerator_count = EXCLUDED.accelerator_count,
+    ram_bytes = EXCLUDED.ram_bytes,
+    storage_bytes = EXCLUDED.storage_bytes,
     created_at = NOW()`
-	_, err := s.pool.pool.Exec(ctx, q, experimentID, clusterName, fp[cpuKey], accelFlavor, accelCount)
+	_, err := s.pool.pool.Exec(ctx, q, experimentID, clusterName, fp[cpuKey], accelFlavor, accelCount, fp[memKey], fp[storageKey])
 	if err != nil {
 		return fmt.Errorf("experiments_store.UpsertPendingReservation: %w", err)
 	}
@@ -55,10 +59,11 @@ func (s *ExperimentsStore) DeletePendingReservation(ctx context.Context, experim
 }
 
 // ListPendingReservationsByCluster sums every outstanding reservation into one domain.Footprint
-// per cluster_name — what tick() subtracts from live capacity on top of the existing
-// SUBMITTED/ADMITTED/RUNNING accounting to close the pending-pod race (see schema comment).
+// per cluster_name — what tick() subtracts from live capacity on top of the existing RUNNING
+// accounting to close the pending-pod race (see schema comment), across every dimension
+// Experiment.Footprint() reports (CPU, accelerator, RAM, storage).
 func (s *ExperimentsStore) ListPendingReservationsByCluster(ctx context.Context) (map[string]domain.Footprint, error) {
-	const q = `SELECT cluster_name, cpu_millicores, accelerator_flavor, accelerator_count FROM pending_capacity_reservations`
+	const q = `SELECT cluster_name, cpu_millicores, accelerator_flavor, accelerator_count, ram_bytes, storage_bytes FROM pending_capacity_reservations`
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.ListPendingReservationsByCluster: %w", err)
@@ -67,10 +72,12 @@ func (s *ExperimentsStore) ListPendingReservationsByCluster(ctx context.Context)
 
 	out := make(map[string]domain.Footprint)
 	cpuKey := domain.ResourceKey{Kind: domain.ResourceKindCPU}
+	memKey := domain.ResourceKey{Kind: domain.ResourceKindMemory}
+	storageKey := domain.ResourceKey{Kind: domain.ResourceKindStorage}
 	for rows.Next() {
 		var cluster, accelFlavor string
-		var cpuMillicores, accelCount int64
-		if err := rows.Scan(&cluster, &cpuMillicores, &accelFlavor, &accelCount); err != nil {
+		var cpuMillicores, accelCount, ramBytes, storageBytes int64
+		if err := rows.Scan(&cluster, &cpuMillicores, &accelFlavor, &accelCount, &ramBytes, &storageBytes); err != nil {
 			return nil, fmt.Errorf("experiments_store.ListPendingReservationsByCluster: scan: %w", err)
 		}
 		fp, ok := out[cluster]
@@ -79,6 +86,8 @@ func (s *ExperimentsStore) ListPendingReservationsByCluster(ctx context.Context)
 			out[cluster] = fp
 		}
 		fp.Add(cpuKey, cpuMillicores)
+		fp.Add(memKey, ramBytes)
+		fp.Add(storageKey, storageBytes)
 		if accelFlavor != "" && accelCount > 0 {
 			fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: accelFlavor}, accelCount)
 		}

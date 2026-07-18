@@ -102,6 +102,24 @@ func (h *Handler) DesiredState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// RAM/ephemeral-storage — Class B (hard-cap, no billing) dimensions, same "metric data,
+	// never duplicated into Postgres" treatment as GPU above (see
+	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2).
+	if ramAvail, availErr := strconv.ParseInt(r.URL.Query().Get("ram_available_bytes"), 10, 64); availErr == nil {
+		if ramTotal, totalErr := strconv.ParseInt(r.URL.Query().Get("ram_total_bytes"), 10, 64); totalErr == nil {
+			if err := metricsdb.RecordClusterRAMCapacity(r.Context(), h.metricsDBURL, clusterName, ramAvail, ramTotal); err != nil {
+				h.logger.Warn("clusteragentapi: record RAM capacity", zap.String("cluster", clusterName), zap.Error(err))
+			}
+		}
+	}
+	if storageAvail, availErr := strconv.ParseInt(r.URL.Query().Get("storage_available_bytes"), 10, 64); availErr == nil {
+		if storageTotal, totalErr := strconv.ParseInt(r.URL.Query().Get("storage_total_bytes"), 10, 64); totalErr == nil {
+			if err := metricsdb.RecordClusterStorageCapacity(r.Context(), h.metricsDBURL, clusterName, storageAvail, storageTotal); err != nil {
+				h.logger.Warn("clusteragentapi: record storage capacity", zap.String("cluster", clusterName), zap.Error(err))
+			}
+		}
+	}
+
 	exps, err := h.store.ListDesiredWorkloads(r.Context(), clusterName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

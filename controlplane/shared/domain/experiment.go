@@ -3,6 +3,8 @@ package domain
 import (
 	"math"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // Experiment is an agent-submitted job within a platform experiment.
@@ -116,23 +118,43 @@ func (e *Experiment) RequestedCPUCores() float64 {
 	return e.EstimatedCPUCoreHours / e.EstimatedDurationHours
 }
 
-// Footprint returns e's physical resource footprint in canonical units for the two dimensions
-// that have real live per-cluster capacity reporting today: CPU (millicores, preserving
-// fractional-CPU precision — see RequestedCPUCores) and its accelerator, if any (whole units,
-// keyed by GPUType.FlavorName() to match capacity's own key convention). e.GPUCount is already
-// the job's TOTAL footprint (per-node GPUCount x NumNodes, set once at submission — see
-// JobSpec.TotalGPUs), so no further node-scaling is needed here.
+// Footprint returns e's physical resource footprint in canonical units, across every dimension
+// that now has real live per-cluster capacity reporting: CPU (millicores), memory/storage
+// (bytes) — read straight from e.Job's own quantity strings (the canonical source of truth,
+// not a second derived representation — see the plan's "no request columns" correction) and
+// scaled by e.Job.Nodes() — plus its accelerator, if any (whole units, keyed by
+// GPUType.FlavorName() to match capacity's own key convention).
 //
-// RAM/storage are validated as a hard physical-fit requirement at submission (see
-// ValidateExperiment) but are not yet part of the joint Fits() check the admission loop runs,
-// because no live per-cluster RAM/storage capacity is reported yet (SCHEDULING_GENERALIZATION_PLAN.md
-// Class B step 2 — cluster-agent capacity piggyback extension — has not landed). Once it does,
-// this method should grow those two dimensions the same way.
+// The accelerator dimension deliberately uses e.GPUType/e.GPUCount (the experiment's own
+// top-level, admission-facing fields), not e.Job.GPUType/e.Job.GPUCount (the originally
+// *requested* type before any substitution): once a job actually lands on a different
+// AcceptableGPUTypes flavor than requested, UpdateAdmittedFlavor rewrites e.GPUType to the
+// flavor it actually holds, and e.GPUCount is already the job's TOTAL footprint (per-node
+// GPUCount x NumNodes, set once at submission — see JobSpec.TotalGPUs) — so this always reports
+// which capacity a RUNNING job is really holding, not what it originally asked for.
+//
+// A malformed CPU/memory/storage quantity string should never reach this point (ValidateExperiment
+// requires and parses all three at submission) — if one somehow does, that dimension is simply
+// omitted here rather than erroring, since every caller of Footprint() treats it as an
+// unconditional value, not (Footprint, error).
 func (e *Experiment) Footprint() Footprint {
 	fp := NewFootprint()
-	if millicores := int64(e.RequestedCPUCores() * 1000); millicores > 0 {
-		fp.Add(ResourceKey{Kind: ResourceKindCPU}, millicores)
+	if e.Job.CPU != "" {
+		if q, err := resource.ParseQuantity(e.Job.CPU); err == nil {
+			fp.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
+		}
 	}
+	if e.Job.Memory != "" {
+		if q, err := resource.ParseQuantity(e.Job.Memory); err == nil {
+			fp.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
+		}
+	}
+	if e.Job.Storage != "" {
+		if q, err := resource.ParseQuantity(e.Job.Storage); err == nil {
+			fp.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
+		}
+	}
+	fp = fp.Scale(int64(e.Job.Nodes()))
 	if e.GPUCount > 0 {
 		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: e.GPUType.FlavorName()}, int64(e.GPUCount))
 	}

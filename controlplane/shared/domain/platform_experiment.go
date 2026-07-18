@@ -24,11 +24,18 @@ type PlatformExperiment struct {
 	Name          string  `json:"name"`
 	Description   string  `json:"description"`
 	BudgetT4Hours float64 `json:"budget_t4_hours"` // total compute in T4-GPU-hours
-	// BudgetCPUCoreHours/BudgetRAMGBHours/BudgetStorageGBHours are optional additional resource
-	// budgets tracked the same way as BudgetT4Hours (guaranteed/burst split, debited at
-	// submission, refunded on completion/eviction). Zero means "not tracked for this platform
-	// experiment" — existing GPU-only platform experiments are unaffected.
-	BudgetCPUCoreHours    float64                  `json:"budget_cpu_core_hours,omitempty"`
+	// BudgetCPUCoreHours is an optional additional resource budget tracked the same way as
+	// BudgetT4Hours (guaranteed/burst split, debited at submission, refunded on
+	// completion/eviction). Zero means "not tracked for this platform experiment" — existing
+	// GPU-only platform experiments are unaffected.
+	BudgetCPUCoreHours float64 `json:"budget_cpu_core_hours,omitempty"`
+	// BudgetRAMGBHours/BudgetStorageGBHours: Deprecated. RAM/storage moved to Class B under
+	// SCHEDULING_GENERALIZATION_PLAN.md — hard physical-fit-checked at admission, never
+	// hours-budgeted (see domain.ResourceRAMGBHours' doc comment for the full migration note).
+	// Nothing reads these two fields to gate or debit anything anymore; the JSON keys are kept
+	// accepted (not rejected) purely so an existing caller that still sends them doesn't start
+	// failing submission, and a platform experiment created before this migration with a
+	// non-zero value here simply keeps it inert in the DB — no debit ever consumes it again.
 	BudgetRAMGBHours      float64                  `json:"budget_ram_gb_hours,omitempty"`
 	BudgetStorageGBHours  float64                  `json:"budget_storage_gb_hours,omitempty"`
 	MaxAgents             int                      `json:"max_agents"`

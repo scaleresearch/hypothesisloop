@@ -29,44 +29,17 @@ func (l *Loop) tick(ctx context.Context) error {
 		return err
 	}
 
-	// 2. Subtract the footprint of every job currently RUNNING. gAvail/bAvail are two views of
-	// the *same* shared physical pool per cluster (see LoopWorkloadClient.GetFlavorCapacity's
-	// doc comment), so a unit held by a job of either tier is unavailable in both views —
-	// preemption, not a capacity split, is what enforces the tier boundary. Each job's footprint
-	// is charged against its own persisted ClusterName, not a combined pool.
-	//
-	// SUBMITTED/ADMITTED (in-flight, not yet observed RUNNING) jobs are deliberately NOT
-	// subtracted here — they're covered by the durable pending-reservation step (2b) below
-	// instead, which is accurate for every dimension including CPU (see that step's comment for
-	// why this loop still can't safely include CPU).
-	runningNow, err := l.store.ListRunningExperiments(ctx)
-	if err != nil {
-		return err
-	}
-	for _, exp := range runningNow {
-		fp := exp.Footprint()
-		// A job's cluster may no longer be configured (removed from clusters.yaml) — nothing
-		// to subtract from in that case; its capacity simply isn't tracked any more.
-		if _, ok := gAvail[exp.ClusterName]; !ok {
-			continue
-		}
-		// The CPU dimension is excluded from what's subtracted here (a fresh copy of fp with
-		// CPU zeroed): GetFlavorCapacity's CPU number is a cluster-agent-reported live figure
-		// that is already allocatable-minus-requested against real k8s Jobs — which already
-		// includes every RUNNING job's request, since its pod is confirmed to exist by
-		// definition. Subtracting it again here would double-count it and manufacture false
-		// scarcity. job_watcher's onRunning deletes a job's pending reservation the moment its
-		// pod is confirmed (see submitJob/onRunning), at which point live capacity becomes the
-		// sole source of truth for its CPU footprint.
-		nonCPU := make(domain.Footprint, len(fp))
-		for k, v := range fp {
-			if k.Kind != domain.ResourceKindCPU {
-				nonCPU[k] = v
-			}
-		}
-		subtractFootprint(gAvail[exp.ClusterName], nonCPU)
-		subtractFootprint(bAvail[exp.ClusterName], nonCPU)
-	}
+	// 2. RUNNING jobs need no separate subtraction here. Every capacity dimension
+	// GetFlavorCapacity reports (CPU, accelerator, RAM, storage) is now a live, cluster-agent-
+	// computed allocatable-minus-requested number counted only against pods actually assigned
+	// to a node (see workload.GetLiveCPUCapacity/GetLiveGPUCapacity/GetLiveRAMCapacity/
+	// GetLiveStorageCapacity's doc comments) — a RUNNING job's pod is scheduled by definition,
+	// so its footprint is already reflected in every one of those live numbers. Subtracting it
+	// again here would double-count it and manufacture false scarcity, the same bug this used
+	// to carve a CPU-only exception for; now that every dimension is live and assigned-pod-
+	// scoped, the exception covers the whole footprint, so the loop itself is dead weight —
+	// removed rather than kept as an always-empty no-op (matches important.md's "less retained
+	// machinery" principle).
 
 	// 2b. Close the pending-pod race: subtract every durably reserved-but-not-yet-confirmed-
 	// running job's footprint (see pending_capacity_reservations' schema comment), across ALL

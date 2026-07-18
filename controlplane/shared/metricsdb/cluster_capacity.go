@@ -72,3 +72,70 @@ func LiveClusterGPUCapacity(ctx context.Context, dbURL string, window time.Durat
 	}
 	return out, nil
 }
+
+// clusterRAMAvailableMetric/clusterRAMTotalMetric and their storage equivalents hold
+// cluster-agents' self-reported live RAM/ephemeral-storage capacity in bytes — the Class B
+// (hard-cap, no billing) counterpart to CPU/GPU's capacity reporting above (see
+// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). Same "metric data, never duplicated into
+// Postgres" rule applies.
+const (
+	clusterRAMAvailableMetric     = "cluster_ram_available_bytes"
+	clusterRAMTotalMetric         = "cluster_ram_total_bytes"
+	clusterStorageAvailableMetric = "cluster_storage_available_bytes"
+	clusterStorageTotalMetric     = "cluster_storage_total_bytes"
+)
+
+// recordClusterScalarCapacity writes one gauge sample each for availMetric/totalMetric, scoped
+// to clusterName — the shared plumbing behind RecordClusterRAMCapacity/RecordClusterStorageCapacity.
+func recordClusterScalarCapacity(ctx context.Context, dbURL, clusterName, availMetric, totalMetric string, availableBytes, totalBytes int64) error {
+	now := time.Now().UTC()
+	samples := []GaugeSample{
+		{MetricName: availMetric, Labels: map[string]string{"cluster_name": clusterName}, Value: float64(availableBytes), At: now},
+		{MetricName: totalMetric, Labels: map[string]string{"cluster_name": clusterName}, Value: float64(totalBytes), At: now},
+	}
+	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
+		return fmt.Errorf("metricsdb.recordClusterScalarCapacity(%s): %w", availMetric, err)
+	}
+	return nil
+}
+
+// liveClusterScalarCapacity returns the most recently reported value of availMetric per
+// cluster, restricted to samples within window of now — see LiveClusterGPUCapacity's doc
+// comment for the staleness-gating rationale (a stale/disconnected cluster contributes nothing).
+func liveClusterScalarCapacity(ctx context.Context, dbURL, availMetric string, window time.Duration) (map[string]int64, error) {
+	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, availMetric, promSeconds(window))
+	samples, err := QueryVector(ctx, dbURL, promQL)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.liveClusterScalarCapacity(%s): %w", availMetric, err)
+	}
+	out := make(map[string]int64, len(samples))
+	for _, s := range samples {
+		if cluster := s.Labels["cluster_name"]; cluster != "" {
+			out[cluster] = int64(s.Value)
+		}
+	}
+	return out, nil
+}
+
+// RecordClusterRAMCapacity/LiveClusterRAMCapacity report and read live per-cluster RAM
+// availability in bytes (allocatable minus requested, computed only against nodes an
+// already-scheduled pod is actually assigned to — see workload.JobWorkloadClient.GetLiveRAMCapacity).
+func RecordClusterRAMCapacity(ctx context.Context, dbURL, clusterName string, availableBytes, totalBytes int64) error {
+	return recordClusterScalarCapacity(ctx, dbURL, clusterName, clusterRAMAvailableMetric, clusterRAMTotalMetric, availableBytes, totalBytes)
+}
+
+func LiveClusterRAMCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
+	return liveClusterScalarCapacity(ctx, dbURL, clusterRAMAvailableMetric, window)
+}
+
+// RecordClusterStorageCapacity/LiveClusterStorageCapacity are RAM's ephemeral-storage
+// counterpart — same semantics, same accepted limitation (ephemeral-storage enforcement in
+// Kubernetes is eviction-based, not a hard cgroup ceiling like memory — see
+// SCHEDULING_GENERALIZATION_PLAN.md Class B step 4).
+func RecordClusterStorageCapacity(ctx context.Context, dbURL, clusterName string, availableBytes, totalBytes int64) error {
+	return recordClusterScalarCapacity(ctx, dbURL, clusterName, clusterStorageAvailableMetric, clusterStorageTotalMetric, availableBytes, totalBytes)
+}
+
+func LiveClusterStorageCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
+	return liveClusterScalarCapacity(ctx, dbURL, clusterStorageAvailableMetric, window)
+}

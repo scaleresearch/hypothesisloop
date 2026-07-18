@@ -8,6 +8,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
@@ -79,46 +80,104 @@ func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, erro
 }
 
 // GetLiveCPUCapacity returns this cluster's real, current CPU-core capacity: total allocatable
-// cores across schedulable nodes, and the same minus every non-terminal pod's CPU requests
-// cluster-wide (not just openresearch-managed pods — a true "how much is actually free" number,
-// the same thing a real scheduler would compute). Replaces the old static-config-only capacity
-// model for CPU-only jobs; pushed to the control plane on every desired-state poll.
+// cores across schedulable nodes, and the same minus every non-terminal, already-scheduled
+// pod's CPU requests (not just openresearch-managed pods — a true "how much is actually free"
+// number, the same thing a real scheduler would compute). Replaces the old static-config-only
+// capacity model for CPU-only jobs; pushed to the control plane on every desired-state poll.
+//
+// Only counts a pod's request against capacity once it is actually assigned to a node
+// (p.Spec.NodeName != "") — an unassigned/Pending pod's request is NOT subtracted here (this
+// used to blanket-subtract it cluster-wide regardless of whether/where it would ever land,
+// which is both imprecise and redundant: the control plane's own durable pending-capacity
+// reservation, Postgres pending_capacity_reservations, already accounts for a job's footprint
+// in the exact window between admission and its pod actually being scheduled — see
+// loop_tick.go step 2b). This collector's job is only to report the live, already-scheduled
+// truth. See SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2 correctness fix, applied here
+// to this pre-existing CPU collector too, not just the new RAM/storage ones below.
 func (c *JobWorkloadClient) GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error) {
-	nodes, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("workload: list nodes: %w", err)
+		return 0, 0, err
 	}
-	var totalMilli int64
-	for _, n := range nodes.Items {
-		if n.Spec.Unschedulable {
-			continue
-		}
-		if q, ok := n.Status.Allocatable[corev1.ResourceCPU]; ok {
-			totalMilli += q.MilliValue()
-		}
-	}
-
-	pods, err := c.kube.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return 0, 0, fmt.Errorf("workload: list pods: %w", err)
-	}
-	var requestedMilli int64
-	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
-			continue
-		}
-		for _, ctr := range p.Spec.Containers {
-			if q, ok := ctr.Resources.Requests[corev1.ResourceCPU]; ok {
-				requestedMilli += q.MilliValue()
-			}
-		}
-	}
-
+	totalMilli, requestedMilli := sumAllocatableAndRequested(nodes, pods, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() })
 	availMilli := totalMilli - requestedMilli
 	if availMilli < 0 {
 		availMilli = 0
 	}
 	return float64(availMilli) / 1000.0, float64(totalMilli) / 1000.0, nil
+}
+
+// GetLiveRAMCapacity/GetLiveStorageCapacity mirror GetLiveCPUCapacity for the two Class B
+// (hard-cap, no billing) dimensions — memory and ephemeral-storage — reported in bytes. Same
+// accounting: total allocatable across schedulable nodes minus already-scheduled non-terminal
+// pods' requests, counted only against the node a pod is actually assigned to.
+func (c *JobWorkloadClient) GetLiveRAMCapacity(ctx context.Context) (available, total int64, err error) {
+	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	totalBytes, requestedBytes := sumAllocatableAndRequested(nodes, pods, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() })
+	avail := totalBytes - requestedBytes
+	if avail < 0 {
+		avail = 0
+	}
+	return avail, totalBytes, nil
+}
+
+func (c *JobWorkloadClient) GetLiveStorageCapacity(ctx context.Context) (available, total int64, err error) {
+	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	totalBytes, requestedBytes := sumAllocatableAndRequested(nodes, pods, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() })
+	avail := totalBytes - requestedBytes
+	if avail < 0 {
+		avail = 0
+	}
+	return avail, totalBytes, nil
+}
+
+// listSchedulableNodesAndPods is the shared node/pod fetch behind every live capacity
+// collector above, so they all read the same consistent-enough snapshot per call.
+func (c *JobWorkloadClient) listSchedulableNodesAndPods(ctx context.Context) ([]corev1.Node, []corev1.Pod, error) {
+	nodeList, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("workload: list nodes: %w", err)
+	}
+	podList, err := c.kube.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("workload: list pods: %w", err)
+	}
+	return nodeList.Items, podList.Items, nil
+}
+
+// sumAllocatableAndRequested totals resourceName's allocatable quantity across schedulable
+// nodes, and separately totals it across every non-terminal pod's container requests — but,
+// per GetLiveCPUCapacity's doc comment, ONLY for pods already assigned to a node
+// (p.Spec.NodeName != ""); an unassigned/Pending pod contributes nothing here.
+func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resourceName corev1.ResourceName, extract func(resource.Quantity) int64) (total, requested int64) {
+	for _, n := range nodes {
+		if n.Spec.Unschedulable {
+			continue
+		}
+		if q, ok := n.Status.Allocatable[resourceName]; ok {
+			total += extract(q)
+		}
+	}
+	for _, p := range pods {
+		if p.Spec.NodeName == "" {
+			continue // not yet scheduled — covered by pending_capacity_reservations instead
+		}
+		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		for _, ctr := range p.Spec.Containers {
+			if q, ok := ctr.Resources.Requests[resourceName]; ok {
+				requested += extract(q)
+			}
+		}
+	}
+	return total, requested
 }
 
 // GetLiveGPUCapacity returns this cluster's real, current GPU capacity per flavor: total
@@ -219,17 +278,26 @@ func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID
 	return fmt.Errorf("workload: timed out waiting for job %s deletion", name)
 }
 
-// GetFlavorCapacity returns nominal GPU + live CPU slot capacity as a canonical
+// GetFlavorCapacity returns nominal GPU + live CPU/RAM/storage capacity as a canonical
 // domain.Footprint. demo: GPU is not reading live reservation state from the cluster (nominal
-// config only); CPU uses the same live allocatable-minus-requested number GetLiveCPUCapacity
-// computes, so a mixed CPU+accelerator job's joint fit can be checked against one vector.
+// config only); CPU/RAM/storage use the same live allocatable-minus-requested numbers
+// GetLiveCPUCapacity/GetLiveRAMCapacity/GetLiveStorageCapacity compute, so a mixed job's joint
+// fit can be checked against one vector.
 func (c *JobWorkloadClient) GetFlavorCapacity(ctx context.Context) (guaranteed, burst domain.Footprint, err error) {
 	nominal := c.gpuNominalCapacity()
 	cpuAvail, _, err := c.GetLiveCPUCapacity(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	fp := domain.CapacityFootprint(cpuAvail, nominal)
+	ramAvail, _, err := c.GetLiveRAMCapacity(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	storageAvail, _, err := c.GetLiveStorageCapacity(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	fp := domain.CapacityFootprint(cpuAvail, nominal, ramAvail, storageAvail)
 	// Guaranteed and burst share the same physical pool here, same as queuebackend.Backend —
 	// preemption enforces the tier boundary, not a capacity split.
 	return fp, fp, nil

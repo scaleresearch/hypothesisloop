@@ -140,6 +140,18 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: live GPU capacity: %w", err)
 	}
+	// RAM/ephemeral-storage — Class B (hard-cap, no billing) dimensions (see
+	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). Same staleness gating as GPU: a
+	// cluster with no fresh report contributes zero, so Fits() fails closed for any job that
+	// actually needs it rather than treating a missing report as unlimited.
+	ramAvail, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: live RAM capacity: %w", err)
+	}
+	storageAvail, err := metricsdb.LiveClusterStorageCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: live storage capacity: %w", err)
+	}
 
 	guaranteed = make(map[string]domain.Footprint, len(b.clusterNames))
 	burst = make(map[string]domain.Footprint, len(b.clusterNames))
@@ -148,7 +160,7 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 		for _, flavor := range b.flavorOrder {
 			gpuByFlavor[flavor] = gpuAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
 		}
-		fp := domain.CapacityFootprint(cpuAvail[cluster], gpuByFlavor)
+		fp := domain.CapacityFootprint(cpuAvail[cluster], gpuByFlavor, ramAvail[cluster], storageAvail[cluster])
 		guaranteed[cluster] = fp
 		// Guaranteed and burst share the same physical pool per cluster — preemption is what
 		// enforces the tier boundary, not a capacity split. Copy so tick()'s mutation of one
