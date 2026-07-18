@@ -12,6 +12,7 @@ image: localhost/openresearch-robotics-workload:latest
 
 cpu: "100m"
 memory: "128Mi"
+storage: "512Mi"
 
 gpu_type: A100
 gpu_count: 1

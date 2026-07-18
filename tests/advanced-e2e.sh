@@ -447,6 +447,47 @@ echo "  platform-experiment timeseries: $TSCOUNT series (dashboard leaderboard/c
 
 echo ""
 echo "=========================================================="
+echo "Scenario 5: unset required resource request is rejected, not silently defaulted"
+echo "=========================================================="
+# SCHEDULING_GENERALIZATION_PLAN.md cross-cutting fix #1: JobSpec.CPU/Memory/Storage must be
+# explicit at submission — the control plane must never resolve a per-cluster JobDefaults
+# default after it has already picked a cluster/estimated a budget. Build a submit body
+# straight from the fixture but with storage stripped out and confirm the API rejects it
+# (4xx), and confirm the same fixture with storage present remains accepted.
+UNSET_HYP=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" -H 'Content-Type: application/json' \
+  -d "$(python3 "$TMPDIR_T/mk_hyp_body.py" "${AGENTS[0]}" "$PE_ID")" | py "import sys,json; print(json.load(sys.stdin)['id'])")
+UNSET_BODY=$(python3 - "$JOB_FILE" "$PE_ID" "${AGENTS[0]}" "$UNSET_HYP" <<'PYEOF'
+import json, sys, yaml
+job_file, pe_id, agent, hyp_id = sys.argv[1:5]
+with open(job_file) as f:
+    job = yaml.safe_load(f)
+job.pop("storage", None)  # deliberately unset — must be rejected, not defaulted
+print(json.dumps({
+    "id": f"job-unset-storage-{agent}",
+    "metadata": {
+        "agent_id": agent,
+        "platform_experiment_id": pe_id,
+        "project_id": "advanced-e2e",
+        "hypothesis_id": hyp_id,
+        "theory": "unset storage must be rejected at submission",
+        "objective": "n/a",
+        "estimated_duration_hours": 0.01,
+        "code_ref": "git://openresearch@main",
+        "capacity_tier": "burst",
+    },
+    "job": job,
+}))
+PYEOF
+)
+UNSET_HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCHED_URL/experiments" -H 'Content-Type: application/json' -d "$UNSET_BODY")
+if [[ "$UNSET_HTTP_CODE" == "4"* ]]; then
+  pass "submission with unset job.storage rejected (HTTP $UNSET_HTTP_CODE), not silently defaulted"
+else
+  fail "submission with unset job.storage returned HTTP $UNSET_HTTP_CODE, expected 4xx rejection"
+fi
+
+echo ""
+echo "=========================================================="
 echo "Settlement durability check (every terminal job across all scenarios)"
 echo "=========================================================="
 # Settlement is asynchronous (inline fast path, or services/settlement.Reconciler's 30s

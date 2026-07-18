@@ -23,6 +23,10 @@ image: localhost/openresearch-workload:latest
 # see node-agent-daemonset.yaml's resources comment for the full mechanism.
 cpu: "250m"
 memory: "128Mi"
+# storage is now a required explicit request — the control plane rejects submissions with
+# an unset resource request rather than resolving a cluster-side default pre-admission (see
+# SCHEDULING_GENERALIZATION_PLAN.md's "explicit resource requests" cross-cutting fix).
+storage: "512Mi"
 
 gpu_type: T4
 gpu_count: 1
