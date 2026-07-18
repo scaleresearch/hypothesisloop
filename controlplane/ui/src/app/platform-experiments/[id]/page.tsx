@@ -829,8 +829,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <th>Burst</th>
                   <th>Remaining</th>
                   {!!pe.budget_cpu_core_hours && <th>CPU (core-h)</th>}
-                  {!!pe.budget_ram_gb_hours && <th>RAM (GB-h)</th>}
-                  {!!pe.budget_storage_gb_hours && <th>Storage (GB-h)</th>}
                 </tr>
               </thead>
               <tbody>
@@ -850,21 +848,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                           {formatT4h((q.used_guaranteed_cpu_core_h ?? 0) + (q.used_burst_cpu_core_h ?? 0))} / {formatT4h((q.guaranteed_cpu_core_hours ?? 0) + (q.burst_cpu_core_hours ?? 0))}
                         </td>
                       )}
-                      {!!pe.budget_ram_gb_hours && (
-                        <td className="mono" style={{ fontSize: 11 }}>
-                          {formatT4h((q.used_guaranteed_ram_gb_h ?? 0) + (q.used_burst_ram_gb_h ?? 0))} / {formatT4h((q.guaranteed_ram_gb_hours ?? 0) + (q.burst_ram_gb_hours ?? 0))}
-                        </td>
-                      )}
-                      {!!pe.budget_storage_gb_hours && (
-                        <td className="mono" style={{ fontSize: 11 }}>
-                          {formatT4h((q.used_guaranteed_storage_gb_h ?? 0) + (q.used_burst_storage_gb_h ?? 0))} / {formatT4h((q.guaranteed_storage_gb_hours ?? 0) + (q.burst_storage_gb_hours ?? 0))}
-                        </td>
-                      )}
                     </tr>
                   )
                 })}
               </tbody>
             </table>
+            {/* RAM/storage quota columns intentionally omitted: those dimensions are no longer
+                hours-tracked (physical fit-only check at admission), so any guaranteed_ram_gb_hours/
+                burst_ram_gb_hours/etc. on AgentQuota are frozen legacy values with nothing debiting
+                them — showing them here would imply a live budget that no longer exists. */}
           </PodContent>
         </Pod>
       )}

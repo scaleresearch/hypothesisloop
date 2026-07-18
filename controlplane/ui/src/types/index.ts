@@ -103,10 +103,16 @@ export interface Experiment {
   // Additional resource-dimension cost/usage, mirroring estimated_cost_t4h/actual_cost_t4h.
   // 0/absent means that dimension wasn't tracked for this job.
   estimated_cpu_core_hours?: number
-  estimated_ram_gb_hours?: number
-  estimated_storage_gb_hours?: number
   actual_cpu_core_hours?: number
+  /** @deprecated RAM is no longer an hours-billed budget dimension — it's a physical fit-only
+   * check at admission now. Kept for backward compat with old API responses; nothing populates
+   * or debits this for new submissions. Do not render as a live budget/usage figure. */
+  estimated_ram_gb_hours?: number
+  /** @deprecated see estimated_ram_gb_hours. */
+  estimated_storage_gb_hours?: number
+  /** @deprecated see estimated_ram_gb_hours. */
   actual_ram_gb_hours?: number
+  /** @deprecated see estimated_ram_gb_hours. */
   actual_storage_gb_hours?: number
   gpu_type: GPUType
   gpu_count: number
@@ -141,7 +147,11 @@ export interface PlatformExperiment {
   // Optional additional resource budgets, tracked the same way as budget_t4_hours. 0/absent
   // means that dimension isn't tracked for this platform experiment.
   budget_cpu_core_hours?: number
+  /** @deprecated RAM is no longer an hours-billed budget dimension — it's a physical fit-only
+   * check at admission now. Kept for backward compat with old API responses; nothing debits or
+   * enforces this for new platform experiments. Do not render as a live budget figure. */
   budget_ram_gb_hours?: number
+  /** @deprecated see budget_ram_gb_hours. */
   budget_storage_gb_hours?: number
   max_agents: number
   starts_at?: string
@@ -224,6 +234,10 @@ export interface AgentQuota {
   burst_cpu_core_hours?: number
   used_guaranteed_cpu_core_h?: number
   used_burst_cpu_core_h?: number
+  /** @deprecated RAM/storage guaranteed/burst/used fields below are frozen — RAM/storage are no
+   * longer hours-billed budget dimensions (physical fit-only check at admission now). Kept for
+   * backward compat with old API responses; nothing debits these for new submissions. Do not
+   * render as a live budget/usage figure. */
   guaranteed_ram_gb_hours?: number
   burst_ram_gb_hours?: number
   used_guaranteed_ram_gb_h?: number

@@ -160,11 +160,15 @@ export interface CreatePlatformExperimentRequest {
   name: string
   description?: string
   budget_t4_hours: number
-  // Optional additional resource budgets, tracked the same way as budget_t4_hours
+  // Optional additional CPU budget, tracked the same way as budget_t4_hours
   // (guaranteed/burst split, debited at submission, refunded on completion). 0/omitted
   // means that dimension isn't tracked for this platform experiment.
   budget_cpu_core_hours?: number
+  /** @deprecated RAM is no longer an hours-billed budget dimension — physical fit-only check at
+   * admission now. Always sent as 0 by the UI; kept in the request type only because the backend
+   * still accepts/echoes the field for backward compat. */
   budget_ram_gb_hours?: number
+  /** @deprecated see budget_ram_gb_hours. */
   budget_storage_gb_hours?: number
   max_agents: number
   metrics?: MetricDefinition[]

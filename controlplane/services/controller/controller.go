@@ -44,6 +44,11 @@ type Store interface {
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
+	// DeletePendingReservation releases id's durable pending-capacity claim, if any — a
+	// no-op if none exists. Must be called on every path that moves a SUBMITTED/ADMITTED
+	// experiment to a terminal status, or tick() keeps subtracting phantom capacity for a
+	// job that no longer exists (see pending_capacity_reservations' schema comment).
+	DeletePendingReservation(ctx context.Context, id string) error
 }
 
 // QuotaService reads agent quota state. Refunds no longer go through here — every

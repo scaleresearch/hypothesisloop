@@ -119,10 +119,21 @@ function ExperimentCard({
         </div>
 
         {(pe.budget_cpu_core_hours || pe.budget_ram_gb_hours || pe.budget_storage_gb_hours) ? (
-          <div className="text-dim" style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
+          <div className="text-dim" style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
             {!!pe.budget_cpu_core_hours && <span>CPU: <span className="mono">{pe.budget_cpu_core_hours}</span> core-h</span>}
-            {!!pe.budget_ram_gb_hours && <span>RAM: <span className="mono">{pe.budget_ram_gb_hours}</span> GB-h</span>}
-            {!!pe.budget_storage_gb_hours && <span>Storage: <span className="mono">{pe.budget_storage_gb_hours}</span> GB-h</span>}
+            {/* RAM/storage are no longer hours-budgeted (physical fit-only check at admission now) —
+                a nonzero value here is a frozen legacy field from before this migration and has no
+                effect on scheduling. */}
+            {!!pe.budget_ram_gb_hours && (
+              <span title="Legacy value — RAM is now a physical fit-only check, not a tracked hours budget">
+                RAM: <span className="mono">{pe.budget_ram_gb_hours}</span> GB-h <em style={{ fontStyle: 'normal', opacity: 0.6 }}>(not tracked)</em>
+              </span>
+            )}
+            {!!pe.budget_storage_gb_hours && (
+              <span title="Legacy value — storage is now a physical fit-only check, not a tracked hours budget">
+                Storage: <span className="mono">{pe.budget_storage_gb_hours}</span> GB-h <em style={{ fontStyle: 'normal', opacity: 0.6 }}>(not tracked)</em>
+              </span>
+            )}
           </div>
         ) : null}
 
@@ -193,11 +204,12 @@ interface FormState {
   name: string
   description: string
   budget_t4_hours: number
-  // Optional additional resource budgets. 0 means "not tracked" for this platform experiment
+  // Optional additional CPU budget. 0 means "not tracked" for this platform experiment
   // (matches the backend's convention — omitting/zeroing leaves that dimension untracked).
   budget_cpu_core_hours: number
-  budget_ram_gb_hours: number
-  budget_storage_gb_hours: number
+  // RAM/storage are deprecated as hours-budget dimensions — they're now a physical fit-only
+  // check at admission, not a fair-share budget. No form input for them; always submitted as
+  // 0/untracked for new and edited platform experiments.
   max_agents: number
   starts_at: string
   ends_at: string
@@ -303,8 +315,6 @@ function ExperimentModal({
     description: initial?.description ?? '',
     budget_t4_hours: initial?.budget_t4_hours ?? 1000,
     budget_cpu_core_hours: initial?.budget_cpu_core_hours ?? 0,
-    budget_ram_gb_hours: initial?.budget_ram_gb_hours ?? 0,
-    budget_storage_gb_hours: initial?.budget_storage_gb_hours ?? 0,
     max_agents: initial?.max_agents ?? 20,
     starts_at: initial?.starts_at ? new Date(initial.starts_at).toISOString().slice(0, 16) : localDatetime(1),
     ends_at: initial?.ends_at ? new Date(initial.ends_at).toISOString().slice(0, 16) : localDatetime(8),
@@ -329,8 +339,11 @@ function ExperimentModal({
         description: form.description.trim() || '',
         budget_t4_hours: Number(form.budget_t4_hours),
         budget_cpu_core_hours: Number(form.budget_cpu_core_hours) || 0,
-        budget_ram_gb_hours: Number(form.budget_ram_gb_hours) || 0,
-        budget_storage_gb_hours: Number(form.budget_storage_gb_hours) || 0,
+        // RAM/storage hours budgets are deprecated/frozen (see Class B in
+        // SCHEDULING_GENERALIZATION_PLAN.md) — always submit untracked (0); the backend no
+        // longer debits or enforces these fields for new submissions.
+        budget_ram_gb_hours: 0,
+        budget_storage_gb_hours: 0,
         max_agents: Number(form.max_agents),
         metrics: form.metrics,
         starts_at: new Date(form.starts_at).toISOString(),
@@ -397,22 +410,19 @@ function ExperimentModal({
 
             <div>
               <label style={{ ...LABEL_STYLE, marginBottom: 2 }}>
-                Additional resource budgets <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional — 0 = not tracked)</span>
+                Additional resource budget <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional — 0 = not tracked)</span>
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
                 <div>
                   <label style={LABEL_STYLE}>CPU-core-hours</label>
                   <input style={INPUT_STYLE} type="number" min={0} step={1} value={form.budget_cpu_core_hours} onChange={e => set('budget_cpu_core_hours', e.target.value)} />
                 </div>
-                <div>
-                  <label style={LABEL_STYLE}>RAM GB-hours</label>
-                  <input style={INPUT_STYLE} type="number" min={0} step={1} value={form.budget_ram_gb_hours} onChange={e => set('budget_ram_gb_hours', e.target.value)} />
-                </div>
-                <div>
-                  <label style={LABEL_STYLE}>Storage GB-hours</label>
-                  <input style={INPUT_STYLE} type="number" min={0} step={1} value={form.budget_storage_gb_hours} onChange={e => set('budget_storage_gb_hours', e.target.value)} />
-                </div>
               </div>
+              <p className="text-dim" style={{ margin: '6px 0 0', fontSize: 11 }}>
+                RAM and storage are no longer hours-budgeted — they're checked as a hard physical
+                fit at admission (fit-or-reject), not tracked as a fair-share budget, so there's no
+                budget to set for them here.
+              </p>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

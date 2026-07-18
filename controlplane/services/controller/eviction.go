@@ -25,6 +25,9 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 		return nil
 	}
 	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
+	// exp may have been ADMITTED/SUBMITTED (not yet RUNNING) when evicted — release any
+	// pending-capacity reservation so it doesn't permanently blackhole that capacity slice.
+	_ = c.store.DeletePendingReservation(ctx, exp.ID)
 
 	// Status is already EVICTED above — the cluster-agent's next reconcile pass removes the
 	// Job on its own. Settling final usage is a separate, independently-retryable step (see
@@ -83,6 +86,9 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 					continue
 				}
 				obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionExperimentClosed)).Inc()
+				// SUBMITTED jobs may hold a pending reservation (QUEUED never does) — release
+				// it unconditionally; a no-op if none exists.
+				_ = c.store.DeletePendingReservation(ctx, exp.ID)
 				exp.Status = domain.StatusRejected
 				exp.EvictionReason = string(domain.EvictionExperimentClosed)
 				c.settleAndMark(ctx, exp)
