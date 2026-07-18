@@ -27,10 +27,11 @@ const usedHoursMetric = "agent_quota_used_hours"
 //
 // Reservation at admission (CheckAndDebit) is the one place that still needs to serialize
 // concurrent writers: two jobs admitting at once must not both read the same "current total"
-// and jointly overspend. lockFor exists only for that check-then-reserve step, and only within
-// this process — safe as long as exactly one control plane process performs admission (true of
-// this deployment: quota/scheduler/controller run as a single replica each — see
-// controlplane/infra/docker-compose.yaml).
+// and jointly overspend. lockFor only ever serializes within this one process, which is not
+// enough now that control-service can run as >1 replica (see shared/leaderelection) and the HTTP
+// admission path is not leader-gated — callers MUST additionally hold
+// db.PlatformExperimentsStore.WithAdmissionLock (a Postgres advisory lock, cluster-wide) around
+// CheckAndDebit; see quota.PlatformExperimentsService.CheckAndDebitQuota
 type UsageTracker struct {
 	dbURL string
 	locks sync.Map // key: agentID+"/"+platformExpID -> *sync.Mutex
@@ -128,6 +129,18 @@ func (t *UsageTracker) Debit(ctx context.Context, agentID, platformExpID, experi
 		return fmt.Errorf("metricsdb.Debit: %w", err)
 	}
 	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier), used+amount)
+}
+
+// SetReservation overwrites experimentID's own not-yet-final reservation with a new absolute
+// amount — used when a job's outstanding estimate changes mid-lifecycle (currently: preemption
+// requeue, which shortens the remaining estimate) and the debited reservation must be corrected
+// to match, rather than left at the stale original-admission estimate. Unlike SetObserved (the
+// terminal, "this job is done, here's what it really cost" write), this is written while the job
+// is still active/queued and expected to be superseded by further corrections or the eventual
+// SetObserved call — kept as a separate, narrowly-named method so neither caller has to reason
+// about the other's semantics.
+func (t *UsageTracker) SetReservation(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error {
+	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier), amount)
 }
 
 // SetObserved overwrites experimentID's own reservation with its real, observed cost — computed

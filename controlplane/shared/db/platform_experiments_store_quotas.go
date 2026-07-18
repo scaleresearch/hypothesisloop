@@ -1,0 +1,128 @@
+package db
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+)
+
+// ---- agent_quotas ----
+
+// UpsertAgentQuota creates or replaces an agent's quota allocation for a platform experiment.
+// Populates all 4 resource dimensions (GPU is always non-zero; CPU/RAM/storage are 0 = "not
+// tracked" for platform experiments that don't budget them). Only the allocation (capacity
+// setting) lives here — consumption (used_*) lives solely in the metrics DB, see
+// metricsdb.UsageTracker; Postgres never holds a copy of it.
+func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error {
+	const sql = `
+INSERT INTO agent_quotas (
+	id, agent_id, platform_experiment_id,
+	guaranteed_t4_hours, burst_t4_hours,
+	guaranteed_cpu_core_hours, burst_cpu_core_hours,
+	guaranteed_ram_gb_hours, burst_ram_gb_hours,
+	guaranteed_storage_gb_hours, burst_storage_gb_hours,
+	created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (agent_id, platform_experiment_id) DO UPDATE SET
+	guaranteed_t4_hours         = EXCLUDED.guaranteed_t4_hours,
+	burst_t4_hours              = EXCLUDED.burst_t4_hours,
+	guaranteed_cpu_core_hours   = EXCLUDED.guaranteed_cpu_core_hours,
+	burst_cpu_core_hours        = EXCLUDED.burst_cpu_core_hours,
+	guaranteed_ram_gb_hours     = EXCLUDED.guaranteed_ram_gb_hours,
+	burst_ram_gb_hours          = EXCLUDED.burst_ram_gb_hours,
+	guaranteed_storage_gb_hours = EXCLUDED.guaranteed_storage_gb_hours,
+	burst_storage_gb_hours      = EXCLUDED.burst_storage_gb_hours`
+
+	_, err := s.pool.pool.Exec(ctx, sql,
+		q.ID, q.AgentID, q.PlatformExperimentID,
+		q.GuaranteedT4Hours, q.BurstT4Hours,
+		q.GuaranteedCPUCoreHours, q.BurstCPUCoreHours,
+		q.GuaranteedRAMGBHours, q.BurstRAMGBHours,
+		q.GuaranteedStorageGBHours, q.BurstStorageGBHours,
+		q.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.UpsertAgentQuota: %w", err)
+	}
+	return nil
+}
+
+// agentQuotaColumns is the canonical column list for agent_quotas SELECT queries, shared by
+// GetAgentQuota/ListAgentQuotas. Allocation only — used_* is populated separately from the
+// metrics DB by the caller (see metricsdb.PopulateUsage/PopulateUsageOne).
+const agentQuotaColumns = `
+	id, agent_id, platform_experiment_id,
+	guaranteed_t4_hours, burst_t4_hours,
+	guaranteed_cpu_core_hours, burst_cpu_core_hours,
+	guaranteed_ram_gb_hours, burst_ram_gb_hours,
+	guaranteed_storage_gb_hours, burst_storage_gb_hours,
+	created_at
+`
+
+func scanAgentQuota(row rowScanner) (*domain.AgentQuota, error) {
+	aq := &domain.AgentQuota{}
+	err := row.Scan(
+		&aq.ID, &aq.AgentID, &aq.PlatformExperimentID,
+		&aq.GuaranteedT4Hours, &aq.BurstT4Hours,
+		&aq.GuaranteedCPUCoreHours, &aq.BurstCPUCoreHours,
+		&aq.GuaranteedRAMGBHours, &aq.BurstRAMGBHours,
+		&aq.GuaranteedStorageGBHours, &aq.BurstStorageGBHours,
+		&aq.CreatedAt,
+	)
+	return aq, err
+}
+
+// GetAgentQuota returns the quota for an agent in a platform experiment.
+func (s *PlatformExperimentsStore) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+	q := `SELECT` + agentQuotaColumns + `FROM agent_quotas WHERE agent_id = $1 AND platform_experiment_id = $2`
+
+	aq, err := scanAgentQuota(s.pool.pool.QueryRow(ctx, q, agentID, platformExpID))
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.GetAgentQuota: %w", err)
+	}
+	return aq, nil
+}
+
+// ListAgentQuotas returns all quotas for a platform experiment.
+func (s *PlatformExperimentsStore) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
+	q := `SELECT` + agentQuotaColumns + `FROM agent_quotas WHERE platform_experiment_id = $1 ORDER BY guaranteed_t4_hours DESC`
+
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListAgentQuotas: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*domain.AgentQuota
+	for rows.Next() {
+		aq, err := scanAgentQuota(rows)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.ListAgentQuotas: scan: %w", err)
+		}
+		out = append(out, aq)
+	}
+	return out, rows.Err()
+}
+
+// resourceQuotaColumns returns the (guaranteed, burst) allocation column names backing one
+// resource dimension's quota bucket on agent_quotas. GPU-hours is the original/default
+// dimension. Consumption (used_*) has no Postgres column — see metricsdb.UsageTracker.
+func resourceQuotaColumns(rt domain.ResourceType) (guaranteed, burst string) {
+	switch rt {
+	case domain.ResourceCPUCoreHours:
+		return "guaranteed_cpu_core_hours", "burst_cpu_core_hours"
+	case domain.ResourceRAMGBHours:
+		return "guaranteed_ram_gb_hours", "burst_ram_gb_hours"
+	case domain.ResourceStorageGBHours:
+		return "guaranteed_storage_gb_hours", "burst_storage_gb_hours"
+	default: // domain.ResourceGPUHours
+		return "guaranteed_t4_hours", "burst_t4_hours"
+	}
+}

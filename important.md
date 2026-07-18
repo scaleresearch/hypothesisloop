@@ -1,0 +1,8 @@
+- robust, simple, easy to refactor and read code, no fallbacks - one path or error
+- is there a simpler structural solution with the same guarantees and less retained machinery - if so, use it
+- metrics only in metrics store, no duplicates between relational db and metrics storage. when metrics are needed - metrics storage is assumed to be able to reply in real-time
+- no caches/in-ram states, we trust that our storage is performant and care about simplicity and do not introduce duplicates, eventual consistency besides clusters - scheduler
+- cluster software of software fetches desired state and reconciliates, only one way commands; cluster software sends metrics and other important information about jobs to control plane; control plane makes decisions
+- control plane can accept connections & requests from multiple cluster and can dispatch jobs also to multiple clusters
+- metrics and overal design shall be very reactive as we're reacting to job state changes and re-scheduling fast too
+- auth & security at the moment are not a priority

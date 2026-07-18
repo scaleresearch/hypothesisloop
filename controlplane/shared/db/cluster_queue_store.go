@@ -67,14 +67,20 @@ ORDER BY id`
 // uidMismatch reports that so the caller can flag it (log + metric), not silently accept or
 // silently drop the report. The phase/sequence update still applies either way — ownership
 // verification is a distinct signal, not a reason to stop tracking the job's lifecycle.
-func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedGPUType domain.GPUType, seq int64, jobUID string) (uidMismatch bool, err error) {
+//
+// applied reports whether the row actually changed: false means the write did not take effect
+// (stale/duplicate sequence number, or experimentID isn't assigned to clusterName) and the
+// caller must not treat this report as durably acknowledged — see clusteragentapi.PushStatus,
+// which surfaces exactly this back to the cluster-agent so it retries instead of losing the
+// report.
+func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedGPUType domain.GPUType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error) {
 	if jobUID != "" {
 		var existing *string
 		err := s.pool.pool.QueryRow(ctx,
 			`SELECT job_uid FROM cluster_job_reports WHERE experiment_id = $1`, experimentID,
 		).Scan(&existing)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return false, fmt.Errorf("db.UpsertJobReport: check uid: %w", err)
+			return false, false, fmt.Errorf("db.UpsertJobReport: check uid: %w", err)
 		}
 		if existing != nil && *existing != "" && *existing != jobUID {
 			uidMismatch = true
@@ -88,9 +94,17 @@ func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, c
 	if jobUID != "" {
 		uidArg = jobUID
 	}
-	_, execErr := s.pool.pool.Exec(ctx, `
+	// The SELECT ... WHERE EXISTS guard (instead of a plain VALUES insert) is the ownership
+	// check: clusterAuthMiddleware already proved the caller *is* clusterName's cluster-agent,
+	// but without this it could still overwrite the job report of an experiment assigned to a
+	// different cluster (clusterName here is caller-supplied, taken from the URL, not derived
+	// from data this experiment actually belongs to). Requiring experiments.cluster_name =
+	// clusterName means a report for a job this cluster doesn't own is silently dropped —
+	// same as a stale/lower sequence number, both are "did not apply", reflected in RowsAffected.
+	tag, execErr := s.pool.pool.Exec(ctx, `
 		INSERT INTO cluster_job_reports (experiment_id, cluster_name, phase, admitted_gpu_type, job_uid, sequence_number, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+		SELECT $1, $2, $3, $4, $5, $6, now()
+		WHERE EXISTS (SELECT 1 FROM experiments WHERE id = $1 AND cluster_name = $2)
 		ON CONFLICT (experiment_id) DO UPDATE SET
 			cluster_name = EXCLUDED.cluster_name,
 			phase = EXCLUDED.phase,
@@ -101,9 +115,9 @@ func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, c
 		WHERE EXCLUDED.sequence_number > cluster_job_reports.sequence_number
 	`, experimentID, clusterName, phase, gpuArg, uidArg, seq)
 	if execErr != nil {
-		return uidMismatch, fmt.Errorf("db.UpsertJobReport: %w", execErr)
+		return false, uidMismatch, fmt.Errorf("db.UpsertJobReport: %w", execErr)
 	}
-	return uidMismatch, nil
+	return tag.RowsAffected() > 0, uidMismatch, nil
 }
 
 // JobReport is the latest pushed status for one experiment's job.
@@ -134,13 +148,51 @@ func (s *ClusterQueueStore) GetJobReport(ctx context.Context, experimentID strin
 }
 
 // DeleteJobReport removes the report row once an experiment reaches a terminal state and its
-// status no longer needs tracking (keeps the table bounded to in-flight experiments).
+// status no longer needs tracking (keeps the table bounded to in-flight experiments). Used by
+// trusted internal callers (queuebackend cleanup) that already know experimentID is theirs to
+// remove; not exposed to cluster-agents directly — see DeleteJobReportForCluster for that.
 func (s *ClusterQueueStore) DeleteJobReport(ctx context.Context, experimentID string) error {
 	_, err := s.pool.pool.Exec(ctx, `DELETE FROM cluster_job_reports WHERE experiment_id = $1`, experimentID)
 	if err != nil {
 		return fmt.Errorf("db.DeleteJobReport: %w", err)
 	}
 	return nil
+}
+
+// DeleteJobReportForCluster removes the tracked job report for experimentID, scoped to
+// clusterName — used by the cluster-agent-facing PushStatus handler so an authenticated
+// cluster-agent reporting a job "gone" can only delete its own cluster's report, never
+// another cluster's report for an experiment it doesn't own.
+func (s *ClusterQueueStore) DeleteJobReportForCluster(ctx context.Context, experimentID, clusterName string) error {
+	_, err := s.pool.pool.Exec(ctx,
+		`DELETE FROM cluster_job_reports WHERE experiment_id = $1 AND cluster_name = $2`,
+		experimentID, clusterName)
+	if err != nil {
+		return fmt.Errorf("db.DeleteJobReportForCluster: %w", err)
+	}
+	return nil
+}
+
+// BumpAttemptOnRecreate increments experiments.attempt for experimentID, but only if it is
+// still in a desired-running status (SUBMITTED/ADMITTED/RUNNING) — called when a cluster-agent
+// reports a Job gone, so the caller can tell "this experiment's Job vanished and is about to be
+// recreated" (bumped=true) from "this experiment already reached a terminal state, the gone
+// report is just expected cleanup" (bumped=false, no attempt change needed). The next
+// desired-state poll carries the new attempt number, and cluster-agent stamps it onto the
+// recreated Job so the new object is identifiable as a distinct execution attempt.
+func (s *ClusterQueueStore) BumpAttemptOnRecreate(ctx context.Context, experimentID string) (attempt int, bumped bool, err error) {
+	err = s.pool.pool.QueryRow(ctx, `
+		UPDATE experiments SET attempt = attempt + 1, updated_at = now()
+		WHERE id = $1 AND status = ANY($2)
+		RETURNING attempt
+	`, experimentID, desiredStatuses).Scan(&attempt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("db.BumpAttemptOnRecreate: %w", err)
+	}
+	return attempt, true, nil
 }
 
 // RecordHeartbeat marks clusterName as seen just now. Called on every desired-state poll, so
@@ -169,10 +221,10 @@ func (s *ClusterQueueStore) RecordHeartbeat(ctx context.Context, clusterName str
 
 // ClusterHeartbeat is the last-seen time and last-reported live CPU capacity for one cluster.
 type ClusterHeartbeat struct {
-	ClusterName        string
-	LastSeenAt         time.Time
-	CPUAvailableCores  float64
-	CPUTotalCores      float64
+	ClusterName       string
+	LastSeenAt        time.Time
+	CPUAvailableCores float64
+	CPUTotalCores     float64
 }
 
 // ListHeartbeats returns the last-seen time for every cluster that has ever polled.
@@ -226,19 +278,30 @@ func (s *ClusterQueueStore) ListStaleDesiredState(ctx context.Context, staleAfte
 	return collectExperiments(rows)
 }
 
-// GetLiveCPUCapacity sums the most recently reported cpu_available_cores across every cluster
-// whose heartbeat is still fresh (within connectedWithin) — stale/disconnected clusters
-// contribute zero rather than a possibly-long-stale number. This is the real-capacity
-// replacement for the old static GPU-flavor-only capacity model, for CPU-only jobs.
-func (s *ClusterQueueStore) GetLiveCPUCapacity(ctx context.Context, connectedWithin time.Duration) (available float64, err error) {
+// GetLiveCPUCapacityByCluster returns the most recently reported cpu_available_cores per
+// cluster whose heartbeat is still fresh (within connectedWithin) — stale/disconnected
+// clusters are simply absent from the result rather than contributing a possibly-long-stale
+// number. Broken out per cluster (not summed into one pool) so admission can reason about
+// which specific cluster has room.
+func (s *ClusterQueueStore) GetLiveCPUCapacityByCluster(ctx context.Context, connectedWithin time.Duration) (map[string]float64, error) {
 	cutoff := time.Now().Add(-connectedWithin)
-	err = s.pool.pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(cpu_available_cores), 0)
+	rows, err := s.pool.pool.Query(ctx, `
+		SELECT cluster_name, cpu_available_cores
 		FROM cluster_heartbeats
 		WHERE cpu_available_cores IS NOT NULL AND last_seen_at > $1
-	`, cutoff).Scan(&available)
+	`, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("db.GetLiveCPUCapacity: %w", err)
+		return nil, fmt.Errorf("db.GetLiveCPUCapacityByCluster: %w", err)
 	}
-	return available, nil
+	defer rows.Close()
+	out := make(map[string]float64)
+	for rows.Next() {
+		var name string
+		var avail float64
+		if err := rows.Scan(&name, &avail); err != nil {
+			return nil, fmt.Errorf("db.GetLiveCPUCapacityByCluster: %w", err)
+		}
+		out[name] = avail
+	}
+	return out, rows.Err()
 }

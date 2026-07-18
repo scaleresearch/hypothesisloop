@@ -446,6 +446,38 @@ TSCOUNT=$(echo "$TS" | py "import sys,json; d=json.load(sys.stdin); print(len(d)
 echo "  platform-experiment timeseries: $TSCOUNT series (dashboard leaderboard/competition chart source)"
 
 echo ""
+echo "=========================================================="
+echo "Settlement durability check (every terminal job across all scenarios)"
+echo "=========================================================="
+# Settlement is asynchronous (inline fast path, or services/settlement.Reconciler's 30s
+# retry) — a job that just went terminal may not be marked settled for a few seconds yet.
+# Poll with a grace period rather than checking once; only terminal-status jobs settle at
+# all (a preemption victim can still be QUEUED/SUBMITTED at script end — that's not a bug).
+for JOB_ID in "$JOB1" "$JOB2" "${BURST_JOBS[@]}" "$JOB4" "$JOB5"; do
+  STATUS="?"
+  SETTLED="no"
+  for i in $(seq 1 8); do
+    RESP=$(curl -sf "$SCHED_URL/experiments/${JOB_ID}" 2>/dev/null || echo '{}')
+    STATUS=$(echo "$RESP" | py "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "?")
+    SETTLED=$(echo "$RESP" | py "import sys,json; print('yes' if json.load(sys.stdin).get('quota_settled_at') else 'no')" 2>/dev/null || echo "no")
+    [[ "$SETTLED" == "yes" ]] && break
+    case "$STATUS" in COMPLETED|FAILED|EVICTED|REJECTED) sleep 5 ;; *) break ;; esac
+  done
+  case "$STATUS" in
+    COMPLETED|FAILED|EVICTED|REJECTED)
+      if [[ "$SETTLED" == "yes" ]]; then
+        pass "$JOB_ID: quota_settled_at set — final usage durably written"
+      else
+        fail "$JOB_ID: quota_settled_at NOT set after grace period — reservation may be stuck at its estimate"
+      fi
+      ;;
+    *)
+      echo "  [SKIP] $JOB_ID: not terminal (status=$STATUS) — settlement doesn't apply"
+      ;;
+  esac
+done
+
+echo ""
 echo "==> Closing experiment $PE_ID..."
 curl -sf -X POST "$QUOTA_URL/platform-experiments/${PE_ID}/close" \
   | py "import sys,json; print('  status:', json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "  (close failed)"

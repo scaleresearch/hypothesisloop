@@ -17,6 +17,8 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/services/controller"
 	"github.com/scaleresearch/openresearch/controlplane/services/quota"
 	"github.com/scaleresearch/openresearch/controlplane/services/registry"
+	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
+	"github.com/scaleresearch/openresearch/controlplane/services/settlement"
 	"github.com/scaleresearch/openresearch/controlplane/shared/api"
 	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
@@ -158,6 +160,18 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 	ctrl = ctrl.WithPhase2Store(peFullStore, metricsDBURL).
 		WithPhase2Boundary(pcfg.Phase2.BoundaryFraction).
 		WithPhase2AdmissionPercentile(pcfg.Phase2.AdmissionPercentile)
+
+	// settler durably writes a terminal experiment's final observed usage (see
+	// services/settlement) — used both inline by the controller for the fast path and by the
+	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
+	// gapCap/step mirror Controller.observedGapCap/observedStep exactly, so every observed-usage
+	// query in this deployment agrees on what "how long did this run" means.
+	observedGapCap := time.Duration(pcfg.Scheduler.SilenceMultiplier * float64(pcfg.Scheduler.DefaultReportIntervalSeconds) * float64(time.Second))
+	observedStep := time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second
+	settler := settlement.New(peSvc, metricsDBURL, observedGapCap, observedStep, scheduler.ObservedMaxLookback)
+	ctrl = ctrl.WithSettler(settler)
+	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
+	go settlementReconciler.Start(context.Background())
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	if err := ctrl.Start(runCtx); err != nil {

@@ -199,6 +199,7 @@ echo ""
 echo "==> Results:"
 PROM_RESULTS=$(curl -sf "${PROM_URL}/api/v1/query?query=experiment_metric_value%7Bplatform_experiment_id%3D%22${PE_ID}%22%7D" 2>/dev/null || echo '{}')
 
+SETTLEMENT_FAILED=0
 for idx in "${!JOB_IDS[@]}"; do
   JOB_ID="${JOB_IDS[$idx]}"
   AGENT="${AGENTS[$idx]}"
@@ -208,9 +209,27 @@ d = json.load(sys.stdin)
 ev = d.get('eviction_reason','')
 prom = json.loads('${PROM_RESULTS}'.replace(\"'\", '\"'))
 vals = [r['value'][1] for r in prom.get('data',{}).get('result',[]) if r.get('metric',{}).get('job_id') == '${JOB_ID}']
-print(f'  ${AGENT}: {d.get(\"status\",\"?\")}' + (f' ({ev})' if ev else '') + f'  metric={vals[-1] if vals else \"n/a\"}')
+print(f'  ${AGENT}: {d.get(\"status\",\"?\")}' + (f' ({ev})' if ev else '') + f'  metric={vals[-1] if vals else \"n/a\"}' + f'  quota_settled_at={d.get(\"quota_settled_at\") or \"UNSETTLED\"}')
 " 2>/dev/null || echo "  $AGENT: (fetch failed)"
+
+  # Every terminal experiment must have a durably settled quota (services/settlement) —
+  # a nil quota_settled_at here means the reservation is stuck at its estimate forever.
+  # Settlement is asynchronous (inline fast path, or the reconciler's 30s retry), so poll
+  # with a grace period rather than failing on the first check.
+  SETTLED="no"
+  for i in $(seq 1 8); do
+    SETTLED=$(curl -sf "$SCHED_URL/experiments/${JOB_ID}" | py "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('quota_settled_at') else 'no')" 2>/dev/null || echo "no")
+    [[ "$SETTLED" == "yes" ]] && break
+    sleep 5
+  done
+  if [[ "$SETTLED" != "yes" ]]; then
+    echo "  [FAIL] ${JOB_ID}: quota_settled_at is not set after grace period — settlement did not complete"
+    SETTLEMENT_FAILED=1
+  fi
 done
+if [[ "$SETTLEMENT_FAILED" -eq 0 ]]; then
+  echo "  [PASS] all terminal jobs have a durably settled quota"
+fi
 
 echo ""
 curl -sf "${PROM_URL}/api/v1/query?query=experiment_metric_value%7Bplatform_experiment_id%3D%22${PE_ID}%22%7D" 2>/dev/null \

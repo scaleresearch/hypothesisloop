@@ -75,6 +75,14 @@ CREATE TABLE platform_experiments (
     report_interval_seconds INTEGER                 NOT NULL DEFAULT 30,
     phase                INTEGER                    NOT NULL DEFAULT 1,
     phase2_triggered_at  TIMESTAMPTZ,
+    -- Set exactly once, inside the same transaction as phase-2's one-time quota redistribution
+    -- (zero held agents, add their remaining budget to active agents) — see
+    -- db.PlatformExperimentsStore.RedistributePhase2Quota. Job-stopping for held agents is
+    -- naturally idempotent and safe to retry every reconcile tick, but redistribution moves
+    -- quota between agents and would double-add on a naive retry — this column (committed
+    -- atomically with the redistribution writes) is what lets a crash between TriggerPhase2 and
+    -- full application resume without redoing (and corrupting) that step.
+    phase2_redistributed_at TIMESTAMPTZ,
     created_at           TIMESTAMPTZ                NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ                NOT NULL DEFAULT now()
 );
@@ -149,18 +157,34 @@ CREATE TABLE experiments (
     submitted_at             TIMESTAMPTZ,
     started_at               TIMESTAMPTZ,
     preempt_count            INTEGER           NOT NULL DEFAULT 0,
+    -- attempt: bumped by the control plane each time a cluster-agent reports a Job gone
+    -- while this experiment is still in a desired-running status (SUBMITTED/ADMITTED/
+    -- RUNNING) — i.e. the Job disappeared without ever reaching a terminal phase, so
+    -- whatever the cluster-agent creates next is a distinct execution attempt, not the
+    -- original one. Carried in desired-state responses and stamped onto the recreated
+    -- Job as a label so each attempt is individually identifiable.
+    attempt                  INTEGER           NOT NULL DEFAULT 1,
     eviction_reason          TEXT,
     -- not_admitted_reason: why a QUEUED job wasn't admitted on its most recent skipped tick
     -- (capacity_unavailable | outranked | summary_gate) — updated every tick, cleared on
     -- admission. Pre-admission counterpart to eviction_reason: same "flag why, don't make the
     -- agent infer it" pattern, for the QUEUED side instead of the post-RUNNING side.
     not_admitted_reason      TEXT,
+    -- quota_settled_at: set once this terminal experiment's final observed usage has been
+    -- durably written to the metrics DB. NULL means settlement is outstanding (never attempted,
+    -- or attempted and failed) — the durable signal a background reconciler scans for to retry
+    -- writing it, surviving any crash/restart between the status transition and that write.
+    quota_settled_at         TIMESTAMPTZ,
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_experiments_agent_id   ON experiments(agent_id);
 CREATE INDEX idx_experiments_status     ON experiments(status);
+-- Partial index backing the settlement reconciler's scan for terminal experiments whose final
+-- usage hasn't been durably written yet — stays tiny since settled rows drop out of it.
+CREATE INDEX idx_experiments_unsettled  ON experiments(updated_at)
+    WHERE quota_settled_at IS NULL AND status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED');
 CREATE INDEX idx_experiments_project    ON experiments(project_id);
 CREATE INDEX idx_experiments_platform   ON experiments(platform_experiment_id);
 CREATE INDEX idx_experiments_hypothesis ON experiments(hypothesis_id);

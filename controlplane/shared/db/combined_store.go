@@ -61,6 +61,13 @@ func (lq *LoopQuotaStore) GetAgentQuota(ctx context.Context, agentID, platformEx
 	return aq, nil
 }
 
+// CorrectReservation overwrites experimentID's own not-yet-final reservation with a new
+// absolute amount — see metricsdb.UsageTracker.SetReservation. Satisfies scheduler.LoopQuotaStore
+// for preemption's requeue-time reservation correction.
+func (lq *LoopQuotaStore) CorrectReservation(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error {
+	return lq.Store.usage.SetReservation(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+}
+
 // ---- Platform Experiments adapter ----
 
 // PlatformExperimentsFullStore embeds Store and satisfies quota.PlatformExperimentsStore

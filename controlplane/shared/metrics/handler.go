@@ -59,6 +59,11 @@ func NewPushHandler(dbURL string) http.Handler {
 		if len(observations) > 0 {
 			if err := metricsdb.RecordObservations(r.Context(), dbURL, observations); err != nil {
 				log.Printf("metrics: record observations for node %s: %v", req.Node, err)
+				// Non-2xx tells node-agent's retry queue to keep this payload and retry later —
+				// acking a write GreptimeDB never received would let silence-eviction mistake a
+				// storage outage for genuinely dead jobs.
+				http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
+				return
 			}
 		}
 		w.WriteHeader(http.StatusNoContent)

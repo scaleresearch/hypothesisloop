@@ -57,8 +57,41 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.Image == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.image is required"}
 	}
-	if exp.GPUCount <= 0 {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_count must be positive"}
+	// Resource requests must be explicit at submission time (plan cross-cutting fix #1): the
+	// footprint used for cluster selection/admission must be genuinely known when the control
+	// plane picks a cluster and computes a budget estimate, not resolved later from a
+	// per-cluster JobDefaults ConfigMap the control plane never sees — different clusters could
+	// silently disagree on defaults, and admission would be checking a footprint that isn't the
+	// one actually created. Matches important.md's "no fallbacks — one path or error": reject,
+	// don't resolve a cluster-side default pre-admission.
+	if exp.Job.CPU == "" {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+	}
+	if exp.Job.Memory == "" {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+	}
+	if exp.Job.Storage == "" {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+	}
+
+	// GPUCount == 0 is a legitimate CPU-only job (see cpuFlavor / admissionUnit) as long as it
+	// actually requests positive CPU — a job with zero GPUs and no CPU requests nothing at all,
+	// which is genuinely malformed. A GPU job (GPUCount > 0) must name a GPU type: nothing
+	// downstream (flavor accounting, GPU affinity/tolerations) has a type to schedule against
+	// otherwise.
+	switch {
+	case exp.GPUCount < 0:
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_count must not be negative"}
+	case exp.GPUCount == 0:
+		cores, err := workload.ParseCPUCores(exp.Job.CPU)
+		if err != nil {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
+		}
+		if cores <= 0 {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_count is zero and job.cpu requests no positive CPU"}
+		}
+	case exp.GPUType == "":
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_type is required when job.gpu_count > 0"}
 	}
 	if exp.EstimatedDurationHours <= 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must be positive"}

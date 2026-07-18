@@ -6,26 +6,20 @@
 //   NODE_NAME                  — Kubernetes node name (downward API)
 //   OPENRESEARCH_CONTROL_PLANE_URL  — base URL of the control plane (default: http://metric-controller:8084)
 //   PUSH_INTERVAL_MS           — push interval in ms (default: 2000)
+//
+// File layout: this file holds the main loop and control-plane push/retry logic;
+// cgroup.go holds cgroup v2 cpu.stat reading; k8s.go holds pod-identity lookup.
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 const (
@@ -197,123 +191,5 @@ func push(client *http.Client, endpoint string, payload pushPayload) bool {
 		log.Printf("push rejected: status %d", resp.StatusCode)
 		return false
 	}
-	return true
-}
-
-// readAllPodStats walks cgroupRoot looking for cpu.stat files and returns a map
-// of cgroup path → entry. Pod UID is parsed from the path.
-func readAllPodStats() map[string]cpuStatEntry {
-	result := map[string]cpuStatEntry{}
-	_ = filepath.WalkDir(cgroupRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || d.Name() != "cpu.stat" {
-			return nil
-		}
-		usage, ok := readUsageUsec(path)
-		if !ok {
-			return nil
-		}
-		uid := extractPodUID(path)
-		result[path] = cpuStatEntry{
-			path:      path,
-			podUID:    uid,
-			usageUsec: usage,
-			readAt:    time.Now(),
-		}
-		return nil
-	})
-	return result
-}
-
-// readUsageUsec extracts the usage_usec value from a cgroup v2 cpu.stat file.
-func readUsageUsec(path string) (uint64, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, false
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "usage_usec ") {
-			parts := strings.Fields(line)
-			if len(parts) == 2 {
-				v, err := strconv.ParseUint(parts[1], 10, 64)
-				if err == nil {
-					return v, true
-				}
-			}
-		}
-	}
-	return 0, false
-}
-
-// extractPodUID parses a pod UID from a cgroup path.
-// Cgroup v2 paths look like: .../pod<uid>/...
-func extractPodUID(path string) string {
-	parts := strings.Split(path, string(os.PathSeparator))
-	for _, part := range parts {
-		if strings.HasPrefix(part, "pod") {
-			uid := strings.TrimPrefix(part, "pod")
-			// Convert underscores to hyphens (cgroup escaping).
-			uid = strings.ReplaceAll(uid, "_", "-")
-			if isValidUID(uid) {
-				return uid
-			}
-		}
-	}
-	return ""
-}
-
-// inClusterPodLister builds a clientset from the pod's own in-cluster service account
-// credentials (the standard kubelet-mounted token/CA, automatic when running inside the
-// cluster with no kubeconfig given) — this daemonset only ever needs to read pods on its own
-// node, so no other credential source is supported.
-func inClusterPodLister() (kubernetes.Interface, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, fmt.Errorf("in-cluster config: %w", err)
-	}
-	cs, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build clientset: %w", err)
-	}
-	return cs, nil
-}
-
-// podExperimentIDs lists every pod on this node in the experiment-jobs namespace and returns
-// pod UID -> openresearch.io/experiment-id label value, for pods that have it set. Identity
-// comes from this label, set once by the control plane at pod creation
-// (workload_client.go) — never inferred from anything the pod itself reports, so it can't be
-// spoofed or drift out of sync with what actually admitted the job.
-func podExperimentIDs(ctx context.Context, cs kubernetes.Interface, nodeName string) (map[string]string, error) {
-	list, err := cs.CoreV1().Pods(jobsNamespace).List(ctx, metav1.ListOptions{
-		FieldSelector: "spec.nodeName=" + nodeName,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]string, len(list.Items))
-	for _, pod := range list.Items {
-		if id := pod.Labels[experimentIDLabel]; id != "" {
-			out[string(pod.UID)] = id
-		}
-	}
-	return out, nil
-}
-
-// isValidUID does a basic check for Kubernetes UID format (8-4-4-4-12).
-func isValidUID(s string) bool {
-	parts := strings.Split(s, "-")
-	if len(parts) != 5 {
-		return false
-	}
-	lens := []int{8, 4, 4, 4, 12}
-	for i, p := range parts {
-		if len(p) != lens[i] {
-			return false
-		}
-	}
-	_ = fmt.Sprintf // suppress unused import warning
 	return true
 }

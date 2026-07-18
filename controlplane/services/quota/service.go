@@ -59,6 +59,7 @@ func (s *Service) RegisterAgent(ctx context.Context, id, name string) (*domain.A
 	return agent, nil
 }
 
+
 // ListBalances returns every registered agent's all-time credit_ledger balance. See
 // domain.AgentBalance's doc comment: nothing currently writes to credit_ledger, so Balance
 // is always 0 today — real consumption tracking lives in per-platform-experiment quotas

@@ -53,3 +53,10 @@ func NewPool(ctx context.Context, cfg Config) (*Pool, error) {
 func (p *Pool) Close() {
 	p.pool.Close()
 }
+
+// Raw returns the underlying pgxpool.Pool, for callers that need a dedicated connection outside
+// the query interfaces this package exposes (e.g. shared/leaderelection's advisory lock, which
+// must hold one connection for as long as it holds leadership).
+func (p *Pool) Raw() *pgxpool.Pool {
+	return p.pool
+}

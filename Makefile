@@ -1,7 +1,8 @@
 .PHONY: up down reset build test lint images \
 	controlplane-up controlplane-down \
 	cluster-agent-up cluster-agent-down \
-	k3s-up k3s-down full-up k3s-add-fake-nodes
+	k3s-up k3s-down full-up k3s-add-fake-nodes \
+	full-stop full-start
 
 COMPOSE_FILE := controlplane/infra/docker-compose.yaml
 
@@ -53,6 +54,14 @@ k3s-add-fake-nodes:
 
 # ---- Convenience: local cluster + control plane in one command -------------
 full-up: k3s-up controlplane-up
+
+# Pause/resume everything (podman machine, k3s, control plane) without destroying
+# cluster state — much faster than full-up/k3s-down for a daily on/off cycle.
+full-stop:
+	bash localdev/stop.sh
+
+full-start:
+	bash localdev/start.sh
 
 # Tagged explicitly under localhost/ (not just the short name) because the DaemonSet/
 # Deployment/Job specs reference these images as localhost/openresearch-*:latest with

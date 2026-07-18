@@ -15,6 +15,7 @@ import (
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
 )
 
@@ -22,30 +23,45 @@ import (
 type Store interface {
 	GetJobReport(ctx context.Context, experimentID string) (*db.JobReport, error)
 	DeleteJobReport(ctx context.Context, experimentID string) error
-	GetLiveCPUCapacity(ctx context.Context, connectedWithin time.Duration) (float64, error)
+	GetLiveCPUCapacityByCluster(ctx context.Context, connectedWithin time.Duration) (map[string]float64, error)
 }
 
 // Backend implements workload.Backend purely against Postgres. It is symmetric with
 // workload.ClusterSet's method set so it's a drop-in replacement at the cmd/*/main.go wiring
 // point; the difference is entirely in how each method is implemented.
 type Backend struct {
-	store         Store
-	clusterNames  []string
-	staticFlavors *workload.OpenResearchConfig // for GetFlavorCapacity fallback until live capacity reporting exists
+	store        Store
+	clusterNames []string
+	// flavorOrder lists every configured GPU flavor, so a cluster with no live report for a
+	// given flavor still gets an explicit 0 entry rather than being silently absent — callers
+	// enumerate flavors purely from these maps, same as they enumerate clusters.
+	flavorOrder []string
+	// metricsDBURL is where cluster-agents' live per-flavor GPU capacity lives (see
+	// clusteragentapi.DesiredState / metricsdb.RecordClusterGPUCapacity) — capacity is metric
+	// data, read live, never duplicated into Postgres.
+	metricsDBURL string
 	// connectedWithin mirrors clusteragentapi.Handler's own staleness window (config-driven,
 	// scheduler.cluster_unreachable_after_seconds — one threshold, not two hardcoded ones): a
-	// cluster whose heartbeat (and therefore its live CPU report) is older than this is treated
-	// as contributing zero capacity rather than a possibly-stale number. This is also what
-	// "freezes new admission" to an Unreachable cluster (item #6) — no separate freeze logic
-	// needed, since its capacity simply drops out of the sum below.
+	// cluster whose heartbeat (and therefore its live CPU/GPU report) is older than this is
+	// treated as contributing zero capacity rather than a possibly-stale number. This is also
+	// what "freezes new admission" to an Unreachable cluster (item #6) — no separate freeze
+	// logic needed, since its capacity simply drops out of the sum below.
 	connectedWithin time.Duration
 }
 
 // New constructs a Backend. clusterNames are the configured target clusters (used for
-// ClusterNames()); flavorCfg feeds the static GPU-flavor GetFlavorCapacity fallback (no GPU
-// clusters wired up yet). connectedWithin is the cluster-liveness threshold (config-driven).
-func New(store Store, clusterNames []string, flavorCfg *workload.OpenResearchConfig, connectedWithin time.Duration) *Backend {
-	return &Backend{store: store, clusterNames: clusterNames, staticFlavors: flavorCfg, connectedWithin: connectedWithin}
+// ClusterNames()); flavorCfg's FlavorOrder is every GPU flavor GetFlavorCapacity reports on
+// (values are read live from metricsDBURL, never from static config). connectedWithin is the
+// cluster-liveness threshold (config-driven).
+func New(store Store, clusterNames []string, flavorCfg *workload.OpenResearchConfig, metricsDBURL string, connectedWithin time.Duration) *Backend {
+	var flavorOrder []string
+	if flavorCfg != nil {
+		flavorOrder = flavorCfg.FlavorOrder
+	}
+	if len(flavorOrder) == 0 {
+		flavorOrder = defaultFlavorOrder
+	}
+	return &Backend{store: store, clusterNames: clusterNames, flavorOrder: flavorOrder, metricsDBURL: metricsDBURL, connectedWithin: connectedWithin}
 }
 
 var _ workload.Backend = (*Backend)(nil)
@@ -110,28 +126,41 @@ func (b *Backend) GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment
 // guaranteed/burst maps GPU flavors use — see scheduler/loop.go's admissionUnit.
 const cpuFlavor = "cpu"
 
-// GetFlavorCapacity returns GPU-flavor capacity from static config (no GPU clusters are wired
-// up yet — see design doc's own production-migration item for that) plus real, live CPU-core
-// capacity summed from cluster-agents' own self-reported allocatable-minus-requested numbers
-// (GetLiveCPUCapacity), since CPU jobs are what's actually submitted today. Guaranteed and
-// burst share the same physical pool, same as the GPU flavors below — preemption is what
-// enforces the tier boundary, not a capacity split.
-func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]int64, err error) {
-	nominal := gpuNominalCapacity(b.staticFlavors)
-	guaranteed = make(map[string]int64, len(nominal)+1)
-	burst = make(map[string]int64, len(nominal)+1)
-	for flavor, n := range nominal {
-		guaranteed[flavor] = n
-		burst[flavor] = n
-	}
-
-	cpuAvail, err := b.store.GetLiveCPUCapacity(ctx, b.connectedWithin)
+// GetFlavorCapacity returns available capacity per cluster per flavor: guaranteed[cluster][flavor]
+// and burst[cluster][flavor]. Every configured cluster (b.clusterNames) always gets an entry, so
+// callers can enumerate clusters purely from these maps. Both CPU and GPU capacity are real and
+// per-cluster, from cluster-agents' own self-reported allocatable-minus-requested numbers
+// (GetLiveCPUCapacityByCluster reads Postgres; GPU reads the metrics store, since capacity is
+// metric data — see metricsdb.LiveClusterGPUCapacity) — a cluster with no fresh report for a
+// given resource contributes zero for it, never a stale or nominal-config number. Guaranteed and
+// burst share the same physical pool per cluster — preemption is what enforces the tier boundary,
+// not a capacity split.
+func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]map[string]int64, err error) {
+	cpuAvail, err := b.store.GetLiveCPUCapacityByCluster(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: live CPU capacity: %w", err)
 	}
-	cpuCores := int64(cpuAvail) // truncates down: never round available capacity up in the admission loop's favor
-	guaranteed[cpuFlavor] = cpuCores
-	burst[cpuFlavor] = cpuCores
+	gpuAvail, err := metricsdb.LiveClusterGPUCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: live GPU capacity: %w", err)
+	}
+
+	guaranteed = make(map[string]map[string]int64, len(b.clusterNames))
+	burst = make(map[string]map[string]int64, len(b.clusterNames))
+	for _, cluster := range b.clusterNames {
+		flavors := make(map[string]int64, len(b.flavorOrder)+1)
+		for _, flavor := range b.flavorOrder {
+			flavors[flavor] = gpuAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
+		}
+		// truncates down: never round available capacity up in the admission loop's favor
+		flavors[cpuFlavor] = int64(cpuAvail[cluster])
+		guaranteed[cluster] = flavors
+		burstFlavors := make(map[string]int64, len(flavors))
+		for flavor, n := range flavors {
+			burstFlavors[flavor] = n
+		}
+		burst[cluster] = burstFlavors
+	}
 	return guaranteed, burst, nil
 }
 
@@ -144,26 +173,6 @@ func (b *Backend) ClusterNames() []string {
 // create (see workload.Backend.ProvisionAgent doc).
 func (b *Backend) ProvisionAgent(_ context.Context, _ string) error { return nil }
 
+// defaultFlavorOrder is used when Backend is constructed with no configured flavor order (e.g.
+// tests) — every flavor GetFlavorCapacity reports on, values always read live.
 var defaultFlavorOrder = []string{"flavor-t4", "flavor-l40", "flavor-a100", "flavor-h100", "flavor-h200"}
-var defaultGPUsByFlavor = map[string]int{
-	"flavor-t4": 64, "flavor-l40": 16, "flavor-a100": 8, "flavor-h100": 4, "flavor-h200": 2,
-}
-
-// gpuNominalCapacity returns the nominal GPU slot count per flavor from config (or the PoC
-// defaults). GPUs are the only resource dimension the scheduler accounts for.
-func gpuNominalCapacity(cfg *workload.OpenResearchConfig) map[string]int64 {
-	order, gpus := defaultFlavorOrder, defaultGPUsByFlavor
-	if cfg != nil {
-		if len(cfg.FlavorOrder) > 0 {
-			order = cfg.FlavorOrder
-		}
-		if len(cfg.GPUsByFlavor) > 0 {
-			gpus = cfg.GPUsByFlavor
-		}
-	}
-	out := make(map[string]int64, len(order))
-	for _, flavor := range order {
-		out[flavor] = int64(gpus[flavor])
-	}
-	return out
-}

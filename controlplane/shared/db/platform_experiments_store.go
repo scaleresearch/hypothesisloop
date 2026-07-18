@@ -230,6 +230,81 @@ func (s *PlatformExperimentsStore) ListPhase2HeldAgents(ctx context.Context, pla
 	return out, rows.Err()
 }
 
+// Phase2ZeroOp strips one resource dimension's guaranteed/burst allocation from one held agent.
+type Phase2ZeroOp struct {
+	AgentID      string
+	ResourceType domain.ResourceType
+}
+
+// Phase2AddOp adds delta to one resource dimension's guaranteed allocation for one active agent.
+type Phase2AddOp struct {
+	AgentID      string
+	ResourceType domain.ResourceType
+	Delta        float64
+}
+
+// RedistributePhase2Quota atomically applies every held-agent zero and active-agent add for a
+// platform experiment's phase-2 transition, in one Postgres transaction, and durably claims that
+// this platform experiment's redistribution is done — all inside the same commit. Findings.md #9:
+// this is what makes redistribution crash-safe. A naive "loop over N UPDATE statements, mark done
+// after" can be interrupted mid-loop, and re-running AddToAgentGuaranteedQuota's delta a second
+// time would double-credit an agent — there is no idempotent way to retry a partially-applied
+// delta. Wrapping every op plus the completion marker in one transaction makes the whole
+// redistribution all-or-nothing: any crash before commit leaves phase2_redistributed_at NULL and
+// nothing applied, so a retry (see Controller.reconcilePhase2Hold) redoes the entire thing safely
+// from scratch; any crash after commit has already applied everything exactly once.
+//
+// Returns (false, nil) if this platform experiment's redistribution was already committed by an
+// earlier call — the caller must skip straight to retrying job-stopping (idempotent on its own)
+// instead of re-applying ops.
+func (s *PlatformExperimentsStore) RedistributePhase2Quota(ctx context.Context, platformExpID string, zeros []Phase2ZeroOp, adds []Phase2AddOp) (bool, error) {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// FOR UPDATE serializes concurrent callers (e.g. two control-service replicas both
+	// reconciling the same platform experiment) on this row, so only one of them ever observes
+	// phase2_redistributed_at IS NULL and proceeds to apply ops.
+	var alreadyDone bool
+	if err := tx.QueryRow(ctx,
+		`SELECT phase2_redistributed_at IS NOT NULL FROM platform_experiments WHERE id=$1 FOR UPDATE`,
+		platformExpID,
+	).Scan(&alreadyDone); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: check: %w", err)
+	}
+	if alreadyDone {
+		return false, nil
+	}
+
+	for _, z := range zeros {
+		guaranteed, burst := resourceQuotaColumns(z.ResourceType)
+		q := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed, burst)
+		if _, err := tx.Exec(ctx, q, z.AgentID, platformExpID); err != nil {
+			return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: zero %s/%s: %w", z.AgentID, z.ResourceType, err)
+		}
+	}
+	for _, a := range adds {
+		guaranteed, _ := resourceQuotaColumns(a.ResourceType)
+		q := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s + $3 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed)
+		if _, err := tx.Exec(ctx, q, a.AgentID, platformExpID, a.Delta); err != nil {
+			return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: add %s/%s: %w", a.AgentID, a.ResourceType, err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE platform_experiments SET phase2_redistributed_at=NOW(), updated_at=NOW() WHERE id=$1`,
+		platformExpID,
+	); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: mark done: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: commit: %w", err)
+	}
+	return true, nil
+}
+
 // IsAgentHeld returns true if the agent is on phase-2 hold for the given platform experiment.
 func (s *PlatformExperimentsStore) IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	const q = `SELECT 1 FROM experiment_phase2_holds WHERE platform_experiment_id=$1 AND agent_id=$2`
@@ -257,230 +332,28 @@ func (s *PlatformExperimentsStore) AddToAgentGuaranteedQuota(ctx context.Context
 	return nil
 }
 
-// ZeroAgentGuaranteedQuota sets resourceType's guaranteed and burst allocation to 0 for a held
-// agent. Called during phase 2 transition to strip held agents of their remaining allocation —
-// callers loop over every resource dimension the platform experiment tracks, not just GPU.
-func (s *PlatformExperimentsStore) ZeroAgentGuaranteedQuota(ctx context.Context, agentID, platformExpID string, resourceType domain.ResourceType) error {
-	guaranteed, burst := resourceQuotaColumns(resourceType)
-	q := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed, burst)
-	_, err := s.pool.pool.Exec(ctx, q, agentID, platformExpID)
+// WithAdmissionLock runs fn while holding a Postgres transaction-scoped advisory lock keyed on
+// (agentID, platformExpID), so quota admission is serialized across every control-service
+// replica, not just within one process. Scoped to the transaction so it auto-releases on
+// commit/rollback (including a crash mid-fn) rather than needing an explicit unlock.
+func (s *PlatformExperimentsStore) WithAdmissionLock(ctx context.Context, agentID, platformExpID string, fn func(ctx context.Context) error) error {
+	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("platform_experiments_store.ZeroAgentGuaranteedQuota: %w", err)
+		return fmt.Errorf("platform_experiments_store.WithAdmissionLock: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	key := agentID + "/" + platformExpID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+		return fmt.Errorf("platform_experiments_store.WithAdmissionLock: acquire lock: %w", err)
+	}
+
+	if err := fn(ctx); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.WithAdmissionLock: commit: %w", err)
 	}
 	return nil
-}
-
-// ---- experiment_signups ----
-
-// Signup records an agent's intent to participate in a platform experiment.
-func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string) error {
-	const q = `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at)
-VALUES ($1, $2, NOW())
-ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`
-
-	_, err := s.pool.pool.Exec(ctx, q, platformExpID, agentID)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Signup: %w", err)
-	}
-	return nil
-}
-
-// ListSignups returns all agent IDs signed up for a platform experiment.
-func (s *PlatformExperimentsStore) ListSignups(ctx context.Context, platformExpID string) ([]string, error) {
-	const q = `
-SELECT agent_id FROM experiment_signups
-WHERE platform_experiment_id = $1
-ORDER BY signed_up_at ASC`
-
-	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.ListSignups: %w", err)
-	}
-	defer rows.Close()
-
-	var agents []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.ListSignups: scan: %w", err)
-		}
-		agents = append(agents, id)
-	}
-	return agents, rows.Err()
-}
-
-// IsSignedUp returns true if the agent is signed up for the platform experiment.
-func (s *PlatformExperimentsStore) IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error) {
-	const q = `
-SELECT 1 FROM experiment_signups
-WHERE platform_experiment_id = $1 AND agent_id = $2`
-
-	var dummy int
-	err := s.pool.pool.QueryRow(ctx, q, platformExpID, agentID).Scan(&dummy)
-	if err == pgx.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.IsSignedUp: %w", err)
-	}
-	return true, nil
-}
-
-// CountSignups returns how many agents have signed up for a platform experiment.
-func (s *PlatformExperimentsStore) CountSignups(ctx context.Context, platformExpID string) (int, error) {
-	const q = `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1`
-	var n int
-	if err := s.pool.pool.QueryRow(ctx, q, platformExpID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("platform_experiments_store.CountSignups: %w", err)
-	}
-	return n, nil
-}
-
-// ---- agent_quotas ----
-
-// UpsertAgentQuota creates or replaces an agent's quota allocation for a platform experiment.
-// Populates all 4 resource dimensions (GPU is always non-zero; CPU/RAM/storage are 0 = "not
-// tracked" for platform experiments that don't budget them). Only the allocation (capacity
-// setting) lives here — consumption (used_*) lives solely in the metrics DB, see
-// metricsdb.UsageTracker; Postgres never holds a copy of it.
-func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error {
-	const sql = `
-INSERT INTO agent_quotas (
-	id, agent_id, platform_experiment_id,
-	guaranteed_t4_hours, burst_t4_hours,
-	guaranteed_cpu_core_hours, burst_cpu_core_hours,
-	guaranteed_ram_gb_hours, burst_ram_gb_hours,
-	guaranteed_storage_gb_hours, burst_storage_gb_hours,
-	created_at
-)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-ON CONFLICT (agent_id, platform_experiment_id) DO UPDATE SET
-	guaranteed_t4_hours         = EXCLUDED.guaranteed_t4_hours,
-	burst_t4_hours              = EXCLUDED.burst_t4_hours,
-	guaranteed_cpu_core_hours   = EXCLUDED.guaranteed_cpu_core_hours,
-	burst_cpu_core_hours        = EXCLUDED.burst_cpu_core_hours,
-	guaranteed_ram_gb_hours     = EXCLUDED.guaranteed_ram_gb_hours,
-	burst_ram_gb_hours          = EXCLUDED.burst_ram_gb_hours,
-	guaranteed_storage_gb_hours = EXCLUDED.guaranteed_storage_gb_hours,
-	burst_storage_gb_hours      = EXCLUDED.burst_storage_gb_hours`
-
-	_, err := s.pool.pool.Exec(ctx, sql,
-		q.ID, q.AgentID, q.PlatformExperimentID,
-		q.GuaranteedT4Hours, q.BurstT4Hours,
-		q.GuaranteedCPUCoreHours, q.BurstCPUCoreHours,
-		q.GuaranteedRAMGBHours, q.BurstRAMGBHours,
-		q.GuaranteedStorageGBHours, q.BurstStorageGBHours,
-		q.CreatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.UpsertAgentQuota: %w", err)
-	}
-	return nil
-}
-
-// agentQuotaColumns is the canonical column list for agent_quotas SELECT queries, shared by
-// GetAgentQuota/ListAgentQuotas. Allocation only — used_* is populated separately from the
-// metrics DB by the caller (see metricsdb.PopulateUsage/PopulateUsageOne).
-const agentQuotaColumns = `
-	id, agent_id, platform_experiment_id,
-	guaranteed_t4_hours, burst_t4_hours,
-	guaranteed_cpu_core_hours, burst_cpu_core_hours,
-	guaranteed_ram_gb_hours, burst_ram_gb_hours,
-	guaranteed_storage_gb_hours, burst_storage_gb_hours,
-	created_at
-`
-
-func scanAgentQuota(row rowScanner) (*domain.AgentQuota, error) {
-	aq := &domain.AgentQuota{}
-	err := row.Scan(
-		&aq.ID, &aq.AgentID, &aq.PlatformExperimentID,
-		&aq.GuaranteedT4Hours, &aq.BurstT4Hours,
-		&aq.GuaranteedCPUCoreHours, &aq.BurstCPUCoreHours,
-		&aq.GuaranteedRAMGBHours, &aq.BurstRAMGBHours,
-		&aq.GuaranteedStorageGBHours, &aq.BurstStorageGBHours,
-		&aq.CreatedAt,
-	)
-	return aq, err
-}
-
-// GetAgentQuota returns the quota for an agent in a platform experiment.
-func (s *PlatformExperimentsStore) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
-	q := `SELECT` + agentQuotaColumns + `FROM agent_quotas WHERE agent_id = $1 AND platform_experiment_id = $2`
-
-	aq, err := scanAgentQuota(s.pool.pool.QueryRow(ctx, q, agentID, platformExpID))
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.GetAgentQuota: %w", err)
-	}
-	return aq, nil
-}
-
-// ListAgentQuotas returns all quotas for a platform experiment.
-func (s *PlatformExperimentsStore) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
-	q := `SELECT` + agentQuotaColumns + `FROM agent_quotas WHERE platform_experiment_id = $1 ORDER BY guaranteed_t4_hours DESC`
-
-	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.ListAgentQuotas: %w", err)
-	}
-	defer rows.Close()
-
-	var out []*domain.AgentQuota
-	for rows.Next() {
-		aq, err := scanAgentQuota(rows)
-		if err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.ListAgentQuotas: scan: %w", err)
-		}
-		out = append(out, aq)
-	}
-	return out, rows.Err()
-}
-
-// resourceQuotaColumns returns the (guaranteed, burst) allocation column names backing one
-// resource dimension's quota bucket on agent_quotas. GPU-hours is the original/default
-// dimension. Consumption (used_*) has no Postgres column — see metricsdb.UsageTracker.
-func resourceQuotaColumns(rt domain.ResourceType) (guaranteed, burst string) {
-	switch rt {
-	case domain.ResourceCPUCoreHours:
-		return "guaranteed_cpu_core_hours", "burst_cpu_core_hours"
-	case domain.ResourceRAMGBHours:
-		return "guaranteed_ram_gb_hours", "burst_ram_gb_hours"
-	case domain.ResourceStorageGBHours:
-		return "guaranteed_storage_gb_hours", "burst_storage_gb_hours"
-	default: // domain.ResourceGPUHours
-		return "guaranteed_t4_hours", "burst_t4_hours"
-	}
-}
-
-// ---- top-3 history (Domain 6) ----
-
-// RecordTop3 records that agentID placed in the top 3 for a platform experiment.
-func (s *PlatformExperimentsStore) RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error {
-	const q = `
-INSERT INTO experiment_top3 (platform_experiment_id, agent_id, final_metric, recorded_at)
-VALUES ($1, $2, $3, NOW())
-ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET final_metric = EXCLUDED.final_metric`
-
-	_, err := s.pool.pool.Exec(ctx, q, platformExpID, agentID, finalMetric)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.RecordTop3: %w", err)
-	}
-	return nil
-}
-
-// HasTop3History returns true if the agent has ever placed in the top 3.
-func (s *PlatformExperimentsStore) HasTop3History(ctx context.Context, agentID string) (bool, error) {
-	const q = `SELECT 1 FROM experiment_top3 WHERE agent_id = $1 LIMIT 1`
-	var dummy int
-	err := s.pool.pool.QueryRow(ctx, q, agentID).Scan(&dummy)
-	if err == pgx.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.HasTop3History: %w", err)
-	}
-	return true, nil
 }

@@ -24,17 +24,18 @@ import (
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
 )
 
 // Store is the persistence interface the handler needs. Satisfied by *db.ClusterQueueStore.
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
-	UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedGPUType domain.GPUType, seq int64, jobUID string) (uidMismatch bool, err error)
-	DeleteJobReport(ctx context.Context, experimentID string) error
+	UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedGPUType domain.GPUType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error)
+	DeleteJobReportForCluster(ctx context.Context, experimentID, clusterName string) error
+	BumpAttemptOnRecreate(ctx context.Context, experimentID string) (attempt int, bumped bool, err error)
 	RecordHeartbeat(ctx context.Context, clusterName string, cpuAvailable, cpuTotal float64, hasCPUReport bool) error
 	ListHeartbeats(ctx context.Context) ([]db.ClusterHeartbeat, error)
-	GetLiveCPUCapacity(ctx context.Context, connectedWithin time.Duration) (float64, error)
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -46,17 +47,18 @@ type Handler struct {
 	// CPU capacity staleness check so there is exactly one cluster-liveness threshold, not two
 	// independently hardcoded ones.
 	connectedWithin time.Duration
+	// metricsDBURL is where live per-cluster GPU capacity is written (see RecordClusterGPUCapacity)
+	// — capacity is metric data, so it lives in the metrics store, never duplicated into Postgres.
+	metricsDBURL string
 }
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, logger *zap.Logger) *Handler {
-	return &Handler{store: store, connectedWithin: connectedWithin, logger: logger}
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, logger *zap.Logger) *Handler {
+	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL, logger: logger}
 }
 
 // Routes registers all cluster-agent-facing routes onto r. Mounted at /internal/clusters.
-// GET / (list) is the one exception — it's read by the UI/operators, not by agents, but lives
-// here because it reads exactly the heartbeat data this package's own traffic produces.
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/", h.ListClusters)
 	r.Get("/{name}/desired-state", h.DesiredState)
@@ -86,6 +88,20 @@ func (h *Handler) DesiredState(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.RecordHeartbeat(r.Context(), clusterName, cpuAvail, cpuTotal, hasCPUReport); err != nil {
 		h.logger.Warn("clusteragentapi: record heartbeat", zap.String("cluster", clusterName), zap.Error(err))
 	}
+
+	var gpuAvail, gpuTotal map[string]int64
+	if raw := r.URL.Query().Get("gpu_available_by_flavor"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &gpuAvail)
+	}
+	if raw := r.URL.Query().Get("gpu_total_by_flavor"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &gpuTotal)
+	}
+	if len(gpuAvail) > 0 {
+		if err := metricsdb.RecordClusterGPUCapacity(r.Context(), h.metricsDBURL, clusterName, gpuAvail, gpuTotal); err != nil {
+			h.logger.Warn("clusteragentapi: record GPU capacity", zap.String("cluster", clusterName), zap.Error(err))
+		}
+	}
+
 	exps, err := h.store.ListDesiredWorkloads(r.Context(), clusterName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -142,13 +158,25 @@ func (h *Handler) PushStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
+	// rejected lists reports the DB write did not durably apply to (error, stale/duplicate
+	// sequence number, or an experiment not owned by this cluster) — the cluster-agent must
+	// only advance its local tracked phase for reports absent from this list, retrying the
+	// rest on its next push. A blanket 200 regardless of per-report outcome would let a
+	// transient DB error or a stale sequence number permanently lose a status report, since
+	// the agent treats any 2xx as a durable ack for the whole batch.
+	rejected := []string{}
 	for _, rep := range body.Reports {
 		if rep.ExperimentID == "" || rep.Phase == "" {
 			continue
 		}
-		uidMismatch, err := h.store.UpsertJobReport(r.Context(), rep.ExperimentID, clusterName, rep.Phase, domain.GPUType(rep.AdmittedGPUType), rep.SequenceNumber, rep.JobUID)
+		applied, uidMismatch, err := h.store.UpsertJobReport(r.Context(), rep.ExperimentID, clusterName, rep.Phase, domain.GPUType(rep.AdmittedGPUType), rep.SequenceNumber, rep.JobUID)
 		if err != nil {
 			h.logger.Warn("clusteragentapi: upsert job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+			rejected = append(rejected, rep.ExperimentID)
+			continue
+		}
+		if !applied {
+			rejected = append(rejected, rep.ExperimentID)
 			continue
 		}
 		if uidMismatch {
@@ -163,12 +191,27 @@ func (h *Handler) PushStatus(w http.ResponseWriter, r *http.Request) {
 			obsmetrics.JobUIDMismatchTotal.WithLabelValues(clusterName).Inc()
 		}
 		if rep.Phase == "gone" {
-			if err := h.store.DeleteJobReport(r.Context(), rep.ExperimentID); err != nil {
+			if err := h.store.DeleteJobReportForCluster(r.Context(), rep.ExperimentID, clusterName); err != nil {
 				h.logger.Warn("clusteragentapi: delete job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+			}
+			// The Job vanished while this experiment may still be desired-running — bump its
+			// attempt counter so that if cluster-agent recreates the Job, it's a distinct,
+			// identifiable execution attempt rather than a silent same-identity re-run. No-op
+			// (bumped=false) if the experiment already left the desired set, since then the gone
+			// report is just expected post-terminal cleanup, not a recreation.
+			attempt, bumped, err := h.store.BumpAttemptOnRecreate(r.Context(), rep.ExperimentID)
+			if err != nil {
+				h.logger.Warn("clusteragentapi: bump attempt", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+			} else if bumped {
+				h.logger.Warn("clusteragentapi: job disappeared while still desired — recreation attempt bumped",
+					zap.String("experiment_id", rep.ExperimentID),
+					zap.String("cluster", clusterName),
+					zap.Int("attempt", attempt),
+				)
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "rejected": rejected})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -18,10 +18,12 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/services/dedup"
 	"github.com/scaleresearch/openresearch/controlplane/services/quota"
 	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
+	"github.com/scaleresearch/openresearch/controlplane/services/settlement"
 	"github.com/scaleresearch/openresearch/controlplane/shared/api"
 	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/openresearch/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/openresearch/controlplane/shared/queuebackend"
 	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
 )
@@ -85,7 +87,7 @@ func main() {
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
 
 	quotaServer := newQuotaServer(store, peFullStore, quotaCfg, pcfg, metricsDBURL, quotaPort, logger)
-	schedulerServer := newSchedulerServer(store, peFullStore, quotaCfg, pcfg, metricsDBURL, schedulerPort, logger)
+	schedulerServer := newSchedulerServer(pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, schedulerPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -122,7 +124,7 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 	// native backend regardless — no per-agent k8s object to create — but wiring it through
 	// queuebackend keeps every service consistent about never dialing a cluster).
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
-	provisioner := quota.AgentProvisioner(queuebackend.New(store, nil, nil, connectedWithin))
+	provisioner := quota.AgentProvisioner(queuebackend.New(store, nil, nil, metricsDBURL, connectedWithin))
 	svc := quota.NewService(store, provisioner, logger)
 	handler := quota.NewHandler(svc, logger)
 
@@ -158,7 +160,7 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 	}
 }
 
-func newSchedulerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *openresearchcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *openresearchcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
 
 	// Configured target clusters (clusters.yaml / CLUSTERS_CONFIG_PATH), falling back to a
@@ -188,7 +190,7 @@ func newSchedulerServer(store *db.Store, peFullStore *db.PlatformExperimentsFull
 	// jwc's static type is workload.Backend: this is the one line that would change to plug
 	// in a different scheduling mechanism — see controlplane/shared/workload/backend.go.
 	// queuebackend.Backend never dials into a cluster; it only reads/writes Postgres.
-	var jwc workload.Backend = queuebackend.New(store, clusterNames, openresearchWorkloadCfg,
+	var jwc workload.Backend = queuebackend.New(store, clusterNames, openresearchWorkloadCfg, metricsDBURL,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second)
 
 	// Cancelled implicitly when the process exits; the watcher and loop below run for the
@@ -196,23 +198,27 @@ func newSchedulerServer(store *db.Store, peFullStore *db.PlatformExperimentsFull
 	observedGapCap := time.Duration(pcfg.Scheduler.SilenceMultiplier * float64(pcfg.Scheduler.DefaultReportIntervalSeconds) * float64(time.Second))
 	observedStep := time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second
 
-	watchCtx := context.Background()
+	// settler is the sole path that durably writes a terminal experiment's final observed usage
+	// (see services/settlement) — used both inline by JobWatcher for the fast path and by the
+	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
+	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap, observedStep, scheduler.ObservedMaxLookback)
+	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
+	go settlementReconciler.Start(context.Background())
+
 	watcher := scheduler.NewJobWatcher(store, jwc, logger).
-		WithQuotaRefunder(expQuotaSvc).
+		WithQuotaSettler(settler).
 		WithQuotaAdjuster(expQuotaSvc).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds) * time.Second).
 		WithScanInterval(time.Duration(pcfg.Scheduler.AdmittedScanIntervalSeconds) * time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds) * time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
-	go watcher.Start(watchCtx)
 
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store).
 		WithQuotaConfig(quotaCfg).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
 
-	loopQuota := db.NewLoopQuotaStore(peFullStore)
-	schedulerLoop := scheduler.NewLoop(store, loopQuota, jwc, logger).
+	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds) * time.Second).
 		WithPreemptTimeout(time.Duration(pcfg.Scheduler.PreemptTimeoutSeconds) * time.Second).
@@ -220,7 +226,16 @@ func newSchedulerServer(store *db.Store, peFullStore *db.PlatformExperimentsFull
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 
-	schedulerLoop.Start(context.Background())
+	// The admission tick reads capacity then decides then writes (not a CAS), and JobWatcher's
+	// scan starts one poller per SUBMITTED/ADMITTED experiment — both must run on exactly one
+	// control-service replica at a time. leaderelection.Run holds a Postgres advisory lock to
+	// pick that replica; every other replica stays in standby and takes over if the leader dies.
+	// The HTTP API stays multi-replica — only these two background loops are leader-gated.
+	go leaderelection.Run(context.Background(), pool.Raw(), leaderelection.SchedulerLockKey,
+		5*time.Second, logger, func(leaderCtx context.Context) {
+			schedulerLoop.Start(leaderCtx)
+			watcher.Start(leaderCtx)
+		})
 
 	schedulerHandler := scheduler.NewHandler(schedulerSvc)
 	r := chi.NewRouter()
@@ -234,7 +249,7 @@ func newSchedulerServer(store *db.Store, peFullStore *db.PlatformExperimentsFull
 	gwHandler := gw.Handler(logger)
 
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
-		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, logger)
+		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, logger)
 	clusterAgentRouter := chi.NewRouter()
 	clusterAgentHandler.Routes(clusterAgentRouter)
 

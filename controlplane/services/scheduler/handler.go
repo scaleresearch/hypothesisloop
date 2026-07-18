@@ -61,7 +61,7 @@ func (h *Handler) SubmitExperiment(w http.ResponseWriter, r *http.Request) {
 
 	meta := req.Metadata
 	exp := domain.Experiment{
-		ID:                     req.ID,
+		ID:       req.ID,
 		ParentID:               meta.ParentID,
 		AgentID:                meta.AgentID,
 		PlatformExperimentID:   meta.PlatformExperimentID,
@@ -130,10 +130,44 @@ func (h *Handler) GetExperiment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, exp)
 }
 
+// admitRequest is the wire shape for POST /experiments/{id}/admit: the operator must name an
+// explicit target cluster — this endpoint never picks one on the caller's behalf (see
+// AdmitExperiment's doc comment for why).
+type admitRequest struct {
+	ClusterName string `json:"cluster_name"`
+}
+
 // AdmitExperiment handles POST /experiments/{id}/admit (operator endpoint).
-// It directly admits the identified experiment, bypassing queue ordering.
+// It admits the identified QUEUED experiment directly onto an operator-specified cluster,
+// bypassing queue ordering — but not capacity accounting: it requires an explicit valid target
+// cluster and goes through the same MarkSubmitted capacity-claiming transition normal admission
+// uses (see loop_preempt.go's submitJob), after confirming that cluster actually has room. A
+// bare status flip with no cluster assignment would create an experiment no cluster agent's
+// desired-state query could ever fetch (queries are scoped WHERE cluster_name = $1) — it would
+// report success and then silently never run.
 func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	var req admitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		return
+	}
+	if req.ClusterName == "" {
+		writeError(w, http.StatusBadRequest, "cluster_name is required")
+		return
+	}
+	valid := false
+	for _, c := range h.svc.workload.ClusterNames() {
+		if c == req.ClusterName {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		writeError(w, http.StatusBadRequest, "cluster_name is not a configured cluster")
+		return
+	}
 
 	exp, err := h.svc.store.GetExperiment(r.Context(), id)
 	if err != nil {
@@ -149,11 +183,45 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.store.UpdateExperimentStatus(r.Context(), id, domain.StatusAdmitted); err != nil {
+	// Compute the same capacity-vs-occupancy view tick() uses, scoped to the requested cluster,
+	// so an operator override still respects physical capacity instead of admitting blindly.
+	gAvail, _, err := h.svc.workload.GetFlavorCapacity(r.Context())
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	exp.Status = domain.StatusAdmitted
+	flavor, need := admissionUnit(exp)
+	avail, ok := gAvail[req.ClusterName]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "cluster_name is not a configured cluster")
+		return
+	}
+	occupied, err := h.svc.occupiedFootprint(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, o := range occupied {
+		if o.ClusterName != req.ClusterName {
+			continue
+		}
+		oFlavor, oNeed := admissionUnit(o)
+		if oFlavor != flavor || flavor == cpuFlavor {
+			continue
+		}
+		avail[flavor] -= oNeed
+	}
+	if avail[flavor] < need {
+		writeError(w, http.StatusUnprocessableEntity, "insufficient capacity on requested cluster")
+		return
+	}
+
+	if err := h.svc.store.MarkSubmitted(r.Context(), id, req.ClusterName); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	exp.Status = domain.StatusSubmitted
+	exp.ClusterName = req.ClusterName
 	exp.UpdatedAt = time.Now().UTC()
 
 	if err := h.svc.workload.CreateWorkload(r.Context(), exp); err != nil {
