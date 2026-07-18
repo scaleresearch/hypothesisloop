@@ -361,4 +361,37 @@ CREATE TABLE cluster_heartbeats (
     cpu_total_cores     DOUBLE PRECISION
 );
 
+-- ---------------------------------------------------------------------------
+-- pending_capacity_reservations — durable (Postgres, not in-process) claim on physical
+-- capacity for an experiment between the moment tick()/the operator admit endpoint marks it
+-- SUBMITTED and the moment its pod is actually confirmed to exist (job_watcher observes it
+-- RUNNING). See SCHEDULING_GENERALIZATION_PLAN.md's "Durable pending-capacity reservations"
+-- cross-cutting fix: cluster-agents' live CPU/GPU capacity numbers (cluster_heartbeats,
+-- metricsdb) reflect real k8s state, so they do NOT yet include a job's request in the window
+-- between MarkSubmitted and the cluster-agent actually creating the pod — a second scheduler
+-- tick in that window could otherwise double-admit into the same capacity. tick() sums these
+-- rows per cluster and subtracts them from live capacity on top of the existing
+-- SUBMITTED/ADMITTED/RUNNING accounting, closing that gap without duplicating the resource
+-- estimate anywhere else (experiments.job_spec / estimated_* columns remain the sole billing
+-- source of truth; this table exists purely for the physical-fit race).
+--
+-- One row per experiment, upserted at admission (loop_preempt.go's submitJob) and deleted once
+-- resolved: onRunning (pod confirmed to exist — capacity now already reflected live),
+-- onStuckPending/onFinished (evicted/completed without a pod ever needing to be counted), or a
+-- rolled-back submission (workload creation failed, job returned to QUEUED).
+--
+-- Only the two dimensions with live per-cluster capacity today (CPU + one accelerator flavor)
+-- are tracked — matches Experiment.Footprint()'s current scope; RAM/storage join this table
+-- once their own capacity piggyback lands (see Class B step 2).
+CREATE TABLE pending_capacity_reservations (
+    experiment_id       TEXT        PRIMARY KEY REFERENCES experiments(id) ON DELETE CASCADE,
+    cluster_name        TEXT        NOT NULL,
+    cpu_millicores       BIGINT      NOT NULL DEFAULT 0,
+    accelerator_flavor   TEXT        NOT NULL DEFAULT '',
+    accelerator_count    BIGINT      NOT NULL DEFAULT 0,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_pending_capacity_reservations_cluster ON pending_capacity_reservations(cluster_name);
+
 COMMIT;

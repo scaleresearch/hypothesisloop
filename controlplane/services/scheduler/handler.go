@@ -231,10 +231,16 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 	exp.Status = domain.StatusSubmitted
 	exp.ClusterName = req.ClusterName
 	exp.UpdatedAt = time.Now().UTC()
+	// Durably claim this capacity the same way normal admission does (see
+	// pending_capacity_reservations' schema comment) — best-effort, matching submitJob: a
+	// failure here degrades the pending-race protection for this one job but must not block
+	// an operator's manual override.
+	_ = h.svc.store.UpsertPendingReservation(r.Context(), id, req.ClusterName, fp)
 
 	if err := h.svc.workload.CreateWorkload(r.Context(), exp); err != nil {
 		// Roll back on workload creation failure.
 		_ = h.svc.store.UpdateExperimentStatus(r.Context(), id, domain.StatusQueued)
+		_ = h.svc.store.DeletePendingReservation(r.Context(), id)
 		writeError(w, http.StatusInternalServerError, "workload creation failed: "+err.Error())
 		return
 	}

@@ -53,6 +53,11 @@ type Store interface {
 	ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
+	// UpsertPendingReservation/DeletePendingReservation manage a durable pending-capacity claim
+	// (see pending_capacity_reservations' schema comment) — used by the operator admit endpoint
+	// so a manual override claims/releases capacity the same way normal admission does.
+	UpsertPendingReservation(ctx context.Context, experimentID, clusterName string, fp domain.Footprint) error
+	DeletePendingReservation(ctx context.Context, id string) error
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource

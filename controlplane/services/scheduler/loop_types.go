@@ -57,6 +57,17 @@ type LoopStore interface {
 	// without a summary in the given platform experiment. Used to enforce the summary gate
 	// during admission so that batch-submitted jobs cannot bypass it.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
+	// UpsertPendingReservation durably claims exp's admission footprint against clusterName
+	// (see pending_capacity_reservations' schema comment) — written alongside MarkSubmitted so
+	// a second tick before the pod actually exists can't double-admit into the same capacity.
+	UpsertPendingReservation(ctx context.Context, experimentID, clusterName string, fp domain.Footprint) error
+	// DeletePendingReservation removes id's reservation once its fate is resolved (rollback to
+	// QUEUED after a failed CreateWorkload — see submitJob). No-op if none exists.
+	DeletePendingReservation(ctx context.Context, id string) error
+	// ListPendingReservationsByCluster sums every outstanding reservation per cluster — see
+	// pending_capacity_reservations' schema comment. tick() subtracts this from live capacity on
+	// top of the existing SUBMITTED/ADMITTED/RUNNING accounting.
+	ListPendingReservationsByCluster(ctx context.Context) (map[string]domain.Footprint, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without

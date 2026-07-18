@@ -29,47 +29,65 @@ func (l *Loop) tick(ctx context.Context) error {
 		return err
 	}
 
-	// 2. Subtract the footprint of every job currently holding physical capacity: SUBMITTED
-	// and ADMITTED (in-flight, not yet observed RUNNING) plus RUNNING. gAvail/bAvail are two
-	// views of the *same* shared physical pool per cluster (see LoopWorkloadClient.GetFlavorCapacity's
+	// 2. Subtract the footprint of every job currently RUNNING. gAvail/bAvail are two views of
+	// the *same* shared physical pool per cluster (see LoopWorkloadClient.GetFlavorCapacity's
 	// doc comment), so a unit held by a job of either tier is unavailable in both views —
 	// preemption, not a capacity split, is what enforces the tier boundary. Each job's footprint
 	// is charged against its own persisted ClusterName, not a combined pool.
 	//
-	// The CPU dimension is skipped here: GetFlavorCapacity's CPU number is a cluster-agent-
-	// reported live figure that is already allocatable-minus-requested against real k8s Jobs —
-	// which already includes every SUBMITTED/ADMITTED/RUNNING job's request once its pod
-	// actually exists. Subtracting their footprint again here would double-count it and
-	// manufacture false scarcity. KNOWN GAP (unchanged by this pass, carried over from the prior
-	// scalar implementation): this assumes the pod already exists by the time capacity is
-	// queried, which is false in the window between MarkSubmitted and the cluster-agent
-	// actually creating it — that race is exactly what SCHEDULING_GENERALIZATION_PLAN.md's
-	// durable pending-capacity reservation item is meant to close; it has not landed yet.
-	submitted, err := l.store.ListSubmittedExperiments(ctx)
-	if err != nil {
-		return err
-	}
-	admittedInFlight, err := l.store.ListAdmittedExperiments(ctx)
-	if err != nil {
-		return err
-	}
+	// SUBMITTED/ADMITTED (in-flight, not yet observed RUNNING) jobs are deliberately NOT
+	// subtracted here — they're covered by the durable pending-reservation step (2b) below
+	// instead, which is accurate for every dimension including CPU (see that step's comment for
+	// why this loop still can't safely include CPU).
 	runningNow, err := l.store.ListRunningExperiments(ctx)
 	if err != nil {
 		return err
 	}
-	occupied := make([]*domain.Experiment, 0, len(submitted)+len(admittedInFlight)+len(runningNow))
-	occupied = append(occupied, submitted...)
-	occupied = append(occupied, admittedInFlight...)
-	occupied = append(occupied, runningNow...)
-	for _, exp := range occupied {
+	for _, exp := range runningNow {
 		fp := exp.Footprint()
 		// A job's cluster may no longer be configured (removed from clusters.yaml) — nothing
 		// to subtract from in that case; its capacity simply isn't tracked any more.
 		if _, ok := gAvail[exp.ClusterName]; !ok {
 			continue
 		}
-		subtractFootprint(gAvail[exp.ClusterName], fp)
-		subtractFootprint(bAvail[exp.ClusterName], fp)
+		// The CPU dimension is excluded from what's subtracted here (a fresh copy of fp with
+		// CPU zeroed): GetFlavorCapacity's CPU number is a cluster-agent-reported live figure
+		// that is already allocatable-minus-requested against real k8s Jobs — which already
+		// includes every RUNNING job's request, since its pod is confirmed to exist by
+		// definition. Subtracting it again here would double-count it and manufacture false
+		// scarcity. job_watcher's onRunning deletes a job's pending reservation the moment its
+		// pod is confirmed (see submitJob/onRunning), at which point live capacity becomes the
+		// sole source of truth for its CPU footprint.
+		nonCPU := make(domain.Footprint, len(fp))
+		for k, v := range fp {
+			if k.Kind != domain.ResourceKindCPU {
+				nonCPU[k] = v
+			}
+		}
+		subtractFootprint(gAvail[exp.ClusterName], nonCPU)
+		subtractFootprint(bAvail[exp.ClusterName], nonCPU)
+	}
+
+	// 2b. Close the pending-pod race: subtract every durably reserved-but-not-yet-confirmed-
+	// running job's footprint (see pending_capacity_reservations' schema comment), across ALL
+	// dimensions including CPU. A reservation only exists between MarkSubmitted and
+	// job_watcher observing the pod RUNNING (see submitJob/onRunning), so by construction it is
+	// never yet reflected in live capacity — subtracting it here is never a double-count. This
+	// is what actually closes SCHEDULING_GENERALIZATION_PLAN.md's "durable pending-capacity
+	// reservations" cross-cutting fix: a second tick before the cluster-agent has created the
+	// pod now sees this capacity as already claimed instead of trusting a stale point-in-time
+	// live number, for every admission dimension, not just the ones that used to have a
+	// separate GPU-only subtraction.
+	pendingByCluster, err := l.store.ListPendingReservationsByCluster(ctx)
+	if err != nil {
+		return err
+	}
+	for cluster, fp := range pendingByCluster {
+		if _, ok := gAvail[cluster]; !ok {
+			continue
+		}
+		subtractFootprint(gAvail[cluster], fp)
+		subtractFootprint(bAvail[cluster], fp)
 	}
 
 	// 3. Get all QUEUED experiments.

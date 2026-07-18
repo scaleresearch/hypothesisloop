@@ -35,6 +35,12 @@ func (w *JobWatcher) onStuckPending(ctx context.Context, exp *domain.Experiment)
 	if err := w.store.UpdateEvictionReason(ctx, exp.ID, string(domain.EvictionStuckPending)); err != nil {
 		w.logger.Warn("job_watcher: set eviction reason", zap.String("id", exp.ID), zap.Error(err))
 	}
+	// Evicted without ever reaching RUNNING — release the durable pending-capacity claim (see
+	// pending_capacity_reservations' schema comment) so it stops being subtracted from live
+	// capacity on the next tick.
+	if err := w.store.DeletePendingReservation(ctx, exp.ID); err != nil {
+		w.logger.Warn("job_watcher: delete pending reservation on stuck_pending eviction", zap.String("id", exp.ID), zap.Error(err))
+	}
 	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStuckPending)).Inc()
 
 	// exp never reported RUNNING, so it has no observations in the metrics DB — Settle will
@@ -78,6 +84,15 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 	if !started {
 		w.logger.Info("job_watcher: experiment left SUBMITTED/ADMITTED before Running was observed — skipping", zap.String("id", exp.ID))
 		return "", false
+	}
+
+	// The pod is now confirmed to exist — live capacity already reflects its request (see
+	// loop_tick.go's step-2 comment), so the durable pending-capacity claim from submitJob is
+	// no longer needed. Best-effort: a failure here is a transient over-reservation, not a
+	// correctness break (tick() would just see slightly less capacity than actually free until
+	// this succeeds on a retry or the job eventually terminates).
+	if err := w.store.DeletePendingReservation(ctx, exp.ID); err != nil {
+		w.logger.Warn("job_watcher: delete pending reservation on running", zap.String("id", exp.ID), zap.Error(err))
 	}
 
 	admittedType := w.backend.GetAdmittedGPUType(ctx, exp)
@@ -212,6 +227,14 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 			// Already terminal (e.g. controller evicted it concurrently) — nothing to do.
 			return
 		}
+	}
+
+	// Release the durable pending-capacity claim, if one is still outstanding — normally
+	// already deleted by onRunning, but a job that skipped straight from SUBMITTED/ADMITTED to
+	// terminal (the startedAt.IsZero() branch above) never went through onRunning, so it must
+	// be cleared here too. No-op (and safe to call unconditionally) if already gone.
+	if err := w.store.DeletePendingReservation(ctx, exp.ID); err != nil {
+		w.logger.Warn("job_watcher: delete pending reservation on finish", zap.String("id", exp.ID), zap.Error(err))
 	}
 
 	// Durably settle each resource dimension's observed cost: elapsed × gpu_count × rate for

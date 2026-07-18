@@ -47,6 +47,12 @@ type JobStatusStore interface {
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
+	// DeletePendingReservation removes id's durable pending-capacity claim (see
+	// pending_capacity_reservations' schema comment) once its fate is resolved: its pod is
+	// confirmed running (live capacity now covers it directly) or it left SUBMITTED/ADMITTED
+	// without ever needing one counted (stuck-pending eviction, or a terminal report arriving
+	// before RUNNING was ever observed). No-op if none exists.
+	DeletePendingReservation(ctx context.Context, id string) error
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage across every

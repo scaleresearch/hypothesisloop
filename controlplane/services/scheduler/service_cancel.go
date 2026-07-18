@@ -35,6 +35,10 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			return nil // concurrent cancellation already handled it
 		}
 		_ = s.store.UpdateEvictionReason(ctx, id, string(domain.EvictionCancelled))
+		// A SUBMITTED job may still hold a durable pending-capacity claim (see
+		// pending_capacity_reservations' schema comment) — release it, or tick() would keep
+		// subtracting it from live capacity for a job that no longer exists.
+		_ = s.store.DeletePendingReservation(ctx, id)
 		// Never started running: 0 observed cost.
 		s.refundAllResources(ctx, exp, 0, 0)
 		return nil
@@ -44,6 +48,9 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			return fmt.Errorf("cancel: update status: %w", err)
 		}
 		_ = s.store.UpdateEvictionReason(ctx, id, string(domain.EvictionCancelled))
+		// ADMITTED jobs may still hold a pending reservation (RUNNING ones already had theirs
+		// cleared by job_watcher's onRunning) — release it unconditionally; a no-op if already gone.
+		_ = s.store.DeletePendingReservation(ctx, id)
 		fraction, gpuCost, err := s.observedFraction(ctx, exp)
 		if err != nil {
 			return fmt.Errorf("cancel: %w", err)

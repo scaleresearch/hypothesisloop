@@ -184,16 +184,31 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 }
 
 // submitJob marks the experiment SUBMITTED and assigns it to clusterName in the DB first
-// (atomically — see MarkSubmitted), then creates the backend workload. Order matters: marking
-// first ensures the in-flight footprint is always visible to the next tick, on the right
-// cluster, even if the backend write is slow. On backend failure we roll back to QUEUED so the
-// job re-enters the queue rather than leaking in an untracked SUBMITTED state.
+// (atomically — see MarkSubmitted), durably reserves its footprint against that cluster (see
+// pending_capacity_reservations' schema comment — closes the race where a second tick, before
+// the cluster-agent has actually created the pod, would otherwise see live capacity as still
+// free), then creates the backend workload. Order matters: marking and reserving first ensures
+// the in-flight footprint is always visible to the next tick, on the right cluster, even if the
+// backend write is slow. On backend failure we roll back to QUEUED and drop the reservation so
+// the job re-enters the queue rather than leaking in an untracked SUBMITTED state or holding a
+// phantom claim on capacity it never actually got.
 func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string) error {
 	if err := l.store.MarkSubmitted(ctx, exp.ID, clusterName); err != nil {
 		return err
 	}
 	exp.ClusterName = clusterName
+	if err := l.store.UpsertPendingReservation(ctx, exp.ID, clusterName, exp.Footprint()); err != nil {
+		// Best-effort: a failure here degrades the pending-race protection for this one job
+		// (the existing SUBMITTED/ADMITTED/RUNNING accounting in tick() step 2 still applies)
+		// but must not block submission — the job's own capacity claim is already durable via
+		// MarkSubmitted's status write.
+		l.logger.Warn("upsert pending reservation", zap.String("exp", exp.ID), zap.Error(err))
+	}
 	if err := l.workload.CreateWorkload(ctx, exp); err != nil {
+		if delErr := l.store.DeletePendingReservation(ctx, exp.ID); delErr != nil {
+			l.logger.Warn("delete pending reservation after workload creation error",
+				zap.String("exp", exp.ID), zap.Error(delErr))
+		}
 		if rbErr := l.store.MarkQueued(ctx, exp.ID); rbErr != nil {
 			l.logger.Error("rollback to QUEUED failed after workload creation error",
 				zap.String("exp", exp.ID), zap.Error(rbErr))
