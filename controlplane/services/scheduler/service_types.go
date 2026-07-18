@@ -63,6 +63,10 @@ type Store interface {
 // QuotaService handles experiment-scoped quota checks and debits, across every resource
 // dimension (GPU-hours, CPU-core-hours, RAM-GB-hours, storage-GB-hours).
 type QuotaService interface {
+	// GetAgentQuota looks up (agentID, platformExpID)'s quota row — used by computePriority to
+	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction),
+	// comparable across CPU/GPU/RAM/storage jobs instead of raw, dimensionally-incompatible hours.
+	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	CheckAndDebitQuota(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error
 	// RefundQuota overwrites experimentID's own usage with amount (its observed cost, an
 	// absolute set — see metricsdb.UsageTracker.SetObserved), not a delta to subtract.

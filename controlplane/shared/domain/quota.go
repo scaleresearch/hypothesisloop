@@ -74,3 +74,57 @@ func (q *AgentQuota) AvailableGuaranteedStorage() float64 {
 func (q *AgentQuota) AvailableBurstStorage() float64 {
 	return math.Max(0, q.BurstStorageGBHours-q.UsedBurstStorageGBH)
 }
+
+// DominantUtilization implements dominant resource fairness generalized across every
+// hours-tracked dimension (GPU/CPU today — RAM/storage are Class B and never estimated, see
+// ResourceRAMGBHours' doc comment, so they naturally drop out below): max(used/guaranteed) over
+// the dimensions exp actually requests (its own estimated amount > 0) AND that q tracks
+// (guaranteed > 0). A dimension exp doesn't request, or q doesn't track at all, is EXCLUDED
+// from the max, not treated as 0 utilization — the latter would make an agent that's exhausted
+// its GPU quota but never touched an untracked CPU quota look artificially idle just because
+// one irrelevant ratio happens to read 0/0. Returns 0 if no dimension is both requested and
+// tracked (nothing to be unfair about).
+//
+// Always reads the *guaranteed* columns, even when called for burst-tier ordering: an agent's
+// standing under its guaranteed allocation is the fairness signal both passes use (see
+// scheduler.sortBurst's doc comment) — burst's own usage is deliberately not part of this ratio.
+func (q *AgentQuota) DominantUtilization(exp *Experiment) float64 {
+	dominant := 0.0
+	consider := func(used, guaranteed, requested float64) {
+		if guaranteed <= 0 || requested <= 0 {
+			return
+		}
+		if u := used / guaranteed; u > dominant {
+			dominant = u
+		}
+	}
+	consider(q.UsedGuaranteedT4H, q.GuaranteedT4Hours, exp.EstimatedCostT4H)
+	consider(q.UsedGuaranteedCPUCoreH, q.GuaranteedCPUCoreHours, exp.EstimatedCPUCoreHours)
+	consider(q.UsedGuaranteedRAMGBH, q.GuaranteedRAMGBHours, exp.EstimatedRAMGBHours)
+	consider(q.UsedGuaranteedStorageGBH, q.GuaranteedStorageGBHours, exp.EstimatedStorageGBHours)
+	return dominant
+}
+
+// DominantCostFraction returns max(requested/guaranteed) across the same requested-AND-tracked
+// dimensions as DominantUtilization, but for one job's own estimated amount rather than the
+// agent's cumulative usage — a dimensionless "how big a bite out of my own guaranteed budget is
+// this one job" fraction, comparable across CPU/GPU/RAM/storage jobs unlike summing raw,
+// unit-incompatible hours together. Used by computePriority's cost-efficiency term and by the
+// scheduler's smallest-job-first sort tiebreak (replacing the old GPU-only GPUHours(), which
+// was always zero for CPU-only jobs). Returns 0 if no dimension is both requested and tracked.
+func (q *AgentQuota) DominantCostFraction(exp *Experiment) float64 {
+	dominant := 0.0
+	consider := func(requested, guaranteed float64) {
+		if guaranteed <= 0 || requested <= 0 {
+			return
+		}
+		if f := requested / guaranteed; f > dominant {
+			dominant = f
+		}
+	}
+	consider(exp.EstimatedCostT4H, q.GuaranteedT4Hours)
+	consider(exp.EstimatedCPUCoreHours, q.GuaranteedCPUCoreHours)
+	consider(exp.EstimatedRAMGBHours, q.GuaranteedRAMGBHours)
+	consider(exp.EstimatedStorageGBHours, q.GuaranteedStorageGBHours)
+	return dominant
+}

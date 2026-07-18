@@ -102,12 +102,6 @@ func (e *Experiment) RemainingEstimatedHours() float64 {
 	return math.Max(MinRemainingHours, r)
 }
 
-// GPUHours returns the total GPU-hours requested (gpu_count × estimated_duration_hours).
-// Used as a scheduling tiebreak: prefer jobs with smaller total GPU-hours (shorter or fewer GPUs).
-func (e *Experiment) GPUHours() float64 {
-	return float64(e.GPUCount) * e.EstimatedDurationHours
-}
-
 // RequestedCPUCores returns the CPU cores this experiment requests, derived from
 // estimated_cpu_core_hours / estimated_duration_hours. Zero for GPU jobs or when duration is
 // unset. Used by the admission loop's live CPU-capacity check for CPU-only jobs.

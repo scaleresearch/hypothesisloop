@@ -127,21 +127,33 @@ func (s *Service) observedFraction(ctx context.Context, exp *domain.Experiment) 
 //
 // Components:
 //   - novelty:        provided by the caller (already computed against active experiments)
-//   - costEfficiency: 1 / (1 + estimatedCost), favours cheaper experiments
+//   - costEfficiency: 1 / (1 + dominantCostFraction), favours cheaper experiments
+//
+// costEfficiency used to be 1/(1+EstimatedCostT4H) — GPU-hours only, so a CPU-only job (always
+// EstimatedCostT4H == 0) got a maximal costEfficiency of 1 regardless of how large its actual
+// CPU/RAM/storage footprint was, and a job requesting a genuinely tiny sliver of GPU couldn't be
+// compared on the same scale as one requesting a huge slice of CPU. domain.AgentQuota.DominantCostFraction
+// fixes this by expressing "how big is this job" as a dimensionless fraction of the agent's own
+// guaranteed budget for whichever dimension(s) it actually requests — comparable across
+// CPU/GPU/RAM/storage jobs instead of summing raw, unit-incompatible hours. Falls back to 0 (the
+// same "maximally cheap" default the old code effectively used for CPU-only jobs) if no quota
+// row is found yet (e.g. first submission before AgentProvisioner ran) or exp has no
+// PlatformExperimentID.
 //
 // Note: SchedulingWeights has no W2/abuse-penalty field today — abuse is handled entirely by
 // the controller's eviction guards (crash-loop, silence), not by suppressing admission
 // priority. (This doc comment previously described a 3-term w1/w2/w3 formula that no longer
 // matches the code — corrected to the actual 2-term one.)
-func (s *Service) computePriority(_ context.Context, exp *domain.Experiment, novelty float64) (float64, error) {
+func (s *Service) computePriority(ctx context.Context, exp *domain.Experiment, novelty float64) (float64, error) {
 	w := s.weights
 
-	// Cost efficiency: cheap experiments get higher scores.
-	cost := exp.EstimatedCostT4H
-	if cost < 0 {
-		cost = 0
+	costFraction := 0.0
+	if exp.PlatformExperimentID != "" {
+		if aq, err := s.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID); err == nil && aq != nil {
+			costFraction = aq.DominantCostFraction(exp)
+		}
 	}
-	costEfficiency := 1.0 / (1.0 + cost)
+	costEfficiency := 1.0 / (1.0 + costFraction)
 
 	score := w.W1Novelty*novelty +
 		w.W3CostEfficiency*costEfficiency

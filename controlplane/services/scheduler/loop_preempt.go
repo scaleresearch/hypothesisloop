@@ -225,14 +225,18 @@ func quotaKey(agentID, platformExpID string) string {
 	return agentID + "/" + platformExpID
 }
 
-// fetchQuotaMap builds a map of (agentID, platformExperimentID) -> used T4H fraction for burst
-// ordering. Keyed by the composite (AgentID, PlatformExperimentID) pair, not AgentID alone: an
-// agent can run multiple platform experiments concurrently, each with its own quota pool, so a
-// map keyed by AgentID alone would let a second platform experiment's ratio silently overwrite
-// the first's.
-func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map[string]float64 {
+// fetchQuotaMap builds a map of (agentID, platformExperimentID) -> *domain.AgentQuota for
+// guaranteed/burst ordering. Keyed by the composite (AgentID, PlatformExperimentID) pair, not
+// AgentID alone: an agent can run multiple platform experiments concurrently, each with its own
+// quota pool, so a map keyed by AgentID alone would let a second platform experiment's quota
+// silently overwrite the first's. The full AgentQuota (not a single precomputed ratio) is kept
+// so sortGuaranteed/sortBurst can compute each experiment's own dominant-utilization fairness
+// ratio (see domain.AgentQuota.DominantUtilization) against the dimensions THAT job actually
+// requests — a fixed single ratio per agent can't do that, since two jobs from the same agent
+// competing on different dimensions (e.g. one GPU-only, one CPU-only) need different ratios.
+func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map[string]*domain.AgentQuota {
 	seen := map[string]bool{}
-	result := map[string]float64{}
+	result := map[string]*domain.AgentQuota{}
 	for _, exp := range exps {
 		key := quotaKey(exp.AgentID, exp.PlatformExperimentID)
 		if seen[key] || exp.PlatformExperimentID == "" {
@@ -243,9 +247,7 @@ func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map
 		if err != nil || aq == nil {
 			continue
 		}
-		if aq.GuaranteedT4Hours > 0 {
-			result[key] = aq.UsedGuaranteedT4H / aq.GuaranteedT4Hours
-		}
+		result[key] = aq
 	}
 	return result
 }
