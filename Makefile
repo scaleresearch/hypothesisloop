@@ -2,7 +2,7 @@
 	controlplane-up controlplane-down \
 	cluster-agent-up cluster-agent-down \
 	k3s-up k3s-down full-up k3s-add-fake-nodes \
-	full-stop full-start
+	full-stop full-start reload
 
 COMPOSE_FILE := controlplane/infra/docker-compose.yaml
 
@@ -62,6 +62,14 @@ full-stop:
 
 full-start:
 	bash localdev/start.sh
+
+# Rebuild every image from current source and push it into every place that caches one
+# (podman store, k3s server, each fake-gpu-node container), then bounce the control-plane
+# containers and cluster-agent/node-agent pods so they run it. Use this after a Go change,
+# before re-running the e2e suites — faster than a manual images+import+restart chain since
+# every step polls for readiness instead of sleeping a fixed guess.
+reload:
+	bash localdev/reload.sh
 
 # Tagged explicitly under localhost/ (not just the short name) because the DaemonSet/
 # Deployment/Job specs reference these images as localhost/openresearch-*:latest with
