@@ -25,7 +25,7 @@ func NewHypothesesStore(pool *Pool) *HypothesesStore {
 const hypothesisColumns = `id, agent_id, platform_experiment_id, text, created_at`
 
 // newHypothesisID generates a UUIDv7-formatted string, matching the ID scheme used
-// elsewhere for agent-visible entities (see registry.newUUIDv7).
+// elsewhere for agent-visible entities.
 func newHypothesisID() (string, error) {
 	var rnd [10]byte
 	if _, err := rand.Read(rnd[:]); err != nil {

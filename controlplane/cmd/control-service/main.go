@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
 	"github.com/scaleresearch/openresearch/controlplane/services/settlement"
 	"github.com/scaleresearch/openresearch/controlplane/shared/api"
+	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
 	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
@@ -73,15 +74,15 @@ func main() {
 	domain.SetStorageGBHourRate(pcfg.StorageGBHourRate)
 
 	quotaCfg := domain.QuotaConfig{
-		Top3BonusFraction:     pcfg.Quota.Top3BonusFraction,
-		BurstFraction:         pcfg.Quota.BurstFraction,
-		Phase1ExploreFraction: pcfg.Phase2.BoundaryFraction,
-		MaxSubmissionsPerHour: pcfg.Quota.MaxSubmissionsPerHour,
-		MetricDeclineFraction: pcfg.Quota.MetricDeclineFraction,
-		MaxAcceleratorCountPerJob:     pcfg.Quota.MaxAcceleratorCountPerJob,
-		MaxCPUCoresPerJob:     pcfg.Quota.MaxCPUCoresPerJob,
-		MaxRAMGBPerJob:        pcfg.Quota.MaxRAMGBPerJob,
-		MaxStorageGBPerJob:    pcfg.Quota.MaxStorageGBPerJob,
+		Top3BonusFraction:         pcfg.Quota.Top3BonusFraction,
+		BurstFraction:             pcfg.Quota.BurstFraction,
+		Phase1ExploreFraction:     pcfg.Phase2.BoundaryFraction,
+		MaxSubmissionsPerHour:     pcfg.Quota.MaxSubmissionsPerHour,
+		MetricDeclineFraction:     pcfg.Quota.MetricDeclineFraction,
+		MaxAcceleratorCountPerJob: pcfg.Quota.MaxAcceleratorCountPerJob,
+		MaxCPUCoresPerJob:         pcfg.Quota.MaxCPUCoresPerJob,
+		MaxRAMGBPerJob:            pcfg.Quota.MaxRAMGBPerJob,
+		MaxStorageGBPerJob:        pcfg.Quota.MaxStorageGBPerJob,
 	}
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
@@ -134,7 +135,7 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, AccHRate: g.AccHRate})
 	}
 	resourceCatalog := quota.ResourceCatalog{
-		AcceleratorTypes:          acceleratorTypeInfos,
+		AcceleratorTypes:  acceleratorTypeInfos,
 		CPUCoreHourRate:   domain.CPUCoreHourRate(),
 		RAMGBHourRate:     domain.RAMGBHourRate(),
 		StorageGBHourRate: domain.StorageGBHourRate(),
@@ -153,8 +154,12 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 
 	r := chi.NewRouter()
 	r.Use(api.CORSMiddleware)
-	handler.RegisterRoutes(r)
-	peHandler.RegisterRoutes(r)
+	// Huma transport: registers the research-agent/dashboard-facing quota API on r,
+	// auto-exposing /openapi.json and serving a compact /explore digest (with the
+	// cross-cutting platform-rules preamble, since agents talk to quota first).
+	doc := apidocs.New(r, "openresearch quota-service", "1.0.0", apidocs.PlatformRules)
+	quota.RegisterHuma(doc, handler, peHandler)
+	doc.MountExplore(r)
 	r.Handle("/metrics", promhttp.Handler())
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -185,9 +190,9 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 		logger.Fatal("control-service: load clusters config", zap.Error(err))
 	}
 	openresearchWorkloadCfg := &workload.OpenResearchConfig{
-		NameByFlavor: pcfg.NameByFlavor,
+		NameByFlavor:         pcfg.NameByFlavor,
 		AcceleratorsByFlavor: pcfg.AcceleratorsByFlavor,
-		FlavorOrder:  pcfg.FlavorOrder(),
+		FlavorOrder:          pcfg.FlavorOrder(),
 	}
 	var clusterNames []string
 	if len(clusterEntries) == 0 {
@@ -218,9 +223,9 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 	watcher := scheduler.NewJobWatcher(store, jwc, logger).
 		WithQuotaSettler(settler).
 		WithQuotaAdjuster(expQuotaSvc).
-		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds) * time.Second).
-		WithScanInterval(time.Duration(pcfg.Scheduler.AdmittedScanIntervalSeconds) * time.Second).
-		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds) * time.Second).
+		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
+		WithScanInterval(time.Duration(pcfg.Scheduler.AdmittedScanIntervalSeconds)*time.Second).
+		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
 
 	noveltyDetector := dedup.New()
@@ -230,9 +235,9 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
 		WithReprioritizer(schedulerSvc).
-		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds) * time.Second).
-		WithPreemptTimeout(time.Duration(pcfg.Scheduler.PreemptTimeoutSeconds) * time.Second).
-		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds) * time.Second).
+		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
+		WithPreemptTimeout(time.Duration(pcfg.Scheduler.PreemptTimeoutSeconds)*time.Second).
+		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 
@@ -248,30 +253,37 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 		})
 
 	schedulerHandler := scheduler.NewHandler(schedulerSvc)
-	r := chi.NewRouter()
-	schedulerHandler.Routes(r)
 
-	gw := api.NewGateway(
-		http.NotFoundHandler(),
-		r,
-		http.NotFoundHandler(),
-	)
-	gwHandler := gw.Handler(logger)
-
+	// Cluster-agent-facing surface (a distinct consumer: Go cluster-agent binaries, not the
+	// Python research agent) gets its own Huma registration mounted at /internal/clusters, with
+	// its own /internal/clusters/openapi.json and /internal/clusters/explore discovery docs.
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, logger)
 	clusterAgentRouter := chi.NewRouter()
-	clusterAgentHandler.Routes(clusterAgentRouter)
+	caDoc := apidocs.New(clusterAgentRouter, "openresearch cluster-agent API", "1.0.0", "")
+	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
+	caDoc.MountExplore(clusterAgentRouter)
 
 	outer := chi.NewRouter()
-	// Same CORS policy as the quota-service router above (api.CORSMiddleware) — without it,
-	// the UI's cross-origin calls into this port (fetchClusters, cancelExperiment, job
-	// submission) succeed at the network level but the browser silently blocks the response,
-	// which surfaces as a misleading "Cannot reach scheduler service" rather than a CORS error.
+	// Same middleware the previous api.Gateway applied (recovery, request logging) plus CORS —
+	// without CORS the UI's cross-origin calls into this port succeed at the network level but the
+	// browser silently blocks the response, surfacing as a misleading "Cannot reach scheduler service".
+	outer.Use(api.RecoveryMiddleware(logger))
+	outer.Use(api.LoggingMiddleware(logger))
 	outer.Use(api.CORSMiddleware)
+	outer.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `{"status":"ok"}`)
+	})
 	outer.Handle("/metrics", promhttp.Handler())
 	outer.Mount("/internal/clusters", clusterAgentRouter)
-	outer.Mount("/", gwHandler)
+	// Research-agent/dashboard-facing scheduler API via Huma, registered at full /experiments/*
+	// paths on the port-root router so /openapi.json and /explore live at the port root.
+	schedDoc := apidocs.New(outer, "openresearch scheduler-service", "1.0.0",
+		"Job submission and experiment lifecycle. See the quota-service /explore for the cross-cutting platform rules.\n")
+	scheduler.RegisterHuma(schedDoc, schedulerHandler)
+	schedDoc.MountExplore(outer)
 
 	return &http.Server{
 		Addr:         ":" + port,

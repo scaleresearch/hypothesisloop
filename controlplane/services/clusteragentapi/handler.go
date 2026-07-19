@@ -10,18 +10,23 @@
 // reconciles its local Jobs to match, the same way a kubelet reconciles pods to a desired
 // spec. This means desired-state is naturally idempotent and safe to poll from any number of
 // concurrent cluster-agent replicas without coordination.
+//
+// This is a distinct *consumer* surface from the research-agent/dashboard API: it is served
+// with its own Huma registration, its own /internal/clusters/openapi.json and its own
+// /internal/clusters/explore digest, tagged "cluster-agent", so the Go cluster-agent binary's
+// contract is never mixed into the Python research agent's discovery doc.
 package clusteragentapi
 
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
@@ -42,13 +47,9 @@ type Store interface {
 type Handler struct {
 	store  Store
 	logger *zap.Logger
-	// connectedWithin is how recent a heartbeat must be to count as "connected" — config-driven
-	// (scheduler.cluster_unreachable_after_seconds), shared with queuebackend.Backend's live
-	// CPU capacity staleness check so there is exactly one cluster-liveness threshold, not two
-	// independently hardcoded ones.
+	// connectedWithin is how recent a heartbeat must be to count as "connected".
 	connectedWithin time.Duration
-	// metricsDBURL is where live per-cluster accelerator capacity is written (see RecordClusterAcceleratorCapacity)
-	// — capacity is metric data, so it lives in the metrics store, never duplicated into Postgres.
+	// metricsDBURL is where live per-cluster accelerator capacity is written.
 	metricsDBURL string
 }
 
@@ -58,198 +59,202 @@ func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string,
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL, logger: logger}
 }
 
-// Routes registers all cluster-agent-facing routes onto r. Mounted at /internal/clusters.
-func (h *Handler) Routes(r chi.Router) {
-	r.Get("/", h.ListClusters)
-	r.Get("/{name}/desired-state", h.DesiredState)
-	r.Post("/{name}/status", h.PushStatus)
-}
-
-// DesiredState handles GET /internal/clusters/{name}/desired-state — returns every
-// experiment that should currently have a Job running in that cluster, full payload
-// included (the agent has no database access, so everything needed to build the Job —
-// accelerator type/count, image, env refs, priority tier — travels in this response). Also records a
-// heartbeat for clusterName: this is the endpoint cluster-agent calls most frequently
-// (its whole reconcile loop), so it doubles as the liveness signal the UI reads back via
-// ListClusters — no separate ping needed.
-//
-// It also doubles as the live-capacity push channel: cluster-agent computes its own
-// allocatable-minus-requested CPU cores every poll and attaches them as query params
-// (cpu_available_cores, cpu_total_cores) — reusing this already-fast (~2s) poll instead of
-// adding a second endpoint/cadence keeps capacity reporting on the same fast path as job
-// status, matching every other push mechanism in this system.
-func (h *Handler) DesiredState(w http.ResponseWriter, r *http.Request) {
-	clusterName := chi.URLParam(r, "name")
-
-	cpuAvail, availErr := strconv.ParseFloat(r.URL.Query().Get("cpu_available_cores"), 64)
-	cpuTotal, totalErr := strconv.ParseFloat(r.URL.Query().Get("cpu_total_cores"), 64)
-	hasCPUReport := availErr == nil && totalErr == nil
-
-	if err := h.store.RecordHeartbeat(r.Context(), clusterName, cpuAvail, cpuTotal, hasCPUReport); err != nil {
-		h.logger.Warn("clusteragentapi: record heartbeat", zap.String("cluster", clusterName), zap.Error(err))
-	}
-
-	var acceleratorAvail, acceleratorTotal map[string]int64
-	if raw := r.URL.Query().Get("accelerator_available_by_flavor"); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &acceleratorAvail)
-	}
-	if raw := r.URL.Query().Get("accelerator_total_by_flavor"); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &acceleratorTotal)
-	}
-	if len(acceleratorAvail) > 0 {
-		if err := metricsdb.RecordClusterAcceleratorCapacity(r.Context(), h.metricsDBURL, clusterName, acceleratorAvail, acceleratorTotal); err != nil {
-			h.logger.Warn("clusteragentapi: record accelerator capacity", zap.String("cluster", clusterName), zap.Error(err))
+// RegisterHuma registers the cluster-agent-facing operations on doc. Paths are relative to
+// the /internal/clusters mount. Tagged "cluster-agent" — a separate consumer from the
+// research agent, so it gets its own OpenAPI doc / explore.
+func RegisterHuma(doc *apidocs.Doc, h *Handler) {
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "list-clusters", Method: "GET", Path: "/",
+		Summary: "List clusters and their connectivity", Tags: []string{"cluster-agent"},
+		Description: "Every cluster that has ever polled, and whether its agent is connected right now.",
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			Clusters []clusterInfo `json:"clusters"`
 		}
-	}
-
-	// RAM/ephemeral-storage — Class B (hard-cap, no billing) dimensions, same "metric data,
-	// never duplicated into Postgres" treatment as accelerator above (see
-	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2).
-	if ramAvail, availErr := strconv.ParseInt(r.URL.Query().Get("ram_available_bytes"), 10, 64); availErr == nil {
-		if ramTotal, totalErr := strconv.ParseInt(r.URL.Query().Get("ram_total_bytes"), 10, 64); totalErr == nil {
-			if err := metricsdb.RecordClusterRAMCapacity(r.Context(), h.metricsDBURL, clusterName, ramAvail, ramTotal); err != nil {
-				h.logger.Warn("clusteragentapi: record RAM capacity", zap.String("cluster", clusterName), zap.Error(err))
+	}, error) {
+		heartbeats, err := h.store.ListHeartbeats(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		out := make([]clusterInfo, len(heartbeats))
+		now := time.Now()
+		for i, hb := range heartbeats {
+			out[i] = clusterInfo{
+				ClusterName: hb.ClusterName,
+				LastSeenAt:  hb.LastSeenAt,
+				Connected:   now.Sub(hb.LastSeenAt) <= h.connectedWithin,
 			}
 		}
-	}
-	if storageAvail, availErr := strconv.ParseInt(r.URL.Query().Get("storage_available_bytes"), 10, 64); availErr == nil {
-		if storageTotal, totalErr := strconv.ParseInt(r.URL.Query().Get("storage_total_bytes"), 10, 64); totalErr == nil {
-			if err := metricsdb.RecordClusterStorageCapacity(r.Context(), h.metricsDBURL, clusterName, storageAvail, storageTotal); err != nil {
-				h.logger.Warn("clusteragentapi: record storage capacity", zap.String("cluster", clusterName), zap.Error(err))
+		resp := &struct {
+			Body struct {
+				Clusters []clusterInfo `json:"clusters"`
+			}
+		}{}
+		resp.Body.Clusters = out
+		return resp, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "cluster-desired-state", Method: "GET", Path: "/{name}/desired-state",
+		Summary: "Fetch the desired workload set for a cluster", Tags: []string{"cluster-agent"},
+		Description: "Returns every experiment that should currently have a Job running in the cluster (full payload). " +
+			"Doubles as the cluster-agent heartbeat and live-capacity push channel via optional query params.",
+	}, func(ctx context.Context, in *desiredStateInput) (*struct {
+		Body struct {
+			Experiments []*domain.Experiment `json:"experiments"`
+		}
+	}, error) {
+		clusterName := in.Name
+
+		cpuAvail, availErr := strconv.ParseFloat(in.CPUAvailableCores, 64)
+		cpuTotal, totalErr := strconv.ParseFloat(in.CPUTotalCores, 64)
+		hasCPUReport := availErr == nil && totalErr == nil && in.CPUAvailableCores != "" && in.CPUTotalCores != ""
+
+		if err := h.store.RecordHeartbeat(ctx, clusterName, cpuAvail, cpuTotal, hasCPUReport); err != nil {
+			h.logger.Warn("clusteragentapi: record heartbeat", zap.String("cluster", clusterName), zap.Error(err))
+		}
+
+		var acceleratorAvail, acceleratorTotal map[string]int64
+		if in.AcceleratorAvailableByFlavor != "" {
+			_ = json.Unmarshal([]byte(in.AcceleratorAvailableByFlavor), &acceleratorAvail)
+		}
+		if in.AcceleratorTotalByFlavor != "" {
+			_ = json.Unmarshal([]byte(in.AcceleratorTotalByFlavor), &acceleratorTotal)
+		}
+		if len(acceleratorAvail) > 0 {
+			if err := metricsdb.RecordClusterAcceleratorCapacity(ctx, h.metricsDBURL, clusterName, acceleratorAvail, acceleratorTotal); err != nil {
+				h.logger.Warn("clusteragentapi: record accelerator capacity", zap.String("cluster", clusterName), zap.Error(err))
 			}
 		}
-	}
 
-	exps, err := h.store.ListDesiredWorkloads(r.Context(), clusterName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"experiments": exps})
+		if ramAvail, availErr := strconv.ParseInt(in.RAMAvailableBytes, 10, 64); availErr == nil {
+			if ramTotal, totalErr := strconv.ParseInt(in.RAMTotalBytes, 10, 64); totalErr == nil {
+				if err := metricsdb.RecordClusterRAMCapacity(ctx, h.metricsDBURL, clusterName, ramAvail, ramTotal); err != nil {
+					h.logger.Warn("clusteragentapi: record RAM capacity", zap.String("cluster", clusterName), zap.Error(err))
+				}
+			}
+		}
+		if storageAvail, availErr := strconv.ParseInt(in.StorageAvailableBytes, 10, 64); availErr == nil {
+			if storageTotal, totalErr := strconv.ParseInt(in.StorageTotalBytes, 10, 64); totalErr == nil {
+				if err := metricsdb.RecordClusterStorageCapacity(ctx, h.metricsDBURL, clusterName, storageAvail, storageTotal); err != nil {
+					h.logger.Warn("clusteragentapi: record storage capacity", zap.String("cluster", clusterName), zap.Error(err))
+				}
+			}
+		}
+
+		exps, err := h.store.ListDesiredWorkloads(ctx, clusterName)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		resp := &struct {
+			Body struct {
+				Experiments []*domain.Experiment `json:"experiments"`
+			}
+		}{}
+		resp.Body.Experiments = exps
+		return resp, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "cluster-push-status", Method: "POST", Path: "/{name}/status",
+		Summary: "Push job-phase observations from a cluster-agent", Tags: []string{"cluster-agent"},
+		Description: "Body: {\"reports\": [...]}. Returns {status, rejected}; rejected lists reports the write " +
+			"did not durably apply (error, stale/duplicate sequence, or not owned by this cluster) — retry those.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+		Body struct {
+			Reports []statusReport `json:"reports"`
+		}
+	}) (*struct {
+		Body struct {
+			Status   string   `json:"status"`
+			Rejected []string `json:"rejected"`
+		}
+	}, error) {
+		clusterName := in.Name
+		rejected := []string{}
+		for _, rep := range in.Body.Reports {
+			if rep.ExperimentID == "" || rep.Phase == "" {
+				continue
+			}
+			applied, uidMismatch, err := h.store.UpsertJobReport(ctx, rep.ExperimentID, clusterName, rep.Phase, domain.AcceleratorType(rep.AdmittedAcceleratorType), rep.SequenceNumber, rep.JobUID)
+			if err != nil {
+				h.logger.Warn("clusteragentapi: upsert job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+				rejected = append(rejected, rep.ExperimentID)
+				continue
+			}
+			if !applied {
+				rejected = append(rejected, rep.ExperimentID)
+				continue
+			}
+			if h.metricsDBURL != "" && rep.AdmittedNode != "" {
+				if err := metricsdb.RecordExperimentNode(ctx, h.metricsDBURL, rep.ExperimentID, rep.AdmittedNode, time.Now().UTC()); err != nil {
+					h.logger.Warn("clusteragentapi: record experiment node", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+				}
+			}
+			if uidMismatch {
+				h.logger.Warn("clusteragentapi: job UID mismatch — report may not correspond to the dispatched Job",
+					zap.String("experiment_id", rep.ExperimentID),
+					zap.String("cluster", clusterName),
+					zap.String("reported_uid", rep.JobUID),
+				)
+				obsmetrics.JobUIDMismatchTotal.WithLabelValues(clusterName).Inc()
+			}
+			if rep.Phase == "gone" {
+				if err := h.store.DeleteJobReportForCluster(ctx, rep.ExperimentID, clusterName); err != nil {
+					h.logger.Warn("clusteragentapi: delete job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+				}
+				attempt, bumped, err := h.store.BumpAttemptOnRecreate(ctx, rep.ExperimentID)
+				if err != nil {
+					h.logger.Warn("clusteragentapi: bump attempt", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+				} else if bumped {
+					h.logger.Warn("clusteragentapi: job disappeared while still desired — recreation attempt bumped",
+						zap.String("experiment_id", rep.ExperimentID),
+						zap.String("cluster", clusterName),
+						zap.Int("attempt", attempt),
+					)
+				}
+			}
+		}
+		resp := &struct {
+			Body struct {
+				Status   string   `json:"status"`
+				Rejected []string `json:"rejected"`
+			}
+		}{}
+		resp.Body.Status = "ok"
+		resp.Body.Rejected = rejected
+		return resp, nil
+	})
 }
 
-// clusterInfo is one row of GET /internal/clusters — read by the UI to show which registered
-// clusters currently have a connected cluster-agent.
+// desiredStateInput models the cluster-agent's desired-state poll, including the optional
+// capacity/heartbeat query params it piggybacks on the request.
+type desiredStateInput struct {
+	Name                         string `path:"name"`
+	CPUAvailableCores            string `query:"cpu_available_cores"`
+	CPUTotalCores                string `query:"cpu_total_cores"`
+	AcceleratorAvailableByFlavor string `query:"accelerator_available_by_flavor"`
+	AcceleratorTotalByFlavor     string `query:"accelerator_total_by_flavor"`
+	RAMAvailableBytes            string `query:"ram_available_bytes"`
+	RAMTotalBytes                string `query:"ram_total_bytes"`
+	StorageAvailableBytes        string `query:"storage_available_bytes"`
+	StorageTotalBytes            string `query:"storage_total_bytes"`
+}
+
+// clusterInfo is one row of GET /internal/clusters.
 type clusterInfo struct {
 	ClusterName string    `json:"cluster_name"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	Connected   bool      `json:"connected"`
 }
 
-// ListClusters handles GET /internal/clusters — every cluster that has ever polled, and
-// whether its agent is connected right now (heartbeat within connectedWithin).
-func (h *Handler) ListClusters(w http.ResponseWriter, r *http.Request) {
-	heartbeats, err := h.store.ListHeartbeats(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	out := make([]clusterInfo, len(heartbeats))
-	now := time.Now()
-	for i, hb := range heartbeats {
-		out[i] = clusterInfo{
-			ClusterName: hb.ClusterName,
-			LastSeenAt:  hb.LastSeenAt,
-			Connected:   now.Sub(hb.LastSeenAt) <= h.connectedWithin,
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"clusters": out})
-}
-
 // statusReport is one job-status push from a cluster-agent.
 type statusReport struct {
-	ExperimentID    string `json:"experiment_id"`
-	Phase           string `json:"phase"` // pending | running | succeeded | failed | gone
+	ExperimentID            string `json:"experiment_id"`
+	Phase                   string `json:"phase"` // pending | running | succeeded | failed | gone
 	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
-	// AdmittedNode is the k8s node cluster-agent observed the job's rank-0 pod scheduled onto.
-	// Written straight into the metrics store below, never into Postgres — see
-	// metricsdb.RecordExperimentNode's doc comment.
-	AdmittedNode    string `json:"admitted_node,omitempty"`
-	SequenceNumber  int64  `json:"sequence_number"`
-	JobUID          string `json:"job_uid,omitempty"`
-}
-
-// PushStatus handles POST /internal/clusters/{name}/status.
-// Body: {"reports": [statusReport, ...]}
-func (h *Handler) PushStatus(w http.ResponseWriter, r *http.Request) {
-	clusterName := chi.URLParam(r, "name")
-	var body struct {
-		Reports []statusReport `json:"reports"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	// rejected lists reports the DB write did not durably apply to (error, stale/duplicate
-	// sequence number, or an experiment not owned by this cluster) — the cluster-agent must
-	// only advance its local tracked phase for reports absent from this list, retrying the
-	// rest on its next push. A blanket 200 regardless of per-report outcome would let a
-	// transient DB error or a stale sequence number permanently lose a status report, since
-	// the agent treats any 2xx as a durable ack for the whole batch.
-	rejected := []string{}
-	for _, rep := range body.Reports {
-		if rep.ExperimentID == "" || rep.Phase == "" {
-			continue
-		}
-		applied, uidMismatch, err := h.store.UpsertJobReport(r.Context(), rep.ExperimentID, clusterName, rep.Phase, domain.AcceleratorType(rep.AdmittedAcceleratorType), rep.SequenceNumber, rep.JobUID)
-		if err != nil {
-			h.logger.Warn("clusteragentapi: upsert job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-			rejected = append(rejected, rep.ExperimentID)
-			continue
-		}
-		if !applied {
-			rejected = append(rejected, rep.ExperimentID)
-			continue
-		}
-		if h.metricsDBURL != "" && rep.AdmittedNode != "" {
-			// Best-effort: a failure here loses one report's worth of node attribution, not
-			// correctness — the next status push (a few seconds later) re-records it as long
-			// as the job keeps running, same tolerance as the accelerator-type marker.
-			if err := metricsdb.RecordExperimentNode(r.Context(), h.metricsDBURL, rep.ExperimentID, rep.AdmittedNode, time.Now().UTC()); err != nil {
-				h.logger.Warn("clusteragentapi: record experiment node", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-			}
-		}
-		if uidMismatch {
-			// Flagged, not silently accepted or dropped: the phase update above still applied,
-			// but this report's Job UID doesn't match the one first observed for this
-			// experiment — a real ownership anomaly (see db.ClusterQueueStore.UpsertJobReport).
-			h.logger.Warn("clusteragentapi: job UID mismatch — report may not correspond to the dispatched Job",
-				zap.String("experiment_id", rep.ExperimentID),
-				zap.String("cluster", clusterName),
-				zap.String("reported_uid", rep.JobUID),
-			)
-			obsmetrics.JobUIDMismatchTotal.WithLabelValues(clusterName).Inc()
-		}
-		if rep.Phase == "gone" {
-			if err := h.store.DeleteJobReportForCluster(r.Context(), rep.ExperimentID, clusterName); err != nil {
-				h.logger.Warn("clusteragentapi: delete job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-			}
-			// The Job vanished while this experiment may still be desired-running — bump its
-			// attempt counter so that if cluster-agent recreates the Job, it's a distinct,
-			// identifiable execution attempt rather than a silent same-identity re-run. No-op
-			// (bumped=false) if the experiment already left the desired set, since then the gone
-			// report is just expected post-terminal cleanup, not a recreation.
-			attempt, bumped, err := h.store.BumpAttemptOnRecreate(r.Context(), rep.ExperimentID)
-			if err != nil {
-				h.logger.Warn("clusteragentapi: bump attempt", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-			} else if bumped {
-				h.logger.Warn("clusteragentapi: job disappeared while still desired — recreation attempt bumped",
-					zap.String("experiment_id", rep.ExperimentID),
-					zap.String("cluster", clusterName),
-					zap.Int("attempt", attempt),
-				)
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "rejected": rejected})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	AdmittedNode            string `json:"admitted_node,omitempty"`
+	SequenceNumber          int64  `json:"sequence_number"`
+	JobUID                  string `json:"job_uid,omitempty"`
 }

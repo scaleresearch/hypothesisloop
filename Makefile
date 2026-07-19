@@ -90,6 +90,24 @@ tt-stop:
 tt-start:
 	bash localdev/k3s-tenstorrent-qb2/start.sh
 
+# ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
+# Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
+# fake-accelerator nodes. See tenstorrent/README.md.
+tt-up:
+	bash tenstorrent/install.sh
+
+tt-down:
+	bash tenstorrent/destroy.sh
+
+tt-status:
+	bash tenstorrent/status.sh
+
+tt-stop:
+	bash tenstorrent/stop.sh
+
+tt-start:
+	bash tenstorrent/start.sh
+
 # Tagged explicitly under localhost/ (not just the short name) because the DaemonSet/
 # Deployment/Job specs reference these images as localhost/openresearch-*:latest with
 # imagePullPolicy: Never — podman defaults unqualified build tags to localhost/ already, but

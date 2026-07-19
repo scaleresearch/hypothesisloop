@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
 	"github.com/scaleresearch/openresearch/controlplane/services/settlement"
 	"github.com/scaleresearch/openresearch/controlplane/shared/api"
+	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
 	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
 	"github.com/scaleresearch/openresearch/controlplane/shared/db"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
@@ -116,19 +117,22 @@ func newRegistryServer(store *db.Store, metricsDBURL, port string, logger *zap.L
 	svc := registry.New(store, logger, metricsDBURL)
 	handler := registry.NewHandler(svc, logger)
 
-	r := chi.NewRouter()
-	handler.Mount(r)
-
-	gw := api.NewGateway(
-		http.NotFoundHandler(), // quota not served by this binary
-		http.NotFoundHandler(), // scheduler not served by this binary
-		r,
-	)
-	gwHandler := gw.Handler(logger)
-
 	outer := chi.NewRouter()
+	outer.Use(api.RecoveryMiddleware(logger))
+	outer.Use(api.LoggingMiddleware(logger))
+	outer.Use(api.CORSMiddleware)
+	outer.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `{"status":"ok"}`)
+	})
 	outer.Handle("/metrics", promhttp.Handler())
-	outer.Mount("/", gwHandler)
+	// Registry API via Huma, registered at full /registry/* paths so /openapi.json and
+	// /explore live at the port root.
+	doc := apidocs.New(outer, "openresearch registry-service", "1.0.0",
+		"Hypotheses, experiment metrics and lineage. See the quota-service /explore for the cross-cutting platform rules.\n")
+	registry.RegisterHuma(doc, handler)
+	doc.MountExplore(outer)
 
 	return &http.Server{
 		Addr:         ":" + port,
@@ -149,9 +153,9 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 		WithMetricDeclineFraction(quotaCfg.MetricDeclineFraction).
 		WithSilenceMultiplier(pcfg.Scheduler.SilenceMultiplier).
 		WithOverrunMultiplier(pcfg.Scheduler.OverrunMultiplier).
-		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second).
-		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds) * time.Second).
-		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second).
+		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds)*time.Second).
+		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds)*time.Second).
+		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds)*time.Second).
 		WithGCSweep(
 			time.Duration(pcfg.Scheduler.StaleDesiredStateSweepIntervalSeconds)*time.Second,
 			time.Duration(pcfg.Scheduler.StaleDesiredStateThresholdSeconds)*time.Second,

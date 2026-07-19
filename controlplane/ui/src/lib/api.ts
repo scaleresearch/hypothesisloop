@@ -132,21 +132,6 @@ export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {
   return apiFetch<HypothesisWithJobs>(`${REGISTRY_URL}/registry/hypotheses/${id}`)
 }
 
-export interface AllotmentResult {
-  new_period: number
-  prev_period: number
-  winner_agent?: string
-  winner_metric?: number
-  winner_experiment_id?: string
-  allotments: Array<{ agent_id: string; credits: number; performance_score: number }>
-}
-
-export async function beginNextPeriod(): Promise<AllotmentResult> {
-  const res = await fetch(`${QUOTA_URL}/quota/allotment`, { method: 'POST', cache: 'no-store' })
-  if (!res.ok) throw new Error(`allotment failed: ${res.status}`)
-  return res.json()
-}
-
 export async function cancelExperiment(id: string): Promise<void> {
   const res = await fetch(`${SCHED_URL}/experiments/${id}/cancel`, { method: 'POST', cache: 'no-store' })
   if (!res.ok) throw new Error(`cancel failed: ${res.status}`)
