@@ -404,7 +404,7 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 // scheduled yet or the resolve fails — the same "not known yet" default the caller already
 // expects before any report has arrived.
 func (c *JobWorkloadClient) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType {
-	resolved, _, err := c.ResolveAdmittedAcceleratorType(ctx, exp.ID)
+	resolved, _, _, err := c.ResolveAdmittedAcceleratorType(ctx, exp.ID)
 	if err != nil || resolved == "" {
 		return exp.AcceleratorType
 	}
@@ -417,21 +417,30 @@ func (c *JobWorkloadClient) GetAdmittedAcceleratorType(ctx context.Context, exp 
 // reverse). This is the only way to observe which acceptable_accelerator_types flavor the k8s scheduler
 // actually chose — neither the Job spec nor this client's own admission decision records it.
 //
+// node is rank 0's own k8s node name (or the first scheduled pod's, if rank 0 isn't up yet) —
+// piggybacked on this same pod/node lookup rather than a second List/Get pass, since the only
+// consumer (cluster-agent's status report loop) always wants both together. This is the sole
+// source of job→physical-node attribution in the system: nothing else persists it, and it is not
+// duplicated into Postgres — see PushStatus, which forwards node straight into the metrics store
+// (metricsdb.RecordExperimentNode), the single place this fact lives, per this repo's "metrics
+// only in the metrics store, no duplicates" rule.
+//
 // Resolves from rank 0's node (batch.kubernetes.io/job-completion-index=0) when available,
 // falling back to the first scheduled pod found — a deliberately simple choice for distributed
 // jobs rather than full cross-rank reconciliation. consistent=false flags (for the caller to log;
 // this alone never blocks reporting) that another already-scheduled rank landed on a different
 // accelerator type than rank 0, which callers should treat as an error condition.
 //
-// Returns ("", true, nil) if no pod is scheduled onto a node yet, or the scheduled node carries
-// none of the configured accelerator labels (non-Accelerator/dev cluster) — both "nothing to report yet", not an
-// error.
-func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, consistent bool, err error) {
+// Returns ("", "", true, nil) if no pod is scheduled onto a node yet. node can be non-empty even
+// when acceleratorType is "" (scheduled onto a node with none of the configured accelerator
+// labels, e.g. a non-accelerator/dev cluster) — the two are reported independently since node
+// attribution is meaningful even without a recognized accelerator type.
+func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, node string, consistent bool, err error) {
 	pods, err := c.kube.CoreV1().Pods(OpenResearchNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("openresearch.io/experiment-id=%s", experimentID),
 	})
 	if err != nil {
-		return "", true, fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
+		return "", "", true, fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
 	}
 
 	var primary *corev1.Pod
@@ -449,16 +458,17 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 		}
 	}
 	if primary == nil {
-		return "", true, nil
+		return "", "", true, nil
 	}
+	node = primary.Spec.NodeName
 
-	node, err := c.kube.CoreV1().Nodes().Get(ctx, primary.Spec.NodeName, metav1.GetOptions{})
+	kubeNode, err := c.kube.CoreV1().Nodes().Get(ctx, primary.Spec.NodeName, metav1.GetOptions{})
 	if err != nil {
-		return "", true, fmt.Errorf("workload: get node %s: %w", primary.Spec.NodeName, err)
+		return "", node, true, fmt.Errorf("workload: get node %s: %w", primary.Spec.NodeName, err)
 	}
-	acceleratorType = c.acceleratorTypeFromNodeLabels(node.Labels)
+	acceleratorType = c.acceleratorTypeFromNodeLabels(kubeNode.Labels)
 	if acceleratorType == "" {
-		return "", true, nil
+		return "", node, true, nil
 	}
 
 	consistent = true
@@ -475,7 +485,7 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 			consistent = false
 		}
 	}
-	return acceleratorType, consistent, nil
+	return acceleratorType, node, consistent, nil
 }
 
 // acceleratorTypeFromNodeLabels reverse-maps a node's own labels back to the configured accelerator type whose

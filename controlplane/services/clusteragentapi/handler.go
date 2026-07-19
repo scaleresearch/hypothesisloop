@@ -161,6 +161,10 @@ type statusReport struct {
 	ExperimentID    string `json:"experiment_id"`
 	Phase           string `json:"phase"` // pending | running | succeeded | failed | gone
 	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
+	// AdmittedNode is the k8s node cluster-agent observed the job's rank-0 pod scheduled onto.
+	// Written straight into the metrics store below, never into Postgres — see
+	// metricsdb.RecordExperimentNode's doc comment.
+	AdmittedNode    string `json:"admitted_node,omitempty"`
 	SequenceNumber  int64  `json:"sequence_number"`
 	JobUID          string `json:"job_uid,omitempty"`
 }
@@ -196,6 +200,14 @@ func (h *Handler) PushStatus(w http.ResponseWriter, r *http.Request) {
 		if !applied {
 			rejected = append(rejected, rep.ExperimentID)
 			continue
+		}
+		if h.metricsDBURL != "" && rep.AdmittedNode != "" {
+			// Best-effort: a failure here loses one report's worth of node attribution, not
+			// correctness — the next status push (a few seconds later) re-records it as long
+			// as the job keeps running, same tolerance as the accelerator-type marker.
+			if err := metricsdb.RecordExperimentNode(r.Context(), h.metricsDBURL, rep.ExperimentID, rep.AdmittedNode, time.Now().UTC()); err != nil {
+				h.logger.Warn("clusteragentapi: record experiment node", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
+			}
 		}
 		if uidMismatch {
 			// Flagged, not silently accepted or dropped: the phase update above still applied,

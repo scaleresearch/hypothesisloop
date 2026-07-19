@@ -15,6 +15,11 @@ type statusReportWire struct {
 	ExperimentID    string `json:"experiment_id"`
 	Phase           string `json:"phase"`
 	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
+	// AdmittedNode is the k8s node name the job's rank-0 pod actually landed on — the sole
+	// job→physical-node attribution signal in the system (see ResolveAdmittedAcceleratorType's
+	// doc comment). Forwarded straight into the metrics store by the control plane, never
+	// stored in Postgres.
+	AdmittedNode    string `json:"admitted_node,omitempty"`
 	SequenceNumber  int64  `json:"sequence_number"`
 	JobUID          string `json:"job_uid,omitempty"`
 }
@@ -76,19 +81,20 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 		seq := tj.seq
 		a.mu.Unlock()
 
-		var admittedAcceleratorType string
+		var admittedAcceleratorType, admittedNode string
 		if phase != workload.JobPhaseGone {
-			// Resolve which accelerator type this job's pod(s) actually landed on — meaningful only
-			// once at least one pod is scheduled onto a node. An empty result (nothing
-			// scheduled yet, or a query error) simply omits the field: the control plane
+			// Resolve which accelerator type (and node) this job's pod(s) actually landed on —
+			// meaningful only once at least one pod is scheduled onto a node. An empty result
+			// (nothing scheduled yet, or a query error) simply omits the field: the control plane
 			// leaves whatever admitted type it already has untouched (see
 			// ClusterQueueStore.UpsertJobReport's COALESCE), falling back to the originally
 			// requested type until a real observation arrives.
-			t, consistent, err := a.jwc.ResolveAdmittedAcceleratorType(ctx, id)
+			t, node, consistent, err := a.jwc.ResolveAdmittedAcceleratorType(ctx, id)
 			if err != nil {
 				log("resolve admitted accelerator type %s: %v", id, err)
 			} else {
 				admittedAcceleratorType = string(t)
+				admittedNode = node
 				if !consistent {
 					log("experiment %s: scheduled ranks landed on inconsistent accelerator types — reporting rank 0's %s", id, t)
 				}
@@ -104,6 +110,7 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 				ExperimentID:    id,
 				Phase:           phase.String(),
 				AdmittedAcceleratorType: admittedAcceleratorType,
+				AdmittedNode:    admittedNode,
 				SequenceNumber:  seq,
 				JobUID:          uid,
 			},
