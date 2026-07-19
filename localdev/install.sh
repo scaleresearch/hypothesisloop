@@ -23,6 +23,19 @@ CONTEXT_NAME="k3s-local"
 K3S_VERSION="v1.36.2+k3s1"
 K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-apiserver-arg=runtime-config=scheduling.k8s.io/v1alpha2=true --kube-controller-manager-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-scheduler-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true"
 
+# This VM's root disk is shared with whatever else podman/podman-machine is running on the
+# host (other unrelated dev stacks, other images) — it can sit well above kubelet's default
+# 80/85% image-GC watermarks for reasons that have nothing to do with this cluster's own
+# images. Without this, kubelet periodically garbage-collects any locally-imported image
+# with no currently-running container (workload/robotics-workload/cluster-agent/node-agent
+# between test runs) straight out from under us — see localdev/add-fake-nodes.sh's identical
+# override on the fake GPU nodes for the same reason.
+# Escaped \< : this value is re-parsed by at least one more shell layer downstream (the SSH
+# command string on macOS, or the piped installer script's own arg handling) before it reaches
+# kubelet, so an unescaped < would be consumed as shell input redirection instead of surviving
+# as literal flag text.
+K3S_KUBELET_IMAGE_GC_FLAGS="--kubelet-arg=eviction-hard=imagefs.available\\<1%,nodefs.available\\<1%"
+
 # Poll until a condition succeeds or the attempt limit is reached.
 # Usage: wait_for <max_attempts> <sleep_secs> <description> <command...>
 wait_for() {
@@ -65,7 +78,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
     # through systemd's restart rate limit in a few seconds (5 failed "Permission
     # denied" execs), leaving the unit in a failed/rate-limited state that a later
     # plain `systemctl start` doesn't clear — so relabel first, start once, clean.
-    vm "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SKIP_START=true INSTALL_K3S_VERSION=${K3S_VERSION} sudo -E sh -s - --disable traefik --write-kubeconfig-mode 644 ${K3S_GANG_SCHEDULING_FLAGS}"
+    vm "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SKIP_START=true INSTALL_K3S_VERSION=${K3S_VERSION} sudo -E sh -s - --disable traefik --write-kubeconfig-mode 644 ${K3S_GANG_SCHEDULING_FLAGS} ${K3S_KUBELET_IMAGE_GC_FLAGS}"
     vm "sudo chcon -t bin_t /usr/local/bin/k3s"
   fi
 
@@ -119,7 +132,7 @@ else
   if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
     echo "==> Installing/upgrading k3s to ${K3S_VERSION}..."
     sudo systemctl stop k3s 2>/dev/null || true
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="--disable traefik ${K3S_GANG_SCHEDULING_FLAGS}" sh -
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="--disable traefik ${K3S_GANG_SCHEDULING_FLAGS} ${K3S_KUBELET_IMAGE_GC_FLAGS}" sh -
   fi
 
   mkdir -p "${HOME}/.kube"

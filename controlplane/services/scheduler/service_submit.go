@@ -9,30 +9,6 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
 )
 
-// occupiedFootprint returns every experiment currently holding physical capacity (SUBMITTED,
-// ADMITTED, or RUNNING) — the same occupancy set tick() subtracts from live availability before
-// admitting (see loop_tick.go step 2). Used by AdmitExperiment to check a requested cluster's
-// real remaining room before an operator override claims it.
-func (s *Service) occupiedFootprint(ctx context.Context) ([]*domain.Experiment, error) {
-	submitted, err := s.store.ListSubmittedExperiments(ctx)
-	if err != nil {
-		return nil, err
-	}
-	admitted, err := s.store.ListAdmittedExperiments(ctx)
-	if err != nil {
-		return nil, err
-	}
-	running, err := s.store.ListRunningExperiments(ctx)
-	if err != nil {
-		return nil, err
-	}
-	occupied := make([]*domain.Experiment, 0, len(submitted)+len(admitted)+len(running))
-	occupied = append(occupied, submitted...)
-	occupied = append(occupied, admitted...)
-	occupied = append(occupied, running...)
-	return occupied, nil
-}
-
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
 func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
@@ -123,6 +99,15 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Message: fmt.Sprintf("hypothesis %s not found — register it first via POST /registry/hypotheses", exp.HypothesisID),
 		}
 	}
+	// The hypothesis must belong to the same platform experiment this job is submitted under.
+	// Without this check an agent could point a job at a hypothesis registered under a different
+	// program, contaminating cross-program scope/ranking (invariant #7).
+	if hyp.PlatformExperimentID != exp.PlatformExperimentID {
+		return &AdmissionError{
+			Reason:  ReasonMalformed,
+			Message: fmt.Sprintf("hypothesis %s belongs to platform experiment %s, not %s", exp.HypothesisID, hyp.PlatformExperimentID, exp.PlatformExperimentID),
+		}
+	}
 	exp.Hypothesis = hyp.Text
 
 	// 3. Duplicate check — must happen before any side effects (quota debit).
@@ -208,13 +193,12 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return nil
 	}
 
-	// New experiment: debit quota (every resource dimension the submission uses) then create.
-	if err := s.debitAllResources(ctx, exp); err != nil {
-		return &AdmissionError{
-			Reason:  ReasonInsufficientCredits,
-			Message: err.Error(),
-		}
-	}
+	// New experiment: the GreptimeDB quota reservation is keyed by experiment id, but nothing can
+	// find, settle, or repair a reservation whose experiment row doesn't exist — every reconciler
+	// keys off Postgres rows (N2). So create the reconcilable anchor first, then debit; if the
+	// debit fails, delete the anchor. This ordering guarantees a reservation never outlives its
+	// row: the worst case is a briefly-created row with no reservation (fully reconcilable), never
+	// an invisible, permanent quota leak.
 	now := time.Now().UTC()
 	exp.CreatedAt = now
 	exp.UpdatedAt = now
@@ -223,11 +207,18 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// ClusterName is intentionally left unset here: the admission loop assigns it, capacity-aware,
 	// at the moment this job is actually admitted onto a specific cluster (see loop_tick.go).
 	if err := s.store.CreateExperiment(ctx, exp); err != nil {
-		// Undo the quota debit so the agent can retry — the job never actually existed.
-		s.refundAllResources(ctx, exp, 0, 0)
 		return fmt.Errorf("scheduler: create experiment: %w", err)
 	}
-	exp.Status = domain.StatusQueued
+	if err := s.debitAllResources(ctx, exp); err != nil {
+		// The reservation never took hold — remove the anchor so the agent can retry cleanly.
+		if delErr := s.store.DeleteExperiment(ctx, exp.ID); delErr != nil {
+			return fmt.Errorf("scheduler: delete experiment after failed debit: %w (original: %v)", delErr, err)
+		}
+		return &AdmissionError{
+			Reason:  ReasonInsufficientCredits,
+			Message: err.Error(),
+		}
+	}
 
 	// 8. Wake the scheduler loop.
 	if s.loop != nil {

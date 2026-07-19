@@ -102,6 +102,15 @@ INSERT INTO experiments (
 	return nil
 }
 
+// DeleteExperiment removes an experiment row by ID. Used by Submit to unwind the reconcilable
+// anchor when the quota debit that follows its creation fails — see scheduler.Submit.
+func (s *ExperimentsStore) DeleteExperiment(ctx context.Context, id string) error {
+	if _, err := s.pool.pool.Exec(ctx, `DELETE FROM experiments WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("experiments_store.DeleteExperiment: %w", err)
+	}
+	return nil
+}
+
 // GetExperiment fetches a single experiment by ID.
 func (s *ExperimentsStore) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE id = $1`

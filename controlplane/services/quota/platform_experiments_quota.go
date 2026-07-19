@@ -84,16 +84,20 @@ func (s *PlatformExperimentsService) CheckAndDebitQuota(ctx context.Context, age
 	if amount <= 0 {
 		return nil
 	}
-	// Block held agents from submitting new jobs (Domain 10).
-	held, err := s.store.IsAgentHeld(ctx, platformExpID, agentID)
-	if err != nil {
-		return fmt.Errorf("phase2 hold check: %w", err)
-	}
-	if held {
-		return fmt.Errorf("agent_phase2_held: agent %s is on hold for experiment %s", agentID, platformExpID)
-	}
 
 	return s.store.WithAdmissionLock(ctx, agentID, platformExpID, func(ctx context.Context) error {
+		// Block held agents from submitting new jobs (Domain 10). Checked inside the same
+		// advisory lock as the debit below — checking it before acquiring the lock left a window
+		// where a hold inserted concurrently (between the check and the lock) would not be seen,
+		// letting a job slip in for an agent that should already be held.
+		held, err := s.store.IsAgentHeld(ctx, platformExpID, agentID)
+		if err != nil {
+			return fmt.Errorf("phase2 hold check: %w", err)
+		}
+		if held {
+			return fmt.Errorf("agent_phase2_held: agent %s is on hold for experiment %s", agentID, platformExpID)
+		}
+
 		aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
 		if err != nil {
 			return err
@@ -111,21 +115,35 @@ func (s *PlatformExperimentsService) CheckAndDebitQuota(ctx context.Context, age
 // absolute set, not a delta — see UsageTracker.SetObserved). Despite the name (kept for callers
 // that still think of this as "the refund step"), amount here means the job's final observed
 // cost for this dimension, computed by the caller from confirmed-alive time.
+//
+// Runs under the same advisory lock as CheckAndDebitQuota: CheckAndDebitQuota's balance check
+// sums every job's series for (agent, PE, resource, tier) and only the lock's own critical
+// section stops that sum from racing another write to a sibling job's series — the per-series
+// writes here are otherwise independent of each other but not of that sum.
 func (s *PlatformExperimentsService) RefundQuota(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error {
-	return s.usage.SetObserved(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+	return s.store.WithAdmissionLock(ctx, agentID, platformExpID, func(ctx context.Context) error {
+		return s.usage.SetObserved(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+	})
 }
 
 // CorrectReservation overwrites experimentID's own resourceType reservation with a new absolute
 // amount (see metricsdb.UsageTracker.SetReservation) — no balance check, since this corrects an
 // existing reservation to match a revised (e.g. shortened, after preemption) estimate rather
-// than reserving new capacity.
+// than reserving new capacity. Locked for the same reason as RefundQuota above — called from
+// preempt() while other agents/experiments may be concurrently admitting against the same
+// agent+PE's aggregate.
 func (s *PlatformExperimentsService) CorrectReservation(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error {
-	return s.usage.SetReservation(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+	return s.store.WithAdmissionLock(ctx, agentID, platformExpID, func(ctx context.Context) error {
+		return s.usage.SetReservation(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+	})
 }
 
 // DebitQuota adds amount to experimentID's own resourceType usage without a balance check.
 // Used for system-level adjustments such as flavor substitution cost corrections
-// (e.g. H100 job admitted on H200 — agent owes the rate difference).
+// (e.g. H100 job admitted on H200 — agent owes the rate difference). Locked for the same reason
+// as RefundQuota/CorrectReservation above.
 func (s *PlatformExperimentsService) DebitQuota(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error {
-	return s.usage.Debit(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+	return s.store.WithAdmissionLock(ctx, agentID, platformExpID, func(ctx context.Context) error {
+		return s.usage.Debit(ctx, agentID, platformExpID, experimentID, resourceType, tier, amount)
+	})
 }

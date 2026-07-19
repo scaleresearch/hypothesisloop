@@ -68,6 +68,13 @@ type LoopStore interface {
 	// pending_capacity_reservations' schema comment. tick() subtracts this from live capacity on
 	// top of the existing SUBMITTED/ADMITTED/RUNNING accounting.
 	ListPendingReservationsByCluster(ctx context.Context) (map[string]domain.Footprint, error)
+	// UpdateAdmittedFlavor records the GPU flavor the job is (or ends up) actually holding and
+	// the recomputed estimated cost at that flavor's rate — see the db implementation's doc
+	// comment. submitJob uses this at admission time when resolveClusterAndFootprint substitutes
+	// an AcceptableGPUTypes alternative for the originally requested flavor, so the persisted
+	// record matches what capacity/reservation/workload creation actually claimed from the
+	// start, instead of only being corrected later when job_watcher observes RUNNING.
+	UpdateAdmittedFlavor(ctx context.Context, id string, gpuType domain.GPUType, estimatedCostT4H float64) error
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without

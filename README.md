@@ -144,11 +144,17 @@ Compose runs.
 ## Testing
 
 ```bash
-bash tests/e2e-flow.sh                    # plain smoke test: submit, run, complete
-AGENTS="a b c d" bash tests/e2e-flow.sh
-bash tests/advanced-e2e.sh                # node-death self-heal, preemption, terminal
-                                           # eviction, and distributed (multi-node) billing
+bash tests/run.sh                         # full scenario suite: API-only scenarios run
+                                           # concurrently, cluster-mutating ones (node death,
+                                           # connectivity loss, daemonset redeploy) run after
+bash tests/run.sh node lifecycle          # only scenarios whose filename matches
+ONLY_FAST=1 bash tests/run.sh             # skip cluster-mutating scenarios (no kubectl needed)
+bash tests/scenarios/job-lifecycle.sh     # run a single scenario directly
 ```
+
+Scenarios live under `tests/scenarios/`, built on shared helpers in `tests/lib/` (agent/PE
+setup, job submission, status polling, node/connectivity/daemonset fault injection) — see
+`tests/lib/api.sh` and `tests/lib/cluster.sh` to add a new one.
 
 ## Agent API
 
@@ -177,6 +183,8 @@ cluster access. Start here: [`tests/workload/spec.md`](tests/workload/spec.md).
 | `make k3s-up`                     | Bootstrap a local k3s cluster and install the cluster-agent bundle onto it |
 | `make k3s-down`                   | Destroy the local k3s cluster                                       |
 | `make full-up`                    | k3s-up + controlplane-up                                            |
+| `make full-stop` / `make full-start` | Pause/resume everything (podman machine, k3s, control plane) without destroying cluster state |
+| `make reload`                     | Rebuild every image from current source, push it everywhere it's cached, and bounce all containers/pods to run it — faster than a manual rebuild+restart after a Go change |
 | `make reset`                      | controlplane-down + controlplane-up                                 |
 | `make up` / `make down`           | Aliases for `controlplane-up` / `controlplane-down` (back-compat)  |
 

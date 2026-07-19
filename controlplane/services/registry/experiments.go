@@ -66,30 +66,6 @@ func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*
 	return exps, nil
 }
 
-// UpdateStatus updates the status of an experiment.
-// When transitioning to RUNNING it uses MarkStarted so that started_at is set exactly once.
-func (s *Service) UpdateStatus(ctx context.Context, id string, status domain.ExperimentStatus) error {
-	if status == domain.StatusRunning {
-		if _, err := s.store.MarkStarted(ctx, id); err != nil {
-			return fmt.Errorf("registry.UpdateStatus: mark started: %w", err)
-		}
-		s.logger.Info("experiment status updated", zap.String("id", id), zap.String("status", string(status)))
-		return nil
-	}
-
-	exp, err := s.store.GetExperiment(ctx, id)
-	if err != nil {
-		return fmt.Errorf("registry.UpdateStatus: get: %w", err)
-	}
-	exp.Status = status
-	exp.UpdatedAt = time.Now().UTC()
-	if err := s.store.UpdateExperiment(ctx, exp); err != nil {
-		return fmt.Errorf("registry.UpdateStatus: store: %w", err)
-	}
-	s.logger.Info("experiment status updated", zap.String("id", id), zap.String("status", string(status)))
-	return nil
-}
-
 // GetLineage returns the ancestor chain of an experiment (oldest first).
 func (s *Service) GetLineage(ctx context.Context, id string) ([]*domain.Experiment, error) {
 	lineage, err := s.store.GetLineage(ctx, id)

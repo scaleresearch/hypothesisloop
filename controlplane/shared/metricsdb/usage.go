@@ -14,12 +14,27 @@ import (
 // of how much of it has been used.
 const usedHoursMetric = "agent_quota_used_hours"
 
+// A job's used-hours sample carries a kind label separating an admission-time estimate from a
+// settled, observed actual. This is what lets phase-2/exhaustion read settled consumption + live
+// running usage only, never a queued job's reservation (which would prematurely trip the boundary
+// and cancel work). A single job owns both series over its lifetime: kindReserved is written at
+// admission and zeroed at settlement; kindObserved is written (once, absolutely) at settlement.
+//
+//   - availability (CheckAndDebit) = allocation − Σ(reserved active) − Σ(observed settled): both
+//     kinds count, so it sums the whole metric with no kind filter.
+//   - phase-2 / exhaustion = Σ(observed settled) + live actual of running attempts: reads only
+//     kindObserved, never kindReserved.
+const (
+	kindReserved = "reserved"
+	kindObserved = "observed"
+)
+
 // UsageTracker is the sole read/write path for agent quota consumption (used_guaranteed_*/
 // used_burst_* in the old Postgres schema).
 //
 // Every sample is tagged with experiment_id, so each job owns its own series — an "agent's used
 // hours" bucket is never itself stored, only ever computed by summing that agent's per-job series
-// at read time (sumUsed, TotalConsumedT4H). This is what makes job completion/eviction accounting
+// at read time (sumUsed, TotalObservedT4H). This is what makes job completion/eviction accounting
 // idempotent: writing a job's final cost (SetObserved) is an absolute set against that job's own
 // series, so replaying the same completion event twice (e.g. after a crash) writes the same value
 // instead of double-refunding or double-debiting — there is no shared counter for two writes to
@@ -52,13 +67,14 @@ func (t *UsageTracker) lockFor(agentID, platformExpID string) *sync.Mutex {
 	return l.(*sync.Mutex)
 }
 
-func labelsFor(agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier) map[string]string {
+func labelsFor(agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, kind string) map[string]string {
 	return map[string]string{
 		"agent_id":               agentID,
 		"platform_experiment_id": platformExpID,
 		"experiment_id":          experimentID,
 		"resource_type":          string(resourceType),
 		"tier":                   string(tier),
+		"kind":                   kind,
 	}
 }
 
@@ -78,11 +94,12 @@ func (t *UsageTracker) sumUsed(ctx context.Context, agentID, platformExpID strin
 	return samples[0].Value, nil
 }
 
-// jobUsed returns a single job's own used-hours sample, or 0 if it has never reserved anything
-// in this bucket.
+// jobUsed returns a single job's own reserved-kind sample, or 0 if it has never reserved anything
+// in this bucket. Reads the reservation series specifically (Debit's surcharge adds to the
+// outstanding reservation, not the settled observed value).
 func (t *UsageTracker) jobUsed(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier) (float64, error) {
-	promQL := fmt.Sprintf(`%s{agent_id=%q, platform_experiment_id=%q, experiment_id=%q, resource_type=%q, tier=%q}`,
-		usedHoursMetric, agentID, platformExpID, experimentID, string(resourceType), string(tier))
+	promQL := fmt.Sprintf(`%s{agent_id=%q, platform_experiment_id=%q, experiment_id=%q, resource_type=%q, tier=%q, kind=%q}`,
+		usedHoursMetric, agentID, platformExpID, experimentID, string(resourceType), string(tier), kindReserved)
 	samples, err := QueryVector(ctx, t.dbURL, promQL)
 	if err != nil {
 		return 0, err
@@ -113,7 +130,7 @@ func (t *UsageTracker) CheckAndDebit(ctx context.Context, agentID, platformExpID
 	if remaining := limit - used; remaining < amount {
 		return fmt.Errorf("insufficient_%s_quota: need %.2f %s, have %.2f remaining", string(tier), amount, resourceType, remaining)
 	}
-	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier), amount)
+	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier, kindReserved), amount)
 }
 
 // Debit adds amount to experimentID's own reservation, no aggregate balance check — used for
@@ -128,7 +145,7 @@ func (t *UsageTracker) Debit(ctx context.Context, agentID, platformExpID, experi
 	if err != nil {
 		return fmt.Errorf("metricsdb.Debit: %w", err)
 	}
-	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier), used+amount)
+	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier, kindReserved), used+amount)
 }
 
 // SetReservation overwrites experimentID's own not-yet-final reservation with a new absolute
@@ -140,20 +157,28 @@ func (t *UsageTracker) Debit(ctx context.Context, agentID, platformExpID, experi
 // SetObserved call — kept as a separate, narrowly-named method so neither caller has to reason
 // about the other's semantics.
 func (t *UsageTracker) SetReservation(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, amount float64) error {
-	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier), amount)
+	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier, kindReserved), amount)
 }
 
-// SetObserved overwrites experimentID's own reservation with its real, observed cost — computed
-// by the caller from confirmed-alive time, never from a wall-clock guess (see
-// Controller.ObservedElapsedHours). This replaces the old increment/decrement-based debit/refund
-// for the terminal write: an absolute set against a series only this job ever writes to is
-// idempotent by construction, so applying it more than once (a retried call, a crash-recovery
-// replay) can never double-count.
+// SetObserved records experimentID's real, observed cost — computed by the caller from
+// confirmed-alive time, never from a wall-clock guess (see Controller.ObservedElapsedHours) — as
+// the terminal settlement write. It writes the observed-kind series to observedAmount and zeroes
+// the reserved-kind series in one settling step: the job is done, so its outstanding estimate no
+// longer stands. Both are absolute sets against series only this job ever writes to, so replaying
+// this (a retried call, a crash-recovery replay) is idempotent and can never double-count.
+//
+// The split matters for phase-2/exhaustion (TotalObservedT4H), which reads only the observed
+// series: a still-queued or running job's reservation never counts toward the boundary, so a large
+// queued job can no longer prematurely trip phase 2. Availability (sumUsed) sums both kinds, so a
+// running job's reservation still holds its allocation until it settles.
 func (t *UsageTracker) SetObserved(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, observedAmount float64) error {
 	if observedAmount < 0 {
 		observedAmount = 0
 	}
-	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier), observedAmount)
+	if err := WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier, kindObserved), observedAmount); err != nil {
+		return err
+	}
+	return WriteGauge(ctx, t.dbURL, usedHoursMetric, labelsFor(agentID, platformExpID, experimentID, resourceType, tier, kindReserved), 0)
 }
 
 // PopulateUsage fills every quotas[i].Used* field from the metrics DB with a single query for
@@ -231,16 +256,17 @@ func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tie
 	}
 }
 
-// TotalConsumedT4H sums used_guaranteed_t4h + used_burst_t4h across every agent and every job in
-// a platform experiment — the metrics-DB equivalent of the old `SUM(...) FROM agent_quotas`
-// query, used by the phase-2 boundary check. sum() with no "by" collapses every label including
-// experiment_id, so this needs no change from the per-job tagging: it already summed across
-// whatever series matched.
-func TotalConsumedT4H(ctx context.Context, dbURL, platformExpID string) (float64, error) {
-	promQL := fmt.Sprintf(`sum(%s{platform_experiment_id=%q, resource_type=%q})`, usedHoursMetric, platformExpID, string(domain.ResourceGPUHours))
+// TotalObservedT4H sums the settled, observed GPU cost across every agent and job in a platform
+// experiment — filtered to kind=observed, so it counts only jobs that have actually settled and
+// never a still-queued or running job's reservation. This is the "committed" half of the phase-2
+// boundary check; the caller adds live actual usage of running attempts on top (see
+// controller.checkPhase2Transition). Reading reservations here would let a large queued job
+// prematurely trip phase 2 and cancel work.
+func TotalObservedT4H(ctx context.Context, dbURL, platformExpID string) (float64, error) {
+	promQL := fmt.Sprintf(`sum(%s{platform_experiment_id=%q, resource_type=%q, kind=%q})`, usedHoursMetric, platformExpID, string(domain.ResourceGPUHours), kindObserved)
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
-		return 0, fmt.Errorf("metricsdb.TotalConsumedT4H: %w", err)
+		return 0, fmt.Errorf("metricsdb.TotalObservedT4H: %w", err)
 	}
 	if len(samples) == 0 {
 		return 0, nil

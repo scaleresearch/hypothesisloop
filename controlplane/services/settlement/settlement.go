@@ -33,6 +33,11 @@ type UsageWriter interface {
 type Store interface {
 	ListUnsettledTerminalExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
+	// ListTerminalExperimentIDsWithPendingReservation/DeletePendingReservation back
+	// reconcileOnce's second retry sweep — see its doc comment for why this lives here rather
+	// than as a separate reconciler.
+	ListTerminalExperimentIDsWithPendingReservation(ctx context.Context) ([]string, error)
+	DeletePendingReservation(ctx context.Context, id string) error
 }
 
 // Settler computes and durably writes a terminal experiment's final observed usage across every
@@ -171,6 +176,32 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) {
 		}
 		if err := r.store.MarkQuotaSettled(ctx, exp.ID); err != nil {
 			r.logger.Error("settlement: mark settled", zap.String("id", exp.ID), zap.Error(err))
+		}
+	}
+
+	r.reconcilePendingReservations(ctx)
+}
+
+// reconcilePendingReservations retries the one durable side effect of a terminal experiment
+// that (unlike settlement above) has no retry of its own anywhere else: releasing a leftover
+// pending_capacity_reservations row. Every terminal-transition path already attempts this
+// delete inline, once, best-effort (see DeletePendingReservation's call sites in job_watcher_
+// lifecycle.go, controller/eviction.go, controller/reconcile.go, service_cancel.go) — a
+// transient Postgres error there previously meant the row was gone for good, permanently
+// shrinking admittable capacity (loop_tick.go's tick() subtracts every outstanding reservation
+// from live capacity every admission pass, with no other path that ever looks at this table
+// again once an experiment leaves RUNNING). Piggybacking on this already-running 30s reconciler
+// closes that gap with no new goroutine/loop — the same "durable retry, no new machinery"
+// pattern this file already uses for settlement itself.
+func (r *Reconciler) reconcilePendingReservations(ctx context.Context) {
+	ids, err := r.store.ListTerminalExperimentIDsWithPendingReservation(ctx)
+	if err != nil {
+		r.logger.Error("settlement: list terminal experiments with pending reservation", zap.Error(err))
+		return
+	}
+	for _, id := range ids {
+		if err := r.store.DeletePendingReservation(ctx, id); err != nil {
+			r.logger.Warn("settlement: retry delete pending reservation", zap.String("id", id), zap.Error(err))
 		}
 	}
 }

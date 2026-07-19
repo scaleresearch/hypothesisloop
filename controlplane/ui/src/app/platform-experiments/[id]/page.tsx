@@ -647,8 +647,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 <tr>
                   <th style={{ width: 36 }}>Rank</th>
                   <th>Agent</th>
-                  {metrics.length > 0 ? metrics.map(m => (
+                  {metrics.length > 0 ? metrics.map((m, i) => (
                     <th key={m.key} style={{ textAlign: 'right' }}>
+                      {i === 0 && metrics.length > 1 && (
+                        <span title="Primary metric — used for ranking" style={{ fontWeight: 700, marginRight: 4 }}>★</span>
+                      )}
                       Best {m.key} <span className="text-dim" style={{ fontWeight: 400 }}>({m.direction === 'maximize' ? '↑' : '↓'})</span>
                     </th>
                   )) : <th style={{ textAlign: 'right' }}>Best Metric</th>}

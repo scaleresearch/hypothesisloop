@@ -8,6 +8,27 @@ import (
 	"go.uber.org/zap"
 )
 
+// DonationError distinguishes an expected, client-caused rejection (bad donation state, self-
+// donation, insufficient quota) from a genuine server-side failure — same pattern as
+// scheduler.AdmissionError — so the HTTP handler can return the right 4xx instead of a blanket
+// 500 for outcomes the caller can reasonably trigger (e.g. fulfilling an already-fulfilled or
+// cancelled request).
+type DonationError struct {
+	Reason  string
+	Message string
+}
+
+func (e *DonationError) Error() string {
+	return fmt.Sprintf("donation rejected [%s]: %s", e.Reason, e.Message)
+}
+
+const (
+	DonationReasonNotFound          = "not_found"
+	DonationReasonInvalidState      = "invalid_state"
+	DonationReasonSelfDonation      = "self_donation"
+	DonationReasonInsufficientQuota = "insufficient_quota"
+)
+
 // FulfillDonation transfers T4h from donor to recipient within a platform experiment.
 // Debits donor's guaranteed_t4_hours and credits recipient's guaranteed_t4_hours.
 // The donation must have a platform_experiment_id; the donor must have sufficient available quota.
@@ -17,18 +38,21 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 		return fmt.Errorf("FulfillDonation: get donation: %w", err)
 	}
 	if req == nil {
-		return fmt.Errorf("FulfillDonation: donation %s not found", donationID)
+		return &DonationError{Reason: DonationReasonNotFound, Message: fmt.Sprintf("donation %s not found", donationID)}
 	}
 	if req.Status != "open" {
-		return fmt.Errorf("FulfillDonation: donation is %s, not open", req.Status)
+		return &DonationError{Reason: DonationReasonInvalidState, Message: fmt.Sprintf("donation is %s, not open", req.Status)}
 	}
 	if req.AgentID == donorAgentID {
-		return fmt.Errorf("FulfillDonation: donor and recipient must be different agents")
+		return &DonationError{Reason: DonationReasonSelfDonation, Message: "donor and recipient must be different agents"}
 	}
 	if req.PlatformExperimentID == "" {
-		return fmt.Errorf("FulfillDonation: donation has no platform_experiment_id")
+		return &DonationError{Reason: DonationReasonInvalidState, Message: "donation has no platform_experiment_id"}
 	}
 
+	// Read the donor's current guaranteed usage (reservations) from the metrics store — the sole
+	// source of consumption — so the atomic transfer below can check headroom against the live
+	// reserved total. GetQuota merges used_* in from GreptimeDB on top of the Postgres allocation.
 	donorQuota, err := s.GetQuota(ctx, donorAgentID, req.PlatformExperimentID)
 	if err != nil {
 		return fmt.Errorf("FulfillDonation: get donor quota: %w", err)
@@ -38,21 +62,23 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 		if donorQuota != nil {
 			avail = donorQuota.AvailableGuaranteed()
 		}
-		return fmt.Errorf("insufficient_quota: donor has %.2f T4h available, need %.2f", avail, req.CreditsWant)
+		return &DonationError{Reason: DonationReasonInsufficientQuota, Message: fmt.Sprintf("donor has %.2f T4h available, need %.2f", avail, req.CreditsWant)}
 	}
 
-	// Debit donor's allocation. Donations are GPU-hours only today.
-	if err := s.store.AddToAgentGuaranteedQuota(ctx, donorAgentID, req.PlatformExperimentID, domain.ResourceGPUHours, -req.CreditsWant); err != nil {
-		return fmt.Errorf("FulfillDonation: debit donor: %w", err)
+	// One atomic, idempotent transaction locks the donation + both quota rows, re-verifies the
+	// donation is still open and the donor has headroom, moves the amount and marks it fulfilled.
+	// Gating on "open" inside the tx makes a retry after a partial failure a safe no-op instead of
+	// a double transfer. The headroom re-check inside the tx (against the metrics-store reserved
+	// total passed here) is the authoritative guard; an error from it means a concurrent donation
+	// raced this one past the donor's balance. Donations are GPU-hours only today.
+	fulfilled, err := s.store.FulfillDonationTx(ctx, donationID, donorAgentID, req.AgentID, req.PlatformExperimentID, domain.ResourceGPUHours, req.CreditsWant, donorQuota.UsedGuaranteedT4H)
+	if err != nil {
+		return fmt.Errorf("FulfillDonation: transfer: %w", err)
 	}
-	// Credit recipient's allocation.
-	if err := s.store.AddToAgentGuaranteedQuota(ctx, req.AgentID, req.PlatformExperimentID, domain.ResourceGPUHours, req.CreditsWant); err != nil {
-		_ = s.store.AddToAgentGuaranteedQuota(ctx, donorAgentID, req.PlatformExperimentID, domain.ResourceGPUHours, req.CreditsWant) // rollback
-		return fmt.Errorf("FulfillDonation: credit recipient: %w", err)
-	}
-
-	if err := s.store.UpdateDonationStatus(ctx, donationID, "fulfilled"); err != nil {
-		return fmt.Errorf("FulfillDonation: update status: %w", err)
+	if !fulfilled {
+		// Another fulfillment already closed this donation (or it was cancelled) between the read
+		// above and the locked check — not open anymore.
+		return &DonationError{Reason: DonationReasonInvalidState, Message: "donation is no longer open"}
 	}
 
 	s.logger.Info("FulfillDonation: quota transferred",

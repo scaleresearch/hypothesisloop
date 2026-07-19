@@ -148,6 +148,11 @@ func (e *Experiment) Footprint() Footprint {
 			fp.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
 		}
 	}
+	for name, qty := range e.Job.ExtraResources {
+		if q, err := resource.ParseQuantity(qty); err == nil {
+			fp.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
+		}
+	}
 	fp = fp.Scale(int64(e.Job.Nodes()))
 	if e.GPUCount > 0 {
 		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: e.GPUType.FlavorName()}, int64(e.GPUCount))

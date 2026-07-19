@@ -62,6 +62,13 @@ func main() {
 			NodeLabelKeyByType: pcfg.NodeLabelKeyByType,
 			ResourceNameByType: pcfg.ResourceNameByType,
 			TaintKeyByType:     pcfg.TaintKeyByType,
+			// Required for GetLiveGPUCapacity's flavor lookup (nameByFlavor()) — without
+			// these, OpenResearchConfig being non-nil short-circuits the built-in defaults
+			// fallback, and nameByFlavor() silently returns an empty map, so the desired-state
+			// poll's GPU capacity piggyback never has anything to report.
+			NameByFlavor: pcfg.NameByFlavor,
+			GPUsByFlavor: pcfg.GPUsByFlavor,
+			FlavorOrder:  pcfg.FlavorOrder(),
 		},
 	})
 	if err != nil {

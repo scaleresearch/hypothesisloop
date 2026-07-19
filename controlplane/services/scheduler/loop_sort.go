@@ -1,11 +1,23 @@
 package scheduler
 
 import (
+	"math"
 	"sort"
 	"time"
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 )
+
+// completionBucket quantizes a completion fraction to a 0.01 grid so "close enough" comparisons
+// form a transitive equivalence relation. A sliding epsilon band (|a-b| <= 0.01) is not
+// transitive — a chain of values each within 0.01 of its neighbor (e.g. 0.100, 0.106, 0.112) can
+// have the first and last differ by more than 0.01, which breaks the strict-weak-ordering
+// contract sort.Slice/sort.SliceStable require and makes tie resolution order-dependent. Rounding
+// to a fixed grid first (like the age-bucket truncation above) keeps "close values compare equal"
+// without that inconsistency.
+func completionBucket(f float64) float64 {
+	return math.Round(f*100) / 100
+}
 
 // filterTier returns experiments of the given capacity tier.
 func filterTier(exps []*domain.Experiment, tier domain.CapacityTier) []*domain.Experiment {
@@ -96,12 +108,9 @@ func sortGuaranteed(exps []*domain.Experiment, quotaMap map[string]*domain.Agent
 		}
 
 		// Tiebreak 1: completion proximity DESC.
-		cf := ei.CompletionFraction() - ej.CompletionFraction()
-		if cf > 0.01 {
-			return true
-		}
-		if cf < -0.01 {
-			return false
+		bi, bj := completionBucket(ei.CompletionFraction()), completionBucket(ej.CompletionFraction())
+		if bi != bj {
+			return bi > bj
 		}
 
 		// Tiebreak 2: smallest dominant cost fraction first (prefers short OR small-footprint
@@ -132,12 +141,9 @@ func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota
 			return ri < rj
 		}
 
-		cf := ei.CompletionFraction() - ej.CompletionFraction()
-		if cf > 0.01 {
-			return true
-		}
-		if cf < -0.01 {
-			return false
+		bi, bj := completionBucket(ei.CompletionFraction()), completionBucket(ej.CompletionFraction())
+		if bi != bj {
+			return bi > bj
 		}
 
 		// Prefer smallest dominant cost fraction — same idea as guaranteed sort.

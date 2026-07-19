@@ -21,6 +21,10 @@ type Store interface {
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error)
 	CreateExperiment(ctx context.Context, exp *domain.Experiment) error
+	// DeleteExperiment removes an experiment row. Used only to unwind the reconcilable anchor
+	// created at the start of Submit when the subsequent quota debit fails — the job never
+	// existed, so its row must not linger.
+	DeleteExperiment(ctx context.Context, id string) error
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
@@ -46,18 +50,19 @@ type Store interface {
 	// transition (see LoopStore.MarkSubmitted). Used by the operator admit endpoint so a manual
 	// override goes through the same capacity-claiming transition as normal admission.
 	MarkSubmitted(ctx context.Context, id, clusterName string) error
-	// ListSubmittedExperiments, ListAdmittedExperiments, ListRunningExperiments return every
-	// experiment currently holding physical capacity in that status — used by the operator
-	// admit endpoint to compute a target cluster's in-flight footprint before admitting onto it,
-	// the same occupancy accounting tick() performs (see loop_tick.go step 2).
-	ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	// UpsertPendingReservation/DeletePendingReservation manage a durable pending-capacity claim
 	// (see pending_capacity_reservations' schema comment) — used by the operator admit endpoint
 	// so a manual override claims/releases capacity the same way normal admission does.
 	UpsertPendingReservation(ctx context.Context, experimentID, clusterName string, fp domain.Footprint) error
 	DeletePendingReservation(ctx context.Context, id string) error
+	// ListPendingReservationsByCluster sums every outstanding reservation per cluster — used by
+	// the operator admit endpoint to compute a target cluster's in-flight footprint the same way
+	// tick() does (see loop_tick.go step 2b). GetFlavorCapacity already reflects every
+	// SUBMITTED/ADMITTED/RUNNING pod that actually exists on a node, so pending reservations
+	// (which by construction only cover the not-yet-scheduled gap) are the only additional
+	// subtraction needed — subtracting occupied-status experiments on top of that would
+	// double-count the ones whose pod already exists.
+	ListPendingReservationsByCluster(ctx context.Context) (map[string]domain.Footprint, error)
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource

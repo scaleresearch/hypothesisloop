@@ -71,6 +71,7 @@ func (a *agent) reconcileOnce(ctx context.Context, log func(string, ...any)) err
 			log("delete workload %s: %v", id, err)
 			continue
 		}
+		log("deleted workload %s (no longer desired)", id)
 		a.track(id) // keep tracking until the status loop observes and reports Gone
 	}
 

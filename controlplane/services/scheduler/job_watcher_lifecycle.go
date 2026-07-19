@@ -194,6 +194,23 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 		zap.String("status", string(status)),
 	)
 
+	// Release the durable pending-capacity claim, if one is still outstanding, unconditionally
+	// and before attempting the status transition below — not gated on this call winning the
+	// transition race. A backend-confirmed terminal phase for this experiment ID means no
+	// reservation should survive past this point no matter which writer (this watch cycle or a
+	// concurrent controller eviction/cancel) ends up owning the status transition; every other
+	// terminal-transition path in this file and in services/controller already follows that
+	// same "delete regardless of transition outcome" rule (see onStuckPending, controller/
+	// eviction.go's evict, service_cancel.go's CancelExperiment). Doing it only after a won
+	// transition left a real gap: a stale watch goroutine that lost track of an experiment
+	// resubmitted after preemption (same deterministic job name, see workload.jobName) would
+	// lose the transition race here and return before ever reaching the delete, permanently
+	// leaking the reservation created by the resubmission's own submitJob call. No-op (and safe
+	// to call unconditionally, from any number of racing callers) if already gone.
+	if err := w.store.DeletePendingReservation(ctx, exp.ID); err != nil {
+		w.logger.Warn("job_watcher: delete pending reservation on finish", zap.String("id", exp.ID), zap.Error(err))
+	}
+
 	if startedAt.IsZero() && w.backfillStartedFromObservations(ctx, exp) {
 		startedAt = *exp.StartedAt
 	}
@@ -227,14 +244,6 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 			// Already terminal (e.g. controller evicted it concurrently) — nothing to do.
 			return
 		}
-	}
-
-	// Release the durable pending-capacity claim, if one is still outstanding — normally
-	// already deleted by onRunning, but a job that skipped straight from SUBMITTED/ADMITTED to
-	// terminal (the startedAt.IsZero() branch above) never went through onRunning, so it must
-	// be cleared here too. No-op (and safe to call unconditionally) if already gone.
-	if err := w.store.DeletePendingReservation(ctx, exp.ID); err != nil {
-		w.logger.Warn("job_watcher: delete pending reservation on finish", zap.String("id", exp.ID), zap.Error(err))
 	}
 
 	// Durably settle each resource dimension's observed cost: elapsed × gpu_count × rate for

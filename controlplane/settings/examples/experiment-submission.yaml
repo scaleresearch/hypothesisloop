@@ -12,7 +12,7 @@
 #               ...) that have nothing to do with how the job executes.
 #
 # See tests/workload/job.yaml for the minimal fixture the e2e smoke test submits (just the
-# `job` section — its `metadata` is generated inline by tests/e2e-flow.sh per agent).
+# `job` section — its `metadata` is generated inline by tests/scenarios/phase2-and-settlement.sh per agent).
 
 job:
   # --- What to run -------------------------------------------------------------------

@@ -350,52 +350,52 @@ func ParseJobPhase(s string) JobPhase {
 }
 
 func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID string) (JobPhase, error) {
+	phase, _, err := c.PollJobPhaseAndUID(ctx, experimentID)
+	return phase, err
+}
+
+// PollJobPhaseAndUID fetches the k8s Job once and returns both its phase and its UID (""
+// if the Job doesn't exist) — one API call instead of the two separate Get()s
+// PollJobPhase/GetJobUID used to each make. This isn't just an efficiency cleanup: two
+// separate polls a few hundred ms apart can each independently observe "Active>0" (phase
+// Running) across a preempt-then-recreate cycle that deleted and recreated the Job in
+// between — collapsing an old Job's disappearance and a new Job's appearance into what
+// looks like "no change" to a phase-only comparison, since the string phase reads Running
+// both times. Comparing UID alongside phase (see cluster-agent's reportChangedStatuses)
+// catches that: the UID always changes across a delete+recreate even when the phase string
+// doesn't, so a stuck-forever "gone was never observed" status report can't happen.
+func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID string) (JobPhase, string, error) {
 	job, err := c.kube.BatchV1().Jobs(OpenResearchNamespace).Get(ctx, jobName(experimentID), metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return JobPhaseGone, nil
+			return JobPhaseGone, "", nil
 		}
-		return JobPhasePending, err
+		return JobPhasePending, "", err
 	}
+	uid := string(job.UID)
 	// Check the native JobComplete condition before falling back to a raw Succeeded
 	// count: for Indexed jobs with a SuccessPolicy (distributed training gated on rank 0),
 	// a non-master worker finishing first bumps Status.Succeeded without the job actually
 	// being done — JobComplete only flips true once the configured policy is satisfied.
 	for _, cond := range job.Status.Conditions {
 		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-			return JobPhaseSucceeded, nil
+			return JobPhaseSucceeded, uid, nil
 		}
 		if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
-			return JobPhaseFailed, nil
+			return JobPhaseFailed, uid, nil
 		}
 	}
 	if job.Spec.CompletionMode == nil || *job.Spec.CompletionMode != batchv1.IndexedCompletion {
 		if job.Status.Succeeded > 0 {
-			return JobPhaseSucceeded, nil
+			return JobPhaseSucceeded, uid, nil
 		}
 	}
 	if job.Status.Active > 0 {
-		return JobPhaseRunning, nil
+		return JobPhaseRunning, uid, nil
 	}
-	return JobPhasePending, nil
+	return JobPhasePending, uid, nil
 }
 
-// GetJobUID returns the k8s Job's UID for experimentID, or "" if the Job doesn't exist. Used by
-// cluster-agent to attach ownership-verification data to status pushes: the control plane
-// trusts the first UID it sees per experiment and flags (doesn't silently accept) a later
-// report carrying a different UID — e.g. a name collision, a stray manually-created Job, or a
-// second cluster-agent misconfigured against the same cluster (see
-// competetors/SYNTHESIS_GAPS_AND_PLAN.md item #5).
-func (c *JobWorkloadClient) GetJobUID(ctx context.Context, experimentID string) (string, error) {
-	job, err := c.kube.BatchV1().Jobs(OpenResearchNamespace).Get(ctx, jobName(experimentID), metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return string(job.UID), nil
-}
 
 // GetAdmittedGPUType reports which GPU type this experiment's Job actually landed on. When
 // AcceptableGPUTypes lists more than one flavor, the k8s scheduler — not this client — picks the

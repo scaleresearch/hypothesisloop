@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -134,36 +134,13 @@ func (h *Handler) appendMetric(w http.ResponseWriter, r *http.Request) {
 	// and decline detection both query GreptimeDB directly (see controller.checkSilence,
 	// checkMetricDecline) rather than being told about pushes through a side channel.
 	if err := h.svc.RecordMetric(r.Context(), id, body.MetricName, body.FractionComplete, body.MetricValue); err != nil {
+		if errors.Is(err, ErrInvalidMetric) {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		h.logger.Error("record metric", zap.String("id", id), zap.Error(err))
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// PATCH /registry/experiments/{id}/status
-func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var body struct {
-		Status domain.ExperimentStatus `json:"status"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if body.Status == "" {
-		writeError(w, http.StatusBadRequest, "status is required")
-		return
-	}
-	if err := h.svc.UpdateStatus(r.Context(), id, body.Status); err != nil {
-		h.logger.Error("update status", zap.String("id", id), zap.Error(err))
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	exp, err := h.svc.Get(context.Background(), id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, exp)
 }

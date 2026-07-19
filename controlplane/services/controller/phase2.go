@@ -59,13 +59,15 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 		return c.reconcilePhase2Hold(ctx, pe, runningExps)
 	}
 
-	// Compute total consumed: committed (from the metrics DB) + in-flight (from running experiments).
-	committed, err := metricsdb.TotalConsumedT4H(ctx, c.metricsDBURL, pe.ID)
+	// Compute total consumed: settled observed (from the metrics DB) + live actual of running
+	// attempts. TotalObservedT4H counts only kind=observed, i.e. jobs that have actually settled —
+	// never a queued or running job's reservation — so a large queued job can no longer prematurely
+	// trip the boundary (P0-a/N1). Running jobs therefore contribute their full live actual cost
+	// here, not just an overrun on top of an estimate.
+	committed, err := metricsdb.TotalObservedT4H(ctx, c.metricsDBURL, pe.ID)
 	if err != nil {
-		return fmt.Errorf("phase2: TotalConsumedT4H: %w", err)
+		return fmt.Errorf("phase2: TotalObservedT4H: %w", err)
 	}
-	// committed already includes running jobs' estimated costs (debited at submission).
-	// Only add the overrun (actual − estimated) to avoid double-counting.
 	var inFlight float64
 	now := time.Now().UTC()
 	for _, exp := range runningExps {
@@ -77,9 +79,7 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 			c.logger.Error("checkPhase2Transition: observed GPU cost", zap.String("experiment", exp.ID), zap.Error(err))
 			continue
 		}
-		if delta := actual - exp.EstimatedCostT4H; delta > 0 {
-			inFlight += delta
-		}
+		inFlight += actual
 	}
 	totalConsumed := committed + inFlight
 

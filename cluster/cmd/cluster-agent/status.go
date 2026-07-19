@@ -41,6 +41,7 @@ type candidateReport struct {
 	wire  statusReportWire
 	id    string
 	phase workload.JobPhase
+	uid   string
 }
 
 func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...any)) {
@@ -53,14 +54,21 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 
 	var candidates []candidateReport
 	for _, id := range ids {
-		phase, err := a.jwc.PollJobPhase(ctx, id)
+		// One combined poll (phase + UID) instead of two separate Get()s a phase-changed-only
+		// gate below would otherwise have to sequence around — see PollJobPhaseAndUID's doc
+		// comment for why comparing UID (not just phase) is required, not just cheaper: a
+		// delete-then-recreate cycle (e.g. preempt-then-readmit reusing the same experiment ID)
+		// can land back on the same phase string across two polls, which a phase-only
+		// comparison would silently treat as "no change" — permanently losing the old Job's
+		// Gone transition and, downstream, WaitForJobDeletion's confirmation of freed capacity.
+		phase, uid, err := a.jwc.PollJobPhaseAndUID(ctx, id)
 		if err != nil {
 			log("poll job phase %s: %v", id, err)
 			continue
 		}
 		a.mu.Lock()
 		tj, ok := a.tracked[id]
-		if !ok || phase == tj.lastPhase {
+		if !ok || (phase == tj.lastPhase && uid == tj.lastUID) {
 			a.mu.Unlock()
 			continue
 		}
@@ -68,18 +76,8 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 		seq := tj.seq
 		a.mu.Unlock()
 
-		// Fetch the Job UID fresh on every reported phase change — this only runs when the
-		// phase actually changed (already rate-limited), so a plain uncached query is simpler
-		// than caching it and just as cheap in practice.
-		var uid string
 		var admittedGPUType string
 		if phase != workload.JobPhaseGone {
-			if u, err := a.jwc.GetJobUID(ctx, id); err != nil {
-				log("get job UID %s: %v", id, err)
-			} else {
-				uid = u
-			}
-
 			// Resolve which GPU type this job's pod(s) actually landed on — meaningful only
 			// once at least one pod is scheduled onto a node. An empty result (nothing
 			// scheduled yet, or a query error) simply omits the field: the control plane
@@ -111,6 +109,7 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 			},
 			id:    id,
 			phase: phase,
+			uid:   uid,
 		})
 		// Succeeded/Failed are terminal for the experiment but the Job object itself may
 		// still exist until reconcile deletes it (status leaves the desired set on the
@@ -149,6 +148,7 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 		}
 		if tj, ok := a.tracked[c.id]; ok {
 			tj.lastPhase = c.phase
+			tj.lastUID = c.uid
 		}
 	}
 	a.mu.Unlock()

@@ -183,8 +183,13 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compute the same capacity-vs-occupancy view tick() uses, scoped to the requested cluster,
-	// so an operator override still respects physical capacity instead of admitting blindly.
+	// Compute the exact same capacity view tick() uses, scoped to the requested cluster, so an
+	// operator override still respects physical capacity instead of admitting blindly.
+	// GetFlavorCapacity already reflects every SUBMITTED/ADMITTED/RUNNING pod that actually
+	// exists on a node (see loop_tick.go step 2) — subtracting occupied-status experiments again
+	// here would double-count them. The only additional subtraction needed is pending
+	// reservations (loop_tick.go step 2b), which by construction cover only the not-yet-
+	// scheduled gap and are never yet reflected in the live number.
 	gAvail, _, err := h.svc.workload.GetFlavorCapacity(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -196,29 +201,12 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cluster_name is not a configured cluster")
 		return
 	}
-	occupied, err := h.svc.occupiedFootprint(r.Context())
+	pendingByCluster, err := h.svc.store.ListPendingReservationsByCluster(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	for _, o := range occupied {
-		if o.ClusterName != req.ClusterName {
-			continue
-		}
-		// CPU is skipped here the same way tick() skips it (see loop_tick.go's step-2 comment):
-		// the live-reported CPU number already reflects every SUBMITTED/ADMITTED/RUNNING job's
-		// request once its pod exists, so subtracting it again would double-count.
-		ofp := o.Footprint()
-		for k, v := range ofp {
-			if k.Kind == domain.ResourceKindCPU {
-				continue
-			}
-			avail[k] -= v
-			if avail[k] < 0 {
-				avail[k] = 0
-			}
-		}
-	}
+	subtractFootprint(avail, pendingByCluster[req.ClusterName])
 	if !domain.Fits(avail, fp) {
 		writeError(w, http.StatusUnprocessableEntity, "insufficient capacity on requested cluster")
 		return
@@ -232,10 +220,17 @@ func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
 	exp.ClusterName = req.ClusterName
 	exp.UpdatedAt = time.Now().UTC()
 	// Durably claim this capacity the same way normal admission does (see
-	// pending_capacity_reservations' schema comment) — best-effort, matching submitJob: a
-	// failure here degrades the pending-race protection for this one job but must not block
-	// an operator's manual override.
-	_ = h.svc.store.UpsertPendingReservation(r.Context(), id, req.ClusterName, fp)
+	// pending_capacity_reservations' schema comment). Unlike the previous best-effort version,
+	// a failure here now rolls the experiment back to QUEUED instead of proceeding — the fallback
+	// occupancy accounting this comment used to point to no longer exists (loop_tick.go step 2
+	// was removed once GetFlavorCapacity became fully live), so a silently dropped reservation
+	// would leave this job's capacity claim completely untracked, reopening the exact
+	// double-admission race pending reservations exist to close.
+	if err := h.svc.store.UpsertPendingReservation(r.Context(), id, req.ClusterName, fp); err != nil {
+		_ = h.svc.store.UpdateExperimentStatus(r.Context(), id, domain.StatusQueued)
+		writeError(w, http.StatusInternalServerError, "reservation failed: "+err.Error())
+		return
+	}
 
 	if err := h.svc.workload.CreateWorkload(r.Context(), exp); err != nil {
 		// Roll back on workload creation failure.

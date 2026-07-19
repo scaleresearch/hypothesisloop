@@ -22,6 +22,17 @@ const (
 	StatusRejected  ExperimentStatus = "REJECTED"
 )
 
+// IsTerminal reports whether the status is a final lifecycle state that no further execution
+// or progress reporting can follow.
+func (s ExperimentStatus) IsTerminal() bool {
+	switch s {
+	case StatusCompleted, StatusFailed, StatusEvicted, StatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // EvictionReason classifies why a job was terminated early.
 type EvictionReason string
 

@@ -71,7 +71,7 @@ export function Nav() {
         <SystemStatus />
         <div className="wa-nav-footer">
           <p className="wa-nav-footer-title">OpenResearch v2.0</p>
-          <p className="wa-nav-footer-sub">Unit: T4-GPU-hours</p>
+          <p className="wa-nav-footer-sub">Budget: normalized compute-hours</p>
         </div>
       </div>
     </nav>

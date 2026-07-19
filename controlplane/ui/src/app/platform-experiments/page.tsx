@@ -24,17 +24,23 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
 }
 
-function MetricChip({ m }: { m: MetricDefinition }) {
+function MetricChip({ m, primary }: { m: MetricDefinition; primary?: boolean }) {
   return (
     <span
       className="mono"
       style={{
         fontSize: 11, padding: '3px 9px', borderRadius: 999,
+        display: 'inline-flex', alignItems: 'center', gap: 4,
         background: m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(251, 191, 36, 0.12)',
-        border: `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
+        border: primary
+          ? `1px solid ${semantic.accent}`
+          : `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
         color: m.direction === 'maximize' ? semantic.success : semantic.warning,
+        boxShadow: primary ? `0 0 0 1px ${semantic.accent} inset` : undefined,
       }}
+      title={primary ? 'Primary metric — used for ranking' : undefined}
     >
+      {primary && <span style={{ opacity: 0.85, fontSize: 9 }}>★</span>}
       {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
     </span>
   )
@@ -93,7 +99,7 @@ function ExperimentCard({
 
         {pe.metrics && pe.metrics.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-            {pe.metrics.map(m => <MetricChip key={m.key} m={m} />)}
+            {pe.metrics.map((m, i) => <MetricChip key={m.key} m={m} primary={i === 0} />)}
           </div>
         )}
 
@@ -247,6 +253,15 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
     onChange(metrics.map(m => m.key === key ? { ...m, direction: m.direction === 'maximize' ? 'minimize' : 'maximize' } : m))
   }
 
+  function makePrimary(key: string) {
+    const idx = metrics.findIndex(m => m.key === key)
+    if (idx <= 0) return
+    const reordered = [...metrics]
+    const [picked] = reordered.splice(idx, 1)
+    reordered.unshift(picked)
+    onChange(reordered)
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
@@ -279,21 +294,37 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
 
       {metrics.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {metrics.map(m => (
-            <span key={m.key} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 999, fontSize: 12,
-              background: m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(251, 191, 36, 0.12)',
-              border: `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
-              color: m.direction === 'maximize' ? semantic.success : semantic.warning,
-            }}>
-              <button type="button" onClick={() => toggleDir(m.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, color: 'inherit' }}>
-                {m.direction === 'maximize' ? '↑' : '↓'}
-              </button>
-              {m.key}
-              <button type="button" onClick={() => remove(m.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 2px', fontSize: 11, color: 'inherit', opacity: 0.6 }}>×</button>
-            </span>
-          ))}
+          {metrics.map((m, i) => {
+            const primary = i === 0
+            return (
+              <span key={m.key} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 8px', borderRadius: 999, fontSize: 12,
+                background: m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(251, 191, 36, 0.12)',
+                border: primary ? `1px solid ${semantic.accent}` : `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
+                boxShadow: primary ? `0 0 0 1px ${semantic.accent} inset` : undefined,
+                color: m.direction === 'maximize' ? semantic.success : semantic.warning,
+              }}>
+                {primary ? (
+                  <span title="Primary metric — used for ranking" style={{ fontSize: 9, opacity: 0.85 }}>★</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => makePrimary(m.key)}
+                    title="Make primary"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'inherit', opacity: 0.5 }}
+                  >
+                    ☆
+                  </button>
+                )}
+                <button type="button" onClick={() => toggleDir(m.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, color: 'inherit' }}>
+                  {m.direction === 'maximize' ? '↑' : '↓'}
+                </button>
+                {m.key}
+                <button type="button" onClick={() => remove(m.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 2px', fontSize: 11, color: 'inherit', opacity: 0.6 }}>×</button>
+              </span>
+            )
+          })}
         </div>
       )}
     </div>
@@ -399,7 +430,9 @@ function ExperimentModal({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={LABEL_STYLE}>Budget (T4h) *</label>
+                <label style={LABEL_STYLE}>
+                  Total Compute Budget * <span style={{ fontWeight: 400, opacity: 0.7, textTransform: 'none' as const }} title="T4-GPU-hour equivalent — every accelerator type is billed against this one normalized unit, not just literal T4 GPUs">(T4h-equivalent)</span>
+                </label>
                 <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_t4_hours} onChange={e => set('budget_t4_hours', e.target.value)} />
               </div>
               <div>
@@ -439,7 +472,8 @@ function ExperimentModal({
             <div>
               <label style={LABEL_STYLE}>Optimization Metrics</label>
               <p className="text-dim" style={{ margin: '0 0 8px' }}>
-                Define which metrics agents must emit. Winners are ranked by the first metric listed.
+                Define which metrics agents must emit. The <strong>★ primary metric</strong> ranks
+                the leaderboard — click ☆ on any other metric to promote it.
               </p>
               <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
             </div>

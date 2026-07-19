@@ -2,6 +2,7 @@ package quota
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -10,6 +11,21 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 	"go.uber.org/zap"
 )
+
+// donationHTTPStatus maps a DonationError reason to the appropriate HTTP status code —
+// mirrors scheduler.admissionHTTPStatus.
+func donationHTTPStatus(reason string) int {
+	switch reason {
+	case DonationReasonNotFound:
+		return http.StatusNotFound
+	case DonationReasonInsufficientQuota:
+		return http.StatusPaymentRequired
+	case DonationReasonInvalidState, DonationReasonSelfDonation:
+		return http.StatusConflict
+	default:
+		return http.StatusUnprocessableEntity
+	}
+}
 
 // GET /donations — list donation requests. Optional ?status= filter (open|fulfilled|cancelled).
 func (h *PlatformExperimentsHandler) listDonations(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +106,13 @@ func (h *PlatformExperimentsHandler) fulfillDonation(w http.ResponseWriter, r *h
 		return
 	}
 	if err := h.svc.FulfillDonation(r.Context(), id, body.DonorAgentID); err != nil {
+		var donErr *DonationError
+		if errors.As(err, &donErr) {
+			// Expected, client-triggerable outcome (already fulfilled/cancelled, self-donation,
+			// insufficient quota) — not a server fault, so don't log at Error level or return 500.
+			respondError(w, donationHTTPStatus(donErr.Reason), donErr.Message)
+			return
+		}
 		h.logger.Error("fulfillDonation failed", zap.String("id", id), zap.Error(err))
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

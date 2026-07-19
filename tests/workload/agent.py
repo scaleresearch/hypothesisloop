@@ -50,7 +50,7 @@ REGISTRY_URL  = os.environ.get("OPENRESEARCH_REGISTRY_URL",  "http://localhost:8
 # Standalone job definition (domain.JobSpec — the platform's own DSL, never a raw k8s
 # manifest) sitting next to this script. Loaded once as the base for every submission;
 # tool_submit_experiment only overrides the fields the agent actually decides per run
-# (gpu_type/gpu_count), same file tests/e2e-flow.sh submits verbatim.
+# (gpu_type/gpu_count), same file tests/scenarios/phase2-and-settlement.sh submits verbatim.
 JOB_FILE = Path(os.environ.get("OPENRESEARCH_JOB_FILE", Path(__file__).parent / "job.yaml"))
 
 client = anthropic.Anthropic()

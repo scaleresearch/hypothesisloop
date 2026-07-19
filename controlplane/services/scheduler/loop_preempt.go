@@ -50,9 +50,17 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		return n
 	}
 
-	// Sort victims: least elapsed time first (minimize wasted work), largest footprint tiebreak
-	// so we free the needed capacity by evicting the fewest possible jobs.
+	// Sort victims: fewest prior preemptions first — without this, "least observed elapsed
+	// hours" alone repeatedly re-selects the same burst job every time it's barely restarted
+	// before the next preemption need arrives, starving it indefinitely while its
+	// less-recently-hit siblings are never touched. Preempt count is the fairness primary key;
+	// least elapsed time (minimize wasted work) and largest footprint (fewest evictions) remain
+	// the tiebreaks among jobs that have been preempted equally often.
 	sort.Slice(burstRunning, func(i, j int) bool {
+		pi, pj := burstRunning[i].PreemptCount, burstRunning[j].PreemptCount
+		if pi != pj {
+			return pi < pj
+		}
 		ei, ej := elapsed[burstRunning[i].ID], elapsed[burstRunning[j].ID]
 		if ei != ej {
 			return ei < ej
@@ -197,12 +205,33 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 		return err
 	}
 	exp.ClusterName = clusterName
+	// resolveClusterAndFootprint may have substituted an AcceptableGPUTypes alternative for the
+	// originally requested flavor (exp.Job.GPUType) to find a cluster this job actually fits on
+	// — persist that now so the record matches from the start, not just once job_watcher's
+	// onRunning observes the real k8s placement. onRunning's own flavor-substitution debit
+	// compares its k8s-observed type against exp.GPUType, so this write is also what lets that
+	// comparison correctly detect "no further correction needed" when our guess here matches
+	// where the pod actually lands, vs. "the real placement differs from what we reserved" when
+	// it doesn't.
+	if exp.GPUCount > 0 && exp.GPUType != exp.Job.GPUType {
+		newEstCost := exp.GPUType.Cost() * float64(exp.GPUCount) * exp.EstimatedDurationHours
+		if err := l.store.UpdateAdmittedFlavor(ctx, exp.ID, exp.GPUType, newEstCost); err != nil {
+			l.logger.Warn("persist admission-time flavor substitution",
+				zap.String("exp", exp.ID), zap.Error(err))
+		}
+	}
 	if err := l.store.UpsertPendingReservation(ctx, exp.ID, clusterName, exp.Footprint()); err != nil {
-		// Best-effort: a failure here degrades the pending-race protection for this one job
-		// (the existing SUBMITTED/ADMITTED/RUNNING accounting in tick() step 2 still applies)
-		// but must not block submission — the job's own capacity claim is already durable via
-		// MarkSubmitted's status write.
-		l.logger.Warn("upsert pending reservation", zap.String("exp", exp.ID), zap.Error(err))
+		// Fail closed, not best-effort: tick() step 2 (the SUBMITTED/ADMITTED/RUNNING fallback
+		// accounting this comment used to describe) was removed once GetFlavorCapacity became
+		// fully live — there is no longer any other mechanism protecting this job's claimed
+		// capacity, so a silently dropped reservation would reopen the exact double-admission
+		// race pending reservations exist to close. Roll back to QUEUED instead.
+		l.logger.Error("upsert pending reservation", zap.String("exp", exp.ID), zap.Error(err))
+		if rbErr := l.store.MarkQueued(ctx, exp.ID); rbErr != nil {
+			l.logger.Error("rollback to QUEUED failed after reservation error",
+				zap.String("exp", exp.ID), zap.Error(rbErr))
+		}
+		return err
 	}
 	if err := l.workload.CreateWorkload(ctx, exp); err != nil {
 		if delErr := l.store.DeletePendingReservation(ctx, exp.ID); delErr != nil {

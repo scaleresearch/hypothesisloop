@@ -161,6 +161,12 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			continue
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
+		// Unlike a normal RUNNING job (whose reservation job_watcher's onRunning already
+		// cleared), a job resubmitted after a preemption/reschedule cycle can still hold a live
+		// reservation until its own watch cycle re-confirms RUNNING — release it here too,
+		// unconditionally, matching every other terminal-transition path (evict, cancel,
+		// onFinished). No-op if already gone.
+		_ = c.store.DeletePendingReservation(ctx, exp.ID)
 		// exp was RUNNING (StartedAt set) and the reason is EvictionQuotaExhaustion, so
 		// settleAndMark's Settle call is a deliberate no-op (budget genuinely spent) — it just
 		// marks the row settled immediately, nothing to write.

@@ -10,6 +10,12 @@ import (
 
 type trackedJob struct {
 	lastPhase workload.JobPhase
+	// lastUID is the k8s Job UID last observed for this experiment ID — compared alongside
+	// lastPhase (see reportChangedStatuses) so a delete-then-recreate cycle that lands back on
+	// the same phase string (e.g. Running -> Gone -> Running again, both polls reading
+	// Active>0) still gets detected and reported, instead of looking like no change happened
+	// at all because the string phase alone matches.
+	lastUID string
 	// seq is a per-job, per-process monotonic counter for this job's own report stream —
 	// incremented on every report built for this job, regardless of delivery outcome. Ordering
 	// only needs to hold within one job's reports from one agent process (this is always a

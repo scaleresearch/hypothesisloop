@@ -56,7 +56,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
       TARBALL="/tmp/reload-images-${node}.tar"
       podman save "${IMAGES[@]/#/localhost/}" -o "${TARBALL}"
       podman cp "${TARBALL}" "${node}:/tmp/reload-images.tar"
-      podman exec "${node}" ctr -n k8s.io images import /tmp/reload-images.tar >/dev/null
+      # Explicit --address: bare `ctr` (and `k3s ctr`) default to the container's own
+      # containerd socket, not the k3s-embedded one the kubelet actually reads from.
+      podman exec "${node}" ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import /tmp/reload-images.tar >/dev/null
       podman exec "${node}" rm -f /tmp/reload-images.tar
       rm -f "${TARBALL}"
       echo "    ${node}: synced"

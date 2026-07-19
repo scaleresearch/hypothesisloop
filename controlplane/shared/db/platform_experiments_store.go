@@ -3,12 +3,18 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 )
+
+// ErrDonorInsufficientQuota is returned by FulfillDonationTx when, at commit time under row
+// locks, the donor's guaranteed allocation minus its already-reserved usage cannot cover the
+// requested transfer.
+var ErrDonorInsufficientQuota = errors.New("donor has insufficient guaranteed quota")
 
 // PlatformExperimentsStore provides persistence for platform experiments,
 // agent signups, and per-agent quotas.
@@ -319,17 +325,70 @@ func (s *PlatformExperimentsStore) IsAgentHeld(ctx context.Context, platformExpI
 	return true, nil
 }
 
-// AddToAgentGuaranteedQuota increases an agent's guaranteed allocation for resourceType.
-// Used when redistributing quota from held agents to active ones (phase 2) and for donations
-// (GPU-hours only, today).
-func (s *PlatformExperimentsStore) AddToAgentGuaranteedQuota(ctx context.Context, agentID, platformExpID string, resourceType domain.ResourceType, delta float64) error {
+// FulfillDonationTx performs a donation transfer as a single atomic, idempotent operation: it
+// locks the donation row, verifies it is still "open", locks both quota rows, checks the donor's
+// headroom (guaranteed allocation minus donorUsedGuaranteed, its metrics-store reservation total
+// passed in by the caller), moves the amount, and flips the donation to "fulfilled" — all in one
+// transaction under the same cross-replica advisory lock admission uses. Gating the transfer on
+// the donation still being "open" inside the tx is what makes a retry safe: a second call after a
+// crash sees "fulfilled" and returns (false, nil) instead of transferring again.
+//
+// Returns fulfilled=true when the transfer was applied, false when the donation was not open
+// (already fulfilled/cancelled — a no-op, not an error). ErrDonorInsufficientQuota is returned if
+// the donor cannot cover the amount.
+func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, donorUsedGuaranteed float64) (fulfilled bool, err error) {
 	guaranteed, _ := resourceQuotaColumns(resourceType)
-	q := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s + $3 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed)
-	_, err := s.pool.pool.Exec(ctx, q, agentID, platformExpID, delta)
+
+	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("platform_experiments_store.AddToAgentGuaranteedQuota: %w", err)
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: begin tx: %w", err)
 	}
-	return nil
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	key := donorAgentID + "/" + platformExpID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: acquire lock: %w", err)
+	}
+
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM donation_requests WHERE id=$1 FOR UPDATE`, donationID).Scan(&status); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: lock donation: %w", err)
+	}
+	if status != "open" {
+		return false, nil
+	}
+
+	lockQ := fmt.Sprintf(`SELECT %s FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2 FOR UPDATE`, guaranteed)
+	var donorGuaranteed float64
+	if err := tx.QueryRow(ctx, lockQ, donorAgentID, platformExpID).Scan(&donorGuaranteed); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: lock donor row: %w", err)
+	}
+	// Lock the recipient row too so its balance can't move under a concurrent operation between
+	// here and commit.
+	var recipientGuaranteed float64
+	if err := tx.QueryRow(ctx, lockQ, recipientAgentID, platformExpID).Scan(&recipientGuaranteed); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: lock recipient row: %w", err)
+	}
+	if donorGuaranteed-donorUsedGuaranteed < amount {
+		return false, ErrDonorInsufficientQuota
+	}
+
+	debitQ := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s - $3 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed)
+	if _, err := tx.Exec(ctx, debitQ, donorAgentID, platformExpID, amount); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: debit donor: %w", err)
+	}
+	creditQ := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s + $3 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed)
+	if _, err := tx.Exec(ctx, creditQ, recipientAgentID, platformExpID, amount); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: credit recipient: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE donation_requests SET status='fulfilled', updated_at=now() WHERE id=$1`, donationID); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: mark fulfilled: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: commit: %w", err)
+	}
+	return true, nil
 }
 
 // WithAdmissionLock runs fn while holding a Postgres transaction-scoped advisory lock keyed on

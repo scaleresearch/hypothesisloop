@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -20,6 +22,19 @@ func (l *Loop) tick(ctx context.Context) error {
 
 	start := time.Now()
 	defer func() { obsmetrics.AdmissionTickDuration.Observe(time.Since(start).Seconds()) }()
+
+	// Reprioritize all queued jobs after every tick, regardless of which pass admitted or
+	// skipped anything — deferred so every exit path (including the guaranteed-only and
+	// no-burst-capacity early returns below) actually runs it, not just the path that reaches
+	// the bottom of the function. Queue order needs to stay fresh (novelty shifts as jobs
+	// start/finish, age increases, etc.) even on a tick where nothing was queued for burst.
+	if l.reprioritizer != nil {
+		defer func() {
+			if err := l.reprioritizer.RePrioritize(ctx); err != nil {
+				l.logger.Warn("reprioritize after tick", zap.Error(err))
+			}
+		}()
+	}
 
 	// 1. Get available physical capacity as a canonical domain.Footprint per cluster — a pooled
 	// cluster-less total would hide which specific cluster has room, so a job could get admitted
@@ -114,14 +129,18 @@ func (l *Loop) tick(ctx context.Context) error {
 	gAvailInitial := cloneAvail(gAvail)
 
 	for _, exp := range guaranteed {
-		fp := exp.Footprint()
 		// A job already assigned a cluster (a retry after this tick previously claimed it, see
-		// submitJob) stays pinned there; otherwise pick a cluster where the job's whole
-		// footprint fits jointly across every dimension it requests — see clusterWithBestFit's
-		// doc comment for the exact policy.
+		// submitJob) stays pinned there — its flavor was already resolved on the attempt that
+		// pinned it, so just recompute its footprint under that flavor; otherwise pick a
+		// (cluster, flavor) pair among the requested type and any AcceptableGPUTypes where the
+		// job's whole footprint fits jointly across every dimension it requests — see
+		// resolveClusterAndFootprint's and clusterWithBestFit's doc comments for the exact policy.
 		cluster := exp.ClusterName
-		if cluster == "" {
-			cluster = clusterWithBestFit(gAvail, fp)
+		var fp domain.Footprint
+		if cluster != "" {
+			fp = exp.Footprint()
+		} else {
+			cluster, fp = resolveClusterAndFootprint(gAvail, exp)
 		}
 		if !domain.Fits(gAvail[cluster], fp) {
 			// Doesn't fit on cluster — try to preempt that cluster's own burst jobs to make
@@ -133,6 +152,11 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			burstRunning := filterTierCluster(running, domain.CapacityBurst, cluster)
 			shortage := shortfall(gAvail[cluster], fp)
+			l.logger.Info("guaranteed job needs preemption",
+				zap.String("exp", exp.ID), zap.String("cluster", cluster),
+				zap.String("avail", footprintStr(gAvail[cluster])), zap.String("need", footprintStr(fp)),
+				zap.String("shortage", footprintStr(shortage)),
+				zap.Int("burst_candidates", len(burstRunning)))
 			freed, err := l.preempt(ctx, shortage, burstRunning)
 			if err != nil {
 				l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
@@ -153,6 +177,10 @@ func (l *Loop) tick(ctx context.Context) error {
 				gAvail[cluster] = domain.NewFootprint()
 			}
 			gAvail[cluster].AddFootprint(freed)
+			l.logger.Info("preemption result",
+				zap.String("exp", exp.ID), zap.String("freed", footprintStr(freed)),
+				zap.String("avail_after", footprintStr(gAvail[cluster])),
+				zap.Bool("fits_now", domain.Fits(gAvail[cluster], fp)))
 			if !domain.Fits(gAvail[cluster], fp) {
 				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 				l.setNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp))
@@ -202,10 +230,12 @@ func (l *Loop) tick(ctx context.Context) error {
 	bAvailInitial := cloneAvail(bAvail)
 
 	for _, exp := range burst {
-		fp := exp.Footprint()
 		cluster := exp.ClusterName
-		if cluster == "" {
-			cluster = clusterWithBestFit(bAvail, fp)
+		var fp domain.Footprint
+		if cluster != "" {
+			fp = exp.Footprint()
+		} else {
+			cluster, fp = resolveClusterAndFootprint(bAvail, exp)
 		}
 		if !domain.Fits(bAvail[cluster], fp) {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
@@ -222,16 +252,19 @@ func (l *Loop) tick(ctx context.Context) error {
 		l.setNotAdmittedReason(ctx, exp.ID, "")
 	}
 
-	// Reprioritize all queued jobs after each admission pass so the queue order
-	// stays fresh (novelty shifts as jobs start/finish, age increases, etc.).
-	// This runs synchronously in the same goroutine — single-threaded, no races.
-	if l.reprioritizer != nil {
-		if err := l.reprioritizer.RePrioritize(ctx); err != nil {
-			l.logger.Warn("reprioritize after tick", zap.Error(err))
-		}
-	}
-
 	return nil
+}
+
+// footprintStr renders a Footprint for logging — domain.Footprint's struct-keyed map can't be
+// marshalled by zap.Any (JSON object keys must be strings), so every call site that wants to log
+// one needs this instead.
+func footprintStr(fp domain.Footprint) string {
+	parts := make([]string, 0, len(fp))
+	for k, v := range fp {
+		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Flavor, v))
+	}
+	sort.Strings(parts)
+	return "{" + strings.Join(parts, ",") + "}"
 }
 
 // subtractFootprint subtracts fp from avail in place, dimension by dimension, clamped at zero
@@ -274,6 +307,51 @@ func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
 		out[cluster] = cp
 	}
 	return out
+}
+
+// candidateGPUTypes returns the flavors admission should try for exp, in preference order:
+// the originally requested exp.GPUType first, then any distinct AcceptableGPUTypes. GPUCount is
+// already flavor-independent (it's the job's total footprint, fixed at submission — see
+// Experiment.Footprint's doc comment), so trying an alternate only changes which accelerator key
+// the footprint is keyed under, nothing else.
+func candidateGPUTypes(exp *domain.Experiment) []domain.GPUType {
+	types := []domain.GPUType{exp.GPUType}
+	seen := map[domain.GPUType]bool{exp.GPUType: true}
+	for _, t := range exp.Job.AcceptableGPUTypes {
+		if !seen[t] {
+			seen[t] = true
+			types = append(types, t)
+		}
+	}
+	return types
+}
+
+// resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for a job with no cluster
+// pinned yet, trying every candidate flavor (requested type first) and returning the first one
+// that fits outright on some cluster — see candidateGPUTypes. This is what lets a job whose
+// requested flavor is saturated still land on a free AcceptableGPUTypes alternative instead of
+// sitting QUEUED with idle capacity elsewhere (findings.md's "acceptable_gpu_types cannot be
+// scheduled correctly"). If no candidate fits outright, falls back to the originally requested
+// flavor's own best-fit cluster (possibly needing preemption, possibly "") so the caller's
+// existing preemption path still runs — this fix only covers the outright-fit case; preemption
+// remains scoped to the originally requested flavor.
+func resolveClusterAndFootprint(avail map[string]domain.Footprint, exp *domain.Experiment) (string, domain.Footprint) {
+	requested := exp.GPUType
+	var fallbackCluster string
+	var fallbackFP domain.Footprint
+	for i, t := range candidateGPUTypes(exp) {
+		exp.GPUType = t
+		fp := exp.Footprint()
+		cluster := clusterWithBestFit(avail, fp)
+		if i == 0 {
+			fallbackCluster, fallbackFP = cluster, fp
+		}
+		if cluster != "" && domain.Fits(avail[cluster], fp) {
+			return cluster, fp
+		}
+	}
+	exp.GPUType = requested
+	return fallbackCluster, fallbackFP
 }
 
 // clusterWithBestFit picks a target cluster for footprint among every configured cluster in

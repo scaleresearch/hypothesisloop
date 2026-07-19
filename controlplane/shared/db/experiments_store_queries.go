@@ -195,3 +195,40 @@ ORDER BY updated_at ASC`
 	defer rows.Close()
 	return collectExperiments(rows)
 }
+
+// ListTerminalExperimentIDsWithPendingReservation returns the IDs of every terminal
+// (COMPLETED/FAILED/EVICTED/REJECTED) experiment that still holds a row in
+// pending_capacity_reservations. A terminal experiment must never hold one — every
+// terminal-transition path (onFinished, onStuckPending, controller eviction/cancel,
+// checkQuotaExhaustion) already deletes it inline as part of its own transition — but that
+// delete is a single best-effort attempt against Postgres with no retry of its own (see
+// DeletePendingReservation's call sites): a transient failure there leaves the row stuck
+// forever, permanently and silently shrinking admittable capacity, since nothing else ever
+// looks at this table again once the experiment isn't RUNNING. This is the settlement
+// reconciler's read side for that same class of problem (a terminal experiment's real-world
+// state was already durably decided; some deferred side effect of that decision hasn't landed
+// yet) — reusing its existing periodic retry loop rather than adding a second one.
+func (s *ExperimentsStore) ListTerminalExperimentIDsWithPendingReservation(ctx context.Context) ([]string, error) {
+	const q = `
+SELECT pr.experiment_id
+FROM pending_capacity_reservations pr
+JOIN experiments e ON e.id = pr.experiment_id
+WHERE e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
+	rows, err := s.pool.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.ListTerminalExperimentIDsWithPendingReservation: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("experiments_store.ListTerminalExperimentIDsWithPendingReservation: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("experiments_store.ListTerminalExperimentIDsWithPendingReservation: %w", err)
+	}
+	return ids, nil
+}

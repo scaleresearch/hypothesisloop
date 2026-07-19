@@ -28,7 +28,6 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/experiments/{id}/lineage", h.getLineage)
 	r.Get("/experiments/{id}/metrics", h.getMetrics)
 	r.Post("/experiments/{id}/metrics", h.appendMetric)
-	r.Patch("/experiments/{id}/status", h.updateStatus)
 	r.Get("/platform-experiments/{id}/metrics-timeseries", h.getPlatformExperimentTimeseries)
 	r.Post("/hypotheses", h.registerHypothesis)
 	r.Get("/hypotheses", h.listHypotheses)

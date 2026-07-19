@@ -33,10 +33,11 @@ type PlatformExperimentsStore interface {
 	GetAgent(ctx context.Context, agentID string) (*domain.Agent, error)
 	ListAgents(ctx context.Context) ([]*domain.Agent, error)
 	UpdateAgent(ctx context.Context, agent *domain.Agent) error
-	// AddToAgentGuaranteedQuota adjusts an agent's guaranteed allocation for resourceType.
-	// Used for donation transfers (positive = credit, negative = debit) — donations are
-	// GPU-hours only today (domain.ResourceGPUHours).
-	AddToAgentGuaranteedQuota(ctx context.Context, agentID, platformExpID string, resourceType domain.ResourceType, delta float64) error
+	// FulfillDonationTx performs a donation transfer atomically and idempotently — locking the
+	// donation + both quota rows, verifying the donation is still open and the donor has headroom,
+	// moving the amount and marking the donation fulfilled in one transaction. See
+	// db.PlatformExperimentsStore.FulfillDonationTx.
+	FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, donorUsedGuaranteed float64) (bool, error)
 	// WithAdmissionLock serializes CheckAndDebitQuota's read-then-reserve step across every
 	// control-service replica — see db.PlatformExperimentsStore.WithAdmissionLock.
 	WithAdmissionLock(ctx context.Context, agentID, platformExpID string, fn func(ctx context.Context) error) error

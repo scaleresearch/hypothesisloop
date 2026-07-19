@@ -115,20 +115,10 @@ def post_metric(fraction: float, value: float, metric_name: str = METRIC) -> Non
 
 
 def patch_status(status: str, final_metric=None) -> None:
-    url = f"{REG_URL}/registry/experiments/{EXP_ID}/status"
-    body: dict = {"status": status}
-    if final_metric is not None:
-        body["final_metric"] = final_metric
-    payload = json.dumps(body).encode()
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-        method="PATCH",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print(f"  [warn] status PATCH failed: {e}", file=sys.stderr)
+    # Execution status (RUNNING/COMPLETED/FAILED) is owned by the control plane, derived from the
+    # cluster agent's pod-phase reports — a workload cannot self-declare its lifecycle state. This
+    # is intentionally a no-op; kept so the call sites read as documentation of the real transition.
+    return
 
 
 

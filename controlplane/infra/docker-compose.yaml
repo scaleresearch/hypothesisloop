@@ -39,6 +39,10 @@ services:
       QUOTA_PORT: "8081"
       SCHEDULER_PORT: "8082"
       CLUSTERS_CONFIG_PATH: /app/settings/clusters.yaml
+      # Scheduler admission (queuebackend.Backend.GetFlavorCapacity) reads live
+      # accelerator/RAM/storage capacity straight from the metrics store — without this, every
+      # job needing one of those dimensions sees zero capacity and Fits() fails closed forever.
+      GREPTIMEDB_URL: http://greptimedb:4000
     volumes:
       - ../settings/clusters.yaml:/app/settings/clusters.yaml:ro
     ports:
@@ -49,6 +53,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      greptimedb:
+        condition: service_started
 
   # Hosts registry-service and metric-controller on their historical ports 8083/8084 —
   # registry writes samples to GreptimeDB and metric-controller reads them back to

@@ -37,8 +37,8 @@ EXTRA_NODES="${EXTRA_NODES:-3}"
 # Matches localdev/install.sh's K3S_VERSION (v1.36.2+k3s1), reformatted for the Docker Hub
 # tag scheme (rancher/k3s uses a hyphen before the k3s suffix, not a plus).
 K3S_IMAGE_TAG="v1.36.2-k3s1"
-FAKE_NODE_CPUS="${FAKE_NODE_CPUS:-1}"
-FAKE_NODE_MEMORY="${FAKE_NODE_MEMORY:-1g}"
+FAKE_NODE_CPUS="${FAKE_NODE_CPUS:-2}"
+FAKE_NODE_MEMORY="${FAKE_NODE_MEMORY:-2g}"
 
 if [[ ! "${EXTRA_NODES}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: EXTRA_NODES must be a non-negative integer, got '${EXTRA_NODES}'"; exit 1
@@ -110,6 +110,7 @@ for i in $(seq 1 "${EXTRA_NODES}"); do
     -e K3S_NODE_NAME="${NODE_NAME}" \
     "docker.io/rancher/k3s:${K3S_IMAGE_TAG}" agent \
     --kubelet-arg=feature-gates=KubeletInUserNamespace=true \
+    "--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%" \
     >/dev/null
 done
 
@@ -144,13 +145,33 @@ for i in $(seq 1 "${EXTRA_NODES}"); do
     TARBALL="/tmp/${img}-${NODE_NAME}.tar"
     podman save "localhost/${img}:latest" -o "${TARBALL}"
     podman cp "${TARBALL}" "${NODE_NAME}:/tmp/image.tar"
-    podman exec "${NODE_NAME}" ctr -n k8s.io images import /tmp/image.tar >/dev/null
+    # Must target k3s's embedded containerd socket explicitly — bare `ctr` (and the
+    # `k3s ctr` subcommand) default to /run/containerd/containerd.sock, while the k3s
+    # agent's kubelet reads images from /run/k3s/containerd/containerd.sock. Importing
+    # via the wrong socket succeeds silently and leaves the kubelet permanently
+    # ImagePullBackOff-ing.
+    podman exec "${NODE_NAME}" ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import /tmp/image.tar >/dev/null
     rm -f "${TARBALL}"
   done
   echo "    ${NODE_NAME}: images imported"
 done
 
 echo "==> Labeling extra nodes with distinct fake GPU types (idempotent: patch/label --overwrite)..."
+# The kubelet inside each fake-node container reports the *host's* full CPU/memory as node
+# capacity/allocatable (cAdvisor reads the machine it's running on, not the --cpus/--memory
+# cgroup quota podman applied to this specific container) — so a container hard-limited to
+# FAKE_NODE_CPUS core(s) still advertises the podman VM's entire CPU count (e.g. 12) to the
+# k8s scheduler. Under light load nothing catches this; run several scenarios concurrently
+# (each submitting real workload pods) and the scheduler happily over-admits far past what
+# the container can actually execute, so pods get severely CPU-throttled instead of properly
+# queued — showing up as scheduling-tick delays, admission timeouts, and jobs missing their
+# preemption/re-admission windows purely from wall-clock slowness, not real scheduler bugs.
+# Patch capacity/allocatable down to what the container can truly deliver (matching the GPU
+# capacity patch's own pattern below), reserving ~20% of allocatable for the kubelet/flannel/
+# system pods that also run inside this same container, same as real kube-reserved sizing.
+CPU_ALLOCATABLE_MILLI=$(( FAKE_NODE_CPUS * 1000 * 80 / 100 ))
+MEM_CAPACITY_KI="${FAKE_NODE_MEMORY%[gG]}000000"
+MEM_ALLOCATABLE_KI=$(( MEM_CAPACITY_KI * 80 / 100 ))
 for i in $(seq 1 "${EXTRA_NODES}"); do
   NODE_NAME="fake-gpu-node-${i}"
   entry="${GPU_TYPES[$(( (i - 1) % ${#GPU_TYPES[@]} ))]}"
@@ -160,11 +181,17 @@ for i in $(seq 1 "${EXTRA_NODES}"); do
   # "add" on an existing capacity/allocatable key replaces its value (RFC 6902 semantics for
   # object members), so re-running this is safe — it doesn't error on already-patched nodes.
   kubectl --context "${CONTEXT_NAME}" patch node "${NODE_NAME}" --subresource=status \
-    --type=json -p '[{"op":"add","path":"/status/capacity/nvidia.com~1gpu","value":"8"},{"op":"add","path":"/status/allocatable/nvidia.com~1gpu","value":"8"}]' \
-    >/dev/null
+    --type=json -p "[
+      {\"op\":\"add\",\"path\":\"/status/capacity/nvidia.com~1gpu\",\"value\":\"8\"},
+      {\"op\":\"add\",\"path\":\"/status/allocatable/nvidia.com~1gpu\",\"value\":\"8\"},
+      {\"op\":\"add\",\"path\":\"/status/capacity/cpu\",\"value\":\"${FAKE_NODE_CPUS}\"},
+      {\"op\":\"add\",\"path\":\"/status/allocatable/cpu\",\"value\":\"${CPU_ALLOCATABLE_MILLI}m\"},
+      {\"op\":\"add\",\"path\":\"/status/capacity/memory\",\"value\":\"${MEM_CAPACITY_KI}Ki\"},
+      {\"op\":\"add\",\"path\":\"/status/allocatable/memory\",\"value\":\"${MEM_ALLOCATABLE_KI}Ki\"}
+    ]" >/dev/null
   kubectl --context "${CONTEXT_NAME}" label node "${NODE_NAME}" \
     "nvidia.com/gpu.product=${LABEL_VALUE}" --overwrite >/dev/null
-  echo "    ${NODE_NAME} -> ${GPU_TYPE} (${LABEL_VALUE})"
+  echo "    ${NODE_NAME} -> ${GPU_TYPE} (${LABEL_VALUE}), cpu=${FAKE_NODE_CPUS} (${CPU_ALLOCATABLE_MILLI}m allocatable), mem=${MEM_CAPACITY_KI}Ki (${MEM_ALLOCATABLE_KI}Ki allocatable)"
 done
 
 echo "==> Cluster nodes:"
