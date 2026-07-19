@@ -10,7 +10,6 @@ import (
 
 // Store is the persistence interface required by the registry service.
 type Store interface {
-	CreateExperiment(ctx context.Context, exp *domain.Experiment) error
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error)
 	UpdateExperiment(ctx context.Context, exp *domain.Experiment) error

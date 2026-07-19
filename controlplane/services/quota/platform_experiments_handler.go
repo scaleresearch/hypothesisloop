@@ -1,17 +1,23 @@
 package quota
 
 import (
-	"net/http"
+	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
-// PlatformExperimentsHandler exposes the Platform Experiment lifecycle over HTTP.
+// PlatformExperimentsHandler exposes the Platform Experiment lifecycle over
+// HTTP. Routes are registered via RegisterHuma (see huma_api.go).
 type PlatformExperimentsHandler struct {
 	svc     *PlatformExperimentsService
 	logger  *zap.Logger
 	catalog ResourceCatalog
+
+	// Live-capacity lookup (GET /resource-catalog/capacity) — an unset metricsDBURL means the
+	// endpoint responds with an empty capacity list rather than panicking.
+	metricsDBURL      string
+	flavorNameFn      func(flavor string) string
+	capacityFreshness time.Duration
 }
 
 // NewPlatformExperimentsHandler constructs the handler.
@@ -25,45 +31,76 @@ func (h *PlatformExperimentsHandler) WithCatalog(catalog ResourceCatalog) *Platf
 	return h
 }
 
-// RegisterRoutes mounts platform experiment endpoints on r.
-func (h *PlatformExperimentsHandler) RegisterRoutes(r chi.Router) {
-	r.Post("/platform-experiments", h.create)
-	r.Get("/platform-experiments", h.list)
-	r.Get("/platform-experiments/{id}", h.get)
-	r.Put("/platform-experiments/{id}", h.update)
-	r.Post("/platform-experiments/{id}/signup", h.signup)
-	r.Post("/platform-experiments/{id}/start", h.start)
-	r.Post("/platform-experiments/{id}/close", h.close)
-	r.Get("/platform-experiments/{id}/quotas", h.listQuotas)
-	r.Get("/quota/{agentID}/experiment/{experimentID}", h.getAgentQuota)
-	r.Get("/platform-experiments/{id}/phase2-status", h.getPhase2Status)
-	// Donation board (experiment-scoped — transfers quota between agents).
-	r.Get("/donations", h.listDonations)
-	r.Post("/donations", h.createDonation)
-	r.Post("/donations/{id}/cancel", h.cancelDonation)
-	r.Post("/donations/{id}/fulfill", h.fulfillDonation)
-	// Resource catalog — read-only reference data (Accelerator type rates, CPU/RAM/storage rates)
-	// so UIs/agents never need to hardcode a copy of the operator's config.
-	r.Get("/resource-catalog", h.getResourceCatalog)
+// WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the metrics DB URL
+// live per-flavor accelerator capacity reports land in, a flavor->accelerator-type-name
+// translator, and the freshness window past which a cluster's last report is treated as stale.
+func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, flavorNameFn func(flavor string) string, freshness time.Duration) *PlatformExperimentsHandler {
+	h.metricsDBURL = metricsDBURL
+	h.flavorNameFn = flavorNameFn
+	h.capacityFreshness = freshness
+	return h
 }
 
-// AcceleratorTypeInfo is the agent/UI-facing view of one catalog accelerator type — pricing only, not the
-// execution-engine internals (resource name, taint key, node label key/value) which stay
-// entirely within the backend/workload layer.
+// AcceleratorTypeInfo is the agent/UI-facing view of one catalog accelerator type — pricing only.
 type AcceleratorTypeInfo struct {
-	Name    string  `json:"name"`
+	Name     string  `json:"name"`
 	AccHRate float64 `json:"acch_rate"`
 }
 
-// ResourceCatalog is the full set of resource-pricing reference data served by
-// GET /resource-catalog.
+// ResourceCatalog is the full set of resource-pricing reference data served by GET /resource-catalog.
 type ResourceCatalog struct {
-	AcceleratorTypes          []AcceleratorTypeInfo `json:"accelerator_types"`
-	CPUCoreHourRate   float64       `json:"cpu_core_hour_rate"`
-	RAMGBHourRate     float64       `json:"ram_gb_hour_rate"`
-	StorageGBHourRate float64       `json:"storage_gb_hour_rate"`
+	AcceleratorTypes  []AcceleratorTypeInfo `json:"accelerator_types"`
+	CPUCoreHourRate   float64               `json:"cpu_core_hour_rate"`
+	RAMGBHourRate     float64               `json:"ram_gb_hour_rate"`
+	StorageGBHourRate float64               `json:"storage_gb_hour_rate"`
 }
 
-func (h *PlatformExperimentsHandler) getResourceCatalog(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, h.catalog)
+// ClusterCapacity is one cluster's live, per-accelerator-type capacity.
+type ClusterCapacity struct {
+	ClusterName  string                `json:"cluster_name"`
+	Accelerators []AcceleratorCapacity `json:"accelerators"`
+}
+
+// AcceleratorCapacity is one accelerator type's live capacity on one cluster.
+type AcceleratorCapacity struct {
+	AcceleratorType string `json:"accelerator_type"`
+	Available       int64  `json:"available"`
+	Total           int64  `json:"total"`
+}
+
+// buildClusterCapacity translates the raw per-cluster/per-flavor available and total maps
+// (internal flavor names) into the agent-facing ClusterCapacity list (accelerator-type names).
+// Unknown flavors (operator config changed since a report) are skipped rather than leaked.
+func buildClusterCapacity(available, total map[string]map[string]int64, flavorNameFn func(string) string) []ClusterCapacity {
+	clusterNames := make(map[string]bool, len(available))
+	for cluster := range available {
+		clusterNames[cluster] = true
+	}
+	for cluster := range total {
+		clusterNames[cluster] = true
+	}
+	clusters := make([]ClusterCapacity, 0, len(clusterNames))
+	for cluster := range clusterNames {
+		flavorsSeen := make(map[string]bool)
+		for flavor := range available[cluster] {
+			flavorsSeen[flavor] = true
+		}
+		for flavor := range total[cluster] {
+			flavorsSeen[flavor] = true
+		}
+		accelerators := make([]AcceleratorCapacity, 0, len(flavorsSeen))
+		for flavor := range flavorsSeen {
+			name := flavorNameFn(flavor)
+			if name == "" {
+				continue
+			}
+			accelerators = append(accelerators, AcceleratorCapacity{
+				AcceleratorType: name,
+				Available:       available[cluster][flavor],
+				Total:           total[cluster][flavor],
+			})
+		}
+		clusters = append(clusters, ClusterCapacity{ClusterName: cluster, Accelerators: accelerators})
+	}
+	return clusters
 }

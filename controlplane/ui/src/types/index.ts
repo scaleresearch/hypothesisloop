@@ -299,19 +299,6 @@ export interface ClustersResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Allotment
-// ---------------------------------------------------------------------------
-
-export interface AllotmentResult {
-  new_period: number
-  prev_period: number
-  winner_agent?: string
-  winner_metric?: number
-  winner_experiment_id?: string
-  allotments: Array<{ agent_id: string; credits: number; performance_score: number }>
-}
-
-// ---------------------------------------------------------------------------
 // Lineage
 // ---------------------------------------------------------------------------
 

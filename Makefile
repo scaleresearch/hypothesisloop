@@ -2,7 +2,8 @@
 	controlplane-up controlplane-down \
 	cluster-agent-up cluster-agent-down \
 	k3s-up k3s-down full-up k3s-add-fake-nodes \
-	full-stop full-start reload
+	full-stop full-start reload \
+	tt-up tt-down tt-status tt-stop tt-start
 
 COMPOSE_FILE := controlplane/infra/docker-compose.yaml
 
@@ -70,6 +71,24 @@ full-start:
 # every step polls for readiness instead of sleeping a fixed guess.
 reload:
 	bash localdev/reload.sh
+
+# ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
+# Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
+# fake-accelerator nodes. See tenstorrent/README.md.
+tt-up:
+	bash tenstorrent/install.sh
+
+tt-down:
+	bash tenstorrent/destroy.sh
+
+tt-status:
+	bash tenstorrent/status.sh
+
+tt-stop:
+	bash tenstorrent/stop.sh
+
+tt-start:
+	bash tenstorrent/start.sh
 
 # Tagged explicitly under localhost/ (not just the short name) because the DaemonSet/
 # Deployment/Job specs reference these images as localhost/openresearch-*:latest with

@@ -1,7 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
-import { fetchClusters } from '@/lib/api'
+import { fetchClusters, fetchResourceCapacity } from '@/lib/api'
 import type { ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -88,6 +88,65 @@ function ConnectedClusters() {
   )
 }
 
+function LiveCapacity() {
+  const { data, error, isLoading, mutate } = useSWR(
+    'resource-capacity',
+    fetchResourceCapacity,
+    { refreshInterval: 5_000 },
+  )
+
+  const clusters = data?.clusters ?? []
+  // Same numbers agents get from GET /resource-catalog/capacity — this table exists so an
+  // operator can see at a glance what agents will see before they submit a job.
+  const rows = clusters.flatMap(c =>
+    c.accelerators.map(a => ({ cluster: c.cluster_name, ...a })),
+  )
+
+  return (
+    <Pod>
+      <PodHeader style={{ justifyContent: 'space-between' }}>
+        <span>Capacity</span>
+        <Button size="sm" onClick={() => mutate()}>Refresh</Button>
+      </PodHeader>
+      <PodContent>
+        {isLoading && <Loading />}
+        {error && <ErrorMessage>Cannot reach quota service — is the stack running?</ErrorMessage>}
+        {data && rows.length === 0 && (
+          <EmptyState>
+            No cluster has reported live accelerator capacity yet — a cluster-agent reports
+            allocatable-minus-requested accelerators per type on every desired-state poll; this
+            table is empty until at least one poll has landed.
+          </EmptyState>
+        )}
+        {data && rows.length > 0 && (
+          <table className="wa-table">
+            <thead>
+              <tr>
+                <th>Cluster</th>
+                <th>Accelerator Type</th>
+                <th>Available</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={`${r.cluster}-${r.accelerator_type}`}>
+                  <td className="mono">{r.cluster}</td>
+                  <td className="mono" style={{ fontWeight: 600 }}>{r.accelerator_type}</td>
+                  <td className="mono" style={{ color: r.available > 0 ? semantic.success : semantic.danger }}>
+                    {r.available}
+                  </td>
+                  <td className="mono text-muted">{r.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </PodContent>
+    </Pod>
+  )
+}
+
 export default function ClusterPage() {
   return (
     <div>
@@ -99,19 +158,7 @@ export default function ClusterPage() {
       />
 
       <ConnectedClusters />
-
-      <Pod>
-        <PodHeader>Capacity</PodHeader>
-        <PodContent>
-          <EmptyState>
-            Capacity is live: each cluster-agent reports its real allocatable-minus-requested
-            CPU cores, accelerators, RAM, and storage on every desired-state poll, summed across
-            reachable clusters for admission
-            (<code>controlplane/settings/openresearch.yaml</code>'s <code>accelerator_types[]</code>
-            only defines the rate table and static inventory hints, not live capacity).
-          </EmptyState>
-        </PodContent>
-      </Pod>
+      <LiveCapacity />
     </div>
   )
 }

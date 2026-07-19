@@ -16,6 +16,16 @@ clusters:
     kubeconfig_path: /root/.kube/config
     context: k3s-local
 
+  # Real Tenstorrent QuietBox v2 hardware — see tenstorrent/README.md for how this cluster
+  # itself is bootstrapped (k3s + tt-operator) and tenstorrent/e2e-test.sh for the workload
+  # this entry lets the control plane route Tenstorrent-Blackhole jobs onto. kubeconfig_path/
+  # context below are unused by control-service/metrics-service today (neither dials into a
+  # cluster directly — see cluster/docs/execution-layer.md's split of responsibility) but are
+  # kept for documentation/future use; only `name` is actually read.
+  - name: tt-quietbox
+    kubeconfig_path: /root/.kube/config
+    context: k3s-tt
+
   # Add one entry per additional target cluster. Each one needs its own
   # kubeconfig mounted into control-service and metrics-service at the
   # path referenced here, e.g. in docker-compose.yaml:

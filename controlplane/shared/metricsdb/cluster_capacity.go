@@ -53,10 +53,22 @@ func RecordClusterAcceleratorCapacity(ctx context.Context, dbURL, clusterName st
 // metricsdb.IsAlive's freshness gating: a stale or disconnected cluster contributes nothing
 // rather than a possibly-long-stale number.
 func LiveClusterAcceleratorCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
-	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, clusterAcceleratorAvailableMetric, promSeconds(window))
+	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorAvailableMetric, window)
+}
+
+// LiveClusterAcceleratorTotalCapacity is LiveClusterAcceleratorCapacity's total-capacity
+// counterpart (allocatable, not allocatable-minus-requested) — same per-cluster-per-flavor
+// shape and freshness gating. Together the two let a caller compute both "how much is free
+// right now" and "how much exists at all" per accelerator flavor per cluster.
+func LiveClusterAcceleratorTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
+	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorTotalMetric, window)
+}
+
+func liveClusterAcceleratorMetric(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]map[string]int64, error) {
+	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, metricName, promSeconds(window))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorCapacity: %w", err)
+		return nil, fmt.Errorf("metricsdb.liveClusterAcceleratorMetric(%s): %w", metricName, err)
 	}
 	out := make(map[string]map[string]int64)
 	for _, s := range samples {

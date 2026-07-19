@@ -1,16 +1,19 @@
 package scheduler
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"net/http"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/go-chi/chi/v5"
 )
 
-// Handler wires the Scheduler Service to HTTP endpoints.
+// Handler wires the Scheduler Service to HTTP endpoints. Routes are registered
+// via RegisterHuma (see below); the transport layer is Huma.
 type Handler struct {
 	svc *Service
 }
@@ -20,295 +23,276 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// Routes registers all scheduler HTTP routes onto r.
-// The caller mounts this handler under /experiments in the gateway, so paths
-// here are relative to that prefix.
-func (h *Handler) Routes(r chi.Router) {
-	r.Post("/", h.SubmitExperiment)
-	r.Get("/", h.ListExperiments)
-	r.Get("/{id}", h.GetExperiment)
-	r.Post("/{id}/admit", h.AdmitExperiment)
-	r.Post("/{id}/cancel", h.CancelExperiment)
-	r.Post("/{id}/summary", h.WriteExperimentSummary)
-	r.Post("/reprioritize", h.Reprioritize)
+// reasonError preserves the historical {"reason","message"} envelope used by
+// experiment submission rejections (admission decisions), distinct from the
+// generic {"error":...} envelope.
+type reasonError struct {
+	status  int
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
-// submitRequest is the wire shape for POST /experiments: the platform's own JobSpec DSL
-// (the sole source of truth for how the workload runs — never a raw execution-engine
-// manifest) alongside the metadata sidecar for research/bookkeeping concepts. See
-// settings/examples/{job,experiment}.yaml.
+func (e *reasonError) Error() string  { return e.Message }
+func (e *reasonError) GetStatus() int { return e.status }
+
+// submitRequest is the wire shape for POST /experiments.
 type submitRequest struct {
 	ID       string                `json:"id"`
 	Metadata domain.ExperimentMeta `json:"metadata"`
 	Job      domain.JobSpec        `json:"job"`
 }
 
-// SubmitExperiment handles POST /experiments.
-// It decodes {id, metadata, job}, builds the domain.Experiment (AcceleratorType/AcceleratorCount are
-// derived from the job spec's own AcceleratorType/TotalAccelerators — never restated by the caller), calls
-// Submit, and returns the updated experiment on success or an admission error on rejection.
-func (h *Handler) SubmitExperiment(w http.ResponseWriter, r *http.Request) {
-	var req submitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
-		return
-	}
-
-	if req.ID == "" {
-		writeError(w, http.StatusBadRequest, "experiment id is required")
-		return
-	}
-
-	meta := req.Metadata
-	exp := domain.Experiment{
-		ID:       req.ID,
-		ParentID:               meta.ParentID,
-		AgentID:                meta.AgentID,
-		PlatformExperimentID:   meta.PlatformExperimentID,
-		ProjectID:              meta.ProjectID,
-		CodeRef:                meta.CodeRef,
-		ConfigHash:             meta.ConfigHash,
-		DataRef:                meta.DataRef,
-		Job:                    req.Job,
-		HypothesisID:           meta.HypothesisID,
-		Hypothesis:             meta.Hypothesis,
-		Objective:              meta.Objective,
-		Theory:                 meta.Theory,
-		AcceleratorType:                req.Job.AcceleratorType,
-		AcceleratorCount:               req.Job.TotalAccelerators(),
-		EstimatedDurationHours: meta.EstimatedDurationHours,
-		CapacityTier:           meta.CapacityTier,
-	}
-
-	if err := h.svc.Submit(r.Context(), &exp); err != nil {
-		var admErr *AdmissionError
-		if errors.As(err, &admErr) {
-			status := admissionHTTPStatus(admErr.Reason)
-			writeJSON(w, status, map[string]string{
-				"reason":  admErr.Reason,
-				"message": admErr.Message,
-			})
-			return
+// RegisterHuma registers the public, research-agent-facing scheduler operations
+// at their full paths (/experiments...).
+func RegisterHuma(doc *apidocs.Doc, h *Handler) {
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",
+		Summary: "Submit one job", Tags: []string{"experiments"},
+		DefaultStatus: 202,
+		Description: "Submit {id, metadata, job}. AcceleratorType/count are derived from the job spec. " +
+			"Rejections return {reason,message}; a job that fits no node QUEUES FOREVER instead of erroring — " +
+			"poll GET /experiments/{id} and check not_admitted_reason.",
+	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
+		req := in.Body
+		if req.ID == "" {
+			return nil, huma.Error400BadRequest("experiment id is required")
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+		meta := req.Metadata
+		exp := domain.Experiment{
+			ID:                     req.ID,
+			ParentID:               meta.ParentID,
+			AgentID:                meta.AgentID,
+			PlatformExperimentID:   meta.PlatformExperimentID,
+			ProjectID:              meta.ProjectID,
+			CodeRef:                meta.CodeRef,
+			ConfigHash:             meta.ConfigHash,
+			DataRef:                meta.DataRef,
+			Job:                    req.Job,
+			HypothesisID:           meta.HypothesisID,
+			Hypothesis:             meta.Hypothesis,
+			Objective:              meta.Objective,
+			Theory:                 meta.Theory,
+			AcceleratorType:        req.Job.AcceleratorType,
+			AcceleratorCount:       req.Job.TotalAccelerators(),
+			EstimatedDurationHours: meta.EstimatedDurationHours,
+			CapacityTier:           meta.CapacityTier,
+		}
+		if err := h.svc.Submit(ctx, &exp); err != nil {
+			var admErr *AdmissionError
+			if errors.As(err, &admErr) {
+				return nil, &reasonError{status: admissionHTTPStatus(admErr.Reason), Reason: admErr.Reason, Message: admErr.Message}
+			}
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
+	})
 
-	writeJSON(w, http.StatusAccepted, &exp)
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
+		Summary: "List experiments", Tags: []string{"experiments"},
+		Description: "Filter with ?agent=<id> and/or ?status=<STATUS>.",
+	}, func(ctx context.Context, in *struct {
+		Agent  string `query:"agent"`
+		Status string `query:"status"`
+	}) (*struct{ Body []*domain.Experiment }, error) {
+		exps, err := h.svc.store.ListExperiments(ctx, domain.ExperimentFilter{
+			AgentID: in.Agent, Status: domain.ExperimentStatus(in.Status),
+		})
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body []*domain.Experiment }{Body: exps}, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
+		Summary: "Get one experiment", Tags: []string{"experiments"},
+		Description: "status flows SUBMITTED -> QUEUED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED. " +
+			"If stuck QUEUED, not_admitted_reason (e.g. capacity_unavailable) explains why.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{ Body *domain.Experiment }, error) {
+		exp, err := h.svc.store.GetExperiment(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if exp == nil {
+			return nil, huma.Error404NotFound("experiment not found")
+		}
+		return &struct{ Body *domain.Experiment }{Body: exp}, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "admit-experiment", Method: "POST", Path: "/experiments/{id}/admit",
+		Summary: "Force-admit a QUEUED experiment onto a named cluster", Tags: []string{"experiments"},
+		Description: "Operator endpoint. Requires an explicit valid cluster_name and still respects capacity accounting.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			ClusterName string `json:"cluster_name"`
+		}
+	}) (*struct{ Body *domain.Experiment }, error) {
+		return h.admit(ctx, in.ID, in.Body.ClusterName)
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
+		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
+		Description: "Credits are refunded.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		if err := h.svc.CancelExperiment(ctx, in.ID); err != nil {
+			if e := admissionStatusError(err); e != nil {
+				return nil, e
+			}
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "cancelled"
+		return out, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
+		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
+		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			Summary string `json:"summary"`
+		}
+	}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		if in.Body.Summary == "" {
+			return nil, huma.Error400BadRequest("summary is required")
+		}
+		if err := h.svc.WriteExperimentSummary(ctx, in.ID, in.Body.Summary); err != nil {
+			if e := admissionStatusError(err); e != nil {
+				return nil, e
+			}
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "ok"
+		return out, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "reprioritize", Method: "POST", Path: "/experiments/reprioritize",
+		Summary: "Trigger an immediate re-prioritization pass", Tags: []string{"experiments"},
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		if err := h.svc.RePrioritize(ctx); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "ok"
+		return out, nil
+	})
 }
 
-// ListExperiments handles GET /experiments.
-// Supports query parameters: agent, status.
-func (h *Handler) ListExperiments(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	filter := domain.ExperimentFilter{
-		AgentID: q.Get("agent"),
-		Status:  domain.ExperimentStatus(q.Get("status")),
+// admissionStatusError maps an AdmissionError to a huma error with the historical
+// status codes ({"error":...} envelope, matching the pre-Huma cancel/summary handlers).
+func admissionStatusError(err error) huma.StatusError {
+	var admErr *AdmissionError
+	if !errors.As(err, &admErr) {
+		return nil
 	}
-
-	exps, err := h.svc.store.ListExperiments(r.Context(), filter)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	switch admErr.Reason {
+	case "not_found":
+		return huma.Error404NotFound(admErr.Message)
+	case "invalid_state":
+		return huma.Error409Conflict(admErr.Message)
+	default:
+		return huma.Error422UnprocessableEntity(admErr.Message)
 	}
-
-	writeJSON(w, http.StatusOK, exps)
 }
 
-// GetExperiment handles GET /experiments/{id}.
-func (h *Handler) GetExperiment(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	exp, err := h.svc.store.GetExperiment(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if exp == nil {
-		writeError(w, http.StatusNotFound, "experiment not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, exp)
-}
-
-// admitRequest is the wire shape for POST /experiments/{id}/admit: the operator must name an
-// explicit target cluster — this endpoint never picks one on the caller's behalf (see
-// AdmitExperiment's doc comment for why).
-type admitRequest struct {
-	ClusterName string `json:"cluster_name"`
-}
-
-// AdmitExperiment handles POST /experiments/{id}/admit (operator endpoint).
-// It admits the identified QUEUED experiment directly onto an operator-specified cluster,
-// bypassing queue ordering — but not capacity accounting: it requires an explicit valid target
-// cluster and goes through the same MarkSubmitted capacity-claiming transition normal admission
-// uses (see loop_preempt.go's submitJob), after confirming that cluster actually has room. A
-// bare status flip with no cluster assignment would create an experiment no cluster agent's
-// desired-state query could ever fetch (queries are scoped WHERE cluster_name = $1) — it would
-// report success and then silently never run.
-func (h *Handler) AdmitExperiment(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	var req admitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
-		return
-	}
-	if req.ClusterName == "" {
-		writeError(w, http.StatusBadRequest, "cluster_name is required")
-		return
+// admit force-admits a QUEUED experiment onto an operator-named cluster, going through the
+// same capacity-claiming transition normal admission uses.
+func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ Body *domain.Experiment }, error) {
+	if clusterName == "" {
+		return nil, huma.Error400BadRequest("cluster_name is required")
 	}
 	valid := false
 	for _, c := range h.svc.workload.ClusterNames() {
-		if c == req.ClusterName {
+		if c == clusterName {
 			valid = true
 			break
 		}
 	}
 	if !valid {
-		writeError(w, http.StatusBadRequest, "cluster_name is not a configured cluster")
-		return
+		return nil, huma.Error400BadRequest("cluster_name is not a configured cluster")
 	}
 
-	exp, err := h.svc.store.GetExperiment(r.Context(), id)
+	exp, err := h.svc.store.GetExperiment(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	if exp == nil {
-		writeError(w, http.StatusNotFound, "experiment not found")
-		return
+		return nil, huma.Error404NotFound("experiment not found")
 	}
 	if exp.Status != domain.StatusQueued {
-		writeError(w, http.StatusConflict, "only QUEUED experiments can be admitted")
-		return
+		return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
 	}
 
-	// Compute the exact same capacity view tick() uses, scoped to the requested cluster, so an
-	// operator override still respects physical capacity instead of admitting blindly.
-	// GetFlavorCapacity already reflects every SUBMITTED/ADMITTED/RUNNING pod that actually
-	// exists on a node (see loop_tick.go step 2) — subtracting occupied-status experiments again
-	// here would double-count them. The only additional subtraction needed is pending
-	// reservations (loop_tick.go step 2b), which by construction cover only the not-yet-
-	// scheduled gap and are never yet reflected in the live number.
-	gAvail, _, err := h.svc.workload.GetFlavorCapacity(r.Context())
+	gAvail, _, err := h.svc.workload.GetFlavorCapacity(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	fp := exp.Footprint()
-	avail, ok := gAvail[req.ClusterName]
+	avail, ok := gAvail[clusterName]
 	if !ok {
-		writeError(w, http.StatusBadRequest, "cluster_name is not a configured cluster")
-		return
+		return nil, huma.Error400BadRequest("cluster_name is not a configured cluster")
 	}
-	pendingByCluster, err := h.svc.store.ListPendingReservationsByCluster(r.Context())
+	pendingByCluster, err := h.svc.store.ListPendingReservationsByCluster(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
-	subtractFootprint(avail, pendingByCluster[req.ClusterName])
+	subtractFootprint(avail, pendingByCluster[clusterName])
 	if !domain.Fits(avail, fp) {
-		writeError(w, http.StatusUnprocessableEntity, "insufficient capacity on requested cluster")
-		return
+		return nil, huma.Error422UnprocessableEntity("insufficient capacity on requested cluster")
 	}
 
-	if err := h.svc.store.MarkSubmitted(r.Context(), id, req.ClusterName); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	if err := h.svc.store.MarkSubmitted(ctx, id, clusterName); err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	exp.Status = domain.StatusSubmitted
-	exp.ClusterName = req.ClusterName
+	exp.ClusterName = clusterName
 	exp.UpdatedAt = time.Now().UTC()
-	// Durably claim this capacity the same way normal admission does (see
-	// pending_capacity_reservations' schema comment). Unlike the previous best-effort version,
-	// a failure here now rolls the experiment back to QUEUED instead of proceeding — the fallback
-	// occupancy accounting this comment used to point to no longer exists (loop_tick.go step 2
-	// was removed once GetFlavorCapacity became fully live), so a silently dropped reservation
-	// would leave this job's capacity claim completely untracked, reopening the exact
-	// double-admission race pending reservations exist to close.
-	if err := h.svc.store.UpsertPendingReservation(r.Context(), id, req.ClusterName, fp); err != nil {
-		_ = h.svc.store.UpdateExperimentStatus(r.Context(), id, domain.StatusQueued)
-		writeError(w, http.StatusInternalServerError, "reservation failed: "+err.Error())
-		return
+	if err := h.svc.store.UpsertPendingReservation(ctx, id, clusterName, fp); err != nil {
+		_ = h.svc.store.UpdateExperimentStatus(ctx, id, domain.StatusQueued)
+		return nil, huma.Error500InternalServerError("reservation failed: " + err.Error())
 	}
-
-	if err := h.svc.workload.CreateWorkload(r.Context(), exp); err != nil {
-		// Roll back on workload creation failure.
-		_ = h.svc.store.UpdateExperimentStatus(r.Context(), id, domain.StatusQueued)
-		_ = h.svc.store.DeletePendingReservation(r.Context(), id)
-		writeError(w, http.StatusInternalServerError, "workload creation failed: "+err.Error())
-		return
+	if err := h.svc.workload.CreateWorkload(ctx, exp); err != nil {
+		_ = h.svc.store.UpdateExperimentStatus(ctx, id, domain.StatusQueued)
+		_ = h.svc.store.DeletePendingReservation(ctx, id)
+		return nil, huma.Error500InternalServerError("workload creation failed: " + err.Error())
 	}
-
-	writeJSON(w, http.StatusOK, exp)
-}
-
-// CancelExperiment handles POST /experiments/{id}/cancel.
-// Agents and operators can cancel QUEUED or RUNNING experiments; credits are refunded.
-func (h *Handler) CancelExperiment(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := h.svc.CancelExperiment(r.Context(), id); err != nil {
-		var admErr *AdmissionError
-		if errors.As(err, &admErr) {
-			switch admErr.Reason {
-			case "not_found":
-				writeError(w, http.StatusNotFound, admErr.Message)
-			case "invalid_state":
-				writeError(w, http.StatusConflict, admErr.Message)
-			default:
-				writeError(w, http.StatusUnprocessableEntity, admErr.Message)
-			}
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
-}
-
-// WriteExperimentSummary handles POST /experiments/{id}/summary.
-// Agents call this after their job completes or is cancelled to record what they learned.
-// Body: {"summary": "..."}
-func (h *Handler) WriteExperimentSummary(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var body struct {
-		Summary string `json:"summary"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if body.Summary == "" {
-		writeError(w, http.StatusBadRequest, "summary is required")
-		return
-	}
-	if err := h.svc.WriteExperimentSummary(r.Context(), id, body.Summary); err != nil {
-		var admErr *AdmissionError
-		if errors.As(err, &admErr) {
-			switch admErr.Reason {
-			case "not_found":
-				writeError(w, http.StatusNotFound, admErr.Message)
-			case "invalid_state":
-				writeError(w, http.StatusConflict, admErr.Message)
-			default:
-				writeError(w, http.StatusUnprocessableEntity, admErr.Message)
-			}
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// Reprioritize handles POST /scheduler/reprioritize.
-// It triggers an immediate re-prioritization pass over all QUEUED experiments.
-func (h *Handler) Reprioritize(w http.ResponseWriter, r *http.Request) {
-	if err := h.svc.RePrioritize(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
 // admissionHTTPStatus maps an admission reason to the appropriate HTTP status code.
@@ -327,14 +311,4 @@ func admissionHTTPStatus(reason string) int {
 	default:
 		return http.StatusUnprocessableEntity
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
 }

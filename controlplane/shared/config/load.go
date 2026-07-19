@@ -44,6 +44,8 @@ func (c *Config) build() error {
 	c.NodeLabelKeyByType = make(map[string]string, len(c.AcceleratorTypes))
 	c.ResourceNameByType = make(map[string]string, len(c.AcceleratorTypes))
 	c.TaintKeyByType = make(map[string]string, len(c.AcceleratorTypes))
+	c.AllocationModeByType = make(map[string]string, len(c.AcceleratorTypes))
+	c.DeviceClassNameByType = make(map[string]string, len(c.AcceleratorTypes))
 
 	defaultResourceName := c.AcceleratorResourceName
 	if defaultResourceName == "" {
@@ -62,6 +64,28 @@ func (c *Config) build() error {
 		c.FlavorByName[g.Name] = g.Flavor
 		c.NameByFlavor[g.Flavor] = g.Name
 		c.AcceleratorsByFlavor[g.Flavor] = g.ClusterAccelerators
+
+		allocationMode := g.AllocationMode
+		if allocationMode == "" {
+			allocationMode = AllocationModeResource
+		}
+		if allocationMode != AllocationModeResource && allocationMode != AllocationModeDRA {
+			return fmt.Errorf("accelerator_type %q: allocation_mode must be %q or %q, got %q", g.Name, AllocationModeResource, AllocationModeDRA, allocationMode)
+		}
+		c.AllocationModeByType[g.Name] = allocationMode
+
+		if allocationMode == AllocationModeDRA {
+			// DRA devices are selected by the DRA scheduler plugin/kubelet plugin, not by
+			// node label/extended resource/taint — those fields are meaningless here and
+			// deliberately left unpopulated so a misconfigured mix (e.g. a stray taint_key
+			// on a dra-mode entry) can't silently do something. See AllocationMode's doc.
+			if g.DeviceClassName == "" {
+				return fmt.Errorf("accelerator_type %q: device_class_name is required when allocation_mode is %q", g.Name, AllocationModeDRA)
+			}
+			c.DeviceClassNameByType[g.Name] = g.DeviceClassName
+			continue
+		}
+
 		if g.NodeLabelValue != "" {
 			c.NodeLabelByType[g.Name] = g.NodeLabelValue
 		}
