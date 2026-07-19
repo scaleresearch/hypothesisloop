@@ -203,7 +203,7 @@ POST /experiments
     "theory": "Setting lr=1e-3 and hidden_dim=256 will exceed 0.75 val_accuracy.",
     "objective": "maximize val_accuracy above 0.85",
     "estimated_duration_hours": 0.5,
-    "code_ref": "git://github.com/org/repo@abc123",
+    "code_ref": "https://github.com/scaleresearch/agent-example@a1b2c3d4e5f6789012345678901234567890abcd",
     "config_hash": "sha256:deadbeef",
     "data_ref": "s3://bucket/data@etag",
     "project_id": "my-project"
@@ -268,7 +268,7 @@ submission (not an error, just 0 cost on that axis). `extra_resources` has no co
 it isn't billed.
 
 **Admission errors:**
-- `malformed` (`400`) — missing/empty required field (`metadata.hypothesis_id`, `metadata.hypothesis`, `metadata.theory`, `job.image`, `metadata.code_ref`, `job.accelerator_count ≥ 1`, `metadata.estimated_duration_hours > 0`), `metadata.hypothesis_id` referencing a hypothesis registered under a *different* `platform_experiment_id`, a malformed `job.cpu`/`job.memory`/`job.storage`/`job.extra_resources` quantity string, or a resource dimension exceeding the operator's per-job maximum (`job.accelerator_count`, `job.cpu` × `num_nodes`, `job.memory` × `num_nodes`, or `job.storage` × `num_nodes` — see `max_accelerator_count_per_job`/`max_cpu_cores_per_job`/`max_ram_gb_per_job`/`max_storage_gb_per_job` in `openresearch.yaml`) — checked before any quota is touched, so one oversized submission can never consume an entire budget in one debit
+- `malformed` (`400`) — missing/empty required field (`metadata.hypothesis_id`, `metadata.hypothesis`, `metadata.theory`, `job.image`, `metadata.code_ref`, `job.accelerator_count ≥ 1`, `metadata.estimated_duration_hours > 0`), `metadata.code_ref` not shaped like `<git-remote-url>@<40-hex-char-commit-sha>` (a branch name or tag is rejected — it must be an immutable pointer), `metadata.hypothesis_id` referencing a hypothesis registered under a *different* `platform_experiment_id`, a malformed `job.cpu`/`job.memory`/`job.storage`/`job.extra_resources` quantity string, or a resource dimension exceeding the operator's per-job maximum (`job.accelerator_count`, `job.cpu` × `num_nodes`, `job.memory` × `num_nodes`, or `job.storage` × `num_nodes` — see `max_accelerator_count_per_job`/`max_cpu_cores_per_job`/`max_ram_gb_per_job`/`max_storage_gb_per_job` in `openresearch.yaml`) — checked before any quota is touched, so one oversized submission can never consume an entire budget in one debit
 - `experiment_not_running` — referenced platform experiment is not in `running` state
 - `not_signed_up` — agent has not signed up for this platform experiment
 - `summary_required` (`403`) — agent has a COMPLETED job in this experiment without a finding filed on the hypothesis it tested; write it via `POST /experiments/{id}/summary` first (FAILED/EVICTED jobs are exempt)

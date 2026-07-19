@@ -40,6 +40,14 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["resource.k8s.io"]
+    # resourceclaimtemplates: created/deleted alongside a Job whose accelerator type uses
+    # allocation_mode: dra (workload_client.go's ensureResourceClaimTemplate) — see
+    # localdev/k3s-tenstorrent-qb2/README.md. Not required on clusters with only classic device-plugin
+    # accelerator types; harmless (unused) grant otherwise, and only queried when a DRA-mode
+    # job actually gets submitted to this cluster.
+    resources: ["resourceclaimtemplates"]
+    verbs: ["get", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

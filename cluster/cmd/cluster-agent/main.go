@@ -62,6 +62,8 @@ func main() {
 			NodeLabelKeyByType: pcfg.NodeLabelKeyByType,
 			ResourceNameByType: pcfg.ResourceNameByType,
 			TaintKeyByType:     pcfg.TaintKeyByType,
+			AllocationModeByType:  pcfg.AllocationModeByType,
+			DeviceClassNameByType: pcfg.DeviceClassNameByType,
 			// Required for GetLiveAcceleratorCapacity's flavor lookup (nameByFlavor()) — without
 			// these, OpenResearchConfig being non-nil short-circuits the built-in defaults
 			// fallback, and nameByFlavor() silently returns an empty map, so the desired-state

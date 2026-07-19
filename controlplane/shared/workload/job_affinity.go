@@ -24,6 +24,13 @@ func (c *JobWorkloadClient) resourceNameFor(acceleratorType domain.AcceleratorTy
 }
 
 func (c *JobWorkloadClient) taintKeyFor(acceleratorType domain.AcceleratorType) string {
+	// DRA-mode nodes carry no accelerator taint in this model (see AllocationMode's doc) —
+	// returning "" here makes acceleratorTolerations correctly add no toleration at all,
+	// rather than falling back to the cluster-wide default taint key, which would add a
+	// meaningless toleration for a taint no DRA node actually carries.
+	if c.isDRA(acceleratorType) {
+		return ""
+	}
 	if v, ok := c.taintKeyByType[string(acceleratorType)]; ok && v != "" {
 		return v
 	}
@@ -35,6 +42,25 @@ func (c *JobWorkloadClient) nodeLabelKeyFor(acceleratorType domain.AcceleratorTy
 		return v
 	}
 	return "nvidia.com/gpu.product"
+}
+
+// allocationModeFor returns "resource" (default) or "dra" for acceleratorType — see
+// config.AcceleratorTypeConfig.AllocationMode's doc. A type absent from allocationModeByType
+// (old rows, accelerator-less dev clusters) is always "resource", matching every behavior
+// that existed before DRA support.
+func (c *JobWorkloadClient) allocationModeFor(acceleratorType domain.AcceleratorType) string {
+	if v, ok := c.allocationModeByType[string(acceleratorType)]; ok && v != "" {
+		return v
+	}
+	return AllocationModeResource
+}
+
+func (c *JobWorkloadClient) isDRA(acceleratorType domain.AcceleratorType) bool {
+	return c.allocationModeFor(acceleratorType) == AllocationModeDRA
+}
+
+func (c *JobWorkloadClient) deviceClassNameFor(acceleratorType domain.AcceleratorType) string {
+	return c.deviceClassNameByType[string(acceleratorType)]
 }
 
 func (c *JobWorkloadClient) buildAffinity(experimentID string, spec domain.JobSpec, distributed bool) *corev1.Affinity {
@@ -111,7 +137,7 @@ func (c *JobWorkloadClient) buildAffinity(experimentID string, spec domain.JobSp
 // execution-engine concern the agent never declares in JobSpec: any request with
 // acceleratorCount > 0 gets it automatically.
 func acceleratorTolerations(acceleratorCount int, taintKey string) []corev1.Toleration {
-	if acceleratorCount <= 0 {
+	if acceleratorCount <= 0 || taintKey == "" {
 		return nil
 	}
 	return []corev1.Toleration{{
@@ -139,7 +165,11 @@ func acceleratorTolerations(acceleratorCount int, taintKey string) []corev1.Tole
 // "amd.com/gpu OR nvidia.com/gpu" in a single container). In practice this means
 // acceptable_accelerator_types should only ever list types from the same vendor as accelerator_type.
 func (c *JobWorkloadClient) acceleratorNodeAffinity(acceleratorType domain.AcceleratorType, acceptable []domain.AcceleratorType) *corev1.NodeAffinity {
-	if len(c.nodeLabelByType) == 0 || acceleratorType == "" {
+	// DRA types (see AllocationMode) are placed by the DRA scheduler plugin resolving the
+	// pod's ResourceClaim, not by a product-label nodeAffinity — they carry no NodeLabelValue
+	// at all (config.build rejects one that does), so this would return nil anyway; the
+	// explicit check just documents why.
+	if len(c.nodeLabelByType) == 0 || acceleratorType == "" || c.isDRA(acceleratorType) {
 		return nil
 	}
 	labelKey := c.nodeLabelKeyFor(acceleratorType)

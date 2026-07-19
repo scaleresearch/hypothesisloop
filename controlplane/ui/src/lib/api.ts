@@ -230,6 +230,20 @@ export function fetchResourceCatalog(): Promise<ResourceCatalog> {
   return apiFetch<ResourceCatalog>(`${QUOTA_URL}/resource-catalog`)
 }
 
+// Live, per-cluster accelerator capacity — what's actually schedulable right now, as opposed to
+// fetchResourceCatalog's static type/rate list. Same numbers the scheduler's own admission loop
+// reads (metricsdb.LiveClusterAcceleratorCapacity), just exposed for display.
+export interface ResourceCapacity {
+  clusters: Array<{
+    cluster_name: string
+    accelerators: Array<{ accelerator_type: string; available: number; total: number }>
+  }>
+}
+
+export function fetchResourceCapacity(): Promise<ResourceCapacity> {
+  return apiFetch<ResourceCapacity>(`${QUOTA_URL}/resource-catalog/capacity`)
+}
+
 export async function updatePlatformExperiment(id: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
   const res = await fetch(`${QUOTA_URL}/platform-experiments/${id}`, {
     method: 'PUT',

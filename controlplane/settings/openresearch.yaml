@@ -84,6 +84,27 @@ accelerator_types:
   #   resource_name: amd.com/gpu
   #   taint_key: amd.com/gpu
 
+  # Tenstorrent Blackhole (QuietBox v2) — allocated via Kubernetes Dynamic Resource Allocation
+  # (resource.k8s.io) instead of a device-plugin extended resource: no node_label_value/
+  # node_label_key/resource_name/taint_key at all (allocation_mode: dra ignores them; see
+  # AcceleratorTypeConfig.AllocationMode's doc in controlplane/shared/config/types.go), because
+  # Tenstorrent's own tt-operator stack (see localdev/k3s-tenstorrent-qb2/README.md) advertises devices as
+  # ResourceSlices under DeviceClass "tenstorrent.com" and the backend requests them with a
+  # ResourceClaimTemplate instead. acch_rate is a rough placeholder pending real benchmarking
+  # against H100 — adjust once this cluster has comparative throughput numbers.
+  - name:       Tenstorrent-Blackhole
+    acch_rate:   0.5
+    # flavor must equal AcceleratorType.FlavorName()'s derivation ("flavor-" + lowercase name,
+    # see controlplane/shared/domain/accelerator.go) — the admission loop's own footprint/need
+    # computation calls FlavorName() directly rather than reading this field back, so a flavor
+    # value that doesn't match it silently desyncs "available capacity" (keyed by this field)
+    # from "what a job needs" (keyed by FlavorName()) and the job can never admit. Every other
+    # entry in this catalog already follows this convention (T4 -> flavor-t4, etc).
+    flavor:     flavor-tenstorrent-blackhole
+    cluster_accelerators: 4
+    allocation_mode: dra
+    device_class_name: tenstorrent.com
+
 # Accelerator types that are interchangeable for admission purposes (same Hopper SM architecture).
 # An H100 request may be satisfied with an H200; the control plane adjusts cost accordingly.
 # Only list types that share the same vendor plumbing (resource_name/taint_key/node_label_key)

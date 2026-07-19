@@ -254,3 +254,101 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 
 	return s.store.UpdatePlatformExperimentStatus(ctx, id, domain.PlatformExpClosed)
 }
+
+// SweepExpired closes every Open/Running platform experiment whose EndsAt has passed. EndsAt is
+// the zero value when unset (PlatformExperiment.EndsAt is not a pointer), so those are skipped —
+// a platform experiment with no end time runs until someone calls Close explicitly.
+func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
+	now := time.Now()
+	for _, status := range []string{string(domain.PlatformExpOpen), string(domain.PlatformExpRunning)} {
+		pes, err := s.store.ListPlatformExperiments(ctx, status)
+		if err != nil {
+			return fmt.Errorf("list %s platform experiments: %w", status, err)
+		}
+		for _, pe := range pes {
+			if pe.EndsAt.IsZero() || pe.EndsAt.After(now) {
+				continue
+			}
+			// TODO(winners): topResults is nil here, so Close never calls RecordTop3 for an
+			// auto-closed (ends_at-expired) platform experiment — the only realistic path for a
+			// real deadline-bound experiment. RecordTop3/HasTop3History (the quota bonus new
+			// experiments give agents with a prior top-3) is effectively dead code as a result.
+			// Fix: compute topResults here from the same per-agent-best-metric ranking phase-2
+			// admission already does (metricsdb.QueryAgentValues with a max_over_time/
+			// min_over_time PromQL over experiment_metric_value, see
+			// controller.applyMetricAdmission), keyed off pe.Metrics[0] as the primary metric,
+			// sorted best-first, then pass the top 3 into Close. Deliberately not done here —
+			// see agent/ session notes: no leaderboard/reputation use case needs it yet.
+			if err := s.Close(ctx, pe.ID, nil); err != nil {
+				s.logger.Error("sweep_expired: close failed",
+					zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+				continue
+			}
+			s.logger.Info("sweep_expired: closed platform experiment past ends_at",
+				zap.String("platform_experiment_id", pe.ID), zap.Time("ends_at", pe.EndsAt))
+		}
+	}
+	return nil
+}
+
+// SweepAutoStart starts every Open platform experiment whose StartsAt has passed and has at
+// least one sign-up. Without this, an operator has to call POST /start by hand the moment
+// starts_at arrives — StartsAt would otherwise be inert metadata, which breaks the case this
+// platform is actually for: agents discovering and running a platform experiment end-to-end with
+// nobody watching the clock for them. A zero StartsAt (unset) is treated as "start immediately
+// on first sign-up" is *not* implied here — Start still requires an explicit call in that case,
+// since there's no scheduled moment to sweep against; only a non-zero, past StartsAt auto-fires.
+func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
+	now := time.Now()
+	pes, err := s.store.ListPlatformExperiments(ctx, string(domain.PlatformExpOpen))
+	if err != nil {
+		return fmt.Errorf("list open platform experiments: %w", err)
+	}
+	for _, pe := range pes {
+		if pe.StartsAt.IsZero() || pe.StartsAt.After(now) {
+			continue
+		}
+		signedUp, err := s.store.ListSignups(ctx, pe.ID)
+		if err != nil {
+			s.logger.Error("sweep_auto_start: list signups failed",
+				zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			continue
+		}
+		if len(signedUp) == 0 {
+			continue // wait for at least one sign-up before starting, same rule Start() enforces
+		}
+		if _, err := s.Start(ctx, pe.ID); err != nil {
+			s.logger.Error("sweep_auto_start: start failed",
+				zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			continue
+		}
+		s.logger.Info("sweep_auto_start: started platform experiment past starts_at",
+			zap.String("platform_experiment_id", pe.ID), zap.Time("starts_at", pe.StartsAt))
+	}
+	return nil
+}
+
+// StartExpirySweep runs SweepAutoStart and SweepExpired on a ticker until ctx is cancelled.
+// Mirrors the idiomatic ticker-loop pattern used elsewhere in this codebase (see
+// scheduler.JobWatcher.Start). Auto-start runs before auto-close so a platform experiment whose
+// starts_at and ends_at are both already in the past (e.g. after a control-service restart) is
+// briefly started and then immediately closed, rather than closed while still "open" — closing
+// requires status running-or-open already, so this ordering isn't strictly required for
+// correctness, but it keeps the transition history sane (open -> running -> closed).
+func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.SweepAutoStart(ctx); err != nil {
+				s.logger.Error("sweep_auto_start: scan", zap.Error(err))
+			}
+			if err := s.SweepExpired(ctx); err != nil {
+				s.logger.Error("sweep_expired: scan", zap.Error(err))
+			}
+		}
+	}
+}

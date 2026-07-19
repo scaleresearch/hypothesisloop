@@ -24,6 +24,27 @@ const AcceleratorTypeLabel = "openresearch.io/accelerator-type"
 // the attempt before it, even though both share the same Job name.
 const AttemptLabel = "openresearch.dev/attempt"
 
+// AcceleratorCountAnnotation carries spec.AcceleratorCount onto the pod template — read back by
+// GetLiveAcceleratorCapacity's DRA branch, which (unlike the classic-mode branch) has no
+// extended-resource request on the pod to sum directly.
+const AcceleratorCountAnnotation = "openresearch.io/accelerator-count"
+
+// draClaimName is the container-local name of the single accelerator ResourceClaim a DRA-mode
+// job's pod carries (PodResourceClaim.Name / Container.Resources.Claims[].Name) — arbitrary
+// (only needs to be unique within the pod, which it trivially is since a pod has exactly one),
+// kept as a constant purely so BuildJob and ResourceClaimTemplateName (job_lifecycle.go) agree
+// on it without threading a string through both.
+const draClaimName = "accelerator"
+
+// resourceClaimTemplateName returns the name of the ResourceClaimTemplate BuildJob's pod
+// references for a DRA-mode job — derived from the Job's own name so it's discoverable and
+// collision-free the same way jobName(exp.ID) already is. Shared between BuildJob (which only
+// references it by name) and job_lifecycle.go's ensureResourceClaimTemplate (which actually
+// creates/deletes the object).
+func resourceClaimTemplateName(jobName string) string {
+	return jobName + "-accelerator"
+}
+
 // BuildJob compiles exp's JobSpec DSL (merged with this cluster's JobDefaults) down into a
 // native batch/v1 Job — the only place the platform's DSL vocabulary (image, command, env,
 // cpu/memory/accelerator, num_nodes, max_retries, acceptable_accelerator_types) is translated into
@@ -88,7 +109,12 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(spec.Storage)
 		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse(spec.Storage)
 	}
-	if spec.AcceleratorCount > 0 {
+	// usesDRA tracks whether this job needs a ResourceClaimTemplate/PodResourceClaim instead of
+	// a plain extended-resource request — see config.AcceleratorTypeConfig.AllocationMode's doc.
+	// CreateWorkload reads this back off the returned Job (a non-empty Spec.ResourceClaims) to
+	// know whether it must also create the companion ResourceClaimTemplate object.
+	usesDRA := spec.AcceleratorCount > 0 && c.isDRA(spec.AcceleratorType)
+	if spec.AcceleratorCount > 0 && !usesDRA {
 		acceleratorQty := resource.MustParse(fmt.Sprintf("%d", spec.AcceleratorCount))
 		acceleratorResource := corev1.ResourceName(c.resourceNameFor(spec.AcceleratorType))
 		resources.Requests[acceleratorResource] = acceleratorQty
@@ -169,6 +195,9 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 		Env:             env,
 		Resources:       resources,
 	}
+	if usesDRA {
+		container.Resources.Claims = []corev1.ResourceClaim{{Name: draClaimName}}
+	}
 
 	var volumes []corev1.Volume
 	if spec.ShmSize != "" {
@@ -208,7 +237,17 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 			ActiveDeadlineSeconds: &deadline,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"openresearch.io/experiment-id": exp.ID},
+					Labels: map[string]string{
+						"openresearch.io/experiment-id": exp.ID,
+						// Duplicated onto the pod (not just the Job) so DRA-mode capacity
+						// accounting (GetLiveAcceleratorCapacity) can sum in-use accelerators
+						// straight off live pods — a DRA pod carries no extended-resource
+						// request for the scheduler to read back the way classic-mode pods do.
+						AcceleratorTypeLabel: string(exp.AcceleratorType),
+					},
+					Annotations: map[string]string{
+						AcceleratorCountAnnotation: fmt.Sprintf("%d", spec.AcceleratorCount),
+					},
 				},
 				Spec: corev1.PodSpec{
 					PriorityClassName: priorityClass,
@@ -220,6 +259,14 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 				},
 			},
 		},
+	}
+
+	if usesDRA {
+		claimTemplateName := resourceClaimTemplateName(job.Name)
+		job.Spec.Template.Spec.ResourceClaims = []corev1.PodResourceClaim{{
+			Name:                      draClaimName,
+			ResourceClaimTemplateName: &claimTemplateName,
+		}}
 	}
 
 	if distributed {

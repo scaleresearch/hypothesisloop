@@ -1,5 +1,5 @@
 # Standalone job definition for the robotics (VLA-style) demo workload
-# (tests/workload-robotics/train.py, built as the openresearch-robotics-workload image —
+# (tests/workloads/robotics/train.py, built as the openresearch-robotics-workload image —
 # see Dockerfile.train). This is a domain.JobSpec: the platform's own DSL, never a raw
 # Kubernetes manifest. tests/robotics-demo.sh reads this file as-is and submits it
 # verbatim as the `job` field of every POST /experiments call — the per-run bits

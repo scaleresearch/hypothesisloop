@@ -3,6 +3,7 @@ package workload
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -10,9 +11,20 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 )
+
+// resourceClaimTemplateGVR addresses resource.k8s.io/v1's ResourceClaimTemplate via the
+// dynamic client — see JobWorkloadClient.dyn's doc comment (workload_client.go) for why this
+// is unstructured rather than a typed client-go call.
+var resourceClaimTemplateGVR = schema.GroupVersionResource{
+	Group:    "resource.k8s.io",
+	Version:  "v1",
+	Resource: "resourceclaimtemplates",
+}
 
 func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
 	if err := c.ensureNamespace(ctx, OpenResearchNamespace); err != nil {
@@ -30,7 +42,86 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 			return fmt.Errorf("workload: ensure headless service: %w", err)
 		}
 	}
+	if len(job.Spec.Template.Spec.ResourceClaims) > 0 {
+		// Must exist before the Job's pod is actually created (async, via the Job
+		// controller) or the pod fails to schedule with a missing-ResourceClaimTemplate
+		// error — created up front here for the same reason ensureHeadlessService runs
+		// before the Job Create call above.
+		if err := c.ensureResourceClaimTemplate(ctx, job, exp); err != nil {
+			return fmt.Errorf("workload: ensure resource claim template: %w", err)
+		}
+	}
 	_, err = c.kube.BatchV1().Jobs(OpenResearchNamespace).Create(ctx, job, metav1.CreateOptions{})
+	if errors.IsAlreadyExists(err) {
+		return nil
+	}
+	return err
+}
+
+// ensureResourceClaimTemplate creates the DRA ResourceClaimTemplate a DRA-mode job's pod
+// references by name (see BuildJob's usesDRA branch) — one accelerator device request for
+// exp.AcceleratorCount devices of exp.AcceleratorType's configured DeviceClassName, using
+// resource.k8s.io's "ExactCount" allocation mode (the only mode this platform's DSL needs:
+// AcceleratorCount is always a plain integer, never a min/max range). Idempotent: tolerates
+// AlreadyExists, matching every other Create call in this file. Deleted explicitly by
+// DeleteWorkload, same pattern as ensureHeadlessService/its Service — not garbage-collected via
+// an ownerReference, since the Job doesn't exist yet at the point this must run.
+func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job *batchv1.Job, exp *domain.Experiment) error {
+	deviceClassName := c.deviceClassNameFor(exp.AcceleratorType)
+	if deviceClassName == "" {
+		return fmt.Errorf("accelerator type %q has no device_class_name configured for dra allocation_mode", exp.AcceleratorType)
+	}
+	count := exp.AcceleratorCount
+	if count < 1 {
+		count = 1
+	}
+
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": resourceClaimTemplateGVR.GroupVersion().String(),
+		"kind":       "ResourceClaimTemplate",
+		"metadata": map[string]interface{}{
+			"name":      resourceClaimTemplateName(job.Name),
+			"namespace": OpenResearchNamespace,
+			"labels":    job.Labels,
+		},
+		"spec": map[string]interface{}{
+			// metadata here (distinct from the ResourceClaimTemplate's own metadata above)
+			// is the ObjectMeta template applied to every ResourceClaim the kubelet
+			// generates from it — carrying the experiment-id label onto the generated
+			// claim is what lets anything (tests, `kubectl get resourceclaim -l ...`,
+			// operators debugging a stuck allocation) find a running job's claim the same
+			// way it already finds its pod.
+			"metadata": map[string]interface{}{
+				"labels": job.Labels,
+			},
+			"spec": map[string]interface{}{
+				"devices": map[string]interface{}{
+					"requests": []interface{}{
+						map[string]interface{}{
+							"name": draClaimName,
+							// "exactly" (as opposed to "firstAvailable", the other arm of this
+							// oneOf) is resource.k8s.io/v1 GA's shape for "N devices from one
+							// specific DeviceClass" — the count/deviceClassName/allocationMode
+							// fields used to live flat on the request itself pre-GA (that shape
+							// is what an earlier version of this code, and hand-written test
+							// YAML from before k3s 1.36's GA DRA, used); the apiserver now
+							// silently drops them as unknown fields and rejects the request as
+							// under-specified instead of erroring on the stale flat fields
+							// directly, which is why this looked like a validation bug rather
+							// than a straightforward schema move at first.
+							"exactly": map[string]interface{}{
+								"deviceClassName": deviceClassName,
+								"allocationMode":  "ExactCount",
+								"count":           int64(count),
+							},
+						},
+					},
+				},
+			},
+		},
+	}}
+
+	_, err := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(OpenResearchNamespace).Create(ctx, obj, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		return nil
 	}
@@ -199,6 +290,12 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacity(ctx context.Context) (ava
 	available = make(map[string]int64)
 	total = make(map[string]int64)
 	for flavor, acceleratorName := range c.nameByFlavor() {
+		if c.isDRA(domain.AcceleratorType(acceleratorName)) {
+			avail, tot := c.liveDRAAcceleratorCapacity(acceleratorName, flavor, pods.Items)
+			available[flavor] = avail
+			total[flavor] = tot
+			continue
+		}
 		labelValue := c.nodeLabelByType[acceleratorName]
 		if labelValue == "" {
 			continue
@@ -243,6 +340,36 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacity(ctx context.Context) (ava
 	return available, total, nil
 }
 
+// liveDRAAcceleratorCapacity mirrors GetLiveAcceleratorCapacity's allocatable-minus-requested
+// model for a DRA-mode flavor, which has no node-label/extended-resource scheme to read total/
+// requested off of directly: total falls back to the operator-declared cluster_accelerators
+// nominal count (config, same source classic-mode flavors use as their starting total before
+// subtracting live node-label-scoped allocatable); requested sums AcceleratorCountAnnotation
+// across every non-terminal pod labeled with this accelerator type (see BuildJob's usesDRA
+// branch, which sets both on every DRA pod specifically so this can work).
+func (c *JobWorkloadClient) liveDRAAcceleratorCapacity(acceleratorName, flavor string, pods []corev1.Pod) (available, total int64) {
+	total = c.acceleratorNominalCapacity()[flavor]
+	var requested int64
+	for _, p := range pods {
+		if p.Labels[AcceleratorTypeLabel] != acceleratorName {
+			continue
+		}
+		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		n, err := strconv.Atoi(p.Annotations[AcceleratorCountAnnotation])
+		if err != nil || n < 0 {
+			continue
+		}
+		requested += int64(n)
+	}
+	available = total - requested
+	if available < 0 {
+		available = 0
+	}
+	return available, total
+}
+
 func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID string) error {
 	prop := metav1.DeletePropagationBackground
 	err := c.kube.BatchV1().Jobs(OpenResearchNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{
@@ -257,6 +384,17 @@ func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID str
 	svcErr := c.kube.CoreV1().Services(OpenResearchNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{})
 	if svcErr != nil && !errors.IsNotFound(svcErr) {
 		return svcErr
+	}
+	// Same unconditional-attempt/NotFound-swallowed pattern as the headless Service above:
+	// only DRA-mode jobs ever created one (see ensureResourceClaimTemplate), but deleting
+	// unconditionally here is harmless and avoids needing to know the accelerator's
+	// allocation_mode at this call site. The ResourceClaim(s) the kubelet derived from this
+	// template are themselves owned by the pod and are cleaned up natively by k8s when the
+	// pod goes away — this only removes the template object this client created.
+	claimErr := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(OpenResearchNamespace).
+		Delete(ctx, resourceClaimTemplateName(jobName(experimentID)), metav1.DeleteOptions{})
+	if claimErr != nil && !errors.IsNotFound(claimErr) {
+		return claimErr
 	}
 	return nil
 }

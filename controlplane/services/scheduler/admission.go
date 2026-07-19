@@ -2,12 +2,19 @@ package scheduler
 
 import (
 	"fmt"
+	"regexp"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
 )
+
+// codeRefPattern requires an immutable pointer — a full commit SHA, never a branch name (which
+// can move) or "latest". Matches "<any-git-remote-url>@<40-hex-char-sha>" — host/org/repo are
+// unconstrained (GitHub, GitLab, self-hosted, whatever the agent's git remote actually is), only
+// the "@<sha>" suffix is enforced.
+var codeRefPattern = regexp.MustCompile(`^\S+@[0-9a-f]{40}$`)
 
 // Admission error reason constants.
 const (
@@ -53,6 +60,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 	if exp.CodeRef == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "code_ref is required"}
+	}
+	if !codeRefPattern.MatchString(exp.CodeRef) {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\" — a full 40-character commit SHA, not a branch name or tag"}
 	}
 	if exp.Job.Image == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.image is required"}

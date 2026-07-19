@@ -139,7 +139,17 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 		RAMGBHourRate:     domain.RAMGBHourRate(),
 		StorageGBHourRate: domain.StorageGBHourRate(),
 	}
-	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).WithCatalog(resourceCatalog)
+	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).
+		WithCatalog(resourceCatalog).
+		WithLiveCapacity(metricsDBURL, pcfg.AcceleratorNameForFlavor, connectedWithin)
+
+	// Auto-close platform experiments once their ends_at deadline passes (e.g. a "24h" experiment
+	// otherwise stays open forever — EndsAt was previously stored but nothing ever read it). Runs
+	// under context.Background() rather than the process shutdown context: it's a plain periodic
+	// scan with no per-request state to drain, so it's fine for it to just stop when the process
+	// exits. Close() is safe to race across replicas — a second caller just gets
+	// invalid_transition and logs it, no corruption.
+	go peSvc.StartExpirySweep(context.Background(), 60*time.Second)
 
 	r := chi.NewRouter()
 	r.Use(api.CORSMiddleware)

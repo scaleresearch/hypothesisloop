@@ -97,7 +97,7 @@ services:
     volumes:
       - greptimedb-data:/tmp/greptimedb-data
     ports:
-      - "4000:4000" # HTTP / PromQL / remote-write
+      - "4010:4000" # HTTP / PromQL / remote-write (host port 4000 already used by another service on this host)
       - "4001:4001" # gRPC
     networks:
       - openresearch-net

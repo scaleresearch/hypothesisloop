@@ -134,7 +134,7 @@ metadata:
   # Reproducibility pointers — not resource specs, just references the training code
   # already knows how to resolve (git ref, hash of the resolved hyperparameter config,
   # and wherever the input dataset actually lives). None of this is a k8s concept.
-  code_ref: "git:main@a1b2c3d"
+  code_ref: "https://github.com/scaleresearch/agent-example@a1b2c3d4e5f6789012345678901234567890abcd"
   config_hash: "sha256:9f8e7d..."
   data_ref: "s3://research-datasets/finetune-corpus-v3"
 

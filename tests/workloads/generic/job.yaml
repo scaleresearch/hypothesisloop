@@ -1,4 +1,4 @@
-# Standalone job definition for the e2e test workload (tests/workload/train.py, built as
+# Standalone job definition for the e2e test workload (tests/workloads/generic/train.py, built as
 # the openresearch-workload image — see Dockerfile.train). This is a domain.JobSpec: the
 # platform's own DSL, never a raw Kubernetes manifest (see
 # controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
@@ -36,7 +36,7 @@ accelerator_count: 1
 # controlplane/settings/examples/experiment-submission.yaml's acceptable_accelerator_types doc). All
 # NVIDIA (same vendor plumbing), so one nodeAffinity OR covers them all. Actually exercised
 # only if the local cluster has nodes of more than one of these types — see
-# localdev/add-fake-nodes.sh, which labels extra simulated nodes with exactly this spread.
+# localdev/k3s-macos/add-fake-nodes.sh, which labels extra simulated nodes with exactly this spread.
 # The billed rate adjusts to whichever type the job actually lands on; scenarios/phase2-and-settlement.sh's BUDGET
 # is sized for the most expensive of these (A100) so landing on any of them still fits.
 acceptable_accelerator_types: [T4, L40, A100]

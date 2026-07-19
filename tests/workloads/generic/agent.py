@@ -199,7 +199,7 @@ def tool_submit_experiment(
             "platform_experiment_id": platform_experiment_id,
             "capacity_tier": capacity_tier,
             "project_id": PROJECT_ID,
-            "code_ref": "git://github.com/antonibertel/openresearch@main",
+            "code_ref": "git://github.com/antonibertel/openresearch@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "config_hash": f"sha256:{uuid.uuid4().hex}",
             "data_ref": "s3://openresearch-data/imagenet-mini@latest",
             "hypothesis_id": hypothesis_id,

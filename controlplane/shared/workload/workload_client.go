@@ -25,6 +25,7 @@ package workload
 import (
 	"fmt"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -39,6 +40,13 @@ const (
 	priorityValueBurst      = int32(100000)
 
 	RegistryURLDefault = "http://metrics-service:8083"
+
+	// AllocationMode values — mirror config.AllocationModeResource/AllocationModeDRA exactly
+	// (plain strings, not the config package's consts, since this package must not import
+	// shared/config: OpenResearchConfig already decouples workload from config's Go types so
+	// workload stays usable by anything that hands it plain maps, tests included).
+	AllocationModeResource = "resource"
+	AllocationModeDRA      = "dra"
 
 	// DistributedMasterPort is the fixed rendezvous port advertised to every rank of a
 	// distributed (NumNodes > 1) job via OPENRESEARCH_MASTER_PORT — one fixed port is fine
@@ -106,6 +114,14 @@ type OpenResearchConfig struct {
 	NodeLabelKeyByType map[string]string
 	ResourceNameByType map[string]string
 	TaintKeyByType     map[string]string
+	// AllocationModeByType/DeviceClassNameByType select, per accelerator type, whether BuildJob
+	// requests a classic extended resource (default, "resource") or a Dynamic Resource
+	// Allocation ResourceClaimTemplate ("dra", e.g. Tenstorrent's tt-dra-driver) — see
+	// config.AcceleratorTypeConfig.AllocationMode's doc for the full rationale. A type absent
+	// from AllocationModeByType is treated as "resource" (today's only behavior), so existing
+	// NVIDIA/AMD clusters are unaffected.
+	AllocationModeByType  map[string]string
+	DeviceClassNameByType map[string]string
 }
 
 // DefaultAcceleratorResourceName is the k8s extended resource name requested per accelerator when
@@ -119,6 +135,7 @@ const DefaultAcceleratorTaintKey = "nvidia.com/gpu"
 
 type JobWorkloadClient struct {
 	kube                  kubernetes.Interface
+	dyn                   dynamic.Interface
 	registryURL           string
 	pcfg                  *OpenResearchConfig
 	jobBackoffLimit       int32
@@ -130,6 +147,8 @@ type JobWorkloadClient struct {
 	nodeLabelKeyByType    map[string]string
 	resourceNameByType    map[string]string
 	taintKeyByType        map[string]string
+	allocationModeByType  map[string]string
+	deviceClassNameByType map[string]string
 }
 
 func New(cfg Config) (*JobWorkloadClient, error) {
@@ -140,6 +159,17 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	kube, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("workload: kube client: %w", err)
+	}
+	// dyn talks to resource.k8s.io as unstructured JSON rather than a generated typed client
+	// pinned to one DRA API version — deliberate: k8s.io/client-go v0.31 (this repo's pin) only
+	// ships resource.k8s.io/v1alpha3 types, but a modern cluster (e.g. k3s 1.36, GA DRA) serves
+	// v1. Going through dynamic.Interface means BuildJob's DRA path works against whatever DRA
+	// API version the target cluster actually runs, with zero coupling to this binary's
+	// compiled-in k8s.io/api version — the same reason this is the right seam for a future
+	// AMD DRA driver or any other resource.k8s.io consumer to reuse untouched.
+	dyn, err := dynamic.NewForConfig(restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("workload: dynamic client: %w", err)
 	}
 	reg := cfg.RegistryURL
 	if reg == "" {
@@ -166,14 +196,18 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 		acceleratorTaintKey = DefaultAcceleratorTaintKey
 	}
 	var nodeLabelByType, nodeLabelKeyByType, resourceNameByType, taintKeyByType map[string]string
+	var allocationModeByType, deviceClassNameByType map[string]string
 	if cfg.OpenResearchConfig != nil {
 		nodeLabelByType = cfg.OpenResearchConfig.NodeLabelByType
 		nodeLabelKeyByType = cfg.OpenResearchConfig.NodeLabelKeyByType
 		resourceNameByType = cfg.OpenResearchConfig.ResourceNameByType
 		taintKeyByType = cfg.OpenResearchConfig.TaintKeyByType
+		allocationModeByType = cfg.OpenResearchConfig.AllocationModeByType
+		deviceClassNameByType = cfg.OpenResearchConfig.DeviceClassNameByType
 	}
 	return &JobWorkloadClient{
 		kube:                  kube,
+		dyn:                   dyn,
 		registryURL:           reg,
 		pcfg:                  cfg.OpenResearchConfig,
 		jobBackoffLimit:       backoff,
@@ -185,5 +219,7 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 		taintKeyByType:        taintKeyByType,
 		acceleratorTaintKey:           acceleratorTaintKey,
 		nodeLabelByType:       nodeLabelByType,
+		allocationModeByType:  allocationModeByType,
+		deviceClassNameByType: deviceClassNameByType,
 	}, nil
 }

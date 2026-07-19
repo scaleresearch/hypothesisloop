@@ -31,7 +31,34 @@ type AcceleratorTypeConfig struct {
 	// TaintKey is the taint key nodes of this accelerator type carry (so only accelerator-requesting pods
 	// land there) — defaults to "nvidia.com/gpu" if unset, matching ResourceName's default.
 	TaintKey string `yaml:"taint_key"`
+
+	// AllocationMode selects how the backend hands this accelerator type to a pod:
+	//   "resource" (default) — the classic device-plugin model: an extended resource request
+	//                           (ResourceName, quantity = AcceleratorCount) plus a nodeAffinity
+	//                           on NodeLabelKey/NodeLabelValue and a toleration for TaintKey.
+	//   "dra"                — Kubernetes Dynamic Resource Allocation (resource.k8s.io): the
+	//                           backend creates a ResourceClaimTemplate requesting DeviceClassName
+	//                           (quantity = AcceleratorCount) and attaches it to the pod via
+	//                           PodResourceClaims/Container.Resources.Claims instead of a plain
+	//                           extended resource. No NodeLabelValue/ResourceName/TaintKey needed —
+	//                           the DRA scheduler plugin and the vendor's kubelet plugin (e.g.
+	//                           Tenstorrent's tt-dra-driver) handle device selection and node
+	//                           placement natively. This is the mode a Tenstorrent (or any other
+	//                           DRA-native vendor) accelerator type should use.
+	// Any other vendor/mechanism (JobSet-managed multi-host DRA, a future AMD DRA driver, ...)
+	// is meant to slot in as a third mode here rather than a new code path elsewhere — see
+	// BuildJob's allocationModeFor branch, the single place this field is read.
+	AllocationMode string `yaml:"allocation_mode"`
+	// DeviceClassName is the resource.k8s.io DeviceClass this type's ResourceClaimTemplate
+	// requests — required when AllocationMode is "dra" (e.g. "tenstorrent.com"), ignored
+	// otherwise. Set by whatever installed the DRA driver (see localdev/k3s-tenstorrent-qb2/README.md).
+	DeviceClassName string `yaml:"device_class_name"`
 }
+
+const (
+	AllocationModeResource = "resource"
+	AllocationModeDRA      = "dra"
+)
 
 // QuotaConfig holds scheduling tunable constants.
 type QuotaConfig struct {
@@ -156,4 +183,6 @@ type Config struct {
 	NodeLabelKeyByType map[string]string  // accelerator name → node label key (defaulted per-type)
 	ResourceNameByType map[string]string  // accelerator name → k8s extended resource name (defaulted per-type)
 	TaintKeyByType     map[string]string  // accelerator name → node taint key (defaulted per-type)
+	AllocationModeByType  map[string]string // accelerator name → "resource" | "dra" (defaulted per-type)
+	DeviceClassNameByType map[string]string // accelerator name → resource.k8s.io DeviceClass (dra types only)
 }

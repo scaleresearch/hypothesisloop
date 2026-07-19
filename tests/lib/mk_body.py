@@ -64,7 +64,10 @@ elif kind == "submit":
         "theory": theory or "e2e scenario coverage",
         "objective": objective or "maximize val_accuracy",
         "estimated_duration_hours": float(hours),
-        "code_ref": "git://openresearch@main",
+        # <git-remote-url>@<40-hex-char-sha> — matches the shape admission.go's codeRefPattern
+        # enforces (a real commit SHA, never a branch name); this is a fixed fixture value, not
+        # meant to resolve to a real commit.
+        "code_ref": "git://openresearch@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }
     if tier:
         metadata["capacity_tier"] = tier
