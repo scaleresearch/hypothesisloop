@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Two independent platform experiments sharing one agent must never leak usage into each
-# other's quota ledger, and a CPU-only (gpu_count=0) job must be accepted into the fairness
-# pool without requiring a GPU dimension. API-only, parallel-safe (two fresh PEs of its own).
+# other's quota ledger, and a CPU-only (accelerator_count=0) job must be accepted into the fairness
+# pool without requiring a accelerator dimension. API-only, parallel-safe (two fresh PEs of its own).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
@@ -20,24 +20,24 @@ J1=$(submit_job "$PE1" "$AGENT" "guaranteed" "0.02")
 wait_for_status "$J1" "COMPLETED,FAILED,EVICTED,QUEUED,RUNNING" 60 > /dev/null || true
 
 read -r CODE CPU_ONLY_ID <<< "$(submit_job_expect_code "$PE2" "$AGENT" "guaranteed" "0.02" \
-  '{"gpu_count": 0, "gpu_type": null, "acceptable_gpu_types": null}')"
+  '{"accelerator_count": 0, "accelerator_type": null, "acceptable_accelerator_types": null}')"
 if [[ "$CODE" -lt 400 ]]; then
   wait_for_status "$CPU_ONLY_ID" "RUNNING,COMPLETED,FAILED,EVICTED,QUEUED,REJECTED" 30 > /dev/null || true
-  pass "CPU-only (gpu_count=0) job accepted into PE2's fairness pool without requiring a GPU dimension"
+  pass "CPU-only (accelerator_count=0) job accepted into PE2's fairness pool without requiring a accelerator dimension"
 else
-  fail "CPU-only (gpu_count=0) job submission was rejected outright (HTTP $CODE)"
+  fail "CPU-only (accelerator_count=0) job submission was rejected outright (HTTP $CODE)"
 fi
 
 wait_for_status "$J1" "COMPLETED,FAILED,EVICTED,QUEUED" 60 > /dev/null || true
 PE1_USED=$(quota_used_guaranteed "$PE1" "$AGENT")
 PE2_USED=$(quota_used_guaranteed "$PE2" "$AGENT")
-echo "  agent $AGENT: PE1 used_guaranteed_t4h=$PE1_USED, PE2 used_guaranteed_t4h=$PE2_USED"
-# PE2's only job requested no GPU, so any nonzero T4h usage recorded against it can only have
+echo "  agent $AGENT: PE1 used_guaranteed_acch=$PE1_USED, PE2 used_guaranteed_acch=$PE2_USED"
+# PE2's only job requested no accelerator, so any nonzero AccH usage recorded against it can only have
 # leaked in from PE1 via a quota-map key collision (AgentID-only instead of (AgentID, PEID)).
 PE2_CLEAN=$(py "print(float('$PE2_USED' or 0) == 0.0)")
 [[ "$PE2_CLEAN" == "True" ]] \
   && pass "PE2's guaranteed usage is unaffected by PE1's — no cross-PE quota leakage" \
-  || fail "PE2 shows nonzero guaranteed usage ($PE2_USED) from a GPU-free job — quota map may key on AgentID alone, leaking PE1's usage"
+  || fail "PE2 shows nonzero guaranteed usage ($PE2_USED) from a accelerator-free job — quota map may key on AgentID alone, leaking PE1's usage"
 
 close_platform_experiment "$PE1"
 close_platform_experiment "$PE2"

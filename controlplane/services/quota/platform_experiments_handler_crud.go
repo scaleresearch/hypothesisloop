@@ -15,8 +15,8 @@ func (h *PlatformExperimentsHandler) create(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if req.Name == "" || req.BudgetT4Hours <= 0 {
-		respondError(w, http.StatusBadRequest, "name and budget_t4_hours are required")
+	if req.Name == "" || req.BudgetAcceleratorHours <= 0 {
+		respondError(w, http.StatusBadRequest, "name and budget_accelerator_hours are required")
 		return
 	}
 

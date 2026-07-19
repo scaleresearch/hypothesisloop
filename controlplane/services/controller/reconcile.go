@@ -103,7 +103,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	return nil
 }
 
-// checkQuotaExhaustion evicts all running jobs for an agent when actual T4h consumed
+// checkQuotaExhaustion evicts all running jobs for an agent when actual AccH consumed
 // reaches their tier quota. No refund — budget genuinely exhausted.
 func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platformExpID string, now time.Time) error {
 	aq, err := c.quota.GetAgentQuota(ctx, agentID, platformExpID)
@@ -116,19 +116,19 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		return err
 	}
 
-	// UsedGuaranteedT4H = Σ(estimated_cost of running jobs) + Σ(actual_cost of completed jobs).
+	// UsedGuaranteedAccH = Σ(estimated_cost of running jobs) + Σ(actual_cost of completed jobs).
 	// We want Σ(actual_running) + Σ(actual_completed) per the spec.
 	// Replace running-job estimates with actual elapsed cost by adding the per-job delta.
-	// The old code added Σ(actual_running) on top of UsedGuaranteedT4H which double-counted
-	// running jobs (their estimate was already in UsedGuaranteedT4H).
+	// The old code added Σ(actual_running) on top of UsedGuaranteedAccH which double-counted
+	// running jobs (their estimate was already in UsedGuaranteedAccH).
 	var deltaGuaranteed, deltaBurst float64
 	for _, exp := range running {
-		actual, err := c.observedGPUCost(ctx, exp.ID, exp.GPUCount, now)
+		actual, err := c.observedAcceleratorCost(ctx, exp.ID, exp.AcceleratorCount, now)
 		if err != nil {
-			c.logger.Error("checkQuotaExhaustion: observed GPU cost", zap.String("experiment", exp.ID), zap.Error(err))
+			c.logger.Error("checkQuotaExhaustion: observed accelerator cost", zap.String("experiment", exp.ID), zap.Error(err))
 			continue
 		}
-		delta := actual - exp.EstimatedCostT4H // negative when under-budget, positive on overrun
+		delta := actual - exp.EstimatedCostAccH // negative when under-budget, positive on overrun
 		if exp.CapacityTier == domain.CapacityGuaranteed {
 			deltaGuaranteed += delta
 		} else {
@@ -138,8 +138,8 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	// 0.99 not 1.0: floating-point accumulation across many debit/refund calls means "exactly
 	// exhausted" may never compare equal/greater than the raw budget — a 1% margin avoids a
 	// budget that's genuinely spent sitting just under the threshold forever.
-	guaranteedExhausted := (aq.UsedGuaranteedT4H + deltaGuaranteed) >= aq.GuaranteedT4Hours*0.99
-	burstExhausted := (aq.UsedBurstT4H + deltaBurst) >= aq.BurstT4Hours*0.99
+	guaranteedExhausted := (aq.UsedGuaranteedAccH + deltaGuaranteed) >= aq.GuaranteedAcceleratorHours*0.99
+	burstExhausted := (aq.UsedBurstAccH + deltaBurst) >= aq.BurstAcceleratorHours*0.99
 
 	if !guaranteedExhausted && !burstExhausted {
 		return nil
@@ -178,10 +178,10 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		c.logger.Info("quota exhaustion eviction",
 			zap.String("agent", agentID),
 			zap.String("exp", exp.ID),
-			zap.Float64("actual_guaranteed", aq.UsedGuaranteedT4H+deltaGuaranteed),
-			zap.Float64("actual_burst", aq.UsedBurstT4H+deltaBurst),
-			zap.Float64("quota_guaranteed", aq.GuaranteedT4Hours),
-			zap.Float64("quota_burst", aq.BurstT4Hours),
+			zap.Float64("actual_guaranteed", aq.UsedGuaranteedAccH+deltaGuaranteed),
+			zap.Float64("actual_burst", aq.UsedBurstAccH+deltaBurst),
+			zap.Float64("quota_guaranteed", aq.GuaranteedAcceleratorHours),
+			zap.Float64("quota_burst", aq.BurstAcceleratorHours),
 		)
 	}
 

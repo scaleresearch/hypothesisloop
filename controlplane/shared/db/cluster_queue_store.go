@@ -73,7 +73,7 @@ ORDER BY id`
 // caller must not treat this report as durably acknowledged — see clusteragentapi.PushStatus,
 // which surfaces exactly this back to the cluster-agent so it retries instead of losing the
 // report.
-func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedGPUType domain.GPUType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error) {
+func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedAcceleratorType domain.AcceleratorType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error) {
 	if jobUID != "" {
 		var existing *string
 		err := s.pool.pool.QueryRow(ctx,
@@ -87,9 +87,9 @@ func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, c
 		}
 	}
 
-	var gpuArg, uidArg any
-	if admittedGPUType != "" {
-		gpuArg = string(admittedGPUType)
+	var acceleratorArg, uidArg any
+	if admittedAcceleratorType != "" {
+		acceleratorArg = string(admittedAcceleratorType)
 	}
 	if jobUID != "" {
 		uidArg = jobUID
@@ -102,18 +102,18 @@ func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, c
 	// clusterName means a report for a job this cluster doesn't own is silently dropped —
 	// same as a stale/lower sequence number, both are "did not apply", reflected in RowsAffected.
 	tag, execErr := s.pool.pool.Exec(ctx, `
-		INSERT INTO cluster_job_reports (experiment_id, cluster_name, phase, admitted_gpu_type, job_uid, sequence_number, updated_at)
+		INSERT INTO cluster_job_reports (experiment_id, cluster_name, phase, admitted_accelerator_type, job_uid, sequence_number, updated_at)
 		SELECT $1, $2, $3, $4, $5, $6, now()
 		WHERE EXISTS (SELECT 1 FROM experiments WHERE id = $1 AND cluster_name = $2)
 		ON CONFLICT (experiment_id) DO UPDATE SET
 			cluster_name = EXCLUDED.cluster_name,
 			phase = EXCLUDED.phase,
-			admitted_gpu_type = COALESCE(EXCLUDED.admitted_gpu_type, cluster_job_reports.admitted_gpu_type),
+			admitted_accelerator_type = COALESCE(EXCLUDED.admitted_accelerator_type, cluster_job_reports.admitted_accelerator_type),
 			job_uid = COALESCE(cluster_job_reports.job_uid, EXCLUDED.job_uid),
 			sequence_number = EXCLUDED.sequence_number,
 			updated_at = now()
 		WHERE EXCLUDED.sequence_number > cluster_job_reports.sequence_number
-	`, experimentID, clusterName, phase, gpuArg, uidArg, seq)
+	`, experimentID, clusterName, phase, acceleratorArg, uidArg, seq)
 	if execErr != nil {
 		return false, uidMismatch, fmt.Errorf("db.UpsertJobReport: %w", execErr)
 	}
@@ -123,26 +123,26 @@ func (s *ClusterQueueStore) UpsertJobReport(ctx context.Context, experimentID, c
 // JobReport is the latest pushed status for one experiment's job.
 type JobReport struct {
 	Phase           string
-	AdmittedGPUType domain.GPUType
+	AdmittedAcceleratorType domain.AcceleratorType
 	UpdatedAt       time.Time
 }
 
 // GetJobReport returns the latest report for experimentID, or (nil, nil) if none yet.
 func (s *ClusterQueueStore) GetJobReport(ctx context.Context, experimentID string) (*JobReport, error) {
 	var r JobReport
-	var gpu *string
+	var accelerator *string
 	err := s.pool.pool.QueryRow(ctx,
-		`SELECT phase, admitted_gpu_type, updated_at FROM cluster_job_reports WHERE experiment_id = $1`,
+		`SELECT phase, admitted_accelerator_type, updated_at FROM cluster_job_reports WHERE experiment_id = $1`,
 		experimentID,
-	).Scan(&r.Phase, &gpu, &r.UpdatedAt)
+	).Scan(&r.Phase, &accelerator, &r.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("db.GetJobReport: %w", err)
 	}
-	if gpu != nil {
-		r.AdmittedGPUType = domain.GPUType(*gpu)
+	if accelerator != nil {
+		r.AdmittedAcceleratorType = domain.AcceleratorType(*accelerator)
 	}
 	return &r, nil
 }

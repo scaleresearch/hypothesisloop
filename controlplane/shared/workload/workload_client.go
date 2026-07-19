@@ -76,46 +76,46 @@ type Config struct {
 	JobDeadlineMultiplier float64
 	// MinJobDeadlineSeconds is the ActiveDeadlineSeconds floor. Zero falls back to 300.
 	MinJobDeadlineSeconds int
-	// GPUResourceName is the k8s extended resource name requested per GPU (quantity =
-	// JobSpec.GPUCount). Empty falls back to "nvidia.com/gpu". Set to "cpu" as a temporary
-	// substitution on a cluster with no GPU nodes/device plugin yet — agents' JobSpec.GPUCount
-	// is unaffected either way, since it's a plain GPU count, not a k8s resource name.
-	GPUResourceName string
-	// GPUTaintKey is the taint key real GPU nodes carry (commonly applied by the NVIDIA GPU
-	// Operator so only GPU-requesting pods land there) — the backend automatically adds a
-	// matching toleration to any pod that requests GPUs. Empty falls back to
+	// AcceleratorResourceName is the k8s extended resource name requested per accelerator (quantity =
+	// JobSpec.AcceleratorCount). Empty falls back to "nvidia.com/gpu". Set to "cpu" as a temporary
+	// substitution on a cluster with no accelerator nodes/device plugin yet — agents' JobSpec.AcceleratorCount
+	// is unaffected either way, since it's a plain accelerator count, not a k8s resource name.
+	AcceleratorResourceName string
+	// AcceleratorTaintKey is the taint key real accelerator nodes carry (commonly applied by the NVIDIA GPU
+	// Operator so only accelerator-requesting pods land there) — the backend automatically adds a
+	// matching toleration to any pod that requests accelerators. Empty falls back to
 	// "nvidia.com/gpu". This is purely an execution-engine concern: agents never declare
 	// tolerations themselves in JobSpec.
-	GPUTaintKey string
+	AcceleratorTaintKey string
 }
 
 type OpenResearchConfig struct {
 	NameByFlavor map[string]string
-	GPUsByFlavor map[string]int
+	AcceleratorsByFlavor map[string]int
 	FlavorOrder  []string
-	// NodeLabelByType maps a GPU type name to the node label value real GPU nodes of that
+	// NodeLabelByType maps an accelerator type name to the node label value real accelerator nodes of that
 	// type carry (set by the vendor's device-plugin/feature-discovery add-on). Used to
-	// translate JobSpec.GPUType/AcceptableGPUTypes into a native nodeAffinity — see
-	// gpuNodeAffinity.
+	// translate JobSpec.AcceleratorType/AcceptableAcceleratorTypes into a native nodeAffinity — see
+	// acceleratorNodeAffinity.
 	NodeLabelByType map[string]string
-	// NodeLabelKeyByType/ResourceNameByType/TaintKeyByType map a GPU type name to its own
+	// NodeLabelKeyByType/ResourceNameByType/TaintKeyByType map an accelerator type name to its own
 	// vendor-specific node-label key, k8s extended resource name, and taint key — per-type
 	// so a cluster can mix vendors (NVIDIA + AMD) in one catalog. Falls back to
-	// "nvidia.com/gpu.product"/gpuResourceName/gpuTaintKey (the client's own defaults) for
+	// "nvidia.com/gpu.product"/acceleratorResourceName/acceleratorTaintKey (the client's own defaults) for
 	// any type not present in these maps.
 	NodeLabelKeyByType map[string]string
 	ResourceNameByType map[string]string
 	TaintKeyByType     map[string]string
 }
 
-// DefaultGPUResourceName is the k8s extended resource name requested per GPU when
-// Config.GPUResourceName is unset.
-const DefaultGPUResourceName = "nvidia.com/gpu"
+// DefaultAcceleratorResourceName is the k8s extended resource name requested per accelerator when
+// Config.AcceleratorResourceName is unset.
+const DefaultAcceleratorResourceName = "nvidia.com/gpu"
 
-// DefaultGPUTaintKey is the taint key tolerated on any GPU-requesting pod when
-// Config.GPUTaintKey is unset — matches the taint the NVIDIA GPU Operator applies to GPU
+// DefaultAcceleratorTaintKey is the taint key tolerated on any accelerator-requesting pod when
+// Config.AcceleratorTaintKey is unset — matches the taint the NVIDIA GPU Operator applies to accelerator
 // nodes by default.
-const DefaultGPUTaintKey = "nvidia.com/gpu"
+const DefaultAcceleratorTaintKey = "nvidia.com/gpu"
 
 type JobWorkloadClient struct {
 	kube                  kubernetes.Interface
@@ -124,8 +124,8 @@ type JobWorkloadClient struct {
 	jobBackoffLimit       int32
 	jobDeadlineMultiplier float64
 	minJobDeadlineSeconds int64
-	gpuResourceName       string
-	gpuTaintKey           string
+	acceleratorResourceName       string
+	acceleratorTaintKey           string
 	nodeLabelByType       map[string]string
 	nodeLabelKeyByType    map[string]string
 	resourceNameByType    map[string]string
@@ -157,13 +157,13 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if minDeadline == 0 {
 		minDeadline = DefaultMinJobDeadlineSeconds
 	}
-	gpuResourceName := cfg.GPUResourceName
-	if gpuResourceName == "" {
-		gpuResourceName = DefaultGPUResourceName
+	acceleratorResourceName := cfg.AcceleratorResourceName
+	if acceleratorResourceName == "" {
+		acceleratorResourceName = DefaultAcceleratorResourceName
 	}
-	gpuTaintKey := cfg.GPUTaintKey
-	if gpuTaintKey == "" {
-		gpuTaintKey = DefaultGPUTaintKey
+	acceleratorTaintKey := cfg.AcceleratorTaintKey
+	if acceleratorTaintKey == "" {
+		acceleratorTaintKey = DefaultAcceleratorTaintKey
 	}
 	var nodeLabelByType, nodeLabelKeyByType, resourceNameByType, taintKeyByType map[string]string
 	if cfg.OpenResearchConfig != nil {
@@ -179,11 +179,11 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 		jobBackoffLimit:       backoff,
 		jobDeadlineMultiplier: deadlineMult,
 		minJobDeadlineSeconds: minDeadline,
-		gpuResourceName:       gpuResourceName,
+		acceleratorResourceName:       acceleratorResourceName,
 		nodeLabelKeyByType:    nodeLabelKeyByType,
 		resourceNameByType:    resourceNameByType,
 		taintKeyByType:        taintKeyByType,
-		gpuTaintKey:           gpuTaintKey,
+		acceleratorTaintKey:           acceleratorTaintKey,
 		nodeLabelByType:       nodeLabelByType,
 	}, nil
 }

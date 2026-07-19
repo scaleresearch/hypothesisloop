@@ -130,12 +130,12 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		if victim.EstimatedDurationHours > 0 {
 			ratio = remaining / victim.EstimatedDurationHours
 		}
-		newCostT4H := victim.EstimatedCostT4H * ratio
+		newCostAccH := victim.EstimatedCostAccH * ratio
 		newCPU := victim.EstimatedCPUCoreHours * ratio
 		newRAM := victim.EstimatedRAMGBHours * ratio
 		newStorage := victim.EstimatedStorageGBHours * ratio
 
-		if err := l.store.RequeuePreempted(ctx, victim.ID, remaining, newCostT4H, newCPU, newRAM, newStorage); err != nil {
+		if err := l.store.RequeuePreempted(ctx, victim.ID, remaining, newCostAccH, newCPU, newRAM, newStorage); err != nil {
 			l.logger.Error("requeue preempted job", zap.String("id", victim.ID), zap.Error(err))
 			continue
 		}
@@ -148,7 +148,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 			rt     domain.ResourceType
 			amount float64
 		}{
-			{domain.ResourceGPUHours, newCostT4H},
+			{domain.ResourceAcceleratorHours, newCostAccH},
 			{domain.ResourceCPUCoreHours, newCPU},
 			{domain.ResourceRAMGBHours, newRAM},
 			{domain.ResourceStorageGBHours, newStorage},
@@ -166,7 +166,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	// Now wait for each victim's Job to actually disappear, in parallel — avoids serialising
 	// WaitForJobDeletion across hundreds of jobs. A victim only contributes to actualFreed if
 	// its own wait positively confirms deletion within the timeout: a timeout means Kubernetes
-	// may still be holding those GPUs, so counting them as freed here would let this same tick
+	// may still be holding those accelerators, so counting them as freed here would let this same tick
 	// admit a guaranteed job against capacity that physically doesn't exist yet. Timed-out
 	// victims stay requeued (out of the running set) but their capacity is simply not counted
 	// this tick — the next tick reads fresh live capacity and will pick it up once actually gone.
@@ -205,17 +205,17 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 		return err
 	}
 	exp.ClusterName = clusterName
-	// resolveClusterAndFootprint may have substituted an AcceptableGPUTypes alternative for the
-	// originally requested flavor (exp.Job.GPUType) to find a cluster this job actually fits on
+	// resolveClusterAndFootprint may have substituted an AcceptableAcceleratorTypes alternative for the
+	// originally requested flavor (exp.Job.AcceleratorType) to find a cluster this job actually fits on
 	// — persist that now so the record matches from the start, not just once job_watcher's
 	// onRunning observes the real k8s placement. onRunning's own flavor-substitution debit
-	// compares its k8s-observed type against exp.GPUType, so this write is also what lets that
+	// compares its k8s-observed type against exp.AcceleratorType, so this write is also what lets that
 	// comparison correctly detect "no further correction needed" when our guess here matches
 	// where the pod actually lands, vs. "the real placement differs from what we reserved" when
 	// it doesn't.
-	if exp.GPUCount > 0 && exp.GPUType != exp.Job.GPUType {
-		newEstCost := exp.GPUType.Cost() * float64(exp.GPUCount) * exp.EstimatedDurationHours
-		if err := l.store.UpdateAdmittedFlavor(ctx, exp.ID, exp.GPUType, newEstCost); err != nil {
+	if exp.AcceleratorCount > 0 && exp.AcceleratorType != exp.Job.AcceleratorType {
+		newEstCost := exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+		if err := l.store.UpdateAdmittedFlavor(ctx, exp.ID, exp.AcceleratorType, newEstCost); err != nil {
 			l.logger.Warn("persist admission-time flavor substitution",
 				zap.String("exp", exp.ID), zap.Error(err))
 		}
@@ -262,7 +262,7 @@ func quotaKey(agentID, platformExpID string) string {
 // so sortGuaranteed/sortBurst can compute each experiment's own dominant-utilization fairness
 // ratio (see domain.AgentQuota.DominantUtilization) against the dimensions THAT job actually
 // requests — a fixed single ratio per agent can't do that, since two jobs from the same agent
-// competing on different dimensions (e.g. one GPU-only, one CPU-only) need different ratios.
+// competing on different dimensions (e.g. one accelerator-only, one CPU-only) need different ratios.
 func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map[string]*domain.AgentQuota {
 	seen := map[string]bool{}
 	result := map[string]*domain.AgentQuota{}

@@ -23,9 +23,9 @@ type Experiment struct {
 	ConfigHash  string `json:"config_hash"`
 	DataRef     string `json:"data_ref"`
 	// Job is the agent's execution definition in the platform's own DSL — never a raw
-	// execution-engine manifest (see JobSpec doc). GPUType/GPUCount below are the billing/
-	// admission-facing totals derived from it once at submission time (Job.GPUCount is
-	// per node; GPUType/GPUCount here are cached for cheap reads by scheduler/quota code
+	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the billing/
+	// admission-facing totals derived from it once at submission time (Job.AcceleratorCount is
+	// per node; AcceleratorType/AcceleratorCount here are cached for cheap reads by scheduler/quota code
 	// that doesn't need the rest of the job definition).
 	Job JobSpec `json:"job"`
 	// HypothesisID references a row registered via POST /registry/hypotheses. Required:
@@ -37,11 +37,11 @@ type Experiment struct {
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
 	Theory                 string  `json:"theory,omitempty"`
-	GPUType                GPUType `json:"gpu_type"`
-	GPUCount               int     `json:"gpu_count"`
+	AcceleratorType                AcceleratorType `json:"accelerator_type"`
+	AcceleratorCount               int     `json:"accelerator_count"`
 	EstimatedDurationHours float64 `json:"estimated_duration_hours"`
-	EstimatedCostT4H       float64 `json:"estimated_cost_t4h"` // cost in T4-GPU-hours
-	// EstimatedCPUCoreHours/EstimatedRAMGBHours/EstimatedStorageGBHours mirror EstimatedCostT4H
+	EstimatedCostAccH       float64 `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
+	// EstimatedCPUCoreHours/EstimatedRAMGBHours/EstimatedStorageGBHours mirror EstimatedCostAccH
 	// for the 3 additional resource dimensions — zero when the platform experiment doesn't
 	// track that dimension (see PlatformExperiment.BudgetCPUCoreHours etc).
 	EstimatedCPUCoreHours   float64          `json:"estimated_cpu_core_hours,omitempty"`
@@ -65,7 +65,7 @@ type Experiment struct {
 	// QUEUED. Pre-admission counterpart to EvictionReason.
 	NotAdmittedReason    string   `json:"not_admitted_reason,omitempty"`
 	ActualDurationHours  *float64 `json:"actual_duration_hours,omitempty"`
-	ActualCostT4H        *float64 `json:"actual_cost_t4h,omitempty"`
+	ActualCostAccH        *float64 `json:"actual_cost_acch,omitempty"`
 	ActualCPUCoreHours   *float64 `json:"actual_cpu_core_hours,omitempty"`
 	ActualRAMGBHours     *float64 `json:"actual_ram_gb_hours,omitempty"`
 	ActualStorageGBHours *float64 `json:"actual_storage_gb_hours,omitempty"`
@@ -103,7 +103,7 @@ func (e *Experiment) RemainingEstimatedHours() float64 {
 }
 
 // RequestedCPUCores returns the CPU cores this experiment requests, derived from
-// estimated_cpu_core_hours / estimated_duration_hours. Zero for GPU jobs or when duration is
+// estimated_cpu_core_hours / estimated_duration_hours. Zero for accelerator jobs or when duration is
 // unset. Used by the admission loop's live CPU-capacity check for CPU-only jobs.
 func (e *Experiment) RequestedCPUCores() float64 {
 	if e.EstimatedDurationHours <= 0 {
@@ -117,14 +117,14 @@ func (e *Experiment) RequestedCPUCores() float64 {
 // (bytes) — read straight from e.Job's own quantity strings (the canonical source of truth,
 // not a second derived representation — see the plan's "no request columns" correction) and
 // scaled by e.Job.Nodes() — plus its accelerator, if any (whole units, keyed by
-// GPUType.FlavorName() to match capacity's own key convention).
+// AcceleratorType.FlavorName() to match capacity's own key convention).
 //
-// The accelerator dimension deliberately uses e.GPUType/e.GPUCount (the experiment's own
-// top-level, admission-facing fields), not e.Job.GPUType/e.Job.GPUCount (the originally
+// The accelerator dimension deliberately uses e.AcceleratorType/e.AcceleratorCount (the experiment's own
+// top-level, admission-facing fields), not e.Job.AcceleratorType/e.Job.AcceleratorCount (the originally
 // *requested* type before any substitution): once a job actually lands on a different
-// AcceptableGPUTypes flavor than requested, UpdateAdmittedFlavor rewrites e.GPUType to the
-// flavor it actually holds, and e.GPUCount is already the job's TOTAL footprint (per-node
-// GPUCount x NumNodes, set once at submission — see JobSpec.TotalGPUs) — so this always reports
+// AcceptableAcceleratorTypes flavor than requested, UpdateAdmittedFlavor rewrites e.AcceleratorType to the
+// flavor it actually holds, and e.AcceleratorCount is already the job's TOTAL footprint (per-node
+// AcceleratorCount x NumNodes, set once at submission — see JobSpec.TotalAccelerators) — so this always reports
 // which capacity a RUNNING job is really holding, not what it originally asked for.
 //
 // A malformed CPU/memory/storage quantity string should never reach this point (ValidateExperiment
@@ -154,8 +154,8 @@ func (e *Experiment) Footprint() Footprint {
 		}
 	}
 	fp = fp.Scale(int64(e.Job.Nodes()))
-	if e.GPUCount > 0 {
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: e.GPUType.FlavorName()}, int64(e.GPUCount))
+	if e.AcceleratorCount > 0 {
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: e.AcceleratorType.FlavorName()}, int64(e.AcceleratorCount))
 	}
 	return fp
 }

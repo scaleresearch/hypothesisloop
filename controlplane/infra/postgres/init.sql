@@ -11,7 +11,7 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed a sample platform experiment in "open" state.
-INSERT INTO platform_experiments (id, name, description, budget_t4_hours, max_agents, starts_at, ends_at, status, created_at, updated_at)
+INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, max_agents, starts_at, ends_at, status, created_at, updated_at)
 VALUES (
   'pe-demo-001',
   'Val-Accuracy Optimization Challenge',

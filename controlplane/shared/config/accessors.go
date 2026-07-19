@@ -1,24 +1,24 @@
 package config
 
-// RateFor returns the T4h rate for the named GPU type (e.g. "H100").
+// RateFor returns the AccH rate for the named accelerator type (e.g. "H100").
 // Returns 1.0 (T4 base rate) for unknown types.
-func (c *Config) RateFor(gpuName string) float64 {
-	if r, ok := c.RateByName[gpuName]; ok {
+func (c *Config) RateFor(acceleratorName string) float64 {
+	if r, ok := c.RateByName[acceleratorName]; ok {
 		return r
 	}
 	return 1.0
 }
 
-// GPUNameForFlavor returns the GPU type name for a flavor name.
+// AcceleratorNameForFlavor returns the accelerator type name for a flavor name.
 // Returns "" if not found.
-func (c *Config) GPUNameForFlavor(flavor string) string {
+func (c *Config) AcceleratorNameForFlavor(flavor string) string {
 	return c.NameByFlavor[flavor]
 }
 
 // FlavorOrder returns flavor names in definition order.
 func (c *Config) FlavorOrder() []string {
-	out := make([]string, len(c.GPUTypes))
-	for i, g := range c.GPUTypes {
+	out := make([]string, len(c.AcceleratorTypes))
+	for i, g := range c.AcceleratorTypes {
 		out[i] = g.Flavor
 	}
 	return out

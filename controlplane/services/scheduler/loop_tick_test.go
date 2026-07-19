@@ -8,7 +8,7 @@ import (
 
 var cpuKey = domain.ResourceKey{Kind: domain.ResourceKindCPU}
 
-func gpuKey(flavor string) domain.ResourceKey {
+func acceleratorKey(flavor string) domain.ResourceKey {
 	return domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: flavor}
 }
 
@@ -45,28 +45,28 @@ func TestSubtractFootprintClampsAtZero(t *testing.T) {
 }
 
 func TestShortfallOnlyCountsDeficitDimensions(t *testing.T) {
-	avail := domain.Footprint{cpuKey: 3000, gpuKey("flavor-t4"): 5}
-	need := domain.Footprint{cpuKey: 4000, gpuKey("flavor-t4"): 2}
+	avail := domain.Footprint{cpuKey: 3000, acceleratorKey("flavor-t4"): 5}
+	need := domain.Footprint{cpuKey: 4000, acceleratorKey("flavor-t4"): 2}
 	got := shortfall(avail, need)
 	if got[cpuKey] != 1000 {
 		t.Errorf("shortfall[cpu] = %d, want 1000", got[cpuKey])
 	}
-	if v, ok := got[gpuKey("flavor-t4")]; ok && v > 0 {
-		t.Errorf("shortfall[gpu] = %d, want 0/absent (capacity already covers this dimension)", v)
+	if v, ok := got[acceleratorKey("flavor-t4")]; ok && v > 0 {
+		t.Errorf("shortfall[accelerator] = %d, want 0/absent (capacity already covers this dimension)", v)
 	}
 }
 
 func TestNotAdmittedReasonForOnlyLooksAtRequestedDimensions(t *testing.T) {
 	// A job that only requests CPU shouldn't be classified "outranked" just because some
-	// unrelated GPU flavor's availability dropped this tick.
-	initial := domain.Footprint{cpuKey: 2000, gpuKey("flavor-t4"): 4}
-	current := domain.Footprint{cpuKey: 2000, gpuKey("flavor-t4"): 0}
+	// unrelated accelerator flavor's availability dropped this tick.
+	initial := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 4}
+	current := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 0}
 	fp := domain.Footprint{cpuKey: 1000}
 	if got := notAdmittedReasonFor(current, initial, fp); got != domain.NotAdmittedCapacityUnavailable {
 		t.Errorf("notAdmittedReasonFor = %q, want capacity_unavailable (CPU untouched)", got)
 	}
 
-	current2 := domain.Footprint{cpuKey: 500, gpuKey("flavor-t4"): 4}
+	current2 := domain.Footprint{cpuKey: 500, acceleratorKey("flavor-t4"): 4}
 	if got := notAdmittedReasonFor(current2, initial, fp); got != domain.NotAdmittedOutranked {
 		t.Errorf("notAdmittedReasonFor = %q, want outranked (CPU dropped)", got)
 	}

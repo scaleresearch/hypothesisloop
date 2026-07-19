@@ -15,8 +15,8 @@ import (
 // both admission passes, and preemption victim accounting, so all three always agree on what a
 // job actually costs across every dimension it requests, not just one flavor.
 //
-// For a distributed job (JobSpec.NumNodes > 1), exp.GPUCount is already the job's TOTAL
-// footprint — JobSpec.TotalGPUs(), i.e. per-node GPUCount x NumNodes, set once at submission
+// For a distributed job (JobSpec.NumNodes > 1), exp.AcceleratorCount is already the job's TOTAL
+// footprint — JobSpec.TotalAccelerators(), i.e. per-node AcceleratorCount x NumNodes, set once at submission
 // (see handler.go) — so tick()'s check (domain.Fits(avail[cluster], fp)) already requires the
 // *whole* job's demand to fit before admitting anything, and submitJob creates the entire k8s
 // Job (every rank/index) in a single CreateWorkload call. Admission is therefore atomic:
@@ -45,9 +45,9 @@ type LoopStore interface {
 	// actually recorded against.
 	MarkSubmitted(ctx context.Context, id, clusterName string) error
 	// RequeuePreempted returns id to QUEUED and overwrites its duration plus every resource
-	// estimate (GPU/CPU/RAM/storage) with the caller's proportionally rescaled remaining amounts
+	// estimate (Accelerator/CPU/RAM/storage) with the caller's proportionally rescaled remaining amounts
 	// — see the store implementation's doc comment for why all four must move together.
-	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostT4H, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) error
+	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) error
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	// UpdateNotAdmittedReason explains why a QUEUED job was skipped on its most recent tick
@@ -68,13 +68,13 @@ type LoopStore interface {
 	// pending_capacity_reservations' schema comment. tick() subtracts this from live capacity on
 	// top of the existing SUBMITTED/ADMITTED/RUNNING accounting.
 	ListPendingReservationsByCluster(ctx context.Context) (map[string]domain.Footprint, error)
-	// UpdateAdmittedFlavor records the GPU flavor the job is (or ends up) actually holding and
+	// UpdateAdmittedFlavor records the accelerator flavor the job is (or ends up) actually holding and
 	// the recomputed estimated cost at that flavor's rate — see the db implementation's doc
 	// comment. submitJob uses this at admission time when resolveClusterAndFootprint substitutes
-	// an AcceptableGPUTypes alternative for the originally requested flavor, so the persisted
+	// an AcceptableAcceleratorTypes alternative for the originally requested flavor, so the persisted
 	// record matches what capacity/reservation/workload creation actually claimed from the
 	// start, instead of only being corrected later when job_watcher observes RUNNING.
-	UpdateAdmittedFlavor(ctx context.Context, id string, gpuType domain.GPUType, estimatedCostT4H float64) error
+	UpdateAdmittedFlavor(ctx context.Context, id string, acceleratorType domain.AcceleratorType, estimatedCostAccH float64) error
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without
@@ -126,7 +126,7 @@ type Loop struct {
 	// depend on for correctness (see competetors/SYNTHESIS_GAPS_AND_PLAN.md item #2). Unlike
 	// cluster-agent's reconcile loop — which is safe to run concurrently because it's purely
 	// declarative (diff desired vs. actual, converge) — tick() is a read-then-decide-then-write
-	// capacity accounting operation: two concurrent ticks could each read the same "1 GPU free"
+	// capacity accounting operation: two concurrent ticks could each read the same "1 accelerator free"
 	// and both admit a job against it, a real double-booking, not an idempotent retry. This
 	// turns that invariant into an enforced guarantee instead of a comment: it panics loudly on
 	// reentrancy rather than silently double-admitting/double-preempting.

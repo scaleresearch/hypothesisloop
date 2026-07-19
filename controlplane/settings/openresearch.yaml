@@ -1,98 +1,99 @@
 # OpenResearch platform configuration.
-# All scheduling constants, GPU definitions, and cluster topology live here.
+# All scheduling constants, accelerator definitions, and cluster topology live here.
 
 
-# GPU types — canonical compute units. The catalog is entirely operator-defined here — any
+# Accelerator types — canonical compute units. The catalog is entirely operator-defined here — any
 # vendor's model name is valid (NVIDIA, AMD, ...); nothing in the code is a closed enum.
 # Each type has:
-#   name:             display name; the value agents put in job.yaml's gpu_type/acceptable_gpu_types
-#   t4h_rate:         cost in T4-GPU-hours per GPU-hour (T4 = 1.0 is the base unit)
+#   name:             display name; the value agents put in job.yaml's accelerator_type/acceptable_accelerator_types
+#   acch_rate:         cost in accelerator-hours (AccH), H100-equivalent (1 AccH = 1 H100-hour, so H100 = 1.0)
 #   flavor:           internal flavor name used for capacity accounting (native k8s Job
 #                     scheduling — no external queueing operator)
-#   cluster_gpus:     number of GPUs of this type in the cluster
+#   cluster_accelerators:     number of accelerators of this type in the cluster
 #   node_label_value: the node label value real nodes of this type carry (set by the
 #                     vendor's device-plugin/feature-discovery add-on). Required for every
 #                     type agents can request: the backend builds a nodeAffinity from this
-#                     for every job (job.gpu_type alone, or the OR of job.acceptable_gpu_types)
-#                     — a plain gpu_type with no acceptable_gpu_types still must land on
+#                     for every job (job.accelerator_type alone, or the OR of job.acceptable_accelerator_types)
+#                     — a plain accelerator_type with no acceptable_accelerator_types still must land on
 #                     hardware of exactly that model, since the extended resource request
-#                     alone only guarantees *a* GPU node, never *the requested model*.
+#                     alone only guarantees *an* accelerator node, never *the requested model*.
 #   node_label_key:   the node label KEY carrying node_label_value. Defaults to
-#                     "nvidia.com/gpu.product" (NVIDIA GPU Feature Discovery) if omitted —
+#                     "nvidia.com/gpu.product" (NVIDIA GPU Feature Discovery, an NVIDIA-specific
+#                     add-on — a generic accelerator system has no such standard) if omitted —
 #                     only needed for non-NVIDIA types (see the AMD example below).
-#   resource_name:    the k8s extended resource requested per GPU of this type. Defaults to
-#                     the top-level gpu_resource_name if omitted — only needed for
+#   resource_name:    the k8s extended resource requested per accelerator of this type. Defaults to
+#                     the top-level accelerator_resource_name if omitted — only needed for
 #                     non-NVIDIA types (AMD's device plugin advertises "amd.com/gpu").
 #   taint_key:        the taint key nodes of this type carry. Defaults to the top-level
-#                     gpu_taint_key if omitted.
+#                     accelerator_taint_key if omitted.
 #
-# GPUs are the primary resource dimension admitted/preempted on. CPU/RAM/storage are
+# Accelerators are the primary resource dimension admitted/preempted on. CPU/RAM/storage are
 # additional, optional dimensions (see quota.* below and each platform experiment's own
 # budget_cpu_core_hours/budget_ram_gb_hours/budget_storage_gb_hours) — 0/unset means "not
-# tracked," so existing GPU-only platform experiments are unaffected. Agents declare GPU
-# count as a plain integer in job.yaml's gpu_count (see settings/examples/experiment-submission.yaml) — never
-# a k8s resource string. gpu_resource_name/gpu_taint_key below are cluster-wide fallbacks
-# used only for GPU types that don't set their own resource_name/taint_key above; set
-# gpu_resource_name to "cpu" as a temporary substitution on a cluster with no GPU
+# tracked," so existing accelerator-only platform experiments are unaffected. Agents declare accelerator
+# count as a plain integer in job.yaml's accelerator_count (see settings/examples/experiment-submission.yaml) — never
+# a k8s resource string. accelerator_resource_name/accelerator_taint_key below are cluster-wide fallbacks
+# used only for accelerator types that don't set their own resource_name/taint_key above; set
+# accelerator_resource_name to "cpu" as a temporary substitution on a cluster with no accelerator
 # nodes/device plugin yet.
-gpu_resource_name: nvidia.com/gpu
-gpu_taint_key: nvidia.com/gpu
+accelerator_resource_name: nvidia.com/gpu
+accelerator_taint_key: nvidia.com/gpu
 
-gpu_types:
+accelerator_types:
   - name:       T4
-    t4h_rate:   1.0
+    acch_rate:   0.125
     flavor:     flavor-t4
-    cluster_gpus: 64
+    cluster_accelerators: 64
     node_label_value: NVIDIA-T4
 
   - name:       L40
-    t4h_rate:   2.0
+    acch_rate:   0.25
     flavor:     flavor-l40
-    cluster_gpus: 16
+    cluster_accelerators: 16
     node_label_value: NVIDIA-L40
 
   - name:       A100
-    t4h_rate:   3.0
+    acch_rate:   0.375
     flavor:     flavor-a100
-    cluster_gpus: 8
+    cluster_accelerators: 8
     node_label_value: NVIDIA-A100-80GB-PCIe
 
   - name:       H100
-    t4h_rate:   8.0
+    acch_rate:   1.0
     flavor:     flavor-h100
-    cluster_gpus: 4
+    cluster_accelerators: 4
     node_label_value: NVIDIA-H100-80GB-HBM3
 
   - name:       H200
-    t4h_rate:   10.0
+    acch_rate:   1.25
     flavor:     flavor-h200
-    cluster_gpus: 2
+    cluster_accelerators: 2
     node_label_value: NVIDIA-H200-141GB-HBM3
 
   # AMD example — demonstrates the multi-vendor catalog. A cluster can mix this entry with
-  # the NVIDIA ones above; each GPU type carries its own resource/taint/label plumbing, so
+  # the NVIDIA ones above; each accelerator type carries its own resource/taint/label plumbing, so
   # the backend requests the right extended resource and builds the right nodeAffinity per
-  # job depending on which type it asked for. Uncomment and adjust cluster_gpus to actually
+  # job depending on which type it asked for. Uncomment and adjust cluster_accelerators to actually
   # use it — commented out by default since most clusters won't have this hardware.
   # - name:       MI300X
-  #   t4h_rate:   9.0
+  #   acch_rate:   1.125
   #   flavor:     flavor-mi300x
-  #   cluster_gpus: 4
+  #   cluster_accelerators: 4
   #   node_label_value: AMD-Instinct-MI300X
   #   node_label_key: amd.com/gpu.device-id
   #   resource_name: amd.com/gpu
   #   taint_key: amd.com/gpu
 
-# GPU types that are interchangeable for admission purposes (same Hopper SM architecture).
+# Accelerator types that are interchangeable for admission purposes (same Hopper SM architecture).
 # An H100 request may be satisfied with an H200; the control plane adjusts cost accordingly.
 # Only list types that share the same vendor plumbing (resource_name/taint_key/node_label_key)
-# — see settings/examples/experiment-submission.yaml's acceptable_gpu_types doc for why mixing vendors in one
+# — see settings/examples/experiment-submission.yaml's acceptable_accelerator_types doc for why mixing vendors in one
 # group doesn't work (the k8s resource request is a single specific name).
 interchangeable_groups:
   - [H100, H200]
 
-# Flat per-unit quota rates for the non-GPU resource dimensions — 1.0 by default (no
-# hardware-tier variation to normalize away, unlike GPU). Override here if you want, e.g.,
+# Flat per-unit quota rates for the non-accelerator resource dimensions — 1.0 by default (no
+# hardware-tier variation to normalize away, unlike accelerators). Override here if you want, e.g.,
 # CPU-hours to cost differently than 1 credit/core-hour.
 cpu_core_hour_rate: 1.0
 ram_gb_hour_rate: 1.0
@@ -120,7 +121,7 @@ quota:
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is
   # independent of (and on top of) budget sizing: size these relative to your smallest
   # expected burst pool, not just to "a sane job." 0 = unlimited.
-  max_gpu_count_per_job: 16
+  max_accelerator_count_per_job: 16
   max_cpu_cores_per_job: 64
   max_ram_gb_per_job: 512
   max_storage_gb_per_job: 1000
@@ -189,7 +190,7 @@ scheduler:
 
   # Kubernetes Job retries (RestartPolicy=OnFailure) before k8s marks the Job Failed.
   # Absorbs transient pod flakes; a persistently crashing job exhausts these retries and is
-  # failed natively by k8s (job watcher then records FAILED and refunds unused T4h).
+  # failed natively by k8s (job watcher then records FAILED and refunds unused AccH).
   job_backoff_limit: 3
 
   # k8s ActiveDeadlineSeconds hard ceiling, as a multiple of estimated_duration_hours.

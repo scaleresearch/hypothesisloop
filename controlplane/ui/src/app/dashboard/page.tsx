@@ -253,7 +253,7 @@ export default function DashboardPage() {
                   <th>Platform Experiment</th>
                   <th>Eviction Reason</th>
                   <th style={{ textAlign: 'right' }}>Metric at Eviction</th>
-                  <th>GPU</th>
+                  <th>Accelerator</th>
                   <th>Tier</th>
                 </tr>
               </thead>
@@ -278,7 +278,7 @@ export default function DashboardPage() {
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
                       {e.metric_at_eviction != null ? e.metric_at_eviction.toFixed(4) : '—'}
                     </td>
-                    <td className="mono" style={{ fontSize: 11 }}>{e.gpu_count}× {e.gpu_type}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{e.accelerator_count}× {e.accelerator_type}</td>
                     <td><Badge status={e.capacity_tier ?? 'unknown'}>{e.capacity_tier ?? '—'}</Badge></td>
                   </tr>
                 ))}

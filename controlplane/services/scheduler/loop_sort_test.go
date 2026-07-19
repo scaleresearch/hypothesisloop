@@ -9,16 +9,16 @@ import (
 
 func TestSortBurstOrdersByDominantUtilizationOverPriorityScore(t *testing.T) {
 	t0 := time.Now().UTC()
-	agentA := &domain.AgentQuota{GuaranteedT4Hours: 10, UsedGuaranteedT4H: 9} // 90% used
-	agentB := &domain.AgentQuota{GuaranteedT4Hours: 10, UsedGuaranteedT4H: 1} // 10% used
+	agentA := &domain.AgentQuota{GuaranteedAcceleratorHours: 10, UsedGuaranteedAccH: 9} // 90% used
+	agentB := &domain.AgentQuota{GuaranteedAcceleratorHours: 10, UsedGuaranteedAccH: 1} // 10% used
 	quotaMap := map[string]*domain.AgentQuota{
 		quotaKey("agent-a", "pe-1"): agentA,
 		quotaKey("agent-b", "pe-1"): agentB,
 	}
 	// agent-a's job has a much higher PriorityScore, but agent-b should still be scheduled
 	// first: dominant utilization is the primary signal, PriorityScore only a final tiebreak.
-	expA := &domain.Experiment{ID: "a", AgentID: "agent-a", PlatformExperimentID: "pe-1", EstimatedCostT4H: 1, PriorityScore: 100, QueuedAt: &t0}
-	expB := &domain.Experiment{ID: "b", AgentID: "agent-b", PlatformExperimentID: "pe-1", EstimatedCostT4H: 1, PriorityScore: 0, QueuedAt: &t0}
+	expA := &domain.Experiment{ID: "a", AgentID: "agent-a", PlatformExperimentID: "pe-1", EstimatedCostAccH: 1, PriorityScore: 100, QueuedAt: &t0}
+	expB := &domain.Experiment{ID: "b", AgentID: "agent-b", PlatformExperimentID: "pe-1", EstimatedCostAccH: 1, PriorityScore: 0, QueuedAt: &t0}
 
 	exps := []*domain.Experiment{expA, expB}
 	sortBurst(exps, quotaMap)
@@ -45,10 +45,10 @@ func TestSortBurstFallsBackToPriorityScoreWhenUtilizationTied(t *testing.T) {
 
 func TestDominantCostFractionTiebreakPrefersSmallerJob(t *testing.T) {
 	quotaMap := map[string]*domain.AgentQuota{
-		quotaKey("agent-a", "pe-1"): {GuaranteedT4Hours: 10},
+		quotaKey("agent-a", "pe-1"): {GuaranteedAcceleratorHours: 10},
 	}
-	small := &domain.Experiment{AgentID: "agent-a", PlatformExperimentID: "pe-1", EstimatedCostT4H: 1}
-	big := &domain.Experiment{AgentID: "agent-a", PlatformExperimentID: "pe-1", EstimatedCostT4H: 9}
+	small := &domain.Experiment{AgentID: "agent-a", PlatformExperimentID: "pe-1", EstimatedCostAccH: 1}
+	big := &domain.Experiment{AgentID: "agent-a", PlatformExperimentID: "pe-1", EstimatedCostAccH: 9}
 
 	if got := dominantCostFraction(quotaMap, small); got >= dominantCostFraction(quotaMap, big) {
 		t.Errorf("dominantCostFraction(small)=%v should be less than dominantCostFraction(big)=%v", got, dominantCostFraction(quotaMap, big))

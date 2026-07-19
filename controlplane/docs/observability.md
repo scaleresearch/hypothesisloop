@@ -1,17 +1,17 @@
 # Observability & Audience Separation
 
 **Scope:** what's persisted where, phase/status read APIs, and who can see what.
-Code: `controlplane/shared/metrics`, `controlplane/services/registry`, `controlplane/services/controller`.
+Code: `controlplane/shared/metricsdb`, `controlplane/services/registry`, `controlplane/services/controller`.
 
-Metric data never enters Postgres. ML timeseries live in the metrics backend (Prometheus-compatible remote-write, backed by GreptimeDB — `controlplane/services/registry/remotewrite.go`); utilization and silence state live in-memory. The control plane is the sole gateway — agents and `node-agent` push to it, never directly to the metrics backend.
+Metric data never enters Postgres. ML timeseries live in the metrics backend (Prometheus-compatible remote-write, backed by GreptimeDB — `controlplane/services/registry/metrics.go`); utilization and silence state live in-memory. The control plane is the sole gateway — agents and `node-agent` push to it, never directly to the metrics backend.
 
 ### ML metric timeseries
 
 Agents push via `POST /experiments/{id}/metrics`; each push is stored labelled with `job_id`, `platform_experiment_id`, `agent_id`, `metric_name`, queryable on demand (`GET /experiments/{id}/metrics`). At the Phase 2 boundary the controller queries the metrics backend directly for each agent's best (direction-aware) value over the experiment lifetime — decoupled from in-memory state, correct across restarts (see `scheduling.md`).
 
-### GPU/CPU utilization per pod
+### CPU utilization per pod
 
-`node-agent` (DaemonSet, `cluster/cmd/node-agent/main.go`) pushes per-pod CPU utilization samples every ~2s to the metrics service's `/internal/node-metrics` endpoint. Held in an in-memory rolling window, never written to Postgres. Used for preemption victim selection and stall detection where available; on setups without utilization data, preemption falls back to elapsed-time-only victim selection.
+`node-agent` (DaemonSet, `cluster/cmd/node-agent/main.go`) pushes per-pod CPU utilization samples every ~2s to the metrics service's `/internal/node-metrics` endpoint. Held in an in-memory rolling window, never written to Postgres. Used for preemption victim selection and stall detection where available; on setups without utilization data, preemption falls back to elapsed-time-only victim selection. Accelerator utilization is not tracked per-pod today — only per-cluster *capacity* (available/total per flavor), self-reported by `cluster-agent` (not `node-agent`) into the metrics store, see `cluster/docs/execution-layer.md`.
 
 ### Metric silence detection
 

@@ -59,9 +59,9 @@ func dominantUtilization(quotaMap map[string]*domain.AgentQuota, exp *domain.Exp
 }
 
 // dominantCostFraction is dominantUtilization's counterpart for "how big is this one job",
-// replacing the old GPU-only GPUHours() tiebreak (which was always zero for CPU-only jobs —
+// replacing the old accelerator-only AcceleratorHours() tiebreak (which was always zero for CPU-only jobs —
 // see domain.AgentQuota.DominantCostFraction for why this generalizes correctly across
-// CPU/GPU/RAM/storage jobs instead of comparing raw, unit-incompatible hours).
+// CPU/Accelerator/RAM/storage jobs instead of comparing raw, unit-incompatible hours).
 func dominantCostFraction(quotaMap map[string]*domain.AgentQuota, exp *domain.Experiment) float64 {
 	aq := quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)]
 	if aq == nil {
@@ -83,7 +83,7 @@ func dominantCostFraction(quotaMap map[string]*domain.AgentQuota, exp *domain.Ex
 //    tier, without abandoning FIFO altogether (a job's age bucket still dominates once the gap
 //    between two jobs exceeds fairnessWindow, so nothing waits indefinitely).
 // 3. CompletionFraction DESC (finish interrupted work first)
-// 4. dominant cost fraction ASC (smallest job first, dimensionless across CPU/GPU/RAM/storage)
+// 4. dominant cost fraction ASC (smallest job first, dimensionless across CPU/Accelerator/RAM/storage)
 // 5. PriorityScore DESC (novelty + cost-efficiency — see computePriority) as the final tiebreak,
 //    so the score every submission computes and persists is actually consumed by ordering
 //    instead of being a dead, API-only number.

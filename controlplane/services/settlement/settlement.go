@@ -79,7 +79,7 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		return nil
 	}
 
-	var hours, gpuCost float64
+	var hours, acceleratorCost float64
 	if !neverStarted && exp.EstimatedDurationHours > 0 {
 		now := time.Now().UTC()
 		var err error
@@ -88,13 +88,13 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 			return fmt.Errorf("settlement: observed elapsed hours: %w", err)
 		}
 
-		gpuCost, err = metricsdb.ObservedGPUCost(ctx, s.metricsDBURL, exp.ID, exp.GPUCount, now, s.maxLookback, s.gapCap, s.step)
+		acceleratorCost, err = metricsdb.ObservedAcceleratorCost(ctx, s.metricsDBURL, exp.ID, exp.AcceleratorCount, now, s.maxLookback, s.gapCap, s.step)
 		if err != nil {
-			return fmt.Errorf("settlement: observed GPU cost: %w", err)
+			return fmt.Errorf("settlement: observed accelerator cost: %w", err)
 		}
 	}
 
-	// CPU/RAM/storage have no independent "actual" measurement the way GPU does (ObservedGPUCost
+	// CPU/RAM/storage have no independent "actual" measurement the way accelerator does (ObservedAcceleratorCost
 	// comes from real alive-time samples) — the best available signal is each dimension's
 	// estimated per-hour rate (estimate / duration) times real cumulative observed hours. This
 	// rate is invariant across a preemption requeue's proportional rescale
@@ -116,7 +116,7 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		estimated    float64
 		amount       float64
 	}{
-		{domain.ResourceGPUHours, exp.EstimatedCostT4H, gpuCost},
+		{domain.ResourceAcceleratorHours, exp.EstimatedCostAccH, acceleratorCost},
 		{domain.ResourceCPUCoreHours, exp.EstimatedCPUCoreHours, rateCost(exp.EstimatedCPUCoreHours)},
 		{domain.ResourceRAMGBHours, exp.EstimatedRAMGBHours, rateCost(exp.EstimatedRAMGBHours)},
 		{domain.ResourceStorageGBHours, exp.EstimatedStorageGBHours, rateCost(exp.EstimatedStorageGBHours)},

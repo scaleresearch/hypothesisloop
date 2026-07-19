@@ -42,7 +42,7 @@ type JobStatusStore interface {
 	TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus) (bool, error)
 	// UpdateAdmittedFlavor persists the flavor the job actually ran on and the
 	// estimated cost recomputed at that flavor's rate, so downstream accounting is consistent.
-	UpdateAdmittedFlavor(ctx context.Context, id string, gpuType domain.GPUType, estimatedCostT4H float64) error
+	UpdateAdmittedFlavor(ctx context.Context, id string, acceleratorType domain.AcceleratorType, estimatedCostAccH float64) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
@@ -62,10 +62,10 @@ type QuotaSettler interface {
 }
 
 // JobQuotaAdjuster debits extra cost if a job ever ran on a more expensive
-// flavor than requested (e.g. H100 request admitted on H200). GPU-hours only — flavor
-// substitution is a GPU-hardware-tier concept, not one that applies to CPU/RAM/storage.
+// flavor than requested (e.g. H100 request admitted on H200). Accelerator-hours only — flavor
+// substitution is an accelerator-hardware-tier concept, not one that applies to CPU/RAM/storage.
 type JobQuotaAdjuster interface {
-	DebitQuota(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, costT4H float64) error
+	DebitQuota(ctx context.Context, agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier, costAccH float64) error
 }
 
 // JobBackendClient is the narrow slice of workload.Backend that JobWatcher needs. It is
@@ -74,7 +74,7 @@ type JobQuotaAdjuster interface {
 // *workload.ClusterSet, but any Backend implementation satisfies it unchanged).
 type JobBackendClient interface {
 	PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error)
-	GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment) domain.GPUType
+	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType
 }
 
 // JobWatcher starts a per-experiment goroutine for every SUBMITTED or ADMITTED experiment

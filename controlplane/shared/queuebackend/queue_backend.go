@@ -32,17 +32,17 @@ type Store interface {
 type Backend struct {
 	store        Store
 	clusterNames []string
-	// flavorOrder lists every configured GPU flavor, so a cluster with no live report for a
+	// flavorOrder lists every configured accelerator flavor, so a cluster with no live report for a
 	// given flavor still gets an explicit 0 entry rather than being silently absent — callers
 	// enumerate flavors purely from these maps, same as they enumerate clusters.
 	flavorOrder []string
-	// metricsDBURL is where cluster-agents' live per-flavor GPU capacity lives (see
-	// clusteragentapi.DesiredState / metricsdb.RecordClusterGPUCapacity) — capacity is metric
+	// metricsDBURL is where cluster-agents' live per-flavor accelerator capacity lives (see
+	// clusteragentapi.DesiredState / metricsdb.RecordClusterAcceleratorCapacity) — capacity is metric
 	// data, read live, never duplicated into Postgres.
 	metricsDBURL string
 	// connectedWithin mirrors clusteragentapi.Handler's own staleness window (config-driven,
 	// scheduler.cluster_unreachable_after_seconds — one threshold, not two hardcoded ones): a
-	// cluster whose heartbeat (and therefore its live CPU/GPU report) is older than this is
+	// cluster whose heartbeat (and therefore its live CPU/Accelerator report) is older than this is
 	// treated as contributing zero capacity rather than a possibly-stale number. This is also
 	// what "freezes new admission" to an Unreachable cluster (item #6) — no separate freeze
 	// logic needed, since its capacity simply drops out of the sum below.
@@ -50,7 +50,7 @@ type Backend struct {
 }
 
 // New constructs a Backend. clusterNames are the configured target clusters (used for
-// ClusterNames()); flavorCfg's FlavorOrder is every GPU flavor GetFlavorCapacity reports on
+// ClusterNames()); flavorCfg's FlavorOrder is every accelerator flavor GetFlavorCapacity reports on
 // (values are read live from metricsDBURL, never from static config). connectedWithin is the
 // cluster-liveness threshold (config-driven).
 func New(store Store, clusterNames []string, flavorCfg *workload.OpenResearchConfig, metricsDBURL string, connectedWithin time.Duration) *Backend {
@@ -112,22 +112,22 @@ func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (wor
 	return workload.ParseJobPhase(report.Phase), nil
 }
 
-// GetAdmittedGPUType reads the flavor a cluster-agent reported back, if any; falls back to
+// GetAdmittedAcceleratorType reads the flavor a cluster-agent reported back, if any; falls back to
 // the requested type if no report has arrived yet.
-func (b *Backend) GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment) domain.GPUType {
+func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType {
 	report, err := b.store.GetJobReport(ctx, exp.ID)
-	if err != nil || report == nil || report.AdmittedGPUType == "" {
-		return exp.GPUType
+	if err != nil || report == nil || report.AdmittedAcceleratorType == "" {
+		return exp.AcceleratorType
 	}
-	return report.AdmittedGPUType
+	return report.AdmittedAcceleratorType
 }
 
 // GetFlavorCapacity returns available capacity per cluster per flavor: guaranteed[cluster][flavor]
 // and burst[cluster][flavor]. Every configured cluster (b.clusterNames) always gets an entry, so
-// callers can enumerate clusters purely from these maps. Both CPU and GPU capacity are real and
+// callers can enumerate clusters purely from these maps. Both CPU and accelerator capacity are real and
 // per-cluster, from cluster-agents' own self-reported allocatable-minus-requested numbers
-// (GetLiveCPUCapacityByCluster reads Postgres; GPU reads the metrics store, since capacity is
-// metric data — see metricsdb.LiveClusterGPUCapacity) — a cluster with no fresh report for a
+// (GetLiveCPUCapacityByCluster reads Postgres; accelerator reads the metrics store, since capacity is
+// metric data — see metricsdb.LiveClusterAcceleratorCapacity) — a cluster with no fresh report for a
 // given resource contributes zero for it, never a stale or nominal-config number. Guaranteed and
 // burst share the same physical pool per cluster — preemption is what enforces the tier boundary,
 // not a capacity split.
@@ -136,12 +136,12 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: live CPU capacity: %w", err)
 	}
-	gpuAvail, err := metricsdb.LiveClusterGPUCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	acceleratorAvail, err := metricsdb.LiveClusterAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: live GPU capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: live accelerator capacity: %w", err)
 	}
 	// RAM/ephemeral-storage — Class B (hard-cap, no billing) dimensions (see
-	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). Same staleness gating as GPU: a
+	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). Same staleness gating as accelerator: a
 	// cluster with no fresh report contributes zero, so Fits() fails closed for any job that
 	// actually needs it rather than treating a missing report as unlimited.
 	ramAvail, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
@@ -156,11 +156,11 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	guaranteed = make(map[string]domain.Footprint, len(b.clusterNames))
 	burst = make(map[string]domain.Footprint, len(b.clusterNames))
 	for _, cluster := range b.clusterNames {
-		gpuByFlavor := make(map[string]int64, len(b.flavorOrder))
+		acceleratorByFlavor := make(map[string]int64, len(b.flavorOrder))
 		for _, flavor := range b.flavorOrder {
-			gpuByFlavor[flavor] = gpuAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
+			acceleratorByFlavor[flavor] = acceleratorAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
 		}
-		fp := domain.CapacityFootprint(cpuAvail[cluster], gpuByFlavor, ramAvail[cluster], storageAvail[cluster])
+		fp := domain.CapacityFootprint(cpuAvail[cluster], acceleratorByFlavor, ramAvail[cluster], storageAvail[cluster])
 		guaranteed[cluster] = fp
 		// Guaranteed and burst share the same physical pool per cluster — preemption is what
 		// enforces the tier boundary, not a capacity split. Copy so tick()'s mutation of one

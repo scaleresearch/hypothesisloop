@@ -34,7 +34,7 @@ func (c *Controller) applyPhase2Hold(ctx context.Context, pe *domain.PlatformExp
 	// The 60% of the budget withheld at experiment start is released to active agents here.
 	// Only real (guaranteed) hours are redistributed — burst is a virtual overcommit limit,
 	// not physical compute. Adding it would inflate active agents' allocations beyond the
-	// actual remaining budget. GPU-hours drives the phase-2 trigger itself and always
+	// actual remaining budget. Accelerator-hours drives the phase-2 trigger itself and always
 	// redistributes; CPU/RAM/storage redistribute too, for any platform experiment that
 	// also tracks them (0 budget = skipped, same "not tracked" convention as elsewhere).
 	boundary := c.phase2BoundaryFrac
@@ -47,9 +47,9 @@ func (c *Controller) applyPhase2Hold(ctx context.Context, pe *domain.PlatformExp
 	var zeros []db.Phase2ZeroOp
 	var adds []db.Phase2AddOp
 	c.collectRedistribution(&zeros, &adds, pe, heldAgentIDs, activeAgentIDs, quotaByAgent, boundary,
-		domain.ResourceGPUHours, pe.BudgetT4Hours,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedT4Hours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedT4H },
+		domain.ResourceAcceleratorHours, pe.BudgetAcceleratorHours,
+		func(q *domain.AgentQuota) float64 { return q.GuaranteedAcceleratorHours },
+		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH },
 	)
 	c.collectRedistribution(&zeros, &adds, pe, heldAgentIDs, activeAgentIDs, quotaByAgent, boundary,
 		domain.ResourceCPUCoreHours, pe.BudgetCPUCoreHours,
@@ -94,7 +94,7 @@ func (c *Controller) applyPhase2Hold(ctx context.Context, pe *domain.PlatformExp
 
 // stopHeldAgentJobs terminates all non-terminal jobs for a held agent.
 func (c *Controller) stopHeldAgentJobs(ctx context.Context, agentID, platformExpID string, runningExps []*domain.Experiment) error {
-	// Stop running jobs (refund unused T4h).
+	// Stop running jobs (refund unused AccH).
 	running, err := c.phase2Store.GetAgentRunningExperiments(ctx, agentID, platformExpID)
 	if err != nil {
 		return fmt.Errorf("get running: %w", err)

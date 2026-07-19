@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Every other scenario guards on GPU-hours; this one guards on CPU-core-hours instead, since
+# Every other scenario guards on accelerator-hours; this one guards on CPU-core-hours instead, since
 # CPU is a tracked resource dimension in its own right (domain.AgentQuota's
 # Guaranteed/UsedGuaranteedCPUCoreH fields) and a platform experiment can run CPU-only jobs
-# with no GPU dimension at all (gpu_count=0). Verifies, on the CPU axis specifically:
-#   1. a CPU-only job debits guaranteed CPU-core-hours (not GPU-hours) at submission time.
+# with no accelerator dimension at all (accelerator_count=0). Verifies, on the CPU axis specifically:
+#   1. a CPU-only job debits guaranteed CPU-core-hours (not accelerator-hours) at submission time.
 #   2. once an agent's guaranteed CPU-hours are exhausted by one job, a second CPU-only job
-#      from the same agent is admission-gated on CPU headroom, not on GPU capacity (which is
+#      from the same agent is admission-gated on CPU headroom, not on accelerator capacity (which is
 #      abundant and irrelevant here) — it must fail closed (stay QUEUED / non-admitted),
-#      exactly the same fail-closed guarantee the GPU-dimension scenarios check for GPUs.
+#      exactly the same fail-closed guarantee the accelerator-dimension scenarios check for accelerators.
 #   3. cancelling the exhausting job while it's the sole CPU consumer frees CPU-core-hours
 #      back up and lets the previously-gated job admit.
-# API-only, parallel-safe (its own platform experiment, no GPU contention with anything else).
+# API-only, parallel-safe (its own platform experiment, no accelerator contention with anything else).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
@@ -25,8 +25,8 @@ register_agent "$AGENT"
 # Only the phase-1 explore fraction of BUDGET_CPU becomes this agent's actual guaranteed
 # core-hours (see domain.AllocateQuota) — verified via quota_guaranteed_cpu_hours below rather
 # than assumed, so this doesn't silently drift if that fraction's default ever changes.
-# budget_t4_hours must be nonzero (the API rejects an all-zero/falsy budget as "required") even
-# though every job here is gpu_count=0 and never touches it.
+# budget_accelerator_hours must be nonzero (the API rejects an all-zero/falsy budget as "required") even
+# though every job here is accelerator_count=0 and never touches it.
 JOB_HOURS="0.02"
 CPU_SPEC="1"
 BUDGET_CPU="0.08"
@@ -36,10 +36,10 @@ signup_and_start "$PE_ID" "$AGENT"
 CPU_BUDGET=$(quota_guaranteed_cpu_hours "$PE_ID" "$AGENT")
 echo "  agent's guaranteed CPU budget: ${CPU_BUDGET} core-hours (job cost: ${JOB_HOURS} core-hours each)"
 
-echo "  -- CPU-only job debits guaranteed CPU-core-hours, not GPU-hours --"
+echo "  -- CPU-only job debits guaranteed CPU-core-hours, not accelerator-hours --"
 QG_BEFORE=$(quota_used_guaranteed "$PE_ID" "$AGENT")
 QC_BEFORE=$(quota_used_guaranteed_cpu "$PE_ID" "$AGENT")
-BIG=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "" "" "" "" "{\"cpu\": \"${CPU_SPEC}\", \"gpu_count\": 0, \"gpu_type\": null, \"acceptable_gpu_types\": null}")
+BIG=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "" "" "" "" "{\"cpu\": \"${CPU_SPEC}\", \"accelerator_count\": 0, \"accelerator_type\": null, \"acceptable_accelerator_types\": null}")
 S=$(wait_for_status "$BIG" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
 [[ "$S" == "RUNNING" ]] \
   && pass "CPU-only job admitted onto guaranteed CPU budget (status=$S)" \
@@ -47,23 +47,23 @@ S=$(wait_for_status "$BIG" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
 
 QG_AFTER=$(quota_used_guaranteed "$PE_ID" "$AGENT")
 QC_AFTER=$(quota_used_guaranteed_cpu "$PE_ID" "$AGENT")
-GPU_DELTA=$(py "print(round(float('$QG_AFTER' or 0) - float('$QG_BEFORE' or 0), 6))")
+ACCELERATOR_DELTA=$(py "print(round(float('$QG_AFTER' or 0) - float('$QG_BEFORE' or 0), 6))")
 CPU_DELTA=$(py "print(round(float('$QC_AFTER' or 0) - float('$QC_BEFORE' or 0), 6))")
-[[ "$GPU_DELTA" == "0.0" || "$GPU_DELTA" == "0" ]] \
-  && pass "a GPU-free job debited zero GPU-hours ($GPU_DELTA)" \
-  || fail "a GPU-free job debited $GPU_DELTA T4h — should be exactly 0"
+[[ "$ACCELERATOR_DELTA" == "0.0" || "$ACCELERATOR_DELTA" == "0" ]] \
+  && pass "a accelerator-free job debited zero accelerator-hours ($ACCELERATOR_DELTA)" \
+  || fail "a accelerator-free job debited $ACCELERATOR_DELTA AccH — should be exactly 0"
 CPU_DELTA_OK=$(py "print(float('$CPU_DELTA') > 0)")
 [[ "$CPU_DELTA_OK" == "True" ]] \
   && pass "CPU-core-hours debited on submission ($CPU_DELTA core-hours > 0)" \
   || fail "expected nonzero CPU-core-hour debit for a CPU-only job, got $CPU_DELTA"
 
-echo "  -- second CPU-only job is gated on CPU headroom, not GPU capacity --"
+echo "  -- second CPU-only job is gated on CPU headroom, not accelerator capacity --"
 # May be rejected outright at submission time (402 insufficient_credits, checked synchronously
 # against the pool) or accepted but left non-admitted (stays QUEUED) — both are correct
 # fail-closed outcomes, so use the code-returning variant instead of submit_job (which treats
 # any non-2xx as a hard script error).
 read -r CODE SECOND <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" \
-  "{\"cpu\": \"${CPU_SPEC}\", \"gpu_count\": 0, \"gpu_type\": null, \"acceptable_gpu_types\": null}")"
+  "{\"cpu\": \"${CPU_SPEC}\", \"accelerator_count\": 0, \"accelerator_type\": null, \"acceptable_accelerator_types\": null}")"
 if [[ "$CODE" -ge 400 ]]; then
   pass "second CPU-only job rejected at submission while CPU budget is exhausted (HTTP $CODE)"
 else

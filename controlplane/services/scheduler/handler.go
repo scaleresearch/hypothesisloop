@@ -44,8 +44,8 @@ type submitRequest struct {
 }
 
 // SubmitExperiment handles POST /experiments.
-// It decodes {id, metadata, job}, builds the domain.Experiment (GPUType/GPUCount are
-// derived from the job spec's own GPUType/TotalGPUs — never restated by the caller), calls
+// It decodes {id, metadata, job}, builds the domain.Experiment (AcceleratorType/AcceleratorCount are
+// derived from the job spec's own AcceleratorType/TotalAccelerators — never restated by the caller), calls
 // Submit, and returns the updated experiment on success or an admission error on rejection.
 func (h *Handler) SubmitExperiment(w http.ResponseWriter, r *http.Request) {
 	var req submitRequest
@@ -74,8 +74,8 @@ func (h *Handler) SubmitExperiment(w http.ResponseWriter, r *http.Request) {
 		Hypothesis:             meta.Hypothesis,
 		Objective:              meta.Objective,
 		Theory:                 meta.Theory,
-		GPUType:                req.Job.GPUType,
-		GPUCount:               req.Job.TotalGPUs(),
+		AcceleratorType:                req.Job.AcceleratorType,
+		AcceleratorCount:               req.Job.TotalAccelerators(),
 		EstimatedDurationHours: meta.EstimatedDurationHours,
 		CapacityTier:           meta.CapacityTier,
 	}

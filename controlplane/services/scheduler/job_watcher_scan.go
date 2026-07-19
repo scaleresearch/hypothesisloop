@@ -71,7 +71,7 @@ func (w *JobWatcher) watchOne(ctx context.Context, exp *domain.Experiment) {
 	}()
 
 	var startedAt time.Time
-	var admittedType domain.GPUType
+	var admittedType domain.AcceleratorType
 	transitionedToRunning := false
 
 	// A restart-recovered watch for an already-RUNNING experiment must not repeat onRunning's
@@ -80,7 +80,7 @@ func (w *JobWatcher) watchOne(ctx context.Context, exp *domain.Experiment) {
 	if exp.Status == domain.StatusRunning && exp.StartedAt != nil {
 		transitionedToRunning = true
 		startedAt = *exp.StartedAt
-		admittedType = exp.GPUType
+		admittedType = exp.AcceleratorType
 	}
 
 	ticker := time.NewTicker(w.pollInterval)
@@ -132,12 +132,12 @@ func (w *JobWatcher) watchOne(ctx context.Context, exp *domain.Experiment) {
 					//      needs any one of them to have landed.
 					//   2. It also closes the gap where a job is rescheduled onto different
 					//      hardware within the same watch goroutine (no fresh onRunning call, so
-					//      no fresh admission event): re-querying GetAdmittedGPUType here, not
+					//      no fresh admission event): re-querying GetAdmittedAcceleratorType here, not
 					//      just re-stamping the cached value from admission, picks up a live type
 					//      change. This is cheap for the real backend (queuebackend.Backend reads
 					//      a stored JobReport, not a k8s API call) and a harmless no-op for the
-					//      raw k8s client, which always reports exp.GPUType.
-					if t := w.backend.GetAdmittedGPUType(ctx, exp); t != "" {
+					//      raw k8s client, which always reports exp.AcceleratorType.
+					if t := w.backend.GetAdmittedAcceleratorType(ctx, exp); t != "" {
 						admittedType = t
 					}
 					if admittedType != "" {

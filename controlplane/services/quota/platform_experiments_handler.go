@@ -42,23 +42,23 @@ func (h *PlatformExperimentsHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/donations", h.createDonation)
 	r.Post("/donations/{id}/cancel", h.cancelDonation)
 	r.Post("/donations/{id}/fulfill", h.fulfillDonation)
-	// Resource catalog — read-only reference data (GPU type rates, CPU/RAM/storage rates)
+	// Resource catalog — read-only reference data (Accelerator type rates, CPU/RAM/storage rates)
 	// so UIs/agents never need to hardcode a copy of the operator's config.
 	r.Get("/resource-catalog", h.getResourceCatalog)
 }
 
-// GPUTypeInfo is the agent/UI-facing view of one catalog GPU type — pricing only, not the
+// AcceleratorTypeInfo is the agent/UI-facing view of one catalog accelerator type — pricing only, not the
 // execution-engine internals (resource name, taint key, node label key/value) which stay
 // entirely within the backend/workload layer.
-type GPUTypeInfo struct {
+type AcceleratorTypeInfo struct {
 	Name    string  `json:"name"`
-	T4HRate float64 `json:"t4h_rate"`
+	AccHRate float64 `json:"acch_rate"`
 }
 
 // ResourceCatalog is the full set of resource-pricing reference data served by
 // GET /resource-catalog.
 type ResourceCatalog struct {
-	GPUTypes          []GPUTypeInfo `json:"gpu_types"`
+	AcceleratorTypes          []AcceleratorTypeInfo `json:"accelerator_types"`
 	CPUCoreHourRate   float64       `json:"cpu_core_hour_rate"`
 	RAMGBHourRate     float64       `json:"ram_gb_hour_rate"`
 	StorageGBHourRate float64       `json:"storage_gb_hour_rate"`

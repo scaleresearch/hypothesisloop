@@ -9,9 +9,9 @@
 # e2e run.
 #
 # Kept deliberately plain/single-node: scenarios/phase2-and-settlement.sh sizes its platform-experiment budget
-# assuming exactly 1 GPU per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
-# here would double the GPU-hours cost per submission and starve the budget. The
-# distributed-training path (num_nodes, topology, acceptable_gpu_types) is verified
+# assuming exactly 1 accelerator per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
+# here would double the accelerator-hours cost per submission and starve the budget. The
+# distributed-training path (num_nodes, topology, acceptable_accelerator_types) is verified
 # separately via direct API calls, not through this shared smoke-test fixture.
 image: localhost/openresearch-workload:latest
 
@@ -28,15 +28,15 @@ memory: "128Mi"
 # SCHEDULING_GENERALIZATION_PLAN.md's "explicit resource requests" cross-cutting fix).
 storage: "512Mi"
 
-gpu_type: T4
-gpu_count: 1
+accelerator_type: T4
+accelerator_count: 1
 
-# acceptable_gpu_types: the e2e run tolerates landing on any of these instead of requiring
+# acceptable_accelerator_types: the e2e run tolerates landing on any of these instead of requiring
 # exactly T4 — demonstrates the platform's variability tolerance (see
-# controlplane/settings/examples/experiment-submission.yaml's acceptable_gpu_types doc). All
+# controlplane/settings/examples/experiment-submission.yaml's acceptable_accelerator_types doc). All
 # NVIDIA (same vendor plumbing), so one nodeAffinity OR covers them all. Actually exercised
 # only if the local cluster has nodes of more than one of these types — see
 # localdev/add-fake-nodes.sh, which labels extra simulated nodes with exactly this spread.
 # The billed rate adjusts to whichever type the job actually lands on; scenarios/phase2-and-settlement.sh's BUDGET
 # is sized for the most expensive of these (A100) so landing on any of them still fits.
-acceptable_gpu_types: [T4, L40, A100]
+acceptable_accelerator_types: [T4, L40, A100]

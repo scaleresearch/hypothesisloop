@@ -85,14 +85,14 @@ WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
 	return tag.RowsAffected() > 0, nil
 }
 
-// UpdateAdmittedFlavor records the GPU flavor the job actually ran on (which may
+// UpdateAdmittedFlavor records the accelerator flavor the job actually ran on (which may
 // differ from the requested type within the Hopper H100/H200 group) and the recomputed
 // estimated cost at that flavor's rate. All downstream accounting — refunds, quota-exhaustion,
-// and phase-2 consumption — reads gpu_type/estimated_cost_t4h, so persisting here keeps the
+// and phase-2 consumption — reads accelerator_type/estimated_cost_acch, so persisting here keeps the
 // charged rate consistent across the whole job lifecycle.
-func (s *ExperimentsStore) UpdateAdmittedFlavor(ctx context.Context, id string, gpuType domain.GPUType, estimatedCostT4H float64) error {
-	const q = `UPDATE experiments SET gpu_type = $2, estimated_cost_t4h = $3, updated_at = NOW() WHERE id = $1`
-	_, err := s.pool.pool.Exec(ctx, q, id, string(gpuType), estimatedCostT4H)
+func (s *ExperimentsStore) UpdateAdmittedFlavor(ctx context.Context, id string, acceleratorType domain.AcceleratorType, estimatedCostAccH float64) error {
+	const q = `UPDATE experiments SET accelerator_type = $2, estimated_cost_acch = $3, updated_at = NOW() WHERE id = $1`
+	_, err := s.pool.pool.Exec(ctx, q, id, string(acceleratorType), estimatedCostAccH)
 	return err
 }
 
@@ -119,19 +119,19 @@ func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reas
 
 // RequeuePreempted returns a job to QUEUED after preemption. Preserves original queued_at
 // (age_score), increments preempt_count, and overwrites estimated_duration_hours plus every
-// resource-dimension estimate (GPU cost, CPU/RAM/storage) with the caller-computed, proportionally
+// resource-dimension estimate (Accelerator cost, CPU/RAM/storage) with the caller-computed, proportionally
 // rescaled remaining amounts — all four dimensions must move together so no downstream reader
 // (reconcile, settlement, quota-exhaustion) ever mixes an old estimate for one dimension with a
 // new one for another. The caller (Loop.preempt) computes the rescale ratio once from the
 // pre-mutation experiment and uses the same numbers to correct the metrics-DB reservation, so the
 // Postgres estimate and the metrics-DB reservation never disagree.
-func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostT4H, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) error {
+func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) error {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',
 		preempt_count = preempt_count + 1,
 		eviction_reason = 'preempted_for_guaranteed',
 		estimated_duration_hours = $2,
-		estimated_cost_t4h = $3,
+		estimated_cost_acch = $3,
 		estimated_cpu_core_hours = $4,
 		estimated_ram_gb_hours = $5,
 		estimated_storage_gb_hours = $6,
@@ -143,7 +143,7 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 		cluster_name = '',
 		updated_at = NOW()
 	WHERE id = $1`
-	_, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostT4H, newCPUCoreHours, newRAMGBHours, newStorageGBHours)
+	_, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours)
 	return err
 }
 

@@ -25,7 +25,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		ID:                    "pe-" + uuid.New().String()[:8],
 		Name:                  req.Name,
 		Description:           req.Description,
-		BudgetT4Hours:         req.BudgetT4Hours,
+		BudgetAcceleratorHours:         req.BudgetAcceleratorHours,
 		BudgetCPUCoreHours:    req.BudgetCPUCoreHours,
 		BudgetRAMGBHours:      req.BudgetRAMGBHours,
 		BudgetStorageGBHours:  req.BudgetStorageGBHours,
@@ -64,8 +64,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 		pe.Name = req.Name
 	}
 	pe.Description = req.Description
-	if req.BudgetT4Hours > 0 {
-		pe.BudgetT4Hours = req.BudgetT4Hours
+	if req.BudgetAcceleratorHours > 0 {
+		pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
 	}
 	if req.BudgetCPUCoreHours > 0 {
 		pe.BudgetCPUCoreHours = req.BudgetCPUCoreHours
@@ -174,7 +174,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 
 	// Cap initial allocation to the explore window so no agent can exhaust the
 	// full budget before phase-2 eviction kicks in. Applied uniformly to every resource
-	// dimension the platform experiment tracks — GPU is always populated; CPU/RAM/storage
+	// dimension the platform experiment tracks — Accelerator is always populated; CPU/RAM/storage
 	// budgets of 0 correctly allocate 0 (AllocateQuota(0, ...) returns 0,0), which is exactly
 	// "not tracked."
 	exploreFrac := s.cfg.Phase1ExploreFraction
@@ -183,8 +183,8 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	}
 
 	for _, ab := range resolved {
-		gpuGuaranteed, gpuBurst := domain.AllocateQuota(
-			pe.BudgetT4Hours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
+		acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
+			pe.BudgetAcceleratorHours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
 		)
 		cpuGuaranteed, cpuBurst := domain.AllocateQuota(
 			pe.BudgetCPUCoreHours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
@@ -200,8 +200,8 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 			ID:                       uuid.New().String(),
 			AgentID:                  ab.id,
 			PlatformExperimentID:     id,
-			GuaranteedT4Hours:        gpuGuaranteed,
-			BurstT4Hours:             gpuBurst,
+			GuaranteedAcceleratorHours:        acceleratorGuaranteed,
+			BurstAcceleratorHours:             acceleratorBurst,
 			GuaranteedCPUCoreHours:   cpuGuaranteed,
 			BurstCPUCoreHours:        cpuBurst,
 			GuaranteedRAMGBHours:     ramGuaranteed,
@@ -217,8 +217,8 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 
 		s.logger.Info("quota allocated",
 			zap.String("agentID", ab.id),
-			zap.Float64("guaranteed_gpu_hours", gpuGuaranteed),
-			zap.Float64("burst_gpu_hours", gpuBurst),
+			zap.Float64("guaranteed_accelerator_hours", acceleratorGuaranteed),
+			zap.Float64("burst_accelerator_hours", acceleratorBurst),
 		)
 	}
 

@@ -12,7 +12,7 @@ import (
 )
 
 // onStuckPending evicts a job that was admitted but never reported RUNNING within
-// stuckPendingTimeout (e.g. unschedulable due to fragmentation, a bad image, or a GPU-flavor
+// stuckPendingTimeout (e.g. unschedulable due to fragmentation, a bad image, or an accelerator-flavor
 // stockout). Transitions SUBMITTED/ADMITTED -> EVICTED — this alone removes the job from the
 // cluster-agent's desired-state set, so no separate delete call is needed; the cluster-agent's
 // own reconcile loop deletes the underlying Job on its next pull, same as any other eviction.
@@ -75,7 +75,7 @@ func (w *JobWatcher) settleQuota(ctx context.Context, exp *domain.Experiment) {
 // SUBMITTED/ADMITTED (cancelled/evicted concurrently) — the caller must stop watching and skip
 // every accelerator/billing side effect below, since none of it applies to a job that's already
 // terminal.
-func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (domain.GPUType, bool) {
+func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, bool) {
 	w.logger.Info("job_watcher: experiment running", zap.String("id", exp.ID))
 	started, err := w.store.MarkStarted(ctx, exp.ID)
 	if err != nil {
@@ -95,10 +95,10 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 		w.logger.Warn("job_watcher: delete pending reservation on running", zap.String("id", exp.ID), zap.Error(err))
 	}
 
-	admittedType := w.backend.GetAdmittedGPUType(ctx, exp)
+	admittedType := w.backend.GetAdmittedAcceleratorType(ctx, exp)
 
 	// Record which accelerator type this admission actually landed on — the sole write path for
-	// metricsdb.ObservedGPUCost's per-type billing (see metricsdb/observed.go). Written
+	// metricsdb.ObservedAcceleratorCost's per-type billing (see metricsdb/observed.go). Written
 	// unconditionally, every time this experiment reaches RUNNING (initial admission and every
 	// re-admission after a reschedule), not just when it differs from what was requested: a job
 	// re-admitted onto the *same* type it had before still needs a fresh marker, since the
@@ -116,29 +116,29 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 	if w.quotaAdjuster == nil || exp.PlatformExperimentID == "" {
 		return admittedType, true
 	}
-	if admittedType == exp.GPUType {
+	if admittedType == exp.AcceleratorType {
 		return admittedType, true
 	}
-	extraPerHour := admittedType.Cost() - exp.GPUType.Cost()
+	extraPerHour := admittedType.Cost() - exp.AcceleratorType.Cost()
 	if extraPerHour <= 0 {
 		return admittedType, true
 	}
-	extra := extraPerHour * float64(exp.GPUCount) * exp.EstimatedDurationHours
+	extra := extraPerHour * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 	w.logger.Info("job_watcher: flavor substitution — debiting extra cost",
 		zap.String("id", exp.ID),
-		zap.String("requested", string(exp.GPUType)),
+		zap.String("requested", string(exp.AcceleratorType)),
 		zap.String("admitted", string(admittedType)),
-		zap.Float64("extra_t4h", extra),
+		zap.Float64("extra_acch", extra),
 	)
-	if err := w.quotaAdjuster.DebitQuota(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, domain.ResourceGPUHours, exp.CapacityTier, extra); err != nil {
+	if err := w.quotaAdjuster.DebitQuota(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, domain.ResourceAcceleratorHours, exp.CapacityTier, extra); err != nil {
 		w.logger.Warn("job_watcher: flavor substitution debit", zap.String("id", exp.ID), zap.Error(err))
 	}
 
 	// Persist the admitted flavor and its recomputed estimated cost. Without this, the
 	// completion refund, quota-exhaustion check, and phase-2 consumption tally all keep
-	// using the cheaper requested rate (exp.GPUType.Cost()), under-refunding the agent and
+	// using the cheaper requested rate (exp.AcceleratorType.Cost()), under-refunding the agent and
 	// under-counting real consumption for the unused/elapsed hours charged at the higher rate.
-	newEstCost := admittedType.Cost() * float64(exp.GPUCount) * exp.EstimatedDurationHours
+	newEstCost := admittedType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 	if err := w.store.UpdateAdmittedFlavor(ctx, exp.ID, admittedType, newEstCost); err != nil {
 		w.logger.Warn("job_watcher: persist admitted flavor", zap.String("id", exp.ID), zap.Error(err))
 	}
@@ -246,8 +246,8 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 		}
 	}
 
-	// Durably settle each resource dimension's observed cost: elapsed × gpu_count × rate for
-	// GPU-hours, and the equivalent proportional-elapsed-fraction amount for CPU/RAM/storage.
+	// Durably settle each resource dimension's observed cost: elapsed × accelerator_count × rate for
+	// accelerator-hours, and the equivalent proportional-elapsed-fraction amount for CPU/RAM/storage.
 	// See settleQuota's doc comment for the crash/outage retry story.
 	w.settleQuota(ctx, exp)
 }

@@ -1,13 +1,13 @@
 """Body builders shared by tests/lib/api.sh. Invoked as:
   python3 mk_body.py hyp AGENT PE_ID
-  python3 mk_body.py submit JOB_ID AGENT PE_ID HOURS JOB_FILE HYP_ID TIER [GPU_TYPE] [GPU_COUNT] \\
+  python3 mk_body.py submit JOB_ID AGENT PE_ID HOURS JOB_FILE HYP_ID TIER [ACCELERATOR_TYPE] [ACCELERATOR_COUNT] \\
                             [NUM_NODES] [ENV_JSON] [PROJECT_ID] [THEORY] [OBJECTIVE] [HYP_TEXT] \\
                             [JOB_OVERRIDE_JSON]
 
 JOB_OVERRIDE_JSON is a JSON object merged directly over the loaded job.yaml (after the
-gpu_type/gpu_count/num_nodes overrides above) — the one escape hatch every scenario needs for
+accelerator_type/accelerator_count/num_nodes overrides above) — the one escape hatch every scenario needs for
 fields job.yaml doesn't have a dedicated CLI arg for (cpu, storage, memory, an intentionally
-omitted/invalid field, gpu_count=0 for a CPU-only job, ...), so no scenario has to hand-roll
+omitted/invalid field, accelerator_count=0 for a CPU-only job, ...), so no scenario has to hand-roll
 its own Python job-body literal just to override one or two fields.
 """
 import json
@@ -27,7 +27,7 @@ if kind == "hyp":
 
 elif kind == "submit":
     (job_id, agent, pe_id, hours, job_file, hyp_id, tier,
-     gpu_type, gpu_count, num_nodes, env_json, project_id, theory, objective,
+     accelerator_type, accelerator_count, num_nodes, env_json, project_id, theory, objective,
      job_override_json) = (sys.argv[2:17] + [""] * 15)[:15]
 
     with open(job_file) as f:
@@ -36,16 +36,16 @@ elif kind == "submit":
     if env_json:
         job["env"] = {**job.get("env", {}), **json.loads(env_json)}
 
-    if gpu_type:
-        # Pin to exactly one type (drop acceptable_gpu_types tolerance) so a scenario can
-        # force capacity contention against that type's known cluster_gpus count.
-        job["gpu_type"] = gpu_type
-        job.pop("acceptable_gpu_types", None)
-    if gpu_count:
-        job["gpu_count"] = int(gpu_count)
+    if accelerator_type:
+        # Pin to exactly one type (drop acceptable_accelerator_types tolerance) so a scenario can
+        # force capacity contention against that type's known cluster_accelerators count.
+        job["accelerator_type"] = accelerator_type
+        job.pop("acceptable_accelerator_types", None)
+    if accelerator_count:
+        job["accelerator_count"] = int(accelerator_count)
     if num_nodes:
         job["num_nodes"] = int(num_nodes)
-        # The local dev cluster has exactly one node per GPU type (localdev/add-fake-nodes.sh),
+        # The local dev cluster has exactly one node per accelerator type (localdev/add-fake-nodes.sh),
         # so a hard distinct-hosts requirement would make any num_nodes>1 job unschedulable.
         job["topology"] = {"spread_across_hosts": False}
     if job_override_json:

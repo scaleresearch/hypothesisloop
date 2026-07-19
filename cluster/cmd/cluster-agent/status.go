@@ -14,7 +14,7 @@ import (
 type statusReportWire struct {
 	ExperimentID    string `json:"experiment_id"`
 	Phase           string `json:"phase"`
-	AdmittedGPUType string `json:"admitted_gpu_type,omitempty"`
+	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
 	SequenceNumber  int64  `json:"sequence_number"`
 	JobUID          string `json:"job_uid,omitempty"`
 }
@@ -76,21 +76,21 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 		seq := tj.seq
 		a.mu.Unlock()
 
-		var admittedGPUType string
+		var admittedAcceleratorType string
 		if phase != workload.JobPhaseGone {
-			// Resolve which GPU type this job's pod(s) actually landed on — meaningful only
+			// Resolve which accelerator type this job's pod(s) actually landed on — meaningful only
 			// once at least one pod is scheduled onto a node. An empty result (nothing
 			// scheduled yet, or a query error) simply omits the field: the control plane
 			// leaves whatever admitted type it already has untouched (see
 			// ClusterQueueStore.UpsertJobReport's COALESCE), falling back to the originally
 			// requested type until a real observation arrives.
-			t, consistent, err := a.jwc.ResolveAdmittedGPUType(ctx, id)
+			t, consistent, err := a.jwc.ResolveAdmittedAcceleratorType(ctx, id)
 			if err != nil {
-				log("resolve admitted GPU type %s: %v", id, err)
+				log("resolve admitted accelerator type %s: %v", id, err)
 			} else {
-				admittedGPUType = string(t)
+				admittedAcceleratorType = string(t)
 				if !consistent {
-					log("experiment %s: scheduled ranks landed on inconsistent GPU types — reporting rank 0's %s", id, t)
+					log("experiment %s: scheduled ranks landed on inconsistent accelerator types — reporting rank 0's %s", id, t)
 				}
 			}
 		}
@@ -103,7 +103,7 @@ func (a *agent) reportChangedStatuses(ctx context.Context, log func(string, ...a
 			wire: statusReportWire{
 				ExperimentID:    id,
 				Phase:           phase.String(),
-				AdmittedGPUType: admittedGPUType,
+				AdmittedAcceleratorType: admittedAcceleratorType,
 				SequenceNumber:  seq,
 				JobUID:          uid,
 			},

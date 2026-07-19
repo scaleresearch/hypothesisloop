@@ -21,7 +21,7 @@ const DESTINATIONS: Omit<CommandItem, 'action'>[] = [
   { id: 'nav-pe',   label: 'Platform Experiments', sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
   { id: 'nav-agt',  label: 'Research Agents',      sub: 'Go to page', icon: Bot,          keywords: 'agents quota balances' },
   { id: 'nav-jobs', label: 'Jobs',                 sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
-  { id: 'nav-clu',  label: 'Compute Resources',    sub: 'Go to page', icon: Server,       keywords: 'clusters compute gpu' },
+  { id: 'nav-clu',  label: 'Compute Resources',    sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
   { id: 'nav-dash', label: 'Scheduler Quality',    sub: 'Go to page', icon: LineChart,    keywords: 'dashboard metrics quality yield' },
 ]
 

@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
-# Burst-tier preemption: a guaranteed-tier job saturating a GPU type preempts a running
+# Burst-tier preemption: a guaranteed-tier job saturating a accelerator type preempts a running
 # burst-tier job, which requeues (QUEUED) and is re-admitted later — unlike terminal
-# eviction (see eviction-terminal.sh). API-only, parallel-safe as long as GPU_TYPE below is
+# eviction (see eviction-terminal.sh). API-only, parallel-safe as long as ACCELERATOR_TYPE below is
 # unique to this scenario (avoid clashing with another scenario's contention target).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 
-GPU_TYPE="A100"
-GPU_COUNT_PER_BURST=4
+ACCELERATOR_TYPE="A100"
+ACCELERATOR_COUNT_PER_BURST=4
 BURST_JOBS_N=2
 AGENTS=("agent-preempt-a-${RUN_ID}" "agent-preempt-b-${RUN_ID}" "agent-preempt-c-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
 # Budget deliberately generous: the controller's phase-2 transition triggers at a hardcoded
-# fraction of budget_t4_hours consumed (domain.Phase1ExploreFraction — the per-PE
+# fraction of budget_accelerator_hours consumed (domain.Phase1ExploreFraction — the per-PE
 # phase2_boundary field passed to create_platform_experiment is NOT what gates this; see
 # controller/phase2.go's checkPhase2Transition), independent of what this scenario is actually
-# testing. A100 is an expensive GPU type (high t4h_rate) and gpu_count=4 burst jobs, so under
+# testing. A100 is an expensive accelerator type (high acch_rate) and accelerator_count=4 burst jobs, so under
 # real scheduling delay a small budget can cross that threshold on realized (not estimated)
 # usage and put an agent on hold mid-scenario — a real, surprising interaction this scenario
 # isn't about, so give it enough headroom that it can't happen.
 PE_ID=$(create_platform_experiment "preemption-${RUN_ID}" 50.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
-echo "  ==> filling all ${GPU_TYPE} capacity with ${BURST_JOBS_N} burst jobs of ${GPU_COUNT_PER_BURST} GPUs each..."
+echo "  ==> filling all ${ACCELERATOR_TYPE} capacity with ${BURST_JOBS_N} burst jobs of ${ACCELERATOR_COUNT_PER_BURST} accelerators each..."
 declare -a BURST_JOBS
 for i in $(seq 1 "$BURST_JOBS_N"); do
-  BJ=$(submit_job "$PE_ID" "${AGENTS[$((i - 1))]}" "burst" "0.017" "$GPU_TYPE" "$GPU_COUNT_PER_BURST")
+  BJ=$(submit_job "$PE_ID" "${AGENTS[$((i - 1))]}" "burst" "0.017" "$ACCELERATOR_TYPE" "$ACCELERATOR_COUNT_PER_BURST")
   BURST_JOBS+=("$BJ")
 done
 
@@ -39,11 +39,11 @@ burst_jobs_admitted() {
   done
   [[ "$n" -ge "$BURST_JOBS_N" ]]
 }
-wait_until "burst jobs admitted onto $GPU_TYPE" 30 1 burst_jobs_admitted \
+wait_until "burst jobs admitted onto $ACCELERATOR_TYPE" 30 1 burst_jobs_admitted \
   || echo "  [WARN] not all burst jobs reached RUNNING/ADMITTED before the guaranteed job — preemption check may be inconclusive"
 
-JOB4=$(submit_job "$PE_ID" "${AGENTS[2]}" "guaranteed" "0.017" "$GPU_TYPE")
-echo "  submitted guaranteed job pinned to ${GPU_TYPE} (should preempt a burst victim): $JOB4"
+JOB4=$(submit_job "$PE_ID" "${AGENTS[2]}" "guaranteed" "0.017" "$ACCELERATOR_TYPE")
+echo "  submitted guaranteed job pinned to ${ACCELERATOR_TYPE} (should preempt a burst victim): $JOB4"
 
 PREEMPTED=""
 for i in $(seq 1 30); do
@@ -55,7 +55,7 @@ done
 
 if [[ -n "$PREEMPTED" ]]; then
   pass "burst job $PREEMPTED was preempted back to QUEUED by guaranteed job $JOB4"
-  # Preempting one 4-GPU burst job only frees 4 of the A100 node's 8 GPUs; the 1-GPU guaranteed
+  # Preempting one 4-accelerator burst job only frees 4 of the A100 node's 8 accelerators; the 1-accelerator guaranteed
   # job takes 1, leaving 3 — not enough for $PREEMPTED to re-admit (it needs 4) until the
   # *other* surviving burst job also completes and frees its share. That job's own admission
   # delay + its ~0.017h (~61s) runtime can genuinely take a while under concurrent load, so
@@ -71,10 +71,10 @@ else
   # scenario exists to catch (findings.md's "preemption is essentially untested" P1) must
   # actually fail the run, not just print a note nobody reads in a green CI log. The earlier
   # burst-jobs-admitted wait_until warns (not fails) if setup itself was inconclusive; by this
-  # point GPU_TYPE was nominally saturated by BURST_JOBS_N*GPU_COUNT_PER_BURST=8 GPUs on an
-  # 8-GPU A100 node, so a guaranteed job requesting that same type finding nothing to preempt
+  # point ACCELERATOR_TYPE was nominally saturated by BURST_JOBS_N*ACCELERATOR_COUNT_PER_BURST=8 accelerators on an
+  # 8-accelerator A100 node, so a guaranteed job requesting that same type finding nothing to preempt
   # is a real admission/preemption bug, not a timing fluke.
-  fail "no preemption observed even with ${GPU_TYPE} capacity nominally saturated (${BURST_JOBS_N}x${GPU_COUNT_PER_BURST} GPUs) — investigate admission accounting"
+  fail "no preemption observed even with ${ACCELERATOR_TYPE} capacity nominally saturated (${BURST_JOBS_N}x${ACCELERATOR_COUNT_PER_BURST} accelerators) — investigate admission accounting"
 fi
 
 for BJ in "${BURST_JOBS[@]}"; do wait_for_status "$BJ" "COMPLETED,FAILED,EVICTED,QUEUED" 90 > /dev/null || true; done
@@ -89,7 +89,7 @@ close_platform_experiment "$PE_ID"
 # the SAME or adjacent scheduler ticks, which is exactly where a preemption decision and a
 # fresh admission decision could race each other over the same capacity. Reuses A100 (Part 1
 # has already fully wound down its own jobs above, so it no longer holds any of that
-# capacity) rather than claiming a new GPU type, since a truly parallel `tests/run.sh` run
+# capacity) rather than claiming a new accelerator type, since a truly parallel `tests/run.sh` run
 # only guarantees each scenario FILE its own isolated capacity, not each section within one.
 echo "  ==> Part 2: firing burst saturation + guaranteed preemptor at the same instant..."
 AGENTS2=("agent-race2-a-${RUN_ID}" "agent-race2-b-${RUN_ID}" "agent-race2-c-${RUN_ID}")
@@ -100,13 +100,13 @@ signup_and_start "$PE2_ID" "${AGENTS2[@]}"
 OUT_DIR2="$TMPDIR_T/race2"
 mkdir -p "$OUT_DIR2"
 PIDS2=()
-# 2 burst jobs (4 GPUs each = 8, full node) + 1 guaranteed job (4 GPUs), all fired at once —
+# 2 burst jobs (4 accelerators each = 8, full node) + 1 guaranteed job (4 accelerators), all fired at once —
 # unlike Part 1, nothing here waits for the burst jobs to land first.
-(submit_job "$PE2_ID" "${AGENTS2[0]}" "burst" "0.03" "$GPU_TYPE" "$GPU_COUNT_PER_BURST" \
+(submit_job "$PE2_ID" "${AGENTS2[0]}" "burst" "0.03" "$ACCELERATOR_TYPE" "$ACCELERATOR_COUNT_PER_BURST" \
   > "$OUT_DIR2/burst_a.id" 2> "$OUT_DIR2/burst_a.err") & PIDS2+=("$!")
-(submit_job "$PE2_ID" "${AGENTS2[1]}" "burst" "0.03" "$GPU_TYPE" "$GPU_COUNT_PER_BURST" \
+(submit_job "$PE2_ID" "${AGENTS2[1]}" "burst" "0.03" "$ACCELERATOR_TYPE" "$ACCELERATOR_COUNT_PER_BURST" \
   > "$OUT_DIR2/burst_b.id" 2> "$OUT_DIR2/burst_b.err") & PIDS2+=("$!")
-(submit_job "$PE2_ID" "${AGENTS2[2]}" "guaranteed" "0.03" "$GPU_TYPE" \
+(submit_job "$PE2_ID" "${AGENTS2[2]}" "guaranteed" "0.03" "$ACCELERATOR_TYPE" \
   > "$OUT_DIR2/guaranteed.id" 2> "$OUT_DIR2/guaranteed.err") & PIDS2+=("$!")
 RACE2_SUBMIT_FAILED=0
 for pid in "${PIDS2[@]}"; do wait "$pid" || RACE2_SUBMIT_FAILED=$((RACE2_SUBMIT_FAILED + 1)); done
@@ -118,25 +118,25 @@ BURST2_A="$(cat "$OUT_DIR2/burst_a.id" 2>/dev/null || true)"
 BURST2_B="$(cat "$OUT_DIR2/burst_b.id" 2>/dev/null || true)"
 GUARANTEED2="$(cat "$OUT_DIR2/guaranteed.id" 2>/dev/null || true)"
 
-# Safety invariant sampled throughout the race window: guaranteed + running-burst GPU count on
+# Safety invariant sampled throughout the race window: guaranteed + running-burst accelerator count on
 # this node must never exceed physical capacity, no matter how admission/preemption decisions
 # interleave across ticks.
 OVER_CAPACITY_SEEN=0
-running_gpu_total() {
+running_accelerator_total() {
   local total=0 j s gc
   for j in "$BURST2_A" "$BURST2_B" "$GUARANTEED2"; do
     [[ -z "$j" ]] && continue
     s=$(get_status "$j")
     if [[ "$s" == "RUNNING" || "$s" == "ADMITTED" ]]; then
-      gc=$(get_field "$j" gpu_count)
+      gc=$(get_field "$j" accelerator_count)
       total=$((total + ${gc:-0}))
     fi
   done
   echo "$total"
 }
 for _ in $(seq 1 45); do
-  t=$(running_gpu_total)
-  [[ "$t" -gt 8 ]] && { OVER_CAPACITY_SEEN=1; echo "  [FAIL-SAMPLE] observed ${t} GPUs concurrently RUNNING/ADMITTED on an 8-GPU node"; }
+  t=$(running_accelerator_total)
+  [[ "$t" -gt 8 ]] && { OVER_CAPACITY_SEEN=1; echo "  [FAIL-SAMPLE] observed ${t} accelerators concurrently RUNNING/ADMITTED on an 8-accelerator node"; }
   # Exit early once the guaranteed job has settled — no need to keep sampling once the race
   # this loop exists to catch is over.
   gs=$(get_status "$GUARANTEED2")
@@ -144,7 +144,7 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 [[ "$OVER_CAPACITY_SEEN" -eq 0 ]] \
-  && pass "Part 2: never observed more than 8 GPUs concurrently RUNNING/ADMITTED under the concurrent-arrival race" \
+  && pass "Part 2: never observed more than 8 accelerators concurrently RUNNING/ADMITTED under the concurrent-arrival race" \
   || fail "Part 2: over-capacity admission observed during concurrent burst+guaranteed arrival"
 
 # Guaranteed-tier non-starvation: even when it arrives at the exact same instant as burst

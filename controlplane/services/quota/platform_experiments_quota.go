@@ -63,11 +63,11 @@ func allocationFor(aq *domain.AgentQuota, resourceType domain.ResourceType, tier
 			return aq.GuaranteedStorageGBHours
 		}
 		return aq.BurstStorageGBHours
-	default: // domain.ResourceGPUHours
+	default: // domain.ResourceAcceleratorHours
 		if guaranteed {
-			return aq.GuaranteedT4Hours
+			return aq.GuaranteedAcceleratorHours
 		}
-		return aq.BurstT4Hours
+		return aq.BurstAcceleratorHours
 	}
 }
 

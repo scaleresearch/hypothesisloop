@@ -31,7 +31,7 @@ import (
 // Store is the persistence interface the handler needs. Satisfied by *db.ClusterQueueStore.
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
-	UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedGPUType domain.GPUType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error)
+	UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedAcceleratorType domain.AcceleratorType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error)
 	DeleteJobReportForCluster(ctx context.Context, experimentID, clusterName string) error
 	BumpAttemptOnRecreate(ctx context.Context, experimentID string) (attempt int, bumped bool, err error)
 	RecordHeartbeat(ctx context.Context, clusterName string, cpuAvailable, cpuTotal float64, hasCPUReport bool) error
@@ -47,7 +47,7 @@ type Handler struct {
 	// CPU capacity staleness check so there is exactly one cluster-liveness threshold, not two
 	// independently hardcoded ones.
 	connectedWithin time.Duration
-	// metricsDBURL is where live per-cluster GPU capacity is written (see RecordClusterGPUCapacity)
+	// metricsDBURL is where live per-cluster accelerator capacity is written (see RecordClusterAcceleratorCapacity)
 	// — capacity is metric data, so it lives in the metrics store, never duplicated into Postgres.
 	metricsDBURL string
 }
@@ -68,7 +68,7 @@ func (h *Handler) Routes(r chi.Router) {
 // DesiredState handles GET /internal/clusters/{name}/desired-state — returns every
 // experiment that should currently have a Job running in that cluster, full payload
 // included (the agent has no database access, so everything needed to build the Job —
-// GPU type/count, image, env refs, priority tier — travels in this response). Also records a
+// accelerator type/count, image, env refs, priority tier — travels in this response). Also records a
 // heartbeat for clusterName: this is the endpoint cluster-agent calls most frequently
 // (its whole reconcile loop), so it doubles as the liveness signal the UI reads back via
 // ListClusters — no separate ping needed.
@@ -89,21 +89,21 @@ func (h *Handler) DesiredState(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("clusteragentapi: record heartbeat", zap.String("cluster", clusterName), zap.Error(err))
 	}
 
-	var gpuAvail, gpuTotal map[string]int64
-	if raw := r.URL.Query().Get("gpu_available_by_flavor"); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &gpuAvail)
+	var acceleratorAvail, acceleratorTotal map[string]int64
+	if raw := r.URL.Query().Get("accelerator_available_by_flavor"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &acceleratorAvail)
 	}
-	if raw := r.URL.Query().Get("gpu_total_by_flavor"); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &gpuTotal)
+	if raw := r.URL.Query().Get("accelerator_total_by_flavor"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &acceleratorTotal)
 	}
-	if len(gpuAvail) > 0 {
-		if err := metricsdb.RecordClusterGPUCapacity(r.Context(), h.metricsDBURL, clusterName, gpuAvail, gpuTotal); err != nil {
-			h.logger.Warn("clusteragentapi: record GPU capacity", zap.String("cluster", clusterName), zap.Error(err))
+	if len(acceleratorAvail) > 0 {
+		if err := metricsdb.RecordClusterAcceleratorCapacity(r.Context(), h.metricsDBURL, clusterName, acceleratorAvail, acceleratorTotal); err != nil {
+			h.logger.Warn("clusteragentapi: record accelerator capacity", zap.String("cluster", clusterName), zap.Error(err))
 		}
 	}
 
 	// RAM/ephemeral-storage — Class B (hard-cap, no billing) dimensions, same "metric data,
-	// never duplicated into Postgres" treatment as GPU above (see
+	// never duplicated into Postgres" treatment as accelerator above (see
 	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2).
 	if ramAvail, availErr := strconv.ParseInt(r.URL.Query().Get("ram_available_bytes"), 10, 64); availErr == nil {
 		if ramTotal, totalErr := strconv.ParseInt(r.URL.Query().Get("ram_total_bytes"), 10, 64); totalErr == nil {
@@ -160,7 +160,7 @@ func (h *Handler) ListClusters(w http.ResponseWriter, r *http.Request) {
 type statusReport struct {
 	ExperimentID    string `json:"experiment_id"`
 	Phase           string `json:"phase"` // pending | running | succeeded | failed | gone
-	AdmittedGPUType string `json:"admitted_gpu_type,omitempty"`
+	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
 	SequenceNumber  int64  `json:"sequence_number"`
 	JobUID          string `json:"job_uid,omitempty"`
 }
@@ -187,7 +187,7 @@ func (h *Handler) PushStatus(w http.ResponseWriter, r *http.Request) {
 		if rep.ExperimentID == "" || rep.Phase == "" {
 			continue
 		}
-		applied, uidMismatch, err := h.store.UpsertJobReport(r.Context(), rep.ExperimentID, clusterName, rep.Phase, domain.GPUType(rep.AdmittedGPUType), rep.SequenceNumber, rep.JobUID)
+		applied, uidMismatch, err := h.store.UpsertJobReport(r.Context(), rep.ExperimentID, clusterName, rep.Phase, domain.AcceleratorType(rep.AdmittedAcceleratorType), rep.SequenceNumber, rep.JobUID)
 		if err != nil {
 			h.logger.Warn("clusteragentapi: upsert job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
 			rejected = append(rejected, rep.ExperimentID)

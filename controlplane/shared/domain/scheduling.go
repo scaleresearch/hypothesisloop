@@ -30,10 +30,10 @@ type QuotaConfig struct {
 	// has been declining for this fraction of its estimated_duration_hours (e.g. 0.3 = 30%).
 	MetricDeclineFraction float64 `json:"metric_decline_fraction"`
 
-	// MaxGPUCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a single
+	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a single
 	// job's total resource request (per node × num_nodes), checked at admission before any
 	// quota debit. 0 means unlimited. See config.QuotaConfig for the operator-facing doc.
-	MaxGPUCountPerJob  int     `json:"max_gpu_count_per_job,omitempty"`
+	MaxAcceleratorCountPerJob  int     `json:"max_accelerator_count_per_job,omitempty"`
 	MaxCPUCoresPerJob  float64 `json:"max_cpu_cores_per_job,omitempty"`
 	MaxRAMGBPerJob     float64 `json:"max_ram_gb_per_job,omitempty"`
 	MaxStorageGBPerJob float64 `json:"max_storage_gb_per_job,omitempty"`

@@ -13,7 +13,7 @@ create_platform_experiment() {
   local name="$1" budget="$2" max_agents="$3" phase2="${4:-0.90}" report_interval="${5:-10}" budget_cpu="${6:-0}"
   curl -sf -X POST "$QUOTA_URL/platform-experiments" -H 'Content-Type: application/json' -d "{
     \"name\": \"$name\",
-    \"budget_t4_hours\": $budget,
+    \"budget_accelerator_hours\": $budget,
     \"budget_cpu_core_hours\": $budget_cpu,
     \"max_agents\": $max_agents,
     \"metrics\": [{\"key\": \"val_accuracy\", \"direction\": \"maximize\"}],
@@ -45,31 +45,31 @@ register_hypothesis() {
     | py "import sys,json; print(json.load(sys.stdin)['id'])"
 }
 
-# submit_job PE_ID AGENT TIER [HOURS] [GPU_TYPE] [GPU_COUNT] [NUM_NODES] [JOB_FILE]
+# submit_job PE_ID AGENT TIER [HOURS] [ACCELERATOR_TYPE] [ACCELERATOR_COUNT] [NUM_NODES] [JOB_FILE]
 #            [JOB_OVERRIDE_JSON] -> prints job id on stdout
 submit_job() {
-  local pe_id="$1" agent="$2" tier="$3" hours="${4:-0.02}" gpu_type="${5:-}" gpu_count="${6:-}" \
+  local pe_id="$1" agent="$2" tier="$3" hours="${4:-0.02}" accelerator_type="${5:-}" accelerator_count="${6:-}" \
         num_nodes="${7:-}" job_file="${8:-$JOB_FILE}" job_override_json="${9:-}"
-  submit_job_ext "$pe_id" "$agent" "$tier" "$hours" "$job_file" "" "$gpu_type" "$gpu_count" "$num_nodes" \
+  submit_job_ext "$pe_id" "$agent" "$tier" "$hours" "$job_file" "" "$accelerator_type" "$accelerator_count" "$num_nodes" \
     "" "" "" "" "$job_override_json"
 }
 
-# submit_job_ext PE_ID AGENT TIER HOURS JOB_FILE ENV_JSON [GPU_TYPE] [GPU_COUNT] [NUM_NODES]
+# submit_job_ext PE_ID AGENT TIER HOURS JOB_FILE ENV_JSON [ACCELERATOR_TYPE] [ACCELERATOR_COUNT] [NUM_NODES]
 #                [PROJECT_ID] [THEORY] [OBJECTIVE] [HYP_TEXT] [JOB_OVERRIDE_JSON]
 #                -> prints job id on stdout
 # Full-control variant used by scenarios that need to inject env vars (e.g. the robotics
 # workload's OPENRESEARCH_LEARNING_RATE), a custom hypothesis/theory, or override raw job
-# fields (cpu/storage/gpu_count/... — see mk_body.py's JOB_OVERRIDE_JSON doc) without hand-
+# fields (cpu/storage/accelerator_count/... — see mk_body.py's JOB_OVERRIDE_JSON doc) without hand-
 # rolling their own JSON body.
 submit_job_ext() {
   local pe_id="$1" agent="$2" tier="$3" hours="$4" job_file="$5" env_json="${6:-}" \
-        gpu_type="${7:-}" gpu_count="${8:-}" num_nodes="${9:-}" \
+        accelerator_type="${7:-}" accelerator_count="${8:-}" num_nodes="${9:-}" \
         project_id="${10:-}" theory="${11:-}" objective="${12:-}" hyp_text="${13:-}" \
         job_override_json="${14:-}"
   local job_id body
   job_id=$(_mk_job_id)
   body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$job_file" "$tier" \
-    "$gpu_type" "$gpu_count" "$num_nodes" "$env_json" "$project_id" "$theory" "$objective" "$hyp_text" "$job_override_json")
+    "$accelerator_type" "$accelerator_count" "$num_nodes" "$env_json" "$project_id" "$theory" "$objective" "$hyp_text" "$job_override_json")
   # Check explicitly: bash only honors -e for a command substitution's own last command, so a
   # failed curl here would not trip `set -e` on the caller's `X=$(submit_job ...)` — it would
   # silently hand back a job ID that was never created. Retry only transport-level failures
@@ -98,12 +98,12 @@ _mk_job_id() { echo "job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN
 
 _mk_submit_body() {
   local job_id="$1" agent="$2" pe_id="$3" hours="$4" job_file="$5" tier="$6" \
-        gpu_type="$7" gpu_count="$8" num_nodes="$9" env_json="${10}" \
+        accelerator_type="$7" accelerator_count="$8" num_nodes="$9" env_json="${10}" \
         project_id="${11}" theory="${12}" objective="${13}" hyp_text="${14}" job_override_json="${15}"
   local hyp_id
   hyp_id=$(register_hypothesis "$agent" "$pe_id" "$hyp_text")
   python3 "$LIB_DIR/mk_body.py" submit "$job_id" "$agent" "$pe_id" "$hours" "$job_file" "$hyp_id" "$tier" \
-    "$gpu_type" "$gpu_count" "$num_nodes" "$env_json" "$project_id" "$theory" "$objective" "$job_override_json"
+    "$accelerator_type" "$accelerator_count" "$num_nodes" "$env_json" "$project_id" "$theory" "$objective" "$job_override_json"
 }
 
 # submit_job_expect_code PE_ID AGENT TIER HOURS JOB_OVERRIDE_JSON [JOB_FILE]
@@ -161,11 +161,11 @@ quota_snapshot() {
     | py "
 import sys, json
 for q in json.load(sys.stdin):
-    print(f\"    {q['agent_id']}: guaranteed={q.get('guaranteed_t4_hours',0):.4f} burst={q.get('burst_t4_hours',0):.4f}\")
+    print(f\"    {q['agent_id']}: guaranteed={q.get('guaranteed_accelerator_hours',0):.4f} burst={q.get('burst_accelerator_hours',0):.4f}\")
 " 2>/dev/null || true
 }
 
-quota_used_guaranteed() { _quota_field "$1" "$2" used_guaranteed_t4h; }
+quota_used_guaranteed() { _quota_field "$1" "$2" used_guaranteed_acch; }
 quota_used_guaranteed_cpu() { _quota_field "$1" "$2" used_guaranteed_cpu_core_h; }
 quota_guaranteed_cpu_hours() { _quota_field "$1" "$2" guaranteed_cpu_core_hours; }
 

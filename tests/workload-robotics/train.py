@@ -18,8 +18,8 @@ Environment variables injected by the scheduler:
   OPENRESEARCH_REGISTRY_URL            - OpenResearch registry HTTP base URL
   OPENRESEARCH_DURATION_SECONDS        - total run time in seconds (default: 60)
   OPENRESEARCH_BASELINE                - declared baseline value to beat
-  OPENRESEARCH_GPU_TYPE                - GPU type label (T4 | L40 | A100)
-  OPENRESEARCH_GPU_COUNT               - number of GPUs
+  OPENRESEARCH_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
+  OPENRESEARCH_ACCELERATOR_COUNT               - number of accelerators
 
 Hypothesis knobs (the actual hyperparameters each competing job is betting on
 — set explicitly per submission, not sampled, so results are reproducible and
@@ -50,8 +50,8 @@ INTERVAL   = int(os.environ.get("OPENRESEARCH_REPORT_INTERVAL_SECONDS", "5"))
 DURATION   = int(os.environ.get("OPENRESEARCH_DURATION_SECONDS", "60"))
 REG_URL    = os.environ.get("OPENRESEARCH_REGISTRY_URL", "http://localhost:8083")
 BASELINE   = float(os.environ.get("OPENRESEARCH_BASELINE", "0.30"))
-GPU_TYPE   = os.environ.get("OPENRESEARCH_GPU_TYPE", "A100")
-GPU_COUNT  = int(os.environ.get("OPENRESEARCH_GPU_COUNT", "1"))
+ACCELERATOR_TYPE   = os.environ.get("OPENRESEARCH_ACCELERATOR_TYPE", "A100")
+ACCELERATOR_COUNT  = int(os.environ.get("OPENRESEARCH_ACCELERATOR_COUNT", "1"))
 
 # The hypothesis under test: same baseline model, explicit hyperparameter bet.
 LEARNING_RATE = float(os.environ.get("OPENRESEARCH_LEARNING_RATE", "3e-4"))
@@ -140,7 +140,7 @@ def main() -> None:
     print(f"  experiment: {EXP_ID}  agent: {AGENT_ID}  project: {PROJECT_ID}")
     print(f"  primary metric: {METRIC} ({DIRECTION})")
     print(f"  steps: {steps}  interval: {INTERVAL}s  total: ~{steps * INTERVAL}s")
-    print(f"  pretend GPU: {GPU_COUNT}x {GPU_TYPE}")
+    print(f"  pretend accelerator: {ACCELERATOR_COUNT}x {ACCELERATOR_TYPE}")
     print(f"  target success: {TARGET_SUCCESS:.4f}  baseline: {BASELINE:.4f}")
     print(f"  hypothesis: lr={LEARNING_RATE}  chunk_len={CHUNK_LEN}  cameras={CAMERA_VIEWS}  batch={BATCH_SIZE}")
 

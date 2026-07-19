@@ -37,15 +37,15 @@ cluster-agent-down:
 # Spins up a local k3s cluster, then installs the cluster-agent bundle onto it
 # (localdev/install.sh calls cluster/infra/install.sh itself), so this
 # target alone produces a fully working local dev target cluster. install.sh also adds a
-# few extra fake-GPU-type nodes at the end (see k3s-add-fake-nodes below) so the cluster has
-# more than one GPU type to schedule onto out of the box; set EXTRA_NODES=0 to skip that.
+# few extra fake-accelerator-type nodes at the end (see k3s-add-fake-nodes below) so the cluster has
+# more than one accelerator type to schedule onto out of the box; set EXTRA_NODES=0 to skip that.
 k3s-up: images
 	bash localdev/install.sh
 
 k3s-down:
 	bash localdev/destroy.sh
 
-# Re-runs just the extra-fake-GPU-node step (idempotent — install.sh already calls this once
+# Re-runs just the extra-fake-accelerator-node step (idempotent — install.sh already calls this once
 # at the end of k3s-up). Useful to add more nodes, or to recover them after a VM restart
 # killed the background agent processes without redoing the whole cluster bootstrap.
 # Usage: make k3s-add-fake-nodes [EXTRA_NODES=3]
@@ -64,7 +64,7 @@ full-start:
 	bash localdev/start.sh
 
 # Rebuild every image from current source and push it into every place that caches one
-# (podman store, k3s server, each fake-gpu-node container), then bounce the control-plane
+# (podman store, k3s server, each fake-accelerator-node container), then bounce the control-plane
 # containers and cluster-agent/node-agent pods so they run it. Use this after a Go change,
 # before re-running the e2e suites — faster than a manual images+import+restart chain since
 # every step polls for readiness instead of sleeping a fixed guess.

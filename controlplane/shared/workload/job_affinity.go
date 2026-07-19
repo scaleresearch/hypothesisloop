@@ -7,31 +7,31 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 )
 
-// buildAffinity translates the DSL's hardware/placement vocabulary — GPUSpec.AcceptableGPUTypes
-// and JobSpec.Topology — into the native affinity rules that make real multi-host GPU
-// training actually work: which GPU models a node must advertise, and how this job's own
+// buildAffinity translates the DSL's hardware/placement vocabulary — AcceleratorSpec.AcceptableAcceleratorTypes
+// and JobSpec.Topology — into the native affinity rules that make real multi-host accelerator
+// training actually work: which accelerator models a node must advertise, and how this job's own
 // ranks must (or should) be placed relative to each other. Returns nil when nothing was
-// requested, so a plain single-node/single-GPU-type job gets no affinity section at all.
-// resourceNameFor/taintKeyFor/nodeLabelKeyFor return gpuType's own vendor plumbing (from the
-// per-type maps built from openresearch.yaml's gpu_types entries — see config.GPUTypeConfig),
-// falling back to the client's cluster-wide default when gpuType has no entry (old rows,
-// GPU-less dev clusters using the "cpu" substitution).
-func (c *JobWorkloadClient) resourceNameFor(gpuType domain.GPUType) string {
-	if v, ok := c.resourceNameByType[string(gpuType)]; ok && v != "" {
+// requested, so a plain single-node/single-Accelerator-type job gets no affinity section at all.
+// resourceNameFor/taintKeyFor/nodeLabelKeyFor return acceleratorType's own vendor plumbing (from the
+// per-type maps built from openresearch.yaml's accelerator_types entries — see config.AcceleratorTypeConfig),
+// falling back to the client's cluster-wide default when acceleratorType has no entry (old rows,
+// accelerator-less dev clusters using the "cpu" substitution).
+func (c *JobWorkloadClient) resourceNameFor(acceleratorType domain.AcceleratorType) string {
+	if v, ok := c.resourceNameByType[string(acceleratorType)]; ok && v != "" {
 		return v
 	}
-	return c.gpuResourceName
+	return c.acceleratorResourceName
 }
 
-func (c *JobWorkloadClient) taintKeyFor(gpuType domain.GPUType) string {
-	if v, ok := c.taintKeyByType[string(gpuType)]; ok && v != "" {
+func (c *JobWorkloadClient) taintKeyFor(acceleratorType domain.AcceleratorType) string {
+	if v, ok := c.taintKeyByType[string(acceleratorType)]; ok && v != "" {
 		return v
 	}
-	return c.gpuTaintKey
+	return c.acceleratorTaintKey
 }
 
-func (c *JobWorkloadClient) nodeLabelKeyFor(gpuType domain.GPUType) string {
-	if v, ok := c.nodeLabelKeyByType[string(gpuType)]; ok && v != "" {
+func (c *JobWorkloadClient) nodeLabelKeyFor(acceleratorType domain.AcceleratorType) string {
+	if v, ok := c.nodeLabelKeyByType[string(acceleratorType)]; ok && v != "" {
 		return v
 	}
 	return "nvidia.com/gpu.product"
@@ -39,7 +39,7 @@ func (c *JobWorkloadClient) nodeLabelKeyFor(gpuType domain.GPUType) string {
 
 func (c *JobWorkloadClient) buildAffinity(experimentID string, spec domain.JobSpec, distributed bool) *corev1.Affinity {
 	aff := &corev1.Affinity{
-		NodeAffinity:    c.gpuNodeAffinity(spec.GPUType, spec.AcceptableGPUTypes),
+		NodeAffinity:    c.acceleratorNodeAffinity(spec.AcceleratorType, spec.AcceptableAcceleratorTypes),
 		PodAffinity:     nil,
 		PodAntiAffinity: nil,
 	}
@@ -70,11 +70,11 @@ func (c *JobWorkloadClient) buildAffinity(experimentID string, spec domain.JobSp
 				}},
 			}
 			// KNOWN GAP: admission (scheduler/loop_tick.go) only checks the target cluster's
-			// aggregate free GPU count against NumNodes*GPUCount before submitting this Job
-			// - it never verifies NumNodes distinct hosts each have GPUCount free, which this
+			// aggregate free accelerator count against NumNodes*AcceleratorCount before submitting this Job
+			// - it never verifies NumNodes distinct hosts each have AcceleratorCount free, which this
 			// hard anti-affinity actually requires. A cluster can pass the aggregate check
 			// while that capacity is concentrated on fewer hosts than NumNodes, so some ranks
-			// schedule and hold GPUs while the rest stay Pending indefinitely (a real
+			// schedule and hold accelerators while the rest stay Pending indefinitely (a real
 			// deadlock - nothing but the generic stuck-pending timeout currently detects or
 			// recovers from it). Fixing this needs per-node (not just per-cluster-per-flavor)
 			// capacity reporting, which doesn't exist yet; see admissionUnit's doc comment in
@@ -104,14 +104,14 @@ func (c *JobWorkloadClient) buildAffinity(experimentID string, spec domain.JobSp
 	return aff
 }
 
-// gpuTolerations tolerates the taint real GPU nodes carry (commonly applied by the NVIDIA
-// GPU Operator, e.g. nvidia.com/gpu=present:NoSchedule) so that GPU-requesting pods can
-// actually land there — non-GPU workloads are meant to stay off those nodes, but a pod that
-// legitimately requests GPUs must be able to schedule onto one. This is purely an
+// acceleratorTolerations tolerates the taint real accelerator nodes carry (commonly applied by the NVIDIA
+// accelerator Operator, e.g. nvidia.com/gpu=present:NoSchedule) so that accelerator-requesting pods can
+// actually land there — non-Accelerator workloads are meant to stay off those nodes, but a pod that
+// legitimately requests accelerators must be able to schedule onto one. This is purely an
 // execution-engine concern the agent never declares in JobSpec: any request with
-// gpuCount > 0 gets it automatically.
-func gpuTolerations(gpuCount int, taintKey string) []corev1.Toleration {
-	if gpuCount <= 0 {
+// acceleratorCount > 0 gets it automatically.
+func acceleratorTolerations(acceleratorCount int, taintKey string) []corev1.Toleration {
+	if acceleratorCount <= 0 {
 		return nil
 	}
 	return []corev1.Toleration{{
@@ -121,31 +121,31 @@ func gpuTolerations(gpuCount int, taintKey string) []corev1.Toleration {
 	}}
 }
 
-// gpuNodeAffinity translates a JobSpec's GPU hardware requirement into a native nodeAffinity
+// acceleratorNodeAffinity translates a JobSpec's accelerator hardware requirement into a native nodeAffinity
 // over the well-known nvidia.com/gpu.product node label (set by the NVIDIA GPU Feature
-// Discovery add-on), using the operator's GPUType->product-label mapping (nodeLabelByType,
-// from openresearch.yaml). The acceptable set is AcceptableGPUTypes if the agent gave one
-// (interchangeable scheduling), otherwise just [gpuType] — a plain gpu_type with no
-// acceptable_gpu_types must still land on hardware of exactly that type: the extended
-// resource request (nvidia.com/gpu quantity) alone only guarantees *a* GPU node, never *the
-// requested model*, since every GPU type advertises the same resource name. Returns nil only
-// when the cluster has no node-label mapping configured at all (e.g. GPU-less dev clusters
+// Discovery add-on), using the operator's AcceleratorType->product-label mapping (nodeLabelByType,
+// from openresearch.yaml). The acceptable set is AcceptableAcceleratorTypes if the agent gave one
+// (interchangeable scheduling), otherwise just [acceleratorType] — a plain accelerator_type with no
+// acceptable_accelerator_types must still land on hardware of exactly that type: the extended
+// resource request (nvidia.com/gpu quantity) alone only guarantees *a* Accelerator node, never *the
+// requested model*, since every accelerator type advertises the same resource name. Returns nil only
+// when the cluster has no node-label mapping configured at all (e.g. Accelerator-less dev clusters
 // substituting "cpu"), so a plain resource request is all that's meaningful there.
-// gpuNodeAffinity builds the nodeAffinity for gpuType (or, if set, the OR of acceptable —
-// GPU-type interchangeability). The node-label KEY used is always gpuType's own
+// acceleratorNodeAffinity builds the nodeAffinity for acceleratorType (or, if set, the OR of acceptable —
+// accelerator-type interchangeability). The node-label KEY used is always acceleratorType's own
 // (nodeLabelKeyFor) — acceptable entries whose vendor plumbing uses a *different* label key
 // are silently skipped, since mixing vendors within one job's acceptable set is incoherent
 // (the k8s resource request itself is one specific extended-resource name; you can't ask for
 // "amd.com/gpu OR nvidia.com/gpu" in a single container). In practice this means
-// acceptable_gpu_types should only ever list types from the same vendor as gpu_type.
-func (c *JobWorkloadClient) gpuNodeAffinity(gpuType domain.GPUType, acceptable []domain.GPUType) *corev1.NodeAffinity {
-	if len(c.nodeLabelByType) == 0 || gpuType == "" {
+// acceptable_accelerator_types should only ever list types from the same vendor as accelerator_type.
+func (c *JobWorkloadClient) acceleratorNodeAffinity(acceleratorType domain.AcceleratorType, acceptable []domain.AcceleratorType) *corev1.NodeAffinity {
+	if len(c.nodeLabelByType) == 0 || acceleratorType == "" {
 		return nil
 	}
-	labelKey := c.nodeLabelKeyFor(gpuType)
+	labelKey := c.nodeLabelKeyFor(acceleratorType)
 	wanted := acceptable
 	if len(wanted) == 0 {
-		wanted = []domain.GPUType{gpuType}
+		wanted = []domain.AcceleratorType{acceleratorType}
 	}
 	values := make([]string, 0, len(wanted))
 	for _, t := range wanted {

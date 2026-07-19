@@ -14,9 +14,9 @@ cpu: "100m"
 memory: "128Mi"
 storage: "512Mi"
 
-gpu_type: A100
-gpu_count: 1
+accelerator_type: A100
+accelerator_count: 1
 
 # Demonstrates the platform's hardware-tier tolerance — lands on whichever of these is
 # available, billed at whichever rate it actually lands on.
-acceptable_gpu_types: [A100, L40, T4]
+acceptable_accelerator_types: [A100, L40, T4]

@@ -2,7 +2,7 @@
 # whatever fields the agent left unset (see shared/workload.mergeJobDefaults /
 # shared/workload.JobDefaults). Lives in-cluster, not in the cross-cluster control-plane
 # config, because it's a property of this one cluster's execution engine: a cluster with no
-# GPU nodes yet, or unusually small/large nodes, tunes its own defaults here without
+# Accelerator nodes yet, or unusually small/large nodes, tunes its own defaults here without
 # touching the platform's shared openresearch.yaml or any agent-facing API.
 #
 # Optional: if this ConfigMap doesn't exist, cluster-agent falls back to hardcoded defaults

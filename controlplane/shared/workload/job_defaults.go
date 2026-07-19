@@ -13,8 +13,8 @@ import (
 // JobSpec for anything it left unset. They live in-cluster as a ConfigMap (see
 // jobDefaultsConfigMapName below and cluster/infra/job-defaults-configmap.yaml) rather than
 // in the cross-cluster control-plane config, because they are inherently a property of one
-// specific cluster's execution engine (e.g. "this cluster has no GPU nodes yet, so default
-// every job's GPU request to the 'cpu' resource instead") — exactly the kind of concern
+// specific cluster's execution engine (e.g. "this cluster has no accelerator nodes yet, so default
+// every job's accelerator request to the 'cpu' resource instead") — exactly the kind of concern
 // that belongs downlevel, behind the Backend seam, not in the agent-facing DSL.
 type JobDefaults struct {
 	CPU        string

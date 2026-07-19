@@ -104,11 +104,11 @@ export default function ClusterPage() {
         <PodHeader>Capacity</PodHeader>
         <PodContent>
           <EmptyState>
-            CPU-core capacity is now live: each cluster-agent reports its real
-            allocatable-minus-requested cores on every desired-state poll, summed across
-            reachable clusters for admission. GPU-flavor capacity still uses static config
-            (<code>controlplane/settings/openresearch.yaml</code>) — no GPU cluster is wired up
-            yet to report from.
+            Capacity is live: each cluster-agent reports its real allocatable-minus-requested
+            CPU cores, accelerators, RAM, and storage on every desired-state poll, summed across
+            reachable clusters for admission
+            (<code>controlplane/settings/openresearch.yaml</code>'s <code>accelerator_types[]</code>
+            only defines the rate table and static inventory hints, not live capacity).
           </EmptyState>
         </PodContent>
       </Pod>

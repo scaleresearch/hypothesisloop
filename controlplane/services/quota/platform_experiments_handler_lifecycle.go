@@ -116,7 +116,7 @@ func (h *PlatformExperimentsHandler) getPhase2Status(w http.ResponseWriter, r *h
 		Phase2TriggeredAt *string  `json:"phase2_triggered_at,omitempty"`
 		ActiveAgents      []string `json:"active_agents"`
 		HeldAgents        []string `json:"held_agents"`
-		// BoundaryFraction is the fraction of pe.budget_t4_hours at which phase 2 triggers,
+		// BoundaryFraction is the fraction of pe.budget_accelerator_hours at which phase 2 triggers,
 		// as actually configured on this deployment — the UI must not hardcode this.
 		BoundaryFraction float64 `json:"boundary_fraction"`
 	}

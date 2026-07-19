@@ -139,12 +139,12 @@ func (c *Controller) researcherHasCapacity(ctx context.Context, exp *domain.Expe
 	}
 	var deltaGuaranteed, deltaBurst float64
 	for _, r := range running {
-		actual, err := c.observedGPUCost(ctx, r.ID, r.GPUCount, now)
+		actual, err := c.observedAcceleratorCost(ctx, r.ID, r.AcceleratorCount, now)
 		if err != nil {
-			c.logger.Error("researcherHasCapacity: observed GPU cost", zap.String("experiment", r.ID), zap.Error(err))
+			c.logger.Error("researcherHasCapacity: observed accelerator cost", zap.String("experiment", r.ID), zap.Error(err))
 			continue
 		}
-		d := actual - r.EstimatedCostT4H
+		d := actual - r.EstimatedCostAccH
 		if d < 0 {
 			d = 0
 		}
@@ -156,9 +156,9 @@ func (c *Controller) researcherHasCapacity(ctx context.Context, exp *domain.Expe
 	}
 	switch exp.CapacityTier {
 	case domain.CapacityGuaranteed:
-		return (aq.UsedGuaranteedT4H + deltaGuaranteed) < aq.GuaranteedT4Hours*0.99
+		return (aq.UsedGuaranteedAccH + deltaGuaranteed) < aq.GuaranteedAcceleratorHours*0.99
 	case domain.CapacityBurst:
-		return (aq.UsedBurstT4H + deltaBurst) < aq.BurstT4Hours*0.99
+		return (aq.UsedBurstAccH + deltaBurst) < aq.BurstAcceleratorHours*0.99
 	}
 	return false
 }

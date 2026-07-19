@@ -11,7 +11,7 @@ import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
-import { formatT4h } from '@/lib/format'
+import { formatAccH } from '@/lib/format'
 import { EVICTION_REASON_LABELS } from '@/lib/eviction'
 
 function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
@@ -65,8 +65,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     return a.localeCompare(b)
   })
 
-  const costEstimate = j.estimated_cost_t4h != null ? formatT4h(j.estimated_cost_t4h) : null
-  const costActual = j.actual_cost_t4h != null ? formatT4h(j.actual_cost_t4h) : null
+  const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
+  const costActual = j.actual_cost_acch != null ? formatAccH(j.actual_cost_acch) : null
 
   const axisColor = 'rgba(255,255,255,.45)'
   const gridColor = 'rgba(255,255,255,.08)'
@@ -122,10 +122,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 : '—'
               } />
               <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
-              <Row label="GPU" value={`${j.gpu_count}× ${j.gpu_type}`} />
+              <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
               <Row label="Est. duration" value={j.estimated_duration_hours != null ? `${j.estimated_duration_hours.toFixed(2)} h` : '—'} />
-              <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} T4h` : '—'} />
-              {costActual != null && <Row label="Actual cost" value={`${costActual} T4h`} highlight={semantic.accent} />}
+              <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} AccH` : '—'} />
+              {costActual != null && <Row label="Actual cost" value={`${costActual} AccH`} highlight={semantic.accent} />}
               <Row label="Submitted" value={j.created_at ? new Date(j.created_at).toLocaleString() : '—'} />
               {j.started_at && <Row label="Started" value={new Date(j.started_at).toLocaleString()} />}
               {j.completed_at && <Row label="Completed" value={new Date(j.completed_at).toLocaleString()} />}

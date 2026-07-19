@@ -29,7 +29,7 @@ type AgentBalance struct {
 type CreditLedgerEntry struct {
 	ID                   string    `json:"id"`
 	AgentID              string    `json:"agent_id"`
-	Amount               float64   `json:"amount"` // positive = credit, negative = debit (in T4h)
+	Amount               float64   `json:"amount"` // positive = credit, negative = debit (in AccH)
 	Reason               string    `json:"reason"` // allocation | spend | refund
 	ExperimentID         *string   `json:"experiment_id,omitempty"`
 	PlatformExperimentID *string   `json:"platform_experiment_id,omitempty"`

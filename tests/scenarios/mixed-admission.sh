@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Admission correctness on the CPU dimension: mixed CPU+accelerator jobs are jointly fit-
 # checked, fractional (millicore) CPU survives verbatim to the pod spec, a CPU-only job
-# (no GPU dimension at all) is admitted and billed on CPU alone, and a submission missing a
+# (no accelerator dimension at all) is admitted and billed on CPU alone, and a submission missing a
 # required resource field is rejected rather than silently defaulted. API-only, parallel-safe.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +15,7 @@ signup_and_start "$PE_ID" "$AGENT"
 
 echo "  -- impossible CPU request should not be admitted --"
 read -r CODE IMPOSSIBLE_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "999999", "gpu_type": "T4", "gpu_count": 1}')"
+  '{"cpu": "999999", "accelerator_type": "T4", "accelerator_count": 1}')"
 if [[ "$CODE" -lt 400 ]]; then
   S=$(wait_for_status "$IMPOSSIBLE_ID" "RUNNING,ADMITTED" 10 || true)
   [[ "$S" == "RUNNING" || "$S" == "ADMITTED" ]] \
@@ -25,22 +25,22 @@ else
   pass "job with an impossible CPU request was rejected at submission (HTTP $CODE)"
 fi
 
-echo "  -- small, fittable mixed CPU+GPU job should admit and run --"
+echo "  -- small, fittable mixed CPU+accelerator job should admit and run --"
 read -r CODE OK_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "250m", "gpu_type": "T4", "gpu_count": 1}')"
+  '{"cpu": "250m", "accelerator_type": "T4", "accelerator_count": 1}')"
 if [[ "$CODE" -lt 400 ]]; then
   S=$(wait_for_status "$OK_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
   [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]] \
-    && pass "mixed CPU(250m)+GPU(1xT4) job admitted where both fit (status=$S)" \
-    || fail "mixed CPU+GPU job never admitted (status=$S)"
+    && pass "mixed CPU(250m)+accelerator(1xT4) job admitted where both fit (status=$S)" \
+    || fail "mixed CPU+accelerator job never admitted (status=$S)"
   [[ "$(wait_for_status "$OK_ID" "COMPLETED,FAILED,EVICTED" 100 || true)" == "COMPLETED" ]] && file_finding "$OK_ID"
 else
-  fail "submission of a small, fittable mixed CPU+GPU job was rejected outright (HTTP $CODE)"
+  fail "submission of a small, fittable mixed CPU+accelerator job was rejected outright (HTTP $CODE)"
 fi
 
 echo "  -- fractional CPU (333m) must retain millicore precision through to the pod spec --"
 read -r CODE FRAC_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "333m", "gpu_type": "T4", "gpu_count": 1}')"
+  '{"cpu": "333m", "accelerator_type": "T4", "accelerator_count": 1}')"
 if [[ "$CODE" -lt 400 ]]; then
   S=$(wait_for_status "$FRAC_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
   if [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]]; then
@@ -58,28 +58,28 @@ else
   fail "submission of a valid fractional-CPU (333m) job was rejected outright (HTTP $CODE)"
 fi
 
-echo "  -- CPU-only job (no GPU dimension at all) should admit and bill on CPU alone --"
+echo "  -- CPU-only job (no accelerator dimension at all) should admit and bill on CPU alone --"
 read -r CODE CPU_ONLY_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "500m", "gpu_count": 0, "gpu_type": null, "acceptable_gpu_types": null}')"
+  '{"cpu": "500m", "accelerator_count": 0, "accelerator_type": null, "acceptable_accelerator_types": null}')"
 if [[ "$CODE" -lt 400 ]]; then
   S=$(wait_for_status "$CPU_ONLY_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
   if [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]]; then
-    ADMITTED_GPU_COUNT=$(get_field "$CPU_ONLY_ID" gpu_count)
-    EST_COST=$(get_field "$CPU_ONLY_ID" estimated_cost_t4h)
-    [[ "$ADMITTED_GPU_COUNT" == "0" && ( "$EST_COST" == "0" || "$EST_COST" == "0.0" ) ]] \
-      && pass "CPU-only job admitted with gpu_count=0 and zero GPU-hour billing (status=$S)" \
-      || fail "CPU-only job admitted but gpu_count=$ADMITTED_GPU_COUNT estimated_cost_t4h=$EST_COST (expected 0/0 — a GPU-free job must not bill GPU-hours)"
+    ADMITTED_ACCELERATOR_COUNT=$(get_field "$CPU_ONLY_ID" accelerator_count)
+    EST_COST=$(get_field "$CPU_ONLY_ID" estimated_cost_acch)
+    [[ "$ADMITTED_ACCELERATOR_COUNT" == "0" && ( "$EST_COST" == "0" || "$EST_COST" == "0.0" ) ]] \
+      && pass "CPU-only job admitted with accelerator_count=0 and zero accelerator-hour billing (status=$S)" \
+      || fail "CPU-only job admitted but accelerator_count=$ADMITTED_ACCELERATOR_COUNT estimated_cost_acch=$EST_COST (expected 0/0 — a accelerator-free job must not bill accelerator-hours)"
   else
     fail "CPU-only job never reached RUNNING/COMPLETED (status=$S) — CPU-only admission may be broken"
   fi
   [[ "$(wait_for_status "$CPU_ONLY_ID" "COMPLETED,FAILED,EVICTED" 100 || true)" == "COMPLETED" ]] && file_finding "$CPU_ONLY_ID"
 else
-  fail "submission of a CPU-only (gpu_count=0) job was rejected outright (HTTP $CODE)"
+  fail "submission of a CPU-only (accelerator_count=0) job was rejected outright (HTTP $CODE)"
 fi
 
 echo "  -- submission with an unset required resource must be rejected, not defaulted --"
 read -r CODE UNSET_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": null, "gpu_type": "T4", "gpu_count": 1}')"
+  '{"cpu": null, "accelerator_type": "T4", "accelerator_count": 1}')"
 if [[ "$CODE" -ge 400 ]]; then
   pass "submission with unset cpu request rejected at submission time (HTTP $CODE)"
 else

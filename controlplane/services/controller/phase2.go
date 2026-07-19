@@ -27,8 +27,8 @@ type Phase2Store interface {
 	ListPhase2HeldAgents(ctx context.Context, platformExpID string) ([]string, error)
 	IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error)
 
-	// Quota redistribution. GPU-hours is the primary/always-populated dimension driving the
-	// phase-2 trigger itself (GetTotalConsumedT4H); CPU/RAM/storage redistribute alongside it
+	// Quota redistribution. Accelerator-hours is the primary/always-populated dimension driving the
+	// phase-2 trigger itself (GetTotalConsumedAccH); CPU/RAM/storage redistribute alongside it
 	// for any platform experiment that also tracks them (see redistributeResource).
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
 	// RedistributePhase2Quota atomically applies every zero/add op and claims completion in one
@@ -60,13 +60,13 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 	}
 
 	// Compute total consumed: settled observed (from the metrics DB) + live actual of running
-	// attempts. TotalObservedT4H counts only kind=observed, i.e. jobs that have actually settled —
+	// attempts. TotalObservedAccH counts only kind=observed, i.e. jobs that have actually settled —
 	// never a queued or running job's reservation — so a large queued job can no longer prematurely
 	// trip the boundary (P0-a/N1). Running jobs therefore contribute their full live actual cost
 	// here, not just an overrun on top of an estimate.
-	committed, err := metricsdb.TotalObservedT4H(ctx, c.metricsDBURL, pe.ID)
+	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.ID)
 	if err != nil {
-		return fmt.Errorf("phase2: TotalObservedT4H: %w", err)
+		return fmt.Errorf("phase2: TotalObservedAccH: %w", err)
 	}
 	var inFlight float64
 	now := time.Now().UTC()
@@ -74,9 +74,9 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 		if exp.PlatformExperimentID != pe.ID {
 			continue
 		}
-		actual, err := c.observedGPUCost(ctx, exp.ID, exp.GPUCount, now)
+		actual, err := c.observedAcceleratorCost(ctx, exp.ID, exp.AcceleratorCount, now)
 		if err != nil {
-			c.logger.Error("checkPhase2Transition: observed GPU cost", zap.String("experiment", exp.ID), zap.Error(err))
+			c.logger.Error("checkPhase2Transition: observed accelerator cost", zap.String("experiment", exp.ID), zap.Error(err))
 			continue
 		}
 		inFlight += actual
@@ -87,14 +87,14 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 	if boundary <= 0 {
 		boundary = phase2BoundaryFraction
 	}
-	if totalConsumed < boundary*pe.BudgetT4Hours {
+	if totalConsumed < boundary*pe.BudgetAcceleratorHours {
 		return nil // boundary not yet reached
 	}
 
 	c.logger.Info("phase 2 boundary reached",
 		zap.String("platform_experiment", pe.ID),
 		zap.Float64("consumed", totalConsumed),
-		zap.Float64("boundary_t4h", boundary*pe.BudgetT4Hours),
+		zap.Float64("boundary_acch", boundary*pe.BudgetAcceleratorHours),
 	)
 
 	// Compute 75th percentile thresholds and determine which agents are active.

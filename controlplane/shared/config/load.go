@@ -33,35 +33,35 @@ func MustLoad(path string) *Config {
 }
 
 func (c *Config) build() error {
-	if len(c.GPUTypes) == 0 {
-		return fmt.Errorf("gpu_types must not be empty")
+	if len(c.AcceleratorTypes) == 0 {
+		return fmt.Errorf("accelerator_types must not be empty")
 	}
-	c.RateByName = make(map[string]float64, len(c.GPUTypes))
-	c.FlavorByName = make(map[string]string, len(c.GPUTypes))
-	c.NameByFlavor = make(map[string]string, len(c.GPUTypes))
-	c.GPUsByFlavor = make(map[string]int, len(c.GPUTypes))
-	c.NodeLabelByType = make(map[string]string, len(c.GPUTypes))
-	c.NodeLabelKeyByType = make(map[string]string, len(c.GPUTypes))
-	c.ResourceNameByType = make(map[string]string, len(c.GPUTypes))
-	c.TaintKeyByType = make(map[string]string, len(c.GPUTypes))
+	c.RateByName = make(map[string]float64, len(c.AcceleratorTypes))
+	c.FlavorByName = make(map[string]string, len(c.AcceleratorTypes))
+	c.NameByFlavor = make(map[string]string, len(c.AcceleratorTypes))
+	c.AcceleratorsByFlavor = make(map[string]int, len(c.AcceleratorTypes))
+	c.NodeLabelByType = make(map[string]string, len(c.AcceleratorTypes))
+	c.NodeLabelKeyByType = make(map[string]string, len(c.AcceleratorTypes))
+	c.ResourceNameByType = make(map[string]string, len(c.AcceleratorTypes))
+	c.TaintKeyByType = make(map[string]string, len(c.AcceleratorTypes))
 
-	defaultResourceName := c.GPUResourceName
+	defaultResourceName := c.AcceleratorResourceName
 	if defaultResourceName == "" {
 		defaultResourceName = "nvidia.com/gpu"
 	}
-	defaultTaintKey := c.GPUTaintKey
+	defaultTaintKey := c.AcceleratorTaintKey
 	if defaultTaintKey == "" {
 		defaultTaintKey = "nvidia.com/gpu"
 	}
 
-	for _, g := range c.GPUTypes {
+	for _, g := range c.AcceleratorTypes {
 		if g.Name == "" || g.Flavor == "" {
-			return fmt.Errorf("each gpu_type must have name and flavor")
+			return fmt.Errorf("each accelerator_type must have name and flavor")
 		}
-		c.RateByName[g.Name] = g.T4HRate
+		c.RateByName[g.Name] = g.AccHRate
 		c.FlavorByName[g.Name] = g.Flavor
 		c.NameByFlavor[g.Flavor] = g.Name
-		c.GPUsByFlavor[g.Flavor] = g.ClusterGPUs
+		c.AcceleratorsByFlavor[g.Flavor] = g.ClusterAccelerators
 		if g.NodeLabelValue != "" {
 			c.NodeLabelByType[g.Name] = g.NodeLabelValue
 		}
@@ -147,11 +147,11 @@ func (c *Config) build() error {
 	if c.Phase2.AdmissionPercentile == 0 {
 		c.Phase2.AdmissionPercentile = 0.75
 	}
-	if c.GPUResourceName == "" {
-		c.GPUResourceName = "nvidia.com/gpu"
+	if c.AcceleratorResourceName == "" {
+		c.AcceleratorResourceName = "nvidia.com/gpu"
 	}
-	if c.GPUTaintKey == "" {
-		c.GPUTaintKey = "nvidia.com/gpu"
+	if c.AcceleratorTaintKey == "" {
+		c.AcceleratorTaintKey = "nvidia.com/gpu"
 	}
 	return nil
 }

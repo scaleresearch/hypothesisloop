@@ -67,7 +67,7 @@ func main() {
 	store := db.NewStore(pool, metricsDBURL)
 
 	pcfg := openresearchcfg.MustLoad(envOrDefault("OPENRESEARCH_CONFIG", "settings/openresearch.yaml"))
-	domain.SetGPURates(pcfg.RateByName)
+	domain.SetAcceleratorRates(pcfg.RateByName)
 	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
 	domain.SetRAMGBHourRate(pcfg.RAMGBHourRate)
 	domain.SetStorageGBHourRate(pcfg.StorageGBHourRate)
@@ -78,7 +78,7 @@ func main() {
 		Phase1ExploreFraction: pcfg.Phase2.BoundaryFraction,
 		MaxSubmissionsPerHour: pcfg.Quota.MaxSubmissionsPerHour,
 		MetricDeclineFraction: pcfg.Quota.MetricDeclineFraction,
-		MaxGPUCountPerJob:     pcfg.Quota.MaxGPUCountPerJob,
+		MaxAcceleratorCountPerJob:     pcfg.Quota.MaxAcceleratorCountPerJob,
 		MaxCPUCoresPerJob:     pcfg.Quota.MaxCPUCoresPerJob,
 		MaxRAMGBPerJob:        pcfg.Quota.MaxRAMGBPerJob,
 		MaxStorageGBPerJob:    pcfg.Quota.MaxStorageGBPerJob,
@@ -129,12 +129,12 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 	handler := quota.NewHandler(svc, logger)
 
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
-	gpuTypeInfos := make([]quota.GPUTypeInfo, 0, len(pcfg.GPUTypes))
-	for _, g := range pcfg.GPUTypes {
-		gpuTypeInfos = append(gpuTypeInfos, quota.GPUTypeInfo{Name: g.Name, T4HRate: g.T4HRate})
+	acceleratorTypeInfos := make([]quota.AcceleratorTypeInfo, 0, len(pcfg.AcceleratorTypes))
+	for _, g := range pcfg.AcceleratorTypes {
+		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, AccHRate: g.AccHRate})
 	}
 	resourceCatalog := quota.ResourceCatalog{
-		GPUTypes:          gpuTypeInfos,
+		AcceleratorTypes:          acceleratorTypeInfos,
 		CPUCoreHourRate:   domain.CPUCoreHourRate(),
 		RAMGBHourRate:     domain.RAMGBHourRate(),
 		StorageGBHourRate: domain.StorageGBHourRate(),
@@ -176,7 +176,7 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 	}
 	openresearchWorkloadCfg := &workload.OpenResearchConfig{
 		NameByFlavor: pcfg.NameByFlavor,
-		GPUsByFlavor: pcfg.GPUsByFlavor,
+		AcceleratorsByFlavor: pcfg.AcceleratorsByFlavor,
 		FlavorOrder:  pcfg.FlavorOrder(),
 	}
 	var clusterNames []string

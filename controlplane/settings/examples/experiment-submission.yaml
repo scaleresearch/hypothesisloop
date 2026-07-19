@@ -26,36 +26,36 @@ job:
   # default (see cluster/infra/job-defaults-configmap.yaml) — useful when you don't care and
   # don't want to guess at a number that might be wrong for this particular cluster. If the
   # platform experiment you're submitting into sets a CPU/RAM/storage budget (in addition to
-  # its GPU-hours budget), whatever you request here (× num_nodes × estimated_duration_hours)
-  # is debited from that budget the same way GPU-hours already are — omitting a field here
+  # its accelerator-hours budget), whatever you request here (× num_nodes × estimated_duration_hours)
+  # is debited from that budget the same way accelerator-hours already are — omitting a field here
   # means that dimension isn't billed/capped for this submission (the actual value used is
   # resolved later by the cluster, invisible to the control plane's own accounting).
   cpu: "4"
   memory: "16Gi"
   storage: "10Gi"
 
-  # gpu_type/gpu_count: the only place GPU count is ever declared — a plain integer, not a
-  # k8s resource quantity string. gpu_count is PER NODE (see num_nodes below); billing and
-  # quota accounting are computed against gpu_count * num_nodes. Note: every resource
+  # accelerator_type/accelerator_count: the only place accelerator count is ever declared — a plain integer, not a
+  # k8s resource quantity string. accelerator_count is PER NODE (see num_nodes below); billing and
+  # quota accounting are computed against accelerator_count * num_nodes. Note: every resource
   # dimension here is also subject to the operator's per-job maximum caps (openresearch.yaml's
-  # quota.max_gpu_count_per_job etc) — a submission exceeding a cap is rejected at admission,
+  # quota.max_accelerator_count_per_job etc) — a submission exceeding a cap is rejected at admission,
   # before any quota is touched.
-  gpu_type: H100
-  gpu_count: 1
+  accelerator_type: H100
+  accelerator_count: 1
 
-  # acceptable_gpu_types: optional. If your training code doesn't care which of several
-  # hardware tiers it lands on, list them here instead of hard-requiring gpu_type exactly —
+  # acceptable_accelerator_types: optional. If your training code doesn't care which of several
+  # hardware tiers it lands on, list them here instead of hard-requiring accelerator_type exactly —
   # the backend places the job on any node of one of these types. The rate you're billed is
   # adjusted to whichever type it actually lands on either way. Only list types that share
   # the same vendor (the k8s resource request is one specific extended-resource name — you
   # can't ask for "AMD or NVIDIA" in a single container); mixing vendors here means the
   # non-matching entries are silently ignored when the backend builds node affinity.
-  # acceptable_gpu_types: [H100, H200]
+  # acceptable_accelerator_types: [H100, H200]
 
-  # extra_resources: any k8s extended resource beyond gpu_type/gpu_count — TPUs
+  # extra_resources: any k8s extended resource beyond accelerator_type/accelerator_count — TPUs
   # (google.com/tpu), other AI accelerators (habana.ai/gaudi, aws.amazon.com/neuron, ...),
   # or anything else a device plugin on this cluster advertises. Plain quantity strings per
-  # node, same convention as cpu/memory/storage. Unlike gpu_count, these are NOT billed or
+  # node, same convention as cpu/memory/storage. Unlike accelerator_count, these are NOT billed or
   # capped by the quota system today — they pass straight through to the pod's resource
   # requests so the job still lands on the right hardware.
   # extra_resources:
@@ -91,7 +91,7 @@ job:
   # topology:
   #   # spread_across_hosts (default true whenever num_nodes > 1): no two of this job's nodes
   #   # land on the same physical host. This is what actually gets you num_nodes independent
-  #   # GPUs of parallelism instead of two ranks silently sharing one host's GPUs. Only set
+  #   # accelerators of parallelism instead of two ranks silently sharing one host's accelerators. Only set
   #   # this to false on a tiny local/dev cluster with fewer hosts than num_nodes.
   #   spread_across_hosts: true
   #   # same_zone (default false): best-effort preference to keep all of this job's nodes in
@@ -104,7 +104,7 @@ job:
 
   # shm_size: /dev/shm size (e.g. "4Gi"). k8s defaults /dev/shm to a tiny tmpfs, which
   # silently breaks PyTorch's multiprocess DataLoader workers and NCCL's shared-memory IPC
-  # under load — both are common requirements for real multi-GPU/multi-host training. Omit
+  # under load — both are common requirements for real multi-accelerator/multi-host training. Omit
   # to use this cluster's default.
   # shm_size: "4Gi"
 

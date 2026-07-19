@@ -47,7 +47,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 2. RUNNING jobs need no separate subtraction here. Every capacity dimension
 	// GetFlavorCapacity reports (CPU, accelerator, RAM, storage) is now a live, cluster-agent-
 	// computed allocatable-minus-requested number counted only against pods actually assigned
-	// to a node (see workload.GetLiveCPUCapacity/GetLiveGPUCapacity/GetLiveRAMCapacity/
+	// to a node (see workload.GetLiveCPUCapacity/GetLiveAcceleratorCapacity/GetLiveRAMCapacity/
 	// GetLiveStorageCapacity's doc comments) — a RUNNING job's pod is scheduled by definition,
 	// so its footprint is already reflected in every one of those live numbers. Subtracting it
 	// again here would double-count it and manufacture false scarcity, the same bug this used
@@ -65,7 +65,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// reservations" cross-cutting fix: a second tick before the cluster-agent has created the
 	// pod now sees this capacity as already claimed instead of trusting a stale point-in-time
 	// live number, for every admission dimension, not just the ones that used to have a
-	// separate GPU-only subtraction.
+	// separate accelerator-only subtraction.
 	pendingByCluster, err := l.store.ListPendingReservationsByCluster(ctx)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// A job already assigned a cluster (a retry after this tick previously claimed it, see
 		// submitJob) stays pinned there — its flavor was already resolved on the attempt that
 		// pinned it, so just recompute its footprint under that flavor; otherwise pick a
-		// (cluster, flavor) pair among the requested type and any AcceptableGPUTypes where the
+		// (cluster, flavor) pair among the requested type and any AcceptableAcceleratorTypes where the
 		// job's whole footprint fits jointly across every dimension it requests — see
 		// resolveClusterAndFootprint's and clusterWithBestFit's doc comments for the exact policy.
 		cluster := exp.ClusterName
@@ -309,15 +309,15 @@ func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
 	return out
 }
 
-// candidateGPUTypes returns the flavors admission should try for exp, in preference order:
-// the originally requested exp.GPUType first, then any distinct AcceptableGPUTypes. GPUCount is
+// candidateAcceleratorTypes returns the flavors admission should try for exp, in preference order:
+// the originally requested exp.AcceleratorType first, then any distinct AcceptableAcceleratorTypes. AcceleratorCount is
 // already flavor-independent (it's the job's total footprint, fixed at submission — see
 // Experiment.Footprint's doc comment), so trying an alternate only changes which accelerator key
 // the footprint is keyed under, nothing else.
-func candidateGPUTypes(exp *domain.Experiment) []domain.GPUType {
-	types := []domain.GPUType{exp.GPUType}
-	seen := map[domain.GPUType]bool{exp.GPUType: true}
-	for _, t := range exp.Job.AcceptableGPUTypes {
+func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType {
+	types := []domain.AcceleratorType{exp.AcceleratorType}
+	seen := map[domain.AcceleratorType]bool{exp.AcceleratorType: true}
+	for _, t := range exp.Job.AcceptableAcceleratorTypes {
 		if !seen[t] {
 			seen[t] = true
 			types = append(types, t)
@@ -328,19 +328,19 @@ func candidateGPUTypes(exp *domain.Experiment) []domain.GPUType {
 
 // resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for a job with no cluster
 // pinned yet, trying every candidate flavor (requested type first) and returning the first one
-// that fits outright on some cluster — see candidateGPUTypes. This is what lets a job whose
-// requested flavor is saturated still land on a free AcceptableGPUTypes alternative instead of
-// sitting QUEUED with idle capacity elsewhere (findings.md's "acceptable_gpu_types cannot be
+// that fits outright on some cluster — see candidateAcceleratorTypes. This is what lets a job whose
+// requested flavor is saturated still land on a free AcceptableAcceleratorTypes alternative instead of
+// sitting QUEUED with idle capacity elsewhere (findings.md's "acceptable_accelerator_types cannot be
 // scheduled correctly"). If no candidate fits outright, falls back to the originally requested
 // flavor's own best-fit cluster (possibly needing preemption, possibly "") so the caller's
 // existing preemption path still runs — this fix only covers the outright-fit case; preemption
 // remains scoped to the originally requested flavor.
 func resolveClusterAndFootprint(avail map[string]domain.Footprint, exp *domain.Experiment) (string, domain.Footprint) {
-	requested := exp.GPUType
+	requested := exp.AcceleratorType
 	var fallbackCluster string
 	var fallbackFP domain.Footprint
-	for i, t := range candidateGPUTypes(exp) {
-		exp.GPUType = t
+	for i, t := range candidateAcceleratorTypes(exp) {
+		exp.AcceleratorType = t
 		fp := exp.Footprint()
 		cluster := clusterWithBestFit(avail, fp)
 		if i == 0 {
@@ -350,7 +350,7 @@ func resolveClusterAndFootprint(avail map[string]domain.Footprint, exp *domain.E
 			return cluster, fp
 		}
 	}
-	exp.GPUType = requested
+	exp.AcceleratorType = requested
 	return fallbackCluster, fallbackFP
 }
 

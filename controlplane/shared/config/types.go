@@ -1,22 +1,22 @@
 // Package config loads openresearch.yaml and exposes a typed Config used across all services.
 package config
 
-// GPUTypeConfig defines one GPU tier. Vendor-specific execution-engine plumbing
+// AcceleratorTypeConfig defines one accelerator tier. Vendor-specific execution-engine plumbing
 // (ResourceName/TaintKey/NodeLabelKey/NodeLabelValue) lives per-entry, not as a single
 // cluster-wide default, so a cluster can mix vendors (e.g. NVIDIA H100 nodes and AMD MI300X
 // nodes) in one catalog — each type carries its own device-plugin resource name, taint, and
 // node-label scheme. Note: Kubernetes Dynamic Resource Allocation (resource.k8s.io, GA-track
 // since 1.31/1.32) is the eventual native replacement for this extended-resource/taint/label
 // approach; these per-vendor fields are a deliberate stopgap until DRA is adopted.
-type GPUTypeConfig struct {
+type AcceleratorTypeConfig struct {
 	Name        string  `yaml:"name"`
-	T4HRate     float64 `yaml:"t4h_rate"`
+	AccHRate     float64 `yaml:"acch_rate"`
 	Flavor      string  `yaml:"flavor"`
-	ClusterGPUs int     `yaml:"cluster_gpus"`
-	// NodeLabelValue is the node label value real nodes of this GPU type carry (set by the
+	ClusterAccelerators int     `yaml:"cluster_accelerators"`
+	// NodeLabelValue is the node label value real nodes of this accelerator type carry (set by the
 	// vendor's device-plugin/feature-discovery add-on), e.g. "NVIDIA-H100-80GB-HBM3" or
 	// "AMD-Instinct-MI300X". Required for every type agents can request (see BuildJob's
-	// node affinity) — a plain gpu_type with no acceptable_gpu_types still must land on
+	// node affinity) — a plain accelerator_type with no acceptable_accelerator_types still must land on
 	// hardware of exactly that model.
 	NodeLabelValue string `yaml:"node_label_value"`
 	// NodeLabelKey is the node label KEY carrying NodeLabelValue above — defaults to
@@ -24,11 +24,11 @@ type GPUTypeConfig struct {
 	// use a different key (e.g. via the AMD GPU Operator's own labeling), so this must be
 	// set per-entry for non-NVIDIA types.
 	NodeLabelKey string `yaml:"node_label_key"`
-	// ResourceName is the k8s extended resource name requested per GPU of this type
-	// (quantity = JobSpec.GPUCount) — defaults to "nvidia.com/gpu" if unset. AMD's device
+	// ResourceName is the k8s extended resource name requested per accelerator of this type
+	// (quantity = JobSpec.AcceleratorCount) — defaults to "nvidia.com/gpu" if unset. AMD's device
 	// plugin advertises "amd.com/gpu" instead.
 	ResourceName string `yaml:"resource_name"`
-	// TaintKey is the taint key nodes of this GPU type carry (so only GPU-requesting pods
+	// TaintKey is the taint key nodes of this accelerator type carry (so only accelerator-requesting pods
 	// land there) — defaults to "nvidia.com/gpu" if unset, matching ResourceName's default.
 	TaintKey string `yaml:"taint_key"`
 }
@@ -45,13 +45,13 @@ type QuotaConfig struct {
 	// E.g. 0.3 = evict after metrics decline for 30% of the job's estimated time.
 	MetricDeclineFraction float64 `yaml:"metric_decline_fraction"`
 
-	// MaxGPUCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap how much of
+	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap how much of
 	// each resource dimension a single job may request (per node × num_nodes total), on top
 	// of the guaranteed/burst quota check — this is what actually prevents one absurd
 	// submission from blowing through an entire budget in one debit. 0 means unlimited.
 	// Operators must size these sanely relative to burst-pool sizing: a cap alone doesn't
 	// replace correct budget sizing, it only bounds a single job's blast radius.
-	MaxGPUCountPerJob  int     `yaml:"max_gpu_count_per_job"`
+	MaxAcceleratorCountPerJob  int     `yaml:"max_accelerator_count_per_job"`
 	MaxCPUCoresPerJob  float64 `yaml:"max_cpu_cores_per_job"`
 	MaxRAMGBPerJob     float64 `yaml:"max_ram_gb_per_job"`
 	MaxStorageGBPerJob float64 `yaml:"max_storage_gb_per_job"`
@@ -124,36 +124,36 @@ type Phase2Config struct {
 
 // Config is the top-level parsed config from openresearch.yaml.
 type Config struct {
-	GPUTypes              []GPUTypeConfig `yaml:"gpu_types"`
+	AcceleratorTypes              []AcceleratorTypeConfig `yaml:"accelerator_types"`
 	InterchangeableGroups [][]string      `yaml:"interchangeable_groups"`
 	Quota                 QuotaConfig     `yaml:"quota"`
 	Scheduler             SchedulerConfig `yaml:"scheduler"`
 	Phase2                Phase2Config    `yaml:"phase2"`
-	// GPUResourceName is the k8s extended resource name the backend requests per GPU
-	// (quantity = JobSpec.GPUCount) when compiling a job down to a native k8s Job —
+	// AcceleratorResourceName is the k8s extended resource name the backend requests per accelerator
+	// (quantity = JobSpec.AcceleratorCount) when compiling a job down to a native k8s Job —
 	// entirely an execution-engine concern, never seen by agents. Defaults to
-	// "nvidia.com/gpu"; set to "cpu" as a temporary substitution for a cluster with no GPU
+	// "nvidia.com/gpu"; set to "cpu" as a temporary substitution for a cluster with no accelerator
 	// nodes/device plugin yet.
-	GPUResourceName string `yaml:"gpu_resource_name"`
-	// GPUTaintKey is the taint key real GPU nodes carry (the NVIDIA GPU Operator applies
-	// this by default so only GPU-requesting pods land there); the backend automatically
-	// tolerates it on any pod that requests GPUs. Defaults to "nvidia.com/gpu". Also purely
+	AcceleratorResourceName string `yaml:"accelerator_resource_name"`
+	// AcceleratorTaintKey is the taint key real accelerator nodes carry (the NVIDIA GPU Operator applies
+	// this by default so only accelerator-requesting pods land there); the backend automatically
+	// tolerates it on any pod that requests accelerators. Defaults to "nvidia.com/gpu". Also purely
 	// an execution-engine concern — agents never declare tolerations in JobSpec.
-	GPUTaintKey string `yaml:"gpu_taint_key"`
+	AcceleratorTaintKey string `yaml:"accelerator_taint_key"`
 
 	// CPUCoreHourRate/RAMGBHourRate/StorageGBHourRate are the flat per-unit quota rates for
-	// the non-GPU resource dimensions (default 1.0 — see domain.SetCPUCoreHourRate etc).
+	// the non-Accelerator resource dimensions (default 1.0 — see domain.SetCPUCoreHourRate etc).
 	CPUCoreHourRate   float64 `yaml:"cpu_core_hour_rate"`
 	RAMGBHourRate     float64 `yaml:"ram_gb_hour_rate"`
 	StorageGBHourRate float64 `yaml:"storage_gb_hour_rate"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
-	RateByName         map[string]float64 // gpu name → T4h rate
-	FlavorByName       map[string]string  // gpu name → flavor name
-	NameByFlavor       map[string]string  // flavor name → gpu name
-	GPUsByFlavor       map[string]int     // flavor name → cluster gpu count
-	NodeLabelByType    map[string]string  // gpu name → node label value
-	NodeLabelKeyByType map[string]string  // gpu name → node label key (defaulted per-type)
-	ResourceNameByType map[string]string  // gpu name → k8s extended resource name (defaulted per-type)
-	TaintKeyByType     map[string]string  // gpu name → node taint key (defaulted per-type)
+	RateByName         map[string]float64 // accelerator name → AccH rate
+	FlavorByName       map[string]string  // accelerator name → flavor name
+	NameByFlavor       map[string]string  // flavor name → accelerator name
+	AcceleratorsByFlavor       map[string]int     // flavor name → cluster accelerator count
+	NodeLabelByType    map[string]string  // accelerator name → node label value
+	NodeLabelKeyByType map[string]string  // accelerator name → node label key (defaulted per-type)
+	ResourceNameByType map[string]string  // accelerator name → k8s extended resource name (defaulted per-type)
+	TaintKeyByType     map[string]string  // accelerator name → node taint key (defaulted per-type)
 }

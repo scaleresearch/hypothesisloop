@@ -7,8 +7,8 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 		CPU:      "500m",
 		Memory:   "1Gi",
 		Storage:  "2Gi",
-		GPUType:  GPUH100,
-		GPUCount: 2,
+		AcceleratorType:  AcceleratorH100,
+		AcceleratorCount: 2,
 		NumNodes: 4,
 	}
 	fp, err := j.Footprint()
@@ -19,10 +19,10 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 	if got := fp[ResourceKey{Kind: ResourceKindCPU}]; got != 2000 {
 		t.Errorf("cpu millicores = %d, want 2000", got)
 	}
-	// Accelerator: 2 GPUs/node * 4 nodes = 8, matches TotalGPUs(). Flavor key uses
-	// GPUType.FlavorName() ("flavor-h100"), matching capacity reporting's key convention.
-	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: GPUH100.FlavorName()}]; got != int64(j.TotalGPUs()) {
-		t.Errorf("accelerator count = %d, want %d", got, j.TotalGPUs())
+	// Accelerator: 2 accelerators/node * 4 nodes = 8, matches TotalAccelerators(). Flavor key uses
+	// AcceleratorType.FlavorName() ("flavor-h100"), matching capacity reporting's key convention.
+	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: AcceleratorH100.FlavorName()}]; got != int64(j.TotalAccelerators()) {
+		t.Errorf("accelerator count = %d, want %d", got, j.TotalAccelerators())
 	}
 	// Memory: 1GiB/node * 4 nodes.
 	want := int64(1073741824) * 4
@@ -52,7 +52,7 @@ func TestFootprintMalformedQuantityRejected(t *testing.T) {
 func TestFits(t *testing.T) {
 	cpu := ResourceKey{Kind: ResourceKindCPU}
 	mem := ResourceKey{Kind: ResourceKindMemory}
-	gpu := ResourceKey{Kind: ResourceKindAccelerator, Flavor: "H100"}
+	accelerator := ResourceKey{Kind: ResourceKindAccelerator, Flavor: "H100"}
 
 	capacity := Footprint{cpu: 4000, mem: 8_000_000_000}
 	need := Footprint{cpu: 2000, mem: 4_000_000_000}
@@ -61,8 +61,8 @@ func TestFits(t *testing.T) {
 	}
 
 	// A dimension the job needs but capacity doesn't report at all must fail closed.
-	needsGPU := Footprint{cpu: 1000, gpu: 1}
-	if Fits(capacity, needsGPU) {
+	needsAccelerator := Footprint{cpu: 1000, accelerator: 1}
+	if Fits(capacity, needsAccelerator) {
 		t.Error("expected no-fit when capacity is missing a dimension the job requests")
 	}
 

@@ -22,8 +22,8 @@ PE_ID=$(create_platform_experiment "stress-integrity-${RUN_ID}" 4.0 2)
 signup_and_start "$PE_ID" "$REQUESTER" "$DONOR"
 
 CREDITS_WANT="0.05"
-DONOR_BEFORE=$(_quota_field "$PE_ID" "$DONOR" guaranteed_t4_hours)
-REQ_BEFORE=$(_quota_field "$PE_ID" "$REQUESTER" guaranteed_t4_hours)
+DONOR_BEFORE=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_hours)
+REQ_BEFORE=$(_quota_field "$PE_ID" "$REQUESTER" guaranteed_accelerator_hours)
 
 DONATION_ID=$(curl -sf -X POST "$QUOTA_URL/donations" -H 'Content-Type: application/json' -d "{
   \"agent_id\": \"$REQUESTER\", \"platform_experiment_id\": \"$PE_ID\",
@@ -43,8 +43,8 @@ rm -rf "$CODES_DIR"
   && pass "exactly one of 12 concurrent fulfillments succeeded (got $SUCCESSES)" \
   || fail "expected exactly 1 concurrent fulfillment to succeed, got $SUCCESSES — atomic gate leaked"
 
-DONOR_AFTER=$(_quota_field "$PE_ID" "$DONOR" guaranteed_t4_hours)
-REQ_AFTER=$(_quota_field "$PE_ID" "$REQUESTER" guaranteed_t4_hours)
+DONOR_AFTER=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_hours)
+REQ_AFTER=$(_quota_field "$PE_ID" "$REQUESTER" guaranteed_accelerator_hours)
 DONOR_DELTA=$(py "print(round(float('$DONOR_AFTER' or 0) - float('$DONOR_BEFORE' or 0), 6))")
 REQ_DELTA=$(py "print(round(float('$REQ_AFTER' or 0) - float('$REQ_BEFORE' or 0), 6))")
 [[ "$DONOR_DELTA" == "-$CREDITS_WANT" ]] \

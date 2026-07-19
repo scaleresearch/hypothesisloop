@@ -9,7 +9,7 @@ There is **no Kueue** in this system. All quota enforcement, ordering, fairness,
 
 ## Split of responsibility: control plane vs. cluster-agent
 
-The control plane (`controlplane/cmd/control-service`, `.../metrics-service`) **never holds a kubeconfig and never dials a cluster API server.** Its view of "the cluster" is `queuebackend.Backend` (`controlplane/shared/queuebackend/queue_backend.go`), which only reads/writes Postgres: it maintains a desired-state list of Jobs per named cluster and returns static per-flavor capacity numbers from `openresearch.yaml` (not live cluster state).
+The control plane (`controlplane/cmd/control-service`, `.../metrics-service`) **never holds a kubeconfig and never dials a cluster API server.** Its view of "the cluster" is `queuebackend.Backend` (`controlplane/shared/queuebackend/queue_backend.go`): it maintains a desired-state list of Jobs per named cluster in Postgres, and reads *live* per-cluster capacity (CPU from Postgres, accelerator/RAM/storage from the metrics store) reported by cluster-agents on every desired-state poll — see "accelerator types & capacity" below, this is no longer a static config number.
 
 **`cluster-agent`** (`cluster/cmd/cluster-agent/main.go`) is the only component anywhere in the system with real Kubernetes credentials. It runs a kubelet-style pull/reconcile/report loop, entirely outbound from inside the target cluster:
 1. `GET /internal/clusters/{name}/desired-state` from the control plane every ~2s.
@@ -24,17 +24,17 @@ RBAC for `cluster-agent` (`cluster/infra/cluster-agent-deployment.yaml`): namesp
 
 ---
 
-## GPU types & capacity
+## accelerator types & capacity
 
-5 GPU types, same T4h rates as `controlplane/docs/quota-and-experiments.md`, but defined purely as control-plane config in `controlplane/settings/openresearch.yaml` under `gpu_types[]` — no ResourceFlavor CRDs. Each entry carries `flavor`, `cluster_gpus` (physical inventory used for the static capacity check in `queuebackend.Backend.GetFlavorCapacity`), `node_label_value`, and optional `node_label_key` / `resource_name` / `taint_key` for multi-vendor node pools. Per-cluster resource defaults live in `cluster/infra/job-defaults-configmap.yaml`.
+5 accelerator types, same AccH rates as `controlplane/docs/quota-and-experiments.md`, but defined purely as control-plane config in `controlplane/settings/openresearch.yaml` under `accelerator_types[]` — no ResourceFlavor CRDs. Each entry carries `flavor`, `node_label_value`, and optional `node_label_key` / `resource_name` / `taint_key` for multi-vendor node pools. Per-cluster resource defaults live in `cluster/infra/job-defaults-configmap.yaml`.
 
-Because capacity is a static config number rather than a live query, physical oversubscription is prevented purely by convention (burst's virtual 2× ledger overcommit relies on burst jobs being lower-priority and preemptable — see below), not by a resource-gate CRD watching real usage.
+Capacity itself is **live, not static**: `cluster-agent` self-reports allocatable-minus-requested accelerator/RAM/storage on every desired-state poll (`GetLiveAcceleratorCapacity` etc., `cluster/cmd/cluster-agent/reconcile.go`) into the metrics store (`metricsdb.RecordClusterAcceleratorCapacity`/`RecordClusterRAMCapacity`/`RecordClusterStorageCapacity`, `controlplane/shared/metricsdb/cluster_capacity.go`); CPU capacity is self-reported the same way but lands in Postgres. `queuebackend.Backend.GetFlavorCapacity` (`controlplane/shared/queuebackend/queue_backend.go:134`) reads all of it back live — a cluster with no fresh report for a resource contributes zero for it, never a stale or nominal-config number, so `Fits()` fails closed rather than treating missing data as unlimited. Guaranteed and burst share the same physical pool per cluster; preemption (not a capacity split) is what enforces the tier boundary and prevents physical oversubscription (burst's virtual 2× ledger overcommit relies on burst jobs being lower-priority and preemptable — see below).
 
 ---
 
 ## Priority instead of ClusterQueues
 
-Two tiers map to two native `scheduling.k8s.io/v1` `PriorityClass` objects, created idempotently by `JobWorkloadClient.ensurePriorityClasses` (`controlplane/shared/workload/workload_client.go:426`):
+Two tiers map to two native `scheduling.k8s.io/v1` `PriorityClass` objects, created idempotently by `JobWorkloadClient.ensurePriorityClasses` (`controlplane/shared/workload/cluster_setup.go:80`):
 
 | | `openresearch-guaranteed` | `openresearch-burst` |
 |---|---|---|
@@ -46,18 +46,18 @@ There are no Cohorts, ClusterQueues, or LocalQueues — the control plane's own 
 
 ## Job construction
 
-`JobWorkloadClient.BuildJob` (`controlplane/shared/workload/workload_client.go:701`) builds the native `batchv1.Job`, including features absent from the old Kueue-based design:
+`JobWorkloadClient.BuildJob` (`controlplane/shared/workload/job_build.go:36`) builds the native `batchv1.Job`, including features absent from the old Kueue-based design:
 
 - Multi-node distributed jobs (`NumNodes`, Indexed completion mode, per-rank env vars, headless Service for pod DNS). `parallelism == completions` on Indexed Jobs is exactly the shape k8s 1.36's native gang scheduling targets (Job controller auto-creates `Workload`/`PodGroup`, in-tree scheduler admits/binds the whole gang atomically) — see "Gang scheduling" below. No control-plane code change needed to use it, only cluster-level feature gates.
 - `TopologySpec` for spread-across-hosts or same-zone pod affinity.
 - `ShmSize` shared-memory volume.
-- Per-GPU-type node affinity/taints/resource names for multi-vendor clusters.
+- Per-accelerator-type node affinity/taints/resource names for multi-vendor clusters.
 - Merge of `cluster/infra/job-defaults-configmap.yaml` for per-cluster resource defaults.
-- `RestartPolicy=OnFailure`, `BackoffLimit=scheduler.job_backoff_limit` (default 3) — native crash-loop handling; the job watcher marks the job `FAILED` and refunds unused T4h once Kubernetes gives up retrying.
+- `RestartPolicy=OnFailure`, `BackoffLimit=scheduler.job_backoff_limit` (default 3) — native crash-loop handling; the job watcher marks the job `FAILED` and refunds unused AccH once Kubernetes gives up retrying.
 
 ### Flavor substitution (currently dormant)
 
-`JobWatcher.onRunning` (`controlplane/services/scheduler/job_watcher.go:207`) contains logic to debit a cost difference if the admitted GPU type differs from the requested one — a carryover from the days a resource gate could substitute an interchangeable flavor (e.g. H100→H200). Today `GetAdmittedGPUType` is a passthrough (`workload_client.go:604-612`) and nothing in the native-Jobs path ever substitutes flavors, so this is effectively dead code unless a future `Backend` implementation adds real substitution.
+`JobWatcher.onRunning` (`controlplane/services/scheduler/job_watcher_lifecycle.go:78`) contains logic to debit a cost difference if the admitted accelerator type differs from the requested one — a carryover from the days a resource gate could substitute an interchangeable flavor (e.g. H100→H200). Today `GetAdmittedAcceleratorType` (`controlplane/shared/workload/job_lifecycle.go:406`) is a passthrough and nothing in the native-Jobs path ever substitutes flavors, so this is effectively dead code unless a future `Backend` implementation adds real substitution.
 
 ### Gang scheduling — native k8s 1.36, not Volcano
 

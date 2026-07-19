@@ -25,10 +25,10 @@ CREATE TYPE experiment_status AS ENUM (
     'REJECTED'
 );
 
--- gpu_type is deliberately plain TEXT, not an ENUM: the GPU catalog is entirely
--- operator-defined via openresearch.yaml's gpu_types (see config.GPUTypeConfig) and any
+-- accelerator_type is deliberately plain TEXT, not an ENUM: the Accelerator catalog is entirely
+-- operator-defined via openresearch.yaml's accelerator_types (see config.AcceleratorTypeConfig) and any
 -- vendor's model name is valid (NVIDIA H100, AMD MI300X, ...) — a closed Postgres enum here
--- would silently reject any GPU type the operator adds without a schema change, defeating the
+-- would silently reject any Accelerator type the operator adds without a schema change, defeating the
 -- whole point of the config-driven catalog.
 
 CREATE TYPE platform_experiment_status AS ENUM (
@@ -63,7 +63,7 @@ CREATE TABLE platform_experiments (
     id                   TEXT                       PRIMARY KEY,
     name                 TEXT                       NOT NULL,
     description          TEXT                       NOT NULL DEFAULT '',
-    budget_t4_hours      DOUBLE PRECISION           NOT NULL,
+    budget_accelerator_hours      DOUBLE PRECISION           NOT NULL,
     budget_cpu_core_hours    DOUBLE PRECISION       NOT NULL DEFAULT 0,
     budget_ram_gb_hours      DOUBLE PRECISION       NOT NULL DEFAULT 0,
     budget_storage_gb_hours  DOUBLE PRECISION       NOT NULL DEFAULT 0,
@@ -137,18 +137,18 @@ CREATE TABLE experiments (
     objective                TEXT              NOT NULL,
     theory                   TEXT              NOT NULL DEFAULT '',
     novelty_score            DOUBLE PRECISION  NOT NULL DEFAULT 0,
-    gpu_type                 TEXT              NOT NULL,
-    gpu_count                INTEGER           NOT NULL DEFAULT 1,
+    accelerator_type                 TEXT              NOT NULL,
+    accelerator_count                INTEGER           NOT NULL DEFAULT 1,
     capacity_tier            capacity_tier     NOT NULL DEFAULT 'guaranteed',
     status                   experiment_status NOT NULL DEFAULT 'DRAFT',
     priority_score           DOUBLE PRECISION  NOT NULL DEFAULT 0,
     estimated_duration_hours DOUBLE PRECISION  NOT NULL,
-    estimated_cost_t4h       DOUBLE PRECISION  NOT NULL DEFAULT 0,
+    estimated_cost_acch       DOUBLE PRECISION  NOT NULL DEFAULT 0,
     estimated_cpu_core_hours    DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_ram_gb_hours      DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_storage_gb_hours  DOUBLE PRECISION NOT NULL DEFAULT 0,
     actual_duration_hours    DOUBLE PRECISION,
-    actual_cost_t4h          DOUBLE PRECISION,
+    actual_cost_acch          DOUBLE PRECISION,
     actual_cpu_core_hours       DOUBLE PRECISION,
     actual_ram_gb_hours         DOUBLE PRECISION,
     actual_storage_gb_hours     DOUBLE PRECISION,
@@ -273,8 +273,8 @@ CREATE TABLE agent_quotas (
     id                     TEXT             PRIMARY KEY,
     agent_id               TEXT             NOT NULL REFERENCES agents(id),
     platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
-    guaranteed_t4_hours    DOUBLE PRECISION NOT NULL,
-    burst_t4_hours         DOUBLE PRECISION NOT NULL,
+    guaranteed_accelerator_hours    DOUBLE PRECISION NOT NULL,
+    burst_accelerator_hours         DOUBLE PRECISION NOT NULL,
     guaranteed_cpu_core_hours    DOUBLE PRECISION NOT NULL DEFAULT 0,
     burst_cpu_core_hours         DOUBLE PRECISION NOT NULL DEFAULT 0,
     guaranteed_ram_gb_hours      DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -335,7 +335,7 @@ CREATE TABLE cluster_job_reports (
     experiment_id    TEXT        PRIMARY KEY REFERENCES experiments(id),
     cluster_name     TEXT        NOT NULL,
     phase            TEXT        NOT NULL,
-    admitted_gpu_type TEXT,
+    admitted_accelerator_type TEXT,
     job_uid          TEXT,
     sequence_number  BIGINT      NOT NULL DEFAULT 0,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -366,7 +366,7 @@ CREATE TABLE cluster_heartbeats (
 -- capacity for an experiment between the moment tick()/the operator admit endpoint marks it
 -- SUBMITTED and the moment its pod is actually confirmed to exist (job_watcher observes it
 -- RUNNING). See SCHEDULING_GENERALIZATION_PLAN.md's "Durable pending-capacity reservations"
--- cross-cutting fix: cluster-agents' live CPU/GPU capacity numbers (cluster_heartbeats,
+-- cross-cutting fix: cluster-agents' live CPU/Accelerator capacity numbers (cluster_heartbeats,
 -- metricsdb) reflect real k8s state, so they do NOT yet include a job's request in the window
 -- between MarkSubmitted and the cluster-agent actually creating the pod — a second scheduler
 -- tick in that window could otherwise double-admit into the same capacity. tick() sums these

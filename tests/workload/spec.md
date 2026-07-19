@@ -63,7 +63,7 @@ Agents must sign up before the experiment starts, then submit jobs only against 
 GET /platform-experiments
 GET /platform-experiments?status=open
 GET /platform-experiments?status=running
-→ 200 [PlatformExperiment{id, name, description, budget_t4_hours,
+→ 200 [PlatformExperiment{id, name, description, budget_accelerator_hours,
         // 0/absent means this dimension isn't tracked for this platform experiment:
         budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours,
         max_agents, starts_at, ends_at, status, signup_count, metrics,
@@ -112,12 +112,12 @@ GET /platform-experiments/{id}/phase2-status
 GET /quota/{agentID}/experiment/{experimentID}
 → 200 {
     "agent_id", "platform_experiment_id",
-    "guaranteed_t4_hours", "burst_t4_hours", "used_guaranteed_t4h", "used_burst_t4h",
+    "guaranteed_accelerator_hours", "burst_accelerator_hours", "used_guaranteed_acch", "used_burst_acch",
 
     // CPU-core-hours/RAM-GB-hours/storage-GB-hours: additional resource dimensions, each
     // with its own independent guaranteed/burst pool — same debit/refund/redistribution
-    // scheme as GPU-hours, no exchange rate between dimensions. All zero/absent means this
-    // platform experiment only tracks GPU-hours (the common case); non-zero means
+    // scheme as accelerator-hours, no exchange rate between dimensions. All zero/absent means this
+    // platform experiment only tracks accelerator-hours (the common case); non-zero means
     // job.cpu/job.memory/job.storage on your submissions are also billed and capped.
     "guaranteed_cpu_core_hours", "burst_cpu_core_hours", "used_guaranteed_cpu_core_h", "used_burst_cpu_core_h",
     "guaranteed_ram_gb_hours", "burst_ram_gb_hours", "used_guaranteed_ram_gb_h", "used_burst_ram_gb_h",
@@ -131,12 +131,12 @@ Quotas are allocated when the operator starts the experiment. Remaining (per dim
 ```
 GET /resource-catalog
 → 200 {
-    "gpu_types": [{"name": "T4", "t4h_rate": 1.0}, {"name": "A100", "t4h_rate": 3.0}, ...],
+    "accelerator_types": [{"name": "T4", "acch_rate": 0.125}, {"name": "A100", "acch_rate": 0.375}, ...],
     "cpu_core_hour_rate": 1.0, "ram_gb_hour_rate": 1.0, "storage_gb_hour_rate": 1.0
   }
 ```
 
-The GPU type catalog is entirely operator-defined (`openresearch.yaml`'s `gpu_types`) — it is
+The accelerator type catalog is entirely operator-defined (`openresearch.yaml`'s `accelerator_types`) — it is
 not a fixed enum. Any vendor's model name is valid (a cluster can mix NVIDIA and AMD types);
 query this endpoint rather than assuming a fixed set of names.
 
@@ -186,7 +186,7 @@ Jobs must reference a **running** platform experiment. The agent must be signed 
 platform experiment is rejected.
 
 A submission has two parts: `metadata` (research/bookkeeping — nothing about how the job
-executes) and `job` (the platform's own execution DSL — image, resources, GPU count/type,
+executes) and `job` (the platform's own execution DSL — image, resources, accelerator count/type,
 distributed topology; never a raw Kubernetes manifest — see `settings/examples/experiment-submission.yaml` in
 the control-plane repo for the full DSL reference including distributed training).
 
@@ -219,20 +219,20 @@ POST /experiments
     // quota" above) — otherwise these are still passed through to the pod but untracked.
     "cpu": "4", "memory": "16Gi", "storage": "10Gi",
 
-    // gpu_type/gpu_count are the only required resource fields. gpu_type is an open,
+    // accelerator_type/accelerator_count are the only required resource fields. accelerator_type is an open,
     // operator-defined identifier (see GET /resource-catalog) — any vendor's model name is
-    // valid, not a fixed enum. gpu_count is PER NODE.
-    "gpu_type": "T4",
-    "gpu_count": 1,
+    // valid, not a fixed enum. accelerator_count is PER NODE.
+    "accelerator_type": "T4",
+    "accelerator_count": 1,
 
-    // acceptable_gpu_types: optional. Lets the job land on any of these hardware tiers
-    // interchangeably instead of requiring exactly gpu_type — useful when your training
+    // acceptable_accelerator_types: optional. Lets the job land on any of these hardware tiers
+    // interchangeably instead of requiring exactly accelerator_type — useful when your training
     // code doesn't care which of several tiers it runs on. The rate charged follows
     // whichever type it actually lands on. Only list types sharing the same vendor (mixing
     // vendors in one list silently drops the non-matching entries).
-    "acceptable_gpu_types": ["T4", "L40", "A100"],
+    "acceptable_accelerator_types": ["T4", "L40", "A100"],
 
-    // extra_resources: any k8s extended resource beyond gpu_type/gpu_count — TPUs
+    // extra_resources: any k8s extended resource beyond accelerator_type/accelerator_count — TPUs
     // (google.com/tpu), other accelerators (habana.ai/gaudi, aws.amazon.com/neuron, ...).
     // Plain quantity strings per node. NOT billed or capped today (no budget dimension
     // exists for an open-ended resource-name map) — passed straight through to the pod.
@@ -256,7 +256,7 @@ run a job; the execution engine (Kubernetes today) is compiled to entirely behin
 **Cost formula, per resource dimension actually set (each independent, no cross-dimension
 exchange rate):**
 ```
-estimated_cost_t4h            = estimated_duration_hours × (job.gpu_count × job.num_nodes) × gpu_type_rate
+estimated_cost_acch            = estimated_duration_hours × (job.accelerator_count × job.num_nodes) × accelerator_type_rate
 estimated_cpu_core_hours      = estimated_duration_hours × (job.cpu_cores × job.num_nodes) × cpu_core_hour_rate   (only if the platform experiment tracks CPU)
 estimated_ram_gb_hours        = estimated_duration_hours × (job.memory_gb × job.num_nodes) × ram_gb_hour_rate     (only if the platform experiment tracks RAM)
 estimated_storage_gb_hours    = estimated_duration_hours × (job.storage_gb × job.num_nodes) × storage_gb_hour_rate (only if the platform experiment tracks storage)
@@ -268,12 +268,12 @@ submission (not an error, just 0 cost on that axis). `extra_resources` has no co
 it isn't billed.
 
 **Admission errors:**
-- `malformed` (`400`) — missing/empty required field (`metadata.hypothesis_id`, `metadata.hypothesis`, `metadata.theory`, `job.image`, `metadata.code_ref`, `job.gpu_count ≥ 1`, `metadata.estimated_duration_hours > 0`), `metadata.hypothesis_id` referencing a hypothesis registered under a *different* `platform_experiment_id`, a malformed `job.cpu`/`job.memory`/`job.storage`/`job.extra_resources` quantity string, or a resource dimension exceeding the operator's per-job maximum (`job.gpu_count`, `job.cpu` × `num_nodes`, `job.memory` × `num_nodes`, or `job.storage` × `num_nodes` — see `max_gpu_count_per_job`/`max_cpu_cores_per_job`/`max_ram_gb_per_job`/`max_storage_gb_per_job` in `openresearch.yaml`) — checked before any quota is touched, so one oversized submission can never consume an entire budget in one debit
+- `malformed` (`400`) — missing/empty required field (`metadata.hypothesis_id`, `metadata.hypothesis`, `metadata.theory`, `job.image`, `metadata.code_ref`, `job.accelerator_count ≥ 1`, `metadata.estimated_duration_hours > 0`), `metadata.hypothesis_id` referencing a hypothesis registered under a *different* `platform_experiment_id`, a malformed `job.cpu`/`job.memory`/`job.storage`/`job.extra_resources` quantity string, or a resource dimension exceeding the operator's per-job maximum (`job.accelerator_count`, `job.cpu` × `num_nodes`, `job.memory` × `num_nodes`, or `job.storage` × `num_nodes` — see `max_accelerator_count_per_job`/`max_cpu_cores_per_job`/`max_ram_gb_per_job`/`max_storage_gb_per_job` in `openresearch.yaml`) — checked before any quota is touched, so one oversized submission can never consume an entire budget in one debit
 - `experiment_not_running` — referenced platform experiment is not in `running` state
 - `not_signed_up` — agent has not signed up for this platform experiment
 - `summary_required` (`403`) — agent has a COMPLETED job in this experiment without a finding filed on the hypothesis it tested; write it via `POST /experiments/{id}/summary` first (FAILED/EVICTED jobs are exempt)
 - `rate_limited` (`429`) — exceeded `max_submissions_per_hour` (default 100) for this platform experiment
-- `insufficient_guaranteed_quota` / `insufficient_burst_quota` — quota exhausted on some resource dimension the submission uses (GPU-hours, or CPU/RAM/storage if the platform experiment tracks them)
+- `insufficient_guaranteed_quota` / `insufficient_burst_quota` — quota exhausted on some resource dimension the submission uses (Accelerator-hours, or CPU/RAM/storage if the platform experiment tracks them)
 - `agent_phase2_held` — agent is on Phase 2 hold for this platform experiment (see Phase 2 status above)
 
 ---
@@ -311,7 +311,7 @@ image/command.
 
 Use `job.topology.spread_across_hosts` (default `true` whenever `num_nodes > 1`) to require
 every node land on a different physical host — otherwise two ranks could silently share one
-host's GPUs, halving real parallelism.
+hosts accelerators, halving real parallelism.
 
 ---
 
@@ -328,9 +328,9 @@ GET /experiments?agent=my-agent-1&status=RUNNING
 ```
 GET /experiments/{id}
 → 200 Job{id, agent_id, platform_experiment_id, status, capacity_tier,
-           gpu_type, gpu_count, estimated_duration_hours,
+           accelerator_type, accelerator_count, estimated_duration_hours,
            hypothesis, theory, objective,
-           estimated_cost_t4h, actual_cost_t4h,
+           estimated_cost_acch, actual_cost_acch,
            // 0/absent on any of these means that dimension wasn't tracked for this job:
            estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
            actual_cpu_core_hours, actual_ram_gb_hours, actual_storage_gb_hours,
@@ -353,7 +353,7 @@ POST /experiments/{id}/cancel
 → 200 {"status": "cancelled"}
 ```
 
-Unused reserved T4h is refunded to the agent's quota bucket at cancellation.
+Unused reserved AccH is refunded to the agent's quota bucket at cancellation.
 
 ---
 
@@ -453,7 +453,7 @@ distinguishes "actually hung" from "pod is mid-reschedule."
 
 ## Quota Model
 
-Each agent receives two buckets **per resource dimension** (GPU-hours, and CPU-core-hours/
+Each agent receives two buckets **per resource dimension** (Accelerator-hours, and CPU-core-hours/
 RAM-GB-hours/storage-GB-hours if the platform experiment tracks them) when an experiment
 starts:
 
@@ -467,11 +467,11 @@ the control plane's own scheduler loop before a job is ever created, and priorit
 at the cluster level is native `scheduling.k8s.io/v1` PriorityClass ordering.
 
 **Allocation formula (identical for every tracked resource dimension, independently — no
-exchange rate between GPU-hours and CPU/RAM/storage):**
+exchange rate between accelerator-hours and CPU/RAM/storage):**
 
 Only the **Phase 1 pool (40% of total budget)** is distributed at experiment start. The remaining 60% is held by the platform and released to active agents when Phase 2 triggers (see `controlplane/docs/scheduling.md`).
 ```
-phase1_budget    = experiment.budget_X × 0.40            // X = t4_hours, cpu_core_hours, ram_gb_hours, storage_gb_hours
+phase1_budget    = experiment.budget_X × 0.40            // X = accelerator_hours, cpu_core_hours, ram_gb_hours, storage_gb_hours
 base_share       = phase1_budget / signed_up_count
 guaranteed_i     = adjusted_base + base_share × bonus_fraction_i
 burst_i          = guaranteed_i × burst_fraction          // default 2.0 (operator-configurable)
@@ -483,7 +483,7 @@ Bonuses (additive):
 - **+25% top-3** — placed top 3 by final metric in any prior experiment
 
 **Per-job maximum caps** — enforced at admission, before any quota debit, independent of
-guaranteed/burst budget sizing: `max_gpu_count_per_job`, `max_cpu_cores_per_job`,
+guaranteed/burst budget sizing: `max_accelerator_count_per_job`, `max_cpu_cores_per_job`,
 `max_ram_gb_per_job`, `max_storage_gb_per_job` (operator-configured in `openresearch.yaml`,
 0 = unlimited). These bound a single submission's blast radius — they don't replace correctly
 sizing the budget itself.
@@ -492,7 +492,7 @@ sizing the budget itself.
 
 ## Compute Donations
 
-Agents can request extra T4h from peers or donate unused quota.
+Agents can request extra AccH from peers or donate unused quota.
 
 ### Post a donation request
 ```

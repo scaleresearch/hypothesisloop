@@ -5,7 +5,7 @@ OpenResearch autonomous research agent.
 Uses Claude with tool use to autonomously:
 - Register itself on the platform
 - Browse and sign up for platform experiments
-- Check experiment-scoped T4h quota
+- Check experiment-scoped AccH quota
 - Submit training jobs tied to platform experiments
 - Track progress and cancel underperformers
 - React to results and decide next steps
@@ -50,7 +50,7 @@ REGISTRY_URL  = os.environ.get("OPENRESEARCH_REGISTRY_URL",  "http://localhost:8
 # Standalone job definition (domain.JobSpec — the platform's own DSL, never a raw k8s
 # manifest) sitting next to this script. Loaded once as the base for every submission;
 # tool_submit_experiment only overrides the fields the agent actually decides per run
-# (gpu_type/gpu_count), same file tests/scenarios/phase2-and-settlement.sh submits verbatim.
+# (accelerator_type/accelerator_count), same file tests/scenarios/phase2-and-settlement.sh submits verbatim.
 JOB_FILE = Path(os.environ.get("OPENRESEARCH_JOB_FILE", Path(__file__).parent / "job.yaml"))
 
 client = anthropic.Anthropic()
@@ -172,25 +172,25 @@ def tool_submit_experiment(
     hypothesis_id: str,
     theory: str,
     objective: str,
-    gpu_type: str,
-    gpu_count: int,
+    accelerator_type: str,
+    accelerator_count: int,
     estimated_duration_hours: float,
     capacity_tier: str = "guaranteed",
 ) -> dict:
-    """Submit a training job. GPU type/count go in `job` (the platform's own DSL — never a
+    """Submit a training job. accelerator type/count go in `job` (the platform's own DSL — never a
     raw k8s manifest); hypothesis_id/theory/objective/etc go in `metadata`. hypothesis_id
     must come from register_hypothesis (or list_hypotheses/get_hypothesis) — call that first.
-    estimated_cost_t4h is computed by the scheduler from job.gpu_type/gpu_count, not sent by
+    estimated_cost_acch is computed by the scheduler from job.accelerator_type/accelerator_count, not sent by
     the caller."""
     exp_id = str(uuid.uuid4())
 
     # Start from the standalone job definition (image, etc.) and only override what this
-    # particular run actually decided (gpu_type/gpu_count) — everything else about how the
+    # particular run actually decided (accelerator_type/accelerator_count) — everything else about how the
     # job executes stays exactly as declared in job.yaml.
     with open(JOB_FILE) as f:
         job = yaml.safe_load(f)
-    job["gpu_type"] = gpu_type
-    job["gpu_count"] = gpu_count
+    job["accelerator_type"] = accelerator_type
+    job["accelerator_count"] = accelerator_count
 
     payload = {
         "id": exp_id,
@@ -287,7 +287,7 @@ TOOLS = [
     {
         "name": "get_experiment_quota",
         "description": (
-            "Get this agent's T4h quota for a specific platform experiment. "
+            "Get this agent's AccH quota for a specific platform experiment. "
             "Returns guaranteed and burst buckets with used/remaining amounts. "
             "Check this before submitting to ensure you have enough quota."
         ),
@@ -370,7 +370,7 @@ TOOLS = [
             "The agent must be signed up for the platform experiment. "
             "hypothesis_id must come from register_hypothesis (or list_hypotheses/get_hypothesis) — call that first. "
             "The job will emit metrics defined in the platform experiment; use get_metrics to observe them. "
-            "estimated_cost_t4h is computed by the scheduler as: duration × gpu_count × gpu_type_rate. "
+            "estimated_cost_acch is computed by the scheduler as: duration × accelerator_count × accelerator_type_rate. "
             "capacity_tier='guaranteed' is high-priority non-preemptable; 'burst' is preemptable but uses separate quota."
         ),
         "input_schema": {
@@ -380,17 +380,17 @@ TOOLS = [
                 "hypothesis_id": {"type": "string", "description": "ID from register_hypothesis"},
                 "theory": {"type": "string", "description": "Specific prediction/bet this run tests"},
                 "objective": {"type": "string", "description": "What we're optimizing"},
-                "gpu_type": {"type": "string", "enum": ["T4", "L40", "A100"]},
-                "gpu_count": {"type": "integer", "minimum": 1},
+                "accelerator_type": {"type": "string", "enum": ["T4", "L40", "A100"]},
+                "accelerator_count": {"type": "integer", "minimum": 1},
                 "estimated_duration_hours": {"type": "number"},
                 "capacity_tier": {"type": "string", "enum": ["guaranteed", "burst"], "description": "guaranteed=high priority; burst=preemptable"},
             },
-            "required": ["platform_experiment_id", "hypothesis_id", "theory", "objective", "gpu_type", "gpu_count", "estimated_duration_hours"],
+            "required": ["platform_experiment_id", "hypothesis_id", "theory", "objective", "accelerator_type", "accelerator_count", "estimated_duration_hours"],
         },
     },
     {
         "name": "cancel_experiment",
-        "description": "Cancel a QUEUED or RUNNING job. QUEUED → full T4h refund to quota; RUNNING → 50% refund.",
+        "description": "Cancel a QUEUED or RUNNING job. QUEUED → full AccH refund to quota; RUNNING → 50% refund.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -450,8 +450,8 @@ TOOL_FN = {
         inp["hypothesis_id"],
         inp["theory"],
         inp["objective"],
-        inp["gpu_type"],
-        inp["gpu_count"],
+        inp["accelerator_type"],
+        inp["accelerator_count"],
         inp["estimated_duration_hours"],
         inp.get("capacity_tier", "guaranteed"),
     ),
@@ -475,7 +475,7 @@ Your identity:
 ## Workflow
 
 The OpenResearch platform organises compute into **Platform Experiments** — operator-created
-compute envelopes with a fixed T4-GPU-hour (T4h) budget. You must follow this flow:
+compute envelopes with a fixed accelerator-hour (AccH), H100-equivalent budget. You must follow this flow:
 
 1. **Register** yourself (ignore 409/500 errors if already registered).
 2. **List open platform experiments** and sign up for one that interests you.
@@ -491,11 +491,11 @@ compute envelopes with a fixed T4-GPU-hour (T4h) budget. You must follow this fl
 ## Cost model
 
 ```
-estimated_cost_t4h = duration_hours × gpu_count × gpu_cost × 1.2
-gpu_cost: T4=1.0, L40=2.0, A100=3.0
+estimated_cost_acch = duration_hours × accelerator_count × accelerator_cost × 1.2
+accelerator_cost (H100-equivalent): T4=0.125, L40=0.25, A100=0.375
 ```
 
-Your quota is in T4h units. Check get_experiment_quota before submitting.
+Your quota is in AccH units. Check get_experiment_quota before submitting.
 
 ## Eviction
 
@@ -505,7 +505,7 @@ The platform auto-evicts jobs that:
 - Stop reporting metrics (silent)
 - Exceed 1.5× estimated duration (overrun)
 
-Evicted burst jobs get a proportional T4h refund. Guaranteed jobs are not preempted.
+Evicted burst jobs get a proportional AccH refund. Guaranteed jobs are not preempted.
 
 ## Scientific strategy
 

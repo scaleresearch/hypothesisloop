@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # True concurrency (not "back-to-back sequential") race: N guaranteed jobs are fired at the
-# scheduler at the same instant, all racing for one GPU type's capacity, where the sum of
+# scheduler at the same instant, all racing for one accelerator type's capacity, where the sum of
 # their requests exceeds what the node actually has. Unlike capacity-safety.sh (which submits
 # sequentially and checks quota debit isn't doubled), this scenario exercises the actual
 # concurrent-write path — multiple submitJob calls landing inside the same or adjacent
@@ -11,9 +11,9 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 
-GPU_TYPE="H200"
-GPU_COUNT_PER_JOB=4
-NODE_GPU_CAPACITY=8
+ACCELERATOR_TYPE="H200"
+ACCELERATOR_COUNT_PER_JOB=4
+NODE_ACCELERATOR_CAPACITY=8
 N_JOBS=3   # 3*4=12 requested against 8 available: exactly 2 can fit, 1 must lose the race.
 EXPECT_ADMITTED=2
 
@@ -26,13 +26,13 @@ done
 PE_ID=$(create_platform_experiment "concurrent-race-${RUN_ID}" 50.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
-echo "  ==> firing ${N_JOBS} guaranteed jobs (${GPU_COUNT_PER_JOB}x${GPU_TYPE} each = $((N_JOBS * GPU_COUNT_PER_JOB)) requested, ${NODE_GPU_CAPACITY} available) at the same instant..."
+echo "  ==> firing ${N_JOBS} guaranteed jobs (${ACCELERATOR_COUNT_PER_JOB}x${ACCELERATOR_TYPE} each = $((N_JOBS * ACCELERATOR_COUNT_PER_JOB)) requested, ${NODE_ACCELERATOR_CAPACITY} available) at the same instant..."
 OUT_DIR="$TMPDIR_T/race"
 mkdir -p "$OUT_DIR"
 PIDS=()
 for i in $(seq 1 "$N_JOBS"); do
   (
-    submit_job "$PE_ID" "${AGENTS[$((i - 1))]}" "guaranteed" "0.05" "$GPU_TYPE" "$GPU_COUNT_PER_JOB" \
+    submit_job "$PE_ID" "${AGENTS[$((i - 1))]}" "guaranteed" "0.05" "$ACCELERATOR_TYPE" "$ACCELERATOR_COUNT_PER_JOB" \
       > "$OUT_DIR/job_$i.id" 2> "$OUT_DIR/job_$i.err"
   ) &
   PIDS+=("$!")
@@ -82,13 +82,13 @@ for j in "${JOBS[@]}"; do
 done
 
 # The core race-safety invariant: however the scheduler interleaves concurrent submitJob
-# calls, it must never admit more total GPU count than the node physically has. This is the
+# calls, it must never admit more total accelerator count than the node physically has. This is the
 # assertion that would catch the reservation-write-race class of bug (fixed in loop_preempt.go
 # per findings.md, but only ever exercised there by sequential back-to-back submission).
-TOTAL_ADMITTED_GPUS=$((ADMITTED_COUNT * GPU_COUNT_PER_JOB))
-[[ "$TOTAL_ADMITTED_GPUS" -le "$NODE_GPU_CAPACITY" ]] \
-  && pass "admitted total (${ADMITTED_COUNT} jobs = ${TOTAL_ADMITTED_GPUS} GPUs) does not exceed physical capacity (${NODE_GPU_CAPACITY} GPUs) under true concurrency" \
-  || fail "OVER-ADMISSION under concurrent submission: ${ADMITTED_COUNT} jobs (${TOTAL_ADMITTED_GPUS} GPUs) admitted against only ${NODE_GPU_CAPACITY} GPUs available — reservation race"
+TOTAL_ADMITTED_ACCELERATORS=$((ADMITTED_COUNT * ACCELERATOR_COUNT_PER_JOB))
+[[ "$TOTAL_ADMITTED_ACCELERATORS" -le "$NODE_ACCELERATOR_CAPACITY" ]] \
+  && pass "admitted total (${ADMITTED_COUNT} jobs = ${TOTAL_ADMITTED_ACCELERATORS} accelerators) does not exceed physical capacity (${NODE_ACCELERATOR_CAPACITY} accelerators) under true concurrency" \
+  || fail "OVER-ADMISSION under concurrent submission: ${ADMITTED_COUNT} jobs (${TOTAL_ADMITTED_ACCELERATORS} accelerators) admitted against only ${NODE_ACCELERATOR_CAPACITY} accelerators available — reservation race"
 
 [[ "$ADMITTED_COUNT" -eq "$EXPECT_ADMITTED" ]] \
   && pass "exactly $EXPECT_ADMITTED of $N_JOBS raced jobs admitted, as capacity allows" \
@@ -96,7 +96,7 @@ TOTAL_ADMITTED_GPUS=$((ADMITTED_COUNT * GPU_COUNT_PER_JOB))
 
 [[ "$QUEUED_COUNT" -ge 1 ]] \
   && pass "at least one over-subscribed job correctly lost the race and stayed QUEUED/non-admitted" \
-  || fail "no job was left QUEUED even though requests (${N_JOBS}x${GPU_COUNT_PER_JOB}=$((N_JOBS * GPU_COUNT_PER_JOB))) exceed capacity (${NODE_GPU_CAPACITY}) — every job appears admitted, which is impossible if capacity accounting is correct"
+  || fail "no job was left QUEUED even though requests (${N_JOBS}x${ACCELERATOR_COUNT_PER_JOB}=$((N_JOBS * ACCELERATOR_COUNT_PER_JOB))) exceed capacity (${NODE_ACCELERATOR_CAPACITY}) — every job appears admitted, which is impossible if capacity accounting is correct"
 
 for j in "${ADMITTED_JOBS[@]:-}"; do
   [[ -z "$j" ]] && continue

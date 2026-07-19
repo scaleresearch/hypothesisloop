@@ -32,7 +32,7 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // CreatePlatformExperiment inserts a new platform experiment.
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, name, description, budget_t4_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, phase, phase2_triggered_at, created_at, updated_at)
+INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, phase, phase2_triggered_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 
 	metrics, err := json.Marshal(pe.Metrics)
@@ -44,7 +44,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		phase = 1
 	}
 	_, err = s.pool.pool.Exec(ctx, q,
-		pe.ID, pe.Name, pe.Description, pe.BudgetT4Hours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
+		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
 		pe.StartsAt, pe.EndsAt, string(pe.Status),
 		phase, pe.Phase2TriggeredAt,
@@ -59,7 +59,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, name, description, budget_t4_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, phase, phase2_triggered_at, created_at, updated_at
+SELECT id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, phase, phase2_triggered_at, created_at, updated_at
 FROM platform_experiments
 WHERE id = $1`
 
@@ -67,7 +67,7 @@ WHERE id = $1`
 	var status string
 	var metricsRaw []byte
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
-		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetT4Hours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
+		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &pe.EndsAt, &status,
 		&pe.Phase, &pe.Phase2TriggeredAt,
@@ -97,7 +97,7 @@ func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, 
 		args []any
 	)
 	base := `
-SELECT pe.id, pe.name, pe.description, pe.budget_t4_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
+SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
        pe.phase, pe.phase2_triggered_at,
@@ -130,7 +130,7 @@ ORDER BY pe.created_at DESC`
 		var status string
 		var metricsRaw []byte
 		if err := rows.Scan(
-			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetT4Hours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
+			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &pe.EndsAt, &status,
 			&pe.Phase, &pe.Phase2TriggeredAt,
@@ -168,11 +168,11 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
 	}
 	const q = `UPDATE platform_experiments
-SET name=$2, description=$3, budget_t4_hours=$4, budget_cpu_core_hours=$5, budget_ram_gb_hours=$6, budget_storage_gb_hours=$7, max_agents=$8, metrics=$9,
+SET name=$2, description=$3, budget_accelerator_hours=$4, budget_cpu_core_hours=$5, budget_ram_gb_hours=$6, budget_storage_gb_hours=$7, max_agents=$8, metrics=$9,
     report_interval_seconds=$10, starts_at=$11, ends_at=$12, updated_at=NOW()
 WHERE id=$1`
 	_, err = s.pool.pool.Exec(ctx, q,
-		pe.ID, pe.Name, pe.Description, pe.BudgetT4Hours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
+		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
 	)
 	if err != nil {

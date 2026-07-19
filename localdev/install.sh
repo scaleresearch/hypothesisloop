@@ -29,7 +29,7 @@ K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=tr
 # images. Without this, kubelet periodically garbage-collects any locally-imported image
 # with no currently-running container (workload/robotics-workload/cluster-agent/node-agent
 # between test runs) straight out from under us — see localdev/add-fake-nodes.sh's identical
-# override on the fake GPU nodes for the same reason.
+# override on the fake accelerator nodes for the same reason.
 # Escaped \< : this value is re-parsed by at least one more shell layer downstream (the SSH
 # command string on macOS, or the piped installer script's own arg handling) before it reaches
 # kubelet, so an unescaped < would be consumed as shell input redirection instead of surviving
@@ -178,17 +178,17 @@ wait_for 40 3 "node to register" \
 kubectl --context "${CONTEXT_NAME}" wait node --all \
   --for=condition=Ready --timeout=120s
 
-# Patch fake GPU capacity onto the node — there's no real GPU hardware in local dev, so this
+# Patch fake accelerator capacity onto the node — there's no real accelerator hardware in local dev, so this
 # just gives the (currently static-config-based) capacity accounting something to point at.
 NODE=$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')
 kubectl --context "${CONTEXT_NAME}" patch node "${NODE}" --subresource=status \
   --type=json -p '[{"op":"add","path":"/status/capacity/nvidia.com~1gpu","value":"8"},{"op":"add","path":"/status/allocatable/nvidia.com~1gpu","value":"8"}]' \
   >/dev/null
 
-# Real GPU nodes carry this label too (set by the NVIDIA GPU Feature Discovery add-on) —
-# the control plane's node affinity requires it for every GPU type a job can request (see
+# Real accelerator nodes carry this label too (set by the NVIDIA GPU Feature Discovery add-on) —
+# the control plane's node affinity requires it for every accelerator type a job can request (see
 # openresearch.yaml node_label_value), so local dev must fake this label as well, not just
-# the resource capacity, or every GPU-requesting job becomes unschedulable here.
+# the resource capacity, or every accelerator-requesting job becomes unschedulable here.
 kubectl --context "${CONTEXT_NAME}" label node "${NODE}" nvidia.com/gpu.product=NVIDIA-T4 --overwrite \
   >/dev/null
 
@@ -217,10 +217,10 @@ echo "==> Installing cluster-agent bundle onto local cluster..."
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   bash "${SCRIPT_DIR}/../cluster/infra/install.sh"
 
-# Add extra simulated nodes labeled with different fake GPU types, so acceptable_gpu_types/
+# Add extra simulated nodes labeled with different fake accelerator types, so acceptable_accelerator_types/
 # node-affinity variability has more than one type to actually land on locally by default
 # (see add-fake-nodes.sh for why this is separate k3s agent processes, not k3d/kind). Set
 # EXTRA_NODES=0 to skip. Idempotent — safe on every `make k3s-up`, including re-runs against
 # an already-provisioned cluster.
-echo "==> Adding fake multi-GPU-type nodes (EXTRA_NODES=${EXTRA_NODES:-3})..."
+echo "==> Adding fake multi-accelerator-type nodes (EXTRA_NODES=${EXTRA_NODES:-3})..."
 EXTRA_NODES="${EXTRA_NODES:-3}" bash "${SCRIPT_DIR}/add-fake-nodes.sh"

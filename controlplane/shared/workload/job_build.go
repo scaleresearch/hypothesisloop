@@ -12,11 +12,11 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
 )
 
-// GPUTypeLabel tracks which GPU type/tier this run is billed against — set by the control
-// plane from exp.GPUType, purely for observability (kubectl get jobs -l ...); it is never
-// read back to derive accounting, since exp.GPUType/exp.GPUCount are already known from the
+// AcceleratorTypeLabel tracks which accelerator type/tier this run is billed against — set by the control
+// plane from exp.AcceleratorType, purely for observability (kubectl get jobs -l ...); it is never
+// read back to derive accounting, since exp.AcceleratorType/exp.AcceleratorCount are already known from the
 // agent's JobSpec at submission time.
-const GPUTypeLabel = "openresearch.io/gpu-type"
+const AcceleratorTypeLabel = "openresearch.io/accelerator-type"
 
 // AttemptLabel carries exp.Attempt (see domain.Experiment.Attempt) — set on every Job so a
 // recreation after the previous Job disappeared is observable (kubectl get jobs -l ...) and,
@@ -26,7 +26,7 @@ const AttemptLabel = "openresearch.dev/attempt"
 
 // BuildJob compiles exp's JobSpec DSL (merged with this cluster's JobDefaults) down into a
 // native batch/v1 Job — the only place the platform's DSL vocabulary (image, command, env,
-// cpu/memory/gpu, num_nodes, max_retries, acceptable_gpu_types) is translated into
+// cpu/memory/accelerator, num_nodes, max_retries, acceptable_accelerator_types) is translated into
 // execution-engine concepts (containers, resource requests, node affinity, Indexed
 // completion mode). Nothing upstream of this function ever constructs or reads a k8s type.
 //
@@ -88,11 +88,11 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(spec.Storage)
 		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse(spec.Storage)
 	}
-	if spec.GPUCount > 0 {
-		gpuQty := resource.MustParse(fmt.Sprintf("%d", spec.GPUCount))
-		gpuResource := corev1.ResourceName(c.resourceNameFor(spec.GPUType))
-		resources.Requests[gpuResource] = gpuQty
-		resources.Limits[gpuResource] = gpuQty
+	if spec.AcceleratorCount > 0 {
+		acceleratorQty := resource.MustParse(fmt.Sprintf("%d", spec.AcceleratorCount))
+		acceleratorResource := corev1.ResourceName(c.resourceNameFor(spec.AcceleratorType))
+		resources.Requests[acceleratorResource] = acceleratorQty
+		resources.Limits[acceleratorResource] = acceleratorQty
 	}
 	for name, qty := range spec.ExtraResources {
 		if qty == "" {
@@ -114,8 +114,8 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 		{Name: "OPENRESEARCH_CONFIG_HASH", Value: exp.ConfigHash},
 		{Name: "OPENRESEARCH_DATA_REF", Value: exp.DataRef},
 		{Name: "OPENRESEARCH_REGISTRY_URL", Value: c.registryURL},
-		{Name: "OPENRESEARCH_GPU_TYPE", Value: string(exp.GPUType)},
-		{Name: "OPENRESEARCH_GPU_COUNT", Value: fmt.Sprintf("%d", exp.GPUCount)},
+		{Name: "OPENRESEARCH_ACCELERATOR_TYPE", Value: string(exp.AcceleratorType)},
+		{Name: "OPENRESEARCH_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", exp.AcceleratorCount)},
 		{Name: "OPENRESEARCH_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
 		{Name: "TRACEPARENT", Value: traceparentFromID(exp.ID)},
 	}
@@ -199,7 +199,7 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 				"openresearch.io/experiment-id": exp.ID,
 				"openresearch.io/agent-id":      sanitizeLabel(exp.AgentID),
 				"openresearch.io/capacity-tier": string(exp.CapacityTier),
-				GPUTypeLabel:                    string(exp.GPUType),
+				AcceleratorTypeLabel:                    string(exp.AcceleratorType),
 				AttemptLabel:                    fmt.Sprintf("%d", attempt),
 			},
 		},
@@ -216,7 +216,7 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 					Containers:        []corev1.Container{container},
 					Volumes:           volumes,
 					Affinity:          c.buildAffinity(exp.ID, spec, distributed),
-					Tolerations:       gpuTolerations(spec.GPUCount, c.taintKeyFor(spec.GPUType)),
+					Tolerations:       acceleratorTolerations(spec.AcceleratorCount, c.taintKeyFor(spec.AcceleratorType)),
 				},
 			},
 		},
@@ -243,7 +243,7 @@ func (c *JobWorkloadClient) BuildJob(ctx context.Context, exp *domain.Experiment
 		// hiding a real failure on any other rank.
 		// Exit code 137 (SIGKILL, typically OOM) is a hard per-index failure rather than
 		// counted toward BackoffLimitPerIndex retries — retrying an OOM with the same
-		// resources just wastes GPU-hours on a guaranteed repeat failure.
+		// resources just wastes accelerator-hours on a guaranteed repeat failure.
 		job.Spec.PodFailurePolicy = &batchv1.PodFailurePolicy{
 			Rules: []batchv1.PodFailurePolicyRule{{
 				Action: batchv1.PodFailurePolicyActionFailIndex,

@@ -18,7 +18,7 @@ import { Button, Chip } from '@/components/ui/button'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
-import { formatT4h } from '@/lib/format'
+import { formatAccH } from '@/lib/format'
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
@@ -62,7 +62,7 @@ function ExperimentCard({
     { refreshInterval: 10_000 },
   )
 
-  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_t4h + q.used_burst_t4h, 0)
+  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const daysLeft = pe.ends_at
     ? Math.ceil((new Date(pe.ends_at).getTime() - Date.now()) / 86_400_000)
     : null
@@ -106,7 +106,7 @@ function ExperimentCard({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 14 }}>
           <div>
             <div className="uppercase-label">Budget</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700 }}>{pe.budget_t4_hours} <span className="text-muted">T4h</span></div>
+            <div className="mono" style={{ fontSize: 20, fontWeight: 700 }}>{pe.budget_accelerator_hours} <span className="text-muted">AccH</span></div>
           </div>
           <div>
             <div className="uppercase-label">Agents</div>
@@ -115,12 +115,12 @@ function ExperimentCard({
           <div>
             <div className="uppercase-label">Budget Used</div>
             <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: totalUsed > 0 ? 'var(--accent-light)' : undefined }}>
-              {formatT4h(totalUsed)} <span className="text-muted">T4h</span>
+              {formatAccH(totalUsed)} <span className="text-muted">AccH</span>
             </div>
           </div>
           <div>
             <div className="uppercase-label">Utilization</div>
-            <MetricBar value={totalUsed} max={pe.budget_t4_hours} />
+            <MetricBar value={totalUsed} max={pe.budget_accelerator_hours} />
           </div>
         </div>
 
@@ -147,7 +147,7 @@ function ExperimentCard({
           <div onClick={e => e.stopPropagation()}>
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
               <div className="uppercase-label" style={{ marginBottom: 10 }}>
-                Agent Quotas — Guaranteed &amp; Burst (T4h)
+                Agent Quotas — Guaranteed &amp; Burst (AccH)
               </div>
               {!quotas ? (
                 <p className="text-dim">Loading quotas…</p>
@@ -165,14 +165,14 @@ function ExperimentCard({
                   </thead>
                   <tbody>
                     {quotas.map(q => {
-                      const gRem = q.guaranteed_t4_hours - q.used_guaranteed_t4h
-                      const bRem = q.burst_t4_hours - q.used_burst_t4h
+                      const gRem = q.guaranteed_accelerator_hours - q.used_guaranteed_acch
+                      const bRem = q.burst_accelerator_hours - q.used_burst_acch
                       return (
                         <tr key={q.id}>
                           <td className="mono" style={{ fontWeight: 600 }}>{q.agent_id}</td>
-                          <td className="mono" style={{ fontSize: 11 }}>{formatT4h(q.used_guaranteed_t4h)} / {formatT4h(q.guaranteed_t4_hours)} T4h</td>
-                          <td className="mono" style={{ fontSize: 11 }}>{formatT4h(q.used_burst_t4h)} / {formatT4h(q.burst_t4_hours)} T4h</td>
-                          <td className="mono" style={{ fontSize: 11, color: gRem + bRem > 0 ? semantic.success : semantic.danger }}>{formatT4h(Math.max(0, gRem) + Math.max(0, bRem))} T4h</td>
+                          <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
+                          <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
+                          <td className="mono" style={{ fontSize: 11, color: gRem + bRem > 0 ? semantic.success : semantic.danger }}>{formatAccH(Math.max(0, gRem) + Math.max(0, bRem))} AccH</td>
                         </tr>
                       )
                     })}
@@ -209,7 +209,7 @@ function localDatetime(offsetDays: number): string {
 interface FormState {
   name: string
   description: string
-  budget_t4_hours: number
+  budget_accelerator_hours: number
   // Optional additional CPU budget. 0 means "not tracked" for this platform experiment
   // (matches the backend's convention — omitting/zeroing leaves that dimension untracked).
   budget_cpu_core_hours: number
@@ -344,7 +344,7 @@ function ExperimentModal({
   const [form, setForm] = useState<FormState>({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
-    budget_t4_hours: initial?.budget_t4_hours ?? 1000,
+    budget_accelerator_hours: initial?.budget_accelerator_hours ?? 1000,
     budget_cpu_core_hours: initial?.budget_cpu_core_hours ?? 0,
     max_agents: initial?.max_agents ?? 20,
     starts_at: initial?.starts_at ? new Date(initial.starts_at).toISOString().slice(0, 16) : localDatetime(1),
@@ -361,14 +361,14 @@ function ExperimentModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Name is required'); return }
-    if (Number(form.budget_t4_hours) <= 0) { setError('Budget must be > 0'); return }
+    if (Number(form.budget_accelerator_hours) <= 0) { setError('Budget must be > 0'); return }
     setSubmitting(true)
     setError(null)
     try {
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || '',
-        budget_t4_hours: Number(form.budget_t4_hours),
+        budget_accelerator_hours: Number(form.budget_accelerator_hours),
         budget_cpu_core_hours: Number(form.budget_cpu_core_hours) || 0,
         // RAM/storage hours budgets are deprecated/frozen (see Class B in
         // SCHEDULING_GENERALIZATION_PLAN.md) — always submit untracked (0); the backend no
@@ -431,9 +431,9 @@ function ExperimentModal({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={LABEL_STYLE}>
-                  Total Compute Budget * <span style={{ fontWeight: 400, opacity: 0.7, textTransform: 'none' as const }} title="T4-GPU-hour equivalent — every accelerator type is billed against this one normalized unit, not just literal T4 GPUs">(T4h-equivalent)</span>
+                  Total Compute Budget * <span style={{ fontWeight: 400, opacity: 0.7, textTransform: 'none' as const }} title="H100-equivalent accelerator-hour — every accelerator type is billed against this one normalized unit (1 AccH = 1 H100-hour), not just literal H100 accelerators">(AccH-equivalent)</span>
                 </label>
-                <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_t4_hours} onChange={e => set('budget_t4_hours', e.target.value)} />
+                <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_accelerator_hours} onChange={e => set('budget_accelerator_hours', e.target.value)} />
               </div>
               <div>
                 <label style={LABEL_STYLE}>Max Agents</label>
@@ -523,7 +523,7 @@ export default function PlatformExperimentsPage() {
 
       <PageHeader
         title="Platform Experiments"
-        description="Operator-defined compute envelopes. Agents sign up and compete for T4h quota within each experiment."
+        description="Operator-defined compute envelopes. Agents sign up and compete for AccH quota within each experiment."
         actions={
           <>
             <Button size="sm" onClick={() => mutate()}>Refresh</Button>

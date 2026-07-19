@@ -23,11 +23,11 @@ type PlatformExperiment struct {
 	ID            string  `json:"id"`
 	Name          string  `json:"name"`
 	Description   string  `json:"description"`
-	BudgetT4Hours float64 `json:"budget_t4_hours"` // total compute in T4-GPU-hours
+	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
 	// BudgetCPUCoreHours is an optional additional resource budget tracked the same way as
-	// BudgetT4Hours (guaranteed/burst split, debited at submission, refunded on
+	// BudgetAcceleratorHours (guaranteed/burst split, debited at submission, refunded on
 	// completion/eviction). Zero means "not tracked for this platform experiment" — existing
-	// GPU-only platform experiments are unaffected.
+	// Accelerator-only platform experiments are unaffected.
 	BudgetCPUCoreHours float64 `json:"budget_cpu_core_hours,omitempty"`
 	// BudgetRAMGBHours/BudgetStorageGBHours: Deprecated. RAM/storage moved to Class B under
 	// SCHEDULING_GENERALIZATION_PLAN.md — hard physical-fit-checked at admission, never

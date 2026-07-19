@@ -14,9 +14,9 @@
 //
 //	CLUSTER_NAME        — this cluster's name as registered in clusters.yaml (default: default)
 //	CONTROLPLANE_URL    — base URL of scheduler-service (default: http://scheduler-service:8082)
-//	OPENRESEARCH_CONFIG — path to openresearch.yaml (default: settings/openresearch.yaml) — GPU
-//	                      type catalog and GPUResourceName, the k8s extended resource requested
-//	                      per GPU (execution-engine detail; agents never see this).
+//	OPENRESEARCH_CONFIG — path to openresearch.yaml (default: settings/openresearch.yaml) — Accelerator
+//	                      type catalog and AcceleratorResourceName, the k8s extended resource requested
+//	                      per accelerator (execution-engine detail; agents never see this).
 package main
 
 import (
@@ -55,19 +55,19 @@ func main() {
 	// no kubeconfig/context, which is exactly what a pod running inside the cluster has.
 	jwc, err := workload.New(workload.Config{
 		RegistryURL:     registryURL,
-		GPUResourceName: pcfg.GPUResourceName,
-		GPUTaintKey:     pcfg.GPUTaintKey,
+		AcceleratorResourceName: pcfg.AcceleratorResourceName,
+		AcceleratorTaintKey:     pcfg.AcceleratorTaintKey,
 		OpenResearchConfig: &workload.OpenResearchConfig{
 			NodeLabelByType:    pcfg.NodeLabelByType,
 			NodeLabelKeyByType: pcfg.NodeLabelKeyByType,
 			ResourceNameByType: pcfg.ResourceNameByType,
 			TaintKeyByType:     pcfg.TaintKeyByType,
-			// Required for GetLiveGPUCapacity's flavor lookup (nameByFlavor()) — without
+			// Required for GetLiveAcceleratorCapacity's flavor lookup (nameByFlavor()) — without
 			// these, OpenResearchConfig being non-nil short-circuits the built-in defaults
 			// fallback, and nameByFlavor() silently returns an empty map, so the desired-state
-			// poll's GPU capacity piggyback never has anything to report.
+			// poll's accelerator capacity piggyback never has anything to report.
 			NameByFlavor: pcfg.NameByFlavor,
-			GPUsByFlavor: pcfg.GPUsByFlavor,
+			AcceleratorsByFlavor: pcfg.AcceleratorsByFlavor,
 			FlavorOrder:  pcfg.FlavorOrder(),
 		},
 	})

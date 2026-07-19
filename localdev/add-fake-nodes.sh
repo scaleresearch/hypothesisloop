@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Adds extra simulated k3s nodes to the local dev cluster, each labeled with a different
-# fake GPU type — so acceptable_gpu_types / node-affinity variability can actually be
+# fake accelerator type — so acceptable_accelerator_types / node-affinity variability can actually be
 # exercised locally (a real multi-vendor/multi-model cluster has heterogeneous nodes; a
 # fresh `make k3s-up` only has the one node the podman VM (or bare host) itself is).
 #
@@ -44,7 +44,7 @@ if [[ ! "${EXTRA_NODES}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: EXTRA_NODES must be a non-negative integer, got '${EXTRA_NODES}'"; exit 1
 fi
 if [[ "${EXTRA_NODES}" -eq 0 ]]; then
-  echo "==> EXTRA_NODES=0, skipping fake multi-GPU-type nodes."
+  echo "==> EXTRA_NODES=0, skipping fake multi-accelerator-type nodes."
   exit 0
 fi
 
@@ -52,7 +52,7 @@ fi
 # resource_name/taint_key/node_label_key as the default node) — see openresearch.yaml's
 # commented MI300X entry for the AMD (different vendor plumbing) case, exercised
 # separately since it needs its own resource/taint/label keys, not just a different value.
-GPU_TYPES=(L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIe H100:NVIDIA-H100-80GB-HBM3 H200:NVIDIA-H200-141GB-HBM3)
+ACCELERATOR_TYPES=(L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIe H100:NVIDIA-H100-80GB-HBM3 H200:NVIDIA-H200-141GB-HBM3)
 
 vm() {
   ssh -i "${SSH_KEY}" -p "${SSH_PORT}" \
@@ -90,7 +90,7 @@ fi
 
 echo "==> Ensuring ${EXTRA_NODES} extra simulated k3s node container(s) are running..."
 for i in $(seq 1 "${EXTRA_NODES}"); do
-  NODE_NAME="fake-gpu-node-${i}"
+  NODE_NAME="fake-accelerator-node-${i}"
   if podman container exists "${NODE_NAME}" 2>/dev/null; then
     if [[ "$(podman inspect -f '{{.State.Running}}' "${NODE_NAME}" 2>/dev/null)" == "true" ]]; then
       echo "    ${NODE_NAME}: container already running, skipping"
@@ -116,7 +116,7 @@ done
 
 echo "==> Waiting for extra nodes to register..."
 for i in $(seq 1 "${EXTRA_NODES}"); do
-  NODE_NAME="fake-gpu-node-${i}"
+  NODE_NAME="fake-accelerator-node-${i}"
   for attempt in $(seq 1 30); do
     if kubectl --context "${CONTEXT_NAME}" get node "${NODE_NAME}" &>/dev/null; then
       break
@@ -137,7 +137,7 @@ done
 # are containers rather than the VM itself).
 echo "==> Importing workload images into fake node containers..."
 for i in $(seq 1 "${EXTRA_NODES}"); do
-  NODE_NAME="fake-gpu-node-${i}"
+  NODE_NAME="fake-accelerator-node-${i}"
   for img in openresearch-node-agent openresearch-cluster-agent openresearch-workload openresearch-robotics-workload; do
     if ! podman image exists "localhost/${img}:latest" 2>/dev/null; then
       continue
@@ -156,7 +156,7 @@ for i in $(seq 1 "${EXTRA_NODES}"); do
   echo "    ${NODE_NAME}: images imported"
 done
 
-echo "==> Labeling extra nodes with distinct fake GPU types (idempotent: patch/label --overwrite)..."
+echo "==> Labeling extra nodes with distinct fake accelerator types (idempotent: patch/label --overwrite)..."
 # The kubelet inside each fake-node container reports the *host's* full CPU/memory as node
 # capacity/allocatable (cAdvisor reads the machine it's running on, not the --cpus/--memory
 # cgroup quota podman applied to this specific container) — so a container hard-limited to
@@ -166,16 +166,16 @@ echo "==> Labeling extra nodes with distinct fake GPU types (idempotent: patch/l
 # the container can actually execute, so pods get severely CPU-throttled instead of properly
 # queued — showing up as scheduling-tick delays, admission timeouts, and jobs missing their
 # preemption/re-admission windows purely from wall-clock slowness, not real scheduler bugs.
-# Patch capacity/allocatable down to what the container can truly deliver (matching the GPU
+# Patch capacity/allocatable down to what the container can truly deliver (matching the accelerator
 # capacity patch's own pattern below), reserving ~20% of allocatable for the kubelet/flannel/
 # system pods that also run inside this same container, same as real kube-reserved sizing.
 CPU_ALLOCATABLE_MILLI=$(( FAKE_NODE_CPUS * 1000 * 80 / 100 ))
 MEM_CAPACITY_KI="${FAKE_NODE_MEMORY%[gG]}000000"
 MEM_ALLOCATABLE_KI=$(( MEM_CAPACITY_KI * 80 / 100 ))
 for i in $(seq 1 "${EXTRA_NODES}"); do
-  NODE_NAME="fake-gpu-node-${i}"
-  entry="${GPU_TYPES[$(( (i - 1) % ${#GPU_TYPES[@]} ))]}"
-  GPU_TYPE="${entry%%:*}"
+  NODE_NAME="fake-accelerator-node-${i}"
+  entry="${ACCELERATOR_TYPES[$(( (i - 1) % ${#ACCELERATOR_TYPES[@]} ))]}"
+  ACCELERATOR_TYPE="${entry%%:*}"
   LABEL_VALUE="${entry##*:}"
 
   # "add" on an existing capacity/allocatable key replaces its value (RFC 6902 semantics for
@@ -191,10 +191,10 @@ for i in $(seq 1 "${EXTRA_NODES}"); do
     ]" >/dev/null
   kubectl --context "${CONTEXT_NAME}" label node "${NODE_NAME}" \
     "nvidia.com/gpu.product=${LABEL_VALUE}" --overwrite >/dev/null
-  echo "    ${NODE_NAME} -> ${GPU_TYPE} (${LABEL_VALUE}), cpu=${FAKE_NODE_CPUS} (${CPU_ALLOCATABLE_MILLI}m allocatable), mem=${MEM_CAPACITY_KI}Ki (${MEM_ALLOCATABLE_KI}Ki allocatable)"
+  echo "    ${NODE_NAME} -> ${ACCELERATOR_TYPE} (${LABEL_VALUE}), cpu=${FAKE_NODE_CPUS} (${CPU_ALLOCATABLE_MILLI}m allocatable), mem=${MEM_CAPACITY_KI}Ki (${MEM_ALLOCATABLE_KI}Ki allocatable)"
 done
 
 echo "==> Cluster nodes:"
 kubectl --context "${CONTEXT_NAME}" get nodes -L nvidia.com/gpu.product
 echo "==> Done. Tear these down with localdev/destroy.sh, or"
-echo "    'podman rm -f \$(podman ps -aq --filter name=fake-gpu-node)' to stop them without a full teardown."
+echo "    'podman rm -f \$(podman ps -aq --filter name=fake-accelerator-node)' to stop them without a full teardown."

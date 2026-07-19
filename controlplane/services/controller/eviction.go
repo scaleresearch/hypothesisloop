@@ -11,7 +11,7 @@ import (
 	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
 )
 
-// evict marks the experiment EVICTED, terminates the backend workload, and refunds unused GPU
+// evict marks the experiment EVICTED, terminates the backend workload, and refunds unused accelerator
 // hours — status transition, eviction reason, and every resource-dimension refund happen in one
 // DB transaction (TransitionAndRefund), so a crash mid-eviction can never leave a durably
 // EVICTED experiment with a partial refund.

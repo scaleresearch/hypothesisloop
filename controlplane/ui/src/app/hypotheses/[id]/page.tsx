@@ -8,7 +8,7 @@ import type { PlatformExperiment } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
-import { formatT4h } from '@/lib/format'
+import { formatAccH } from '@/lib/format'
 
 function relTime(iso: string) {
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -113,7 +113,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>Agent</th>
                 <th>Status</th>
                 <th>Tier</th>
-                <th>GPU</th>
+                <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
                 <th style={{ textAlign: 'right' }}>Final Metric</th>
                 <th>Submitted</th>
@@ -129,7 +129,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               ) : jobs.map(job => {
                 const j = job as any
                 const status = j.status ?? 'UNKNOWN'
-                const cost = j.estimated_cost_t4h != null ? formatT4h(j.estimated_cost_t4h) : null
+                const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
                   <tr
                     key={job.id}
@@ -143,9 +143,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     <td className="mono">{job.agent_id}</td>
                     <td><Badge status={status}>{status}</Badge></td>
                     <td><TierBadge tier={j.capacity_tier} /></td>
-                    <td className="mono" style={{ fontSize: 11 }}>{j.gpu_count}× {j.gpu_type}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {j.accelerator_type}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
-                      {cost != null ? `${cost} T4h` : '—'}
+                      {cost != null ? `${cost} AccH` : '—'}
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>
                       <span className={j.final_metric_value != null ? 'accent' : 'text-muted'}>

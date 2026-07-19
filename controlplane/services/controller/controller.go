@@ -14,7 +14,7 @@ import (
 // Note: silence detection and observed-cost accounting are pure GreptimeDB queries (see
 // isAlive/observedElapsedHours in this package) — nothing about "how long has this job run" is
 // ever cached in this process's memory.
-// CPU/GPU utilization is never stored here — it lives in-memory in the node-agent window.
+// CPU/Accelerator utilization is never stored here — it lives in-memory in the node-agent window.
 type Store interface {
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error

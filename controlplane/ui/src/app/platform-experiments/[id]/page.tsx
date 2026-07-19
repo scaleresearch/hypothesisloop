@@ -26,7 +26,7 @@ import { MetricBar } from '@/components/ui/metric-bar'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
-import { formatT4h } from '@/lib/format'
+import { formatAccH } from '@/lib/format'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -460,7 +460,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   }
 
   const scoreboard = buildScoreboard(experiments ?? [], quotas ?? [], metrics, metricBestsByAgent)
-  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_t4h + q.used_burst_t4h, 0)
+  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
 
   // Running experiments
   const running = (experiments ?? []).filter(e => e.status === 'RUNNING')
@@ -621,9 +621,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       <Pod>
         <PodContent>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 16 }}>
-            <StatTile label="Budget" value={`${pe.budget_t4_hours} T4h`} />
+            <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
-            <StatTile label="Budget Used" value={`${formatT4h(totalUsed)} T4h`} />
+            <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
             <StatTile label="Jobs" value={(experiments?.length ?? 0).toString()} />
             <StatTile label="Running" value={running.length.toString()} color={running.length > 0 ? semantic.success : undefined} />
             <StatTile label="Hypotheses" value={(hypotheses?.length ?? 0).toString()} color={semantic.accent} />
@@ -663,8 +663,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               <tbody>
                 {scoreboard.map((entry, i) => {
                   const quota = (quotas ?? []).find(q => q.agent_id === entry.agentId)
-                  const usedT4h = quota ? quota.used_guaranteed_t4h + quota.used_burst_t4h : 0
-                  const totalT4h = quota ? quota.guaranteed_t4_hours + quota.burst_t4_hours : 0
+                  const usedAccH = quota ? quota.used_guaranteed_acch + quota.used_burst_acch : 0
+                  const totalAccH = quota ? quota.guaranteed_accelerator_hours + quota.burst_accelerator_hours : 0
                   const isHeld = phase2Status?.phase === 2 && phase2Status.held_agents.includes(entry.agentId)
                   const isActive = phase2Status?.phase === 2 && phase2Status.active_agents.includes(entry.agentId)
                   const isExpanded = expandedAgentId === entry.agentId
@@ -697,8 +697,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         <td className="mono" style={{ textAlign: 'right' }}>{entry.jobCount}</td>
                         <td className="mono" style={{ textAlign: 'right' }}>{entry.completedCount}</td>
                         <td style={{ width: 160 }}>
-                          {totalT4h > 0 ? (
-                            <MetricBar value={usedT4h} max={totalT4h} />
+                          {totalAccH > 0 ? (
+                            <MetricBar value={usedAccH} max={totalAccH} />
                           ) : <span className="text-muted">no quota</span>}
                         </td>
                       </tr>
@@ -732,7 +732,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 <tr>
                   <th>Experiment ID</th>
                   <th>Agent</th>
-                  <th>GPU</th>
+                  <th>Accelerator</th>
                   <th style={{ textAlign: 'right' }}>Est. Cost</th>
                   <th>Hypothesis</th>
                 </tr>
@@ -744,8 +744,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <Link href={`/jobs/${exp.id}`} className="text-link">{exp.id.slice(0, 8)}…</Link>
                     </td>
                     <td className="mono">{exp.agent_id}</td>
-                    <td className="mono">{exp.gpu_count}× {exp.gpu_type}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{exp.estimated_cost_t4h?.toFixed(1) ?? '—'} T4h</td>
+                    <td className="mono">{exp.accelerator_count}× {exp.accelerator_type}</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>{exp.estimated_cost_acch?.toFixed(1) ?? '—'} AccH</td>
                     <td style={{ fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.hypothesis}</td>
                   </tr>
                 ))}
@@ -799,7 +799,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               <tbody>
                 {recent.map(exp => {
                   const metric = (exp as any).final_metric ?? (exp as any).final_metric_value
-                  const cost = (exp as any).actual_cost_t4h ?? exp.actual_cost_t4h
+                  const cost = (exp as any).actual_cost_acch ?? exp.actual_cost_acch
                   return (
                     <tr key={exp.id}>
                       <td className="mono" style={{ fontSize: 11 }}>
@@ -808,7 +808,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <td className="mono">{exp.agent_id}</td>
                       <td><StatusBadge status={exp.status} /></td>
                       <td className="mono" style={{ textAlign: 'right' }}>{metric != null ? metric.toFixed(4) : '—'}</td>
-                      <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatT4h(cost)} T4h` : '—'}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
                       <td className="text-dim">{new Date(exp.created_at).toLocaleString()}</td>
                     </tr>
                   )
@@ -836,19 +836,19 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               </thead>
               <tbody>
                 {quotas.map(q => {
-                  const gRem = q.guaranteed_t4_hours - q.used_guaranteed_t4h
-                  const bRem = q.burst_t4_hours - q.used_burst_t4h
+                  const gRem = q.guaranteed_accelerator_hours - q.used_guaranteed_acch
+                  const bRem = q.burst_accelerator_hours - q.used_burst_acch
                   return (
                     <tr key={q.id}>
                       <td className="mono" style={{ fontWeight: 600 }}>{q.agent_id}</td>
-                      <td className="mono" style={{ fontSize: 11 }}>{formatT4h(q.used_guaranteed_t4h)} / {formatT4h(q.guaranteed_t4_hours)} T4h</td>
-                      <td className="mono" style={{ fontSize: 11 }}>{formatT4h(q.used_burst_t4h)} / {formatT4h(q.burst_t4_hours)} T4h</td>
+                      <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
+                      <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
                       <td className="mono" style={{ fontSize: 11, color: gRem + bRem > 0 ? semantic.success : semantic.danger }}>
-                        {formatT4h(Math.max(0, gRem) + Math.max(0, bRem))} T4h
+                        {formatAccH(Math.max(0, gRem) + Math.max(0, bRem))} AccH
                       </td>
                       {!!pe.budget_cpu_core_hours && (
                         <td className="mono" style={{ fontSize: 11 }}>
-                          {formatT4h((q.used_guaranteed_cpu_core_h ?? 0) + (q.used_burst_cpu_core_h ?? 0))} / {formatT4h((q.guaranteed_cpu_core_hours ?? 0) + (q.burst_cpu_core_hours ?? 0))}
+                          {formatAccH((q.used_guaranteed_cpu_core_h ?? 0) + (q.used_burst_cpu_core_h ?? 0))} / {formatAccH((q.guaranteed_cpu_core_hours ?? 0) + (q.burst_cpu_core_hours ?? 0))}
                         </td>
                       )}
                     </tr>
@@ -882,7 +882,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 {relevantDonations.map(d => (
                   <tr key={d.id}>
                     <td className="mono" style={{ fontWeight: 600 }}>{d.agent_name || d.agent_id}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{d.credits_want} T4h</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>{d.credits_want} AccH</td>
                     <td style={{ fontSize: 12 }}>{d.reason}</td>
                     <td className="text-dim">{new Date(d.created_at).toLocaleString()}</td>
                   </tr>

@@ -81,7 +81,7 @@ func acceleratorTypeChanges(ctx context.Context, dbURL, experimentID string, sin
 // A grid point before the *earliest* known event (possible if a marker write failed, or on a
 // re-admission whose marker lands after the new pod's first heartbeat) is backfilled with that
 // earliest type rather than dropped — an untyped alive point would otherwise be silently omitted
-// from GPUHoursByType, under-billing exactly the interval the job was demonstrably running.
+// from AcceleratorHoursByType, under-billing exactly the interval the job was demonstrably running.
 func acceleratorTypeAtGrid(ctx context.Context, dbURL, experimentID string, changesSince, since, now time.Time, step time.Duration) (map[int64]string, error) {
 	changes, err := acceleratorTypeChanges(ctx, dbURL, experimentID, changesSince, now, step)
 	if err != nil {
@@ -103,38 +103,38 @@ func acceleratorTypeAtGrid(ctx context.Context, dbURL, experimentID string, chan
 	return grid, nil
 }
 
-// GPUHoursByType returns, for experimentID, confirmed-alive hours bucketed by accelerator type —
-// the direct answer to "how many GPU-hours per GPU type did this job consume", correct across a
+// AcceleratorHoursByType returns, for experimentID, confirmed-alive hours bucketed by accelerator type —
+// the direct answer to "how many accelerator-hours per accelerator type did this job consume", correct across a
 // mid-run reschedule onto a different type: each alive grid point is billed under whichever type
 // was actually active at that point, not one flat rate for the job's whole observed lifetime.
 //
 // An experiment with no accelerator-type marker at all within maxLookback (a CPU-only job) yields
-// an empty map and therefore zero GPU cost — that is the only case where alive time goes unbilled.
+// an empty map and therefore zero accelerator cost — that is the only case where alive time goes unbilled.
 // Once any marker exists, every alive grid point is attributed to some type (see
-// acceleratorTypeAtGrid), so observed runtime can never be silently dropped from a GPU job's bill.
+// acceleratorTypeAtGrid), so observed runtime can never be silently dropped from an accelerator job's bill.
 // Callers that need a total across types should use ObservedElapsedHours, which doesn't require a
 // type label at all.
-func GPUHoursByType(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (map[string]float64, error) {
+func AcceleratorHoursByType(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (map[string]float64, error) {
 	if step <= 0 {
 		return nil, nil
 	}
 	since, ok, err := FirstObserved(ctx, dbURL, experimentID, now, maxLookback, step)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.GPUHoursByType: %w", err)
+		return nil, fmt.Errorf("metricsdb.AcceleratorHoursByType: %w", err)
 	}
 	if !ok || !now.After(since) {
 		return nil, nil
 	}
 	aliveGrid, err := unionAliveGrid(ctx, dbURL, experimentID, since, now, gapCap, step)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.GPUHoursByType: %w", err)
+		return nil, fmt.Errorf("metricsdb.AcceleratorHoursByType: %w", err)
 	}
 	// Scan for type markers from the same horizon FirstObserved searched, not from `since`: the
 	// marker predates the first heartbeat by however long the pod took to schedule and pull its
 	// image (see acceleratorTypeAtGrid).
 	typeGrid, err := acceleratorTypeAtGrid(ctx, dbURL, experimentID, now.Add(-maxLookback), since, now, step)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.GPUHoursByType: %w", err)
+		return nil, fmt.Errorf("metricsdb.AcceleratorHoursByType: %w", err)
 	}
 	hours := make(map[string]float64)
 	for ts := range aliveGrid {
@@ -147,17 +147,17 @@ func GPUHoursByType(ctx context.Context, dbURL, experimentID string, now time.Ti
 	return hours, nil
 }
 
-// ObservedGPUCost returns experimentID's true GPU cost — Σ over each accelerator type it actually
-// ran on of (hours on that type × gpuCount × that type's own rate) — replacing the old
-// elapsedHours × gpuCount × exp.GPUType.Cost() flat-rate formula, which silently mischarged any
+// ObservedAcceleratorCost returns experimentID's true accelerator cost — Σ over each accelerator type it actually
+// ran on of (hours on that type × acceleratorCount × that type's own rate) — replacing the old
+// elapsedHours × acceleratorCount × exp.AcceleratorType.Cost() flat-rate formula, which silently mischarged any
 // job that changed accelerator type mid-run (a real scenario: a burst job preempted and later
-// re-admitted can land on a different type than it started on). gpuCount is passed in rather than
+// re-admitted can land on a different type than it started on). acceleratorCount is passed in rather than
 // read from the type series because it doesn't vary by type — a job requests N accelerators and
 // keeps requesting N regardless of which type fills that request.
-func ObservedGPUCost(ctx context.Context, dbURL, experimentID string, gpuCount int, now time.Time, maxLookback, gapCap, step time.Duration) (float64, error) {
-	byType, err := GPUHoursByType(ctx, dbURL, experimentID, now, maxLookback, gapCap, step)
+func ObservedAcceleratorCost(ctx context.Context, dbURL, experimentID string, acceleratorCount int, now time.Time, maxLookback, gapCap, step time.Duration) (float64, error) {
+	byType, err := AcceleratorHoursByType(ctx, dbURL, experimentID, now, maxLookback, gapCap, step)
 	if err != nil {
-		return 0, fmt.Errorf("metricsdb.ObservedGPUCost: %w", err)
+		return 0, fmt.Errorf("metricsdb.ObservedAcceleratorCost: %w", err)
 	}
 	var cost float64
 	for accType, hours := range byType {
@@ -167,11 +167,11 @@ func ObservedGPUCost(ctx context.Context, dbURL, experimentID string, gpuCount i
 		// silently settle those hours at the arbitrary 1.0 (T4) fallback rate — the caller
 		// already treats an error here as "skip this refund pass, retry next reconcile",
 		// exactly the same contract as any other query error.
-		rate, ok := domain.GPUType(accType).LookupCost()
+		rate, ok := domain.AcceleratorType(accType).LookupCost()
 		if !ok {
-			return 0, fmt.Errorf("metricsdb.ObservedGPUCost: experiment %s: no registered rate for accelerator type %q", experimentID, accType)
+			return 0, fmt.Errorf("metricsdb.ObservedAcceleratorCost: experiment %s: no registered rate for accelerator type %q", experimentID, accType)
 		}
-		cost += hours * float64(gpuCount) * rate
+		cost += hours * float64(acceleratorCount) * rate
 	}
 	return cost, nil
 }

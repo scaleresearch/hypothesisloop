@@ -103,16 +103,16 @@ func (a *agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 		url = fmt.Sprintf("%s?cpu_available_cores=%.3f&cpu_total_cores=%.3f", url, avail, total)
 	}
 
-	// Same idea per GPU flavor, JSON-encoded since it's a map rather than a scalar. The control
+	// Same idea per accelerator flavor, JSON-encoded since it's a map rather than a scalar. The control
 	// plane writes these straight to the metrics store (never Postgres) — see clusteragentapi.
-	if gpuAvail, gpuTotal, err := a.jwc.GetLiveGPUCapacity(ctx); err != nil {
-		fmt.Printf("[cluster-agent] get live GPU capacity: %v\n", err)
-	} else if len(gpuAvail) > 0 {
-		availJSON, _ := json.Marshal(gpuAvail)
-		totalJSON, _ := json.Marshal(gpuTotal)
+	if acceleratorAvail, acceleratorTotal, err := a.jwc.GetLiveAcceleratorCapacity(ctx); err != nil {
+		fmt.Printf("[cluster-agent] get live accelerator capacity: %v\n", err)
+	} else if len(acceleratorAvail) > 0 {
+		availJSON, _ := json.Marshal(acceleratorAvail)
+		totalJSON, _ := json.Marshal(acceleratorTotal)
 		q := neturl.Values{}
-		q.Set("gpu_available_by_flavor", string(availJSON))
-		q.Set("gpu_total_by_flavor", string(totalJSON))
+		q.Set("accelerator_available_by_flavor", string(availJSON))
+		q.Set("accelerator_total_by_flavor", string(totalJSON))
 		sep := "&"
 		if !strings.Contains(url, "?") {
 			sep = "?"
@@ -121,7 +121,7 @@ func (a *agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 	}
 
 	// RAM/ephemeral-storage: Class B (hard-cap, no billing) dimensions — see
-	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2. Same fast-poll piggyback as CPU/GPU
+	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2. Same fast-poll piggyback as CPU/Accelerator
 	// above, in bytes, so the control plane can joint-fit a mixed job's memory/storage request
 	// against real cluster state instead of trusting it fits unconditionally.
 	if ramAvail, ramTotal, err := a.jwc.GetLiveRAMCapacity(ctx); err != nil {

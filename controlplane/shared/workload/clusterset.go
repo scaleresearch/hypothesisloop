@@ -110,13 +110,13 @@ func (cs *ClusterSet) PollJobPhase(ctx context.Context, exp *domain.Experiment) 
 	return c.PollJobPhase(ctx, exp.ID)
 }
 
-// GetAdmittedGPUType routes to the cluster named by exp.ClusterName (or the default cluster).
-func (cs *ClusterSet) GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment) domain.GPUType {
+// GetAdmittedAcceleratorType routes to the cluster named by exp.ClusterName (or the default cluster).
+func (cs *ClusterSet) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType {
 	c := cs.forExperiment(exp)
 	if c == nil {
-		return exp.GPUType
+		return exp.AcceleratorType
 	}
-	return c.GetAdmittedGPUType(ctx, exp)
+	return c.GetAdmittedAcceleratorType(ctx, exp)
 }
 
 // WaitForJobDeletion routes to the cluster named by exp.ClusterName (or the default cluster).
@@ -128,7 +128,7 @@ func (cs *ClusterSet) WaitForJobDeletion(ctx context.Context, exp *domain.Experi
 	return c.WaitForJobDeletion(ctx, exp.ID, timeout)
 }
 
-// GetFlavorCapacity returns nominal GPU slot capacity per flavor, broken out per configured
+// GetFlavorCapacity returns nominal accelerator slot capacity per flavor, broken out per configured
 // cluster (guaranteed[cluster][flavor], burst[cluster][flavor]) — capacity is derived from
 // static config (not live cluster state) and is identical across clusters today, but each
 // cluster still gets its own entry so admission can reason about per-cluster room.

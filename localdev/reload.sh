@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rebuilds every image from current source and pushes the result into every place that
-# caches one: podman's local store, the k3s server's containerd, and each fake-gpu-node
+# caches one: podman's local store, the k3s server's containerd, and each fake-accelerator-node
 # container's own containerd (each is a separate container with its own containerd, so a
 # `make images` alone never reaches them — see add-fake-nodes.sh's comment on this). Then
 # force-recreates the control-plane containers and bounces the cluster-agent/node-agent
@@ -49,7 +49,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
   FAKE_NODES=()
   while IFS= read -r node; do
     [[ -n "${node}" ]] && FAKE_NODES+=("${node}")
-  done < <(podman ps --format '{{.Names}}' --filter name=fake-gpu-node)
+  done < <(podman ps --format '{{.Names}}' --filter name=fake-accelerator-node)
   if [[ "${#FAKE_NODES[@]}" -gt 0 ]]; then
     echo "==> Importing images into ${#FAKE_NODES[@]} fake node container(s)..."
     for node in "${FAKE_NODES[@]}"; do

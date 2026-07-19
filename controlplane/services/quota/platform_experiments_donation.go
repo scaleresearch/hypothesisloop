@@ -29,8 +29,8 @@ const (
 	DonationReasonInsufficientQuota = "insufficient_quota"
 )
 
-// FulfillDonation transfers T4h from donor to recipient within a platform experiment.
-// Debits donor's guaranteed_t4_hours and credits recipient's guaranteed_t4_hours.
+// FulfillDonation transfers AccH from donor to recipient within a platform experiment.
+// Debits donor's guaranteed_accelerator_hours and credits recipient's guaranteed_accelerator_hours.
 // The donation must have a platform_experiment_id; the donor must have sufficient available quota.
 func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donationID, donorAgentID string) error {
 	req, err := s.store.GetDonationRequest(ctx, donationID)
@@ -62,7 +62,7 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 		if donorQuota != nil {
 			avail = donorQuota.AvailableGuaranteed()
 		}
-		return &DonationError{Reason: DonationReasonInsufficientQuota, Message: fmt.Sprintf("donor has %.2f T4h available, need %.2f", avail, req.CreditsWant)}
+		return &DonationError{Reason: DonationReasonInsufficientQuota, Message: fmt.Sprintf("donor has %.2f AccH available, need %.2f", avail, req.CreditsWant)}
 	}
 
 	// One atomic, idempotent transaction locks the donation + both quota rows, re-verifies the
@@ -70,8 +70,8 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 	// Gating on "open" inside the tx makes a retry after a partial failure a safe no-op instead of
 	// a double transfer. The headroom re-check inside the tx (against the metrics-store reserved
 	// total passed here) is the authoritative guard; an error from it means a concurrent donation
-	// raced this one past the donor's balance. Donations are GPU-hours only today.
-	fulfilled, err := s.store.FulfillDonationTx(ctx, donationID, donorAgentID, req.AgentID, req.PlatformExperimentID, domain.ResourceGPUHours, req.CreditsWant, donorQuota.UsedGuaranteedT4H)
+	// raced this one past the donor's balance. Donations are accelerator-hours only today.
+	fulfilled, err := s.store.FulfillDonationTx(ctx, donationID, donorAgentID, req.AgentID, req.PlatformExperimentID, domain.ResourceAcceleratorHours, req.CreditsWant, donorQuota.UsedGuaranteedAccH)
 	if err != nil {
 		return fmt.Errorf("FulfillDonation: transfer: %w", err)
 	}

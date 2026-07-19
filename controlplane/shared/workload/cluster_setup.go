@@ -17,7 +17,7 @@ var defaultNameByFlavor = map[string]string{
 	"flavor-h100": "H100", "flavor-h200": "H200",
 }
 
-var defaultGPUsByFlavor = map[string]int{
+var defaultAcceleratorsByFlavor = map[string]int{
 	"flavor-t4": 64, "flavor-l40": 16, "flavor-a100": 8, "flavor-h100": 4, "flavor-h200": 2,
 }
 
@@ -35,20 +35,20 @@ func (c *JobWorkloadClient) nameByFlavor() map[string]string {
 	return defaultNameByFlavor
 }
 
-func (c *JobWorkloadClient) gpusByFlavor() map[string]int {
+func (c *JobWorkloadClient) acceleratorsByFlavor() map[string]int {
 	if c.pcfg != nil {
-		return c.pcfg.GPUsByFlavor
+		return c.pcfg.AcceleratorsByFlavor
 	}
-	return defaultGPUsByFlavor
+	return defaultAcceleratorsByFlavor
 }
 
-// gpuNominalCapacity returns the nominal GPU slot count per flavor from config (or the
+// acceleratorNominalCapacity returns the nominal accelerator slot count per flavor from config (or the
 // PoC defaults). This is the only resource dimension the scheduler admits/preempts on —
 // CPU, memory, and storage are not modeled.
-func (c *JobWorkloadClient) gpuNominalCapacity() map[string]int64 {
-	gpus := c.gpusByFlavor()
-	out := make(map[string]int64, len(gpus))
-	for flavor, count := range gpus {
+func (c *JobWorkloadClient) acceleratorNominalCapacity() map[string]int64 {
+	accelerators := c.acceleratorsByFlavor()
+	out := make(map[string]int64, len(accelerators))
+	for flavor, count := range accelerators {
 		out[flavor] = int64(count)
 	}
 	return out

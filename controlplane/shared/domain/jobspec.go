@@ -18,20 +18,20 @@ type JobSpec struct {
 	Env map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
 	// CPU/Memory/Storage are plain resource-quantity strings (e.g. "4", "16Gi") for the
-	// non-GPU resources each node gets. Empty means "use the operator's per-cluster default".
+	// non-Accelerator resources each node gets. Empty means "use the operator's per-cluster default".
 	// Storage is ephemeral scratch space (k8s ephemeral-storage) — not a persistent volume.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
 
-	// GPUType is the hardware tier this run is billed against (T4/L40/A100/H100/H200).
-	GPUType GPUType `json:"gpu_type" yaml:"gpu_type"`
-	// GPUCount is GPUs requested per node (not the job total — see TotalGPUs).
-	GPUCount int `json:"gpu_count" yaml:"gpu_count"`
-	// AcceptableGPUTypes, if set, lets the run land on any of these hardware tiers
-	// interchangeably (e.g. H100 or H200) instead of requiring exactly GPUType. The rate
+	// AcceleratorType is the hardware tier this run is billed against (T4/L40/A100/H100/H200).
+	AcceleratorType AcceleratorType `json:"accelerator_type" yaml:"accelerator_type"`
+	// AcceleratorCount is accelerators requested per node (not the job total — see TotalAccelerators).
+	AcceleratorCount int `json:"accelerator_count" yaml:"accelerator_count"`
+	// AcceptableAcceleratorTypes, if set, lets the run land on any of these hardware tiers
+	// interchangeably (e.g. H100 or H200) instead of requiring exactly AcceleratorType. The rate
 	// charged is still adjusted to whichever tier it actually lands on.
-	AcceptableGPUTypes []GPUType `json:"acceptable_gpu_types,omitempty" yaml:"acceptable_gpu_types,omitempty"`
+	AcceptableAcceleratorTypes []AcceleratorType `json:"acceptable_accelerator_types,omitempty" yaml:"acceptable_accelerator_types,omitempty"`
 
 	// NumNodes is how many identical nodes this job spans. 1 (default) is a plain
 	// single-node job; >1 requests a distributed run — the backend handles rank
@@ -52,16 +52,16 @@ type JobSpec struct {
 
 	// ShmSize sets the size of /dev/shm (e.g. "4Gi"). k8s defaults /dev/shm to a tiny
 	// tmpfs, which silently breaks PyTorch's multiprocess DataLoader workers and NCCL's
-	// shared-memory IPC — both need real shared memory for multi-GPU/multi-process
+	// shared-memory IPC — both need real shared memory for multi-Accelerator/multi-process
 	// training. Empty means "use the operator's per-cluster default".
 	ShmSize string `json:"shm_size,omitempty" yaml:"shm_size,omitempty"`
 
-	// ExtraResources requests any k8s extended resource GPUType/GPUCount doesn't cover —
+	// ExtraResources requests any k8s extended resource AcceleratorType/AcceleratorCount doesn't cover —
 	// TPUs (google.com/tpu), other AI accelerators (habana.ai/gaudi, aws.amazon.com/neuron,
 	// ...), or anything else a device plugin advertises — as plain quantity strings per node
 	// (e.g. {"google.com/tpu": "8"}), same convention as CPU/Memory/Storage. These are NOT
 	// billed or capped by the quota system today (no rate/cap exists for an open-ended
-	// resource-name map, unlike the fixed GPU/CPU/RAM/storage dimensions) — they pass straight
+	// resource-name map, unlike the fixed accelerator/CPU/RAM/storage dimensions) — they pass straight
 	// through to the pod's resource requests/limits so a job can still get scheduled onto the
 	// right hardware; add a matching budget dimension if/when one of these needs billing.
 	ExtraResources map[string]string `json:"extra_resources,omitempty" yaml:"extra_resources,omitempty"`
@@ -74,7 +74,7 @@ type JobSpec struct {
 // compile it into their own native placement/gang-scheduling primitives.
 type TopologySpec struct {
 	// SpreadAcrossHosts requires no two of this job's nodes to land on the same physical
-	// host — the whole point of NumNodes > 1 is more physical GPUs, so two ranks sharing a
+	// host — the whole point of NumNodes > 1 is more physical accelerators, so two ranks sharing a
 	// host silently halves your real parallelism. Defaults to true whenever NumNodes > 1
 	// (set explicitly to false only for local/dev clusters with fewer hosts than NumNodes).
 	SpreadAcrossHosts *bool `json:"spread_across_hosts,omitempty" yaml:"spread_across_hosts,omitempty"`
@@ -87,10 +87,10 @@ type TopologySpec struct {
 	SameZone bool `json:"same_zone,omitempty" yaml:"same_zone,omitempty"`
 }
 
-// TotalGPUs returns the job's total GPU footprint across all nodes (GPUCount × NumNodes),
+// TotalAccelerators returns the job's total accelerator footprint across all nodes (AcceleratorCount × NumNodes),
 // which is what admission/quota/eviction actually reserve and bill against.
-func (j JobSpec) TotalGPUs() int {
-	return j.GPUCount * j.Nodes()
+func (j JobSpec) TotalAccelerators() int {
+	return j.AcceleratorCount * j.Nodes()
 }
 
 // Nodes returns NumNodes, floored at 1 (0/unset means a plain single-node job).

@@ -67,9 +67,9 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 type CreatePlatformExperimentRequest struct {
 	Name          string  `json:"name"`
 	Description   string  `json:"description"`
-	BudgetT4Hours float64 `json:"budget_t4_hours"`
+	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
 	// BudgetCPUCoreHours/BudgetRAMGBHours/BudgetStorageGBHours are optional; 0 means that
-	// resource dimension isn't tracked for this platform experiment (GPU-only, as before).
+	// resource dimension isn't tracked for this platform experiment (Accelerator-only, as before).
 	BudgetCPUCoreHours    float64                   `json:"budget_cpu_core_hours,omitempty"`
 	BudgetRAMGBHours      float64                   `json:"budget_ram_gb_hours,omitempty"`
 	BudgetStorageGBHours  float64                   `json:"budget_storage_gb_hours,omitempty"`

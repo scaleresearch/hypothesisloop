@@ -49,10 +49,10 @@ func (c *Controller) observedElapsedHours(ctx context.Context, experimentID stri
 	return metricsdb.ObservedElapsedHours(ctx, c.metricsDBURL, experimentID, now, c.observedMaxLookback(), c.observedGapCap(), c.observedStep())
 }
 
-// observedGPUCost returns experimentID's true GPU cost, billed per accelerator type it actually
-// ran on — see metricsdb.ObservedGPUCost. This replaces elapsedHours × gpuCount × exp.GPUType.Cost()
-// everywhere a job's real GPU spend is computed, so a job rescheduled onto a different type
+// observedAcceleratorCost returns experimentID's true accelerator cost, billed per accelerator type it actually
+// ran on — see metricsdb.ObservedAcceleratorCost. This replaces elapsedHours × acceleratorCount × exp.AcceleratorType.Cost()
+// everywhere a job's real accelerator spend is computed, so a job rescheduled onto a different type
 // mid-run is billed correctly for each segment instead of one flat rate for its whole lifetime.
-func (c *Controller) observedGPUCost(ctx context.Context, experimentID string, gpuCount int, now time.Time) (float64, error) {
-	return metricsdb.ObservedGPUCost(ctx, c.metricsDBURL, experimentID, gpuCount, now, c.observedMaxLookback(), c.observedGapCap(), c.observedStep())
+func (c *Controller) observedAcceleratorCost(ctx context.Context, experimentID string, acceleratorCount int, now time.Time) (float64, error) {
+	return metricsdb.ObservedAcceleratorCost(ctx, c.metricsDBURL, experimentID, acceleratorCount, now, c.observedMaxLookback(), c.observedGapCap(), c.observedStep())
 }

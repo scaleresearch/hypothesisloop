@@ -8,7 +8,7 @@ import (
 
 // This file introduces the canonical multi-dimensional resource primitives used for physical
 // fit checks (see SCHEDULING_GENERALIZATION_PLAN.md, Class A step 3). They are intentionally
-// separate from the hours-based billing dimensions in gpu.go (ResourceType/CapacityTier): a
+// separate from the hours-based billing dimensions in accelerator.go (ResourceType/CapacityTier): a
 // Footprint answers "does this fit right now," in canonical integer units, on one cluster; it
 // carries no notion of guaranteed/burst or a time dimension at all.
 
@@ -116,14 +116,14 @@ func Fits(capacity, footprint Footprint) bool {
 // truncation used, but with millicore granularity so a capacity check against a fractional-CPU
 // job doesn't lose precision). ramBytes/storageBytes are already integer bytes — pass 0 if a
 // cluster has no fresh report for that dimension (Fits() then fails closed for any job that
-// actually needs it, per the plan's "fail closed on stale/missing capacity" fix). gpuByFlavor
-// keys must already be GPUType.FlavorName()-shaped, matching
+// actually needs it, per the plan's "fail closed on stale/missing capacity" fix). acceleratorByFlavor
+// keys must already be AcceleratorType.FlavorName()-shaped, matching
 // JobSpec.Footprint()/Experiment.Footprint()'s accelerator key convention, or Fits() will never
 // match them.
-func CapacityFootprint(cpuCores float64, gpuByFlavor map[string]int64, ramBytes, storageBytes int64) Footprint {
+func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, ramBytes, storageBytes int64) Footprint {
 	fp := NewFootprint()
 	fp.Add(ResourceKey{Kind: ResourceKindCPU}, int64(cpuCores*1000))
-	for flavor, n := range gpuByFlavor {
+	for flavor, n := range acceleratorByFlavor {
 		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: flavor}, n)
 	}
 	fp.Add(ResourceKey{Kind: ResourceKindMemory}, ramBytes)
@@ -165,14 +165,14 @@ func (j JobSpec) Footprint() (Footprint, error) {
 		}
 		perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
 	}
-	if j.GPUCount > 0 {
-		if j.GPUType == "" {
-			return nil, fmt.Errorf("job.gpu_type is required when job.gpu_count > 0")
+	if j.AcceleratorCount > 0 {
+		if j.AcceleratorType == "" {
+			return nil, fmt.Errorf("job.accelerator_type is required when job.accelerator_count > 0")
 		}
-		// Flavor uses the same GPUType.FlavorName() convention capacity reporting keys on
+		// Flavor uses the same AcceleratorType.FlavorName() convention capacity reporting keys on
 		// (e.g. "flavor-t4", not "T4") so Fits() actually matches a job's accelerator dimension
 		// against the right capacity entry.
-		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: j.GPUType.FlavorName()}, int64(j.GPUCount))
+		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: j.AcceleratorType.FlavorName()}, int64(j.AcceleratorCount))
 	}
 	for name, qty := range j.ExtraResources {
 		q, err := resource.ParseQuantity(qty)

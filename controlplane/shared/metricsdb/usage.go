@@ -34,7 +34,7 @@ const (
 //
 // Every sample is tagged with experiment_id, so each job owns its own series — an "agent's used
 // hours" bucket is never itself stored, only ever computed by summing that agent's per-job series
-// at read time (sumUsed, TotalObservedT4H). This is what makes job completion/eviction accounting
+// at read time (sumUsed, TotalObservedAccH). This is what makes job completion/eviction accounting
 // idempotent: writing a job's final cost (SetObserved) is an absolute set against that job's own
 // series, so replaying the same completion event twice (e.g. after a crash) writes the same value
 // instead of double-refunding or double-debiting — there is no shared counter for two writes to
@@ -112,7 +112,7 @@ func (t *UsageTracker) jobUsed(ctx context.Context, agentID, platformExpID, expe
 
 // CheckAndDebit atomically (within this process) verifies the agent's aggregate used+amount
 // doesn't exceed limit and, if so, reserves amount against experimentID's own series. limit is
-// the bucket's allocation (guaranteed_t4_hours etc), read from Postgres by the caller — the only
+// the bucket's allocation (guaranteed_accelerator_hours etc), read from Postgres by the caller — the only
 // cross-store read this package needs.
 //
 // This is a reservation, not an observation: at admission time the job hasn't run yet, so there
@@ -167,7 +167,7 @@ func (t *UsageTracker) SetReservation(ctx context.Context, agentID, platformExpI
 // longer stands. Both are absolute sets against series only this job ever writes to, so replaying
 // this (a retried call, a crash-recovery replay) is idempotent and can never double-count.
 //
-// The split matters for phase-2/exhaustion (TotalObservedT4H), which reads only the observed
+// The split matters for phase-2/exhaustion (TotalObservedAccH), which reads only the observed
 // series: a still-queued or running job's reservation never counts toward the boundary, so a large
 // queued job can no longer prematurely trip phase 2. Availability (sumUsed) sums both kinds, so a
 // running job's reservation still holds its allocation until it settles.
@@ -247,26 +247,26 @@ func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tie
 		} else {
 			q.UsedBurstStorageGBH = value
 		}
-	default: // domain.ResourceGPUHours
+	default: // domain.ResourceAcceleratorHours
 		if guaranteed {
-			q.UsedGuaranteedT4H = value
+			q.UsedGuaranteedAccH = value
 		} else {
-			q.UsedBurstT4H = value
+			q.UsedBurstAccH = value
 		}
 	}
 }
 
-// TotalObservedT4H sums the settled, observed GPU cost across every agent and job in a platform
+// TotalObservedAccH sums the settled, observed accelerator cost across every agent and job in a platform
 // experiment — filtered to kind=observed, so it counts only jobs that have actually settled and
 // never a still-queued or running job's reservation. This is the "committed" half of the phase-2
 // boundary check; the caller adds live actual usage of running attempts on top (see
 // controller.checkPhase2Transition). Reading reservations here would let a large queued job
 // prematurely trip phase 2 and cancel work.
-func TotalObservedT4H(ctx context.Context, dbURL, platformExpID string) (float64, error) {
-	promQL := fmt.Sprintf(`sum(%s{platform_experiment_id=%q, resource_type=%q, kind=%q})`, usedHoursMetric, platformExpID, string(domain.ResourceGPUHours), kindObserved)
+func TotalObservedAccH(ctx context.Context, dbURL, platformExpID string) (float64, error) {
+	promQL := fmt.Sprintf(`sum(%s{platform_experiment_id=%q, resource_type=%q, kind=%q})`, usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved)
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
-		return 0, fmt.Errorf("metricsdb.TotalObservedT4H: %w", err)
+		return 0, fmt.Errorf("metricsdb.TotalObservedAccH: %w", err)
 	}
 	if len(samples) == 0 {
 		return 0, nil

@@ -159,8 +159,8 @@ export async function cancelExperiment(id: string): Promise<void> {
 export interface CreatePlatformExperimentRequest {
   name: string
   description?: string
-  budget_t4_hours: number
-  // Optional additional CPU budget, tracked the same way as budget_t4_hours
+  budget_accelerator_hours: number
+  // Optional additional CPU budget, tracked the same way as budget_accelerator_hours
   // (guaranteed/burst split, debited at submission, refunded on completion). 0/omitted
   // means that dimension isn't tracked for this platform experiment.
   budget_cpu_core_hours?: number
@@ -217,10 +217,10 @@ export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<Ag
   return apiFetch<AgentQuota[]>(`${QUOTA_URL}/platform-experiments/${platformExpID}/quotas`)
 }
 
-// Resource pricing reference data (GPU type rates, CPU/RAM/storage flat rates) — fetched
+// Resource pricing reference data (Accelerator type rates, CPU/RAM/storage flat rates) — fetched
 // from the backend instead of hardcoded, so the UI never drifts from the operator's config.
 export interface ResourceCatalog {
-  gpu_types: Array<{ name: string; t4h_rate: number }>
+  accelerator_types: Array<{ name: string; acch_rate: number }>
   cpu_core_hour_rate: number
   ram_gb_hour_rate: number
   storage_gb_hour_rate: number

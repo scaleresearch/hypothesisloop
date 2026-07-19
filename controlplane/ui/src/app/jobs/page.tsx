@@ -13,7 +13,7 @@ import { Badge, TierBadge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
-import { formatT4h } from '@/lib/format'
+import { formatAccH } from '@/lib/format'
 
 function relTime(iso: string) {
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -74,7 +74,7 @@ export default function JobsPage() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Agent-submitted workload runs within Platform Experiments — status, capacity tier, GPU cost in T4h"
+        description="Agent-submitted workload runs within Platform Experiments — status, capacity tier, accelerator cost in AccH"
         actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
@@ -169,7 +169,7 @@ export default function JobsPage() {
                 <th>Status</th>
                 <th>Cluster</th>
                 <th>Tier</th>
-                <th>GPU</th>
+                <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
                 <th style={{ textAlign: 'right' }}>Final Metric</th>
                 <th>Hypothesis</th>
@@ -191,7 +191,7 @@ export default function JobsPage() {
               ) : visible.map((job: Experiment) => {
                 const j = job as any
                 const status = j.status ?? 'UNKNOWN'
-                const cost = j.estimated_cost_t4h != null ? formatT4h(j.estimated_cost_t4h) : null
+                const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
                   <tr
                     key={job.id}
@@ -236,9 +236,9 @@ export default function JobsPage() {
                       ) : '—'}
                     </td>
                     <td><TierBadge tier={j.capacity_tier} /></td>
-                    <td className="mono" style={{ fontSize: 11 }}>{j.gpu_count}× {j.gpu_type}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {j.accelerator_type}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
-                      {cost != null ? `${cost} T4h` : '—'}
+                      {cost != null ? `${cost} AccH` : '—'}
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>
                       <span className={j.final_metric != null ? 'accent' : 'text-muted'}>

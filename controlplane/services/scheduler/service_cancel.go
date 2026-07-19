@@ -12,7 +12,7 @@ import (
 //   - ADMITTED/RUNNING: marks as EVICTED (which is itself the deletion signal — the
 //     cluster-agent reconciles its Jobs to the set of SUBMITTED/ADMITTED/RUNNING
 //     experiments, so moving out of that set is what makes the Job go away) and issues
-//     a partial refund for unused GPU-hours.
+//     a partial refund for unused accelerator-hours.
 func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {
@@ -51,11 +51,11 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 		// ADMITTED jobs may still hold a pending reservation (RUNNING ones already had theirs
 		// cleared by job_watcher's onRunning) — release it unconditionally; a no-op if already gone.
 		_ = s.store.DeletePendingReservation(ctx, id)
-		fraction, gpuCost, err := s.observedFraction(ctx, exp)
+		fraction, acceleratorCost, err := s.observedFraction(ctx, exp)
 		if err != nil {
 			return fmt.Errorf("cancel: %w", err)
 		}
-		s.refundAllResources(ctx, exp, fraction, gpuCost)
+		s.refundAllResources(ctx, exp, fraction, acceleratorCost)
 		if s.loop != nil {
 			s.loop.Trigger()
 		}

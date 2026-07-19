@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Job/platform-experiment termination semantics, contrasted in one place:
-#   1. A job that can never be scheduled (impossible GPU type) fails closed — stays QUEUED
+#   1. A job that can never be scheduled (impossible accelerator type) fails closed — stays QUEUED
 #      indefinitely, never debits guaranteed quota — and cancelling it while still QUEUED
 #      terminates it as REJECTED (not EVICTED: it was never admitted).
 #   2. A RUNNING job that's cancelled is EVICTED (terminal, refunded) — and stays EVICTED,
@@ -23,7 +23,7 @@ signup_and_start "$PE_ID" "$AGENT"
 
 echo "  -- cancel while QUEUED (never admitted) -> REJECTED --"
 QUOTA_BEFORE=$(quota_used_guaranteed "$PE_ID" "$AGENT")
-STUCK=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "NONEXISTENT-GPU-TYPE")
+STUCK=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "NONEXISTENT-ACCELERATOR-TYPE")
 S=$(wait_for_status "$STUCK" "RUNNING,COMPLETED,FAILED,EVICTED,REJECTED" 20 || true)
 S=$(get_status "$STUCK")
 if [[ "$S" == "QUEUED" ]]; then
@@ -36,8 +36,9 @@ if [[ "$S" == "QUEUED" ]]; then
   # see debitAllResources in service_submit.go), so a still-QUEUED job legitimately holds its
   # estimated-cost debit; the real invariant is that cancelling it below refunds that in full.
   DEBIT=$(py "print(round(float('$(quota_used_guaranteed "$PE_ID" "$AGENT")' or 0) - float('$QUOTA_BEFORE' or 0), 6))")
-  [[ "$DEBIT" == "0.02" ]] && pass "guaranteed quota reserved at submission time (0.02 T4h) for the still-QUEUED job" \
-    || fail "expected 0.02 T4h reserved for the QUEUED job's estimated cost, got $DEBIT"
+  # 0.02h * 0.125 AccH/h (Cost()'s unregistered-type fallback rate, the cheapest/T4 tier) = 0.0025 AccH.
+  [[ "$DEBIT" == "0.0025" ]] && pass "guaranteed quota reserved at submission time (0.0025 AccH) for the still-QUEUED job" \
+    || fail "expected 0.0025 AccH reserved for the QUEUED job's estimated cost, got $DEBIT"
 
   curl -sf -X POST "$SCHED_URL/experiments/${STUCK}/cancel" > /dev/null || true
   S=$(wait_for_status "$STUCK" "EVICTED,REJECTED,FAILED" 15 || true)
@@ -48,7 +49,7 @@ if [[ "$S" == "QUEUED" ]]; then
   DEBIT_AFTER_CANCEL=$(py "print(round(float('$(quota_used_guaranteed "$PE_ID" "$AGENT")' or 0) - float('$QUOTA_BEFORE' or 0), 6))")
   [[ "$DEBIT_AFTER_CANCEL" == "0.0" || "$DEBIT_AFTER_CANCEL" == "0" ]] \
     && pass "reservation fully refunded after cancelling the never-run job" \
-    || fail "guaranteed quota still shows $DEBIT_AFTER_CANCEL T4h debited after cancelling a never-run job — refund incomplete"
+    || fail "guaranteed quota still shows $DEBIT_AFTER_CANCEL AccH debited after cancelling a never-run job — refund incomplete"
 else
   echo "  [INFO] status=$S (REJECTED at submission time is also an acceptable fail-closed outcome)"
 fi

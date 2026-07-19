@@ -20,8 +20,8 @@ clusters:
   # kubeconfig mounted into control-service and metrics-service at the
   # path referenced here, e.g. in docker-compose.yaml:
   #   volumes:
-  #     - ${GPU_EAST_KUBECONFIG_PATH}:/etc/openresearch/kubeconfigs/gpu-east.yaml:ro
+  #     - ${Accelerator_EAST_KUBECONFIG_PATH}:/etc/openresearch/kubeconfigs/accelerator-east.yaml:ro
   #
-  # - name: gpu-cluster-east
-  #   kubeconfig_path: /etc/openresearch/kubeconfigs/gpu-east.yaml
-  #   context: gpu-cluster-east
+  # - name: accelerator-cluster-east
+  #   kubeconfig_path: /etc/openresearch/kubeconfigs/accelerator-east.yaml
+  #   context: accelerator-cluster-east

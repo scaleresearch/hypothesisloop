@@ -65,7 +65,7 @@ func main() {
 	store := db.NewStore(pool, metricsDBURL)
 
 	pcfg := openresearchcfg.MustLoad(envOrDefault("OPENRESEARCH_CONFIG", "settings/openresearch.yaml"))
-	domain.SetGPURates(pcfg.RateByName)
+	domain.SetAcceleratorRates(pcfg.RateByName)
 	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
 	domain.SetRAMGBHourRate(pcfg.RAMGBHourRate)
 	domain.SetStorageGBHourRate(pcfg.StorageGBHourRate)

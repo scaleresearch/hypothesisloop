@@ -15,8 +15,8 @@ Environment variables injected by the scheduler:
   OPENRESEARCH_REGISTRY_URL            - OpenResearch registry HTTP base URL
   OPENRESEARCH_DURATION_SECONDS        - total run time in seconds (default: 60)
   OPENRESEARCH_BASELINE                - declared baseline value to beat
-  OPENRESEARCH_GPU_TYPE                - GPU type label (T4 | L40 | A100)
-  OPENRESEARCH_GPU_COUNT               - number of GPUs
+  OPENRESEARCH_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
+  OPENRESEARCH_ACCELERATOR_COUNT               - number of accelerators
 """
 
 import os
@@ -39,8 +39,8 @@ INTERVAL   = int(os.environ.get("OPENRESEARCH_REPORT_INTERVAL_SECONDS", "5"))
 DURATION   = int(os.environ.get("OPENRESEARCH_DURATION_SECONDS", "60"))
 REG_URL    = os.environ.get("OPENRESEARCH_REGISTRY_URL", "http://localhost:8083")
 BASELINE   = float(os.environ.get("OPENRESEARCH_BASELINE", "0.5"))
-GPU_TYPE   = os.environ.get("OPENRESEARCH_GPU_TYPE", "T4")
-GPU_COUNT  = int(os.environ.get("OPENRESEARCH_GPU_COUNT", "1"))
+ACCELERATOR_TYPE   = os.environ.get("OPENRESEARCH_ACCELERATOR_TYPE", "T4")
+ACCELERATOR_COUNT  = int(os.environ.get("OPENRESEARCH_ACCELERATOR_COUNT", "1"))
 
 
 # Per-agent hyperparameter sampling (stable from same agent seed)
@@ -131,7 +131,7 @@ def main() -> None:
     print(f"OpenResearch workload starting")
     print(f"  experiment: {EXP_ID}  agent: {AGENT_ID}  project: {PROJECT_ID}")
     print(f"  metric: {METRIC} ({DIRECTION})  steps: {steps}  interval: {INTERVAL}s  total: ~{steps * INTERVAL}s")
-    print(f"  pretend GPU: {GPU_COUNT}x {GPU_TYPE}")
+    print(f"  pretend accelerator: {ACCELERATOR_COUNT}x {ACCELERATOR_TYPE}")
     print(f"  target: {TARGET:.4f}  baseline: {BASELINE:.4f}")
     print(f"  lr={LEARNING_RATE}  batch={BATCH_SIZE}  hidden={HIDDEN_DIM}  "
           f"dropout={DROPOUT}  optim={OPTIMIZER}  wd={WEIGHT_DECAY}")

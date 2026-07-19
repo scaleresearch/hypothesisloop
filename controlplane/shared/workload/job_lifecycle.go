@@ -180,13 +180,13 @@ func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resource
 	return total, requested
 }
 
-// GetLiveGPUCapacity returns this cluster's real, current GPU capacity per flavor: total
-// allocatable extended-resource quantity across schedulable nodes carrying that GPU type's own
+// GetLiveAcceleratorCapacity returns this cluster's real, current accelerator capacity per flavor: total
+// allocatable extended-resource quantity across schedulable nodes carrying that accelerator type's own
 // node label, and the same minus every non-terminal pod's request for that resource name,
 // counted only across those labeled nodes. Mirrors GetLiveCPUCapacity's allocatable-minus-
 // requested model, keyed by flavor so it slots directly into the same guaranteed/burst maps CPU
 // capacity uses. Flavors with no node-label mapping configured are omitted (nothing to count).
-func (c *JobWorkloadClient) GetLiveGPUCapacity(ctx context.Context) (available, total map[string]int64, err error) {
+func (c *JobWorkloadClient) GetLiveAcceleratorCapacity(ctx context.Context) (available, total map[string]int64, err error) {
 	nodes, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("workload: list nodes: %w", err)
@@ -198,13 +198,13 @@ func (c *JobWorkloadClient) GetLiveGPUCapacity(ctx context.Context) (available, 
 
 	available = make(map[string]int64)
 	total = make(map[string]int64)
-	for flavor, gpuName := range c.nameByFlavor() {
-		labelValue := c.nodeLabelByType[gpuName]
+	for flavor, acceleratorName := range c.nameByFlavor() {
+		labelValue := c.nodeLabelByType[acceleratorName]
 		if labelValue == "" {
 			continue
 		}
-		labelKey := c.nodeLabelKeyFor(domain.GPUType(gpuName))
-		resourceName := corev1.ResourceName(c.resourceNameFor(domain.GPUType(gpuName)))
+		labelKey := c.nodeLabelKeyFor(domain.AcceleratorType(acceleratorName))
+		resourceName := corev1.ResourceName(c.resourceNameFor(domain.AcceleratorType(acceleratorName)))
 
 		var totalQty int64
 		onFlavorNode := make(map[string]bool)
@@ -278,13 +278,13 @@ func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID
 	return fmt.Errorf("workload: timed out waiting for job %s deletion", name)
 }
 
-// GetFlavorCapacity returns nominal GPU + live CPU/RAM/storage capacity as a canonical
-// domain.Footprint. demo: GPU is not reading live reservation state from the cluster (nominal
+// GetFlavorCapacity returns nominal accelerator + live CPU/RAM/storage capacity as a canonical
+// domain.Footprint. demo: Accelerator is not reading live reservation state from the cluster (nominal
 // config only); CPU/RAM/storage use the same live allocatable-minus-requested numbers
 // GetLiveCPUCapacity/GetLiveRAMCapacity/GetLiveStorageCapacity compute, so a mixed job's joint
 // fit can be checked against one vector.
 func (c *JobWorkloadClient) GetFlavorCapacity(ctx context.Context) (guaranteed, burst domain.Footprint, err error) {
-	nominal := c.gpuNominalCapacity()
+	nominal := c.acceleratorNominalCapacity()
 	cpuAvail, _, err := c.GetLiveCPUCapacity(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -397,36 +397,36 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 }
 
 
-// GetAdmittedGPUType reports which GPU type this experiment's Job actually landed on. When
-// AcceptableGPUTypes lists more than one flavor, the k8s scheduler — not this client — picks the
+// GetAdmittedAcceleratorType reports which accelerator type this experiment's Job actually landed on. When
+// AcceptableAcceleratorTypes lists more than one flavor, the k8s scheduler — not this client — picks the
 // node, so the only way to know which flavor was chosen is to read it back from the live cluster
-// (see ResolveAdmittedGPUType). Falls back to the originally requested exp.GPUType if no pod is
+// (see ResolveAdmittedAcceleratorType). Falls back to the originally requested exp.AcceleratorType if no pod is
 // scheduled yet or the resolve fails — the same "not known yet" default the caller already
 // expects before any report has arrived.
-func (c *JobWorkloadClient) GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment) domain.GPUType {
-	resolved, _, err := c.ResolveAdmittedGPUType(ctx, exp.ID)
+func (c *JobWorkloadClient) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType {
+	resolved, _, err := c.ResolveAdmittedAcceleratorType(ctx, exp.ID)
 	if err != nil || resolved == "" {
-		return exp.GPUType
+		return exp.AcceleratorType
 	}
 	return resolved
 }
 
-// ResolveAdmittedGPUType inspects experimentID's currently-scheduled pod(s) and returns the GPU
-// type actually admitted, reverse-mapping the assigned node's GPU product label back to a
-// configured type name via nodeLabelByType/nodeLabelKeyByType (gpuNodeAffinity's mapping, in
-// reverse). This is the only way to observe which acceptable_gpu_types flavor the k8s scheduler
+// ResolveAdmittedAcceleratorType inspects experimentID's currently-scheduled pod(s) and returns the accelerator
+// type actually admitted, reverse-mapping the assigned node's accelerator product label back to a
+// configured type name via nodeLabelByType/nodeLabelKeyByType (acceleratorNodeAffinity's mapping, in
+// reverse). This is the only way to observe which acceptable_accelerator_types flavor the k8s scheduler
 // actually chose — neither the Job spec nor this client's own admission decision records it.
 //
 // Resolves from rank 0's node (batch.kubernetes.io/job-completion-index=0) when available,
 // falling back to the first scheduled pod found — a deliberately simple choice for distributed
 // jobs rather than full cross-rank reconciliation. consistent=false flags (for the caller to log;
 // this alone never blocks reporting) that another already-scheduled rank landed on a different
-// GPU type than rank 0, which callers should treat as an error condition.
+// accelerator type than rank 0, which callers should treat as an error condition.
 //
 // Returns ("", true, nil) if no pod is scheduled onto a node yet, or the scheduled node carries
-// none of the configured GPU labels (non-GPU/dev cluster) — both "nothing to report yet", not an
+// none of the configured accelerator labels (non-Accelerator/dev cluster) — both "nothing to report yet", not an
 // error.
-func (c *JobWorkloadClient) ResolveAdmittedGPUType(ctx context.Context, experimentID string) (gpuType domain.GPUType, consistent bool, err error) {
+func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, consistent bool, err error) {
 	pods, err := c.kube.CoreV1().Pods(OpenResearchNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("openresearch.io/experiment-id=%s", experimentID),
 	})
@@ -456,8 +456,8 @@ func (c *JobWorkloadClient) ResolveAdmittedGPUType(ctx context.Context, experime
 	if err != nil {
 		return "", true, fmt.Errorf("workload: get node %s: %w", primary.Spec.NodeName, err)
 	}
-	gpuType = c.gpuTypeFromNodeLabels(node.Labels)
-	if gpuType == "" {
+	acceleratorType = c.acceleratorTypeFromNodeLabels(node.Labels)
+	if acceleratorType == "" {
 		return "", true, nil
 	}
 
@@ -471,24 +471,24 @@ func (c *JobWorkloadClient) ResolveAdmittedGPUType(ctx context.Context, experime
 		if getErr != nil {
 			continue
 		}
-		if t := c.gpuTypeFromNodeLabels(n.Labels); t != "" && t != gpuType {
+		if t := c.acceleratorTypeFromNodeLabels(n.Labels); t != "" && t != acceleratorType {
 			consistent = false
 		}
 	}
-	return gpuType, consistent, nil
+	return acceleratorType, consistent, nil
 }
 
-// gpuTypeFromNodeLabels reverse-maps a node's own labels back to the configured GPU type whose
-// nodeLabelByType/nodeLabelKeyByType entry matches — the inverse of gpuNodeAffinity's
-// type-to-label translation. Returns "" if no configured type matches (unlabeled/non-GPU node).
-func (c *JobWorkloadClient) gpuTypeFromNodeLabels(labels map[string]string) domain.GPUType {
+// acceleratorTypeFromNodeLabels reverse-maps a node's own labels back to the configured accelerator type whose
+// nodeLabelByType/nodeLabelKeyByType entry matches — the inverse of acceleratorNodeAffinity's
+// type-to-label translation. Returns "" if no configured type matches (unlabeled/non-Accelerator node).
+func (c *JobWorkloadClient) acceleratorTypeFromNodeLabels(labels map[string]string) domain.AcceleratorType {
 	for typeName, labelValue := range c.nodeLabelByType {
 		if labelValue == "" {
 			continue
 		}
-		key := c.nodeLabelKeyFor(domain.GPUType(typeName))
+		key := c.nodeLabelKeyFor(domain.AcceleratorType(typeName))
 		if labels[key] == labelValue {
-			return domain.GPUType(typeName)
+			return domain.AcceleratorType(typeName)
 		}
 	}
 	return ""

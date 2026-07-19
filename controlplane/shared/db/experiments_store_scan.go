@@ -17,7 +17,7 @@ type rowScanner interface {
 
 func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
-	var gpuType, capacityTier, status string
+	var acceleratorType, capacityTier, status string
 	var artifacts []string
 	var evictionReason *string
 	var notAdmittedReason *string
@@ -27,12 +27,12 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ProjectID, &exp.ClusterName,
 		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec,
 		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory,
-		&gpuType, &exp.GPUCount,
-		&exp.EstimatedDurationHours, &exp.EstimatedCostT4H,
+		&acceleratorType, &exp.AcceleratorCount,
+		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
 		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &exp.StartedAt, &exp.PreemptCount, &exp.Attempt, &evictionReason, &notAdmittedReason,
-		&exp.ActualDurationHours, &exp.ActualCostT4H,
+		&exp.ActualDurationHours, &exp.ActualCostAccH,
 		&exp.ActualCPUCoreHours, &exp.ActualRAMGBHours, &exp.ActualStorageGBHours,
 		&artifacts, &exp.QuotaSettledAt,
 		&exp.CreatedAt, &exp.UpdatedAt,
@@ -45,7 +45,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 			return nil, fmt.Errorf("scan experiment: unmarshal job spec: %w", err)
 		}
 	}
-	exp.GPUType = domain.GPUType(gpuType)
+	exp.AcceleratorType = domain.AcceleratorType(acceleratorType)
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
 	if evictionReason != nil {

@@ -46,7 +46,7 @@ func (f *fakeJobStatusStore) TransitionStatusFromNonTerminal(ctx context.Context
 	f.status = to
 	return true, nil
 }
-func (f *fakeJobStatusStore) UpdateAdmittedFlavor(ctx context.Context, id string, gpuType domain.GPUType, estimatedCostT4H float64) error {
+func (f *fakeJobStatusStore) UpdateAdmittedFlavor(ctx context.Context, id string, acceleratorType domain.AcceleratorType, estimatedCostAccH float64) error {
 	return nil
 }
 func (f *fakeJobStatusStore) UpdateEvictionReason(ctx context.Context, id, reason string) error {

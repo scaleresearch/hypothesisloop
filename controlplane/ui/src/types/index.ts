@@ -11,10 +11,10 @@ export enum ExperimentStatus {
   PROMOTED = 'PROMOTED',
 }
 
-// GPUType is an open, operator-defined identifier (see openresearch.yaml's gpu_types) — any
+// AcceleratorType is an open, operator-defined identifier (see openresearch.yaml's accelerator_types) — any
 // vendor's model name is valid (NVIDIA, AMD, ...), not a fixed set. Fetch the live catalog
 // (name + rate) via fetchResourceCatalog() instead of hardcoding known values here.
-export type GPUType = string
+export type AcceleratorType = string
 
 export enum CapacityTier {
   GUARANTEED = 'guaranteed',
@@ -75,14 +75,14 @@ export interface JobSpec {
   cpu?: string
   memory?: string
   storage?: string
-  gpu_type: GPUType
-  gpu_count: number
-  acceptable_gpu_types?: GPUType[]
+  accelerator_type: AcceleratorType
+  accelerator_count: number
+  acceptable_accelerator_types?: AcceleratorType[]
   num_nodes?: number
   max_retries?: number
   topology?: { spread_across_hosts?: boolean; same_zone?: boolean }
   shm_size?: string
-  // Any k8s extended resource beyond gpu_type/gpu_count — TPUs, other accelerators. Not
+  // Any k8s extended resource beyond accelerator_type/accelerator_count — TPUs, other accelerators. Not
   // billed/capped (see domain.JobSpec.ExtraResources), passed straight through as pod
   // resource requests.
   extra_resources?: Record<string, string>
@@ -98,9 +98,9 @@ export interface Experiment {
   hypothesis: string
   objective?: string
   status: ExperimentStatus
-  estimated_cost_t4h?: number
-  actual_cost_t4h?: number
-  // Additional resource-dimension cost/usage, mirroring estimated_cost_t4h/actual_cost_t4h.
+  estimated_cost_acch?: number
+  actual_cost_acch?: number
+  // Additional resource-dimension cost/usage, mirroring estimated_cost_acch/actual_cost_acch.
   // 0/absent means that dimension wasn't tracked for this job.
   estimated_cpu_core_hours?: number
   actual_cpu_core_hours?: number
@@ -114,10 +114,10 @@ export interface Experiment {
   actual_ram_gb_hours?: number
   /** @deprecated see estimated_ram_gb_hours. */
   actual_storage_gb_hours?: number
-  gpu_type: GPUType
-  gpu_count: number
+  accelerator_type: AcceleratorType
+  accelerator_count: number
   estimated_duration_hours?: number
-  // The job's own DSL — image, command, resources, GPU count/type, distributed topology.
+  // The job's own DSL — image, command, resources, accelerator count/type, distributed topology.
   job?: JobSpec
   created_at: string
   started_at?: string
@@ -143,8 +143,8 @@ export interface PlatformExperiment {
   id: string
   name: string
   description?: string
-  budget_t4_hours: number
-  // Optional additional resource budgets, tracked the same way as budget_t4_hours. 0/absent
+  budget_accelerator_hours: number
+  // Optional additional resource budgets, tracked the same way as budget_accelerator_hours. 0/absent
   // means that dimension isn't tracked for this platform experiment.
   budget_cpu_core_hours?: number
   /** @deprecated RAM is no longer an hours-billed budget dimension — it's a physical fit-only
@@ -202,8 +202,8 @@ export const COMMON_ML_METRICS: Array<{ key: string; label: string; direction: '
   { key: 'mmlu',                label: 'MMLU Score',             direction: 'maximize', description: 'Massive multitask language understanding accuracy' },
   { key: 'hellaswag',           label: 'HellaSwag',              direction: 'maximize', description: 'Common-sense NLI benchmark' },
   { key: 'throughput_samples',  label: 'Throughput (samples/s)', direction: 'maximize', description: 'Training throughput in samples per second' },
-  { key: 'gpu_utilization',     label: 'GPU Utilization %',      direction: 'maximize', description: 'Average GPU kernel utilization during training' },
-  { key: 'memory_gb',           label: 'Peak Memory (GB)',       direction: 'minimize', description: 'Peak GPU memory consumed during a forward pass' },
+  { key: 'accelerator_utilization',     label: 'Accelerator Utilization %',      direction: 'maximize', description: 'Average accelerator kernel utilization during training' },
+  { key: 'memory_gb',           label: 'Peak Memory (GB)',       direction: 'minimize', description: 'Peak accelerator memory consumed during a forward pass' },
   { key: 'latency_ms',          label: 'Latency (ms)',           direction: 'minimize', description: 'Inference latency per sample in milliseconds' },
   { key: 'flops',               label: 'FLOPs',                  direction: 'minimize', description: 'Floating-point operations required per inference' },
   { key: 'params_millions',     label: 'Params (M)',             direction: 'minimize', description: 'Total trainable parameters in millions' },
@@ -224,10 +224,10 @@ export interface AgentQuota {
   id: string
   agent_id: string
   platform_experiment_id: string
-  guaranteed_t4_hours: number
-  burst_t4_hours: number
-  used_guaranteed_t4h: number
-  used_burst_t4h: number
+  guaranteed_accelerator_hours: number
+  burst_accelerator_hours: number
+  used_guaranteed_acch: number
+  used_burst_acch: number
   // Additional resource dimensions — 0/absent means the platform experiment doesn't track
   // that dimension.
   guaranteed_cpu_core_hours?: number

@@ -74,31 +74,31 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
 	}
 
-	// GPUCount == 0 is a legitimate CPU-only job (see cpuFlavor / admissionUnit) as long as it
-	// actually requests positive CPU — a job with zero GPUs and no CPU requests nothing at all,
-	// which is genuinely malformed. A GPU job (GPUCount > 0) must name a GPU type: nothing
-	// downstream (flavor accounting, GPU affinity/tolerations) has a type to schedule against
+	// AcceleratorCount == 0 is a legitimate CPU-only job (see cpuFlavor / admissionUnit) as long as it
+	// actually requests positive CPU — a job with zero accelerators and no CPU requests nothing at all,
+	// which is genuinely malformed. An accelerator job (AcceleratorCount > 0) must name an accelerator type: nothing
+	// downstream (flavor accounting, accelerator affinity/tolerations) has a type to schedule against
 	// otherwise.
 	switch {
-	case exp.GPUCount < 0:
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_count must not be negative"}
-	case exp.GPUCount == 0:
+	case exp.AcceleratorCount < 0:
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
+	case exp.AcceleratorCount == 0:
 		cores, err := workload.ParseCPUCores(exp.Job.CPU)
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 		}
 		if cores <= 0 {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_count is zero and job.cpu requests no positive CPU"}
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count is zero and job.cpu requests no positive CPU"}
 		}
-	case exp.GPUType == "":
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.gpu_type is required when job.gpu_count > 0"}
+	case exp.AcceleratorType == "":
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_type is required when job.accelerator_count > 0"}
 	}
 	if exp.EstimatedDurationHours <= 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must be positive"}
 	}
 
-	if caps.MaxGPUCountPerJob > 0 && exp.GPUCount > caps.MaxGPUCountPerJob {
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.gpu_count %d exceeds per-job max %d", exp.GPUCount, caps.MaxGPUCountPerJob)}
+	if caps.MaxAcceleratorCountPerJob > 0 && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
+		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d exceeds per-job max %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
 	nodes := float64(exp.Job.Nodes())
 	if caps.MaxCPUCoresPerJob > 0 {

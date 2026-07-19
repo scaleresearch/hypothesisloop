@@ -14,7 +14,7 @@ rules:
     verbs: ["get", "create"]
   - apiGroups: [""]
     # nodes: read live CPU capacity/allocatable off real cluster nodes (replaces the old
-    # fake-GPU-only capacity accounting) — see workload's "get live CPU capacity" step.
+    # fake-Accelerator-only capacity accounting) — see workload's "get live CPU capacity" step.
     resources: ["nodes"]
     verbs: ["get", "list"]
   - apiGroups: [""]

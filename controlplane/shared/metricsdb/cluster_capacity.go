@@ -6,20 +6,20 @@ import (
 	"time"
 )
 
-// clusterGPUAvailableMetric/clusterGPUTotalMetric hold cluster-agents' self-reported live
-// per-flavor GPU capacity (allocatable extended-resource quantity minus actually-requested,
-// computed per GPU flavor against a cluster's real node/pod state — see
-// workload.GetLiveGPUCapacity). Written on every desired-state poll, same as the CPU capacity
+// clusterAcceleratorAvailableMetric/clusterAcceleratorTotalMetric hold cluster-agents' self-reported live
+// per-flavor accelerator capacity (allocatable extended-resource quantity minus actually-requested,
+// computed per accelerator flavor against a cluster's real node/pod state — see
+// workload.GetLiveAcceleratorCapacity). Written on every desired-state poll, same as the CPU capacity
 // this mirrors. Capacity is metric data like everything else on this client: it lives here,
 // never duplicated into Postgres.
 const (
-	clusterGPUAvailableMetric = "cluster_gpu_available_gpus"
-	clusterGPUTotalMetric     = "cluster_gpu_total_gpus"
+	clusterAcceleratorAvailableMetric = "cluster_accelerator_available_accelerators"
+	clusterAcceleratorTotalMetric     = "cluster_accelerator_total_accelerators"
 )
 
-// RecordClusterGPUCapacity writes one gauge sample per (flavor, available/total) pair for
+// RecordClusterAcceleratorCapacity writes one gauge sample per (flavor, available/total) pair for
 // clusterName, all in a single remote-write batch.
-func RecordClusterGPUCapacity(ctx context.Context, dbURL, clusterName string, availableByFlavor, totalByFlavor map[string]int64) error {
+func RecordClusterAcceleratorCapacity(ctx context.Context, dbURL, clusterName string, availableByFlavor, totalByFlavor map[string]int64) error {
 	if len(availableByFlavor) == 0 {
 		return nil
 	}
@@ -27,7 +27,7 @@ func RecordClusterGPUCapacity(ctx context.Context, dbURL, clusterName string, av
 	samples := make([]GaugeSample, 0, 2*len(availableByFlavor))
 	for flavor, avail := range availableByFlavor {
 		samples = append(samples, GaugeSample{
-			MetricName: clusterGPUAvailableMetric,
+			MetricName: clusterAcceleratorAvailableMetric,
 			Labels:     map[string]string{"cluster_name": clusterName, "flavor": flavor},
 			Value:      float64(avail),
 			At:         now,
@@ -35,28 +35,28 @@ func RecordClusterGPUCapacity(ctx context.Context, dbURL, clusterName string, av
 	}
 	for flavor, total := range totalByFlavor {
 		samples = append(samples, GaugeSample{
-			MetricName: clusterGPUTotalMetric,
+			MetricName: clusterAcceleratorTotalMetric,
 			Labels:     map[string]string{"cluster_name": clusterName, "flavor": flavor},
 			Value:      float64(total),
 			At:         now,
 		})
 	}
 	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.RecordClusterGPUCapacity: %w", err)
+		return fmt.Errorf("metricsdb.RecordClusterAcceleratorCapacity: %w", err)
 	}
 	return nil
 }
 
-// LiveClusterGPUCapacity returns the most recently reported GPU availability per cluster per
+// LiveClusterAcceleratorCapacity returns the most recently reported accelerator availability per cluster per
 // flavor, restricted to samples within `window` of now — a cluster (or a single flavor on a
 // cluster) with no report inside the window is simply absent from the result, exactly like
 // metricsdb.IsAlive's freshness gating: a stale or disconnected cluster contributes nothing
 // rather than a possibly-long-stale number.
-func LiveClusterGPUCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
-	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, clusterGPUAvailableMetric, promSeconds(window))
+func LiveClusterAcceleratorCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
+	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, clusterAcceleratorAvailableMetric, promSeconds(window))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.LiveClusterGPUCapacity: %w", err)
+		return nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorCapacity: %w", err)
 	}
 	out := make(map[string]map[string]int64)
 	for _, s := range samples {
@@ -75,7 +75,7 @@ func LiveClusterGPUCapacity(ctx context.Context, dbURL string, window time.Durat
 
 // clusterRAMAvailableMetric/clusterRAMTotalMetric and their storage equivalents hold
 // cluster-agents' self-reported live RAM/ephemeral-storage capacity in bytes — the Class B
-// (hard-cap, no billing) counterpart to CPU/GPU's capacity reporting above (see
+// (hard-cap, no billing) counterpart to CPU/Accelerator's capacity reporting above (see
 // SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). Same "metric data, never duplicated into
 // Postgres" rule applies.
 const (
@@ -100,7 +100,7 @@ func recordClusterScalarCapacity(ctx context.Context, dbURL, clusterName, availM
 }
 
 // liveClusterScalarCapacity returns the most recently reported value of availMetric per
-// cluster, restricted to samples within window of now — see LiveClusterGPUCapacity's doc
+// cluster, restricted to samples within window of now — see LiveClusterAcceleratorCapacity's doc
 // comment for the staleness-gating rationale (a stale/disconnected cluster contributes nothing).
 func liveClusterScalarCapacity(ctx context.Context, dbURL, availMetric string, window time.Duration) (map[string]int64, error) {
 	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, availMetric, promSeconds(window))

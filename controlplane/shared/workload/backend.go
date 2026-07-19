@@ -47,11 +47,11 @@ type Backend interface {
 	// PollJobPhase reports the current lifecycle phase of exp's job.
 	PollJobPhase(ctx context.Context, exp *domain.Experiment) (JobPhase, error)
 
-	// GetAdmittedGPUType reports which GPU type the job actually ran on. Backends that can
+	// GetAdmittedAcceleratorType reports which accelerator type the job actually ran on. Backends that can
 	// substitute a different flavor than requested (e.g. Kueue's ResourceFlavor ordering)
 	// should read that back here; backends that never substitute (like ClusterSet today) can
-	// just return exp.GPUType.
-	GetAdmittedGPUType(ctx context.Context, exp *domain.Experiment) domain.GPUType
+	// just return exp.AcceleratorType.
+	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType
 
 	// GetFlavorCapacity reports available capacity broken out per cluster, as a canonical
 	// domain.Footprint (CPU millicores + per-accelerator-flavor counts today — see

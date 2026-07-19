@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
-import { formatT4h } from '@/lib/format'
+import { formatAccH } from '@/lib/format'
 
 function BonusChip({ label, active }: { label: string; active: boolean }) {
   return (
@@ -38,22 +38,22 @@ function AgentExperimentQuota({ agentId, pe }: { agentId: string; pe: PlatformEx
   )
   const q = quotas?.find(q => q.agent_id === agentId)
   if (!q) return null
-  const gRem = q.guaranteed_t4_hours - q.used_guaranteed_t4h
-  const bRem = q.burst_t4_hours - q.used_burst_t4h
+  const gRem = q.guaranteed_accelerator_hours - q.used_guaranteed_acch
+  const bRem = q.burst_accelerator_hours - q.used_burst_acch
   const totalRem = Math.max(0, gRem) + Math.max(0, bRem)
   return (
     <tr style={{ background: 'var(--muted)' }}>
       <td style={{ paddingLeft: 28, fontSize: 12 }} className="text-link">{pe.name}</td>
       <td className="mono" style={{ fontSize: 11 }}>
         <Badge status="guaranteed" className="mr-1">G</Badge>
-        {formatT4h(q.guaranteed_t4_hours)} T4h ({gRem >= 0 ? `${formatT4h(gRem)} left` : 'over'})
+        {formatAccH(q.guaranteed_accelerator_hours)} AccH ({gRem >= 0 ? `${formatAccH(gRem)} left` : 'over'})
       </td>
       <td className="mono" style={{ fontSize: 11 }}>
         <Badge status="burst" className="mr-1">B</Badge>
-        {formatT4h(q.burst_t4_hours)} T4h ({bRem >= 0 ? `${formatT4h(bRem)} left` : 'over'})
+        {formatAccH(q.burst_accelerator_hours)} AccH ({bRem >= 0 ? `${formatAccH(bRem)} left` : 'over'})
       </td>
       <td className="mono" style={{ fontSize: 11, color: totalRem > 0 ? semantic.success : semantic.danger }}>
-        {formatT4h(totalRem)} T4h
+        {formatAccH(totalRem)} AccH
       </td>
     </tr>
   )
@@ -99,7 +99,7 @@ export default function AgentsPage() {
   })()
 
   const selectedPE = experimentFilter ? (experiments ?? []).find(pe => pe.id === experimentFilter) ?? null : null
-  const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_t4_hours / selectedPE.signup_count : 0
+  const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
 
   const top3Count = (balances ?? []).filter(b => ((b as any).top3_count ?? 0) > 0).length
   const avgPerf = balances && balances.length > 0
@@ -158,9 +158,9 @@ export default function AgentsPage() {
             <PodContent>
               <table className="wa-table">
                 <tbody>
-                  <tr><td>Base share</td><td className="mono" style={{ fontSize: 11.5 }}>{formatT4h(selectedPE.budget_t4_hours)} ÷ {selectedPE.signup_count || 0} = {formatT4h(baseShare)} T4h</td></tr>
+                  <tr><td>Base share</td><td className="mono" style={{ fontSize: 11.5 }}>{formatAccH(selectedPE.budget_accelerator_hours)} ÷ {selectedPE.signup_count || 0} = {formatAccH(baseShare)} AccH</td></tr>
                   <tr><td>Top-3 bonus <span className="badge badge-running" style={{ marginLeft: 4 }}>+25%</span></td><td className="mono text-muted" style={{ fontSize: 11.5 }}>any top-3 placement in prior experiments</td></tr>
-                  <tr><td>Guaranteed quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>{formatT4h(baseShare)} × (1 + bonus)</td></tr>
+                  <tr><td>Guaranteed quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>{formatAccH(baseShare)} × (1 + bonus)</td></tr>
                   <tr><td>Burst quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>guaranteed × 2.0 — preemptable</td></tr>
                 </tbody>
               </table>
@@ -172,7 +172,7 @@ export default function AgentsPage() {
             <PodContent>
               <table className="wa-table">
                 <tbody>
-                  <tr><td>Base share</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>total_budget_T4h ÷ signed_up_agent_count</td></tr>
+                  <tr><td>Base share</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>total_budget_AccH ÷ signed_up_agent_count</td></tr>
                   <tr><td>Top-3 bonus <span className="badge badge-running" style={{ marginLeft: 4 }}>+25%</span></td><td className="mono text-muted" style={{ fontSize: 11.5 }}>any top-3 placement in prior experiments</td></tr>
                   <tr><td>Guaranteed quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>base_share × (1 + bonus)</td></tr>
                   <tr><td>Burst quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>guaranteed × 2.0 — preemptable</td></tr>
@@ -255,7 +255,7 @@ export default function AgentsPage() {
               <thead>
                 <tr>
                   <th>Agent</th>
-                  <th style={{ textAlign: 'right' }}>Wants (T4h)</th>
+                  <th style={{ textAlign: 'right' }}>Wants (AccH)</th>
                   <th>Reason</th>
                   <th>Status</th>
                   <th>Requested</th>

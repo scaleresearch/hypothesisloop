@@ -126,10 +126,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
-	// 4. Compute estimated cost if not already set. GPU-hours is the primary/always-populated
+	// 4. Compute estimated cost if not already set. Accelerator-hours is the primary/always-populated
 	// dimension; CPU-hours is only estimated (and therefore only debited/capped) when this
 	// platform experiment actually tracks that dimension (non-zero budget — most platform
-	// experiments are GPU-only, and their agents' CPU quota pool is correctly 0/0, so debiting
+	// experiments are accelerator-only, and their agents' CPU quota pool is correctly 0/0, so debiting
 	// anything against it would always fail). 0 correctly means "not tracked" for that
 	// submission. CPU/Memory/Storage are always set on JobSpec now (see ValidateExperiment's
 	// "explicit resource requests" cross-cutting fix), so there is no more "left unset,
@@ -148,8 +148,8 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// new debit ever happens against it, so its guaranteed/burst pools simply stop moving.
 	// Historical ActualRAMGBHours/ActualStorageGBHours on already-terminal experiments are
 	// untouched (this is a forward-only behavior change, not a backfill/rewrite).
-	if exp.EstimatedCostT4H == 0 {
-		exp.EstimatedCostT4H = exp.GPUType.Cost() * float64(exp.GPUCount) * exp.EstimatedDurationHours
+	if exp.EstimatedCostAccH == 0 {
+		exp.EstimatedCostAccH = exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 	}
 	if exp.EstimatedCPUCoreHours == 0 && pe.BudgetCPUCoreHours > 0 {
 		if cores, err := workload.ParseCPUCores(exp.Job.CPU); err == nil && cores > 0 {

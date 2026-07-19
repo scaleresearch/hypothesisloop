@@ -1,10 +1,10 @@
 # OpenResearch
 
-A platform for running autonomous ML research agents against a shared compute budget. Each platform experiment accumulates its own shared, deduplicated pool of hypotheses; agents register (or reuse) a hypothesis, submit training/eval jobs tied to it, spend metered GPU-hours against an operator-set quota, and file a finding — a short write-up attached to the hypothesis, not the job — for every completed run.
+A platform for running autonomous ML research agents against a shared compute budget. Each platform experiment accumulates its own shared, deduplicated pool of hypotheses; agents register (or reuse) a hypothesis, submit training/eval jobs tied to it, spend metered accelerator-hours against an operator-set quota, and file a finding — a short write-up attached to the hypothesis, not the job — for every completed run.
 
 ## What it does
 
-- **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (GPU-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
+- **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (accelerator-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
 - **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool (agents register hypothesis text once via `POST /registry/hypotheses`; registering equivalent text again returns the existing row instead of a duplicate). A completed run requires a written finding — attached to the hypothesis it tested — before the same agent can submit again.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler distinguishes "job is mid-reschedule" from "job actually hung" before evicting for silence, and billing settles against observed usage across the gap.
 - **Inspectable eviction reasons.** Jobs are evicted with a specific reason (`silent`, `crash_loop`, `overrun`, `metric_decline`, `quota_exhaustion`, `stuck_pending`, ...) rather than disappearing silently. `COMPLETED`/`FAILED`/`EVICTED` are terminal.
@@ -18,8 +18,8 @@ See [`tests/workload/spec.md`](tests/workload/spec.md) for the agent-facing API 
 
 - **Platform experiment** — an operator-created compute envelope: a budget, a set of metrics to optimize, a max agent count, a reporting cadence, and its own shared pool of hypotheses. Agents sign up, then submit jobs against it once it starts.
 - **Hypothesis** — a registered research claim, scoped to one platform experiment. Agents register (or retrieve, if equivalent text already exists in the same platform experiment) a hypothesis before submitting any job against it; a job's `platform_experiment_id` must match its hypothesis's.
-- **Job** — one training/eval run, submitted with a hypothesis reference, a theory, and the platform's own resource DSL (GPU type/count, optional distributed `num_nodes`, CPU/RAM/storage) — never a raw Kubernetes manifest.
-- **Quota tiers** — `guaranteed` (high scheduling priority, never preempted) and `burst` (lower priority, preemptable by any guaranteed job needing the same GPU flavor). Preempted burst jobs return to the queue and re-admit later; cancellations are terminal and refund unused reservation.
+- **Job** — one training/eval run, submitted with a hypothesis reference, a theory, and the platform's own resource DSL (accelerator type/count, optional distributed `num_nodes`, CPU/RAM/storage) — never a raw Kubernetes manifest.
+- **Quota tiers** — `guaranteed` (high scheduling priority, never preempted) and `burst` (lower priority, preemptable by any guaranteed job needing the same accelerator flavor). Preempted burst jobs return to the queue and re-admit later; cancellations are terminal and refund unused reservation.
 - **Lineage and findings** — jobs can chain parent → child. Every completed (or failed/evicted) job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one — the hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
 
 ## UI
