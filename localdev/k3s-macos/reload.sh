@@ -14,7 +14,7 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/../controlplane/infra/docker-compose.yaml"
+COMPOSE_FILE="${SCRIPT_DIR}/../../controlplane/infra/docker-compose.yaml"
 IMAGES=(openresearch-node-agent openresearch-cluster-agent openresearch-workload openresearch-robotics-workload)
 
 wait_for() {
@@ -29,7 +29,7 @@ wait_for() {
 }
 
 echo "==> Rebuilding all images..."
-(cd "${SCRIPT_DIR}/.." && make images)
+(cd "${SCRIPT_DIR}/../.." && make images)
 
 if [[ "$(uname)" == "Darwin" ]]; then
   SSH_KEY="$(podman machine inspect --format '{{.SSHConfig.IdentityPath}}')"

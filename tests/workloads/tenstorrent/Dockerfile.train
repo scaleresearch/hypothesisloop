@@ -1,0 +1,25 @@
+# Real Tenstorrent compute, not a stub: the base image is Tenstorrent's own official release
+# build of tt-metal/ttnn (confirmed working against this QuietBox's Blackhole cards —
+# KMD 2.10.0, firmware 19.11.0 — via a manual `docker run --device /dev/tenstorrent` smoke test
+# before this Dockerfile was written). It already ships Python 3.10 + ttnn on $PATH
+# (/opt/venv/bin) with pre-compiled device firmware baked in, so no extra install step is
+# needed — just add train.py.
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:latest-rc
+
+# This QuietBox's cards are p300 boards (2 ASICs/chips per physical board). DRA allocates one
+# ASIC per pod (accelerator_count: 1 in job.yaml) and only that one /dev/tenstorrent/N node is
+# visible inside the container — but ttnn's default fabric/mesh init expects to see a whole
+# p300 board (both chips) and throws "Custom fabric mesh graph descriptor path must be
+# specified for CUSTOM cluster type" the moment it detects only one chip of a two-chip board.
+# Pointing it at the vendor's own single-chip 1x1 mesh descriptor (shipped in this same image,
+# normally used for single-ASIC p100 boards) sidesteps that: it accurately describes "exactly
+# one isolated chip, no fabric routing to a sibling," which is exactly what one DRA-allocated
+# device is. Confirmed working with a manual `docker run --device /dev/tenstorrent/0` smoke
+# test before this was baked in.
+ENV TT_MESH_GRAPH_DESC_PATH=/opt/venv/lib/python3.10/site-packages/ttnn/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto
+
+WORKDIR /app
+
+COPY train.py .
+
+ENTRYPOINT ["python3", "train.py"]

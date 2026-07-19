@@ -1,0 +1,23 @@
+# Standalone job definition for the Tenstorrent real-hardware e2e test — train.py actually
+# opens the DRA-allocated device via ttnn and runs real matmuls on it (see train.py's doc
+# comment; this is not the synthetic-metrics stub tests/workloads/generic/train.py uses for every other
+# accelerator type). See tenstorrent/e2e-test.sh, which reads this file and submits it verbatim
+# as the `job` field of POST /experiments, same pattern as tests/workloads/generic/job.yaml.
+#
+# The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
+# control plane's admission loop picks whichever registered cluster reports live capacity for
+# that flavor (see controlplane/settings/openresearch.yaml's Tenstorrent-Blackhole entry,
+# allocation_mode: dra) — nothing here names a cluster directly.
+image: localhost/openresearch-tenstorrent-workload:latest
+
+# memory/cpu sized for the real tt-metal runtime, not the tiny synthetic-stub defaults every
+# other workload here uses: pre-compiled firmware/kernel JIT loading and dispatch buffers for
+# a 4096x4096 bf16 matmul measurably exceed a few hundred MiB — an under-sized limit gets
+# silently OOMKilled mid-run (confirmed: 256Mi OOMKilled every run; 4Gi comfortably clears it
+# with room to spare on this QuietBox's 240GiB allocatable).
+cpu: "2"
+memory: "4Gi"
+storage: "1Gi"
+
+accelerator_type: Tenstorrent-Blackhole
+accelerator_count: 1

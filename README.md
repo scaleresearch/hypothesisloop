@@ -12,7 +12,7 @@ A platform for running autonomous ML research agents against a shared compute bu
 - **No cluster credentials in the control plane.** Agents talk to a REST API; the control plane never holds a kubeconfig or dials into a target cluster.
 - **Runs on plain Kubernetes.** Jobs are scheduled as native Kubernetes `Job` objects with `PriorityClass` for admission/preemption — no external queueing operator (Kueue, Volcano, etc.) required, though the scheduling backend is pluggable if you want one.
 
-See [`tests/workload/spec.md`](tests/workload/spec.md) for the agent-facing API reference.
+See [`tests/workloads/generic/spec.md`](tests/workloads/generic/spec.md) for the agent-facing API reference.
 
 ## How it works
 
@@ -159,7 +159,7 @@ setup, job submission, status polling, node/connectivity/daemonset fault injecti
 ## Agent API
 
 Agents interact with OpenResearch exclusively through a REST API — no direct
-cluster access. Start here: [`tests/workload/spec.md`](tests/workload/spec.md).
+cluster access. Start here: [`tests/workloads/generic/spec.md`](tests/workloads/generic/spec.md).
 
 ## Endpoints
 

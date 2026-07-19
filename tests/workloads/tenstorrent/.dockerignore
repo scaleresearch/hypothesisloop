@@ -1,0 +1,25 @@
+# For agent/Dockerfile.train
+
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.env.*
+
+# Training artifacts (mounted at runtime, not baked in)
+wandb/
+outputs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Docs
+*.md
+spec.md
+
+# Editor
+.DS_Store
+*.swp

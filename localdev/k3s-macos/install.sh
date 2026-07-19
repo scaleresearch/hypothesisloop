@@ -28,7 +28,7 @@ K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=tr
 # 80/85% image-GC watermarks for reasons that have nothing to do with this cluster's own
 # images. Without this, kubelet periodically garbage-collects any locally-imported image
 # with no currently-running container (workload/robotics-workload/cluster-agent/node-agent
-# between test runs) straight out from under us — see localdev/add-fake-nodes.sh's identical
+# between test runs) straight out from under us — see localdev/k3s-macos/add-fake-nodes.sh's identical
 # override on the fake accelerator nodes for the same reason.
 # Escaped \< : this value is re-parsed by at least one more shell layer downstream (the SSH
 # command string on macOS, or the piped installer script's own arg handling) before it reaches
@@ -215,7 +215,7 @@ kubectl --context "${CONTEXT_NAME}" get nodes
 # produces a fully working local dev environment in one command.
 echo "==> Installing cluster-agent bundle onto local cluster..."
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  bash "${SCRIPT_DIR}/../cluster/infra/install.sh"
+  bash "${SCRIPT_DIR}/../../cluster/infra/install.sh"
 
 # Add extra simulated nodes labeled with different fake accelerator types, so acceptable_accelerator_types/
 # node-affinity variability has more than one type to actually land on locally by default

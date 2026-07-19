@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Assertion-based version of tests/robotics-demo.sh's flow: several agents train the same
-# VLA baseline (tests/workload-robotics) but each bets on a different hyperparameter
-# hypothesis, competing under one platform experiment. Confirms each job runs its own
-# hypothesis to a terminal state and reports its own metrics — the code path the UI's
-# "competing agents" chart depends on. API-only, parallel-safe.
+# Assertion-based competing-agents flow: several agents train the same VLA baseline
+# (tests/workloads/robotics) but each bets on a different hyperparameter hypothesis,
+# competing under one platform experiment. Confirms each job runs its own hypothesis to a
+# terminal state and reports its own metrics — the code path the UI's "competing agents"
+# chart depends on. API-only, parallel-safe.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 
-ROBOTICS_JOB_FILE="$SCRIPT_DIR/workload-robotics/job.yaml"
+ROBOTICS_JOB_FILE="$SCRIPT_DIR/workloads/robotics/job.yaml"
 JOB_HOURS="0.02"
 
 AGENTS=("agent-hi-lr-${RUN_ID}" "agent-lo-lr-${RUN_ID}")

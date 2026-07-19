@@ -12,7 +12,7 @@
 # H200 (controlplane/settings/openresearch.yaml) is saturated by the filler job below —
 # whether that lands it as RUNNING/ADMITTED (real live capacity exists and got claimed) or an
 # outright REJECTED (no live H200 capacity exists at all, e.g. this dev cluster's fake-node set
-# doesn't happen to include an H200-labeled node — see localdev/add-fake-nodes.sh) both prove
+# doesn't happen to include an H200-labeled node — see localdev/k3s-macos/add-fake-nodes.sh) both prove
 # the same thing: zero H200 capacity is available afterward, either way. H100 is left untouched
 # so it's the only viable landing spot for the flexible job. API-only, parallel-safe (uses accelerator
 # types not touched by other scenarios' saturation logic) as long as it doesn't run

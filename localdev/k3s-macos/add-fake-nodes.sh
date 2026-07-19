@@ -22,19 +22,19 @@
 #   --kubelet-arg=feature-gates=KubeletInUserNamespace=true
 # so the kubelet doesn't insist on /dev/kmsg (blocked under any userns remapping) for its
 # OOM watcher. This is a different problem from the k3d/kind cgroup-cpuset failure
-# documented in localdev/install.sh — that's specific to k3d/kind's own nested-Docker
+# documented in localdev/k3s-macos/install.sh — that's specific to k3d/kind's own nested-Docker
 # layering, not to running a bare k3s agent in one container.
 #
 # Idempotent: safe to call from install.sh on every `make k3s-up`. Re-running with the same
 # EXTRA_NODES count is a no-op (checked by container name, so a VM restart that stopped the
 # containers gets them recreated rather than silently skipped); raising EXTRA_NODES only
 # adds the new ones; lowering it leaves the excess containers running (tear down with
-# localdev/destroy.sh, or `podman rm -f` the container names printed at the end).
+# localdev/k3s-macos/destroy.sh, or `podman rm -f` the container names printed at the end).
 set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 EXTRA_NODES="${EXTRA_NODES:-3}"
-# Matches localdev/install.sh's K3S_VERSION (v1.36.2+k3s1), reformatted for the Docker Hub
+# Matches localdev/k3s-macos/install.sh's K3S_VERSION (v1.36.2+k3s1), reformatted for the Docker Hub
 # tag scheme (rancher/k3s uses a hyphen before the k3s suffix, not a plus).
 K3S_IMAGE_TAG="v1.36.2-k3s1"
 FAKE_NODE_CPUS="${FAKE_NODE_CPUS:-2}"
@@ -62,7 +62,7 @@ vm() {
 
 if [[ "$(uname)" == "Darwin" ]]; then
   if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q "true"; then
-    echo "ERROR: podman machine is not running — run localdev/install.sh first."; exit 1
+    echo "ERROR: podman machine is not running — run localdev/k3s-macos/install.sh first."; exit 1
   fi
   SSH_KEY="$(podman machine inspect --format '{{.SSHConfig.IdentityPath}}')"
   SSH_PORT="$(podman machine inspect --format '{{.SSHConfig.Port}}')"
@@ -78,7 +78,7 @@ else
 fi
 
 if ! kubectl --context "${CONTEXT_NAME}" get nodes &>/dev/null; then
-  echo "ERROR: cluster context '${CONTEXT_NAME}' is not reachable — run localdev/install.sh first."
+  echo "ERROR: cluster context '${CONTEXT_NAME}' is not reachable — run localdev/k3s-macos/install.sh first."
   exit 1
 fi
 
@@ -196,5 +196,5 @@ done
 
 echo "==> Cluster nodes:"
 kubectl --context "${CONTEXT_NAME}" get nodes -L nvidia.com/gpu.product
-echo "==> Done. Tear these down with localdev/destroy.sh, or"
+echo "==> Done. Tear these down with localdev/k3s-macos/destroy.sh, or"
 echo "    'podman rm -f \$(podman ps -aq --filter name=fake-accelerator-node)' to stop them without a full teardown."

@@ -49,7 +49,7 @@ controlplane/ui/tsconfig.tsbuildinfo
 *.ckpt
 
 # k3s
-localdev/kubeconfig
+localdev/**/kubeconfig
 *.kubeconfig
 *.pem
 *.key

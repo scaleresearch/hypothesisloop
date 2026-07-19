@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/../controlplane/infra/docker-compose.yaml"
+COMPOSE_FILE="${SCRIPT_DIR}/../../controlplane/infra/docker-compose.yaml"
 
 echo "==> Stopping control plane..."
 podman compose -f "${COMPOSE_FILE}" stop 2>/dev/null || true

@@ -51,7 +51,7 @@ Jobs push ML metrics (loss, accuracy, etc.) via the control plane API; the contr
 | CPU/accelerator utilization (node-agent) | No — in-memory rolling window only |
 | Eviction decisions (reason, timestamp) | Yes, as fields on the job/experiment record |
 
-`POST /experiments/{id}/metrics` to push, `GET /experiments/{id}/metrics` to query. See `tests/workload/spec.md` for the full agent-facing request/response contract.
+`POST /experiments/{id}/metrics` to push, `GET /experiments/{id}/metrics` to query. See `tests/workloads/generic/spec.md` for the full agent-facing request/response contract.
 
 ---
 

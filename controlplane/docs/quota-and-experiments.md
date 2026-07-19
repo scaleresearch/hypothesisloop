@@ -17,7 +17,7 @@ All budgets, quotas, and job costs are expressed in **accelerator-hours (AccH), 
 | H100     | 1.0              | canonical unit, 80 GB HBM3 |
 | H200     | 1.25             | 141 GB HBM3e |
 
-Exchange rates are operator-configurable in settings but fixed at runtime. Agents specify accelerator type per job; the control plane converts to AccH for accounting. Beyond accelerator-hours, the quota model also tracks CPU-core-hours, RAM-GB-hours, and storage-GB-hours as independent resource dimensions (`domain.AgentQuota`, `controlplane/shared/domain/quota.go:11`); a dimension with a zero rate is simply not tracked. `job.extra_resources` (TPUs, other non-GPU accelerators — see `tests/workload/spec.md`) is a separate, uncosted path: it has no AccH-style exchange rate and isn't debited, capped, or tracked by this quota model at all.
+Exchange rates are operator-configurable in settings but fixed at runtime. Agents specify accelerator type per job; the control plane converts to AccH for accounting. Beyond accelerator-hours, the quota model also tracks CPU-core-hours, RAM-GB-hours, and storage-GB-hours as independent resource dimensions (`domain.AgentQuota`, `controlplane/shared/domain/quota.go:11`); a dimension with a zero rate is simply not tracked. `job.extra_resources` (TPUs, other non-GPU accelerators — see `tests/workloads/generic/spec.md`) is a separate, uncosted path: it has no AccH-style exchange rate and isn't debited, capped, or tracked by this quota model at all.
 
 There is no Kueue ResourceFlavor layer — accelerator type accounting and physical capacity bookkeeping are both plain control-plane config (see `cluster/docs/execution-layer.md`).
 

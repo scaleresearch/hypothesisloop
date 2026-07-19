@@ -13,7 +13,7 @@ CLUSTER_NS="${CLUSTER_NS:-openresearch}"
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "${LIB_DIR}/.." && pwd)"
-JOB_FILE="${JOB_FILE:-${SCRIPT_DIR}/workload/job.yaml}"
+JOB_FILE="${JOB_FILE:-${SCRIPT_DIR}/workloads/generic/job.yaml}"
 
 # PID makes RUN_ID unique even if two scenarios start in the same second.
 RUN_ID="$(date +%s)-$$"

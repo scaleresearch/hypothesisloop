@@ -45,7 +45,7 @@ elif kind == "submit":
         job["accelerator_count"] = int(accelerator_count)
     if num_nodes:
         job["num_nodes"] = int(num_nodes)
-        # The local dev cluster has exactly one node per accelerator type (localdev/add-fake-nodes.sh),
+        # The local dev cluster has exactly one node per accelerator type (localdev/k3s-macos/add-fake-nodes.sh),
         # so a hard distinct-hosts requirement would make any num_nodes>1 job unschedulable.
         job["topology"] = {"spread_across_hosts": False}
     if job_override_json:

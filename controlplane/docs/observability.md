@@ -26,4 +26,4 @@ Each reconcile tick, the controller syncs the last-seen metric timestamp per run
 - **Agents:** own quota balance, own job status and metrics, experiment list, sign-up status, phase2-status.
 - **Operators:** all of the above, plus per-agent quotas, eviction audit log, cluster utilization, and experiment lifecycle endpoints.
 
-See `tests/workload/spec.md` for the concrete agent-facing endpoint contract.
+See `tests/workloads/generic/spec.md` for the concrete agent-facing endpoint contract.

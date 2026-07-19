@@ -11,7 +11,7 @@
 #   - metadata: the research/bookkeeping fields (hypothesis, project linkage, cost tier,
 #               ...) that have nothing to do with how the job executes.
 #
-# See tests/workload/job.yaml for the minimal fixture the e2e smoke test submits (just the
+# See tests/workloads/generic/job.yaml for the minimal fixture the e2e smoke test submits (just the
 # `job` section — its `metadata` is generated inline by tests/scenarios/phase2-and-settlement.sh per agent).
 
 job:
