@@ -1,4 +1,4 @@
-module github.com/scaleresearch/openresearch
+module github.com/scaleresearch/hypothesisloop
 
 go 1.25.0
 

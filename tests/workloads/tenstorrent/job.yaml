@@ -1,14 +1,14 @@
-# Standalone job definition for the Tenstorrent real-hardware e2e test — train.py actually
-# opens the DRA-allocated device via ttnn and runs real matmuls on it (see train.py's doc
-# comment; this is not the synthetic-metrics stub tests/workloads/generic/train.py uses for every other
-# accelerator type). See tenstorrent/e2e-test.sh, which reads this file and submits it verbatim
-# as the `job` field of POST /experiments, same pattern as tests/workloads/generic/job.yaml.
+# Standalone job definition for the Tenstorrent real-hardware e2e test — train.py opens the
+# DRA-allocated device via ttnn and runs real matmuls (not the synthetic-metrics stub
+# tests/workloads/generic/train.py uses for every other accelerator type). See
+# tenstorrent/e2e-test.sh, which reads this file and submits it verbatim as the `job` field of
+# POST /experiments, same pattern as tests/workloads/generic/job.yaml.
 #
 # The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
 # control plane's admission loop picks whichever registered cluster reports live capacity for
-# that flavor (see controlplane/settings/openresearch.yaml's Tenstorrent-Blackhole entry,
+# that flavor (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
 # allocation_mode: dra) — nothing here names a cluster directly.
-image: localhost/openresearch-tenstorrent-workload:latest
+image: localhost/hypothesisloop-tenstorrent-workload:latest
 
 # memory/cpu sized for the real tt-metal runtime, not the tiny synthetic-stub defaults every
 # other workload here uses: pre-compiled firmware/kernel JIT loading and dispatch buffers for
@@ -18,6 +18,9 @@ image: localhost/openresearch-tenstorrent-workload:latest
 cpu: "2"
 memory: "4Gi"
 storage: "1Gi"
+max_retries: 3
 
-accelerator_type: Tenstorrent-Blackhole
 accelerator_count: 1
+accelerator_type: tenstorrent.com/chipArch=blackhole
+accelerator_pod_resources:
+  hugepages-1Gi: 4Gi

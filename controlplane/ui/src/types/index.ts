@@ -11,7 +11,7 @@ export enum ExperimentStatus {
   PROMOTED = 'PROMOTED',
 }
 
-// AcceleratorType is an open, operator-defined identifier (see openresearch.yaml's accelerator_types) — any
+// AcceleratorType is an open, operator-defined identifier (see hypothesisloop.yaml's accelerator_types) — any
 // vendor's model name is valid (NVIDIA, AMD, ...), not a fixed set. Fetch the live catalog
 // (name + rate) via fetchResourceCatalog() instead of hardcoding known values here.
 export type AcceleratorType = string

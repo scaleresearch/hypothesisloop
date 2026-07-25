@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: openresearch-cluster-agent
-  namespace: openresearch
+  name: hypothesisloop-cluster-agent
+  namespace: hypothesisloop
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: openresearch-cluster-agent
+  name: hypothesisloop-cluster-agent
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -27,13 +27,7 @@ rules:
     # discovery), created alongside the Job and deleted with it (workload_client.go create/
     # delete paths).
     resources: ["services"]
-    verbs: ["create", "delete"]
-  - apiGroups: [""]
-    # ConfigMaps: read this cluster's operator-set JobDefaults (see
-    # cluster/infra/job-defaults-configmap.yaml) — falls back to hardcoded defaults if
-    # absent/unreadable, so this permission is an optimization, not a hard requirement.
-    resources: ["configmaps"]
-    verbs: ["get"]
+    verbs: ["get", "list", "create", "delete"]
   - apiGroups: ["scheduling.k8s.io"]
     resources: ["priorityclasses"]
     verbs: ["get", "create", "update"]
@@ -41,51 +35,51 @@ rules:
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: ["resource.k8s.io"]
-    # resourceclaimtemplates: created/deleted alongside a Job whose accelerator type uses
-    # allocation_mode: dra (workload_client.go's ensureResourceClaimTemplate) — see
-    # localdev/k3s-tenstorrent-qb2/README.md. Not required on clusters with only classic device-plugin
-    # accelerator types; harmless (unused) grant otherwise, and only queried when a DRA-mode
-    # job actually gets submitted to this cluster.
+    # ResourceClaimTemplates are reconciled with desired Jobs. ResourceSlices and allocated
+    # ResourceClaims are the authoritative live DRA capacity/usage source.
     resources: ["resourceclaimtemplates"]
-    verbs: ["get", "create", "delete"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims", "resourceslices", "deviceclasses"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: openresearch-cluster-agent
+  name: hypothesisloop-cluster-agent
 subjects:
   - kind: ServiceAccount
-    name: openresearch-cluster-agent
-    namespace: openresearch
+    name: hypothesisloop-cluster-agent
+    namespace: hypothesisloop
 roleRef:
   kind: ClusterRole
-  name: openresearch-cluster-agent
+  name: hypothesisloop-cluster-agent
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: openresearch-cluster-agent
-  namespace: openresearch
+  name: hypothesisloop-cluster-agent
+  namespace: hypothesisloop
   labels:
-    app: openresearch-cluster-agent
+    app: hypothesisloop-cluster-agent
 spec:
-  # Every replica independently reconciles (desired-state fetch is a read-only GET, and
+  # Every replica independently reconciles (the reconcile exchange is idempotent, and
   # Job create/delete are idempotent), so no leader election is needed — safe to scale this
   # up for availability without any coordination. One is enough for most deployments.
   replicas: 1
   selector:
     matchLabels:
-      app: openresearch-cluster-agent
+      app: hypothesisloop-cluster-agent
   template:
     metadata:
       labels:
-        app: openresearch-cluster-agent
+        app: hypothesisloop-cluster-agent
     spec:
-      serviceAccountName: openresearch-cluster-agent
+      serviceAccountName: hypothesisloop-cluster-agent
       containers:
         - name: cluster-agent
-          image: localhost/openresearch-cluster-agent:latest
+          image: localhost/hypothesisloop-cluster-agent:latest
           imagePullPolicy: Never
           env:
             - name: CLUSTER_NAME
@@ -103,3 +97,7 @@ spec:
             limits:
               cpu: "300m"
               memory: "64Mi"
+      # Same as node-agent-daemonset.yaml: must always have somewhere to run regardless of
+      # whether any workload node is attached (tt-quietbox's no-workload taint).
+      tolerations:
+        - operator: Exists

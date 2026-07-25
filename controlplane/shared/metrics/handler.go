@@ -6,22 +6,21 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// PushRequest is the payload sent by openresearch-node-agent every 2 seconds.
+// PushRequest is the fresh observation payload sent by hypothesisloop-node-agent.
 type PushRequest struct {
 	Node      string      `json:"node"`
 	Timestamp time.Time   `json:"timestamp"`
 	Pods      []PodSample `json:"pods"`
 }
 
-// PodSample is a single pod's CPU utilization reading, tagged with the experiment it belongs to
-// (from the pod's openresearch.io/experiment-id label — resolved by the node-agent, not us).
+// PodSample is a pod execution observation tagged with the experiment it belongs to
+// (from the pod's hypothesisloop.io/experiment-id label — resolved by the node-agent, not us).
 type PodSample struct {
-	PodUID       string  `json:"pod_uid"`
-	ExperimentID string  `json:"experiment_id,omitempty"`
-	CPUUtilPct   float64 `json:"cpu_util_pct"`
+	PodUID       string `json:"pod_uid"`
+	ExperimentID string `json:"experiment_id,omitempty"`
 }
 
 // NewPushHandler returns an HTTP handler that accepts node-agent push payloads and writes every

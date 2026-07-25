@@ -30,17 +30,17 @@ type QuotaConfig struct {
 	// has been declining for this fraction of its estimated_duration_hours (e.g. 0.3 = 30%).
 	MetricDeclineFraction float64 `json:"metric_decline_fraction"`
 
-	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a single
-	// job's total resource request (per node × num_nodes), checked at admission before any
-	// quota debit. 0 means unlimited. See config.QuotaConfig for the operator-facing doc.
-	MaxAcceleratorCountPerJob  int     `json:"max_accelerator_count_per_job,omitempty"`
-	MaxCPUCoresPerJob  float64 `json:"max_cpu_cores_per_job,omitempty"`
-	MaxRAMGBPerJob     float64 `json:"max_ram_gb_per_job,omitempty"`
-	MaxStorageGBPerJob float64 `json:"max_storage_gb_per_job,omitempty"`
+	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a job's
+	// total resource request (per node × num_nodes) at admission, before any quota debit.
+	// 0 means unlimited. See config.QuotaConfig for the operator-facing doc.
+	MaxAcceleratorCountPerJob int     `json:"max_accelerator_count_per_job,omitempty"`
+	MaxCPUCoresPerJob         float64 `json:"max_cpu_cores_per_job,omitempty"`
+	MaxRAMGBPerJob            float64 `json:"max_ram_gb_per_job,omitempty"`
+	MaxStorageGBPerJob        float64 `json:"max_storage_gb_per_job,omitempty"`
 }
 
 // DefaultQuotaConfig returns fallback quota constants used in tests and local runs
-// without a config file. Production services load these from settings/openresearch.yaml.
+// without a config file. Production services load these from settings/hypothesisloop.yaml.
 func DefaultQuotaConfig() QuotaConfig {
 	return QuotaConfig{
 		Top3BonusFraction:     0.25,

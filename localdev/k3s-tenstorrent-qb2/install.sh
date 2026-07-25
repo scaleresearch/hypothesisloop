@@ -101,6 +101,7 @@ if [[ ! -e /dev/tenstorrent/0 ]]; then
 fi
 
 # ---- k3s: native systemd service, same version pin as localdev --------------
+STAGE_T0=$(date +%s)
 echo "==> Ensuring k3s ${K3S_VERSION} is installed and running..."
 if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
   echo "    Installing/upgrading k3s..."
@@ -139,8 +140,12 @@ kubectl config use-context "${CONTEXT_NAME}"
 echo "==> Waiting for node..."
 wait_for 40 3 "node to register" kubectl --context "${CONTEXT_NAME}" get nodes
 kubectl --context "${CONTEXT_NAME}" wait node --all --for=condition=Ready --timeout=120s
+echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
+
+source "${SCRIPT_DIR}/../lib/node.sh"
 
 # ---- helm ---------------------------------------------------------------
+STAGE_T0=$(date +%s)
 if ! command -v helm &>/dev/null; then
   echo "==> Installing Helm..."
   curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
@@ -166,6 +171,9 @@ HELM_ARGS=(
   --set tt-k8s-driver-manager.enabled=false
   --set jobset.enabled=false
   --set kubepmix.enabled=false
+  # Restrict the DRA driver to the real node — fake nodes share this host's kernel and would
+  # otherwise falsely advertise the same physical Tenstorrent card.
+  --set-json 'tt-dra-driver.kubeletPlugin.nodeSelector={"node-role.kubernetes.io/control-plane":"true"}'
   # tt-telemetry's aggregator Deployment polls each collector over
   # hostNetwork:8080 — the same port the per-node collector DaemonSet itself
   # listens on. On a multi-node cluster that's fine (they land on different
@@ -184,6 +192,43 @@ helm "${HELM_ARGS[@]}"
 echo "==> Waiting for Tenstorrent node label from NFD..."
 wait_for 40 3 "NFD pci-1200_1e52 label" \
   kubectl --context "${CONTEXT_NAME}" get nodes -l feature.node.kubernetes.io/pci-1200_1e52.present=true -o name
+wait_for 40 3 "Tenstorrent ResourceSlice" sh -c \
+  "kubectl --context '${CONTEXT_NAME}' get resourceslices -o json | python3 -c 'import json,sys; assert any(x.get(\"spec\",{}).get(\"driver\")==\"tenstorrent.com\" for x in json.load(sys.stdin)[\"items\"])'"
+echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
+
+# ---- cluster-agent bundle -------------------------------------------------
+# Import the images `make images` built locally (Makefile's `tt-up: images` prerequisite) into
+# k3s's own containerd, the same way localdev/k3s-macos/install.sh's native-Linux branch does,
+# then install the node-agent DaemonSet + cluster-agent Deployment. Without this, jobs submitted
+# to the control plane have nothing polling for them on this cluster and stay QUEUED forever.
+STAGE_T0=$(date +%s)
+for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload; do
+  if podman image inspect "localhost/${img}:latest" &>/dev/null; then
+    echo "==> Importing ${img} into k3s..."
+    podman save "localhost/${img}:latest" | sudo k3s ctr images import -
+  fi
+done
+# host.containers.internal is a podman-machine hostname and is not available to native k3s pods
+# convenience hostname that doesn't exist on native Linux — nothing on this host maps it to
+# anything, so cluster-agent would poll a name that never resolves. The control plane's containers
+# publish on 0.0.0.0 (confirmed via `docker port`), so the host's own real IP reaches them from
+# any pod on this node.
+HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
+CLUSTER_NAME="tt-quietbox" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
+  CONTROLPLANE_URL="http://${HOST_IP}:8082" REGISTRY_URL="http://${HOST_IP}:8083" METRICS_URL="http://${HOST_IP}:8084" \
+  bash "${SCRIPT_DIR}/../../cluster/infra/install.sh"
+echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
+
+# Donates zero capacity to workloads by default, same as localdev/k3s-macos/install.sh — applied
+# only now, after tt-operator's own management pods (fabric-manager, NFD master/gc, coredns,
+# metrics-server) have already landed on this one node while it was still schedulable. Tainting
+# any earlier leaves those pods Pending forever (no toleration, no other node to land on),
+# which is exactly what made this hang against helm's own --wait --timeout 8m. node-agent's
+# DaemonSet still monitors this node afterward (tolerates every taint). dev-nodes-up.sh attaches
+# it as a full worker when actually needed (dev work, the portable suite, or the real-hardware
+# e2e); dev-nodes-down.sh detaches it so real training work sharing this box isn't competing with
+# anything k3s scheduled onto it.
+lib_detach_node "${CONTEXT_NAME}" tt-quietbox
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 echo

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Tear down the OpenResearch "cluster agent" bundle from a target Kubernetes
-# cluster: the openresearch-node-agent DaemonSet and the openresearch-cluster-agent
+# Tear down the HypothesisLoop "cluster agent" bundle from a target Kubernetes
+# cluster: the hypothesisloop-node-agent DaemonSet and the hypothesisloop-cluster-agent
 # Deployment + its RBAC. There is no external operator to leave behind — the
-# openresearch-jobs namespace and PriorityClasses cluster-agent created stay
+# hypothesisloop-jobs namespace and PriorityClasses cluster-agent created stay
 # (harmless if the bundle is reinstalled later).
 #
 # Parameters (env vars, all optional):
@@ -32,7 +32,7 @@ echo "==> Removing cluster-agent bundle from cluster '${CLUSTER_NAME}' (context:
 sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g" "${SCRIPT_DIR}/node-agent-daemonset.yaml" \
   | kctl delete -f - --ignore-not-found
 
-sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__CONTROLPLANE_URL__|unused|g; s|__REGISTRY_URL__|unused|g" \
+sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|unused|g; s|__CONTROLPLANE_URL__|unused|g; s|__REGISTRY_URL__|unused|g" \
   "${SCRIPT_DIR}/cluster-agent-deployment.yaml" \
   | kctl delete -f - --ignore-not-found
 

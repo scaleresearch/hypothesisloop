@@ -2,7 +2,7 @@
 // cluster-agents call. Every request in this package is initiated by an agent running
 // inside a target cluster; the control plane never calls out. Endpoints:
 //
-//	GET  /internal/clusters/{name}/desired-state — "what should currently be running here?"
+//	POST /internal/clusters/{name}/reconcile — actual capacity in, desired workloads out
 //	POST /internal/clusters/{name}/status        — push job phase observations
 //
 // There is no command/ack protocol: an experiment's own status (SUBMITTED/ADMITTED/RUNNING)
@@ -19,28 +19,21 @@ package clusteragentapi
 
 import (
 	"context"
-	"encoding/json"
-	"strconv"
+	"sort"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// Store is the persistence interface the handler needs. Satisfied by *db.ClusterQueueStore.
+// Store is the desired-state persistence interface the handler needs.
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
-	UpsertJobReport(ctx context.Context, experimentID, clusterName, phase string, admittedAcceleratorType domain.AcceleratorType, seq int64, jobUID string) (applied bool, uidMismatch bool, err error)
-	DeleteJobReportForCluster(ctx context.Context, experimentID, clusterName string) error
-	BumpAttemptOnRecreate(ctx context.Context, experimentID string) (attempt int, bumped bool, err error)
-	RecordHeartbeat(ctx context.Context, clusterName string, cpuAvailable, cpuTotal float64, hasCPUReport bool) error
-	ListHeartbeats(ctx context.Context) ([]db.ClusterHeartbeat, error)
+	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -72,17 +65,27 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Clusters []clusterInfo `json:"clusters"`
 		}
 	}, error) {
-		heartbeats, err := h.store.ListHeartbeats(ctx)
+		heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, h.metricsDBURL, h.connectedWithin)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		out := make([]clusterInfo, len(heartbeats))
+		names := make([]string, 0, len(heartbeats))
+		for name := range heartbeats {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		out := make([]clusterInfo, len(names))
 		now := time.Now()
-		for i, hb := range heartbeats {
+		for i, name := range names {
+			connected := heartbeats[name]
+			var lastSeen time.Time
+			if connected {
+				lastSeen = now
+			}
 			out[i] = clusterInfo{
-				ClusterName: hb.ClusterName,
-				LastSeenAt:  hb.LastSeenAt,
-				Connected:   now.Sub(hb.LastSeenAt) <= h.connectedWithin,
+				ClusterName: name,
+				LastSeenAt:  lastSeen,
+				Connected:   connected,
 			}
 		}
 		resp := &struct {
@@ -95,51 +98,71 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	})
 
 	apidocs.Register(doc, huma.Operation{
-		OperationID: "cluster-desired-state", Method: "GET", Path: "/{name}/desired-state",
-		Summary: "Fetch the desired workload set for a cluster", Tags: []string{"cluster-agent"},
-		Description: "Returns every experiment that should currently have a Job running in the cluster (full payload). " +
-			"Doubles as the cluster-agent heartbeat and live-capacity push channel via optional query params.",
-	}, func(ctx context.Context, in *desiredStateInput) (*struct {
+		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
+		Summary: "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
+		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, then returns the complete PostgreSQL desired workload set for this cluster.",
+	}, func(ctx context.Context, in *reconcileInput) (*struct {
 		Body struct {
 			Experiments []*domain.Experiment `json:"experiments"`
 		}
 	}, error) {
 		clusterName := in.Name
 
-		cpuAvail, availErr := strconv.ParseFloat(in.CPUAvailableCores, 64)
-		cpuTotal, totalErr := strconv.ParseFloat(in.CPUTotalCores, 64)
-		hasCPUReport := availErr == nil && totalErr == nil && in.CPUAvailableCores != "" && in.CPUTotalCores != ""
-
-		if err := h.store.RecordHeartbeat(ctx, clusterName, cpuAvail, cpuTotal, hasCPUReport); err != nil {
-			h.logger.Warn("clusteragentapi: record heartbeat", zap.String("cluster", clusterName), zap.Error(err))
+		report := in.Body
+		if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
+			return nil, huma.Error400BadRequest("complete accelerator capacity report is required")
 		}
-
-		var acceleratorAvail, acceleratorTotal map[string]int64
-		if in.AcceleratorAvailableByFlavor != "" {
-			_ = json.Unmarshal([]byte(in.AcceleratorAvailableByFlavor), &acceleratorAvail)
+		if report.CPUAvailableCores < 0 || report.CPUTotalCores < 0 || report.CPUAvailableCores > report.CPUTotalCores {
+			return nil, huma.Error400BadRequest("invalid CPU capacity values")
 		}
-		if in.AcceleratorTotalByFlavor != "" {
-			_ = json.Unmarshal([]byte(in.AcceleratorTotalByFlavor), &acceleratorTotal)
-		}
-		if len(acceleratorAvail) > 0 {
-			if err := metricsdb.RecordClusterAcceleratorCapacity(ctx, h.metricsDBURL, clusterName, acceleratorAvail, acceleratorTotal); err != nil {
-				h.logger.Warn("clusteragentapi: record accelerator capacity", zap.String("cluster", clusterName), zap.Error(err))
+		for flavor, total := range report.AcceleratorTotalByFlavor {
+			if flavor == "" {
+				return nil, huma.Error400BadRequest("accelerator capacity contains empty flavor")
+			}
+			available, present := report.AcceleratorAvailableByFlavor[flavor]
+			if !present || total < 0 || available < 0 || available > total {
+				return nil, huma.Error400BadRequest("invalid accelerator capacity values")
 			}
 		}
-
-		if ramAvail, availErr := strconv.ParseInt(in.RAMAvailableBytes, 10, 64); availErr == nil {
-			if ramTotal, totalErr := strconv.ParseInt(in.RAMTotalBytes, 10, 64); totalErr == nil {
-				if err := metricsdb.RecordClusterRAMCapacity(ctx, h.metricsDBURL, clusterName, ramAvail, ramTotal); err != nil {
-					h.logger.Warn("clusteragentapi: record RAM capacity", zap.String("cluster", clusterName), zap.Error(err))
+		if len(report.AcceleratorAvailableByFlavor) != len(report.AcceleratorTotalByFlavor) {
+			return nil, huma.Error400BadRequest("accelerator available and total flavor sets must match")
+		}
+		availableByNode := make(map[string]int64, len(report.AcceleratorAvailableByFlavor))
+		for node, flavors := range report.AcceleratorAvailableByNode {
+			if node == "" {
+				return nil, huma.Error400BadRequest("per-node accelerator report has empty node identity")
+			}
+			for flavor, available := range flavors {
+				if flavor == "" || available < 0 {
+					return nil, huma.Error400BadRequest("invalid per-node accelerator capacity value")
 				}
+				if _, present := report.AcceleratorTotalByFlavor[flavor]; !present {
+					return nil, huma.Error400BadRequest("per-node accelerator flavor is absent from cluster totals")
+				}
+				availableByNode[flavor] += available
 			}
 		}
-		if storageAvail, availErr := strconv.ParseInt(in.StorageAvailableBytes, 10, 64); availErr == nil {
-			if storageTotal, totalErr := strconv.ParseInt(in.StorageTotalBytes, 10, 64); totalErr == nil {
-				if err := metricsdb.RecordClusterStorageCapacity(ctx, h.metricsDBURL, clusterName, storageAvail, storageTotal); err != nil {
-					h.logger.Warn("clusteragentapi: record storage capacity", zap.String("cluster", clusterName), zap.Error(err))
-				}
+		for flavor, byNode := range availableByNode {
+			if byNode > report.AcceleratorAvailableByFlavor[flavor] {
+				return nil, huma.Error400BadRequest("per-node accelerator capacity exceeds cluster availability")
 			}
+		}
+
+		if report.RAMAvailableBytes < 0 || report.RAMTotalBytes < 0 || report.RAMAvailableBytes > report.RAMTotalBytes ||
+			report.StorageAvailableBytes < 0 || report.StorageTotalBytes < 0 || report.StorageAvailableBytes > report.StorageTotalBytes {
+			return nil, huma.Error400BadRequest("invalid memory or storage capacity values")
+		}
+
+		if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
+			ClusterName: clusterName, At: time.Now().UTC(),
+			CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
+			AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,
+			AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
+			NodeLabelsByNode:           report.NodeLabelsByNode,
+			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
+			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
+		}); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
 		}
 
 		exps, err := h.store.ListDesiredWorkloads(ctx, clusterName)
@@ -158,8 +181,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "cluster-push-status", Method: "POST", Path: "/{name}/status",
 		Summary: "Push job-phase observations from a cluster-agent", Tags: []string{"cluster-agent"},
-		Description: "Body: {\"reports\": [...]}. Returns {status, rejected}; rejected lists reports the write " +
-			"did not durably apply (error, stale/duplicate sequence, or not owned by this cluster) — retry those.",
+		Description: "Body: {\"reports\": [...]}. The complete snapshot is validated and written atomically; any invalid report rejects the whole request.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
 		Body struct {
@@ -167,79 +189,57 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 	}) (*struct {
 		Body struct {
-			Status   string   `json:"status"`
-			Rejected []string `json:"rejected"`
+			Status string `json:"status"`
 		}
 	}, error) {
 		clusterName := in.Name
-		rejected := []string{}
+		now := time.Now().UTC()
+		statusSamples := make([]metricsdb.JobStatusSample, 0, len(in.Body.Reports))
 		for _, rep := range in.Body.Reports {
 			if rep.ExperimentID == "" || rep.Phase == "" {
-				continue
+				return nil, huma.Error400BadRequest("every status report requires experiment_id and phase")
 			}
-			applied, uidMismatch, err := h.store.UpsertJobReport(ctx, rep.ExperimentID, clusterName, rep.Phase, domain.AcceleratorType(rep.AdmittedAcceleratorType), rep.SequenceNumber, rep.JobUID)
+			exp, err := h.store.GetExperiment(ctx, rep.ExperimentID)
 			if err != nil {
-				h.logger.Warn("clusteragentapi: upsert job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-				rejected = append(rejected, rep.ExperimentID)
-				continue
+				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			if !applied {
-				rejected = append(rejected, rep.ExperimentID)
-				continue
+			if exp == nil || exp.ClusterName != clusterName {
+				return nil, huma.Error409Conflict("status report does not belong to this cluster: " + rep.ExperimentID)
 			}
-			if h.metricsDBURL != "" && rep.AdmittedNode != "" {
-				if err := metricsdb.RecordExperimentNode(ctx, h.metricsDBURL, rep.ExperimentID, rep.AdmittedNode, time.Now().UTC()); err != nil {
-					h.logger.Warn("clusteragentapi: record experiment node", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-				}
-			}
-			if uidMismatch {
-				h.logger.Warn("clusteragentapi: job UID mismatch — report may not correspond to the dispatched Job",
-					zap.String("experiment_id", rep.ExperimentID),
-					zap.String("cluster", clusterName),
-					zap.String("reported_uid", rep.JobUID),
-				)
-				obsmetrics.JobUIDMismatchTotal.WithLabelValues(clusterName).Inc()
-			}
-			if rep.Phase == "gone" {
-				if err := h.store.DeleteJobReportForCluster(ctx, rep.ExperimentID, clusterName); err != nil {
-					h.logger.Warn("clusteragentapi: delete job report", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-				}
-				attempt, bumped, err := h.store.BumpAttemptOnRecreate(ctx, rep.ExperimentID)
-				if err != nil {
-					h.logger.Warn("clusteragentapi: bump attempt", zap.String("experiment_id", rep.ExperimentID), zap.Error(err))
-				} else if bumped {
-					h.logger.Warn("clusteragentapi: job disappeared while still desired — recreation attempt bumped",
-						zap.String("experiment_id", rep.ExperimentID),
-						zap.String("cluster", clusterName),
-						zap.Int("attempt", attempt),
-					)
-				}
-			}
+			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
+				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
+				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, At: now,
+			})
+		}
+		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		resp := &struct {
 			Body struct {
-				Status   string   `json:"status"`
-				Rejected []string `json:"rejected"`
+				Status string `json:"status"`
 			}
 		}{}
 		resp.Body.Status = "ok"
-		resp.Body.Rejected = rejected
 		return resp, nil
 	})
 }
 
-// desiredStateInput models the cluster-agent's desired-state poll, including the optional
-// capacity/heartbeat query params it piggybacks on the request.
-type desiredStateInput struct {
-	Name                         string `path:"name"`
-	CPUAvailableCores            string `query:"cpu_available_cores"`
-	CPUTotalCores                string `query:"cpu_total_cores"`
-	AcceleratorAvailableByFlavor string `query:"accelerator_available_by_flavor"`
-	AcceleratorTotalByFlavor     string `query:"accelerator_total_by_flavor"`
-	RAMAvailableBytes            string `query:"ram_available_bytes"`
-	RAMTotalBytes                string `query:"ram_total_bytes"`
-	StorageAvailableBytes        string `query:"storage_available_bytes"`
-	StorageTotalBytes            string `query:"storage_total_bytes"`
+type reconcileInput struct {
+	Name string `path:"name"`
+	Body capacityReport
+}
+
+type capacityReport struct {
+	CPUAvailableCores            float64                      `json:"cpu_available_cores"`
+	CPUTotalCores                float64                      `json:"cpu_total_cores"`
+	AcceleratorAvailableByFlavor map[string]int64             `json:"accelerator_available_by_type"`
+	AcceleratorTotalByFlavor     map[string]int64             `json:"accelerator_total_by_type"`
+	AcceleratorAvailableByNode   map[string]map[string]int64  `json:"accelerator_available_by_node"`
+	NodeLabelsByNode             map[string]map[string]string `json:"node_labels_by_node"`
+	RAMAvailableBytes            int64                        `json:"ram_available_bytes"`
+	RAMTotalBytes                int64                        `json:"ram_total_bytes"`
+	StorageAvailableBytes        int64                        `json:"storage_available_bytes"`
+	StorageTotalBytes            int64                        `json:"storage_total_bytes"`
 }
 
 // clusterInfo is one row of GET /internal/clusters.
@@ -255,6 +255,4 @@ type statusReport struct {
 	Phase                   string `json:"phase"` // pending | running | succeeded | failed | gone
 	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
 	AdmittedNode            string `json:"admitted_node,omitempty"`
-	SequenceNumber          int64  `json:"sequence_number"`
-	JobUID                  string `json:"job_uid,omitempty"`
 }

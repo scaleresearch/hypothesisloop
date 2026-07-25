@@ -5,12 +5,32 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
+
+// defaultHypothesisListLimit and maxHypothesisListLimit bound every ListHypotheses read so a
+// weeks-long platform experiment's accumulated pool can never flood an agent's catch-up read —
+// see plan.md. 200 is ample even for a single agent's full own-history read: registration is
+// gated by the platform's per-agent submission rate limit, so one agent cannot accumulate
+// thousands of hypotheses over a run.
+const (
+	defaultHypothesisListLimit = 200
+	maxHypothesisListLimit     = 200
+)
+
+// HypothesisListItem bundles a hypothesis with cheap activity counts — not the finding/comment
+// bodies — so a bounded list read tells the agent which rows are worth a full detail fetch,
+// without opening every hypothesis in the pool.
+type HypothesisListItem struct {
+	*domain.Hypothesis
+	FindingCount int `json:"finding_count"`
+	CommentCount int `json:"comment_count"`
+}
 
 // HypothesesStore provides persistence for domain.Hypothesis and domain.HypothesisFinding.
 type HypothesesStore struct {
@@ -127,11 +147,38 @@ func (s *HypothesesStore) GetHypothesis(ctx context.Context, id string) (*domain
 	return h, nil
 }
 
-// ListHypotheses returns every hypothesis registered within a platform experiment, most
-// recent first — the shared idea pool for that platform experiment.
-func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID string) ([]*domain.Hypothesis, error) {
-	q := `SELECT ` + hypothesisColumns + ` FROM hypotheses WHERE platform_experiment_id = $1 ORDER BY created_at DESC`
-	rows, err := s.pool.pool.Query(ctx, q, platformExperimentID)
+// ListHypotheses returns hypotheses registered within a platform experiment, most recent
+// first, each carrying its finding/comment counts. Bounded at the store so the endpoint can
+// never return unbounded rows even if a caller forgets a limit: limit <= 0 uses
+// defaultHypothesisListLimit, and any limit above maxHypothesisListLimit is clamped down to
+// it. agentID, if non-empty, restricts the result to that agent's own hypotheses.
+func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, limit int) ([]*HypothesisListItem, error) {
+	if limit <= 0 {
+		limit = defaultHypothesisListLimit
+	} else if limit > maxHypothesisListLimit {
+		limit = maxHypothesisListLimit
+	}
+
+	clauses := []string{"h.platform_experiment_id = $1"}
+	args := []any{platformExperimentID}
+	if agentID != "" {
+		args = append(args, agentID)
+		clauses = append(clauses, fmt.Sprintf("h.agent_id = $%d", len(args)))
+	}
+	args = append(args, limit)
+
+	q := `
+SELECT h.id, h.agent_id, h.platform_experiment_id, h.text, h.created_at,
+       COUNT(DISTINCT f.id) AS finding_count, COUNT(DISTINCT c.id) AS comment_count
+FROM hypotheses h
+LEFT JOIN hypothesis_findings f ON f.hypothesis_id = h.id
+LEFT JOIN hypothesis_comments c ON c.hypothesis_id = h.id
+WHERE ` + strings.Join(clauses, " AND ") + `
+GROUP BY h.id
+ORDER BY h.created_at DESC
+LIMIT $` + fmt.Sprint(len(args))
+
+	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.ListHypotheses: %w", err)
 	}
@@ -141,13 +188,14 @@ func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperiment
 	// platform experiment is the common case (a fresh platform experiment always starts
 	// with none) — callers merging results across many platform experiments must be able to
 	// treat every response as an array without a null-check per item.
-	out := []*domain.Hypothesis{}
+	out := []*HypothesisListItem{}
 	for rows.Next() {
-		h, err := scanHypothesis(rows)
-		if err != nil {
+		h := &domain.Hypothesis{}
+		item := &HypothesisListItem{Hypothesis: h}
+		if err := rows.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.CreatedAt, &item.FindingCount, &item.CommentCount); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListHypotheses: scan: %w", err)
 		}
-		out = append(out, h)
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }
@@ -196,6 +244,50 @@ FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC`
 			return nil, fmt.Errorf("hypotheses_store.ListFindingsByHypothesis: scan: %w", err)
 		}
 		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// CreateHypothesisComment records a freeform, job-independent note against a hypothesis — see
+// domain.HypothesisComment for how this differs from a finding.
+func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesisID, agentID, text string) (*domain.HypothesisComment, error) {
+	id, err := newHypothesisID()
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
+	}
+	c := &domain.HypothesisComment{
+		ID:           id,
+		HypothesisID: hypothesisID,
+		AgentID:      agentID,
+		Text:         text,
+		CreatedAt:    time.Now().UTC(),
+	}
+	const q = `
+INSERT INTO hypothesis_comments (id, hypothesis_id, agent_id, text, created_at)
+VALUES ($1, $2, $3, $4, $5)`
+	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.AgentID, c.Text, c.CreatedAt); err != nil {
+		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
+	}
+	return c, nil
+}
+
+// ListCommentsByHypothesis returns every comment filed against a hypothesis, oldest first.
+func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisComment, error) {
+	const q = `SELECT id, hypothesis_id, agent_id, text, created_at
+FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC`
+	rows, err := s.pool.pool.Query(ctx, q, hypothesisID)
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.ListCommentsByHypothesis: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*domain.HypothesisComment{} // non-nil: see ListHypotheses for why
+	for rows.Next() {
+		c := &domain.HypothesisComment{}
+		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.AgentID, &c.Text, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.ListCommentsByHypothesis: scan: %w", err)
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

@@ -24,12 +24,10 @@ K3S_VERSION="v1.36.2+k3s1"
 K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-apiserver-arg=runtime-config=scheduling.k8s.io/v1alpha2=true --kube-controller-manager-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-scheduler-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true"
 
 # This VM's root disk is shared with whatever else podman/podman-machine is running on the
-# host (other unrelated dev stacks, other images) — it can sit well above kubelet's default
-# 80/85% image-GC watermarks for reasons that have nothing to do with this cluster's own
-# images. Without this, kubelet periodically garbage-collects any locally-imported image
-# with no currently-running container (workload/robotics-workload/cluster-agent/node-agent
-# between test runs) straight out from under us — see localdev/k3s-macos/add-fake-nodes.sh's identical
-# override on the fake accelerator nodes for the same reason.
+# host, so it can sit well above kubelet's default 80/85% image-GC watermarks for unrelated
+# reasons. Without this, kubelet periodically garbage-collects any locally-imported image
+# with no currently-running container straight out from under us — see
+# localdev/k3s-macos/dev-nodes-up.sh's identical override on the fake accelerator nodes.
 # Escaped \< : this value is re-parsed by at least one more shell layer downstream (the SSH
 # command string on macOS, or the piped installer script's own arg handling) before it reaches
 # kubelet, so an unescaped < would be consumed as shell input redirection instead of surviving
@@ -50,6 +48,7 @@ wait_for() {
 }
 
 # ---- macOS: k3s inside the podman machine VM --------------------------------
+STAGE_T0=$(date +%s)
 if [[ "$(uname)" == "Darwin" ]]; then
   if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q "true"; then
     echo "==> Starting podman machine..."
@@ -96,8 +95,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
     -o StrictHostKeyChecking=no -L 6443:localhost:6443 core@localhost
   sleep 1
 
-  # Build host kubeconfig and a container-friendly copy (host.docker.internal).
-  # k3s TLS covers localhost/127.0.0.1 but not host.docker.internal, so the
+  # Build host kubeconfig and a container-friendly copy (host.containers.internal).
+  # k3s TLS covers localhost/127.0.0.1 but not host.containers.internal, so the
   # container copy skips TLS verification.
   TMPKUBE=$(mktemp)
   trap 'rm -f "${TMPKUBE}"' EXIT
@@ -108,7 +107,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
            s|current-context: default|current-context: ${CONTEXT_NAME}|g" \
     > "${TMPKUBE}"
 
-  sed "s|https://127.0.0.1:6443|https://host.docker.internal:6443|;
+  sed "s|https://127.0.0.1:6443|https://host.containers.internal:6443|;
        s|current-context: default|current-context: ${CONTEXT_NAME}|g" "${TMPKUBE}" \
     | python3 -c "
 import sys, re
@@ -143,15 +142,15 @@ else
   kubectl config rename-context default "${CONTEXT_NAME}" 2>/dev/null || true
   kubectl config use-context "${CONTEXT_NAME}"
 
-  # Build container-friendly kubeconfig (host.docker.internal instead of
+  # Build container-friendly kubeconfig (host.containers.internal instead of
   # 127.0.0.1 so compose services can reach the API server; TLS skipped because
-  # the k3s cert covers 127.0.0.1 but not host.docker.internal).
+  # the k3s cert covers 127.0.0.1 but not host.containers.internal).
   sudo cat /etc/rancher/k3s/k3s.yaml \
     | sed "s|name: default|name: ${CONTEXT_NAME}|g;
            s|cluster: default|cluster: ${CONTEXT_NAME}|g;
            s|user: default|user: ${CONTEXT_NAME}|g;
            s|current-context: default|current-context: ${CONTEXT_NAME}|g;
-           s|https://127.0.0.1:6443|https://host.docker.internal:6443|" \
+           s|https://127.0.0.1:6443|https://host.containers.internal:6443|" \
     | python3 -c "
 import sys, re
 sys.stdout.write(re.sub(
@@ -162,8 +161,8 @@ sys.stdout.write(re.sub(
   chmod 600 "${HOME}/.kube/k3s-container.yaml"
 
   # Import workload images into k3s containerd (pre-built by `make images`).
-  for img in openresearch-node-agent openresearch-cluster-agent openresearch-workload openresearch-robotics-workload; do
-    if command -v podman &>/dev/null && podman image exists "${img}:latest" 2>/dev/null; then
+  for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload; do
+    if podman image exists "${img}:latest" 2>/dev/null; then
       echo "==> Importing ${img} into k3s..."
       podman save "${img}:latest" | sudo k3s ctr images import -
     fi
@@ -177,34 +176,26 @@ wait_for 40 3 "node to register" \
   kubectl --context "${CONTEXT_NAME}" get nodes
 kubectl --context "${CONTEXT_NAME}" wait node --all \
   --for=condition=Ready --timeout=120s
+echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 
-# Patch fake accelerator capacity onto the node — there's no real accelerator hardware in local dev, so this
-# just gives the (currently static-config-based) capacity accounting something to point at.
-NODE=$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')
-kubectl --context "${CONTEXT_NAME}" patch node "${NODE}" --subresource=status \
-  --type=json -p '[{"op":"add","path":"/status/capacity/nvidia.com~1gpu","value":"8"},{"op":"add","path":"/status/allocatable/nvidia.com~1gpu","value":"8"}]' \
-  >/dev/null
-
-# Real accelerator nodes carry this label too (set by the NVIDIA GPU Feature Discovery add-on) —
-# the control plane's node affinity requires it for every accelerator type a job can request (see
-# openresearch.yaml node_label_value), so local dev must fake this label as well, not just
-# the resource capacity, or every accelerator-requesting job becomes unschedulable here.
-kubectl --context "${CONTEXT_NAME}" label node "${NODE}" nvidia.com/gpu.product=NVIDIA-T4 --overwrite \
-  >/dev/null
-
-# Import workload images (node-agent, workload) into k3s so the cluster-agent
-# bundle installed below can actually schedule them.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/node.sh"
+
+# The control-plane node donates zero capacity to workloads by default — it never runs
+# training pods, but node-agent's DaemonSet tolerates every taint
+# (cluster/infra/node-agent-daemonset.yaml) so it still monitors this node. Import just that
+# image here; workload/cluster-agent images land on whatever nodes dev-nodes-up.sh attaches or
+# creates below.
+CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"
+lib_detach_node "${CONTEXT_NAME}" "${CONTROL_PLANE_NODE}"
 if [[ "$(uname)" == "Darwin" ]]; then
   # On macOS k3s runs inside the podman VM; import workload images via stdin.
-  for img in openresearch-node-agent openresearch-cluster-agent openresearch-workload openresearch-robotics-workload; do
-    if podman image exists "${img}:latest" 2>/dev/null; then
-      echo "==> Importing ${img} into k3s..."
-      podman save "${img}:latest" \
-        | ssh -i "${SSH_KEY}" -p "${SSH_PORT}" -o StrictHostKeyChecking=no core@localhost \
-            "sudo k3s ctr images import -"
-    fi
-  done
+  if podman image exists "hypothesisloop-node-agent:latest" 2>/dev/null; then
+    echo "==> Importing hypothesisloop-node-agent into k3s..."
+    podman save "hypothesisloop-node-agent:latest" \
+      | ssh -i "${SSH_KEY}" -p "${SSH_PORT}" -o StrictHostKeyChecking=no core@localhost \
+          "sudo k3s ctr images import -"
+  fi
 fi
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
@@ -214,13 +205,15 @@ kubectl --context "${CONTEXT_NAME}" get nodes
 # external queueing operator) onto the freshly bootstrapped local cluster, so `make k3s-up`
 # produces a fully working local dev environment in one command.
 echo "==> Installing cluster-agent bundle onto local cluster..."
+STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   bash "${SCRIPT_DIR}/../../cluster/infra/install.sh"
+echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 
-# Add extra simulated nodes labeled with different fake accelerator types, so acceptable_accelerator_types/
-# node-affinity variability has more than one type to actually land on locally by default
-# (see add-fake-nodes.sh for why this is separate k3s agent processes, not k3d/kind). Set
-# EXTRA_NODES=0 to skip. Idempotent — safe on every `make k3s-up`, including re-runs against
-# an already-provisioned cluster.
-echo "==> Adding fake multi-accelerator-type nodes (EXTRA_NODES=${EXTRA_NODES:-3})..."
-EXTRA_NODES="${EXTRA_NODES:-3}" bash "${SCRIPT_DIR}/add-fake-nodes.sh"
+# Provision the schedulable dev/test nodes (see dev-nodes-up.sh) — on macOS/laptop dev they're the
+# only worker capacity there is, since the control-plane node above stays tainted no-workload.
+# Set NODE_COUNT=0 to leave the cluster control-plane-only. Idempotent — safe on every
+# `make k3s-up`, including re-runs against an already-provisioned cluster.
+STAGE_T0=$(date +%s)
+bash "${SCRIPT_DIR}/dev-nodes-up.sh"
+echo "==> dev-nodes-up stage: $(( $(date +%s) - STAGE_T0 ))s"

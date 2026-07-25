@@ -8,7 +8,6 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/../../controlplane/infra/docker-compose.yaml"
 
 wait_for() {
   local max="$1" delay="$2" desc="$3"; shift 3
@@ -54,7 +53,7 @@ kubectl --context "${CONTEXT_NAME}" wait node --all --for=condition=Ready --time
 kubectl config use-context "${CONTEXT_NAME}" >/dev/null
 
 echo "==> Starting control plane..."
-podman compose -f "${COMPOSE_FILE}" start 2>/dev/null || podman compose -f "${COMPOSE_FILE}" up -d
+bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" start
 
 echo "==> Local dev started. Context: ${CONTEXT_NAME}"
 kubectl --context "${CONTEXT_NAME}" get nodes

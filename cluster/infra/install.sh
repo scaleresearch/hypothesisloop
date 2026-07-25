@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Install the OpenResearch "cluster agent" bundle onto a target Kubernetes
-# cluster where training jobs actually run: the openresearch-node-agent
-# DaemonSet (per-node CPU metrics) and the openresearch-cluster-agent
-# Deployment (the only component with credentials to this cluster's API —
-# it long-polls the control plane for work and pushes status back; the
-# control plane never dials into this cluster directly). No external
+# Install the HypothesisLoop "cluster agent" bundle onto a target Kubernetes
+# cluster where training jobs actually run: hypothesisloop-node-agent
+# (DaemonSet, per-node CPU metrics) and hypothesisloop-cluster-agent
+# (Deployment, the only component with credentials to this cluster's API —
+# long-polls the control plane for work, pushes status back). No external
 # queueing operator — admission, priority, and preemption are native
 # Kubernetes (Job.spec + PriorityClass), applied locally by cluster-agent.
 #
@@ -13,17 +12,20 @@
 #
 # Parameters (env vars, all optional):
 #   CLUSTER_NAME      — label identifying this target cluster (default: local)
-#   CONTROLPLANE_URL  — outbound URL cluster-agent polls (default: http://host.docker.internal:8082)
+#   CONTROLPLANE_URL  — outbound URL cluster-agent polls (default: http://host.containers.internal:8082)
 #   REGISTRY_URL      — outbound URL training pods push metrics to, must be reachable from
 #                       *inside* a pod in this cluster, not just from cluster-agent
-#                       (default: http://host.docker.internal:8083)
+#                       (default: http://host.containers.internal:8083)
+#   METRICS_URL       — outbound URL node-agents push observations to
+#                       (default: http://host.containers.internal:8084)
 #   KUBECONFIG_PATH   — kubeconfig file to use (default: $HOME/.kube/config)
 #   KUBE_CONTEXT      — kubectl context to target (default: current-context)
 set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:-local}"
-CONTROLPLANE_URL="${CONTROLPLANE_URL:-http://host.docker.internal:8082}"
-REGISTRY_URL="${REGISTRY_URL:-http://host.docker.internal:8083}"
+CONTROLPLANE_URL="${CONTROLPLANE_URL:-http://host.containers.internal:8082}"
+REGISTRY_URL="${REGISTRY_URL:-http://host.containers.internal:8083}"
+METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 
@@ -43,7 +45,7 @@ kctl() {
 
 echo "==> Installing cluster-agent bundle on cluster '${CLUSTER_NAME}' (context: ${KUBE_CONTEXT})"
 
-# The openresearch-jobs namespace and PriorityClasses are created idempotently by
+# The hypothesisloop-jobs namespace and PriorityClasses are created idempotently by
 # cluster-agent itself on startup (it has in-cluster credentials; nothing to apply here).
 
 # ---- node-agent DaemonSet -----------------------------------------------------
@@ -51,7 +53,7 @@ echo "==> Installing cluster-agent bundle on cluster '${CLUSTER_NAME}' (context:
 # metric-controller). The image must already be built and imported into the
 # cluster's container runtime.
 echo "==> Applying node-agent DaemonSet..."
-sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g" "${SCRIPT_DIR}/node-agent-daemonset.yaml" \
+sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|${METRICS_URL}|g" "${SCRIPT_DIR}/node-agent-daemonset.yaml" \
   | kctl apply -f -
 
 # ---- cluster-agent Deployment (RBAC + the actual reconciler) ------------------

@@ -1,4 +1,4 @@
-# OpenResearch
+# HypothesisLoop
 
 A platform for running autonomous ML research agents against a shared compute budget. Each platform experiment accumulates its own shared, deduplicated pool of hypotheses; agents register (or reuse) a hypothesis, submit training/eval jobs tied to it, spend metered accelerator-hours against an operator-set quota, and file a finding — a short write-up attached to the hypothesis, not the job — for every completed run.
 
@@ -67,7 +67,7 @@ cd controlplane/ui && npm install && npm run dev   # → http://localhost:3000
 
 ## Architecture
 
-OpenResearch is split into two kinds of deployable things:
+HypothesisLoop is split into two kinds of deployable things:
 
 - **Control plane** — one instance, runs anywhere (postgres, control-service,
   metrics-service, GreptimeDB — all in `controlplane/infra/`, a plain Docker
@@ -82,7 +82,7 @@ OpenResearch is split into two kinds of deployable things:
   training jobs actually run (`cluster/infra/`): the node-agent DaemonSet
   (per-node CPU metrics) and the cluster-agent Deployment, which is the
   only component with real k8s credentials anywhere in this system. It
-  polls the control plane's `/internal/clusters/{name}/desired-state`
+  calls the control plane's `/internal/clusters/{name}/reconcile`
   endpoint for which experiments should currently have a Job running,
   reconciles its local Jobs to match (create/delete), and pushes job status
   back — the same pull-desired-state/reconcile/report-status loop a kubelet
@@ -94,9 +94,8 @@ OpenResearch is split into two kinds of deployable things:
 
 The scheduling mechanism itself is pluggable: `controlplane/shared/workload.Backend`
 is the interface `services/scheduler`, `services/controller`, and `services/quota`
-actually depend on. `queuebackend.Backend` (Postgres-only, no cluster dialing) is
-the production implementation; `workload.ClusterSet` (direct client-go dialing) still
-exists in the same package for reference/testing but isn't wired into either binary.
+actually depend on. `queuebackend.Backend` (PostgreSQL desired state plus metrics actual
+state, with no cluster dialing) is the production implementation.
 A team that wants Kueue, Volcano, or something else implements `Backend` in its own
 package and swaps one constructor call in `cmd/control-service` / `cmd/metrics-service`
 — no other code changes.
@@ -143,12 +142,20 @@ Compose runs.
 
 ## Testing
 
+All e2e tests live under `tests/scenarios/`, run via `tests/run.sh`. Almost all are portable
+(fake accelerator types, run on any k3s); `tenstorrent-hardware.sh` is the one exception —
+it needs real Blackhole silicon, so it's excluded by default and only included with
+`RUN_HARDWARE_TESTS=1` (set automatically by `localdev/k3s-tenstorrent-qb2/run-e2e.sh`). The
+whole suite is capped at 5 minutes wall-clock (`TOTAL_TIMEOUT_SECONDS`) — a scenario that can't
+finish in that shared budget fails rather than hanging the run.
+
 ```bash
-bash tests/run.sh                         # full scenario suite: API-only scenarios run
+bash tests/run.sh                         # portable suite: API-only scenarios run
                                            # concurrently, cluster-mutating ones (node death,
                                            # connectivity loss, daemonset redeploy) run after
 bash tests/run.sh node lifecycle          # only scenarios whose filename matches
 ONLY_FAST=1 bash tests/run.sh             # skip cluster-mutating scenarios (no kubectl needed)
+RUN_HARDWARE_TESTS=1 bash tests/run.sh    # also include the Tenstorrent hardware-only scenario
 bash tests/scenarios/job-lifecycle.sh     # run a single scenario directly
 ```
 
@@ -158,7 +165,7 @@ setup, job submission, status polling, node/connectivity/daemonset fault injecti
 
 ## Agent API
 
-Agents interact with OpenResearch exclusively through a REST API — no direct
+Agents interact with HypothesisLoop exclusively through a REST API — no direct
 cluster access. Start here: [`tests/workloads/generic/spec.md`](tests/workloads/generic/spec.md).
 
 ## Endpoints

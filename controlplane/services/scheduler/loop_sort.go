@@ -5,16 +5,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // completionBucket quantizes a completion fraction to a 0.01 grid so "close enough" comparisons
-// form a transitive equivalence relation. A sliding epsilon band (|a-b| <= 0.01) is not
-// transitive — a chain of values each within 0.01 of its neighbor (e.g. 0.100, 0.106, 0.112) can
-// have the first and last differ by more than 0.01, which breaks the strict-weak-ordering
-// contract sort.Slice/sort.SliceStable require and makes tie resolution order-dependent. Rounding
-// to a fixed grid first (like the age-bucket truncation above) keeps "close values compare equal"
-// without that inconsistency.
+// form a transitive equivalence relation. A sliding epsilon band isn't transitive (a chain of
+// near-neighbors can drift beyond 0.01 end-to-end), which breaks sort's strict-weak-ordering
+// contract. Rounding to a fixed grid avoids that.
 func completionBucket(f float64) float64 {
 	return math.Round(f*100) / 100
 }
@@ -31,11 +28,9 @@ func filterTier(exps []*domain.Experiment, tier domain.CapacityTier) []*domain.E
 }
 
 // filterTierCluster returns experiments of the given tier and cluster — candidates preempt()
-// can evict to cover a shortage Footprint that may span multiple dimensions at once, so
-// candidates are no longer narrowed to a single matching flavor here (preempt() itself decides
-// which victims' combined footprint actually covers the shortage). Scoped to one cluster
-// because freeing capacity on a different cluster wouldn't make room for a job being admitted
-// onto this one.
+// can evict to cover a shortage that may span multiple dimensions (preempt() itself decides
+// which victims' combined footprint covers it). Scoped to one cluster since freeing capacity
+// elsewhere wouldn't help a job being admitted onto this one.
 func filterTierCluster(exps []*domain.Experiment, tier domain.CapacityTier, clusterName string) []*domain.Experiment {
 	var out []*domain.Experiment
 	for _, e := range exps {
@@ -46,10 +41,9 @@ func filterTierCluster(exps []*domain.Experiment, tier domain.CapacityTier, clus
 	return out
 }
 
-// dominantUtilization looks up exp's agent/platform-experiment quota in quotaMap and returns
-// its dominant-utilization fairness ratio for exp's own requested dimensions (see
-// domain.AgentQuota.DominantUtilization) — 0 if no quota row was found (nothing tracked yet, or
-// exp has no PlatformExperimentID at all).
+// dominantUtilization looks up exp's agent/platform-experiment quota in quotaMap and returns its
+// dominant-utilization fairness ratio for exp's own requested dimensions (see
+// domain.AgentQuota.DominantUtilization) — 0 if no quota row was found.
 func dominantUtilization(quotaMap map[string]*domain.AgentQuota, exp *domain.Experiment) float64 {
 	aq := quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)]
 	if aq == nil {
@@ -58,10 +52,9 @@ func dominantUtilization(quotaMap map[string]*domain.AgentQuota, exp *domain.Exp
 	return aq.DominantUtilization(exp)
 }
 
-// dominantCostFraction is dominantUtilization's counterpart for "how big is this one job",
-// replacing the old accelerator-only AcceleratorHours() tiebreak (which was always zero for CPU-only jobs —
-// see domain.AgentQuota.DominantCostFraction for why this generalizes correctly across
-// CPU/Accelerator/RAM/storage jobs instead of comparing raw, unit-incompatible hours).
+// dominantCostFraction is dominantUtilization's counterpart for "how big is this one job" —
+// replaces the old accelerator-only tiebreak, which was always zero for CPU-only jobs (see
+// domain.AgentQuota.DominantCostFraction).
 func dominantCostFraction(quotaMap map[string]*domain.AgentQuota, exp *domain.Experiment) float64 {
 	aq := quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)]
 	if aq == nil {
@@ -71,23 +64,17 @@ func dominantCostFraction(quotaMap map[string]*domain.AgentQuota, exp *domain.Ex
 }
 
 // sortGuaranteed sorts guaranteed-tier experiments:
-// 1. age bucket ASC, quantized to fairnessWindow (oldest bucket first) — jobs within the same
-//    bucket are treated as "arrived around the same time" rather than strictly ordered by exact
-//    queued_at, so...
-// 2. ...dominant-utilization ASC (least-used-guaranteed-quota agent first, over the dimensions
-//    each job actually requests — see domain.AgentQuota.DominantUtilization) breaks ties within
-//    a bucket. Without this, pure exact-timestamp FIFO lets an agent with a steady submission
-//    stream get its jobs consistently admitted ahead of other agents' equally-entitled jobs
-//    purely because it always has *a* job ready to submit right after the last one clears — this
-//    bounds that latency-fairness gap the same way Kueue's DRS bounds time-to-admission within a
-//    tier, without abandoning FIFO altogether (a job's age bucket still dominates once the gap
-//    between two jobs exceeds fairnessWindow, so nothing waits indefinitely).
-// 3. CompletionFraction DESC (finish interrupted work first)
-// 4. dominant cost fraction ASC (smallest job first, dimensionless across CPU/Accelerator/RAM/storage)
-// 5. PriorityScore DESC (novelty + cost-efficiency — see computePriority) as the final tiebreak,
-//    so the score every submission computes and persists is actually consumed by ordering
-//    instead of being a dead, API-only number.
-func sortGuaranteed(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota, fairnessWindow time.Duration) {
+//  1. age bucket ASC, quantized to fairnessWindow (oldest bucket first) — jobs in the same
+//     bucket are treated as "arrived around the same time" rather than strictly FIFO
+//  2. dominant-utilization ASC breaks ties within a bucket (least-used-quota agent first, over
+//     the dimensions each job requests). Without this, an agent with a steady submission stream
+//     could keep landing ahead of equally-entitled agents just by always having a job ready —
+//     this bounds that latency-fairness gap (like Kueue's DRS) without abandoning FIFO once the
+//     age gap exceeds fairnessWindow
+//  3. CompletionFraction DESC (finish interrupted work first)
+//  4. dominant cost fraction ASC (smallest job first, dimensionless across resource types)
+//  5. PriorityScore DESC (novelty + cost-efficiency — see computePriority) as final tiebreak
+func sortGuaranteed(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota, completion map[string]float64, fairnessWindow time.Duration) {
 	sort.SliceStable(exps, func(i, j int) bool {
 		ei, ej := exps[i], exps[j]
 
@@ -108,7 +95,7 @@ func sortGuaranteed(exps []*domain.Experiment, quotaMap map[string]*domain.Agent
 		}
 
 		// Tiebreak 1: completion proximity DESC.
-		bi, bj := completionBucket(ei.CompletionFraction()), completionBucket(ej.CompletionFraction())
+		bi, bj := completionBucket(completion[ei.ID]), completionBucket(completion[ej.ID])
 		if bi != bj {
 			return bi > bj
 		}
@@ -126,13 +113,13 @@ func sortGuaranteed(exps []*domain.Experiment, quotaMap map[string]*domain.Agent
 }
 
 // sortBurst sorts burst-tier experiments:
-// 1. dominant-utilization ASC (least used guaranteed quota goes first, over each job's own
-//    requested dimensions)
-// 2. CompletionFraction DESC
-// 3. dominant cost fraction ASC
-// 4. PriorityScore DESC
-// 5. queued_at ASC (final tiebreak)
-func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota) {
+//  1. dominant-utilization ASC (least used guaranteed quota goes first, over each job's own
+//     requested dimensions)
+//  2. CompletionFraction DESC
+//  3. dominant cost fraction ASC
+//  4. PriorityScore DESC
+//  5. queued_at ASC (final tiebreak)
+func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota, completion map[string]float64) {
 	sort.SliceStable(exps, func(i, j int) bool {
 		ei, ej := exps[i], exps[j]
 
@@ -141,7 +128,7 @@ func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota
 			return ri < rj
 		}
 
-		bi, bj := completionBucket(ei.CompletionFraction()), completionBucket(ej.CompletionFraction())
+		bi, bj := completionBucket(completion[ei.ID]), completionBucket(completion[ej.ID])
 		if bi != bj {
 			return bi > bj
 		}

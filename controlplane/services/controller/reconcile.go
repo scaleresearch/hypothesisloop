@@ -7,8 +7,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 // sweepStaleDesiredState flags (log + gauge, never mutates) SUBMITTED/ADMITTED/RUNNING
@@ -18,9 +19,21 @@ import (
 // case that reactive cleanup alone doesn't catch. Alert-only by design — an operator decides
 // what to do with a flagged experiment, this never auto-evicts or auto-corrects it.
 func (c *Controller) sweepStaleDesiredState(ctx context.Context) error {
-	stale, err := c.store.ListStaleDesiredState(ctx, c.staleDesiredStateThreshold)
-	if err != nil {
-		return fmt.Errorf("sweepStaleDesiredState: %w", err)
+	var stale []*domain.Experiment
+	for _, status := range []domain.ExperimentStatus{domain.StatusSubmitted, domain.StatusAdmitted, domain.StatusRunning} {
+		exps, err := c.store.ListExperimentsWithStatus(ctx, status)
+		if err != nil {
+			return fmt.Errorf("sweepStaleDesiredState: list %s: %w", status, err)
+		}
+		for _, exp := range exps {
+			_, found, err := metricsdb.LatestJobPhase(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, c.staleDesiredStateThreshold)
+			if err != nil {
+				return fmt.Errorf("sweepStaleDesiredState: phase %s: %w", exp.ID, err)
+			}
+			if !found {
+				stale = append(stale, exp)
+			}
+		}
 	}
 	obsmetrics.StaleDesiredStateExperiments.Set(float64(len(stale)))
 	for _, exp := range stale {
@@ -46,23 +59,28 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	// Build PE report-interval map and metric-direction map; run phase-2 checks in one pass.
 	reportIntervalByPE := map[string]time.Duration{}
-	// metricDirectionByName: metricName → "maximize"|"minimize", derived from any PE's metric definitions.
-	metricDirectionByName := map[string]string{}
+	metricDirectionsByPE := map[string]map[string]string{}
 	if c.phase2Store != nil {
 		pes, err := c.phase2Store.ListPlatformExperiments(ctx, "running")
 		if err != nil {
-			c.logger.Error("phase2: list platform experiments", zap.Error(err))
-		} else {
-			for _, pe := range pes {
-				if pe.ReportIntervalSeconds > 0 {
-					reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
+			return fmt.Errorf("phase2: list platform experiments: %w", err)
+		}
+		for _, pe := range pes {
+			if pe.ReportIntervalSeconds > 0 {
+				reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
+			}
+			metricDirectionsByPE[pe.ID] = make(map[string]string, len(pe.Metrics))
+			for _, md := range pe.Metrics {
+				if md.Key == "" || (md.Direction != "maximize" && md.Direction != "minimize") {
+					return fmt.Errorf("phase2: platform experiment %s has invalid metric contract", pe.ID)
 				}
-				for _, md := range pe.Metrics {
-					metricDirectionByName[md.Key] = md.Direction
+				if _, duplicate := metricDirectionsByPE[pe.ID][md.Key]; duplicate {
+					return fmt.Errorf("phase2: platform experiment %s has duplicate metric %q", pe.ID, md.Key)
 				}
-				if err := c.checkPhase2Transition(ctx, pe, exps); err != nil {
-					c.logger.Error("phase2: check transition", zap.String("pe", pe.ID), zap.Error(err))
-				}
+				metricDirectionsByPE[pe.ID][md.Key] = md.Direction
+			}
+			if err := c.checkPhase2Transition(ctx, pe, exps); err != nil {
+				return fmt.Errorf("phase2: check transition for %s: %w", pe.ID, err)
 			}
 		}
 	}
@@ -72,7 +90,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	// status but pod termination or refunds were not yet completed.
 	if c.phase2Store != nil {
 		if err := c.reconcileClosedExperiments(ctx); err != nil {
-			c.logger.Error("reconcile closed experiments", zap.Error(err))
+			return fmt.Errorf("reconcile closed experiments: %w", err)
 		}
 	}
 
@@ -88,16 +106,13 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 		checked[key] = true
 		if err := c.checkQuotaExhaustion(ctx, exp.AgentID, exp.PlatformExperimentID, now); err != nil {
-			c.logger.Error("quota exhaustion check", zap.String("agent", exp.AgentID), zap.Error(err))
+			return fmt.Errorf("quota exhaustion check for %s: %w", exp.AgentID, err)
 		}
 	}
 
 	for _, exp := range exps {
-		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, metricDirectionByName); err != nil {
-			c.logger.Error("reconcile experiment",
-				zap.String("id", exp.ID),
-				zap.Error(err),
-			)
+		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, metricDirectionsByPE[exp.PlatformExperimentID]); err != nil {
+			return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
 		}
 	}
 	return nil
@@ -121,25 +136,48 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	// Replace running-job estimates with actual elapsed cost by adding the per-job delta.
 	// The old code added Σ(actual_running) on top of UsedGuaranteedAccH which double-counted
 	// running jobs (their estimate was already in UsedGuaranteedAccH).
-	var deltaGuaranteed, deltaBurst float64
+	// Same delta correction as accelerator, applied to every tracked budget dimension: the Used*
+	// fields carry running jobs' *estimates*, so we swap each running job's estimate for its
+	// observed-so-far cost. Accelerator is billed per-type (observedAcceleratorCost); CPU is
+	// linear, so its observed cost is observedElapsedHours × RequestedCPUCores(). RAM/storage are
+	// not enforced here because nothing debits an observed RAM/storage figure to true up against.
+	var accDeltaG, accDeltaB, cpuDeltaG, cpuDeltaB float64
 	for _, exp := range running {
-		actual, err := c.observedAcceleratorCost(ctx, exp.ID, exp.AcceleratorCount, now)
+		accActual, err := c.observedAcceleratorCost(ctx, exp.ID, exp.AcceleratorCount, now)
 		if err != nil {
-			c.logger.Error("checkQuotaExhaustion: observed accelerator cost", zap.String("experiment", exp.ID), zap.Error(err))
-			continue
+			return fmt.Errorf("observed accelerator cost for %s: %w", exp.ID, err)
 		}
-		delta := actual - exp.EstimatedCostAccH // negative when under-budget, positive on overrun
+		accDelta := accActual - exp.EstimatedCostAccH // negative when under-budget, positive on overrun
+		var cpuDelta float64
+		if exp.EstimatedCPUCoreHours > 0 {
+			hours, err := c.observedElapsedHours(ctx, exp.ID, now)
+			if err != nil {
+				return fmt.Errorf("observed elapsed hours for %s: %w", exp.ID, err)
+			}
+			cpuDelta = hours*exp.RequestedCPUCores() - exp.EstimatedCPUCoreHours
+		}
 		if exp.CapacityTier == domain.CapacityGuaranteed {
-			deltaGuaranteed += delta
+			accDeltaG += accDelta
+			cpuDeltaG += cpuDelta
 		} else {
-			deltaBurst += delta
+			accDeltaB += accDelta
+			cpuDeltaB += cpuDelta
 		}
 	}
 	// 0.99 not 1.0: floating-point accumulation across many debit/refund calls means "exactly
 	// exhausted" may never compare equal/greater than the raw budget — a 1% margin avoids a
 	// budget that's genuinely spent sitting just under the threshold forever.
-	guaranteedExhausted := (aq.UsedGuaranteedAccH + deltaGuaranteed) >= aq.GuaranteedAcceleratorHours*0.99
-	burstExhausted := (aq.UsedBurstAccH + deltaBurst) >= aq.BurstAcceleratorHours*0.99
+	// Guard each dimension on a positive budget: a zero budget (e.g. a CPU-only platform
+	// experiment has GuaranteedAcceleratorHours == 0) is not an exhaustion condition — it means
+	// "no quota of that kind to spend", not "quota spent". Without the guard 0 >= 0*0.99 is true on
+	// the first tick and every job is evicted for quota_exhaustion.
+	spent := func(budget, used, delta float64) bool {
+		return budget > 0 && (used+delta) >= budget*0.99
+	}
+	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH, accDeltaG) ||
+		spent(aq.GuaranteedCPUCoreHours, aq.UsedGuaranteedCPUCoreH, cpuDeltaG)
+	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH, accDeltaB) ||
+		spent(aq.BurstCPUCoreHours, aq.UsedBurstCPUCoreH, cpuDeltaB)
 
 	if !guaranteedExhausted && !burstExhausted {
 		return nil
@@ -161,15 +199,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			continue
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
-		// Unlike a normal RUNNING job (whose reservation job_watcher's onRunning already
-		// cleared), a job resubmitted after a preemption/reschedule cycle can still hold a live
-		// reservation until its own watch cycle re-confirms RUNNING — release it here too,
-		// unconditionally, matching every other terminal-transition path (evict, cancel,
-		// onFinished). No-op if already gone.
-		_ = c.store.DeletePendingReservation(ctx, exp.ID)
-		// exp was RUNNING (StartedAt set) and the reason is EvictionQuotaExhaustion, so
-		// settleAndMark's Settle call is a deliberate no-op (budget genuinely spent) — it just
-		// marks the row settled immediately, nothing to write.
+		// Persist the same observed terminal usage as every other terminal path.
 		exp.Status = domain.StatusEvicted
 		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
 		c.settleAndMark(ctx, exp)
@@ -178,10 +208,14 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		c.logger.Info("quota exhaustion eviction",
 			zap.String("agent", agentID),
 			zap.String("exp", exp.ID),
-			zap.Float64("actual_guaranteed", aq.UsedGuaranteedAccH+deltaGuaranteed),
-			zap.Float64("actual_burst", aq.UsedBurstAccH+deltaBurst),
-			zap.Float64("quota_guaranteed", aq.GuaranteedAcceleratorHours),
-			zap.Float64("quota_burst", aq.BurstAcceleratorHours),
+			zap.Float64("actual_guaranteed_acch", aq.UsedGuaranteedAccH+accDeltaG),
+			zap.Float64("actual_burst_acch", aq.UsedBurstAccH+accDeltaB),
+			zap.Float64("quota_guaranteed_acch", aq.GuaranteedAcceleratorHours),
+			zap.Float64("quota_burst_acch", aq.BurstAcceleratorHours),
+			zap.Float64("actual_guaranteed_cpuh", aq.UsedGuaranteedCPUCoreH+cpuDeltaG),
+			zap.Float64("actual_burst_cpuh", aq.UsedBurstCPUCoreH+cpuDeltaB),
+			zap.Float64("quota_guaranteed_cpuh", aq.GuaranteedCPUCoreHours),
+			zap.Float64("quota_burst_cpuh", aq.BurstCPUCoreHours),
 		)
 	}
 
@@ -205,7 +239,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 				continue
 			}
 			obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
-			// exp never reached RUNNING (StartedAt nil), so Settle refunds it fully to 0
+			// exp never reached RUNNING, so Settle derives zero usage from metrics
 			// regardless of the quota_exhaustion reason string — it never consumed anything.
 			exp.Status = finalStatus
 			exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
@@ -237,21 +271,37 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 
 func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, metricDirectionByName map[string]string) error {
 	// 1. Silence check.
-	if evict, reason := c.checkSilence(ctx, exp, now, reportIntervalByPE); evict {
+	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE)
+	if err != nil {
+		return err
+	}
+	if evict {
 		return c.evict(ctx, exp, reason, now)
 	}
 
 	// 2. Overrun — only evict if the researcher has no remaining capacity.
 	// If they still have quota headroom, let the job continue past the 1.5× estimate.
-	if evict, reason := c.checkOverrun(ctx, exp, now); evict {
-		if !c.researcherHasCapacity(ctx, exp, now) {
+	evict, reason, err = c.checkOverrun(ctx, exp, now)
+	if err != nil {
+		return err
+	}
+	if evict {
+		hasCapacity, err := c.researcherHasCapacity(ctx, exp, now)
+		if err != nil {
+			return err
+		}
+		if !hasCapacity {
 			return c.evict(ctx, exp, reason, now)
 		}
 	}
 
 	// 3. Metric decline: evict if all observed metrics have been monotonically declining
 	// for longer than metricDeclineFraction × estimated_duration_hours.
-	if evict, reason := c.checkMetricDecline(ctx, exp, now, metricDirectionByName); evict {
+	evict, reason, err = c.checkMetricDecline(ctx, exp, now, metricDirectionByName)
+	if err != nil {
+		return err
+	}
+	if evict {
 		return c.evict(ctx, exp, reason, now)
 	}
 

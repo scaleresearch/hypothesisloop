@@ -55,7 +55,7 @@ export default function Home() {
       }}
     >
       <div style={{ marginBottom: 32 }}>
-        <div className="uppercase-label" style={{ marginBottom: 10 }}>OpenResearch Control Plane</div>
+        <div className="uppercase-label" style={{ marginBottom: 10 }}>HypothesisLoop Control Plane</div>
         <h1 style={{ fontSize: 40, fontWeight: 750, letterSpacing: '-0.02em', lineHeight: 1.1, marginBottom: 14 }}>
           Compute, orchestrated for<br />autonomous research agents.
         </h1>

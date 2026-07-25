@@ -1,22 +1,20 @@
-// openresearch-cluster-agent is the only component with credentials to a target cluster's
+// hypothesisloop-cluster-agent is the only component with credentials to a target cluster's
 // Kubernetes API. It runs inside that cluster and reconciles its local Jobs against a
-// desired-state view it fetches from the control plane (GET .../desired-state) — the same
+// desired-state view it receives from the control plane (POST .../reconcile) — the same
 // model a kubelet uses: pull desired state, diff against actual, converge, report status
 // back. The control plane never dials into this cluster; every call here is outbound.
 //
 // No leader election: every operation is naturally idempotent (Job creation tolerates
-// AlreadyExists, deletion tolerates NotFound, status pushes are sequence-numbered) and
-// desired-state is a read-only, side-effect-free GET, so any number of replicas can run this
+// AlreadyExists, deletion tolerates NotFound, status pushes are current snapshots) and
+// reconciliation exchange is idempotent, so any number of replicas can run this
 // loop concurrently and safely. Extra replicas just mean some redundant polling — never a
 // correctness problem. Run more than one only for availability if you want it; one is fine.
 //
 // Environment variables:
 //
-//	CLUSTER_NAME        — this cluster's name as registered in clusters.yaml (default: default)
-//	CONTROLPLANE_URL    — base URL of scheduler-service (default: http://scheduler-service:8082)
-//	OPENRESEARCH_CONFIG — path to openresearch.yaml (default: settings/openresearch.yaml) — Accelerator
-//	                      type catalog and AcceleratorResourceName, the k8s extended resource requested
-//	                      per accelerator (execution-engine detail; agents never see this).
+//	CLUSTER_NAME        — this cluster's stable identity
+//	CONTROLPLANE_URL    — base URL of scheduler-service
+//	HYPOTHESISLOOP_CONFIG — path to hypothesisloop.yaml
 package main
 
 import (
@@ -29,8 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 const (
@@ -39,39 +37,27 @@ const (
 )
 
 func main() {
-	clusterName := envOrDefault("CLUSTER_NAME", "default")
-	controlPlaneURL := envOrDefault("CONTROLPLANE_URL", "http://scheduler-service:8082")
-	// Passed to every Job this agent creates as OPENRESEARCH_REGISTRY_URL — must be reachable
+	clusterName := requiredEnv("CLUSTER_NAME")
+	controlPlaneURL := requiredEnv("CONTROLPLANE_URL")
+	// Passed to every Job this agent creates as HYPOTHESISLOOP_REGISTRY_URL — must be reachable
 	// from *inside* the training pod, not from the agent itself, so it can't just default to
 	// registry-service's in-cluster DNS name the way CONTROLPLANE_URL does for this process;
 	// there is no such Service unless this cluster also runs the control plane's own compose
 	// stack reachable under that name. Must be set explicitly for local/dev clusters where the
 	// control plane lives outside the cluster (e.g. http://host.docker.internal:8083).
-	registryURL := os.Getenv("REGISTRY_URL")
-	pcfg := openresearchcfg.MustLoad(envOrDefault("OPENRESEARCH_CONFIG", "settings/openresearch.yaml"))
+	registryURL := requiredEnv("REGISTRY_URL")
+	pcfg := hypothesisloopcfg.MustLoad(requiredEnv("HYPOTHESISLOOP_CONFIG"))
 
 	// JobWorkloadClient does all the actual Job/PriorityClass/Namespace work against this
 	// cluster's own API server — it resolves in-cluster credentials automatically when given
 	// no kubeconfig/context, which is exactly what a pod running inside the cluster has.
 	jwc, err := workload.New(workload.Config{
-		RegistryURL:     registryURL,
-		AcceleratorResourceName: pcfg.AcceleratorResourceName,
-		AcceleratorTaintKey:     pcfg.AcceleratorTaintKey,
-		OpenResearchConfig: &workload.OpenResearchConfig{
-			NodeLabelByType:    pcfg.NodeLabelByType,
-			NodeLabelKeyByType: pcfg.NodeLabelKeyByType,
-			ResourceNameByType: pcfg.ResourceNameByType,
-			TaintKeyByType:     pcfg.TaintKeyByType,
-			AllocationModeByType:  pcfg.AllocationModeByType,
-			DeviceClassNameByType: pcfg.DeviceClassNameByType,
-			// Required for GetLiveAcceleratorCapacity's flavor lookup (nameByFlavor()) — without
-			// these, OpenResearchConfig being non-nil short-circuits the built-in defaults
-			// fallback, and nameByFlavor() silently returns an empty map, so the desired-state
-			// poll's accelerator capacity piggyback never has anything to report.
-			NameByFlavor: pcfg.NameByFlavor,
-			AcceleratorsByFlavor: pcfg.AcceleratorsByFlavor,
-			FlavorOrder:  pcfg.FlavorOrder(),
-		},
+		RegistryURL:                          registryURL,
+		JobDeadlineMultiplier:                pcfg.Scheduler.JobDeadlineMultiplier,
+		MinJobDeadlineSeconds:                pcfg.Scheduler.MinJobDeadlineSeconds,
+		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
+		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
+		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
@@ -104,9 +90,7 @@ func main() {
 		cpURL:       controlPlaneURL,
 		jwc:         jwc,
 		httpClient:  &http.Client{Timeout: 35 * time.Second},
-		tracked:     map[string]*trackedJob{},
 	}
-	a.resyncTrackedFromCluster(ctx, log)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -115,9 +99,11 @@ func main() {
 	wg.Wait()
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func requiredEnv(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		fmt.Fprintf(os.Stderr, "cluster-agent: %s environment variable is required\n", key)
+		os.Exit(1)
 	}
-	return def
+	return value
 }

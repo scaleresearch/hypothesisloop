@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
-# Runs every scenario under tests/scenarios/. API-only scenarios run concurrently (they each
-# get their own RUN_ID-namespaced agents/platform-experiments, so they don't collide); the
-# few that mutate cluster-wide state (a real node, the cluster-agent Deployment, the
-# node-agent DaemonSet) run sequentially afterward so they don't fight each other.
+# Portable e2e suite: runs every selected scenario once. Hardware tests need real Tenstorrent
+# silicon and are excluded by default.
 #
 # Usage:
-#   bash tests/run.sh                      # everything
+#   bash tests/run.sh                      # fast group only (default)
 #   bash tests/run.sh node-death eviction  # only scenarios whose filename matches these
-#   ONLY_FAST=1 bash tests/run.sh          # skip CLUSTER_EXCLUSIVE scenarios (fast, no kubectl)
+#   RUN_SLOW=1 bash tests/run.sh           # full suite: fast + slow group
+#   RUN_HARDWARE_TESTS=1 bash tests/run.sh # also include HARDWARE_ONLY scenarios
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Mutate real cluster/node/daemonset state — must not run concurrently with each other.
+# Mutate shared cluster/node/daemonset state — run sequentially, not concurrently. Structurally
+# slow (real node/daemonset kill+recovery, real disconnect/reconnect wait windows).
 CLUSTER_EXCLUSIVE=(
+  acceptable-accelerator-types
+  concurrent-admission-race
   node-and-daemonset-faults
   connectivity-loss
+)
+
+# Capacity/preemption scenarios deliberately hold real resources across multiple scheduler ticks.
+SLOW_TESTS=(
+  capacity-safety
+  mixed-admission
+  preemption-requeue
+)
+
+# Needs real Tenstorrent hardware — excluded unless explicitly requested.
+HARDWARE_ONLY=(
+  tenstorrent-hardware
 )
 
 is_exclusive() {
@@ -23,10 +36,17 @@ is_exclusive() {
   return 1
 }
 
-all_scenarios=()
-for f in "$DIR"/scenarios/*.sh; do
-  all_scenarios+=("$(basename "$f" .sh)")
-done
+is_slow() {
+  local name="$1" e
+  for e in "${SLOW_TESTS[@]}"; do [[ "$name" == "$e" ]] && return 0; done
+  return 1
+}
+
+is_hardware_only() {
+  local name="$1" e
+  for e in "${HARDWARE_ONLY[@]}"; do [[ "$name" == "$e" ]] && return 0; done
+  return 1
+}
 
 filters=("$@")
 matches() {
@@ -40,68 +60,87 @@ matches() {
 LOG_DIR="$(mktemp -d)"
 trap 'rm -rf "$LOG_DIR"' EXIT
 
-declare -a parallel_set exclusive_set
-for name in "${all_scenarios[@]}"; do
+fast_set=()
+slow_set=()
+exclusive_set=()
+hardware_set=()
+for f in "$DIR"/scenarios/*.sh; do
+  name="$(basename "$f" .sh)"
   matches "$name" || continue
-  if is_exclusive "$name"; then exclusive_set+=("$name"); else parallel_set+=("$name"); fi
-done
-[[ -n "${ONLY_FAST:-}" ]] && exclusive_set=()
-
-run_one() {
-  local name="$1"
-  bash "$DIR/scenarios/${name}.sh" > "$LOG_DIR/${name}.log" 2>&1
-  echo "$?" > "$LOG_DIR/${name}.rc"
-}
-
-# Every scenario in parallel_set runs its own workload pods across the same handful of fake
-# nodes, which all share one podman VM's real (not k8s-reported) CPU pool. Firing all of them
-# at once routinely oversubscribes that shared pool on a modest dev machine: pods get
-# throttled hard enough that admission/preemption/scheduling-tick timeouts fire for reasons
-# that have nothing to do with scheduler correctness (verified: capacity-safety,
-# distributed-jobs, and preemption-requeue all pass individually but flake under the full
-# 13-way concurrent run). Batching trades wall-clock time for a load level the VM can
-# actually sustain, without touching any scenario's own timeouts/assertions.
-PARALLEL_BATCH_SIZE="${PARALLEL_BATCH_SIZE:-5}"
-START=$(date +%s)
-echo "==> Running ${#parallel_set[@]} scenario(s), ${PARALLEL_BATCH_SIZE} at a time: ${parallel_set[*]:-<none>}"
-batch=()
-for name in "${parallel_set[@]:-}"; do
-  [[ -z "$name" ]] && continue
-  batch+=("$name")
-  if [[ "${#batch[@]}" -ge "${PARALLEL_BATCH_SIZE}" ]]; then
-    pids=()
-    for n in "${batch[@]}"; do run_one "$n" & pids+=("$!"); done
-    for pid in "${pids[@]}"; do wait "$pid"; done
-    batch=()
+  if is_hardware_only "$name"; then
+    [[ -n "${RUN_HARDWARE_TESTS:-}" ]] && hardware_set+=("$name")
+  elif is_exclusive "$name"; then
+    exclusive_set+=("$name")
+  elif is_slow "$name"; then
+    [[ -n "${RUN_SLOW:-}" ]] && slow_set+=("$name")
+  else
+    fast_set+=("$name")
   fi
 done
-if [[ "${#batch[@]}" -gt 0 ]]; then
-  pids=()
-  for n in "${batch[@]}"; do run_one "$n" & pids+=("$!"); done
+
+# connectivity-loss runs last: disconnects cluster-agent, so nothing else should run alongside it.
+reordered=()
+has_connectivity_loss=0
+for name in "${exclusive_set[@]}"; do
+  if [[ "$name" == "connectivity-loss" ]]; then has_connectivity_loss=1; continue; fi
+  reordered+=("$name")
+done
+[[ "$has_connectivity_loss" -eq 1 ]] && reordered+=(connectivity-loss)
+exclusive_set=("${reordered[@]}")
+
+# One deterministic ceiling for every scenario. A scenario that needs a larger special case is
+# too slow or is hiding an unreliable assertion and must be fixed at its source.
+SCENARIO_TIMEOUT_SECONDS="${SCENARIO_TIMEOUT_SECONDS:-240}"
+
+run_one() {
+  local name="$1" t0 t1 rc elapsed
+  t0=$(date +%s)
+  timeout "$SCENARIO_TIMEOUT_SECONDS" bash "$DIR/scenarios/${name}.sh" > "$LOG_DIR/${name}.log" 2>&1
+  rc=$?
+  echo "$rc" > "$LOG_DIR/${name}.rc"
+  t1=$(date +%s)
+  elapsed=$(( t1 - t0 ))
+  echo "$elapsed" > "$LOG_DIR/${name}.elapsed"
+  [[ "$rc" == "0" ]] && echo "  [PASS] $name (${elapsed}s)" || echo "  [FAIL] $name (${elapsed}s, rc=$rc)"
+}
+
+START=$(date +%s)
+run_parallel_group() {
+  local label="$1"; shift
+  local names=("$@") pids=() name pid
+  [[ "${#names[@]}" -gt 0 ]] || return 0
+  echo "==> Running ${#names[@]} ${label} scenario(s) concurrently: ${names[*]}"
+  for name in "${names[@]}"; do run_one "$name" & pids+=("$!"); done
   for pid in "${pids[@]}"; do wait "$pid"; done
-fi
+}
+
+run_parallel_group fast "${fast_set[@]}"
+run_parallel_group slow "${slow_set[@]}"
 
 # cluster-agent Ready check for the CLUSTER_EXCLUSIVE loop below — deliberately NOT sourcing
 # tests/lib/common.sh here (it sets `set -e`, which would change this script's own top-level
 # error handling); just the one kubectl query these two lines need.
 cluster_agent_ready() {
-  [[ "$(kubectl -n openresearch get deployment/openresearch-cluster-agent -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)" == "1" ]]
+  [[ "$(kubectl -n hypothesisloop get deployment/hypothesisloop-cluster-agent -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" == "1" ]]
 }
 
 if [[ "${#exclusive_set[@]}" -gt 0 ]]; then
   echo "==> Running ${#exclusive_set[@]} cluster-exclusive scenario(s) sequentially: ${exclusive_set[*]}"
   for name in "${exclusive_set[@]}"; do
-    # connectivity-loss.sh deliberately disconnects cluster-agent; its own cleanup should
-    # already leave it reconnected, but don't just trust that — a scenario that starts with
-    # cluster-agent still down would have its very first submission silently misattributed to
-    # this scenario's own bug rather than the previous one's cleanup.
-    if ! cluster_agent_ready; then
-      echo "  [WARN] cluster-agent not connected before ${name} — waiting up to 30s"
-      for _ in $(seq 1 30); do cluster_agent_ready && break; sleep 1; done
-      cluster_agent_ready || echo "  [WARN] cluster-agent still not connected — ${name} will likely fail at its first submission"
-    fi
+    cluster_agent_ready || {
+      echo "  [FAIL] cluster-agent is not ready before ${name}" >&2
+      echo "1" > "$LOG_DIR/${name}.rc"
+      echo "0" > "$LOG_DIR/${name}.elapsed"
+      echo "cluster-agent is not ready before scenario start" > "$LOG_DIR/${name}.log"
+      continue
+    }
     run_one "$name"
   done
+fi
+
+if [[ "${#hardware_set[@]}" -gt 0 ]]; then
+  echo "==> Running ${#hardware_set[@]} hardware scenario(s) sequentially: ${hardware_set[*]}"
+  for name in "${hardware_set[@]}"; do run_one "$name"; done
 fi
 ELAPSED=$(( $(date +%s) - START ))
 
@@ -110,13 +149,14 @@ echo "=========================================================="
 echo "RESULTS (${ELAPSED}s)"
 echo "=========================================================="
 FAILED=0
-for name in "${parallel_set[@]:-}" "${exclusive_set[@]:-}"; do
+for name in "${fast_set[@]}" "${slow_set[@]}" "${exclusive_set[@]}" "${hardware_set[@]}"; do
   [[ -z "$name" ]] && continue
-  rc=$(cat "$LOG_DIR/${name}.rc" 2>/dev/null || echo 1)
+  rc=$(<"$LOG_DIR/${name}.rc")
+  secs=$(<"$LOG_DIR/${name}.elapsed")
   if [[ "$rc" == "0" ]]; then
-    echo "  [PASS] $name"
+    echo "  [PASS] $name (${secs}s)"
   else
-    echo "  [FAIL] $name"
+    echo "  [FAIL] $name (${secs}s)"
     FAILED=1
   fi
 done
@@ -124,9 +164,9 @@ done
 if [[ "$FAILED" == "1" ]]; then
   echo ""
   echo "==> Full output for failed scenarios:"
-  for name in "${parallel_set[@]:-}" "${exclusive_set[@]:-}"; do
+  for name in "${fast_set[@]}" "${slow_set[@]}" "${exclusive_set[@]}" "${hardware_set[@]}"; do
     [[ -z "$name" ]] && continue
-    rc=$(cat "$LOG_DIR/${name}.rc" 2>/dev/null || echo 1)
+    rc=$(<"$LOG_DIR/${name}.rc")
     if [[ "$rc" != "0" ]]; then
       echo ""
       echo "---- $name ----"

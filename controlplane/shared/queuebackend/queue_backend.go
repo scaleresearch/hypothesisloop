@@ -1,11 +1,9 @@
 // Package queuebackend implements workload.Backend without ever calling into a target
-// cluster. Every method reads or writes Postgres only (via db.ClusterQueueStore). There is no
-// command outbox and no separate "delete" call: the experiment's status (already updated by
-// services/scheduler before Backend is called) is itself the desired state a cluster-agent
-// reconciles against — the same way updating a Deployment's spec, not issuing an imperative
-// RPC, is what tells a kubelet what to run. experiments.status is the *only* record of
-// desired state; nothing here duplicates it. The control plane never holds cluster
-// credentials and never opens a connection to a cluster's API server.
+// cluster. Every method reads or writes Postgres only (via db.ClusterQueueStore). There's no
+// command outbox or "delete" call: the experiment's status (set by services/scheduler before
+// Backend is called) is itself the desired state a cluster-agent reconciles against, like
+// updating a Deployment's spec instead of issuing an imperative RPC. experiments.status is
+// the only record of desired state. The control plane never holds cluster credentials.
 package queuebackend
 
 import (
@@ -13,55 +11,42 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// Store is the persistence interface Backend needs. Satisfied by *db.ClusterQueueStore.
+// Store is the persistence interface Backend needs. Satisfied by *db.Store.
 type Store interface {
-	GetJobReport(ctx context.Context, experimentID string) (*db.JobReport, error)
-	DeleteJobReport(ctx context.Context, experimentID string) error
-	GetLiveCPUCapacityByCluster(ctx context.Context, connectedWithin time.Duration) (map[string]float64, error)
+	SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error)
 }
 
-// Backend implements workload.Backend purely against Postgres. It is symmetric with
-// workload.ClusterSet's method set so it's a drop-in replacement at the cmd/*/main.go wiring
-// point; the difference is entirely in how each method is implemented.
+// Backend implements workload.Backend using PostgreSQL desired state and metrics observations.
 type Backend struct {
-	store        Store
-	clusterNames []string
-	// flavorOrder lists every configured accelerator flavor, so a cluster with no live report for a
-	// given flavor still gets an explicit 0 entry rather than being silently absent — callers
-	// enumerate flavors purely from these maps, same as they enumerate clusters.
-	flavorOrder []string
+	store Store
 	// metricsDBURL is where cluster-agents' live per-flavor accelerator capacity lives (see
-	// clusteragentapi.DesiredState / metricsdb.RecordClusterAcceleratorCapacity) — capacity is metric
-	// data, read live, never duplicated into Postgres.
+	// clusteragentapi.DesiredState / metricsdb.RecordClusterAcceleratorCapacity) — capacity is
+	// metric data, read live, never duplicated into Postgres.
 	metricsDBURL string
-	// connectedWithin mirrors clusteragentapi.Handler's own staleness window (config-driven,
-	// scheduler.cluster_unreachable_after_seconds — one threshold, not two hardcoded ones): a
-	// cluster whose heartbeat (and therefore its live CPU/Accelerator report) is older than this is
-	// treated as contributing zero capacity rather than a possibly-stale number. This is also
-	// what "freezes new admission" to an Unreachable cluster (item #6) — no separate freeze
-	// logic needed, since its capacity simply drops out of the sum below.
+	// connectedWithin mirrors clusteragentapi.Handler's staleness window
+	// (scheduler.cluster_unreachable_after_seconds): a cluster whose heartbeat is older than
+	// this contributes zero capacity instead of a possibly-stale number. This also freezes new
+	// admission to an Unreachable cluster, since its capacity just drops out of the sum below.
 	connectedWithin time.Duration
 }
 
-// New constructs a Backend. clusterNames are the configured target clusters (used for
-// ClusterNames()); flavorCfg's FlavorOrder is every accelerator flavor GetFlavorCapacity reports on
-// (values are read live from metricsDBURL, never from static config). connectedWithin is the
-// cluster-liveness threshold (config-driven).
-func New(store Store, clusterNames []string, flavorCfg *workload.OpenResearchConfig, metricsDBURL string, connectedWithin time.Duration) *Backend {
-	var flavorOrder []string
-	if flavorCfg != nil {
-		flavorOrder = flavorCfg.FlavorOrder
+// New constructs a Backend from the authoritative stores and cluster-liveness threshold.
+func New(store Store, metricsDBURL string, connectedWithin time.Duration) (*Backend, error) {
+	if store == nil {
+		return nil, fmt.Errorf("queuebackend: store is required")
 	}
-	if len(flavorOrder) == 0 {
-		flavorOrder = defaultFlavorOrder
+	if metricsDBURL == "" {
+		return nil, fmt.Errorf("queuebackend: metrics DB URL is required")
 	}
-	return &Backend{store: store, clusterNames: clusterNames, flavorOrder: flavorOrder, metricsDBURL: metricsDBURL, connectedWithin: connectedWithin}
+	if connectedWithin <= 0 {
+		return nil, fmt.Errorf("queuebackend: cluster liveness window must be positive")
+	}
+	return &Backend{store: store, metricsDBURL: metricsDBURL, connectedWithin: connectedWithin}, nil
 }
 
 var _ workload.Backend = (*Backend)(nil)
@@ -70,25 +55,22 @@ var _ workload.Backend = (*Backend)(nil)
 // cluster-agent side (it has in-cluster credentials; the control plane does not).
 func (b *Backend) SetupCluster(_ context.Context) error { return nil }
 
-// CreateWorkload is a no-op: the caller has already updated exp's status to SUBMITTED (or
-// similar) in the database before calling this, and that status change is exactly what a
-// cluster-agent's desired-state reconciliation reads to know a Job should exist. There is
-// nothing further to do — deliberately not even a database write, to avoid a second place
+// CreateWorkload is a no-op: the caller already updated exp's status to SUBMITTED (or
+// similar), and that status change is exactly what a cluster-agent's desired-state
+// reconciliation reads. Deliberately not even a database write, to avoid a second place
 // that could disagree with experiments.status.
 func (b *Backend) CreateWorkload(_ context.Context, _ *domain.Experiment) error { return nil }
 
-// WaitForJobDeletion polls the local job-report row (populated by cluster-agent pushes)
-// until it disappears or reports Gone, instead of asking the cluster. Callers must have
-// already updated exp's status away from SUBMITTED/ADMITTED/RUNNING before calling this —
-// otherwise the cluster-agent still considers the job desired and will never delete it.
+// WaitForJobDeletion waits until no fresh actual-state phase exists. Callers must first remove
+// the experiment from desired state so the cluster agent deletes it.
 func (b *Backend) WaitForJobDeletion(ctx context.Context, exp *domain.Experiment, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		report, err := b.store.GetJobReport(ctx, exp.ID)
+		phase, found, err := metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)
 		if err != nil {
 			return err
 		}
-		if report == nil || workload.ParseJobPhase(report.Phase) == workload.JobPhaseGone {
+		if found && phase == workload.JobPhaseGone {
 			return nil
 		}
 		select {
@@ -100,71 +82,98 @@ func (b *Backend) WaitForJobDeletion(ctx context.Context, exp *domain.Experiment
 	return fmt.Errorf("queuebackend: timed out waiting for job deletion report: %s", exp.ID)
 }
 
-// PollJobPhase reads the last phase a cluster-agent pushed for exp — never asks the cluster.
+// PollJobPhase reads the latest fresh phase metric pushed by the cluster agent.
 func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error) {
-	report, err := b.store.GetJobReport(ctx, exp.ID)
+	phase, found, err := metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)
 	if err != nil {
 		return workload.JobPhasePending, err
 	}
-	if report == nil {
-		return workload.JobPhasePending, nil
+	if !found {
+		return workload.JobPhasePending, fmt.Errorf("queuebackend: no current job-status snapshot for experiment %s in cluster %s", exp.ID, exp.ClusterName)
 	}
-	return workload.ParseJobPhase(report.Phase), nil
+	return phase, nil
 }
 
-// GetAdmittedAcceleratorType reads the flavor a cluster-agent reported back, if any; falls back to
-// the requested type if no report has arrived yet.
-func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType {
-	report, err := b.store.GetJobReport(ctx, exp.ID)
-	if err != nil || report == nil || report.AdmittedAcceleratorType == "" {
-		return exp.AcceleratorType
+// GetAdmittedAcceleratorType reads the latest observed type metric.
+func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
+	t, found, err := metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, time.Now().UTC(), b.connectedWithin)
+	if err != nil {
+		return "", err
 	}
-	return report.AdmittedAcceleratorType
+	if !found {
+		return "", fmt.Errorf("queuebackend: accelerator type for %s is not observed yet", exp.ID)
+	}
+	return t, nil
 }
 
 // GetFlavorCapacity returns available capacity per cluster per flavor: guaranteed[cluster][flavor]
-// and burst[cluster][flavor]. Every configured cluster (b.clusterNames) always gets an entry, so
-// callers can enumerate clusters purely from these maps. Both CPU and accelerator capacity are real and
-// per-cluster, from cluster-agents' own self-reported allocatable-minus-requested numbers
-// (GetLiveCPUCapacityByCluster reads Postgres; accelerator reads the metrics store, since capacity is
-// metric data — see metricsdb.LiveClusterAcceleratorCapacity) — a cluster with no fresh report for a
-// given resource contributes zero for it, never a stale or nominal-config number. Guaranteed and
-// burst share the same physical pool per cluster — preemption is what enforces the tier boundary,
-// not a capacity split.
+// and burst[cluster][flavor]. Every configured cluster always gets an entry.
+//
+// Available is the dimension-wise minimum of two views:
+//   - desired-free = latest reported total minus every PostgreSQL SUBMITTED/ADMITTED/RUNNING footprint;
+//   - actual-free = the cluster agent's fresh allocatable-minus-requested observation.
+//
+// Desired-free closes the creation-delay race right after MarkSubmitted; actual-free closes
+// the deletion-delay race after preemption/eviction. Taking the minimum prevents overcommit.
+// Missing/stale metrics abort the pass instead of being replaced with zero.
 func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error) {
-	cpuAvail, err := b.store.GetLiveCPUCapacityByCluster(ctx, b.connectedWithin)
+	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: live CPU capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: live clusters: %w", err)
 	}
-	acceleratorAvail, err := metricsdb.LiveClusterAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: live accelerator capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: total CPU capacity: %w", err)
 	}
-	// RAM/ephemeral-storage — Class B (hard-cap, no billing) dimensions (see
-	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2). Same staleness gating as accelerator: a
-	// cluster with no fresh report contributes zero, so Fits() fails closed for any job that
-	// actually needs it rather than treating a missing report as unlimited.
-	ramAvail, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: live RAM capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: available CPU capacity: %w", err)
 	}
-	storageAvail, err := metricsdb.LiveClusterStorageCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	acceleratorTotal, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: live storage capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: total accelerator capacity: %w", err)
+	}
+	acceleratorAvailable, err := metricsdb.LiveClusterAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: available accelerator capacity: %w", err)
+	}
+	// RAM/ephemeral-storage are hard physical-fit dimensions (not billing dimensions).
+	ramTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: total RAM capacity: %w", err)
+	}
+	ramAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: available RAM capacity: %w", err)
+	}
+	storageTotal, err := metricsdb.LiveClusterStorageTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: total storage capacity: %w", err)
+	}
+	storageAvailable, err := metricsdb.LiveClusterStorageCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: available storage capacity: %w", err)
+	}
+	desiredByCluster, err := b.store.SumDesiredFootprintByCluster(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queuebackend: desired footprint: %w", err)
+	}
+	if err := b.validateCapacitySnapshot(heartbeats, cpuAvailable, cpuTotal, acceleratorAvailable, acceleratorTotal, ramAvailable, ramTotal, storageAvailable, storageTotal); err != nil {
+		return nil, nil, err
 	}
 
-	guaranteed = make(map[string]domain.Footprint, len(b.clusterNames))
-	burst = make(map[string]domain.Footprint, len(b.clusterNames))
-	for _, cluster := range b.clusterNames {
-		acceleratorByFlavor := make(map[string]int64, len(b.flavorOrder))
-		for _, flavor := range b.flavorOrder {
-			acceleratorByFlavor[flavor] = acceleratorAvail[cluster][flavor] // 0 if cluster/flavor has no fresh report
-		}
-		fp := domain.CapacityFootprint(cpuAvail[cluster], acceleratorByFlavor, ramAvail[cluster], storageAvail[cluster])
+	guaranteed = make(map[string]domain.Footprint, len(heartbeats))
+	burst = make(map[string]domain.Footprint, len(heartbeats))
+	for cluster := range heartbeats {
+		totalAccelerators := acceleratorTotal[cluster]
+		availableAccelerators := acceleratorAvailable[cluster]
+		total := domain.CapacityFootprint(cpuTotal[cluster], totalAccelerators, ramTotal[cluster], storageTotal[cluster])
+		desiredFree := total.Sub(desiredByCluster[cluster])
+		actualFree := domain.CapacityFootprint(cpuAvailable[cluster], availableAccelerators, ramAvailable[cluster], storageAvailable[cluster])
+		fp := minimumFootprint(desiredFree, actualFree)
 		guaranteed[cluster] = fp
-		// Guaranteed and burst share the same physical pool per cluster — preemption is what
-		// enforces the tier boundary, not a capacity split. Copy so tick()'s mutation of one
-		// view never aliases the other.
+		// Guaranteed and burst share the same physical pool per cluster; preemption enforces
+		// the tier boundary, not a capacity split. Copy so tick()'s mutations don't alias.
 		burstCopy := make(domain.Footprint, len(fp))
 		for k, v := range fp {
 			burstCopy[k] = v
@@ -174,15 +183,73 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	return guaranteed, burst, nil
 }
 
-// ClusterNames returns the configured target cluster names.
-func (b *Backend) ClusterNames() []string {
-	return b.clusterNames
+func (b *Backend) validateCapacitySnapshot(
+	heartbeats map[string]bool,
+	cpuAvailable, cpuTotal map[string]float64,
+	acceleratorAvailable, acceleratorTotal map[string]map[string]int64,
+	ramAvailable, ramTotal, storageAvailable, storageTotal map[string]int64,
+) error {
+	for cluster, connected := range heartbeats {
+		if !connected {
+			continue
+		}
+		cpuAvail, cpuAvailOK := cpuAvailable[cluster]
+		cpuTot, cpuTotalOK := cpuTotal[cluster]
+		ramAvail, ramAvailOK := ramAvailable[cluster]
+		ramTot, ramTotalOK := ramTotal[cluster]
+		storageAvail, storageAvailOK := storageAvailable[cluster]
+		storageTot, storageTotalOK := storageTotal[cluster]
+		accelAvail, accelAvailOK := acceleratorAvailable[cluster]
+		accelTotal, accelTotalOK := acceleratorTotal[cluster]
+		if !cpuAvailOK || !cpuTotalOK || !ramAvailOK || !ramTotalOK || !storageAvailOK || !storageTotalOK {
+			return fmt.Errorf("queuebackend: incomplete live capacity snapshot for active cluster %q", cluster)
+		}
+		if accelAvailOK != accelTotalOK {
+			return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q", cluster)
+		}
+		if !accelAvailOK {
+			accelAvail, accelTotal = map[string]int64{}, map[string]int64{}
+		}
+		if cpuAvail > cpuTot || ramAvail > ramTot || storageAvail > storageTot {
+			return fmt.Errorf("queuebackend: available capacity exceeds total for active cluster %q", cluster)
+		}
+		if len(accelAvail) != len(accelTotal) {
+			return fmt.Errorf("queuebackend: mismatched live accelerator capacity sets for cluster %q", cluster)
+		}
+		for flavor, total := range accelTotal {
+			available, availableOK := accelAvail[flavor]
+			if !availableOK {
+				return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q flavor %q", cluster, flavor)
+			}
+			if available > total {
+				return fmt.Errorf("queuebackend: available accelerator capacity exceeds total for cluster %q flavor %q", cluster, flavor)
+			}
+		}
+	}
+	return nil
 }
 
-// ProvisionAgent is a no-op: the native scheduling model has no per-agent k8s object to
-// create (see workload.Backend.ProvisionAgent doc).
-func (b *Backend) ProvisionAgent(_ context.Context, _ string) error { return nil }
+// GetAcceleratorCapacityByNode returns fresh actual per-node capacity for topology-aware
+// distributed admission. Missing/stale nodes are absent and can't satisfy a hard spread requirement.
+func (b *Backend) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+	return metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+}
 
-// defaultFlavorOrder is used when Backend is constructed with no configured flavor order (e.g.
-// tests) — every flavor GetFlavorCapacity reports on, values always read live.
-var defaultFlavorOrder = []string{"flavor-t4", "flavor-l40", "flavor-a100", "flavor-h100", "flavor-h200"}
+func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
+	return metricsdb.LiveClusterNodeLabels(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
+func minimumFootprint(a, b domain.Footprint) domain.Footprint {
+	out := domain.NewFootprint()
+	for resource, av := range a {
+		if bv := b[resource]; bv < av {
+			out[resource] = bv
+		} else {
+			out[resource] = av
+		}
+	}
+	return out
+}
+
+// ProvisionAgent is a no-op: the native scheduling model has no per-agent k8s object to create.
+func (b *Backend) ProvisionAgent(_ context.Context, _ string) error { return nil }

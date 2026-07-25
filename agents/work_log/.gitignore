@@ -1,0 +1,4 @@
+# Per-agent local code repos (agent-<id>/), created at runtime. Each is its own git repo —
+# never commit them into hypothesisloop. The directory itself is tracked so it always exists.
+*
+!.gitignore

@@ -46,7 +46,7 @@ export function Nav() {
     <nav className="wa-nav flex h-screen w-56 flex-col">
       <Link href="/" className="wa-nav-logo" style={{ textDecoration: 'none', color: 'inherit' }}>
         <span className="wa-nav-mark">O</span>
-        <span>OpenResearch</span>
+        <span>HypothesisLoop</span>
       </Link>
       <div className="mt-4">
         <CommandPaletteTrigger />
@@ -70,7 +70,7 @@ export function Nav() {
       <div className="mt-auto px-4 pb-5">
         <SystemStatus />
         <div className="wa-nav-footer">
-          <p className="wa-nav-footer-title">OpenResearch v2.0</p>
+          <p className="wa-nav-footer-title">HypothesisLoop v2.0</p>
           <p className="wa-nav-footer-sub">Budget: normalized compute-hours</p>
         </div>
       </div>

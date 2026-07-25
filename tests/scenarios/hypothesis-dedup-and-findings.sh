@@ -47,7 +47,7 @@ echo "  -- a finding filed by one agent is visible to a different agent reading 
 # hyp_text=$TEXT (13th positional arg) so this job tests the SAME deduplicated hypothesis
 # (FIRST_ID) rather than submit_job_ext's own default-generated text creating a new one.
 JOB=$(submit_job_ext "$PE_ID" "$AGENT_A" "guaranteed" "0.02" "$JOB_FILE" "" "" "" "" "" "" "" "$TEXT")
-S=$(wait_for_status "$JOB" "COMPLETED,FAILED,EVICTED" 90 || true)
+S=$(wait_for_completion_after_running "$JOB" "0.02" "$ADMISSION_BUDGET_SECONDS" || true)
 if [[ "$S" == "COMPLETED" ]]; then
   SUMMARY_TEXT="Achieved 0.81 val_accuracy — e2e cross-agent findings-visibility coverage"
   file_finding "$JOB" "$SUMMARY_TEXT"

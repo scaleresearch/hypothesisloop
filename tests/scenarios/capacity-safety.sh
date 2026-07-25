@@ -10,10 +10,11 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
+source "$DIR/../lib/cluster.sh"
 
-ACCELERATOR_TYPE="L40"
-# L40's acch_rate is 0.25 (controlplane/settings/openresearch.yaml) — costs are normalized to
-# H100-equivalent-hours, so a job requesting HOURS of wall-clock time on L40 debits
+ACCELERATOR_TYPE="nvidia.com/gpu.product=NVIDIA-L40"
+# L40's acch_rate is 0.25 (controlplane/settings/hypothesisloop.yaml) — costs are normalized to
+# H100-equivalent-hours, so a job requesting HOURS of wall-clock time on L40 reserves
 # HOURS * L40_ACCH_RATE AccH, not HOURS AccH 1:1. Keep this in sync with that config's L40 entry.
 L40_ACCH_RATE=0.25
 AGENTS=("agent-cap-a-${RUN_ID}" "agent-cap-b-${RUN_ID}" "agent-cap-c-${RUN_ID}")
@@ -25,9 +26,9 @@ for a in "${AGENTS[@]}"; do register_agent "$a"; done
 PE_ID=$(create_platform_experiment "capacity-safety-${RUN_ID}" 50.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
-echo "  -- back-to-back same-type submissions must not double-reserve capacity --"
-JOB_HOURS=0.02
-EXPECTED_DEBIT=$(py "print(round($JOB_HOURS * $L40_ACCH_RATE, 6))")
+echo "  -- PostgreSQL desired usage must remain stable across scheduler ticks --"
+JOB_HOURS=0.003
+EXPECTED_RESERVATION=$(py "print(round($JOB_HOURS * $L40_ACCH_RATE, 6))")
 QA_BEFORE=$(quota_used_guaranteed "$PE_ID" "${AGENTS[0]}")
 QB_BEFORE=$(quota_used_guaranteed "$PE_ID" "${AGENTS[1]}")
 JOB_A=$(submit_job "$PE_ID" "${AGENTS[0]}" "guaranteed" "$JOB_HOURS" "$ACCELERATOR_TYPE")
@@ -36,23 +37,34 @@ SA=$(wait_for_status "$JOB_A" "RUNNING,COMPLETED,FAILED,EVICTED,QUEUED" 30 || tr
 SB=$(wait_for_status "$JOB_B" "RUNNING,COMPLETED,FAILED,EVICTED,QUEUED" 30 || true)
 echo "  job A status=$SA ; job B status=$SB"
 pass "two back-to-back same-type submissions did not crash/error the scheduler across ticks"
-# The actual double-reservation bug this guards against: a submission getting debited twice
-# against its own agent's quota (once per tick it was reconsidered) rather than once at
-# submission — each agent's own guaranteed usage must match exactly one job's estimated cost.
+# Desired usage is derived from each current PostgreSQL job row. Reconsidering a job on later
+# scheduler ticks must not create another reservation or any metrics-side copy.
 QA_AFTER=$(quota_used_guaranteed "$PE_ID" "${AGENTS[0]}")
 QB_AFTER=$(quota_used_guaranteed "$PE_ID" "${AGENTS[1]}")
-DEBIT_A=$(py "print(round(float('$QA_AFTER' or 0) - float('$QA_BEFORE' or 0), 6))")
-DEBIT_B=$(py "print(round(float('$QB_AFTER' or 0) - float('$QB_BEFORE' or 0), 6))")
-[[ "$DEBIT_A" == "$EXPECTED_DEBIT" && "$DEBIT_B" == "$EXPECTED_DEBIT" ]] \
-  && pass "each job debited its own agent's guaranteed quota exactly once ($EXPECTED_DEBIT AccH = ${JOB_HOURS}h * L40's ${L40_ACCH_RATE} acch_rate, not doubled)" \
-  || fail "expected each agent debited exactly $EXPECTED_DEBIT AccH, got agent A=$DEBIT_A agent B=$DEBIT_B — possible double-reservation across ticks"
-[[ "$(wait_for_status "$JOB_A" "COMPLETED,FAILED,EVICTED,QUEUED" 120 || true)" == "COMPLETED" ]] && file_finding "$JOB_A"
-[[ "$(wait_for_status "$JOB_B" "COMPLETED,FAILED,EVICTED,QUEUED" 120 || true)" == "COMPLETED" ]] && file_finding "$JOB_B"
+RESERVED_A=$(py "print(round(float('$QA_AFTER' or 0) - float('$QA_BEFORE' or 0), 6))")
+RESERVED_B=$(py "print(round(float('$QB_AFTER' or 0) - float('$QB_BEFORE' or 0), 6))")
+[[ "$RESERVED_A" == "$EXPECTED_RESERVATION" && "$RESERVED_B" == "$EXPECTED_RESERVATION" ]] \
+  && pass "each current PostgreSQL job contributes exactly one desired reservation ($EXPECTED_RESERVATION AccH)" \
+  || fail "expected one $EXPECTED_RESERVATION AccH desired reservation per job, got agent A=$RESERVED_A agent B=$RESERVED_B"
+for J in "$JOB_A" "$JOB_B"; do
+  JS=$(wait_for_completion_after_running "$J" "$JOB_HOURS" "$ADMISSION_BUDGET_SECONDS" || true)
+  if [[ "$JS" == "COMPLETED" ]]; then
+    file_finding "$J"
+  else
+    fail "initial capacity probe $J did not complete (status=$JS)"
+  fi
+  wait_until "completed capacity probe $J is removed from Kubernetes" 30 1 job_resource_absent "$J" \
+    || fail "completed capacity probe $J still owns a Kubernetes Job"
+done
 
 echo "  -- preemption must plan a sufficient victim set, not silently under-free capacity --"
 BURST_A=$(submit_job "$PE_ID" "${AGENTS[0]}" "burst" "0.017" "$ACCELERATOR_TYPE" 4)
 BURST_B=$(submit_job "$PE_ID" "${AGENTS[1]}" "burst" "0.017" "$ACCELERATOR_TYPE" 4)
-for BJ in "$BURST_A" "$BURST_B"; do wait_for_status "$BJ" "RUNNING,ADMITTED" 30 > /dev/null || true; done
+for BJ in "$BURST_A" "$BURST_B"; do
+  BS=$(wait_for_status "$BJ" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
+  [[ "$BS" == "RUNNING" ]] \
+    || fail "burst victim setup failed for $BJ (status=$BS); victim-set assertion would be invalid"
+done
 
 BIG_ACCELERATOR_COUNT=8
 JOB_BIG=$(submit_job "$PE_ID" "${AGENTS[2]}" "guaranteed" "0.017" "$ACCELERATOR_TYPE" "$BIG_ACCELERATOR_COUNT")
@@ -60,18 +72,15 @@ echo "  submitted guaranteed job requesting ${BIG_ACCELERATOR_COUNT}x ${ACCELERA
 # QUEUED excluded from the wait target: wait_for_status returns as soon as status matches
 # any target, and every fresh submission starts QUEUED — including it here would return
 # instantly instead of giving admission/preemption up to the full 45s to actually happen. A
-# real timeout still yields "QUEUED" via wait_for_status's own last-status fallback, so the
-# QUEUED branch below still works correctly.
-S=$(wait_for_status "$JOB_BIG" "RUNNING,COMPLETED,FAILED,EVICTED" 45 || true)
-if [[ "$S" == "RUNNING" ]]; then
+# A timeout prints the current status for the assertion below.
+S=$(wait_for_status "$JOB_BIG" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
+if [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]]; then
   ADMITTED_ACCELERATOR_COUNT=$(get_field "$JOB_BIG" accelerator_count)
   [[ "$ADMITTED_ACCELERATOR_COUNT" == "$BIG_ACCELERATOR_COUNT" ]] \
-    && pass "admitted RUNNING with its full ${BIG_ACCELERATOR_COUNT}-accelerator footprint preserved — sufficient victim set was planned" \
-    || fail "RUNNING but admitted accelerator_count=$ADMITTED_ACCELERATOR_COUNT != requested $BIG_ACCELERATOR_COUNT — partial admission after preemption"
-elif [[ "$S" == "QUEUED" ]]; then
-  pass "correctly stayed QUEUED rather than admitted without a sufficient victim set"
+    && pass "admitted with its full ${BIG_ACCELERATOR_COUNT}-accelerator footprint preserved — sufficient victim set was planned" \
+    || fail "admitted but accelerator_count=$ADMITTED_ACCELERATOR_COUNT != requested $BIG_ACCELERATOR_COUNT — partial admission after preemption"
 else
-  echo "  [WARN] status=$S — inconclusive for victim-set-sufficiency assertion"
+  fail "guaranteed job did not run after two sufficient burst victims became available for preemption (status=$S)"
 fi
 for J in "$BURST_A" "$BURST_B" "$JOB_BIG"; do wait_for_status "$J" "COMPLETED,FAILED,EVICTED,QUEUED" 60 > /dev/null || true; done
 

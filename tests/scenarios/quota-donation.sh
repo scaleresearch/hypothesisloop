@@ -51,9 +51,9 @@ REFULFILL_CODE=$(curl -s -o /tmp/donation_refulfill.$$.json -w '%{http_code}' -X
   -H 'Content-Type: application/json' -d "{\"donor_agent_id\": \"$DONOR\"}")
 rm -f /tmp/donation_refulfill.$$.json
 DONOR_GUARANTEED_AFTER2=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_hours)
-[[ "$DONOR_GUARANTEED_AFTER2" == "$DONOR_GUARANTEED_AFTER" ]] \
-  && pass "re-fulfilling an already-fulfilled donation did not debit the donor again (HTTP $REFULFILL_CODE)" \
-  || fail "donor's guaranteed AccH changed again on re-fulfillment attempt ($DONOR_GUARANTEED_AFTER -> $DONOR_GUARANTEED_AFTER2) — double-credit"
+[[ "$REFULFILL_CODE" -ge 400 && "$REFULFILL_CODE" -lt 500 && "$DONOR_GUARANTEED_AFTER2" == "$DONOR_GUARANTEED_AFTER" ]] \
+  && pass "re-fulfilling an already-fulfilled donation was rejected without another debit (HTTP $REFULFILL_CODE)" \
+  || fail "re-fulfillment returned HTTP $REFULFILL_CODE or changed donor AccH ($DONOR_GUARANTEED_AFTER -> $DONOR_GUARANTEED_AFTER2)"
 
 echo "  -- a cancelled donation request cannot later be fulfilled --"
 CANCEL_DONATION_ID=$(curl -sf -X POST "$QUOTA_URL/donations" -H 'Content-Type: application/json' -d "{

@@ -3,7 +3,7 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 var cpuKey = domain.ResourceKey{Kind: domain.ResourceKindCPU}
@@ -56,18 +56,14 @@ func TestShortfallOnlyCountsDeficitDimensions(t *testing.T) {
 	}
 }
 
-func TestNotAdmittedReasonForOnlyLooksAtRequestedDimensions(t *testing.T) {
-	// A job that only requests CPU shouldn't be classified "outranked" just because some
-	// unrelated accelerator flavor's availability dropped this tick.
-	initial := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 4}
-	current := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 0}
-	fp := domain.Footprint{cpuKey: 1000}
-	if got := notAdmittedReasonFor(current, initial, fp); got != domain.NotAdmittedCapacityUnavailable {
-		t.Errorf("notAdmittedReasonFor = %q, want capacity_unavailable (CPU untouched)", got)
+func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
+	need := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 1}
+	initial := domain.Footprint{cpuKey: 1000, acceleratorKey("flavor-t4"): 1}
+	if got := notAdmittedReasonFor(initial, initial, need); got != domain.NotAdmittedCapacityUnavailable {
+		t.Fatalf("unchanged insufficient capacity reason = %q", got)
 	}
-
-	current2 := domain.Footprint{cpuKey: 500, acceleratorKey("flavor-t4"): 4}
-	if got := notAdmittedReasonFor(current2, initial, fp); got != domain.NotAdmittedOutranked {
-		t.Errorf("notAdmittedReasonFor = %q, want outranked (CPU dropped)", got)
+	current := domain.Footprint{cpuKey: 500, acceleratorKey("flavor-t4"): 1}
+	if got := notAdmittedReasonFor(current, initial, need); got != domain.NotAdmittedOutranked {
+		t.Fatalf("capacity consumed earlier in tick reason = %q", got)
 	}
 }

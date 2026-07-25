@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Job/platform-experiment termination semantics, contrasted in one place:
-#   1. A job that can never be scheduled (impossible accelerator type) fails closed — stays QUEUED
+# Job/platform-experiment termination semantics, contrasted here:
+#   1. A valid job that can never be scheduled (known flavor, impossible physical count) fails closed — stays QUEUED
 #      indefinitely, never debits guaranteed quota — and cancelling it while still QUEUED
 #      terminates it as REJECTED (not EVICTED: it was never admitted).
 #   2. A RUNNING job that's cancelled is EVICTED (terminal, refunded) — and stays EVICTED,
@@ -18,33 +18,35 @@ source "$DIR/../lib/api.sh"
 
 AGENT="agent-lifecycle-${RUN_ID}"
 register_agent "$AGENT"
-PE_ID=$(create_platform_experiment "job-lifecycle-${RUN_ID}" 1.0 1)
+PE_ID=$(create_platform_experiment "job-lifecycle-${RUN_ID}" 10.0 1)
 signup_and_start "$PE_ID" "$AGENT"
 
 echo "  -- cancel while QUEUED (never admitted) -> REJECTED --"
 QUOTA_BEFORE=$(quota_used_guaranteed "$PE_ID" "$AGENT")
-STUCK=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "NONEXISTENT-ACCELERATOR-TYPE")
+STUCK=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "nvidia.com/gpu.product=NVIDIA-H200" "3")
 S=$(wait_for_status "$STUCK" "RUNNING,COMPLETED,FAILED,EVICTED,REJECTED" 20 || true)
 S=$(get_status "$STUCK")
 if [[ "$S" == "QUEUED" ]]; then
-  pass "stayed QUEUED — never falsely admitted for an unsatisfiable request"
+	pass "stayed QUEUED — never falsely admitted for an unsatisfiable request"
+	[[ "$(get_field "$STUCK" not_admitted_reason)" == "capacity_unavailable" ]] \
+		&& pass "current PostgreSQL scheduler decision explains the queue state (capacity_unavailable)" \
+		|| fail "queued unsatisfiable job has wrong not_admitted_reason=$(get_field "$STUCK" not_admitted_reason)"
   sleep 5
   [[ "$(get_status "$STUCK")" == "QUEUED" ]] && pass "still QUEUED — no flapping into a false RUNNING/FAILED state" \
     || fail "status drifted from QUEUED with no capacity ever becoming available"
 
-  # Quota is reserved at submission time, not on admission (pending-capacity reservation —
-  # see debitAllResources in service_submit.go), so a still-QUEUED job legitimately holds its
-  # estimated-cost debit; the real invariant is that cancelling it below refunds that in full.
+  # The still-QUEUED PostgreSQL row is the desired quota reservation; there is no reservation
+  # metric or secondary table. Cancelling it below removes that desired amount from quota reads.
   DEBIT=$(py "print(round(float('$(quota_used_guaranteed "$PE_ID" "$AGENT")' or 0) - float('$QUOTA_BEFORE' or 0), 6))")
-  # 0.02h * 0.125 AccH/h (Cost()'s unregistered-type fallback rate, the cheapest/T4 tier) = 0.0025 AccH.
-  [[ "$DEBIT" == "0.0025" ]] && pass "guaranteed quota reserved at submission time (0.0025 AccH) for the still-QUEUED job" \
-    || fail "expected 0.0025 AccH reserved for the QUEUED job's estimated cost, got $DEBIT"
+  # 0.02h * 3 H200 * 1.25 AccH/h = 0.075 AccH.
+  [[ "$DEBIT" == "0.075" ]] && pass "PostgreSQL desired reservation is 0.075 AccH for the still-QUEUED job" \
+    || fail "expected 0.075 AccH desired reservation for the QUEUED job, got $DEBIT"
 
-  curl -sf -X POST "$SCHED_URL/experiments/${STUCK}/cancel" > /dev/null || true
-  S=$(wait_for_status "$STUCK" "EVICTED,REJECTED,FAILED" 15 || true)
-  [[ "$S" == "REJECTED" ]] \
-    && pass "cancelling a still-QUEUED job terminates it as REJECTED" \
-    || { [[ "$S" == "EVICTED" || "$S" == "FAILED" ]] && pass "cancelling a still-QUEUED job terminated it (status=$S)" || fail "cancel did not terminate a never-started job (status=$S)"; }
+	cancel_job "$STUCK"
+	S=$(wait_for_status "$STUCK" "EVICTED,REJECTED,FAILED" 15 || true)
+	[[ "$S" == "REJECTED" ]] \
+		&& pass "cancelling a still-QUEUED job terminates it as REJECTED" \
+		|| fail "cancelling a still-QUEUED job produced $S, expected REJECTED"
 
   DEBIT_AFTER_CANCEL=$(py "print(round(float('$(quota_used_guaranteed "$PE_ID" "$AGENT")' or 0) - float('$QUOTA_BEFORE' or 0), 6))")
   [[ "$DEBIT_AFTER_CANCEL" == "0.0" || "$DEBIT_AFTER_CANCEL" == "0" ]] \
@@ -56,9 +58,12 @@ fi
 
 echo "  -- cancel while RUNNING -> EVICTED (terminal, refunded) --"
 RUNNER=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.03")
-S=$(wait_for_status "$RUNNER" "RUNNING,COMPLETED,FAILED" 60 || true)
-[[ "$S" != "RUNNING" ]] && echo "  [WARN] status=$S before cancel attempt (still trying cancel)"
-curl -sf -X POST "$SCHED_URL/experiments/${RUNNER}/cancel" > /dev/null || true
+S=$(wait_for_status "$RUNNER" "RUNNING,COMPLETED,FAILED" "$ADMISSION_BUDGET_SECONDS" || true)
+[[ "$S" == "RUNNING" ]] || fail "job must be RUNNING before cancel, got $S"
+[[ -z "$(get_field "$RUNNER" not_admitted_reason)" ]] \
+	&& pass "not_admitted_reason cleared atomically on admission" \
+	|| fail "admitted job retained stale not_admitted_reason=$(get_field "$RUNNER" not_admitted_reason)"
+curl -sf -X POST "$SCHED_URL/experiments/${RUNNER}/cancel" > /dev/null
 S=$(wait_for_status "$RUNNER" "EVICTED,COMPLETED,FAILED" 30 || true)
 if [[ "$S" == "EVICTED" ]]; then
   pass "cancelling a RUNNING job terminates it as EVICTED (reason=$(get_field "$RUNNER" eviction_reason)) — different outcome than cancelling while QUEUED"
@@ -69,7 +74,7 @@ assert_stable_status "$RUNNER" "EVICTED" 5 "eviction is terminal, unlike preempt
 
 echo "  -- close platform experiment while a job is RUNNING --"
 LIVE=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.03")
-S=$(wait_for_status "$LIVE" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
+S=$(wait_for_status "$LIVE" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
 if [[ "$S" != "RUNNING" ]]; then
   fail "job never reached RUNNING before close (status=$S) — cannot exercise close-while-active"
 else

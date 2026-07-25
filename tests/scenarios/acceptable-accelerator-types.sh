@@ -1,54 +1,98 @@
 #!/usr/bin/env bash
-# acceptable_accelerator_types: a job that hard-requires exactly accelerator_type must still get selected a
-# concrete flavor at admission time from among accelerator_type + acceptable_accelerator_types — not just at
-# Kubernetes node-affinity time. If the requested flavor is fully saturated but a listed
-# alternative has free capacity, the job must be admitted onto the alternative instead of
-# sitting QUEUED forever next to idle accelerators.
+# acceptable_accelerator_types: a job must get its concrete flavor selected at admission time
+# from accelerator_type + acceptable_accelerator_types, not just at k8s node-affinity time. If
+# the requested flavor is saturated but a listed alternative is free, the job must admit onto
+# the alternative instead of sitting QUEUED next to idle accelerators.
 #
 # Regression test for findings.md's P1 "acceptable_accelerator_types cannot be scheduled correctly":
-# scheduler capacity selection and reservation used to use only Experiment.AcceleratorType (the
+# scheduler capacity selection used to use only Experiment.AcceleratorType (the
 # requested flavor) — see resolveClusterAndFootprint in loop_tick.go for the fix.
 #
-# H200 (controlplane/settings/openresearch.yaml) is saturated by the filler job below —
-# whether that lands it as RUNNING/ADMITTED (real live capacity exists and got claimed) or an
-# outright REJECTED (no live H200 capacity exists at all, e.g. this dev cluster's fake-node set
-# doesn't happen to include an H200-labeled node — see localdev/k3s-macos/add-fake-nodes.sh) both prove
-# the same thing: zero H200 capacity is available afterward, either way. H100 is left untouched
-# so it's the only viable landing spot for the flexible job. API-only, parallel-safe (uses accelerator
-# types not touched by other scenarios' saturation logic) as long as it doesn't run
-# concurrently with another scenario that also saturates H200 or H100.
+# Cluster-exclusive because the assertion deliberately consumes one live accelerator pool.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 
-REQUESTED="H200"
-ALTERNATIVE="H100"
-AGENTS=("agent-agt-a-${RUN_ID}" "agent-agt-b-${RUN_ID}")
+REQUESTED=nvidia.com/gpu.product=NVIDIA-L40
+ALTERNATIVE=nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+REQUESTED_CAPACITY=$(kubectl get nodes -l nvidia.com/gpu.product=NVIDIA-L40 -o json | py '
+import json, sys
+print(sum(int(node["status"]["allocatable"].get("nvidia.com/gpu", 0)) for node in json.load(sys.stdin)["items"]))
+')
+ALTERNATIVE_CAPACITY=$(kubectl get nodes -l nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe -o json | py '
+import json, sys
+print(sum(int(node["status"]["allocatable"].get("nvidia.com/gpu", 0)) for node in json.load(sys.stdin)["items"]))
+')
+[[ "$REQUESTED_CAPACITY" -gt 0 && "$ALTERNATIVE_CAPACITY" -gt 0 ]] \
+  || { echo "acceptable accelerator scenario requires live L40 and A100 native node inventory" >&2; exit 2; }
+
+# The two counts above are ground truth, read straight off the vendor's own node labels. The
+# catalog an agent reads before submitting must agree with them, under the very strings a job
+# spec takes — that is the whole contract of a driver-published accelerator type, and the only
+# check here that costs no job and no extra wall time.
+#
+# Splitting matters as much as the totals: L40 and A100 both advertise nvidia.com/gpu, so a
+# catalog that keyed on the extended resource alone would report one merged pool that matches no
+# submittable accelerator_type, and an agent picking from it would queue forever.
+echo "  -- catalog reports live capacity under the driver-published type strings --"
+CATALOG=$(curl -sf "$QUOTA_URL/resource-catalog/capacity")
+for pair in "${REQUESTED}:${REQUESTED_CAPACITY}" "${ALTERNATIVE}:${ALTERNATIVE_CAPACITY}"; do
+  want_type="${pair%:*}" want_total="${pair##*:}"
+  got_total=$(printf '%s' "$CATALOG" | WANT="$want_type" py '
+import json, os, sys
+want = os.environ["WANT"]
+print(sum(a["total"] for c in json.load(sys.stdin)["clusters"]
+          for a in c["accelerators"] if a["accelerator_type"] == want))
+')
+  [[ "$got_total" == "$want_total" ]] \
+    && pass "catalog reports ${want_type} total=${got_total}, matching live node inventory" \
+    || fail "catalog reports ${want_type} total=${got_total}; live node inventory has ${want_total}"
+done
+
+AGENTS=("agent-agt-flex-${RUN_ID}")
+for ((i = 1; i <= REQUESTED_CAPACITY; i++)); do AGENTS+=("agent-agt-fill-${i}-${RUN_ID}"); done
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
 PE_ID=$(create_platform_experiment "acceptable-accelerator-types-${RUN_ID}" 50.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
-echo "  ==> saturating all ${REQUESTED} capacity with a filler guaranteed job (16 is the per-job accelerator_count cap — quota.max_accelerator_count_per_job in openresearch.yaml — and deliberately exceeds any real ${REQUESTED} node's supply)..."
-FILLER=$(submit_job "$PE_ID" "${AGENTS[0]}" "guaranteed" "0.05" "$REQUESTED" 16)
-# The filler proves "zero ${REQUESTED} capacity available" by simply never reaching
-# RUNNING/ADMITTED — whether it settles as REJECTED (synchronous "impossible" rejection) or
-# stays QUEUED (admission keeps retrying every tick and never finds room) is an implementation
-# detail; either outcome (or a wait-window timeout while still QUEUED) equally proves the
-# capacity claim below.
-FILLER_STATUS=$(wait_for_status "$FILLER" "RUNNING,ADMITTED,REJECTED" 15 || true)
-if [[ "$FILLER_STATUS" == "RUNNING" || "$FILLER_STATUS" == "ADMITTED" ]]; then
-  echo "  [WARN] filler job was admitted (status=$FILLER_STATUS) — ${REQUESTED} apparently has real capacity in this cluster; saturation assumption may not hold"
-fi
+echo "  ==> unknown accelerator types must fail at the API boundary..."
+read -r UNKNOWN_REQUESTED_CODE _ <<< "$(submit_job_expect_code "$PE_ID" "${AGENTS[0]}" "guaranteed" "0.01" \
+  '{"accelerator_count":1,"accelerator_type":"nvidia.com/gpu.product=not-in-catalog"}')"
+[[ "$UNKNOWN_REQUESTED_CODE" -ge 400 && "$UNKNOWN_REQUESTED_CODE" -lt 500 ]] \
+  && pass "unknown requested accelerator type failed fast (HTTP $UNKNOWN_REQUESTED_CODE)" \
+  || fail "unknown requested accelerator type returned HTTP $UNKNOWN_REQUESTED_CODE; expected a client error"
+
+read -r UNKNOWN_ACCEPTABLE_CODE _ <<< "$(submit_job_expect_code "$PE_ID" "${AGENTS[0]}" "guaranteed" "0.01" \
+  "{\"accelerator_count\":1,\"accelerator_type\":\"${ALTERNATIVE}\",\"acceptable_accelerator_types\":[\"nvidia.com/gpu.product=not-in-catalog\"]}")"
+[[ "$UNKNOWN_ACCEPTABLE_CODE" -ge 400 && "$UNKNOWN_ACCEPTABLE_CODE" -lt 500 ]] \
+  && pass "unknown acceptable accelerator type failed fast (HTTP $UNKNOWN_ACCEPTABLE_CODE)" \
+  || fail "unknown acceptable accelerator type returned HTTP $UNKNOWN_ACCEPTABLE_CODE; expected a client error"
+
+echo "  ==> saturating all ${REQUESTED_CAPACITY} observed ${REQUESTED} devices..."
+FILLERS=()
+for ((i = 1; i <= REQUESTED_CAPACITY; i++)); do
+  FILLERS+=("$(submit_job "$PE_ID" "${AGENTS[$i]}" "guaranteed" "0.05" "$REQUESTED" 1)")
+done
+requested_saturated() {
+  local filler status
+  for filler in "${FILLERS[@]}"; do
+    status=$(get_field "$filler" status)
+    [[ "$status" == "RUNNING" || "$status" == "COMPLETED" ]] || return 1
+  done
+}
+wait_until "all ${REQUESTED} capacity is occupied" "$ADMISSION_BUDGET_SECONDS" 1 \
+  requested_saturated \
+  || { fail "${REQUESTED} saturation precondition failed"; close_platform_experiment "$PE_ID"; finish; }
 
 echo "  ==> submitting a job requesting ${REQUESTED} with acceptable_accelerator_types=[${REQUESTED}, ${ALTERNATIVE}]..."
-read -r CODE FLEX_ID <<< "$(submit_job_expect_code "$PE_ID" "${AGENTS[1]}" "guaranteed" "0.02" \
-  "{\"accelerator_type\": \"${REQUESTED}\", \"accelerator_count\": 1, \"acceptable_accelerator_types\": [\"${REQUESTED}\", \"${ALTERNATIVE}\"]}")"
+read -r CODE FLEX_ID <<< "$(submit_job_expect_code "$PE_ID" "${AGENTS[0]}" "guaranteed" "0.02" \
+  "{\"accelerator_count\":1,\"accelerator_type\":\"${REQUESTED}\",\"acceptable_accelerator_types\":[\"${ALTERNATIVE}\"],\"accelerator_tolerations\":[\"nvidia.com/gpu\"]}")"
 
 if [[ "$CODE" -ge 400 ]]; then
   fail "submission with an acceptable alternative was rejected outright (HTTP $CODE) instead of admitted onto ${ALTERNATIVE}"
 else
-  S=$(wait_for_status "$FLEX_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 30 || true)
+  S=$(wait_for_status "$FLEX_ID" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
   if [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]]; then
     ADMITTED_TYPE=$(get_field "$FLEX_ID" accelerator_type)
     [[ "$ADMITTED_TYPE" == "$ALTERNATIVE" ]] \
@@ -57,9 +101,11 @@ else
   else
     fail "job stayed QUEUED (status=$S) with idle ${ALTERNATIVE} capacity available — admission only considered the requested flavor, not acceptable_accelerator_types"
   fi
-  [[ "$(wait_for_status "$FLEX_ID" "COMPLETED,FAILED,EVICTED,QUEUED" 100 || true)" == "COMPLETED" ]] && file_finding "$FLEX_ID"
+  [[ "$(wait_for_status "$FLEX_ID" "COMPLETED,FAILED,EVICTED,QUEUED" "$(completion_wait_tries 0.02)" || true)" == "COMPLETED" ]] \
+    && file_finding "$FLEX_ID" \
+    || fail "flexible accelerator job did not complete cleanly"
 fi
 
-wait_for_status "$FILLER" "COMPLETED,FAILED,EVICTED,REJECTED,QUEUED" 100 > /dev/null || true
+for filler in "${FILLERS[@]}"; do cancel_job "$filler"; done
 close_platform_experiment "$PE_ID"
 finish

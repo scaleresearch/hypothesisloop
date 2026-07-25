@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ErrDonorInsufficientQuota is returned by FulfillDonationTx when, at commit time under row
@@ -389,30 +389,4 @@ func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donati
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: commit: %w", err)
 	}
 	return true, nil
-}
-
-// WithAdmissionLock runs fn while holding a Postgres transaction-scoped advisory lock keyed on
-// (agentID, platformExpID), so quota admission is serialized across every control-service
-// replica, not just within one process. Scoped to the transaction so it auto-releases on
-// commit/rollback (including a crash mid-fn) rather than needing an explicit unlock.
-func (s *PlatformExperimentsStore) WithAdmissionLock(ctx context.Context, agentID, platformExpID string, fn func(ctx context.Context) error) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.WithAdmissionLock: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	key := agentID + "/" + platformExpID
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-		return fmt.Errorf("platform_experiments_store.WithAdmissionLock: acquire lock: %w", err)
-	}
-
-	if err := fn(ctx); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.WithAdmissionLock: commit: %w", err)
-	}
-	return nil
 }

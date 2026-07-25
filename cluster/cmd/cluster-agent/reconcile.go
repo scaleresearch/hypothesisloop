@@ -1,16 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	neturl "net/url"
-	"strings"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // reconcileLoop is the whole "desired state" side: fetch what should exist, list what
@@ -40,26 +39,57 @@ func (a *agent) reconcileOnce(ctx context.Context, log func(string, ...any)) err
 	if err != nil {
 		return fmt.Errorf("list local jobs: %w", err)
 	}
+	auxiliary, err := a.jwc.ListManagedAuxiliaryWorkloads(ctx)
+	if err != nil {
+		return fmt.Errorf("list local auxiliary resources: %w", err)
+	}
 
 	desiredByID := make(map[string]*domain.Experiment, len(desired))
 	for _, exp := range desired {
+		if exp == nil || exp.ID == "" {
+			return fmt.Errorf("desired state contains experiment without identity")
+		}
+		if _, exists := desiredByID[exp.ID]; exists {
+			return fmt.Errorf("desired state contains duplicate experiment %q", exp.ID)
+		}
 		desiredByID[exp.ID] = exp
 	}
 	actualSet := make(map[string]bool, len(actual))
 	for _, id := range actual {
+		if id == "" {
+			return fmt.Errorf("actual state contains workload without experiment identity")
+		}
+		if actualSet[id] {
+			return fmt.Errorf("actual state contains duplicate experiment identity %q", id)
+		}
 		actualSet[id] = true
 	}
+	var reconcileErrors []error
 
 	// Create anything desired but not yet actual.
 	for id, exp := range desiredByID {
 		if actualSet[id] {
+			matches, err := a.jwc.WorkloadMatchesDesired(ctx, exp)
+			if err != nil {
+				log("compare workload %s with desired spec: %v", id, err)
+				reconcileErrors = append(reconcileErrors, fmt.Errorf("compare workload %s: %w", id, err))
+				continue
+			}
+			if !matches {
+				if err := a.jwc.DeleteWorkload(ctx, id); err != nil {
+					log("delete drifted workload %s: %v", id, err)
+					reconcileErrors = append(reconcileErrors, fmt.Errorf("delete drifted workload %s: %w", id, err))
+					continue
+				}
+				log("deleted drifted workload %s; next pass recreates desired spec", id)
+			}
 			continue
 		}
 		if err := a.jwc.CreateWorkload(ctx, exp); err != nil {
 			log("create workload %s: %v", id, err)
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("create workload %s: %w", id, err))
 			continue
 		}
-		a.track(id)
 	}
 
 	// Delete anything actual but no longer desired.
@@ -69,84 +99,68 @@ func (a *agent) reconcileOnce(ctx context.Context, log func(string, ...any)) err
 		}
 		if err := a.jwc.DeleteWorkload(ctx, id); err != nil {
 			log("delete workload %s: %v", id, err)
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("delete workload %s: %w", id, err))
 			continue
 		}
 		log("deleted workload %s (no longer desired)", id)
-		a.track(id) // keep tracking until the status loop observes and reports Gone
 	}
-
-	// Track everything currently desired too, even if already actual (covers the case where
-	// resync missed it, or a previous reconcile pass's create hasn't been observed yet).
-	for id := range desiredByID {
-		a.track(id)
+	// A partial create/delete can leave a Service or DRA template without a Job. Discover and
+	// remove those orphans from current cluster state; retain no cleanup queue between ticks.
+	for _, id := range orphanAuxiliaryIDs(desiredByID, actualSet, auxiliary) {
+		if err := a.jwc.DeleteWorkload(ctx, id); err != nil {
+			log("delete orphan auxiliary resources %s: %v", id, err)
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("delete orphan auxiliary resources %s: %w", id, err))
+			continue
+		}
+		log("deleted orphan auxiliary resources %s", id)
 	}
-	return nil
+	return errors.Join(reconcileErrors...)
 }
 
-func (a *agent) track(id string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, ok := a.tracked[id]; !ok {
-		a.tracked[id] = &trackedJob{lastPhase: workload.JobPhasePending}
+func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[string]bool, auxiliary []string) []string {
+	orphans := make([]string, 0, len(auxiliary))
+	for _, id := range auxiliary {
+		if desired[id] == nil && !actualJobs[id] {
+			orphans = append(orphans, id)
+		}
 	}
+	return orphans
 }
 
 func (a *agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, error) {
-	url := fmt.Sprintf("%s/internal/clusters/%s/desired-state", a.cpURL, a.clusterName)
-
-	// Attach live CPU capacity as query params on this same fast (~2s) poll — reusing the
-	// existing desired-state pull instead of adding a second endpoint/cadence keeps capacity
-	// reporting on the same fast path as job status and heartbeats.
-	if avail, total, err := a.jwc.GetLiveCPUCapacity(ctx); err != nil {
-		fmt.Printf("[cluster-agent] get live CPU capacity: %v\n", err)
-	} else {
-		url = fmt.Sprintf("%s?cpu_available_cores=%.3f&cpu_total_cores=%.3f", url, avail, total)
+	cpuAvail, cpuTotal, err := a.jwc.GetLiveCPUCapacity(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get live CPU capacity: %w", err)
 	}
-
-	// Same idea per accelerator flavor, JSON-encoded since it's a map rather than a scalar. The control
-	// plane writes these straight to the metrics store (never Postgres) — see clusteragentapi.
-	if acceleratorAvail, acceleratorTotal, err := a.jwc.GetLiveAcceleratorCapacity(ctx); err != nil {
-		fmt.Printf("[cluster-agent] get live accelerator capacity: %v\n", err)
-	} else if len(acceleratorAvail) > 0 {
-		availJSON, _ := json.Marshal(acceleratorAvail)
-		totalJSON, _ := json.Marshal(acceleratorTotal)
-		q := neturl.Values{}
-		q.Set("accelerator_available_by_flavor", string(availJSON))
-		q.Set("accelerator_total_by_flavor", string(totalJSON))
-		sep := "&"
-		if !strings.Contains(url, "?") {
-			sep = "?"
-		}
-		url = url + sep + q.Encode()
+	acceleratorAvail, acceleratorTotal, acceleratorByNode, nodeLabels, err := a.jwc.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get live accelerator capacity: %w", err)
 	}
-
-	// RAM/ephemeral-storage: Class B (hard-cap, no billing) dimensions — see
-	// SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2. Same fast-poll piggyback as CPU/Accelerator
-	// above, in bytes, so the control plane can joint-fit a mixed job's memory/storage request
-	// against real cluster state instead of trusting it fits unconditionally.
-	if ramAvail, ramTotal, err := a.jwc.GetLiveRAMCapacity(ctx); err != nil {
-		fmt.Printf("[cluster-agent] get live RAM capacity: %v\n", err)
-	} else {
-		sep := "&"
-		if !strings.Contains(url, "?") {
-			sep = "?"
-		}
-		url = fmt.Sprintf("%s%sram_available_bytes=%d&ram_total_bytes=%d", url, sep, ramAvail, ramTotal)
+	ramAvail, ramTotal, err := a.jwc.GetLiveRAMCapacity(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get live RAM capacity: %w", err)
 	}
-	if storageAvail, storageTotal, err := a.jwc.GetLiveStorageCapacity(ctx); err != nil {
-		fmt.Printf("[cluster-agent] get live storage capacity: %v\n", err)
-	} else {
-		sep := "&"
-		if !strings.Contains(url, "?") {
-			sep = "?"
-		}
-		url = fmt.Sprintf("%s%sstorage_available_bytes=%d&storage_total_bytes=%d", url, sep, storageAvail, storageTotal)
+	storageAvail, storageTotal, err := a.jwc.GetLiveStorageCapacity(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get live storage capacity: %w", err)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	payload, err := json.Marshal(map[string]any{
+		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
+		"accelerator_available_by_type": acceleratorAvail, "accelerator_total_by_type": acceleratorTotal,
+		"accelerator_available_by_node": acceleratorByNode,
+		"node_labels_by_node":           nodeLabels,
+		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
+		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode reconcile snapshot: %w", err)
+	}
+	url := fmt.Sprintf("%s/internal/clusters/%s/reconcile", a.cpURL, a.clusterName)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return nil, err

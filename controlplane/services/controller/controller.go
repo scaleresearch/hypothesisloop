@@ -2,21 +2,22 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Store is the persistence interface required by the controller.
 // Note: silence detection and observed-cost accounting are pure GreptimeDB queries (see
 // isAlive/observedElapsedHours in this package) — nothing about "how long has this job run" is
 // ever cached in this process's memory.
-// CPU/Accelerator utilization is never stored here — it lives in-memory in the node-agent window.
+// Cluster and job observations are queried from metrics storage and never cached here.
 type Store interface {
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
+	ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error)
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
@@ -30,13 +31,6 @@ type Store interface {
 	// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED,
 	// ADMITTED, RUNNING) for a platform experiment. Used by close-eviction reconciliation.
 	ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
-	// ListStaleDesiredState returns SUBMITTED/ADMITTED/RUNNING experiments with no recent
-	// cluster_job_reports row — see db.ClusterQueueStore.ListStaleDesiredState.
-	ListStaleDesiredState(ctx context.Context, staleAfter time.Duration) ([]*domain.Experiment, error)
-	// GetJobReport returns the cluster-agent's latest pushed status for id, or (nil, nil) if
-	// none yet — used by checkSilence to tell "pod is mid-reschedule, no wonder it's quiet"
-	// (Phase != running) apart from a genuinely hung training process (Phase == running).
-	GetJobReport(ctx context.Context, id string) (*db.JobReport, error)
 	// TransitionTerminal atomically transitions status and records the reason in one DB
 	// transaction — see db.Store.TransitionTerminal. Does not write usage; the caller settles
 	// separately (see Controller.settleAndMark) so that write can be retried independently.
@@ -44,11 +38,6 @@ type Store interface {
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
-	// DeletePendingReservation releases id's durable pending-capacity claim, if any — a
-	// no-op if none exists. Must be called on every path that moves a SUBMITTED/ADMITTED
-	// experiment to a terminal status, or tick() keeps subtracting phantom capacity for a
-	// job that no longer exists (see pending_capacity_reservations' schema comment).
-	DeletePendingReservation(ctx context.Context, id string) error
 }
 
 // QuotaService reads agent quota state. Refunds no longer go through here — every
@@ -95,7 +84,8 @@ type Controller struct {
 	minSilenceWindow      time.Duration
 }
 
-// New returns a Controller with default reconcile interval.
+// New constructs an unwired Controller. Start validates every production dependency and
+// operational value after the explicit With... configuration has been applied.
 func New(store Store, quota QuotaService, logger *zap.Logger) *Controller {
 	return &Controller{
 		store:  store,
@@ -205,6 +195,18 @@ func (c *Controller) WithGCSweep(interval, staleAfter time.Duration) *Controller
 // Start launches the reconcile loop in a goroutine; it stops when ctx is
 // cancelled and returns the first non-context error (if any).
 func (c *Controller) Start(ctx context.Context) error {
+	if c.store == nil || c.quota == nil || c.settler == nil || c.phase2Store == nil || c.logger == nil {
+		return fmt.Errorf("controller: store, quota, settler, phase2 store, and logger are required")
+	}
+	if c.metricsDBURL == "" {
+		return fmt.Errorf("controller: metrics DB URL is required")
+	}
+	if c.reconcileInterval <= 0 || c.gcSweepInterval <= 0 || c.staleDesiredStateThreshold <= 0 ||
+		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 || c.metricDeclineFraction <= 0 ||
+		c.silenceMultiplier <= 0 || c.overrunMultiplier <= 0 || c.phase2BoundaryFrac <= 0 ||
+		c.phase2BoundaryFrac >= 1 || c.phase2AdmissionPercentile <= 0 || c.phase2AdmissionPercentile >= 1 {
+		return fmt.Errorf("controller: all timing, multiplier, and phase fractions must be explicitly valid")
+	}
 	go func() {
 		ticker := time.NewTicker(c.reconcileInterval)
 		defer ticker.Stop()

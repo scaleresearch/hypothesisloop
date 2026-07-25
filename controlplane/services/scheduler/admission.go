@@ -6,14 +6,12 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// codeRefPattern requires an immutable pointer — a full commit SHA, never a branch name (which
-// can move) or "latest". Matches "<any-git-remote-url>@<40-hex-char-sha>" — host/org/repo are
-// unconstrained (GitHub, GitLab, self-hosted, whatever the agent's git remote actually is), only
-// the "@<sha>" suffix is enforced.
+// codeRefPattern requires an immutable pointer — a full commit SHA, never a branch name or
+// "latest". Matches "<any-git-remote-url>@<40-hex-char-sha>"; only the "@<sha>" suffix is enforced.
 var codeRefPattern = regexp.MustCompile(`^\S+@[0-9a-f]{40}$`)
 
 // Admission error reason constants.
@@ -35,10 +33,9 @@ func (e *AdmissionError) Error() string {
 	return fmt.Sprintf("admission rejected [%s]: %s", e.Reason, e.Message)
 }
 
-// ValidateExperiment checks that required fields are populated and, given caps, that no
-// single resource dimension exceeds its per-job maximum — applied before any quota debit, so
-// one absurd submission can never consume an entire guaranteed/burst budget in one shot
-// regardless of how loosely the budget itself is sized.
+// ValidateExperiment checks required fields are populated and no resource dimension exceeds
+// its per-job cap — applied before any quota debit, so one absurd submission can't consume an
+// entire budget in one shot.
 func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp == nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "experiment is nil"}
@@ -67,13 +64,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.Image == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.image is required"}
 	}
-	// Resource requests must be explicit at submission time (plan cross-cutting fix #1): the
-	// footprint used for cluster selection/admission must be genuinely known when the control
-	// plane picks a cluster and computes a budget estimate, not resolved later from a
-	// per-cluster JobDefaults ConfigMap the control plane never sees — different clusters could
-	// silently disagree on defaults, and admission would be checking a footprint that isn't the
-	// one actually created. Matches important.md's "no fallbacks — one path or error": reject,
-	// don't resolve a cluster-side default pre-admission.
+	// Resource requests must be explicit at submission time: the footprint used for cluster
+	// selection/admission must be known up front, not resolved later from a per-cluster
+	// JobDefaults ConfigMap the control plane never sees. Reject rather than assume a default.
 	if exp.Job.CPU == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
 	}
@@ -83,12 +76,13 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.Storage == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
 	}
+	if exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 0 {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries is required and must be non-negative"}
+	}
 
-	// AcceleratorCount == 0 is a legitimate CPU-only job (see cpuFlavor / admissionUnit) as long as it
-	// actually requests positive CPU — a job with zero accelerators and no CPU requests nothing at all,
-	// which is genuinely malformed. An accelerator job (AcceleratorCount > 0) must name an accelerator type: nothing
-	// downstream (flavor accounting, accelerator affinity/tolerations) has a type to schedule against
-	// otherwise.
+	// AcceleratorCount == 0 is a legitimate CPU-only job as long as it requests positive CPU —
+	// zero accelerators and no CPU requests nothing at all. An accelerator job must name a type,
+	// or nothing downstream has a type to schedule against.
 	switch {
 	case exp.AcceleratorCount < 0:
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
@@ -100,8 +94,34 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		if cores <= 0 {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count is zero and job.cpu requests no positive CPU"}
 		}
-	case exp.AcceleratorType == "":
+	case exp.Job.AcceleratorType == "":
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_type is required when job.accelerator_count > 0"}
+	}
+	if exp.AcceleratorCount > 0 {
+		// Every type must be a well-formed driver-published key=value AND priced in the
+		// operator's catalog. The catalog attaches a rate to these strings; it never renames
+		// them, so an unpriced type is an operator gap, not a translation failure.
+		seen := map[domain.AcceleratorType]bool{}
+		for i, t := range append([]domain.AcceleratorType{exp.Job.AcceleratorType}, exp.Job.AcceptableAcceleratorTypes...) {
+			if err := t.Validate(); err != nil {
+				return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+			}
+			// Position 0 is job.accelerator_type, the first choice. It may legitimately reappear
+			// among the alternatives — an agent listing every flavor it runs on naturally includes
+			// its preferred one, and rejecting that makes the obvious payload unsubmittable. Only a
+			// genuine repeat *within* acceptable_accelerator_types is malformed, so dedup from i=1.
+			// candidateAcceleratorTypes collapses the harmless overlap before placement.
+			if i > 0 {
+				if seen[t] {
+					return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q is listed more than once", t)}
+				}
+				seen[t] = true
+			}
+			if _, ok := t.LookupCost(); !ok {
+				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q has no configured acch_rate (position %d)", t, i)}
+			}
+		}
+		exp.AcceleratorType = exp.Job.AcceleratorType
 	}
 	if exp.EstimatedDurationHours <= 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must be positive"}
@@ -138,13 +158,16 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", gb, exp.Job.Nodes(), caps.MaxStorageGBPerJob)}
 		}
 	}
-	// ExtraResources (TPUs/other accelerators) has no billing dimension or per-job cap (see
-	// domain.JobSpec.ExtraResources), but a malformed quantity string should still be
-	// rejected here — at submission — rather than surfacing later as an opaque Job-creation
-	// failure once the scheduler loop calls workload.CreateWorkload.
+	// ExtraResources has no billing dimension or per-job cap, but a malformed quantity string
+	// should still be rejected here rather than surfacing later as an opaque Job-creation failure.
 	for name, qty := range exp.Job.ExtraResources {
 		if _, err := resource.ParseQuantity(qty); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.extra_resources[%q]: %s", name, err.Error())}
+		}
+	}
+	for name, qty := range exp.Job.AcceleratorPodResources {
+		if _, err := resource.ParseQuantity(qty); err != nil {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_pod_resources[%q]: %s", name, err.Error())}
 		}
 	}
 	return nil

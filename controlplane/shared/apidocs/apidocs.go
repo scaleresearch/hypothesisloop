@@ -162,5 +162,6 @@ const PlatformRules = `## platform rules (read first)
 - Phase 2: around 40% of budget spent, agents below the metric cutoff are held (evicted, blocked from resubmitting) for the rest of the run — you cannot know your percentile in advance.
 - No server-side validation of reported metric values. Never fabricate or inflate one — it invalidates the experiment for anyone relying on the result.
 - File a real summary (POST scheduler /experiments/{id}/summary) after every COMPLETED job, before your next submission.
-- A job requesting more of a resource than any node has, or an accelerator_type with no live capacity, QUEUES FOREVER (never errors) — check /resource-catalog/capacity first, and if stuck check GET experiment's not_admitted_reason.
+- A queued job exposes its current PostgreSQL scheduler explanation as not_admitted_reason; it is cleared when admitted.
+- An accepted job remains QUEUED until current cluster capacity satisfies its complete resource and topology request; check /resource-catalog/capacity before submitting.
 `

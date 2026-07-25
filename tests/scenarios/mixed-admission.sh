@@ -9,13 +9,14 @@ source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 
 AGENT="agent-mixed-${RUN_ID}"
+PROBE_JOB_HOURS="0.003"
 register_agent "$AGENT"
 PE_ID=$(create_platform_experiment "mixed-admission-${RUN_ID}" 1.0 1)
 signup_and_start "$PE_ID" "$AGENT"
 
 echo "  -- impossible CPU request should not be admitted --"
-read -r CODE IMPOSSIBLE_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "999999", "accelerator_type": "T4", "accelerator_count": 1}')"
+read -r CODE IMPOSSIBLE_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$PROBE_JOB_HOURS" \
+  '{"cpu":"999999","accelerator_count":1,"accelerator_type":"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}')"
 if [[ "$CODE" -lt 400 ]]; then
   S=$(wait_for_status "$IMPOSSIBLE_ID" "RUNNING,ADMITTED" 10 || true)
   [[ "$S" == "RUNNING" || "$S" == "ADMITTED" ]] \
@@ -26,25 +27,25 @@ else
 fi
 
 echo "  -- small, fittable mixed CPU+accelerator job should admit and run --"
-read -r CODE OK_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "250m", "accelerator_type": "T4", "accelerator_count": 1}')"
+read -r CODE OK_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$PROBE_JOB_HOURS" \
+  '{"cpu":"250m","accelerator_count":1,"accelerator_type":"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}')"
 if [[ "$CODE" -lt 400 ]]; then
-  S=$(wait_for_status "$OK_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
+  S=$(wait_for_status "$OK_ID" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
   [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]] \
-    && pass "mixed CPU(250m)+accelerator(1xT4) job admitted where both fit (status=$S)" \
+    && pass "mixed CPU(250m)+accelerator(1xH100) job admitted where both fit (status=$S)" \
     || fail "mixed CPU+accelerator job never admitted (status=$S)"
-  [[ "$(wait_for_status "$OK_ID" "COMPLETED,FAILED,EVICTED" 100 || true)" == "COMPLETED" ]] && file_finding "$OK_ID"
+  [[ "$(wait_for_status "$OK_ID" "COMPLETED,FAILED,EVICTED" "$(completion_wait_tries "$PROBE_JOB_HOURS")" || true)" == "COMPLETED" ]] && file_finding "$OK_ID"
 else
   fail "submission of a small, fittable mixed CPU+accelerator job was rejected outright (HTTP $CODE)"
 fi
 
 echo "  -- fractional CPU (333m) must retain millicore precision through to the pod spec --"
-read -r CODE FRAC_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "333m", "accelerator_type": "T4", "accelerator_count": 1}')"
+read -r CODE FRAC_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$PROBE_JOB_HOURS" \
+  '{"cpu":"333m","accelerator_count":1,"accelerator_type":"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}')"
 if [[ "$CODE" -lt 400 ]]; then
-  S=$(wait_for_status "$FRAC_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
+  S=$(wait_for_status "$FRAC_ID" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
   if [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]]; then
-    POD=$(kubectl -n "$JOB_NS" get pods -l "openresearch.io/experiment-id=$FRAC_ID" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    POD=$(kubectl -n "$JOB_NS" get pods -l "hypothesisloop.io/experiment-id=$FRAC_ID" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
     CPU_REQ=$(kubectl -n "$JOB_NS" get pod "$POD" -o jsonpath='{.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)
     CPU_LIM=$(kubectl -n "$JOB_NS" get pod "$POD" -o jsonpath='{.spec.containers[0].resources.limits.cpu}' 2>/dev/null || true)
     [[ "$CPU_REQ" == "333m" && "$CPU_LIM" == "333m" ]] \
@@ -53,16 +54,16 @@ if [[ "$CODE" -lt 400 ]]; then
   else
     fail "fractional CPU job never reached RUNNING/COMPLETED (status=$S)"
   fi
-  [[ "$(wait_for_status "$FRAC_ID" "COMPLETED,FAILED,EVICTED" 100 || true)" == "COMPLETED" ]] && file_finding "$FRAC_ID"
+  [[ "$(wait_for_status "$FRAC_ID" "COMPLETED,FAILED,EVICTED" "$(completion_wait_tries "$PROBE_JOB_HOURS")" || true)" == "COMPLETED" ]] && file_finding "$FRAC_ID"
 else
   fail "submission of a valid fractional-CPU (333m) job was rejected outright (HTTP $CODE)"
 fi
 
 echo "  -- CPU-only job (no accelerator dimension at all) should admit and bill on CPU alone --"
-read -r CODE CPU_ONLY_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": "500m", "accelerator_count": 0, "accelerator_type": null, "acceptable_accelerator_types": null}')"
+read -r CODE CPU_ONLY_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$PROBE_JOB_HOURS" \
+  '{"cpu": "500m", "accelerator_count": 0, "accelerators": null}')"
 if [[ "$CODE" -lt 400 ]]; then
-  S=$(wait_for_status "$CPU_ONLY_ID" "RUNNING,COMPLETED,FAILED,EVICTED" 60 || true)
+  S=$(wait_for_status "$CPU_ONLY_ID" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
   if [[ "$S" == "RUNNING" || "$S" == "COMPLETED" ]]; then
     ADMITTED_ACCELERATOR_COUNT=$(get_field "$CPU_ONLY_ID" accelerator_count)
     EST_COST=$(get_field "$CPU_ONLY_ID" estimated_cost_acch)
@@ -72,14 +73,14 @@ if [[ "$CODE" -lt 400 ]]; then
   else
     fail "CPU-only job never reached RUNNING/COMPLETED (status=$S) — CPU-only admission may be broken"
   fi
-  [[ "$(wait_for_status "$CPU_ONLY_ID" "COMPLETED,FAILED,EVICTED" 100 || true)" == "COMPLETED" ]] && file_finding "$CPU_ONLY_ID"
+  [[ "$(wait_for_status "$CPU_ONLY_ID" "COMPLETED,FAILED,EVICTED" "$(completion_wait_tries "$PROBE_JOB_HOURS")" || true)" == "COMPLETED" ]] && file_finding "$CPU_ONLY_ID"
 else
   fail "submission of a CPU-only (accelerator_count=0) job was rejected outright (HTTP $CODE)"
 fi
 
 echo "  -- submission with an unset required resource must be rejected, not defaulted --"
-read -r CODE UNSET_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "0.02" \
-  '{"cpu": null, "accelerator_type": "T4", "accelerator_count": 1}')"
+read -r CODE UNSET_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$PROBE_JOB_HOURS" \
+  '{"cpu":null,"accelerator_count":1,"accelerator_type":"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}')"
 if [[ "$CODE" -ge 400 ]]; then
   pass "submission with unset cpu request rejected at submission time (HTTP $CODE)"
 else

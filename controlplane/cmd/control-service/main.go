@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,28 +15,28 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/openresearch/controlplane/services/dedup"
-	"github.com/scaleresearch/openresearch/controlplane/services/quota"
-	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
-	"github.com/scaleresearch/openresearch/controlplane/services/settlement"
-	"github.com/scaleresearch/openresearch/controlplane/shared/api"
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
-	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/leaderelection"
-	"github.com/scaleresearch/openresearch/controlplane/shared/queuebackend"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/dedup"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/queuebackend"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// control-service hosts quota-service and scheduler-service together: they
-// already share the same Postgres store and quota domain logic (scheduler
-// calls straight into the quota package for refunds/adjustments), so running
-// them as one process removes a duplicated build/deploy unit without
-// changing either one's HTTP surface. Each keeps its own listener on its
-// historical port so existing callers (UI, e2e tests, cluster-agents) don't
-// need to change.
+type noopAgentProvisioner struct{}
+
+func (noopAgentProvisioner) ProvisionAgent(context.Context, string) error { return nil }
+
+// control-service hosts quota-service and scheduler-service in one process
+// (they share the Postgres store and quota domain logic). Each keeps its own
+// listener on its historical port so existing callers don't need to change.
 func main() {
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -44,18 +45,16 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	quotaPort := envOrDefault("QUOTA_PORT", "8081")
-	schedulerPort := envOrDefault("SCHEDULER_PORT", "8082")
+	pcfg := hypothesisloopcfg.MustLoad(requiredEnv("HYPOTHESISLOOP_CONFIG", logger))
+	quotaPort := strconv.Itoa(pcfg.Services.QuotaPort)
+	schedulerPort := strconv.Itoa(pcfg.Services.SchedulerPort)
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		logger.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	metricsDBURL := os.Getenv("GREPTIMEDB_URL")
-	if metricsDBURL == "" {
-		metricsDBURL = "http://greptimedb:4000"
-	}
+	metricsDBURL := pcfg.Services.MetricsDBURL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pool, err := db.NewPool(ctx, db.Config{DSN: dsn})
@@ -67,7 +66,6 @@ func main() {
 
 	store := db.NewStore(pool, metricsDBURL)
 
-	pcfg := openresearchcfg.MustLoad(envOrDefault("OPENRESEARCH_CONFIG", "settings/openresearch.yaml"))
 	domain.SetAcceleratorRates(pcfg.RateByName)
 	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
 	domain.SetRAMGBHourRate(pcfg.RAMGBHourRate)
@@ -120,12 +118,11 @@ func main() {
 	logger.Info("control-service: stopped")
 }
 
-func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *openresearchcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
-	// quota-service never connects to a cluster directly (ProvisionAgent is a no-op on the
-	// native backend regardless — no per-agent k8s object to create — but wiring it through
-	// queuebackend keeps every service consistent about never dialing a cluster).
+func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+	// Native Kubernetes Jobs need no per-agent object; keeps agent registration
+	// independent from the scheduler backend.
+	provisioner := quota.AgentProvisioner(noopAgentProvisioner{})
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
-	provisioner := quota.AgentProvisioner(queuebackend.New(store, nil, nil, metricsDBURL, connectedWithin))
 	svc := quota.NewService(store, provisioner, logger)
 	handler := quota.NewHandler(svc, logger)
 
@@ -142,22 +139,18 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 	}
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).
 		WithCatalog(resourceCatalog).
-		WithLiveCapacity(metricsDBURL, pcfg.AcceleratorNameForFlavor, connectedWithin)
+		WithLiveCapacity(metricsDBURL, connectedWithin)
 
-	// Auto-close platform experiments once their ends_at deadline passes (e.g. a "24h" experiment
-	// otherwise stays open forever — EndsAt was previously stored but nothing ever read it). Runs
-	// under context.Background() rather than the process shutdown context: it's a plain periodic
-	// scan with no per-request state to drain, so it's fine for it to just stop when the process
-	// exits. Close() is safe to race across replicas — a second caller just gets
-	// invalid_transition and logs it, no corruption.
+	// Auto-close platform experiments past their ends_at deadline. Runs under
+	// context.Background() since it's a periodic scan with no state to drain on shutdown.
+	// Close() is safe to race across replicas — a second caller just logs invalid_transition.
 	go peSvc.StartExpirySweep(context.Background(), 60*time.Second)
 
 	r := chi.NewRouter()
 	r.Use(api.CORSMiddleware)
-	// Huma transport: registers the research-agent/dashboard-facing quota API on r,
-	// auto-exposing /openapi.json and serving a compact /explore digest (with the
-	// cross-cutting platform-rules preamble, since agents talk to quota first).
-	doc := apidocs.New(r, "openresearch quota-service", "1.0.0", apidocs.PlatformRules)
+	// Registers the quota API via Huma, exposing /openapi.json and a compact /explore digest
+	// with the cross-cutting platform-rules preamble (agents talk to quota first).
+	doc := apidocs.New(r, "hypothesisloop quota-service", "1.0.0", apidocs.PlatformRules)
 	quota.RegisterHuma(doc, handler, peHandler)
 	doc.MountExplore(r)
 	r.Handle("/metrics", promhttp.Handler())
@@ -175,77 +168,50 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 	}
 }
 
-func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *openresearchcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
 
-	// Configured target clusters (clusters.yaml / CLUSTERS_CONFIG_PATH), falling back to a
-	// single "default" cluster name if absent. The control plane never connects to any of
-	// these directly — it only needs their names, to route commands to the right outbox
-	// partition and to know which clusters exist for admission purposes. All actual
-	// Kubernetes access happens inside each cluster's own cluster-agent, which polls this
-	// service for work; see controlplane/services/clusteragentapi and
-	// controlplane/shared/queuebackend.
-	clusterEntries, err := openresearchcfg.LoadClusters(envOrDefault("CLUSTERS_CONFIG_PATH", "settings/clusters.yaml"))
-	if err != nil {
-		logger.Fatal("control-service: load clusters config", zap.Error(err))
-	}
-	openresearchWorkloadCfg := &workload.OpenResearchConfig{
-		NameByFlavor:         pcfg.NameByFlavor,
-		AcceleratorsByFlavor: pcfg.AcceleratorsByFlavor,
-		FlavorOrder:          pcfg.FlavorOrder(),
-	}
-	var clusterNames []string
-	if len(clusterEntries) == 0 {
-		clusterNames = []string{workload.DefaultClusterName}
-	} else {
-		for _, ce := range clusterEntries {
-			clusterNames = append(clusterNames, ce.Name)
-		}
-	}
-	// jwc's static type is workload.Backend: this is the one line that would change to plug
-	// in a different scheduling mechanism — see controlplane/shared/workload/backend.go.
-	// queuebackend.Backend never dials into a cluster; it only reads/writes Postgres.
-	var jwc workload.Backend = queuebackend.New(store, clusterNames, openresearchWorkloadCfg, metricsDBURL,
+	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
+	// (see workload/backend.go). queuebackend.Backend only reads/writes Postgres.
+	queueBackend, err := queuebackend.New(store, metricsDBURL,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second)
+	if err != nil {
+		logger.Fatal("control-service: configure scheduler backend", zap.Error(err))
+	}
+	var jwc workload.Backend = queueBackend
 
-	// Cancelled implicitly when the process exits; the watcher and loop below run for the
-	// life of control-service, same as they did in standalone scheduler-service.
 	observedGapCap := time.Duration(pcfg.Scheduler.SilenceMultiplier * float64(pcfg.Scheduler.DefaultReportIntervalSeconds) * float64(time.Second))
 	observedStep := time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second
 
 	// settler is the sole path that durably writes a terminal experiment's final observed usage
-	// (see services/settlement) — used both inline by JobWatcher for the fast path and by the
-	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
+	// (see services/settlement) — used inline by JobWatcher and by the reconciler below to
+	// retry anything a crash or metrics-DB outage left unsettled.
 	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap, observedStep, scheduler.ObservedMaxLookback)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 	go settlementReconciler.Start(context.Background())
 
 	watcher := scheduler.NewJobWatcher(store, jwc, logger).
 		WithQuotaSettler(settler).
-		WithQuotaAdjuster(expQuotaSvc).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
-		WithScanInterval(time.Duration(pcfg.Scheduler.AdmittedScanIntervalSeconds)*time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
 
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store).
 		WithQuotaConfig(quotaCfg).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
+		WithQuotaSettler(settler)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
-		WithPreemptTimeout(time.Duration(pcfg.Scheduler.PreemptTimeoutSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 
-	// The admission tick reads capacity then decides then writes (not a CAS), and JobWatcher's
-	// scan starts one poller per SUBMITTED/ADMITTED experiment — both must run on exactly one
-	// control-service replica at a time. leaderelection.Run holds a Postgres advisory lock to
-	// pick that replica; every other replica stays in standby and takes over if the leader dies.
-	// The HTTP API stays multi-replica — only these two background loops are leader-gated.
+	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run
+	// on exactly one replica. leaderelection.Run holds a Postgres advisory lock to pick that
+	// replica; others stand by and take over if the leader dies. Only these loops are
+	// leader-gated — the HTTP API stays multi-replica.
 	go leaderelection.Run(context.Background(), pool.Raw(), leaderelection.SchedulerLockKey,
 		5*time.Second, logger, func(leaderCtx context.Context) {
 			schedulerLoop.Start(leaderCtx)
@@ -254,20 +220,18 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 
 	schedulerHandler := scheduler.NewHandler(schedulerSvc)
 
-	// Cluster-agent-facing surface (a distinct consumer: Go cluster-agent binaries, not the
-	// Python research agent) gets its own Huma registration mounted at /internal/clusters, with
-	// its own /internal/clusters/openapi.json and /internal/clusters/explore discovery docs.
+	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets
+	// its own Huma registration mounted at /internal/clusters with its own openapi/explore docs.
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, logger)
 	clusterAgentRouter := chi.NewRouter()
-	caDoc := apidocs.New(clusterAgentRouter, "openresearch cluster-agent API", "1.0.0", "")
+	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "")
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
 	caDoc.MountExplore(clusterAgentRouter)
 
 	outer := chi.NewRouter()
-	// Same middleware the previous api.Gateway applied (recovery, request logging) plus CORS —
-	// without CORS the UI's cross-origin calls into this port succeed at the network level but the
-	// browser silently blocks the response, surfacing as a misleading "Cannot reach scheduler service".
+	// Recovery + request logging plus CORS — without CORS the UI's cross-origin calls succeed at
+	// the network level but the browser blocks the response, looking like "Cannot reach scheduler".
 	outer.Use(api.RecoveryMiddleware(logger))
 	outer.Use(api.LoggingMiddleware(logger))
 	outer.Use(api.CORSMiddleware)
@@ -278,9 +242,9 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 	})
 	outer.Handle("/metrics", promhttp.Handler())
 	outer.Mount("/internal/clusters", clusterAgentRouter)
-	// Research-agent/dashboard-facing scheduler API via Huma, registered at full /experiments/*
-	// paths on the port-root router so /openapi.json and /explore live at the port root.
-	schedDoc := apidocs.New(outer, "openresearch scheduler-service", "1.0.0",
+	// Scheduler API via Huma at full /experiments/* paths on the port-root router, so
+	// /openapi.json and /explore live at the port root.
+	schedDoc := apidocs.New(outer, "hypothesisloop scheduler-service", "1.0.0",
 		"Job submission and experiment lifecycle. See the quota-service /explore for the cross-cutting platform rules.\n")
 	scheduler.RegisterHuma(schedDoc, schedulerHandler)
 	schedDoc.MountExplore(outer)
@@ -294,9 +258,10 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 	}
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func requiredEnv(key string, logger *zap.Logger) string {
+	value := os.Getenv(key)
+	if value == "" {
+		logger.Fatal(key + " environment variable is required")
 	}
-	return def
+	return value
 }

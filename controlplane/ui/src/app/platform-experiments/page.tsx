@@ -370,8 +370,7 @@ function ExperimentModal({
         description: form.description.trim() || '',
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
         budget_cpu_core_hours: Number(form.budget_cpu_core_hours) || 0,
-        // RAM/storage hours budgets are deprecated/frozen (see Class B in
-        // SCHEDULING_GENERALIZATION_PLAN.md) — always submit untracked (0); the backend no
+        // RAM/storage hours budgets are deprecated/frozen — always submit untracked (0); the backend no
         // longer debits or enforces these fields for new submissions.
         budget_ram_gb_hours: 0,
         budget_storage_gb_hours: 0,

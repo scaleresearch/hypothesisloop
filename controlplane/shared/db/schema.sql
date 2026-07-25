@@ -1,4 +1,4 @@
--- OpenResearch Autonomous Research Platform — canonical schema
+-- HypothesisLoop Autonomous Research Platform — canonical schema
 -- Single source of truth; no migration history.
 --
 -- Metrics (time-series values emitted during job execution) are never stored here — they
@@ -26,7 +26,7 @@ CREATE TYPE experiment_status AS ENUM (
 );
 
 -- accelerator_type is deliberately plain TEXT, not an ENUM: the Accelerator catalog is entirely
--- operator-defined via openresearch.yaml's accelerator_types (see config.AcceleratorTypeConfig) and any
+-- operator-defined via hypothesisloop.yaml's accelerator_types (see config.AcceleratorTypeConfig) and any
 -- vendor's model name is valid (NVIDIA H100, AMD MI300X, ...) — a closed Postgres enum here
 -- would silently reject any Accelerator type the operator adds without a schema change, defeating the
 -- whole point of the config-driven catalog.
@@ -147,29 +147,12 @@ CREATE TABLE experiments (
     estimated_cpu_core_hours    DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_ram_gb_hours      DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_storage_gb_hours  DOUBLE PRECISION NOT NULL DEFAULT 0,
-    actual_duration_hours    DOUBLE PRECISION,
-    actual_cost_acch          DOUBLE PRECISION,
-    actual_cpu_core_hours       DOUBLE PRECISION,
-    actual_ram_gb_hours         DOUBLE PRECISION,
-    actual_storage_gb_hours     DOUBLE PRECISION,
     artifacts                TEXT[]            NOT NULL DEFAULT '{}',
     queued_at                TIMESTAMPTZ,
     submitted_at             TIMESTAMPTZ,
-    started_at               TIMESTAMPTZ,
-    preempt_count            INTEGER           NOT NULL DEFAULT 0,
-    -- attempt: bumped by the control plane each time a cluster-agent reports a Job gone
-    -- while this experiment is still in a desired-running status (SUBMITTED/ADMITTED/
-    -- RUNNING) — i.e. the Job disappeared without ever reaching a terminal phase, so
-    -- whatever the cluster-agent creates next is a distinct execution attempt, not the
-    -- original one. Carried in desired-state responses and stamped onto the recreated
-    -- Job as a label so each attempt is individually identifiable.
-    attempt                  INTEGER           NOT NULL DEFAULT 1,
-    eviction_reason          TEXT,
-    -- not_admitted_reason: why a QUEUED job wasn't admitted on its most recent skipped tick
-    -- (capacity_unavailable | outranked | summary_gate) — updated every tick, cleared on
-    -- admission. Pre-admission counterpart to eviction_reason: same "flag why, don't make the
-    -- agent infer it" pattern, for the QUEUED side instead of the post-RUNNING side.
-    not_admitted_reason      TEXT,
+	eviction_reason          TEXT,
+	-- Current scheduler decision for a QUEUED job; overwritten, not historical.
+	not_admitted_reason      TEXT,
     -- quota_settled_at: set once this terminal experiment's final observed usage has been
     -- durably written to the metrics DB. NULL means settlement is outstanding (never attempted,
     -- or attempted and failed) — the durable signal a background reconciler scans for to retry
@@ -178,6 +161,19 @@ CREATE TABLE experiments (
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
+
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS not_admitted_reason TEXT;
+UPDATE experiments
+SET not_admitted_reason = CASE
+    WHEN status = 'QUEUED' THEN COALESCE(not_admitted_reason, 'capacity_unavailable')
+    ELSE NULL
+END;
+DO $$ BEGIN
+    ALTER TABLE experiments ADD CONSTRAINT experiments_queue_reason_consistent
+        CHECK ((status = 'QUEUED') = (not_admitted_reason IS NOT NULL));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE INDEX idx_experiments_agent_id   ON experiments(agent_id);
 CREATE INDEX idx_experiments_status     ON experiments(status);
@@ -210,6 +206,24 @@ CREATE TABLE hypothesis_findings (
 );
 
 CREATE INDEX idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesis_id);
+
+-- ---------------------------------------------------------------------------
+-- hypothesis_comments — a freeform, job-independent note on a hypothesis (amend, abandon,
+-- revise, cross-reference), as opposed to hypothesis_findings which is the measured result of
+-- one terminal job. Lets an agent record "abandoning this, ruled out by X" without having to
+-- burn a trial first. No idempotency key: an occasional duplicate under crash-restart is
+-- low-harm noise, not a correctness bug — see plan.md.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE hypothesis_comments (
+    id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
+    agent_id       TEXT        NOT NULL REFERENCES agents(id),
+    text           TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
 
 -- ---------------------------------------------------------------------------
 -- credit_ledger
@@ -265,10 +279,8 @@ CREATE INDEX idx_experiment_signups_agent    ON experiment_signups(agent_id);
 -- agent_quotas — per-agent allocation per platform experiment
 -- ---------------------------------------------------------------------------
 
--- Allocation only (the operator-set capacity setting). Consumption (how much of it has been
--- used) is never stored here — it lives solely in the metrics DB (GreptimeDB), updated on every
--- debit/refund and read live wherever "available quota" needs to be computed. See
--- controlplane/shared/metricsdb.UsageTracker.
+-- Allocation only. Current desired usage is derived from experiment rows in PostgreSQL;
+-- observed terminal consumption lives in the metrics store. No usage total is persisted here.
 CREATE TABLE agent_quotas (
     id                     TEXT             PRIMARY KEY,
     agent_id               TEXT             NOT NULL REFERENCES agents(id),
@@ -314,85 +326,5 @@ CREATE TABLE experiment_phase2_holds (
 );
 
 CREATE INDEX idx_phase2_holds_platform ON experiment_phase2_holds(platform_experiment_id);
-
--- ---------------------------------------------------------------------------
--- cluster_job_reports — latest observed Job phase per experiment, pushed by
--- cluster-agents (never read live from a cluster by the control plane). There
--- is no separate command outbox: a cluster-agent derives what should exist
--- directly from experiments.status (SUBMITTED/ADMITTED/RUNNING = should have a
--- Job) and reconciles its local Jobs to match, the same way a kubelet
--- reconciles pods to a desired spec. sequence_number guards against
--- out-of-order/duplicate delivery: a report is only applied if its
--- sequence_number is greater than the stored one.
--- ---------------------------------------------------------------------------
-
--- job_uid: the k8s Job's UID, as first reported by cluster-agent. Ownership verification: once
--- set, a later report for the same experiment_id carrying a *different* job_uid indicates the
--- report doesn't correspond to the Job this control plane actually dispatched (name collision,
--- stray manually-created Job, a second cluster-agent misconfigured against the same cluster) —
--- flagged, not silently trusted. See UpsertJobReport.
-CREATE TABLE cluster_job_reports (
-    experiment_id    TEXT        PRIMARY KEY REFERENCES experiments(id),
-    cluster_name     TEXT        NOT NULL,
-    phase            TEXT        NOT NULL,
-    admitted_accelerator_type TEXT,
-    job_uid          TEXT,
-    sequence_number  BIGINT      NOT NULL DEFAULT 0,
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_cluster_job_reports_cluster ON cluster_job_reports(cluster_name);
-
--- ---------------------------------------------------------------------------
--- cluster_heartbeats — last time each cluster-agent was seen, so the control
--- plane (and its UI) can show which registered clusters are actually connected
--- right now. Updated on every desired-state poll (cluster-agent calls this
--- every ~2s), so a cluster is "connected" iff last_seen_at is recent.
--- ---------------------------------------------------------------------------
-
--- cpu_available_cores/cpu_total_cores: live CPU capacity self-reported by cluster-agent on
--- every desired-state poll (allocatable minus actually-requested, computed against this
--- cluster's real node/pod state) — replaces the old static-config-only capacity model for
--- CPU-only jobs. See controlplane/services/scheduler/loop.go's admissionUnit.
-CREATE TABLE cluster_heartbeats (
-    cluster_name        TEXT             PRIMARY KEY,
-    last_seen_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    cpu_available_cores DOUBLE PRECISION,
-    cpu_total_cores     DOUBLE PRECISION
-);
-
--- ---------------------------------------------------------------------------
--- pending_capacity_reservations — durable (Postgres, not in-process) claim on physical
--- capacity for an experiment between the moment tick()/the operator admit endpoint marks it
--- SUBMITTED and the moment its pod is actually confirmed to exist (job_watcher observes it
--- RUNNING). See SCHEDULING_GENERALIZATION_PLAN.md's "Durable pending-capacity reservations"
--- cross-cutting fix: cluster-agents' live CPU/Accelerator capacity numbers (cluster_heartbeats,
--- metricsdb) reflect real k8s state, so they do NOT yet include a job's request in the window
--- between MarkSubmitted and the cluster-agent actually creating the pod — a second scheduler
--- tick in that window could otherwise double-admit into the same capacity. tick() sums these
--- rows per cluster and subtracts them from live capacity on top of the existing
--- SUBMITTED/ADMITTED/RUNNING accounting, closing that gap without duplicating the resource
--- estimate anywhere else (experiments.job_spec / estimated_* columns remain the sole billing
--- source of truth; this table exists purely for the physical-fit race).
---
--- One row per experiment, upserted at admission (loop_preempt.go's submitJob) and deleted once
--- resolved: onRunning (pod confirmed to exist — capacity now already reflected live),
--- onStuckPending/onFinished (evicted/completed without a pod ever needing to be counted), or a
--- rolled-back submission (workload creation failed, job returned to QUEUED).
---
--- Tracks every dimension Experiment.Footprint() reports: CPU, one accelerator flavor, and (once
--- Class B step 2's capacity piggyback landed) RAM/ephemeral-storage in bytes.
-CREATE TABLE pending_capacity_reservations (
-    experiment_id       TEXT        PRIMARY KEY REFERENCES experiments(id) ON DELETE CASCADE,
-    cluster_name        TEXT        NOT NULL,
-    cpu_millicores       BIGINT      NOT NULL DEFAULT 0,
-    accelerator_flavor   TEXT        NOT NULL DEFAULT '',
-    accelerator_count    BIGINT      NOT NULL DEFAULT 0,
-    ram_bytes            BIGINT      NOT NULL DEFAULT 0,
-    storage_bytes        BIGINT      NOT NULL DEFAULT 0,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_pending_capacity_reservations_cluster ON pending_capacity_reservations(cluster_name);
 
 COMMIT;

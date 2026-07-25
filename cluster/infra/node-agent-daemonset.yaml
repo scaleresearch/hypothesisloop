@@ -1,25 +1,25 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: openresearch
+  name: hypothesisloop
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: openresearch-node-agent
-  namespace: openresearch
+  name: hypothesisloop-node-agent
+  namespace: hypothesisloop
 ---
-# ClusterRole (not a namespaced Role) deliberately: openresearch-jobs — where the pods this
+# ClusterRole (not a namespaced Role) deliberately: hypothesisloop-jobs — where the pods this
 # agent needs to read actually live — doesn't exist yet at apply time. It's created later,
 # idempotently, by cluster-agent's own startup (see install.sh). A ClusterRole grants the
 # permission cluster-wide up front so it's already in effect whenever that namespace shows up,
 # with no dependency on apply order between this file and cluster-agent's deployment. The agent
-# itself still only ever lists pods in openresearch-jobs on its own node (see
+# itself still only ever lists pods in hypothesisloop-jobs on its own node (see
 # podExperimentIDs in main.go) — this is broader than it uses, not broader than it needs to.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: openresearch-node-agent-pod-reader
+  name: hypothesisloop-node-agent-pod-reader
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -28,37 +28,37 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: openresearch-node-agent-pod-reader
+  name: hypothesisloop-node-agent-pod-reader
 subjects:
   - kind: ServiceAccount
-    name: openresearch-node-agent
-    namespace: openresearch
+    name: hypothesisloop-node-agent
+    namespace: hypothesisloop
 roleRef:
   kind: ClusterRole
-  name: openresearch-node-agent-pod-reader
+  name: hypothesisloop-node-agent-pod-reader
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: openresearch-node-agent
-  namespace: openresearch
+  name: hypothesisloop-node-agent
+  namespace: hypothesisloop
   labels:
-    app: openresearch-node-agent
+    app: hypothesisloop-node-agent
 spec:
   selector:
     matchLabels:
-      app: openresearch-node-agent
+      app: hypothesisloop-node-agent
   template:
     metadata:
       labels:
-        app: openresearch-node-agent
+        app: hypothesisloop-node-agent
     spec:
-      serviceAccountName: openresearch-node-agent
+      serviceAccountName: hypothesisloop-node-agent
       hostPID: true
       containers:
         - name: node-agent
-          image: localhost/openresearch-node-agent:latest
+          image: localhost/hypothesisloop-node-agent:latest
           imagePullPolicy: Never
           env:
             - name: NODE_NAME
@@ -71,8 +71,10 @@ spec:
             # $CLUSTER_NAME. node-agent does not yet read this env var.
             - name: CLUSTER_NAME
               value: "__CLUSTER_NAME__"
-            - name: OPENRESEARCH_CONTROL_PLANE_URL
-              value: "http://host.docker.internal:8084"
+            - name: HYPOTHESISLOOP_CONTROL_PLANE_URL
+              value: "__METRICS_URL__"
+            - name: PUSH_INTERVAL_MS
+              value: "2000"
           volumeMounts:
             - name: cgroup
               mountPath: /sys/fs/cgroup

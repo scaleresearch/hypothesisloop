@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // GetLineage returns the ancestor chain of an experiment (oldest first).
@@ -40,6 +40,34 @@ ORDER BY created_at ASC`
 	}
 	defer rows.Close()
 	return collectExperiments(rows)
+}
+
+// SumDesiredFootprintByCluster returns each cluster's total committed footprint — the sum of
+// every experiment's Footprint() currently RUNNING, SUBMITTED, or ADMITTED there. This is the
+// control plane's own desired state, updated immediately on each status transition, independent
+// of how long the cluster takes to converge. Available capacity is nominal total minus this sum,
+// never total minus a separately live-reported "actual usage" number.
+func (s *ExperimentsStore) SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error) {
+	q := `SELECT` + experimentColumns + `FROM experiments
+WHERE status IN ('RUNNING', 'SUBMITTED', 'ADMITTED') AND cluster_name != ''`
+
+	rows, err := s.pool.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.SumDesiredFootprintByCluster: %w", err)
+	}
+	defer rows.Close()
+	exps, err := collectExperiments(rows)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.SumDesiredFootprintByCluster: %w", err)
+	}
+	out := make(map[string]domain.Footprint)
+	for _, exp := range exps {
+		if out[exp.ClusterName] == nil {
+			out[exp.ClusterName] = domain.NewFootprint()
+		}
+		out[exp.ClusterName].AddFootprint(exp.Footprint())
+	}
+	return out, nil
 }
 
 // ListRunningExperiments returns all RUNNING experiments.
@@ -97,9 +125,8 @@ func (s *ExperimentsStore) ListSubmittedExperiments(ctx context.Context) ([]*dom
 	return collectExperiments(rows)
 }
 
-// ListAdmittedExperiments returns all experiments in ADMITTED state (submitted to the
-// workload backend, not yet observed RUNNING by the job watcher) — still holding physical
-// capacity, same as SUBMITTED/RUNNING.
+// ListAdmittedExperiments returns all experiments in ADMITTED state (submitted to the workload
+// backend, not yet observed RUNNING) — still holding physical capacity, same as SUBMITTED/RUNNING.
 func (s *ExperimentsStore) ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE status = 'ADMITTED' ORDER BY submitted_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q)
@@ -125,7 +152,7 @@ func (s *ExperimentsStore) ListQueuedExperiments(ctx context.Context) ([]*domain
 func (s *ExperimentsStore) GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE agent_id = $1 AND platform_experiment_id = $2 AND status = 'RUNNING'
-ORDER BY started_at ASC`
+ORDER BY updated_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.GetAgentRunningExperiments: %w", err)
@@ -148,12 +175,10 @@ ORDER BY queued_at ASC`
 	return collectExperiments(rows)
 }
 
-// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment
-// in the given platform experiment without a finding filed against the hypothesis it
-// tested (see hypothesis_findings, one row per job). Agents must document successful
-// runs before submitting new jobs so the collective learning loop is maintained.
-// FAILED and EVICTED runs are excluded — documenting unsuccessful infrastructure
-// outcomes adds little signal and would unfairly block agents after noisy failures.
+// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment in the given
+// platform experiment without a finding filed against its hypothesis (see hypothesis_findings,
+// one row per job). Agents must document successful runs before submitting new jobs. FAILED and
+// EVICTED runs are excluded since documenting infra failures adds little signal.
 func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error) {
 	const q = `SELECT EXISTS(
 		SELECT 1 FROM experiments e
@@ -180,10 +205,9 @@ func (s *ExperimentsStore) CountRecentSubmissions(ctx context.Context, agentID, 
 	return n, err
 }
 
-// ListUnsettledTerminalExperiments returns terminal (COMPLETED/FAILED/EVICTED/REJECTED)
-// experiments whose final observed usage has not yet been durably written — candidates for the
-// settlement reconciler to retry, e.g. after a crash or metrics-DB outage left one stuck
-// mid-settlement.
+// ListUnsettledTerminalExperiments returns terminal experiments whose final usage has not yet
+// been durably written — candidates for the settlement reconciler to retry after a crash or
+// metrics-DB outage.
 func (s *ExperimentsStore) ListUnsettledTerminalExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED') AND quota_settled_at IS NULL
@@ -194,41 +218,4 @@ ORDER BY updated_at ASC`
 	}
 	defer rows.Close()
 	return collectExperiments(rows)
-}
-
-// ListTerminalExperimentIDsWithPendingReservation returns the IDs of every terminal
-// (COMPLETED/FAILED/EVICTED/REJECTED) experiment that still holds a row in
-// pending_capacity_reservations. A terminal experiment must never hold one — every
-// terminal-transition path (onFinished, onStuckPending, controller eviction/cancel,
-// checkQuotaExhaustion) already deletes it inline as part of its own transition — but that
-// delete is a single best-effort attempt against Postgres with no retry of its own (see
-// DeletePendingReservation's call sites): a transient failure there leaves the row stuck
-// forever, permanently and silently shrinking admittable capacity, since nothing else ever
-// looks at this table again once the experiment isn't RUNNING. This is the settlement
-// reconciler's read side for that same class of problem (a terminal experiment's real-world
-// state was already durably decided; some deferred side effect of that decision hasn't landed
-// yet) — reusing its existing periodic retry loop rather than adding a second one.
-func (s *ExperimentsStore) ListTerminalExperimentIDsWithPendingReservation(ctx context.Context) ([]string, error) {
-	const q = `
-SELECT pr.experiment_id
-FROM pending_capacity_reservations pr
-JOIN experiments e ON e.id = pr.experiment_id
-WHERE e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
-	rows, err := s.pool.pool.Query(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.ListTerminalExperimentIDsWithPendingReservation: %w", err)
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("experiments_store.ListTerminalExperimentIDsWithPendingReservation: scan: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("experiments_store.ListTerminalExperimentIDsWithPendingReservation: %w", err)
-	}
-	return ids, nil
 }

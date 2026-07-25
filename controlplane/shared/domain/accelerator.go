@@ -1,77 +1,155 @@
 package domain
 
-import "strings"
-
-// AcceleratorType identifies the hardware tier for a job. It is deliberately an open, string-based
-// identifier, not a closed enum: the const block below only seeds a fallback rate table for
-// tests/local runs without config — the real catalog is entirely operator-defined via
-// openresearch.yaml's accelerator_types (see config.AcceleratorTypeConfig), and any vendor's model name works
-// (NVIDIA H100, AMD MI300X, ...). Nothing in this codebase switches on these specific consts.
-type AcceleratorType string
-
-const (
-	AcceleratorT4   AcceleratorType = "T4"
-	AcceleratorL40  AcceleratorType = "L40"
-	AcceleratorA100 AcceleratorType = "A100"
-	AcceleratorH100 AcceleratorType = "H100"
-	AcceleratorH200 AcceleratorType = "H200"
+import (
+	"fmt"
+	"strings"
 )
 
-// acceleratorRateRegistry is populated by SetAcceleratorRates() at startup from openresearch.yaml.
-// Falls back to hardcoded defaults when not set (tests, local runs without config).
+// AcceleratorType identifies a piece of hardware by a fact its own driver publishes, written
+// as a fully-qualified "key=value" pair — for example:
+//
+//	nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3   (NVIDIA GPU Feature Discovery node label)
+//	amd.com/gpu.product-name=Instinct-MI300X       (AMD node labeller node label)
+//	tenstorrent.com/chipArch=blackhole             (Tenstorrent DRA device attribute)
+//
+// The string is the driver's own output, verbatim. There is no platform-side name for hardware
+// and no table translating one to the other: the same string an agent writes in a job spec is
+// the string capacity reports, the string quota bills against, and the string recorded on the
+// job's pods. That is the whole point — a mapping is a place where two names can disagree, so
+// there isn't one.
+//
+// Being fully qualified is what makes this work without any per-vendor knowledge in the code.
+// The key carries its vendor domain, so matching is a plain lookup against live inventory rather
+// than a rule about which field a given vendor calls its model name. Runtime code contains no
+// vendor/model enum, and the operator's catalog (hypothesisloop.yaml) only attaches a price to
+// these strings — it never defines or renames them.
+type AcceleratorType string
+
+// Key returns the label/attribute name (the part before "="), and Value the driver-published
+// value after it. Both return "" for a malformed type; callers that need a hard failure use
+// Validate.
+func (g AcceleratorType) Key() string {
+	key, _, ok := g.split()
+	if !ok {
+		return ""
+	}
+	return key
+}
+
+func (g AcceleratorType) Value() string {
+	_, value, ok := g.split()
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+// Domain returns the vendor domain the key belongs to — "nvidia.com" for
+// "nvidia.com/gpu.product", "tenstorrent.com" for "tenstorrent.com/chipArch". This is how a type
+// is tied back to the driver that publishes it (a DRA driver name, or the domain of the extended
+// resource a device plugin advertises) without the code knowing anything vendor-specific.
+func (g AcceleratorType) Domain() string {
+	key := g.Key()
+	slash := strings.Index(key, "/")
+	if slash <= 0 {
+		return ""
+	}
+	return key[:slash]
+}
+
+// Validate rejects anything that is not a fully-qualified driver-published key=value pair.
+// Enforced at admission so a malformed type fails at submission with a clear message, rather
+// than silently matching no hardware and queueing forever.
+func (g AcceleratorType) Validate() error {
+	key, value, ok := g.split()
+	if !ok {
+		return fmt.Errorf("accelerator type %q must be a driver-published \"key=value\" pair, e.g. nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", string(g))
+	}
+	if strings.Index(key, "/") <= 0 {
+		return fmt.Errorf("accelerator type %q must have a vendor-qualified key (e.g. nvidia.com/gpu.product), so it can be traced to the driver that publishes it", string(g))
+	}
+	if value == "" {
+		return fmt.Errorf("accelerator type %q has an empty value", string(g))
+	}
+	return nil
+}
+
+func (g AcceleratorType) split() (key, value string, ok bool) {
+	s := string(g)
+	eq := strings.Index(s, "=")
+	if eq <= 0 || eq == len(s)-1 {
+		return "", "", false
+	}
+	return s[:eq], s[eq+1:], true
+}
+
+// MatchesLabels reports whether a node publishing these labels carries this accelerator type.
+// Used for device-plugin hardware, whose identity the vendor publishes as a node label.
+func (g AcceleratorType) MatchesLabels(labels map[string]string) bool {
+	key, value, ok := g.split()
+	if !ok {
+		return false
+	}
+	return labels[key] == value
+}
+
+// MatchesAttributes reports whether a DRA device publishing these attributes carries this
+// accelerator type. attributes are keyed by their bare attribute name as published in the
+// ResourceSlice ("chipArch"); the type's key is vendor-qualified ("tenstorrent.com/chipArch"),
+// and driver is the DRA driver name that qualifies them.
+func (g AcceleratorType) MatchesAttributes(driver string, attributes map[string]string) bool {
+	key, value, ok := g.split()
+	if !ok || g.Domain() != driver {
+		return false
+	}
+	bare := key[strings.Index(key, "/")+1:]
+	return attributes[bare] == value
+}
+
+// acceleratorRateRegistry is populated by SetAcceleratorRates() at startup from hypothesisloop.yaml.
 // Rates are in accelerator-hours (AccH), H100-equivalent: 1 AccH = 1 H100-hour, so H100 is
 // exactly 1.0 and every other tier is its H100-relative fraction.
-var acceleratorRateRegistry = map[AcceleratorType]float64{
-	AcceleratorT4:   0.125,
-	AcceleratorL40:  0.25,
-	AcceleratorA100: 0.375,
-	AcceleratorH100: 1.0,
-	AcceleratorH200: 1.25,
-}
+var acceleratorRateRegistry = map[AcceleratorType]float64{}
 
 // SetAcceleratorRates registers AccH rates loaded from config. Call once at startup.
 func SetAcceleratorRates(rates map[string]float64) {
+	next := make(map[AcceleratorType]float64, len(rates))
 	for name, rate := range rates {
-		acceleratorRateRegistry[AcceleratorType(name)] = rate
+		if name == "" || rate <= 0 {
+			panic("accelerator catalog contains an empty name or non-positive rate")
+		}
+		next[AcceleratorType(name)] = rate
 	}
+	if len(next) == 0 {
+		panic("accelerator catalog is empty")
+	}
+	acceleratorRateRegistry = next
 }
 
-// FlavorName returns the flavor name for this accelerator type ("flavor-t4", etc.).
-func (g AcceleratorType) FlavorName() string {
-	return "flavor-" + strings.ToLower(string(g))
-}
-
-// Cost returns the accelerator-hour (AccH, H100-equivalent) cost per accelerator-hour for this
-// accelerator type, falling back to 0.125 (the T4 tier's rate, the cheapest baseline) for an
-// unregistered type. Safe for pre-flight estimates, where a wrong guess
-// just gets corrected once the job is actually admitted onto a real, catalog-known type — but NOT
-// safe for final billing, where a typo'd or deprecated type must not silently settle at the wrong
-// rate. Billing code should use LookupCost instead and treat "not found" as an error.
+// Cost returns the registered accelerator-hour rate and panics for an unknown type. Admission
+// validates catalog membership before cost calculation; internal callers must never substitute a
+// different hardware rate.
 func (g AcceleratorType) Cost() float64 {
 	if r, ok := acceleratorRateRegistry[g]; ok {
 		return r
 	}
-	return 0.125
+	panic("unknown accelerator type: " + string(g))
 }
 
-// LookupCost returns this accelerator type's registered accelerator-hour (AccH) rate and whether it was found in the
-// catalog (populated by SetAcceleratorRates from openresearch.yaml's accelerator_types at startup). Unlike Cost,
-// this never silently substitutes a fallback rate — used by final-settlement paths (see
-// metricsdb.ObservedAcceleratorCost) where an unrecognized type must fail loudly rather than bill at the
-// wrong tier's price.
+// LookupCost returns this type's registered AccH rate and whether it was found. Unlike Cost, it
+// never silently substitutes another rate — used by settlement paths (see
+// metricsdb.ObservedAcceleratorCost) where an unrecognized type must fail loudly.
 func (g AcceleratorType) LookupCost() (float64, bool) {
 	r, ok := acceleratorRateRegistry[g]
 	return r, ok
 }
 
-// cpuCoreHourRate is a flat per-unit rate (1.0 by default — unlike accelerator there is no
-// hardware-tier variation to normalize away), operator-overridable via openresearch.yaml.
+// cpuCoreHourRate is a flat per-unit rate (no hardware-tier variation), operator-overridable via
+// hypothesisloop.yaml.
 //
 // ramGBHourRate/storageGBHourRate: Deprecated, kept only so SetRAMGBHourRate/SetStorageGBHourRate
-// and RAMGBHourRate/StorageGBHourRate remain valid no-op-ish calls for any config/caller that
-// still references them — nothing in this codebase reads these two rates to compute a bill
-// anymore (RAM/storage moved to Class B, hard-fit-checked only — see ResourceRAMGBHours' doc
-// comment for the full migration note).
+// remain valid no-ops for old callers — nothing reads these to compute a bill anymore (RAM/storage
+// moved to Class B, hard-fit-checked only — see ResourceRAMGBHours' doc comment).
 var (
 	cpuCoreHourRate   = 1.0
 	ramGBHourRate     = 1.0
@@ -79,17 +157,15 @@ var (
 )
 
 // SetCPUCoreHourRate registers the flat per-unit CPU-hour rate, loaded from config at startup.
-// Zero/negative is ignored (keeps the 1.0 default) so an absent config key doesn't zero out the
-// rate.
 func SetCPUCoreHourRate(rate float64) {
-	if rate > 0 {
-		cpuCoreHourRate = rate
+	if rate <= 0 {
+		panic("CPU core-hour rate must be positive")
 	}
+	cpuCoreHourRate = rate
 }
 
 // SetRAMGBHourRate/SetStorageGBHourRate: Deprecated — see ramGBHourRate's doc comment. Still
-// registers the value (so an operator's existing openresearch.yaml with these keys doesn't
-// error), but nothing reads it for billing anymore.
+// registers the value so old config keys don't error, but nothing reads it for billing anymore.
 func SetRAMGBHourRate(rate float64) {
 	if rate > 0 {
 		ramGBHourRate = rate
@@ -116,28 +192,18 @@ const (
 )
 
 // ResourceType identifies one quota-tracked resource dimension. Accelerator-hours is the original,
-// always-populated dimension (billed at AcceleratorType's own tiered rate); CPU-hours is a flat
-// per-unit pool (see cpuCoreHourRate) checked/debited/refunded against its own guaranteed/burst
-// pool on AgentQuota, same as accelerator-hours.
+// always-populated dimension (billed at AcceleratorType's tiered rate); CPU-hours is a flat
+// per-unit pool (see cpuCoreHourRate) checked/debited/refunded the same way on AgentQuota.
 type ResourceType string
 
 const (
-	ResourceAcceleratorHours     ResourceType = "accelerator_hours"
-	ResourceCPUCoreHours ResourceType = "cpu_core_hours"
+	ResourceAcceleratorHours ResourceType = "accelerator_hours"
+	ResourceCPUCoreHours     ResourceType = "cpu_core_hours"
 
-	// ResourceRAMGBHours/ResourceStorageGBHours: Deprecated. RAM and ephemeral-storage moved to
-	// Class B under SCHEDULING_GENERALIZATION_PLAN.md — hard physical-fit-checked at admission
-	// (domain.Experiment.Footprint()/domain.Fits) but never hours-budgeted, debited, or
-	// preemption-rescaled. Nothing in this codebase computes a non-zero amount for either
-	// resource type anymore (see scheduler.Service.Submit's estimate step) — every debit/refund
-	// call site skips them via their existing "amount <= 0" guard, so they are dead weight, not
-	// live billing dimensions. Kept defined (not deleted) purely so historical rows already
-	// written against them (AgentQuota's ram_gb_hours/storage_gb_hours columns, historical
-	// Experiment.EstimatedRAMGBHours/ActualRAMGBHours values, metricsdb reservation series
-	// keyed by these ResourceTypes) remain readable/interpretable rather than becoming orphaned
-	// magic strings. A platform experiment created before this migration with a non-zero
-	// BudgetRAMGBHours/BudgetStorageGBHours (see PlatformExperiment) keeps that number in the
-	// DB, but nothing reads it anymore — its guaranteed/burst pools simply stop moving forward.
+	// ResourceRAMGBHours/ResourceStorageGBHours: Deprecated. RAM and ephemeral-storage are hard
+	// physical-fit-checked at admission (domain.Experiment.Footprint()/domain.Fits) but never
+	// hours-budgeted, debited, or preemption-rescaled. Kept as API identifiers for schema
+	// compatibility only — not live billing dimensions.
 	ResourceRAMGBHours     ResourceType = "ram_gb_hours"
 	ResourceStorageGBHours ResourceType = "storage_gb_hours"
 )

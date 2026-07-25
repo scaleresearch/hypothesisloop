@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-OpenResearch ML workload — minimal stub, no real computation.
+HypothesisLoop ML workload — minimal stub, no real computation.
 
-Emits realistic metrics on a real timer, sleeping OPENRESEARCH_REPORT_INTERVAL_SECONDS
+Emits realistic metrics on a real timer, sleeping HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS
 between each step so the registry receives a live stream rather than a batch dump.
 
 Environment variables injected by the scheduler:
-  OPENRESEARCH_EXPERIMENT_ID           - unique experiment UUID
-  OPENRESEARCH_AGENT_ID                - agent/researcher identifier
-  OPENRESEARCH_PROJECT_ID              - project identifier
-  OPENRESEARCH_PRIMARY_METRIC          - metric name to optimize (e.g. val_accuracy)
-  OPENRESEARCH_METRIC_DIRECTION        - maximize | minimize
-  OPENRESEARCH_REPORT_INTERVAL_SECONDS - seconds between metric pushes (default: 5)
-  OPENRESEARCH_REGISTRY_URL            - OpenResearch registry HTTP base URL
-  OPENRESEARCH_DURATION_SECONDS        - total run time in seconds (default: 60)
-  OPENRESEARCH_BASELINE                - declared baseline value to beat
-  OPENRESEARCH_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
-  OPENRESEARCH_ACCELERATOR_COUNT               - number of accelerators
+  HYPOTHESISLOOP_EXPERIMENT_ID           - unique experiment UUID
+  HYPOTHESISLOOP_AGENT_ID                - agent/researcher identifier
+  HYPOTHESISLOOP_PROJECT_ID              - project identifier
+  HYPOTHESISLOOP_PRIMARY_METRIC          - metric name to optimize (e.g. val_accuracy)
+  HYPOTHESISLOOP_METRIC_DIRECTION        - maximize | minimize
+  HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS - seconds between metric pushes (default: 5)
+  HYPOTHESISLOOP_REGISTRY_URL            - HypothesisLoop registry HTTP base URL
+  HYPOTHESISLOOP_DURATION_SECONDS        - total run time in seconds (default: 60)
+  HYPOTHESISLOOP_BASELINE                - declared baseline value to beat
+  HYPOTHESISLOOP_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
+  HYPOTHESISLOOP_ACCELERATOR_COUNT               - number of accelerators
 """
 
 import os
@@ -30,17 +30,17 @@ import urllib.request
 
 # Config from environment
 
-EXP_ID     = os.environ.get("OPENRESEARCH_EXPERIMENT_ID", "local-test")
-AGENT_ID   = os.environ.get("OPENRESEARCH_AGENT_ID", "agent-dev")
-PROJECT_ID = os.environ.get("OPENRESEARCH_PROJECT_ID", "dev")
-METRIC     = os.environ.get("OPENRESEARCH_PRIMARY_METRIC", "val_accuracy")
-DIRECTION  = os.environ.get("OPENRESEARCH_METRIC_DIRECTION", "maximize")
-INTERVAL   = int(os.environ.get("OPENRESEARCH_REPORT_INTERVAL_SECONDS", "5"))
-DURATION   = int(os.environ.get("OPENRESEARCH_DURATION_SECONDS", "60"))
-REG_URL    = os.environ.get("OPENRESEARCH_REGISTRY_URL", "http://localhost:8083")
-BASELINE   = float(os.environ.get("OPENRESEARCH_BASELINE", "0.5"))
-ACCELERATOR_TYPE   = os.environ.get("OPENRESEARCH_ACCELERATOR_TYPE", "T4")
-ACCELERATOR_COUNT  = int(os.environ.get("OPENRESEARCH_ACCELERATOR_COUNT", "1"))
+EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
+AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
+PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
+METRIC     = os.environ.get("HYPOTHESISLOOP_PRIMARY_METRIC", "val_accuracy")
+DIRECTION  = os.environ.get("HYPOTHESISLOOP_METRIC_DIRECTION", "maximize")
+INTERVAL   = int(os.environ.get("HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS", "5"))
+DURATION   = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "60"))
+REG_URL    = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "http://localhost:8083")
+BASELINE   = float(os.environ.get("HYPOTHESISLOOP_BASELINE", "0.5"))
+ACCELERATOR_TYPE   = os.environ.get("HYPOTHESISLOOP_ACCELERATOR_TYPE", "T4")
+ACCELERATOR_COUNT  = int(os.environ.get("HYPOTHESISLOOP_ACCELERATOR_COUNT", "1"))
 
 
 # Per-agent hyperparameter sampling (stable from same agent seed)
@@ -144,7 +144,7 @@ def patch_status(status: str, final_metric=None) -> None:
 def main() -> None:
     steps = max(4, DURATION // max(1, INTERVAL))
 
-    print(f"OpenResearch workload starting")
+    print(f"HypothesisLoop workload starting")
     print(f"  experiment: {EXP_ID}  agent: {AGENT_ID}  project: {PROJECT_ID}")
     print(f"  metric: {METRIC} ({DIRECTION})  steps: {steps}  interval: {INTERVAL}s  total: ~{steps * INTERVAL}s")
     print(f"  pretend accelerator: {ACCELERATOR_COUNT}x {ACCELERATOR_TYPE}")
@@ -156,6 +156,7 @@ def main() -> None:
 
     best = None
     final_value = None
+    last_primary = None
 
     for step in range(steps):
         fraction = (step + 1) / steps
@@ -172,6 +173,12 @@ def main() -> None:
         final_value = v_acc
 
         primary = v_acc if METRIC == "val_accuracy" else (v_loss if METRIC == "val_loss" else v_acc)
+        # This fixture represents a healthy, converging job. Keep its declared primary series
+        # moving in the configured direction so random presentation noise cannot turn an infra
+        # scenario into a metric-decline eviction test. Secondary dashboard series stay noisy.
+        if last_primary is not None:
+            primary = min(primary, last_primary - 1e-6) if DIRECTION == "minimize" else max(primary, last_primary + 1e-6)
+        last_primary = primary
         post_metric(fraction, primary, metric_name=METRIC)
         # Secondary metrics: always emitted alongside the primary so the dashboard has more
         # than one series to plot per job, same as a real training run's eval sweep would.

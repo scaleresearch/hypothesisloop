@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ---- agent_quotas ----
@@ -15,7 +15,7 @@ import (
 // Populates all 4 resource dimensions (Accelerator is always non-zero; CPU/RAM/storage are 0 = "not
 // tracked" for platform experiments that don't budget them). Only the allocation (capacity
 // setting) lives here — consumption (used_*) lives solely in the metrics DB, see
-// metricsdb.UsageTracker; Postgres never holds a copy of it.
+// metricsdb.UsageTracker; Postgres never holds a copy of observed consumption.
 func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error {
 	const sql = `
 INSERT INTO agent_quotas (
@@ -109,6 +109,69 @@ func (s *PlatformExperimentsStore) ListAgentQuotas(ctx context.Context, platform
 		out = append(out, aq)
 	}
 	return out, rows.Err()
+}
+
+// AddDesiredQuotaUsage adds outstanding scheduler reservations to quotas. A non-terminal
+// experiment row is the reservation: its estimates are authoritative PostgreSQL desired state,
+// so no reservation series or second table is maintained elsewhere.
+func (s *PlatformExperimentsStore) AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error {
+	if len(quotas) == 0 {
+		return nil
+	}
+	const q = `
+SELECT agent_id, capacity_tier,
+       COALESCE(SUM(estimated_cost_acch), 0),
+       COALESCE(SUM(estimated_cpu_core_hours), 0),
+       COALESCE(SUM(estimated_ram_gb_hours), 0),
+       COALESCE(SUM(estimated_storage_gb_hours), 0)
+FROM experiments
+WHERE platform_experiment_id = $1
+  AND (
+      status IN ('QUEUED', 'SUBMITTED', 'ADMITTED', 'RUNNING')
+      OR (status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED') AND quota_settled_at IS NULL)
+  )
+GROUP BY agent_id, capacity_tier`
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.AddDesiredQuotaUsage: %w", err)
+	}
+	defer rows.Close()
+	byAgent := make(map[string]*domain.AgentQuota, len(quotas))
+	for _, quota := range quotas {
+		byAgent[quota.AgentID] = quota
+	}
+	for rows.Next() {
+		var agentID string
+		var tier domain.CapacityTier
+		var accelerator, cpu, ram, storage float64
+		if err := rows.Scan(&agentID, &tier, &accelerator, &cpu, &ram, &storage); err != nil {
+			return fmt.Errorf("platform_experiments_store.AddDesiredQuotaUsage: scan: %w", err)
+		}
+		quota := byAgent[agentID]
+		if quota == nil {
+			continue
+		}
+		if tier == domain.CapacityGuaranteed {
+			quota.UsedGuaranteedAccH += accelerator
+			quota.UsedGuaranteedCPUCoreH += cpu
+			quota.UsedGuaranteedRAMGBH += ram
+			quota.UsedGuaranteedStorageGBH += storage
+		} else {
+			quota.UsedBurstAccH += accelerator
+			quota.UsedBurstCPUCoreH += cpu
+			quota.UsedBurstRAMGBH += ram
+			quota.UsedBurstStorageGBH += storage
+		}
+	}
+	return rows.Err()
+}
+
+// AddDesiredQuotaUsageOne is the single-agent counterpart to AddDesiredQuotaUsage.
+func (s *PlatformExperimentsStore) AddDesiredQuotaUsageOne(ctx context.Context, quota *domain.AgentQuota) error {
+	if quota == nil {
+		return nil
+	}
+	return s.AddDesiredQuotaUsage(ctx, quota.PlatformExperimentID, []*domain.AgentQuota{quota})
 }
 
 // resourceQuotaColumns returns the (guaranteed, burst) allocation column names backing one

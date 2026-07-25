@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func TestSortBurstOrdersByDominantUtilizationOverPriorityScore(t *testing.T) {
@@ -21,7 +21,7 @@ func TestSortBurstOrdersByDominantUtilizationOverPriorityScore(t *testing.T) {
 	expB := &domain.Experiment{ID: "b", AgentID: "agent-b", PlatformExperimentID: "pe-1", EstimatedCostAccH: 1, PriorityScore: 0, QueuedAt: &t0}
 
 	exps := []*domain.Experiment{expA, expB}
-	sortBurst(exps, quotaMap)
+	sortBurst(exps, quotaMap, nil)
 
 	if exps[0].ID != "b" {
 		t.Errorf("sortBurst order = [%s, %s], want b first (agent-b has lower dominant utilization)", exps[0].ID, exps[1].ID)
@@ -36,7 +36,7 @@ func TestSortBurstFallsBackToPriorityScoreWhenUtilizationTied(t *testing.T) {
 	highPriority := &domain.Experiment{ID: "high", AgentID: "agent-b", PlatformExperimentID: "pe-1", PriorityScore: 5, QueuedAt: &t0}
 
 	exps := []*domain.Experiment{lowPriority, highPriority}
-	sortBurst(exps, quotaMap)
+	sortBurst(exps, quotaMap, nil)
 
 	if exps[0].ID != "high" {
 		t.Errorf("sortBurst order = [%s, %s], want high first (higher PriorityScore breaks the tie)", exps[0].ID, exps[1].ID)

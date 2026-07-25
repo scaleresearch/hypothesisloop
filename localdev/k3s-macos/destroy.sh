@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CONTEXT_NAME="k3s-local"
 
 pkill -f "ssh.*6443:localhost:6443" 2>/dev/null || true
 
-# The extra fake-accelerator nodes (see add-fake-nodes.sh) are their own podman containers — remove
-# them before tearing down the server, or they'd be orphaned (and re-register against a
-# fresh server on the next `make k3s-up`, confusingly reusing their old identities).
-FAKE_NODE_CONTAINERS="$(podman ps -aq --filter name=fake-accelerator-node 2>/dev/null || true)"
-if [[ -n "${FAKE_NODE_CONTAINERS}" ]]; then
-  podman rm -f ${FAKE_NODE_CONTAINERS} >/dev/null
-fi
+# The dev/test node containers (see dev-nodes-up.sh) are their own podman containers — remove them
+# before tearing down the server, or they'd be orphaned (and re-register against a fresh server
+# on the next `make k3s-up`, confusingly reusing their old identities).
+DESTROYING_CLUSTER=1 bash "${DIR}/dev-nodes-down.sh"
 
 if [[ "$(uname)" == "Darwin" ]]; then
   SSH_KEY="$(podman machine inspect --format '{{.SSHConfig.IdentityPath}}')"
@@ -23,7 +21,13 @@ else
 fi
 
 kubectl config delete-context "${CONTEXT_NAME}" 2>/dev/null || true
-kubectl config delete-cluster  "${CONTEXT_NAME}" 2>/dev/null || true
-kubectl config delete-user     "${CONTEXT_NAME}" 2>/dev/null || true
+# install.sh names the cluster/user objects differently per OS: on Darwin they're renamed to
+# CONTEXT_NAME directly (sed rewrite of the raw kubeconfig); on native Linux it uses `kubectl
+# config rename-context`, which only renames the context and leaves cluster/user as "default"
+# underneath. Delete both names — whichever doesn't apply is just a harmless no-op.
+kubectl config delete-cluster "${CONTEXT_NAME}" 2>/dev/null || true
+kubectl config delete-user    "${CONTEXT_NAME}" 2>/dev/null || true
+kubectl config delete-cluster default 2>/dev/null || true
+kubectl config delete-user    default 2>/dev/null || true
 
 echo "==> Cluster destroyed."

@@ -5,16 +5,20 @@
 # sequentially and checks quota debit isn't doubled), this scenario exercises the actual
 # concurrent-write path — multiple submitJob calls landing inside the same or adjacent
 # scheduler ticks — which is exactly where a reservation-write race would show up as
-# over-admission. API-only, parallel-safe (H200 is otherwise unused by other scenarios).
+# over-admission. Cluster-exclusive because it deliberately saturates a shared accelerator pool.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
+source "$DIR/../lib/cluster.sh"
 
-ACCELERATOR_TYPE="H200"
-ACCELERATOR_COUNT_PER_JOB=4
-NODE_ACCELERATOR_CAPACITY=8
-N_JOBS=3   # 3*4=12 requested against 8 available: exactly 2 can fit, 1 must lose the race.
+ACCELERATOR_TYPE="nvidia.com/gpu.product=NVIDIA-L40"
+NODE_ACCELERATOR_CAPACITY=$(kubectl get nodes -l 'nvidia.com/gpu.product=NVIDIA-L40' -o json \
+  | py "import sys,json; print(sum(int(n.get('status',{}).get('allocatable',{}).get('nvidia.com/gpu',0)) for n in json.load(sys.stdin)['items']))")
+[[ "$NODE_ACCELERATOR_CAPACITY" -ge 2 && $((NODE_ACCELERATOR_CAPACITY % 2)) -eq 0 ]] \
+  || { echo "ERROR: concurrent admission fixture needs a positive even L40 capacity, observed $NODE_ACCELERATOR_CAPACITY" >&2; exit 2; }
+ACCELERATOR_COUNT_PER_JOB=$((NODE_ACCELERATOR_CAPACITY / 2))
+N_JOBS=3   # Three half-capacity requests: exactly two fit and one must lose the race.
 EXPECT_ADMITTED=2
 
 AGENTS=()
@@ -51,21 +55,18 @@ for i in $(seq 1 "$N_JOBS"); do
   [[ -n "$jid" ]] && JOBS+=("$jid")
 done
 
-# Give the scheduler enough ticks to make its admission decisions. QUEUED is deliberately
-# NOT treated as settled here — every job starts QUEUED, so counting it as "done" would let
-# this exit on the very first poll, before the scheduler has actually had a chance to admit
-# anything. Only RUNNING/ADMITTED (won the race) or REJECTED (a real terminal rejection, not
-# from us closing the PE early) count; a job still QUEUED when the budget runs out is the
-# genuine "lost the race, still waiting" outcome this scenario checks for.
-settled() {
-  local n=0 j s
+# Wait only for the capacity-sized winning set. The over-capacity loser is expected to remain
+# QUEUED, so requiring every job to leave QUEUED is contradictory and burns the full timeout.
+capacity_admitted() {
+	local n=0 j s
   for j in "${JOBS[@]}"; do
     s=$(get_status "$j")
-    [[ "$s" == "RUNNING" || "$s" == "ADMITTED" || "$s" == "REJECTED" ]] && n=$((n + 1))
+    [[ "$s" == "SUBMITTED" || "$s" == "ADMITTED" || "$s" == "RUNNING" ]] && n=$((n + 1))
   done
-  [[ "$n" -ge "${#JOBS[@]}" ]]
+	[[ "$n" -ge "$EXPECT_ADMITTED" ]]
 }
-wait_until "all raced jobs reach a settled admission decision" 45 1 settled || true
+wait_until "capacity-sized winning set is admitted" "$ADMISSION_BUDGET_SECONDS" 1 capacity_admitted \
+  || fail "capacity-sized winning set was not admitted"
 
 ADMITTED_COUNT=0
 QUEUED_COUNT=0
@@ -73,7 +74,7 @@ declare -a ADMITTED_JOBS=()
 for j in "${JOBS[@]}"; do
   s=$(get_status "$j")
   echo "  $j -> $s"
-  if [[ "$s" == "RUNNING" || "$s" == "ADMITTED" ]]; then
+  if [[ "$s" == "SUBMITTED" || "$s" == "ADMITTED" || "$s" == "RUNNING" ]]; then
     ADMITTED_COUNT=$((ADMITTED_COUNT + 1))
     ADMITTED_JOBS+=("$j")
   elif [[ "$s" == "QUEUED" ]]; then
@@ -92,7 +93,7 @@ TOTAL_ADMITTED_ACCELERATORS=$((ADMITTED_COUNT * ACCELERATOR_COUNT_PER_JOB))
 
 [[ "$ADMITTED_COUNT" -eq "$EXPECT_ADMITTED" ]] \
   && pass "exactly $EXPECT_ADMITTED of $N_JOBS raced jobs admitted, as capacity allows" \
-  || echo "  [WARN] expected exactly $EXPECT_ADMITTED admitted, got $ADMITTED_COUNT (not necessarily a bug — cluster capacity/timing may differ; the hard invariant above is what matters)"
+  || fail "expected exactly $EXPECT_ADMITTED admitted, got $ADMITTED_COUNT"
 
 [[ "$QUEUED_COUNT" -ge 1 ]] \
   && pass "at least one over-subscribed job correctly lost the race and stayed QUEUED/non-admitted" \
@@ -100,8 +101,60 @@ TOTAL_ADMITTED_ACCELERATORS=$((ADMITTED_COUNT * ACCELERATOR_COUNT_PER_JOB))
 
 for j in "${ADMITTED_JOBS[@]:-}"; do
   [[ -z "$j" ]] && continue
-  [[ "$(wait_for_status "$j" "COMPLETED,FAILED,EVICTED,QUEUED" 90 || true)" == "COMPLETED" ]] && file_finding "$j"
+  cancel_job "$j"
+done
+for j in "${ADMITTED_JOBS[@]:-}"; do
+  [[ -z "$j" ]] && continue
+  s=$(wait_for_status "$j" "COMPLETED,FAILED,EVICTED,REJECTED" 30 || true)
+  [[ "$s" == "COMPLETED" || "$s" == "FAILED" || "$s" == "EVICTED" || "$s" == "REJECTED" ]] \
+    && pass "$j stopped after race assertions (status=$s)" \
+    || fail "$j did not stop after cancellation (status=$s)"
+  wait_until "$j Kubernetes Job is removed after cancellation" 30 1 job_resource_absent "$j" \
+    && pass "$j no longer has a Kubernetes Job" \
+    || fail "$j remained present in Kubernetes after cancellation (status=$s)"
 done
 
 close_platform_experiment "$PE_ID"
+
+echo "  ==> racing two same-agent submissions against one PostgreSQL quota boundary..."
+QUOTA_AGENT="agent-quota-race-${RUN_ID}"
+register_agent "$QUOTA_AGENT"
+QUOTA_PE=$(create_platform_experiment "concurrent-quota-race-${RUN_ID}" 1.0 1)
+signup_and_start "$QUOTA_PE" "$QUOTA_AGENT"
+# Phase-1 guaranteed allocation is 0.4 AccH. Each job reserves 0.24 AccH, so either job fits
+# alone but both cannot. The correct outcome is exactly one committed desired row and one 4xx;
+# zero winners exposes the old provisional-row visibility race, while two exposes over-admission.
+QUOTA_OUT="$TMPDIR_T/quota-race"
+mkdir -p "$QUOTA_OUT"
+for i in 1 2; do
+  (
+    submit_job_expect_code "$QUOTA_PE" "$QUOTA_AGENT" "guaranteed" "0.06" \
+      '{"accelerator_count":4,"accelerator_type":"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}' > "$QUOTA_OUT/result_$i"
+  ) &
+  PIDS[$i]=$!
+done
+for i in 1 2; do wait "${PIDS[$i]}"; done
+QUOTA_ACCEPTED=0
+QUOTA_REJECTED=0
+QUOTA_JOB=""
+for i in 1 2; do
+  read -r code id < "$QUOTA_OUT/result_$i"
+  if [[ "$code" -ge 200 && "$code" -lt 300 ]]; then
+    QUOTA_ACCEPTED=$((QUOTA_ACCEPTED + 1))
+    QUOTA_JOB="$id"
+  elif [[ "$code" -ge 400 && "$code" -lt 500 ]]; then
+    QUOTA_REJECTED=$((QUOTA_REJECTED + 1))
+  else
+    fail "same-agent quota race request $i returned unexpected HTTP $code"
+  fi
+done
+[[ "$QUOTA_ACCEPTED" -eq 1 && "$QUOTA_REJECTED" -eq 1 ]] \
+  && pass "same-agent quota race committed exactly one desired row and rejected exactly one request" \
+  || fail "same-agent quota race produced accepted=$QUOTA_ACCEPTED rejected=$QUOTA_REJECTED; expected 1/1"
+QUOTA_USED=$(quota_used_guaranteed "$QUOTA_PE" "$QUOTA_AGENT")
+[[ "$(py "print(round(float('$QUOTA_USED'), 6))")" == "0.24" ]] \
+  && pass "the sole committed PostgreSQL row contributes exactly 0.24 AccH desired usage" \
+  || fail "same-agent quota race reports $QUOTA_USED AccH desired usage; expected 0.24"
+[[ -n "$QUOTA_JOB" ]] && cancel_job "$QUOTA_JOB"
+close_platform_experiment "$QUOTA_PE"
 finish

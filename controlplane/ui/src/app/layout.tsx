@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swa
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap', weight: ['400', '500', '700'] })
 
 export const metadata: Metadata = {
-  title: 'OpenResearch — Autonomous Research Platform',
+  title: 'HypothesisLoop — Autonomous Research Platform',
   description: 'Compute scheduler for autonomous ML research agents',
 }
 

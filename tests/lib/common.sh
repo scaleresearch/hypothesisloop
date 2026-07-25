@@ -4,12 +4,17 @@
 # scenarios never collide on agent IDs, job IDs or platform-experiment names.
 set -euo pipefail
 
+# How long a job's admission (queueing/scheduling delay, not its own runtime) may take before a
+# scenario gives up — scales with concurrent suite load (see tests/run.sh), small fixed default
+# when a scenario is run standalone since there's no contention to budget for.
+ADMISSION_BUDGET_SECONDS="${ADMISSION_BUDGET_SECONDS:-60}"
+
 QUOTA_URL="${QUOTA_URL:-http://localhost:8081}"
 SCHED_URL="${SCHED_URL:-http://localhost:8082}"
 REGISTRY_URL="${REGISTRY_URL:-http://localhost:8083}"
 PROM_URL="${PROM_URL:-http://localhost:4000/v1/prometheus}"
-JOB_NS="${JOB_NS:-openresearch-jobs}"
-CLUSTER_NS="${CLUSTER_NS:-openresearch}"
+JOB_NS="${JOB_NS:-hypothesisloop-jobs}"
+CLUSTER_NS="${CLUSTER_NS:-hypothesisloop}"
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "${LIB_DIR}/.." && pwd)"
@@ -33,7 +38,7 @@ wait_until() {
   local desc="$1" tries="$2" sleep_s="$3"; shift 3
   for ((i = 1; i <= tries; i++)); do
     if "$@"; then return 0; fi
-    sleep "$sleep_s"
+    [[ "$i" -lt "$tries" ]] && sleep "$sleep_s"
   done
   echo "  [TIMEOUT] $desc (${tries}x${sleep_s}s)" >&2
   return 1

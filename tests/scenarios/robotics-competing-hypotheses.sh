@@ -24,7 +24,7 @@ signup_and_start "$PE_ID" "${AGENTS[@]}"
 
 declare -a JOBS
 for i in "${!AGENTS[@]}"; do
-  ENV_JSON=$(py "import json; print(json.dumps({'OPENRESEARCH_LEARNING_RATE': '${LRS[$i]}', 'OPENRESEARCH_BASELINE': '0.30'}))")
+  ENV_JSON=$(py "import json; print(json.dumps({'HYPOTHESISLOOP_LEARNING_RATE': '${LRS[$i]}', 'HYPOTHESISLOOP_BASELINE': '0.30'}))")
   J=$(submit_job_ext "$PE_ID" "${AGENTS[$i]}" "guaranteed" "$JOB_HOURS" "$ROBOTICS_JOB_FILE" "$ENV_JSON" \
     "" "" "" "robotics-vla-demo" "lr=${LRS[$i]}, same VLA baseline as every other agent" \
     "maximize task_success_rate above 0.30 baseline" "${HYPOTHESES[$i]}")
@@ -34,10 +34,13 @@ done
 
 OK=0
 for J in "${JOBS[@]}"; do
-  S=$(wait_for_status "$J" "COMPLETED,FAILED,EVICTED" 150 || true)
+  # Two-phase wait: admission budget (60s) absorbs queueing/scheduling contention from sibling
+  # concurrent scenarios; completion budget is derived fresh from confirmed RUNNING using this
+  # job's own HYPOTHESISLOOP_DURATION_SECONDS (JOB_HOURS*3600), not a hand-tuned absolute number.
+  S=$(wait_for_completion_after_running "$J" "$JOB_HOURS" "$ADMISSION_BUDGET_SECONDS" || true)
   if [[ "$S" == "COMPLETED" ]]; then
     M=$(dashboard_metrics "$J")
-    COUNT=$(echo "$M" | py "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)" 2>/dev/null || echo 0)
+    COUNT=$(echo "$M" | py "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list); print(len(d))")
     if [[ "$COUNT" -ge 1 ]]; then
       OK=$((OK + 1))
     else

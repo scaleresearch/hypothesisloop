@@ -2,8 +2,9 @@ package workload
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
-	"strconv"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -11,29 +12,21 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// resourceClaimTemplateGVR addresses resource.k8s.io/v1's ResourceClaimTemplate via the
-// dynamic client — see JobWorkloadClient.dyn's doc comment (workload_client.go) for why this
-// is unstructured rather than a typed client-go call.
-var resourceClaimTemplateGVR = schema.GroupVersionResource{
-	Group:    "resource.k8s.io",
-	Version:  "v1",
-	Resource: "resourceclaimtemplates",
-}
-
 func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
-	if err := c.ensureNamespace(ctx, OpenResearchNamespace); err != nil {
+	if err := c.ensureNamespace(ctx, HypothesisLoopNamespace); err != nil {
 		return err
 	}
-	// No admission handshake here: the scheduler loop (services/scheduler) already decided
-	// this experiment fits available capacity before calling CreateWorkload, so the Job is
-	// created ready-to-run (not suspended).
-	job, err := c.BuildJob(ctx, exp)
+	// No admission handshake here: the scheduler loop already decided this experiment fits
+	// available capacity before calling CreateWorkload, so the Job is created ready-to-run.
+	placement, err := c.resolvePlacementFor(ctx, exp)
+	if err != nil {
+		return err
+	}
+	job, err := c.BuildJob(exp, placement)
 	if err != nil {
 		return err
 	}
@@ -43,148 +36,189 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 		}
 	}
 	if len(job.Spec.Template.Spec.ResourceClaims) > 0 {
-		// Must exist before the Job's pod is actually created (async, via the Job
-		// controller) or the pod fails to schedule with a missing-ResourceClaimTemplate
-		// error — created up front here for the same reason ensureHeadlessService runs
-		// before the Job Create call above.
+		// Must exist before the Job's pod is created (async, via the Job controller) or the
+		// pod fails to schedule — same reason ensureHeadlessService runs before Job Create.
 		if err := c.ensureResourceClaimTemplate(ctx, job, exp); err != nil {
 			return fmt.Errorf("workload: ensure resource claim template: %w", err)
 		}
 	}
-	_, err = c.kube.BatchV1().Jobs(OpenResearchNamespace).Create(ctx, job, metav1.CreateOptions{})
+	_, err = c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
-		return nil
+		// Job names are deterministic per experiment ID, so re-admission after preemption
+		// collides with the prior Job object if WaitForJobDeletion's background-propagation
+		// delete hasn't removed it yet — observed live as exp stuck SUBMITTED for 3+min
+		// because this branch treated the stale, still-terminating object as a safe no-op.
+		// A DeletionTimestamp means it's the old, dying object: surface an error so submitJob
+		// rolls back to QUEUED and retries once the delete actually completes.
+		existing, getErr := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, job.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("workload: inspect existing job %s: %w", job.Name, getErr)
+		}
+		if existingJobMatchesDesired(existing, job, exp.ID) {
+			return nil
+		}
+		if existing.DeletionTimestamp == nil {
+			if deleteErr := c.DeleteWorkload(ctx, exp.ID); deleteErr != nil {
+				return fmt.Errorf("workload: delete mismatched existing job %s: %w", job.Name, deleteErr)
+			}
+		}
+		return fmt.Errorf("workload: stale job %s removed or still terminating; retry creation", job.Name)
 	}
 	return err
 }
 
-// ensureResourceClaimTemplate creates the DRA ResourceClaimTemplate a DRA-mode job's pod
-// references by name (see BuildJob's usesDRA branch) — one accelerator device request for
-// exp.AcceleratorCount devices of exp.AcceleratorType's configured DeviceClassName, using
-// resource.k8s.io's "ExactCount" allocation mode (the only mode this platform's DSL needs:
-// AcceleratorCount is always a plain integer, never a min/max range). Idempotent: tolerates
-// AlreadyExists, matching every other Create call in this file. Deleted explicitly by
-// DeleteWorkload, same pattern as ensureHeadlessService/its Service — not garbage-collected via
-// an ownerReference, since the Job doesn't exist yet at the point this must run.
-func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job *batchv1.Job, exp *domain.Experiment) error {
-	deviceClassName := c.deviceClassNameFor(exp.AcceleratorType)
-	if deviceClassName == "" {
-		return fmt.Errorf("accelerator type %q has no device_class_name configured for dra allocation_mode", exp.AcceleratorType)
-	}
-	count := exp.AcceleratorCount
-	if count < 1 {
-		count = 1
-	}
-
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
-		"apiVersion": resourceClaimTemplateGVR.GroupVersion().String(),
-		"kind":       "ResourceClaimTemplate",
-		"metadata": map[string]interface{}{
-			"name":      resourceClaimTemplateName(job.Name),
-			"namespace": OpenResearchNamespace,
-			"labels":    job.Labels,
-		},
-		"spec": map[string]interface{}{
-			// metadata here (distinct from the ResourceClaimTemplate's own metadata above)
-			// is the ObjectMeta template applied to every ResourceClaim the kubelet
-			// generates from it — carrying the experiment-id label onto the generated
-			// claim is what lets anything (tests, `kubectl get resourceclaim -l ...`,
-			// operators debugging a stuck allocation) find a running job's claim the same
-			// way it already finds its pod.
-			"metadata": map[string]interface{}{
-				"labels": job.Labels,
-			},
-			"spec": map[string]interface{}{
-				"devices": map[string]interface{}{
-					"requests": []interface{}{
-						map[string]interface{}{
-							"name": draClaimName,
-							// "exactly" (as opposed to "firstAvailable", the other arm of this
-							// oneOf) is resource.k8s.io/v1 GA's shape for "N devices from one
-							// specific DeviceClass" — the count/deviceClassName/allocationMode
-							// fields used to live flat on the request itself pre-GA (that shape
-							// is what an earlier version of this code, and hand-written test
-							// YAML from before k3s 1.36's GA DRA, used); the apiserver now
-							// silently drops them as unknown fields and rejects the request as
-							// under-specified instead of erroring on the stale flat fields
-							// directly, which is why this looked like a validation bug rather
-							// than a straightforward schema move at first.
-							"exactly": map[string]interface{}{
-								"deviceClassName": deviceClassName,
-								"allocationMode":  "ExactCount",
-								"count":           int64(count),
-							},
-						},
-					},
-				},
-			},
-		},
-	}}
-
-	_, err := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(OpenResearchNamespace).Create(ctx, obj, metav1.CreateOptions{})
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
+func existingJobMatchesDesired(existing, desired *batchv1.Job, experimentID string) bool {
+	return existing != nil && desired != nil && existing.DeletionTimestamp == nil &&
+		existing.Annotations[DesiredSpecHashAnnotation] == desired.Annotations[DesiredSpecHashAnnotation] &&
+		existing.Labels["hypothesisloop.io/managed-by"] == "hypothesisloop" &&
+		existing.Labels["hypothesisloop.io/experiment-id"] == experimentID
 }
 
 // ensureHeadlessService creates the headless (ClusterIP: None) Service a distributed job's
-// pods need for rank 0's stable DNS name (see OPENRESEARCH_MASTER_ADDR in BuildJob) — named
-// identically to the Job and selecting its pods by experiment-id label, matching the
-// Subdomain BuildJob sets on the pod template.
+// pods need for rank 0's stable DNS name (see HYPOTHESISLOOP_MASTER_ADDR in BuildJob) — named
+// identically to the Job and selecting its pods by experiment-id label.
 func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, job *batchv1.Job) error {
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      job.Name,
-			Namespace: OpenResearchNamespace,
+			Namespace: HypothesisLoopNamespace,
 			Labels:    job.Labels,
+			Annotations: map[string]string{
+				DesiredSpecHashAnnotation: job.Annotations[DesiredSpecHashAnnotation],
+			},
 		},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: corev1.ClusterIPNone,
 			Selector:  job.Spec.Template.Labels,
 		},
 	}
-	_, err := c.kube.CoreV1().Services(OpenResearchNamespace).Create(ctx, svc, metav1.CreateOptions{})
+	_, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).Create(ctx, svc, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
-		return nil
+		existing, getErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Get(ctx, svc.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		if existing.Annotations[DesiredSpecHashAnnotation] == job.Annotations[DesiredSpecHashAnnotation] && existing.DeletionTimestamp == nil &&
+			existing.Labels["hypothesisloop.io/managed-by"] == "hypothesisloop" && existing.Labels["hypothesisloop.io/experiment-id"] == job.Labels["hypothesisloop.io/experiment-id"] {
+			return nil
+		}
+		if deleteErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); deleteErr != nil && !errors.IsNotFound(deleteErr) {
+			return fmt.Errorf("delete drifted headless Service: %w", deleteErr)
+		}
+		return fmt.Errorf("drifted headless Service %s removed; retry creation", svc.Name)
 	}
 	return err
 }
 
-// ListManagedJobs returns the experiment IDs of every Job this client manages
-// (labeled openresearch.io/managed-by=openresearch) in the current cluster — used by
-// cluster-agent to discover what actually exists, to diff against desired state.
+// ListManagedJobs returns the experiment IDs of every Job this client manages in the current
+// cluster — used by cluster-agent to discover what actually exists, to diff against desired state.
 func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, error) {
-	jobs, err := c.kube.BatchV1().Jobs(OpenResearchNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "openresearch.io/managed-by=openresearch",
+	jobs, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "hypothesisloop.io/managed-by=hypothesisloop",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("workload: list managed jobs: %w", err)
 	}
 	ids := make([]string, 0, len(jobs.Items))
 	for _, j := range jobs.Items {
-		if id := j.Labels["openresearch.io/experiment-id"]; id != "" {
-			ids = append(ids, id)
+		// A Job with a DeletionTimestamp is mid-teardown (Background propagation leaves it
+		// listable while pods are still removed) — the dying generation of a
+		// preempted-then-recreated experiment. Counting it as "actual" would make reconcile
+		// silently skip (re)creating the new generation until it finally vanishes from List().
+		if j.DeletionTimestamp != nil {
+			continue
 		}
+		id := j.Labels["hypothesisloop.io/experiment-id"]
+		if id == "" {
+			return nil, fmt.Errorf("workload: managed job %q has no experiment identity", j.Name)
+		}
+		ids = append(ids, id)
 	}
 	return ids, nil
 }
 
+// WorkloadMatchesDesired compares the current Job with a fresh compilation of desired state.
+// Kubernetes-defaulted fields never enter the comparison since the pre-create desired hash is
+// stored as an annotation.
+func (c *JobWorkloadClient) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
+	placement, err := c.resolvePlacementFor(ctx, exp)
+	if err != nil {
+		return false, err
+	}
+	desired, err := c.BuildJob(exp, placement)
+	if err != nil {
+		return false, err
+	}
+	actual, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, desired.Name, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("workload: get desired-hash Job: %w", err)
+	}
+	if actual.Annotations[DesiredSpecHashAnnotation] != desired.Annotations[DesiredSpecHashAnnotation] ||
+		actual.Labels["hypothesisloop.io/managed-by"] != "hypothesisloop" || actual.Labels["hypothesisloop.io/experiment-id"] != exp.ID {
+		return false, nil
+	}
+	desiredHash := desired.Annotations[DesiredSpecHashAnnotation]
+	service, serviceErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Get(ctx, desired.Name, metav1.GetOptions{})
+	wantsService := desired.Spec.Template.Spec.Subdomain != ""
+	if serviceErr != nil && !errors.IsNotFound(serviceErr) {
+		return false, fmt.Errorf("workload: get auxiliary Service: %w", serviceErr)
+	}
+	if wantsService != (serviceErr == nil) || (serviceErr == nil && (service.Annotations[DesiredSpecHashAnnotation] != desiredHash ||
+		service.Labels["hypothesisloop.io/managed-by"] != "hypothesisloop" || service.Labels["hypothesisloop.io/experiment-id"] != exp.ID)) {
+		return false, nil
+	}
+
+	wantsTemplate := len(desired.Spec.Template.Spec.ResourceClaims) > 0
+	draMatches, err := c.draTemplateMatches(ctx, desired.Name, exp.ID, wantsTemplate, desiredHash)
+	if err != nil {
+		return false, fmt.Errorf("workload: compare auxiliary ResourceClaimTemplate: %w", err)
+	}
+	if !draMatches {
+		return false, nil
+	}
+	return true, nil
+}
+
+// ListManagedAuxiliaryWorkloads returns experiment IDs referenced by managed headless Services
+// and DRA ResourceClaimTemplates. Used only to remove orphans; auxiliary existence must never
+// stand in for Job existence when deciding whether to create.
+func (c *JobWorkloadClient) ListManagedAuxiliaryWorkloads(ctx context.Context) ([]string, error) {
+	ids := map[string]struct{}{}
+	services, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "hypothesisloop.io/managed-by=hypothesisloop",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("workload: list managed services: %w", err)
+	}
+	for _, service := range services.Items {
+		id := service.Labels["hypothesisloop.io/experiment-id"]
+		if id == "" {
+			return nil, fmt.Errorf("workload: managed Service %q has no experiment identity", service.Name)
+		}
+		ids[id] = struct{}{}
+	}
+	if err := c.addManagedDRAIDs(ctx, ids); err != nil {
+		return nil, fmt.Errorf("workload: list managed resource claim templates: %w", err)
+	}
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // GetLiveCPUCapacity returns this cluster's real, current CPU-core capacity: total allocatable
-// cores across schedulable nodes, and the same minus every non-terminal, already-scheduled
-// pod's CPU requests (not just openresearch-managed pods — a true "how much is actually free"
-// number, the same thing a real scheduler would compute). Replaces the old static-config-only
-// capacity model for CPU-only jobs; pushed to the control plane on every desired-state poll.
+// cores across schedulable nodes, minus every non-terminal, already-scheduled pod's CPU
+// requests (all pods, not just hypothesisloop-managed ones) — a true "how much is actually free"
+// number, pushed during every control-plane reconcile exchange.
 //
-// Only counts a pod's request against capacity once it is actually assigned to a node
-// (p.Spec.NodeName != "") — an unassigned/Pending pod's request is NOT subtracted here (this
-// used to blanket-subtract it cluster-wide regardless of whether/where it would ever land,
-// which is both imprecise and redundant: the control plane's own durable pending-capacity
-// reservation, Postgres pending_capacity_reservations, already accounts for a job's footprint
-// in the exact window between admission and its pod actually being scheduled — see
-// loop_tick.go step 2b). This collector's job is only to report the live, already-scheduled
-// truth. See SCHEDULING_GENERALIZATION_PLAN.md's Class B step 2 correctness fix, applied here
-// to this pre-existing CPU collector too, not just the new RAM/storage ones below.
+// Only counts a pod's request once it's assigned to a node (p.Spec.NodeName != ""); an
+// unassigned/Pending pod contributes nothing, since the control plane already derives capacity
+// from nominal totals minus its complete PostgreSQL desired footprint. This collector only
+// reports live actual state.
 func (c *JobWorkloadClient) GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error) {
 	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
 	if err != nil {
@@ -198,10 +232,8 @@ func (c *JobWorkloadClient) GetLiveCPUCapacity(ctx context.Context) (available, 
 	return float64(availMilli) / 1000.0, float64(totalMilli) / 1000.0, nil
 }
 
-// GetLiveRAMCapacity/GetLiveStorageCapacity mirror GetLiveCPUCapacity for the two Class B
-// (hard-cap, no billing) dimensions — memory and ephemeral-storage — reported in bytes. Same
-// accounting: total allocatable across schedulable nodes minus already-scheduled non-terminal
-// pods' requests, counted only against the node a pod is actually assigned to.
+// GetLiveRAMCapacity/GetLiveStorageCapacity mirror GetLiveCPUCapacity for the two hard-cap,
+// no-billing dimensions — memory and ephemeral-storage — reported in bytes.
 func (c *JobWorkloadClient) GetLiveRAMCapacity(ctx context.Context) (available, total int64, err error) {
 	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
 	if err != nil {
@@ -229,7 +261,14 @@ func (c *JobWorkloadClient) GetLiveStorageCapacity(ctx context.Context) (availab
 }
 
 // listSchedulableNodesAndPods is the shared node/pod fetch behind every live capacity
-// collector above, so they all read the same consistent-enough snapshot per call.
+// collector, so they all read the same consistent-enough snapshot per call — and apply one
+// definition of "schedulable", rather than each collector deciding for itself.
+//
+// A node counts only when it is both uncordoned and Ready. Ready matters as much as the cordon
+// flag: a node whose machine is powered off (or whose kubelet has died, or that lost its network)
+// stays in the API as a registered NotReady object, still advertising its full Allocatable. Left
+// unfiltered, that hardware keeps being reported as live capacity long after it stopped existing,
+// and jobs admitted against it queue forever with nothing to run them.
 func (c *JobWorkloadClient) listSchedulableNodesAndPods(ctx context.Context) ([]corev1.Node, []corev1.Pod, error) {
 	nodeList, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -239,25 +278,41 @@ func (c *JobWorkloadClient) listSchedulableNodesAndPods(ctx context.Context) ([]
 	if err != nil {
 		return nil, nil, fmt.Errorf("workload: list pods: %w", err)
 	}
-	return nodeList.Items, podList.Items, nil
+	nodes := make([]corev1.Node, 0, len(nodeList.Items))
+	for _, n := range nodeList.Items {
+		if schedulableNode(n) {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes, podList.Items, nil
+}
+
+// schedulableNode reports whether n can actually accept work right now — see
+// listSchedulableNodesAndPods for why NotReady must disqualify a node, not just a cordon.
+func schedulableNode(n corev1.Node) bool {
+	if n.Spec.Unschedulable {
+		return false
+	}
+	for _, cond := range n.Status.Conditions {
+		if cond.Type == corev1.NodeReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // sumAllocatableAndRequested totals resourceName's allocatable quantity across schedulable
-// nodes, and separately totals it across every non-terminal pod's container requests — but,
-// per GetLiveCPUCapacity's doc comment, ONLY for pods already assigned to a node
-// (p.Spec.NodeName != ""); an unassigned/Pending pod contributes nothing here.
+// nodes, and separately across every non-terminal pod's container requests — only for pods
+// already assigned to a node (see GetLiveCPUCapacity doc).
 func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resourceName corev1.ResourceName, extract func(resource.Quantity) int64) (total, requested int64) {
 	for _, n := range nodes {
-		if n.Spec.Unschedulable {
-			continue
-		}
 		if q, ok := n.Status.Allocatable[resourceName]; ok {
 			total += extract(q)
 		}
 	}
 	for _, p := range pods {
 		if p.Spec.NodeName == "" {
-			continue // not yet scheduled — covered by pending_capacity_reservations instead
+			continue // actual usage starts only once Kubernetes assigns a node
 		}
 		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue
@@ -271,139 +326,126 @@ func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resource
 	return total, requested
 }
 
-// GetLiveAcceleratorCapacity returns this cluster's real, current accelerator capacity per flavor: total
-// allocatable extended-resource quantity across schedulable nodes carrying that accelerator type's own
-// node label, and the same minus every non-terminal pod's request for that resource name,
-// counted only across those labeled nodes. Mirrors GetLiveCPUCapacity's allocatable-minus-
-// requested model, keyed by flavor so it slots directly into the same guaranteed/burst maps CPU
-// capacity uses. Flavors with no node-label mapping configured are omitted (nothing to count).
-func (c *JobWorkloadClient) GetLiveAcceleratorCapacity(ctx context.Context) (available, total map[string]int64, err error) {
-	nodes, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+// GetLiveAcceleratorCapacitySnapshot returns aggregate and per-node actual accelerator state
+// from one Kubernetes node/pod listing (DRA inventory listed once per configured driver), so
+// the reconcile exchange reports one internally consistent snapshot without duplicate reads.
+func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error) {
+	// Hardware publishes many true facts about itself — a Tenstorrent card reports its arch, its
+	// board type, its tray, its serial. Each is a legitimate accelerator type, but reporting all
+	// of them would bury the two an operator actually cares about under twenty per-serial
+	// entries. The priced catalog is the filter: it is precisely the set of types that can be
+	// billed, and admission already refuses anything unpriced, so an unpriced type could never
+	// have been submitted anyway. The operator prices the granularity they want; that is exactly
+	// what capacity reports.
+	priced := c.pricedAcceleratorTypes
+	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("workload: list nodes: %w", err)
+		return nil, nil, nil, nil, err
 	}
-	pods, err := c.kube.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("workload: list pods: %w", err)
+	requested := make(map[string]map[corev1.ResourceName]int64)
+	for _, pod := range pods {
+		if pod.Spec.NodeName == "" || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if requested[pod.Spec.NodeName] == nil {
+			requested[pod.Spec.NodeName] = make(map[corev1.ResourceName]int64)
+		}
+		for _, ctr := range pod.Spec.Containers {
+			for name, qty := range ctr.Resources.Requests {
+				requested[pod.Spec.NodeName][name] += qty.Value()
+			}
+		}
 	}
 
 	available = make(map[string]int64)
 	total = make(map[string]int64)
-	for flavor, acceleratorName := range c.nameByFlavor() {
-		if c.isDRA(domain.AcceleratorType(acceleratorName)) {
-			avail, tot := c.liveDRAAcceleratorCapacity(acceleratorName, flavor, pods.Items)
-			available[flavor] = avail
-			total[flavor] = tot
+	byNode = make(map[string]map[string]int64)
+	nodeLabels = make(map[string]map[string]string)
+	draSnapshots, err := c.liveDRACapacitySnapshots(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	for acceleratorName, snapshot := range draSnapshots {
+		key := acceleratorName
+		if !priced[key] {
 			continue
 		}
-		labelValue := c.nodeLabelByType[acceleratorName]
-		if labelValue == "" {
-			continue
+		available[key], total[key] = snapshot.available, snapshot.total
+		for node, free := range snapshot.freeByNode {
+			if byNode[node] == nil {
+				byNode[node] = make(map[string]int64)
+			}
+			byNode[node][key] = free
 		}
-		labelKey := c.nodeLabelKeyFor(domain.AcceleratorType(acceleratorName))
-		resourceName := corev1.ResourceName(c.resourceNameFor(domain.AcceleratorType(acceleratorName)))
-
-		var totalQty int64
-		onFlavorNode := make(map[string]bool)
-		for _, n := range nodes.Items {
-			if n.Spec.Unschedulable || n.Labels[labelKey] != labelValue {
+	}
+	// Device-plugin hardware: a node's extended resource says how many devices it has, and the
+	// vendor's own node labels say what they are. Capacity is keyed by those labels — the same
+	// "key=value" a job spec names — so an H100 node and an L40 node are separate types instead
+	// of one undifferentiated nvidia.com/gpu pool that matches no submittable accelerator_type.
+	//
+	// A device is counted under every label in its vendor's domain, for the same reason DRA
+	// devices are counted under every attribute: these are selectors a job picks one of, not a
+	// partition, and it keeps the platform from having to decide which label is the model name.
+	for _, node := range nodes {
+		nodeLabels[node.Name] = node.Labels
+		for resourceName, allocatable := range node.Status.Allocatable {
+			name := string(resourceName)
+			if !strings.Contains(name, "/") || strings.HasPrefix(name, "kubernetes.io/") {
 				continue
 			}
-			if q, ok := n.Status.Allocatable[resourceName]; ok {
-				totalQty += q.Value()
+			free := allocatable.Value() - requested[node.Name][resourceName]
+			if free < 0 {
+				free = 0
 			}
-			onFlavorNode[n.Name] = true
-		}
-
-		var requestedQty int64
-		for _, p := range pods.Items {
-			if !onFlavorNode[p.Spec.NodeName] {
-				continue
-			}
-			if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
-				continue
-			}
-			for _, ctr := range p.Spec.Containers {
-				if q, ok := ctr.Resources.Requests[resourceName]; ok {
-					requestedQty += q.Value()
+			domainName := resourceDomain(name)
+			for labelKey, labelValue := range node.Labels {
+				if resourceDomain(labelKey) != domainName {
+					continue
 				}
+				key := labelKey + "=" + labelValue
+				if !priced[key] {
+					continue
+				}
+				if byNode[node.Name] == nil {
+					byNode[node.Name] = make(map[string]int64)
+				}
+				byNode[node.Name][key] = free
+				total[key] += allocatable.Value()
+				available[key] += free
 			}
 		}
-
-		availQty := totalQty - requestedQty
-		if availQty < 0 {
-			availQty = 0
-		}
-		available[flavor] = availQty
-		total[flavor] = totalQty
 	}
-	return available, total, nil
-}
-
-// liveDRAAcceleratorCapacity mirrors GetLiveAcceleratorCapacity's allocatable-minus-requested
-// model for a DRA-mode flavor, which has no node-label/extended-resource scheme to read total/
-// requested off of directly: total falls back to the operator-declared cluster_accelerators
-// nominal count (config, same source classic-mode flavors use as their starting total before
-// subtracting live node-label-scoped allocatable); requested sums AcceleratorCountAnnotation
-// across every non-terminal pod labeled with this accelerator type (see BuildJob's usesDRA
-// branch, which sets both on every DRA pod specifically so this can work).
-func (c *JobWorkloadClient) liveDRAAcceleratorCapacity(acceleratorName, flavor string, pods []corev1.Pod) (available, total int64) {
-	total = c.acceleratorNominalCapacity()[flavor]
-	var requested int64
-	for _, p := range pods {
-		if p.Labels[AcceleratorTypeLabel] != acceleratorName {
-			continue
-		}
-		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
-			continue
-		}
-		n, err := strconv.Atoi(p.Annotations[AcceleratorCountAnnotation])
-		if err != nil || n < 0 {
-			continue
-		}
-		requested += int64(n)
-	}
-	available = total - requested
-	if available < 0 {
-		available = 0
-	}
-	return available, total
+	return available, total, byNode, nodeLabels, nil
 }
 
 func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID string) error {
 	prop := metav1.DeletePropagationBackground
-	err := c.kube.BatchV1().Jobs(OpenResearchNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{
+	jobErr := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{
 		PropagationPolicy: &prop,
 	})
-	if err != nil && !errors.IsNotFound(err) {
-		return err
+	if errors.IsNotFound(jobErr) {
+		jobErr = nil
 	}
-	// The headless Service (see ensureHeadlessService) is only ever created for distributed
-	// jobs, but deleting it unconditionally here is harmless (NotFound is swallowed) and
-	// avoids needing to know NumNodes at this call site.
-	svcErr := c.kube.CoreV1().Services(OpenResearchNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{})
-	if svcErr != nil && !errors.IsNotFound(svcErr) {
-		return svcErr
+	// The headless Service (see ensureHeadlessService) is only created for distributed jobs,
+	// but deleting it unconditionally is harmless (NotFound swallowed) and avoids needing to
+	// know NumNodes at this call site.
+	svcErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{})
+	if errors.IsNotFound(svcErr) {
+		svcErr = nil
 	}
-	// Same unconditional-attempt/NotFound-swallowed pattern as the headless Service above:
-	// only DRA-mode jobs ever created one (see ensureResourceClaimTemplate), but deleting
-	// unconditionally here is harmless and avoids needing to know the accelerator's
-	// allocation_mode at this call site. The ResourceClaim(s) the kubelet derived from this
-	// template are themselves owned by the pod and are cleaned up natively by k8s when the
-	// pod goes away — this only removes the template object this client created.
-	claimErr := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(OpenResearchNamespace).
-		Delete(ctx, resourceClaimTemplateName(jobName(experimentID)), metav1.DeleteOptions{})
-	if claimErr != nil && !errors.IsNotFound(claimErr) {
-		return claimErr
-	}
-	return nil
+	// Same unconditional-attempt/NotFound-swallowed pattern as the headless Service: only
+	// DRA-mode jobs created a template, but deleting unconditionally avoids needing to know
+	// allocation_mode here. The kubelet-derived ResourceClaim(s) are owned by the pod and
+	// cleaned up natively by k8s; this only removes the template object itself.
+	claimErr := c.deleteDRAResource(ctx, experimentID)
+	return stderrors.Join(jobErr, svcErr, claimErr)
 }
 
 func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	name := jobName(experimentID)
 	for time.Now().Before(deadline) {
-		_, err := c.kube.BatchV1().Jobs(OpenResearchNamespace).Get(ctx, name, metav1.GetOptions{})
+		_, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, name, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -416,31 +458,6 @@ func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID
 	return fmt.Errorf("workload: timed out waiting for job %s deletion", name)
 }
 
-// GetFlavorCapacity returns nominal accelerator + live CPU/RAM/storage capacity as a canonical
-// domain.Footprint. demo: Accelerator is not reading live reservation state from the cluster (nominal
-// config only); CPU/RAM/storage use the same live allocatable-minus-requested numbers
-// GetLiveCPUCapacity/GetLiveRAMCapacity/GetLiveStorageCapacity compute, so a mixed job's joint
-// fit can be checked against one vector.
-func (c *JobWorkloadClient) GetFlavorCapacity(ctx context.Context) (guaranteed, burst domain.Footprint, err error) {
-	nominal := c.acceleratorNominalCapacity()
-	cpuAvail, _, err := c.GetLiveCPUCapacity(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	ramAvail, _, err := c.GetLiveRAMCapacity(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	storageAvail, _, err := c.GetLiveStorageCapacity(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	fp := domain.CapacityFootprint(cpuAvail, nominal, ramAvail, storageAvail)
-	// Guaranteed and burst share the same physical pool here, same as queuebackend.Backend —
-	// preemption enforces the tier boundary, not a capacity split.
-	return fp, fp, nil
-}
-
 type JobPhase int
 
 const (
@@ -451,9 +468,8 @@ const (
 	JobPhaseGone
 )
 
-// String renders the phase as a stable lowercase name — used when persisting/transmitting
-// phase over the wire (e.g. cluster-agent status reports), where the int representation
-// would not be a meaningful value across processes.
+// String renders the phase as a stable lowercase name for wire transmission (e.g. cluster-agent
+// status reports), where the int representation wouldn't be meaningful across processes.
 func (p JobPhase) String() string {
 	switch p {
 	case JobPhaseRunning:
@@ -469,9 +485,8 @@ func (p JobPhase) String() string {
 	}
 }
 
-// ParseJobPhase is the inverse of JobPhase.String, used to decode phase values received
-// over the wire. Unrecognized values decode to JobPhasePending (fail safe, not fail loud —
-// an unrecognized phase should never be treated as terminal).
+// ParseJobPhase is the inverse of JobPhase.String, used to decode wire values. Unrecognized
+// values decode to JobPhasePending (fail safe: never treat an unrecognized phase as terminal).
 func ParseJobPhase(s string) JobPhase {
 	switch s {
 	case "running":
@@ -492,18 +507,14 @@ func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID strin
 	return phase, err
 }
 
-// PollJobPhaseAndUID fetches the k8s Job once and returns both its phase and its UID (""
-// if the Job doesn't exist) — one API call instead of the two separate Get()s
-// PollJobPhase/GetJobUID used to each make. This isn't just an efficiency cleanup: two
-// separate polls a few hundred ms apart can each independently observe "Active>0" (phase
-// Running) across a preempt-then-recreate cycle that deleted and recreated the Job in
-// between — collapsing an old Job's disappearance and a new Job's appearance into what
-// looks like "no change" to a phase-only comparison, since the string phase reads Running
-// both times. Comparing UID alongside phase (see cluster-agent's reportChangedStatuses)
-// catches that: the UID always changes across a delete+recreate even when the phase string
-// doesn't, so a stuck-forever "gone was never observed" status report can't happen.
+// PollJobPhaseAndUID fetches the k8s Job once and returns both its phase and UID ("" if the
+// Job doesn't exist) — one API call instead of two separate Get()s. This isn't just an
+// efficiency cleanup: two polls a few hundred ms apart could each observe "Active>0" across a
+// preempt-then-recreate cycle, making an old Job's disappearance and a new Job's appearance
+// look like "no change" to a phase-only comparison. Comparing UID alongside phase (see
+// cluster-agent's reportChangedStatuses) catches that, since UID always changes on delete+recreate.
 func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID string) (JobPhase, string, error) {
-	job, err := c.kube.BatchV1().Jobs(OpenResearchNamespace).Get(ctx, jobName(experimentID), metav1.GetOptions{})
+	job, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, jobName(experimentID), metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return JobPhaseGone, "", nil
@@ -511,10 +522,9 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 		return JobPhasePending, "", err
 	}
 	uid := string(job.UID)
-	// Check the native JobComplete condition before falling back to a raw Succeeded
-	// count: for Indexed jobs with a SuccessPolicy (distributed training gated on rank 0),
-	// a non-master worker finishing first bumps Status.Succeeded without the job actually
-	// being done — JobComplete only flips true once the configured policy is satisfied.
+	// Check the native JobComplete condition before falling back to a raw Succeeded count:
+	// for Indexed jobs with a SuccessPolicy, a non-master worker finishing first bumps
+	// Status.Succeeded without the job actually being done.
 	for _, cond := range job.Status.Conditions {
 		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
 			return JobPhaseSucceeded, uid, nil
@@ -534,48 +544,42 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 	return JobPhasePending, uid, nil
 }
 
-
 // GetAdmittedAcceleratorType reports which accelerator type this experiment's Job actually landed on. When
-// AcceptableAcceleratorTypes lists more than one flavor, the k8s scheduler — not this client — picks the
-// node, so the only way to know which flavor was chosen is to read it back from the live cluster
-// (see ResolveAdmittedAcceleratorType). Falls back to the originally requested exp.AcceleratorType if no pod is
-// scheduled yet or the resolve fails — the same "not known yet" default the caller already
-// expects before any report has arrived.
-func (c *JobWorkloadClient) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) domain.AcceleratorType {
+// AcceptableAcceleratorTypes lists more than one flavor, the k8s scheduler picks the node, so
+// the only way to know which was chosen is to read it back from the live cluster (see
+// ResolveAdmittedAcceleratorType). Missing actual placement is an error; callers retry.
+func (c *JobWorkloadClient) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
 	resolved, _, _, err := c.ResolveAdmittedAcceleratorType(ctx, exp.ID)
-	if err != nil || resolved == "" {
-		return exp.AcceleratorType
+	if err != nil {
+		return "", err
 	}
-	return resolved
+	if resolved == "" {
+		return "", fmt.Errorf("workload: accelerator type for %s is not observed yet", exp.ID)
+	}
+	return resolved, nil
 }
 
 // ResolveAdmittedAcceleratorType inspects experimentID's currently-scheduled pod(s) and returns the accelerator
-// type actually admitted, reverse-mapping the assigned node's accelerator product label back to a
-// configured type name via nodeLabelByType/nodeLabelKeyByType (acceleratorNodeAffinity's mapping, in
-// reverse). This is the only way to observe which acceptable_accelerator_types flavor the k8s scheduler
-// actually chose — neither the Job spec nor this client's own admission decision records it.
+// type actually admitted, reverse-mapping the assigned node's accelerator product label back to
+// a configured type name (acceleratorNodeAffinity's mapping, in reverse). This is the only way
+// to observe which acceptable_accelerator_types flavor the k8s scheduler actually chose.
 //
-// node is rank 0's own k8s node name (or the first scheduled pod's, if rank 0 isn't up yet) —
-// piggybacked on this same pod/node lookup rather than a second List/Get pass, since the only
-// consumer (cluster-agent's status report loop) always wants both together. This is the sole
-// source of job→physical-node attribution in the system: nothing else persists it, and it is not
-// duplicated into Postgres — see PushStatus, which forwards node straight into the metrics store
-// (metricsdb.RecordExperimentNode), the single place this fact lives, per this repo's "metrics
-// only in the metrics store, no duplicates" rule.
+// node is rank 0's k8s node name (or the first scheduled pod's, if rank 0 isn't up yet) —
+// piggybacked on this lookup since the only consumer (cluster-agent's status report loop)
+// always wants both together. This is the sole source of job->physical-node attribution in the
+// system; PushStatus forwards it straight into the metrics store (metricsdb.RecordExperimentNode),
+// per this repo's "metrics only in the metrics store, no duplicates" rule.
 //
-// Resolves from rank 0's node (batch.kubernetes.io/job-completion-index=0) when available,
-// falling back to the first scheduled pod found — a deliberately simple choice for distributed
-// jobs rather than full cross-rank reconciliation. consistent=false flags (for the caller to log;
-// this alone never blocks reporting) that another already-scheduled rank landed on a different
-// accelerator type than rank 0, which callers should treat as an error condition.
+// Resolves from rank 0's node when available, falling back to the first scheduled pod found —
+// a deliberately simple choice rather than full cross-rank reconciliation. consistent=false
+// flags (for the caller to log only) that another rank landed on a different accelerator type.
 //
-// Returns ("", "", true, nil) if no pod is scheduled onto a node yet. node can be non-empty even
-// when acceleratorType is "" (scheduled onto a node with none of the configured accelerator
-// labels, e.g. a non-accelerator/dev cluster) — the two are reported independently since node
-// attribution is meaningful even without a recognized accelerator type.
+// Returns ("", "", true, nil) if no pod is scheduled yet. node can be non-empty even when
+// acceleratorType is "" (e.g. a non-accelerator/dev cluster) — reported independently since
+// node attribution is meaningful even without a recognized accelerator type.
 func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, node string, consistent bool, err error) {
-	pods, err := c.kube.CoreV1().Pods(OpenResearchNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("openresearch.io/experiment-id=%s", experimentID),
+	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("hypothesisloop.io/experiment-id=%s", experimentID),
 	})
 	if err != nil {
 		return "", "", true, fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
@@ -600,11 +604,7 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 	}
 	node = primary.Spec.NodeName
 
-	kubeNode, err := c.kube.CoreV1().Nodes().Get(ctx, primary.Spec.NodeName, metav1.GetOptions{})
-	if err != nil {
-		return "", node, true, fmt.Errorf("workload: get node %s: %w", primary.Spec.NodeName, err)
-	}
-	acceleratorType = c.acceleratorTypeFromNodeLabels(kubeNode.Labels)
+	acceleratorType = domain.AcceleratorType(primary.Annotations[AcceleratorTypeAnnotation])
 	if acceleratorType == "" {
 		return "", node, true, nil
 	}
@@ -612,34 +612,17 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 	consistent = true
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		if p.Spec.NodeName == "" || p.Spec.NodeName == primary.Spec.NodeName {
+		if p.Spec.NodeName == "" {
 			continue
 		}
-		n, getErr := c.kube.CoreV1().Nodes().Get(ctx, p.Spec.NodeName, metav1.GetOptions{})
-		if getErr != nil {
-			continue
-		}
-		if t := c.acceleratorTypeFromNodeLabels(n.Labels); t != "" && t != acceleratorType {
+		if t := domain.AcceleratorType(p.Annotations[AcceleratorTypeAnnotation]); t != acceleratorType {
 			consistent = false
 		}
 	}
 	return acceleratorType, node, consistent, nil
 }
 
-// acceleratorTypeFromNodeLabels reverse-maps a node's own labels back to the configured accelerator type whose
-// nodeLabelByType/nodeLabelKeyByType entry matches — the inverse of acceleratorNodeAffinity's
-// type-to-label translation. Returns "" if no configured type matches (unlabeled/non-Accelerator node).
-func (c *JobWorkloadClient) acceleratorTypeFromNodeLabels(labels map[string]string) domain.AcceleratorType {
-	for typeName, labelValue := range c.nodeLabelByType {
-		if labelValue == "" {
-			continue
-		}
-		key := c.nodeLabelKeyFor(domain.AcceleratorType(typeName))
-		if labels[key] == labelValue {
-			return domain.AcceleratorType(typeName)
-		}
-	}
-	return ""
-}
-
+// acceleratorTypeFromNodeLabels reverse-maps a node's labels back to the configured accelerator
+// type — the inverse of acceleratorNodeAffinity's type-to-label translation. Returns "" if no
+// configured type matches.
 func (c *JobWorkloadClient) ProvisionAgent(_ context.Context, _ string) error { return nil }

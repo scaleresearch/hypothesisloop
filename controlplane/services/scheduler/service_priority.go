@@ -3,10 +3,8 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // RePrioritize re-evaluates and persists priority scores for all QUEUED experiments.
@@ -38,9 +36,8 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 	return nil
 }
 
-// resourceCosts returns (resourceType, estimatedAmount) pairs for every dimension exp actually
-// uses — Accelerator is always included (even 0-cost, checked elsewhere); CPU/RAM/storage only appear
-// when non-zero (the submission set them and they were estimated in Submit).
+// resourceCosts returns (resourceType, estimatedAmount) pairs for every dimension exp uses —
+// Accelerator is always included (even 0-cost); CPU/RAM/storage only appear when non-zero.
 func resourceCosts(exp *domain.Experiment) []struct {
 	resourceType domain.ResourceType
 	amount       float64
@@ -56,71 +53,6 @@ func resourceCosts(exp *domain.Experiment) []struct {
 	}
 }
 
-// debitAllResources debits every non-zero resource dimension exp uses. If a later dimension's
-// debit fails, the earlier ones already committed for this call are rolled back to 0 — the
-// reservation is being abandoned entirely, so the job's own series should read "never happened",
-// not "refunded" — so a rejected submission never leaves a partial debit behind.
-func (s *Service) debitAllResources(ctx context.Context, exp *domain.Experiment) error {
-	costs := resourceCosts(exp)
-	for i, c := range costs {
-		if c.amount <= 0 {
-			continue
-		}
-		if err := s.quota.CheckAndDebitQuota(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, c.resourceType, exp.CapacityTier, c.amount); err != nil {
-			for _, prior := range costs[:i] {
-				if prior.amount > 0 {
-					_ = s.quota.RefundQuota(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, prior.resourceType, exp.CapacityTier, 0)
-				}
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-// refundAllResources overwrites each non-zero estimated dimension exp uses with its true
-// observed cost, not an amount to refund. Accelerator-hours uses acceleratorCost directly — an absolute amount
-// already computed per accelerator type actually used (see metricsdb.ObservedAcceleratorCost), since a
-// single flat rate over observedFraction would mischarge any job that ran on more than one
-// accelerator type. CPU/RAM/storage have no per-type rate tiers, so they still use
-// observedFraction × estimate. observedFraction=0 (and acceleratorCost=0) for a job that never ran
-// (cancel-while-queued, a failed create).
-func (s *Service) refundAllResources(ctx context.Context, exp *domain.Experiment, observedFraction, acceleratorCost float64) {
-	for _, c := range resourceCosts(exp) {
-		amount := observedFraction * c.amount
-		if c.resourceType == domain.ResourceAcceleratorHours {
-			amount = acceleratorCost
-		}
-		if amount <= 0 && c.amount <= 0 {
-			continue
-		}
-		_ = s.quota.RefundQuota(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, c.resourceType, exp.CapacityTier, amount)
-	}
-}
-
-// observedFraction returns exp's confirmed-alive time (see metricsdb.ObservedElapsedHours) as a
-// fraction of its estimate, and its true accelerator cost billed per accelerator type actually used (see
-// metricsdb.ObservedAcceleratorCost) — the two figures refundAllResources needs. This is the same
-// GreptimeDB query Controller uses for every automatic eviction path — a user cancelling a job
-// and the controller evicting it agree on what "how long did this run" and "what did it cost"
-// mean, because both ask the same source of truth the same way. No fallback: GreptimeDB is a
-// required dependency of this deployment, not an optional one, so a query error is returned to
-// the caller rather than papered over.
-func (s *Service) observedFraction(ctx context.Context, exp *domain.Experiment) (fraction, acceleratorCost float64, err error) {
-	if exp.EstimatedDurationHours <= 0 {
-		return 0, 0, nil
-	}
-	hours, err := metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback, s.observedGapCap, s.observedStep)
-	if err != nil {
-		return 0, 0, fmt.Errorf("scheduler: observed elapsed hours: %w", err)
-	}
-	acceleratorCost, err = metricsdb.ObservedAcceleratorCost(ctx, s.metricsDBURL, exp.ID, exp.AcceleratorCount, time.Now().UTC(), ObservedMaxLookback, s.observedGapCap, s.observedStep)
-	if err != nil {
-		return 0, 0, fmt.Errorf("scheduler: observed accelerator cost: %w", err)
-	}
-	return hours / exp.EstimatedDurationHours, acceleratorCost, nil
-}
-
 // computePriority calculates the weighted priority score for an experiment.
 //
 // Priority = w1*novelty + w3*costEfficiency
@@ -129,21 +61,14 @@ func (s *Service) observedFraction(ctx context.Context, exp *domain.Experiment) 
 //   - novelty:        provided by the caller (already computed against active experiments)
 //   - costEfficiency: 1 / (1 + dominantCostFraction), favours cheaper experiments
 //
-// costEfficiency used to be 1/(1+EstimatedCostAccH) — Accelerator-hours only, so a CPU-only job (always
-// EstimatedCostAccH == 0) got a maximal costEfficiency of 1 regardless of how large its actual
-// CPU/RAM/storage footprint was, and a job requesting a genuinely tiny sliver of accelerator couldn't be
-// compared on the same scale as one requesting a huge slice of CPU. domain.AgentQuota.DominantCostFraction
-// fixes this by expressing "how big is this job" as a dimensionless fraction of the agent's own
-// guaranteed budget for whichever dimension(s) it actually requests — comparable across
-// CPU/Accelerator/RAM/storage jobs instead of summing raw, unit-incompatible hours. Falls back to 0 (the
-// same "maximally cheap" default the old code effectively used for CPU-only jobs) if no quota
-// row is found yet (e.g. first submission before AgentProvisioner ran) or exp has no
-// PlatformExperimentID.
+// costEfficiency used to be 1/(1+EstimatedCostAccH), so a CPU-only job (always 0 accelerator
+// cost) got a maximal score regardless of its real CPU/RAM/storage footprint.
+// domain.AgentQuota.DominantCostFraction fixes this by expressing "how big is this job" as a
+// dimensionless fraction of the agent's own guaranteed budget, comparable across resource types.
+// Falls back to 0 if no quota row is found yet or exp has no PlatformExperimentID.
 //
-// Note: SchedulingWeights has no W2/abuse-penalty field today — abuse is handled entirely by
-// the controller's eviction guards (crash-loop, silence), not by suppressing admission
-// priority. (This doc comment previously described a 3-term w1/w2/w3 formula that no longer
-// matches the code — corrected to the actual 2-term one.)
+// Note: SchedulingWeights has no W2/abuse-penalty field — abuse is handled by the controller's
+// eviction guards, not by suppressing admission priority.
 func (s *Service) computePriority(ctx context.Context, exp *domain.Experiment, novelty float64) (float64, error) {
 	w := s.weights
 

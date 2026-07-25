@@ -9,8 +9,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Handler wires the registry service to HTTP routes, registered via RegisterHuma.
@@ -37,6 +38,7 @@ type hypothesisWithJobs struct {
 	*domain.Hypothesis
 	Jobs     []*domain.Experiment        `json:"jobs"`
 	Findings []*domain.HypothesisFinding `json:"findings"`
+	Comments []*domain.HypothesisComment `json:"comments"`
 }
 
 // RegisterHuma registers every registry operation at its full path (/registry/...).
@@ -220,23 +222,28 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "registry-list-hypotheses", Method: "GET", Path: "/registry/hypotheses",
 		Summary: "List hypotheses for a platform experiment", Tags: []string{"hypotheses"},
-		Description: "Requires ?platform_experiment_id. Returns all agents' hypotheses for it.",
+		Description: "Requires ?platform_experiment_id. Optional ?agent restricts to one agent's own " +
+			"hypotheses; ?limit bounds the result (default/max 200), most recent first. Each row carries " +
+			"finding_count/comment_count — drill into GET /registry/hypotheses/{id} for the bodies only " +
+			"when a count or relevance justifies it, to keep catch-up reads cheap.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id"`
-	}) (*struct{ Body []*domain.Hypothesis }, error) {
+		Agent                string `query:"agent"`
+		Limit                int    `query:"limit"`
+	}) (*struct{ Body []*db.HypothesisListItem }, error) {
 		if in.PlatformExperimentID == "" {
 			return nil, huma.Error400BadRequest("platform_experiment_id is required")
 		}
-		hs, err := h.svc.ListHypotheses(ctx, in.PlatformExperimentID)
+		hs, err := h.svc.ListHypotheses(ctx, in.PlatformExperimentID, in.Agent, in.Limit)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body []*domain.Hypothesis }{Body: hs}, nil
+		return &struct{ Body []*db.HypothesisListItem }{Body: hs}, nil
 	})
 
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "registry-get-hypothesis", Method: "GET", Path: "/registry/hypotheses/{id}",
-		Summary: "Get a hypothesis with its jobs and findings", Tags: []string{"hypotheses"},
+		Summary: "Get a hypothesis with its jobs, findings, and comments", Tags: []string{"hypotheses"},
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body hypothesisWithJobs }, error) {
@@ -255,6 +262,45 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{Hypothesis: hyp, Jobs: jobs, Findings: findings}}, nil
+		comments, err := h.svc.ListHypothesisComments(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{Hypothesis: hyp, Jobs: jobs, Findings: findings, Comments: comments}}, nil
+	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "registry-add-hypothesis-comment", Method: "POST", Path: "/registry/hypotheses/{id}/comments",
+		Summary: "Add a comment to a hypothesis", Tags: []string{"hypotheses"},
+		DefaultStatus: 201,
+		Description: "Records a freeform, job-independent note (abandon/revise/cross-reference) on a " +
+			"hypothesis, distinct from a finding (which requires a terminal job). Check the hypothesis's " +
+			"existing comments (from GET /registry/hypotheses/{id}) before posting to avoid re-recording " +
+			"the same conclusion.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			AgentID string `json:"agent_id"`
+			Text    string `json:"text"`
+		}
+	}) (*struct {
+		Status int
+		Body   *domain.HypothesisComment
+	}, error) {
+		if in.Body.AgentID == "" {
+			return nil, huma.Error400BadRequest("agent_id is required")
+		}
+		if in.Body.Text == "" {
+			return nil, huma.Error400BadRequest("text is required")
+		}
+		c, err := h.svc.AddHypothesisComment(ctx, in.ID, in.Body.AgentID, in.Body.Text)
+		if err != nil {
+			h.logger.Error("add hypothesis comment", zap.Error(err))
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct {
+			Status int
+			Body   *domain.HypothesisComment
+		}{Status: http.StatusCreated, Body: c}, nil
 	})
 }

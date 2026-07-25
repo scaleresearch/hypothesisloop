@@ -4,21 +4,39 @@
 register_agent() {
   local agent="$1"
   curl -sf -X POST "$QUOTA_URL/agents" -H 'Content-Type: application/json' \
-    -d "{\"id\":\"$agent\",\"name\":\"$agent\"}" > /dev/null 2>&1 || true
+    -d "{\"id\":\"$agent\",\"name\":\"$agent\"}" > /dev/null
 }
 
-# create_platform_experiment NAME BUDGET MAX_AGENTS [PHASE2_BOUNDARY] [REPORT_INTERVAL_SECONDS]
-#                            [BUDGET_CPU_CORE_HOURS] -> prints PE_ID
+# create_platform_experiment NAME BUDGET MAX_AGENTS [REPORT_INTERVAL_SECONDS]
+#                            [BUDGET_CPU_CORE_HOURS] [METRICS_JSON] -> prints PE_ID
+# Phase-2 boundary is a global controller config (controlplane/shared/config Phase2.BoundaryFraction),
+# not a per-request field, so there's no phase2 positional here at all. starts_at/ends_at are
+# required by the Huma schema but the zero value is treated downstream as "start
+# immediately"/"never expires".
+#
+# METRICS_JSON must name metrics the scenario's workload actually emits — a declared metric
+# nobody pushes yields no admission data, and a metric the workload pushes but nobody declares
+# is never ranked on. It defaults to val_accuracy, which is what tests/workloads/generic/train.py
+# emits (HYPOTHESISLOOP_PRIMARY_METRIC). Hardware-benchmark workloads emit their own names and
+# must pass this explicitly — see tests/scenarios/tenstorrent-hardware.sh.
 create_platform_experiment() {
-  local name="$1" budget="$2" max_agents="$3" phase2="${4:-0.90}" report_interval="${5:-10}" budget_cpu="${6:-0}"
+  local name="$1" budget="$2" max_agents="$3" report_interval="${4:-10}" budget_cpu="${5:-0}"
+  # Assigned in two steps, not via ${6:-<json>}: a literal '}' inside a default-value expansion
+  # terminates the expansion early, silently corrupting the JSON. The empty default here is safe
+  # for exactly that reason (no '}' in it) and is required — under `set -u` a bare "$6" aborts
+  # the whole scenario for every caller that omits the argument.
+  local metrics="${6-}"
+  [[ -z "$metrics" ]] && metrics='[{"key": "val_accuracy", "direction": "maximize"}]'
   curl -sf -X POST "$QUOTA_URL/platform-experiments" -H 'Content-Type: application/json' -d "{
     \"name\": \"$name\",
+    \"description\": \"$name\",
     \"budget_accelerator_hours\": $budget,
     \"budget_cpu_core_hours\": $budget_cpu,
     \"max_agents\": $max_agents,
-    \"metrics\": [{\"key\": \"val_accuracy\", \"direction\": \"maximize\"}],
-    \"phase2_boundary\": $phase2,
-    \"report_interval_seconds\": $report_interval
+    \"metrics\": $metrics,
+    \"report_interval_seconds\": $report_interval,
+    \"starts_at\": \"0001-01-01T00:00:00Z\",
+    \"ends_at\": \"0001-01-01T00:00:00Z\"
   }" | py "import sys,json; print(json.load(sys.stdin)['id'])"
 }
 
@@ -33,8 +51,14 @@ signup_and_start() {
   curl -sf -X POST "$QUOTA_URL/platform-experiments/${pe_id}/start" > /dev/null
 }
 
+# close_platform_experiment PE_ID -> closes with no final results to report (top_results: [])
 close_platform_experiment() {
-  curl -sf -X POST "$QUOTA_URL/platform-experiments/$1/close" > /dev/null 2>&1 || true
+  curl -sf -X POST "$QUOTA_URL/platform-experiments/$1/close" -H 'Content-Type: application/json' \
+    -d '{"top_results":[]}' > /dev/null
+}
+
+cancel_job() {
+  curl -sf -X POST "$SCHED_URL/experiments/$1/cancel" > /dev/null
 }
 
 # register_hypothesis AGENT PE_ID [TEXT] -> prints hypothesis id
@@ -58,7 +82,7 @@ submit_job() {
 #                [PROJECT_ID] [THEORY] [OBJECTIVE] [HYP_TEXT] [JOB_OVERRIDE_JSON]
 #                -> prints job id on stdout
 # Full-control variant used by scenarios that need to inject env vars (e.g. the robotics
-# workload's OPENRESEARCH_LEARNING_RATE), a custom hypothesis/theory, or override raw job
+# workload's HYPOTHESISLOOP_LEARNING_RATE), a custom hypothesis/theory, or override raw job
 # fields (cpu/storage/accelerator_count/... — see mk_body.py's JOB_OVERRIDE_JSON doc) without hand-
 # rolling their own JSON body.
 submit_job_ext() {
@@ -68,30 +92,27 @@ submit_job_ext() {
         job_override_json="${14:-}"
   local job_id body
   job_id=$(_mk_job_id)
-  body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$job_file" "$tier" \
-    "$accelerator_type" "$accelerator_count" "$num_nodes" "$env_json" "$project_id" "$theory" "$objective" "$hyp_text" "$job_override_json")
-  # Check explicitly: bash only honors -e for a command substitution's own last command, so a
-  # failed curl here would not trip `set -e` on the caller's `X=$(submit_job ...)` — it would
-  # silently hand back a job ID that was never created. Retry only transport-level failures
-  # (connection refused/reset/timeout under bursty concurrent-scenario load) — curl exit code
-  # 0 with a 4xx/5xx is a real, meaningful admission rejection and must fail immediately, not
-  # get masked by retrying into the same rejection a few seconds later.
-  local i curl_rc http_code resp
-  resp="/tmp/submit_job_ext.$$.json"
-  for i in 1 2 3; do
-    http_code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$SCHED_URL/experiments" -H 'Content-Type: application/json' -d "$body")
-    curl_rc=$?
-    if [[ "$curl_rc" == 0 && "$http_code" -lt 400 ]]; then rm -f "$resp"; echo "$job_id"; return 0; fi
-    # Distinguish a real HTTP-level rejection (4xx/5xx, curl itself succeeded) from a transport
-    # failure (curl_rc!=0: connection refused/reset/timeout under bursty concurrent-scenario
-    # load) — only the latter is worth retrying; retrying an admission rejection just wastes
-    # time reproducing the same rejection.
-    [[ "$curl_rc" == 0 ]] && break
-    sleep "$i"
-  done
-  echo "submit_job: POST /experiments failed for $job_id (agent=$agent tier=$tier, curl_rc=$curl_rc http_code=$http_code body=$(cat "$resp" 2>/dev/null))" >&2
+  if ! body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$job_file" "$tier" \
+    "$accelerator_type" "$accelerator_count" "$num_nodes" "$env_json" "$project_id" "$theory" "$objective" "$hyp_text" "$job_override_json"); then
+    echo "submit_job: failed to build request body for $job_id (agent=$agent tier=$tier)" >&2
+    return 1
+  fi
+  # One request, one result. A transport or HTTP failure is the test failure; retrying would
+  # hide an unreliable control plane and make concurrent tests nondeterministic.
+  local http_code resp
+  resp=$(mktemp)
+  if ! http_code=$(curl -sS -o "$resp" -w '%{http_code}' -X POST "$SCHED_URL/experiments" -H 'Content-Type: application/json' -d "$body"); then
+    echo "submit_job: POST /experiments transport failure for $job_id (agent=$agent tier=$tier)" >&2
+    rm -f "$resp"
+    return 1
+  fi
+  if [[ "$http_code" -ge 400 ]]; then
+    echo "submit_job: POST /experiments failed for $job_id (agent=$agent tier=$tier, http_code=$http_code body=$(<"$resp"))" >&2
+    rm -f "$resp"
+    return 1
+  fi
   rm -f "$resp"
-  return 1
+  echo "$job_id"
 }
 
 _mk_job_id() { echo "job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN_ID}"; }
@@ -115,15 +136,18 @@ submit_job_expect_code() {
   local pe_id="$1" agent="$2" tier="$3" hours="$4" job_override_json="${5:-}" job_file="${6:-$JOB_FILE}"
   local job_id body code resp
   job_id=$(_mk_job_id)
-  body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$job_file" "$tier" "" "" "" "" "" "" "" "" "$job_override_json")
+  if ! body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$job_file" "$tier" "" "" "" "" "" "" "" "" "$job_override_json"); then
+    echo "submit_job_expect_code: failed to build request body for $job_id (agent=$agent tier=$tier)" >&2
+    return 1
+  fi
   resp="/tmp/submit_job_expect_code.$$.json"
   code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$SCHED_URL/experiments" -H 'Content-Type: application/json' -d "$body")
   rm -f "$resp"
   echo "$code $job_id"
 }
 
-get_status() { curl -sf "$SCHED_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin).get('status','UNKNOWN'))" 2>/dev/null || echo UNKNOWN; }
-get_field()  { curl -sf "$SCHED_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || echo ""; }
+get_status() { curl -sf "$SCHED_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin)['status'])"; }
+get_field()  { curl -sf "$SCHED_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin).get('$2',''))"; }
 
 # wait_for_status ID WANT_COMMA_LIST [TRIES] -> prints final status, returns 1 on timeout
 wait_for_status() {
@@ -132,10 +156,32 @@ wait_for_status() {
   for ((i = 1; i <= tries; i++)); do
     s=$(get_status "$id")
     if [[ ",$want," == *",$s,"* ]]; then echo "$s"; return 0; fi
-    sleep 1
+    [[ "$i" -lt "$tries" ]] && sleep 1
   done
   echo "$(get_status "$id")"
   return 1
+}
+
+# completion_wait_tries JOB_HOURS [MARGIN_SECONDS] -> prints a completion-wait budget (secs)
+# sized from the job's own known duration, not a hand-tuned absolute constant. Use this only for
+# a wait started right when the job is already confirmed RUNNING (fresh timestamp), never from
+# submission time, or the queueing delay it isn't meant to cover leaks back in.
+completion_wait_tries() {
+  local job_hours="$1" margin="${2:-25}"
+  py "import math; print(math.ceil(float('$job_hours') * 3600) + $margin)"
+}
+
+# wait_for_completion_after_running ID JOB_HOURS ADMISSION_BUDGET [MARGIN_SECONDS]
+#   -> prints final status, returns 1 on timeout (same convention as wait_for_status)
+# Two-phase wait: admission (unpredictable queueing/scheduling delay, bounded by
+# ADMISSION_BUDGET, generous and not per-scenario-tuned) then completion (the job's own known
+# duration + a small fixed margin, timed fresh from confirmed RUNNING rather than submission).
+wait_for_completion_after_running() {
+  local id="$1" job_hours="$2" admission_budget="$3" margin="${4:-25}"
+  local s rc=0
+  s=$(wait_for_status "$id" "RUNNING,COMPLETED,FAILED,EVICTED" "$admission_budget") || rc=$?
+  [[ "$s" != "RUNNING" ]] && { echo "$s"; return "$rc"; }
+  wait_for_status "$id" "COMPLETED,FAILED,EVICTED" "$(completion_wait_tries "$job_hours" "$margin")"
 }
 
 # assert_stable_status ID ALLOWED_COMMA_LIST DURATION_SECS DESC -> polls every second for the
@@ -162,7 +208,7 @@ quota_snapshot() {
 import sys, json
 for q in json.load(sys.stdin):
     print(f\"    {q['agent_id']}: guaranteed={q.get('guaranteed_accelerator_hours',0):.4f} burst={q.get('burst_accelerator_hours',0):.4f}\")
-" 2>/dev/null || true
+"
 }
 
 quota_used_guaranteed() { _quota_field "$1" "$2" used_guaranteed_acch; }
@@ -183,17 +229,12 @@ for q in json.load(sys.stdin):
 # are exempt) — scenarios that submit >1 job for the same agent+PE must call this after any
 # job they wait to COMPLETED, or the next submit_job for that agent+PE gets 403 summary_required.
 file_finding() {
-  local job_id="$1" summary="${2:-e2e scenario finding for $1}" i
-  for i in 1 2 3; do
-    curl -sf -X POST "$SCHED_URL/experiments/${job_id}/summary" -H 'Content-Type: application/json' \
-      -d "{\"summary\": \"$summary\"}" > /dev/null 2>&1 && return 0
-    sleep 1
-  done
-  echo "file_finding: POST .../summary failed for $job_id after 3 attempts — next submission from its agent will 403" >&2
-  return 1
+  local job_id="$1" summary="${2:-e2e scenario finding for $1}"
+  curl -sf -X POST "$SCHED_URL/experiments/${job_id}/summary" -H 'Content-Type: application/json' \
+    -d "{\"summary\": \"$summary\"}" > /dev/null
 }
 
 dashboard_metrics() {
   # Exercises the same endpoint controlplane/ui's fetchExperimentMetrics calls.
-  curl -sf "${REGISTRY_URL}/registry/experiments/$1/metrics" 2>/dev/null || echo "[]"
+  curl -sf "${REGISTRY_URL}/registry/experiments/$1/metrics"
 }

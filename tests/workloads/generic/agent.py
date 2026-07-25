@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OpenResearch autonomous research agent.
+HypothesisLoop autonomous research agent.
 
 Uses Claude with tool use to autonomously:
 - Register itself on the platform
@@ -11,15 +11,15 @@ Uses Claude with tool use to autonomously:
 - React to results and decide next steps
 
 Usage:
-  ANTHROPIC_API_KEY=... OPENRESEARCH_AGENT_ID=agent-1 python agent/agent.py
+  ANTHROPIC_API_KEY=... HYPOTHESISLOOP_AGENT_ID=agent-1 python agent/agent.py
 
 Optional env vars:
-  OPENRESEARCH_AGENT_NAME      — display name (default: derived from OPENRESEARCH_AGENT_ID)
-  OPENRESEARCH_QUOTA_URL       — base URL of quota service   (default: http://localhost:8081)
-  OPENRESEARCH_SCHEDULER_URL   — base URL of scheduler       (default: http://localhost:8082)
-  OPENRESEARCH_REGISTRY_URL    — base URL of registry        (default: http://localhost:8083)
-  OPENRESEARCH_PROJECT_ID      — project identifier          (default: openresearch)
-  OPENRESEARCH_MAX_TURNS       — max agent turns before stopping (default: 20)
+  HYPOTHESISLOOP_AGENT_NAME      — display name (default: derived from HYPOTHESISLOOP_AGENT_ID)
+  HYPOTHESISLOOP_QUOTA_URL       — base URL of quota service   (default: http://localhost:8081)
+  HYPOTHESISLOOP_SCHEDULER_URL   — base URL of scheduler       (default: http://localhost:8082)
+  HYPOTHESISLOOP_REGISTRY_URL    — base URL of registry        (default: http://localhost:8083)
+  HYPOTHESISLOOP_PROJECT_ID      — project identifier          (default: hypothesisloop)
+  HYPOTHESISLOOP_MAX_TURNS       — max agent turns before stopping (default: 20)
 """
 
 import os
@@ -38,20 +38,18 @@ import yaml
 
 # Config
 
-AGENT_ID      = os.environ.get("OPENRESEARCH_AGENT_ID", f"agent-{uuid.uuid4().hex[:6]}")
-AGENT_NAME    = os.environ.get("OPENRESEARCH_AGENT_NAME", AGENT_ID.replace("-", " ").title())
-PROJECT_ID    = os.environ.get("OPENRESEARCH_PROJECT_ID", "openresearch")
-MAX_TURNS     = int(os.environ.get("OPENRESEARCH_MAX_TURNS", "20"))
+AGENT_ID      = os.environ.get("HYPOTHESISLOOP_AGENT_ID", f"agent-{uuid.uuid4().hex[:6]}")
+AGENT_NAME    = os.environ.get("HYPOTHESISLOOP_AGENT_NAME", AGENT_ID.replace("-", " ").title())
+PROJECT_ID    = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "hypothesisloop")
+MAX_TURNS     = int(os.environ.get("HYPOTHESISLOOP_MAX_TURNS", "20"))
 
-QUOTA_URL     = os.environ.get("OPENRESEARCH_QUOTA_URL",     "http://localhost:8081").rstrip("/")
-SCHEDULER_URL = os.environ.get("OPENRESEARCH_SCHEDULER_URL", "http://localhost:8082").rstrip("/")
-REGISTRY_URL  = os.environ.get("OPENRESEARCH_REGISTRY_URL",  "http://localhost:8083").rstrip("/")
+QUOTA_URL     = os.environ.get("HYPOTHESISLOOP_QUOTA_URL",     "http://localhost:8081").rstrip("/")
+SCHEDULER_URL = os.environ.get("HYPOTHESISLOOP_SCHEDULER_URL", "http://localhost:8082").rstrip("/")
+REGISTRY_URL  = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL",  "http://localhost:8083").rstrip("/")
 
-# Standalone job definition (domain.JobSpec — the platform's own DSL, never a raw k8s
-# manifest) sitting next to this script. Loaded once as the base for every submission;
-# tool_submit_experiment only overrides the fields the agent actually decides per run
-# (accelerator_type/accelerator_count), same file tests/scenarios/phase2-and-settlement.sh submits verbatim.
-JOB_FILE = Path(os.environ.get("OPENRESEARCH_JOB_FILE", Path(__file__).parent / "job.yaml"))
+# Base job definition (domain.JobSpec DSL); tool_submit_experiment only overrides the
+# accelerator fields decided per run. Same file tests/scenarios/phase2-and-settlement.sh submits verbatim.
+JOB_FILE = Path(os.environ.get("HYPOTHESISLOOP_JOB_FILE", Path(__file__).parent / "job.yaml"))
 
 client = anthropic.Anthropic()
 
@@ -138,13 +136,9 @@ def tool_get_experiment(experiment_id: str) -> dict:
 
 
 def tool_register_hypothesis(platform_experiment_id: str, text: str) -> dict:
-    """Register (or retrieve, if an equivalent one already exists in the same platform
-    experiment) a hypothesis. Returns a hypothesis_id that must be passed to
-    submit_experiment. Hypotheses are scoped to one platform experiment — this is the real
-    uniqueness check: registering text equivalent to an already-registered hypothesis
-    (modulo case/whitespace) *in the same platform experiment* returns the existing
-    hypothesis_id instead of creating a duplicate — use it to check whether your idea has
-    already been claimed before running an experiment."""
+    """Register (or retrieve, if an equivalent one exists in the same platform experiment) a
+    hypothesis. Returns a hypothesis_id for submit_experiment. Text equivalent (modulo
+    case/whitespace) to an existing hypothesis in the same experiment returns that one instead."""
     status, body = _reg_post(
         "/hypotheses",
         {"agent_id": AGENT_ID, "platform_experiment_id": platform_experiment_id, "text": text},
@@ -153,16 +147,13 @@ def tool_register_hypothesis(platform_experiment_id: str, text: str) -> dict:
 
 
 def tool_list_hypotheses(platform_experiment_id: str) -> dict:
-    """List every hypothesis registered so far in a platform experiment, across all agents —
-    check this before registering a new one to see what's already been claimed or tested."""
+    """List every hypothesis registered so far in a platform experiment, across all agents."""
     status, body = _reg_get(f"/hypotheses?platform_experiment_id={platform_experiment_id}")
     return {"status": status, "body": body}
 
 
 def tool_get_hypothesis(hypothesis_id: str) -> dict:
-    """Get a hypothesis, every job (experiment) submitted against it, and every finding
-    (post-run write-up) filed against it so far — read the findings before deciding whether
-    to test this hypothesis again yourself."""
+    """Get a hypothesis, every job submitted against it, and every finding filed against it."""
     status, body = _reg_get(f"/hypotheses/{hypothesis_id}")
     return {"status": status, "body": body}
 
@@ -177,19 +168,15 @@ def tool_submit_experiment(
     estimated_duration_hours: float,
     capacity_tier: str = "guaranteed",
 ) -> dict:
-    """Submit a training job. accelerator type/count go in `job` (the platform's own DSL — never a
-    raw k8s manifest); hypothesis_id/theory/objective/etc go in `metadata`. hypothesis_id
-    must come from register_hypothesis (or list_hypotheses/get_hypothesis) — call that first.
-    estimated_cost_acch is computed by the scheduler from job.accelerator_type/accelerator_count, not sent by
-    the caller."""
+    """Submit a training job. accelerator type/count go in `job`; hypothesis_id/theory/objective
+    go in `metadata`. hypothesis_id must come from register_hypothesis first.
+    estimated_cost_acch is computed by the scheduler, not sent by the caller."""
     exp_id = str(uuid.uuid4())
 
-    # Start from the standalone job definition (image, etc.) and only override what this
-    # particular run actually decided (accelerator_type/accelerator_count) — everything else about how the
-    # job executes stays exactly as declared in job.yaml.
+    # Start from the base job definition, only override what this run decided.
     with open(JOB_FILE) as f:
         job = yaml.safe_load(f)
-    job["accelerator_type"] = accelerator_type
+    job["accelerators"] = [x for x in job.get("accelerators", []) if x.get("type") == accelerator_type]
     job["accelerator_count"] = accelerator_count
 
     payload = {
@@ -199,9 +186,9 @@ def tool_submit_experiment(
             "platform_experiment_id": platform_experiment_id,
             "capacity_tier": capacity_tier,
             "project_id": PROJECT_ID,
-            "code_ref": "git://github.com/antonibertel/openresearch@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "code_ref": "git://github.com/antonibertel/hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "config_hash": f"sha256:{uuid.uuid4().hex}",
-            "data_ref": "s3://openresearch-data/imagenet-mini@latest",
+            "data_ref": "s3://hypothesisloop-data/imagenet-mini@latest",
             "hypothesis_id": hypothesis_id,
             "theory": theory,
             "objective": objective,
@@ -240,7 +227,7 @@ def tool_wait(seconds: int) -> dict:
 TOOLS = [
     {
         "name": "register_agent",
-        "description": "Register this agent on the OpenResearch platform. Call once at startup.",
+        "description": "Register this agent on the HypothesisLoop platform. Call once at startup.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -325,12 +312,8 @@ TOOLS = [
         "name": "register_hypothesis",
         "description": (
             "Register (or retrieve, if an equivalent one already exists in the same platform "
-            "experiment) a scientific hypothesis, scoped to one platform experiment's shared "
-            "idea pool. Returns a hypothesis_id required by submit_experiment. Registering text "
-            "equivalent (modulo case/whitespace) to an already-registered hypothesis in the "
-            "same platform experiment returns the existing hypothesis_id instead of creating a "
-            "duplicate — call this to validate/retrieve a hypothesis before running an "
-            "experiment against it."
+            "experiment) a scientific hypothesis. Returns a hypothesis_id required by "
+            "submit_experiment."
         ),
         "input_schema": {
             "type": "object",
@@ -366,11 +349,8 @@ TOOLS = [
     {
         "name": "submit_experiment",
         "description": (
-            "Submit a training job inside a running platform experiment. "
-            "The agent must be signed up for the platform experiment. "
-            "hypothesis_id must come from register_hypothesis (or list_hypotheses/get_hypothesis) — call that first. "
-            "The job will emit metrics defined in the platform experiment; use get_metrics to observe them. "
-            "estimated_cost_acch is computed by the scheduler as: duration × accelerator_count × accelerator_type_rate. "
+            "Submit a training job inside a running platform experiment (agent must be signed up). "
+            "hypothesis_id must come from register_hypothesis first. Use get_metrics to observe results. "
             "capacity_tier='guaranteed' is high-priority non-preemptable; 'burst' is preemptable but uses separate quota."
         ),
         "input_schema": {
@@ -465,7 +445,7 @@ TOOL_FN = {
 # Agent loop
 
 
-SYSTEM_PROMPT = f"""You are an autonomous ML research agent on the OpenResearch platform.
+SYSTEM_PROMPT = f"""You are an autonomous ML research agent on the HypothesisLoop platform.
 
 Your identity:
   agent_id: {AGENT_ID}
@@ -474,7 +454,7 @@ Your identity:
 
 ## Workflow
 
-The OpenResearch platform organises compute into **Platform Experiments** — operator-created
+The HypothesisLoop platform organises compute into **Platform Experiments** — operator-created
 compute envelopes with a fixed accelerator-hour (AccH), H100-equivalent budget. You must follow this flow:
 
 1. **Register** yourself (ignore 409/500 errors if already registered).
@@ -520,9 +500,9 @@ Be decisive. Make tool calls, reason about results, take the next action. Don't 
 
 
 def run_agent() -> None:
-    print(f"[openresearch-agent] Starting: {AGENT_ID} ({AGENT_NAME})")
-    print(f"[openresearch-agent] Quota: {QUOTA_URL}  Scheduler: {SCHEDULER_URL}  Registry: {REGISTRY_URL}")
-    print(f"[openresearch-agent] Project: {PROJECT_ID}  Max turns: {MAX_TURNS}\n")
+    print(f"[hypothesisloop-agent] Starting: {AGENT_ID} ({AGENT_NAME})")
+    print(f"[hypothesisloop-agent] Quota: {QUOTA_URL}  Scheduler: {SCHEDULER_URL}  Registry: {REGISTRY_URL}")
+    print(f"[hypothesisloop-agent] Project: {PROJECT_ID}  Max turns: {MAX_TURNS}\n")
 
     messages: list[dict] = [
         {"role": "user", "content": (
@@ -561,7 +541,7 @@ def run_agent() -> None:
         messages.append({"role": "assistant", "content": assistant_content})
 
         if not tool_uses:
-            print("\n[openresearch-agent] Agent finished (no more tool calls).")
+            print("\n[hypothesisloop-agent] Agent finished (no more tool calls).")
             break
 
         tool_results: list[dict] = []
@@ -583,7 +563,7 @@ def run_agent() -> None:
         if response.stop_reason == "end_turn" and not tool_uses:
             break
 
-    print(f"\n[openresearch-agent] Session complete after {turn + 1} turns.")
+    print(f"\n[hypothesisloop-agent] Session complete after {turn + 1} turns.")
 
 
 if __name__ == "__main__":

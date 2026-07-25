@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // ErrInvalidMetric is returned by RecordMetric when an ingested sample is malformed or refers

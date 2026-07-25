@@ -1,5 +1,5 @@
 networks:
-  openresearch-net:
+  hypothesisloop-net:
     driver: bridge
 
 volumes:
@@ -11,9 +11,9 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: openresearch
-      POSTGRES_USER: openresearch
-      POSTGRES_PASSWORD: openresearch
+      POSTGRES_DB: hypothesisloop
+      POSTGRES_USER: hypothesisloop
+      POSTGRES_PASSWORD: hypothesisloop
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -21,9 +21,9 @@ services:
     ports:
       - "5433:5432"
     networks:
-      - openresearch-net
+      - hypothesisloop-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U openresearch -d openresearch"]
+      test: ["CMD-SHELL", "pg_isready -U hypothesisloop -d hypothesisloop"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,24 +32,20 @@ services:
   # scheduler already calls straight into the quota package for refunds/adjustments,
   # so they share one Postgres connection pool instead of duplicating it.
   control-service:
-    image: openresearch-control-service:latest
+    image: hypothesisloop-control-service:latest
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://openresearch:openresearch@postgres:5432/openresearch?sslmode=disable
-      QUOTA_PORT: "8081"
-      SCHEDULER_PORT: "8082"
-      CLUSTERS_CONFIG_PATH: /app/settings/clusters.yaml
+      DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       # Scheduler admission (queuebackend.Backend.GetFlavorCapacity) reads live
       # accelerator/RAM/storage capacity straight from the metrics store — without this, every
       # job needing one of those dimensions sees zero capacity and Fits() fails closed forever.
-      GREPTIMEDB_URL: http://greptimedb:4000
     volumes:
-      - ../settings/clusters.yaml:/app/settings/clusters.yaml:ro
+      - ../settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro
     ports:
       - "8081:8081"
       - "8082:8082"
     networks:
-      - openresearch-net
+      - hypothesisloop-net
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,21 +56,17 @@ services:
   # registry writes samples to GreptimeDB and metric-controller reads them back to
   # drive eviction, so they're the write/read halves of the same metrics pipeline.
   metrics-service:
-    image: openresearch-metrics-service:latest
+    image: hypothesisloop-metrics-service:latest
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://openresearch:openresearch@postgres:5432/openresearch?sslmode=disable
-      REGISTRY_PORT: "8083"
-      METRIC_CONTROLLER_PORT: "8084"
-      GREPTIMEDB_URL: http://greptimedb:4000
-      CLUSTERS_CONFIG_PATH: /app/settings/clusters.yaml
+      DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
     volumes:
-      - ../settings/clusters.yaml:/app/settings/clusters.yaml:ro
+      - ../settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro
     ports:
       - "8083:8083"
       - "8084:8084"
     networks:
-      - openresearch-net
+      - hypothesisloop-net
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,6 +92,6 @@ services:
       - "4010:4000" # HTTP / PromQL / remote-write (host port 4000 already used by another service on this host)
       - "4001:4001" # gRPC
     networks:
-      - openresearch-net
+      - hypothesisloop-net
 
   # ui: run separately with `cd ui && npm run dev` (no container Dockerfile yet)

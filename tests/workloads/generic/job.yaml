@@ -1,42 +1,37 @@
-# Standalone job definition for the e2e test workload (tests/workloads/generic/train.py, built as
-# the openresearch-workload image — see Dockerfile.train). This is a domain.JobSpec: the
+# Standalone job definition for the e2e test workload (tests/workloads/generic/train.py, built
+# as the hypothesisloop-workload image — see Dockerfile.train). This is a domain.JobSpec, the
 # platform's own DSL, never a raw Kubernetes manifest (see
 # controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
-# reference, including distributed training). tests/scenarios/phase2-and-settlement.sh reads this file as-is and
-# submits it verbatim as the `job` field of every POST /experiments call — the per-run bits
-# (hypothesis, agent, platform experiment) live in the request's `metadata`, not here,
-# because this file describes how the job runs, which is identical for every agent in the
-# e2e run.
+# reference). tests/scenarios/phase2-and-settlement.sh reads this file as-is and submits it
+# verbatim as the `job` field of every POST /experiments call — per-run bits (hypothesis,
+# agent, platform experiment) live in the request's `metadata`, not here, since this file
+# describes how the job runs, identical for every agent in the e2e run.
 #
 # Kept deliberately plain/single-node: scenarios/phase2-and-settlement.sh sizes its platform-experiment budget
 # assuming exactly 1 accelerator per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
 # here would double the accelerator-hours cost per submission and starve the budget. The
 # distributed-training path (num_nodes, topology, acceptable_accelerator_types) is verified
 # separately via direct API calls, not through this shared smoke-test fixture.
-image: localhost/openresearch-workload:latest
+image: localhost/hypothesisloop-workload:latest
 
-# Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster
-# would leave these unset to pick up its own operator-set defaults instead. cpu is kept
-# well above what the workload actually uses at steady state because a too-tight cpu limit
-# starves the container during its runtime-level startup handshake (a short burst of
-# forks/execs), which can fail the container outright instead of just running it slower —
-# see node-agent-daemonset.yaml's resources comment for the full mechanism.
+# Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster would
+# leave these unset for operator-set defaults. cpu is kept well above steady-state usage
+# because a too-tight limit starves the container during its startup handshake (a burst of
+# forks/execs), failing it outright rather than just slowing it down — see
+# node-agent-daemonset.yaml's resources comment for the full mechanism.
 cpu: "250m"
 memory: "128Mi"
 # storage is now a required explicit request — the control plane rejects submissions with
 # an unset resource request rather than resolving a cluster-side default pre-admission (see
-# SCHEDULING_GENERALIZATION_PLAN.md's "explicit resource requests" cross-cutting fix).
+# admission must know the complete physical footprint before selecting a cluster).
 storage: "512Mi"
+max_retries: 3
 
-accelerator_type: T4
 accelerator_count: 1
-
-# acceptable_accelerator_types: the e2e run tolerates landing on any of these instead of requiring
-# exactly T4 — demonstrates the platform's variability tolerance (see
-# controlplane/settings/examples/experiment-submission.yaml's acceptable_accelerator_types doc). All
-# NVIDIA (same vendor plumbing), so one nodeAffinity OR covers them all. Actually exercised
-# only if the local cluster has nodes of more than one of these types — see
-# localdev/k3s-macos/add-fake-nodes.sh, which labels extra simulated nodes with exactly this spread.
-# The billed rate adjusts to whichever type the job actually lands on; scenarios/phase2-and-settlement.sh's BUDGET
-# is sized for the most expensive of these (A100) so landing on any of them still fits.
-acceptable_accelerator_types: [T4, L40, A100]
+accelerator_type: nvidia.com/gpu.product=NVIDIA-L40
+acceptable_accelerator_types:
+  - nvidia.com/gpu.product=Tesla-T4
+  - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+  - nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+  - nvidia.com/gpu.product=NVIDIA-H200
+accelerator_tolerations: [nvidia.com/gpu]

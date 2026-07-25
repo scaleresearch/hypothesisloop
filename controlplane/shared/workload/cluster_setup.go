@@ -10,55 +10,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var defaultFlavorOrder = []string{"flavor-t4", "flavor-l40", "flavor-a100", "flavor-h100", "flavor-h200"}
-
-var defaultNameByFlavor = map[string]string{
-	"flavor-t4": "T4", "flavor-l40": "L40", "flavor-a100": "A100",
-	"flavor-h100": "H100", "flavor-h200": "H200",
-}
-
-var defaultAcceleratorsByFlavor = map[string]int{
-	"flavor-t4": 64, "flavor-l40": 16, "flavor-a100": 8, "flavor-h100": 4, "flavor-h200": 2,
-}
-
-func (c *JobWorkloadClient) flavorOrder() []string {
-	if c.pcfg != nil {
-		return c.pcfg.FlavorOrder
-	}
-	return defaultFlavorOrder
-}
-
-func (c *JobWorkloadClient) nameByFlavor() map[string]string {
-	if c.pcfg != nil {
-		return c.pcfg.NameByFlavor
-	}
-	return defaultNameByFlavor
-}
-
-func (c *JobWorkloadClient) acceleratorsByFlavor() map[string]int {
-	if c.pcfg != nil {
-		return c.pcfg.AcceleratorsByFlavor
-	}
-	return defaultAcceleratorsByFlavor
-}
-
-// acceleratorNominalCapacity returns the nominal accelerator slot count per flavor from config (or the
-// PoC defaults). This is the only resource dimension the scheduler admits/preempts on —
-// CPU, memory, and storage are not modeled.
-func (c *JobWorkloadClient) acceleratorNominalCapacity() map[string]int64 {
-	accelerators := c.acceleratorsByFlavor()
-	out := make(map[string]int64, len(accelerators))
-	for flavor, count := range accelerators {
-		out[flavor] = int64(count)
-	}
-	return out
-}
-
 // SetupCluster ensures the namespace and the two native PriorityClasses exist. There is no
 // operator to install and no queue/cohort/flavor topology to reconcile — capacity accounting
 // happens in Go (services/scheduler), not as Kubernetes objects.
 func (c *JobWorkloadClient) SetupCluster(ctx context.Context) error {
-	if err := c.ensureNamespace(ctx, OpenResearchNamespace); err != nil {
+	if err := c.ensureNamespace(ctx, HypothesisLoopNamespace); err != nil {
 		return err
 	}
 	return c.ensurePriorityClasses(ctx)
@@ -90,7 +46,7 @@ func (c *JobWorkloadClient) ensurePriorityClasses(ctx context.Context) error {
 			ObjectMeta:    metav1.ObjectMeta{Name: pc.name},
 			Value:         pc.value,
 			GlobalDefault: false,
-			Description:   "OpenResearch capacity tier priority class (managed in-code, not by an operator).",
+			Description:   "HypothesisLoop capacity tier priority class (managed in-code, not by an operator).",
 		}
 		_, err := c.kube.SchedulingV1().PriorityClasses().Create(ctx, obj, metav1.CreateOptions{})
 		if err != nil && !errors.IsAlreadyExists(err) {

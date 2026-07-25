@@ -7,10 +7,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 // applyPhase2Hold stops held agents' jobs, returns their reservations, and redistributes
@@ -24,6 +24,9 @@ func (c *Controller) applyPhase2Hold(ctx context.Context, pe *domain.PlatformExp
 	}
 	if err := metricsdb.PopulateUsage(ctx, c.metricsDBURL, pe.ID, allQuotas); err != nil {
 		c.logger.Error("phase2: populate usage", zap.String("pe", pe.ID), zap.Error(err))
+	}
+	if err := c.phase2Store.AddDesiredQuotaUsage(ctx, pe.ID, allQuotas); err != nil {
+		c.logger.Error("phase2: populate desired usage", zap.String("pe", pe.ID), zap.Error(err))
 	}
 	quotaByAgent := make(map[string]*domain.AgentQuota, len(allQuotas))
 	for _, q := range allQuotas {
@@ -139,7 +142,7 @@ func (c *Controller) stopHeldAgentJobs(ctx context.Context, agentID, platformExp
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionPhase2Hold)).Inc()
 		// Status is already updated above (away from QUEUED/SUBMITTED) — if a Job existed
 		// for this experiment, it disappears on the cluster-agent's next reconcile pass.
-		// Never reached RUNNING (StartedAt nil), so settleAndMark refunds it fully to 0.
+		// Never reached RUNNING; settlement derives zero usage from absent metrics.
 		exp.Status = domain.StatusRejected
 		exp.EvictionReason = string(domain.EvictionPhase2Hold)
 		c.settleAndMark(ctx, exp)

@@ -2,159 +2,86 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// Start runs the scan loop until ctx is cancelled.
+// Start repeatedly derives lifecycle work from PostgreSQL desired state and the latest backend
+// observation. No per-experiment goroutine or transition history survives a pass.
 func (w *JobWatcher) Start(ctx context.Context) {
-	ticker := time.NewTicker(w.scanInterval)
+	if w.pollInterval <= 0 {
+		panic("job_watcher: poll interval must be positive")
+	}
+	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 	for {
+		if err := w.scanAndWatch(ctx); err != nil {
+			w.logger.Error("job_watcher: reconcile", zap.Error(err))
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := w.scanAndWatch(ctx); err != nil {
-				w.logger.Error("job_watcher: scan", zap.Error(err))
-			}
 		}
 	}
 }
 
-// scanAndWatch finds experiments in SUBMITTED, ADMITTED, or RUNNING state without an active
-// watch goroutine and starts one for each. RUNNING must be included here — otherwise a
-// control-service restart permanently loses the watch for any job already running at the
-// time of restart, and its eventual SUCCEEDED/FAILED report is never converted into terminal
-// experiment state or quota settlement.
+// scanAndWatch is retained as the package's reconciliation entry point. Each call is a complete
+// stateless pass over every desired-running experiment.
 func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
-	submitted, err := w.store.ListExperimentsWithStatus(ctx, domain.StatusSubmitted)
-	if err != nil {
-		return err
+	statuses := []domain.ExperimentStatus{
+		domain.StatusSubmitted,
+		domain.StatusAdmitted,
+		domain.StatusRunning,
 	}
-	admitted, err := w.store.ListExperimentsWithStatus(ctx, domain.StatusAdmitted)
-	if err != nil {
-		return err
-	}
-	running, err := w.store.ListExperimentsWithStatus(ctx, domain.StatusRunning)
-	if err != nil {
-		return err
-	}
-	for _, exp := range append(append(submitted, admitted...), running...) {
-		w.mu.Lock()
-		_, already := w.watched[exp.ID]
-		w.mu.Unlock()
-		if already {
-			continue
+	for _, status := range statuses {
+		exps, err := w.store.ListExperimentsWithStatus(ctx, status)
+		if err != nil {
+			return err
 		}
-		watchCtx, cancel := context.WithCancel(ctx)
-		w.mu.Lock()
-		w.watched[exp.ID] = cancel
-		w.mu.Unlock()
-		go w.watchOne(watchCtx, exp)
+		for _, exp := range exps {
+			if err := w.reconcileOne(ctx, exp); err != nil {
+				return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
+			}
+		}
 	}
 	return nil
 }
 
-// watchOne polls the backend workload for a single experiment until it reaches a terminal phase
-// or the context is cancelled (e.g. the experiment was evicted by the controller).
-func (w *JobWatcher) watchOne(ctx context.Context, exp *domain.Experiment) {
-	defer func() {
-		w.mu.Lock()
-		delete(w.watched, exp.ID)
-		w.mu.Unlock()
-	}()
-
-	var startedAt time.Time
-	var admittedType domain.AcceleratorType
-	transitionedToRunning := false
-
-	// A restart-recovered watch for an already-RUNNING experiment must not repeat onRunning's
-	// side effects (accelerator-type recording, flavor-substitution billing) — seed the local
-	// state from the durable started_at column instead of assuming this is a fresh admission.
-	if exp.Status == domain.StatusRunning && exp.StartedAt != nil {
-		transitionedToRunning = true
-		startedAt = *exp.StartedAt
-		admittedType = exp.AcceleratorType
+func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) error {
+	if exp.Status != domain.StatusRunning && w.stuckPendingTimeout > 0 && exp.SubmittedAt != nil &&
+		time.Since(*exp.SubmittedAt) > w.stuckPendingTimeout {
+		w.onStuckPending(ctx, exp)
+		return nil
 	}
 
-	ticker := time.NewTicker(w.pollInterval)
-	defer ticker.Stop()
+	phase, err := w.backend.PollJobPhase(ctx, exp)
+	if err != nil {
+		return fmt.Errorf("poll actual phase: %w", err)
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if !transitionedToRunning && w.stuckPendingTimeout > 0 && exp.SubmittedAt != nil &&
-				time.Since(*exp.SubmittedAt) > w.stuckPendingTimeout {
-				w.onStuckPending(ctx, exp)
-				return
-			}
-
-			phase, err := w.backend.PollJobPhase(ctx, exp)
-			if err != nil {
-				w.logger.Warn("job_watcher: poll", zap.String("id", exp.ID), zap.Error(err))
-				continue
-			}
-
-			switch phase {
-			case workload.JobPhaseGone:
-				// Job was deleted externally — controller already updated DB status.
-				return
-
-			case workload.JobPhaseRunning:
-				if !transitionedToRunning {
-					var started bool
-					admittedType, started = w.onRunning(ctx, exp)
-					if !started {
-						// Experiment already left SUBMITTED/ADMITTED (cancelled/evicted
-						// concurrently) — nothing more for this watcher to do.
-						return
-					}
-					transitionedToRunning = true
-					startedAt = time.Now().UTC()
-				} else if w.metricsDBURL != "" {
-					// Re-query and re-emit the accelerator-type marker on every poll tick, not
-					// just once at admission. Two independent reasons:
-					//   1. A once-per-admission write is a single-sample series, and observed
-					//      behavior against GreptimeDB is that sparse single-sample series can
-					//      sit invisible to range queries for much longer than dense,
-					//      continuously-appended ones (the heartbeat series never shows this
-					//      lag) — the same eventual-consistency risk RecordObservation avoids by
-					//      construction. A periodic re-emit makes the type series behave like the
-					//      heartbeat series: multiple recent samples, so onFinished's query only
-					//      needs any one of them to have landed.
-					//   2. It also closes the gap where a job is rescheduled onto different
-					//      hardware within the same watch goroutine (no fresh onRunning call, so
-					//      no fresh admission event): re-querying GetAdmittedAcceleratorType here, not
-					//      just re-stamping the cached value from admission, picks up a live type
-					//      change. This is cheap for the real backend (queuebackend.Backend reads
-					//      a stored JobReport, not a k8s API call) and a harmless no-op for the
-					//      raw k8s client, which always reports exp.AcceleratorType.
-					if t := w.backend.GetAdmittedAcceleratorType(ctx, exp); t != "" {
-						admittedType = t
-					}
-					if admittedType != "" {
-						if err := metricsdb.RecordAcceleratorType(ctx, w.metricsDBURL, exp.ID, string(admittedType), time.Now().UTC()); err != nil {
-							w.logger.Warn("job_watcher: re-record accelerator type", zap.String("id", exp.ID), zap.Error(err))
-						}
-					}
-				}
-
-			case workload.JobPhaseSucceeded:
-				w.onFinished(ctx, exp, true, startedAt)
-				return
-
-			case workload.JobPhaseFailed:
-				w.onFinished(ctx, exp, false, startedAt)
-				return
-			}
+	switch phase {
+	case workload.JobPhaseGone, workload.JobPhasePending:
+		// Desired state remains authoritative. The cluster agent independently retries creation;
+		// an admission that never becomes Running is bounded by stuckPendingTimeout above.
+		return nil
+	case workload.JobPhaseRunning:
+		if exp.Status != domain.StatusRunning {
+			w.onRunning(ctx, exp)
+			return nil
 		}
+		// The cluster agent continuously writes actual accelerator type into the metrics store.
+	case workload.JobPhaseSucceeded:
+		return w.onFinished(ctx, exp, true)
+	case workload.JobPhaseFailed:
+		return w.onFinished(ctx, exp, false)
+	default:
+		return fmt.Errorf("unknown actual phase %q", phase)
 	}
+	return nil
 }

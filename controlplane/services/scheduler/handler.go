@@ -8,8 +8,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Handler wires the Scheduler Service to HTTP endpoints. Routes are registered
@@ -50,8 +50,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
 		Description: "Submit {id, metadata, job}. AcceleratorType/count are derived from the job spec. " +
-			"Rejections return {reason,message}; a job that fits no node QUEUES FOREVER instead of erroring — " +
-			"poll GET /experiments/{id} and check not_admitted_reason.",
+			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits.",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
 		req := in.Body
 		if req.ID == "" {
@@ -72,7 +71,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Hypothesis:             meta.Hypothesis,
 			Objective:              meta.Objective,
 			Theory:                 meta.Theory,
-			AcceleratorType:        req.Job.AcceleratorType,
+			AcceleratorType:        primaryAcceleratorType(req.Job),
 			AcceleratorCount:       req.Job.TotalAccelerators(),
 			EstimatedDurationHours: meta.EstimatedDurationHours,
 			CapacityTier:           meta.CapacityTier,
@@ -107,8 +106,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
-		Description: "status flows SUBMITTED -> QUEUED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED. " +
-			"If stuck QUEUED, not_admitted_reason (e.g. capacity_unavailable) explains why.",
+		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.Experiment }, error) {
@@ -214,6 +212,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	})
 }
 
+func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
+	return job.AcceleratorType
+}
+
 // admissionStatusError maps an AdmissionError to a huma error with the historical
 // status codes ({"error":...} envelope, matching the pre-Huma cancel/summary handlers).
 func admissionStatusError(err error) huma.StatusError {
@@ -237,17 +239,6 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	if clusterName == "" {
 		return nil, huma.Error400BadRequest("cluster_name is required")
 	}
-	valid := false
-	for _, c := range h.svc.workload.ClusterNames() {
-		if c == clusterName {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return nil, huma.Error400BadRequest("cluster_name is not a configured cluster")
-	}
-
 	exp, err := h.svc.store.GetExperiment(ctx, id)
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
@@ -259,37 +250,51 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
 	}
 
-	gAvail, _, err := h.svc.workload.GetFlavorCapacity(ctx)
-	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
-	}
 	fp := exp.Footprint()
-	avail, ok := gAvail[clusterName]
-	if !ok {
-		return nil, huma.Error400BadRequest("cluster_name is not a configured cluster")
-	}
-	pendingByCluster, err := h.svc.store.ListPendingReservationsByCluster(ctx)
+	clusterActive := false
+	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+		gAvail, _, err := h.svc.workload.GetFlavorCapacity(ctx)
+		if err != nil {
+			return false, err
+		}
+		avail, ok := gAvail[clusterName]
+		clusterActive = ok
+		if !ok || !domain.Fits(avail, fp) {
+			return false, nil
+		}
+		nodeAvail, err := h.svc.workload.GetAcceleratorCapacityByNode(ctx)
+		if err != nil {
+			return false, err
+		}
+		nodeLabels, err := h.svc.workload.GetNodeLabels(ctx)
+		if err != nil {
+			return false, err
+		}
+		return desiredPlacementFits(nodeAvail[clusterName], nodeLabels[clusterName], desired, exp), nil
+	})
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
-	subtractFootprint(avail, pendingByCluster[clusterName])
-	if !domain.Fits(avail, fp) {
+	if !claimed {
+		if !clusterActive {
+			return nil, huma.Error400BadRequest("cluster is not active")
+		}
+		current, err := h.svc.store.GetExperiment(ctx, id)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if current == nil || current.Status != domain.StatusQueued {
+			return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
+		}
 		return nil, huma.Error422UnprocessableEntity("insufficient capacity on requested cluster")
-	}
-
-	if err := h.svc.store.MarkSubmitted(ctx, id, clusterName); err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	exp.Status = domain.StatusSubmitted
 	exp.ClusterName = clusterName
 	exp.UpdatedAt = time.Now().UTC()
-	if err := h.svc.store.UpsertPendingReservation(ctx, id, clusterName, fp); err != nil {
-		_ = h.svc.store.UpdateExperimentStatus(ctx, id, domain.StatusQueued)
-		return nil, huma.Error500InternalServerError("reservation failed: " + err.Error())
-	}
 	if err := h.svc.workload.CreateWorkload(ctx, exp); err != nil {
-		_ = h.svc.store.UpdateExperimentStatus(ctx, id, domain.StatusQueued)
-		_ = h.svc.store.DeletePendingReservation(ctx, id)
+		if rollbackErr := h.svc.store.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation); rollbackErr != nil {
+			return nil, huma.Error500InternalServerError("workload creation failed and admission rollback failed: " + rollbackErr.Error())
+		}
 		return nil, huma.Error500InternalServerError("workload creation failed: " + err.Error())
 	}
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil

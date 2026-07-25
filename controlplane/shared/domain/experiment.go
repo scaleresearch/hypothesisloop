@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"math"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -14,36 +13,31 @@ type Experiment struct {
 	AgentID              string  `json:"agent_id"`
 	PlatformExperimentID string  `json:"platform_experiment_id"`
 	ProjectID            string  `json:"project_id"`
-	// ClusterName is the target execution cluster this experiment is (or will be) admitted
-	// onto (a Kubernetes cluster today, but domain has no dependency on that — it's whatever
-	// unit the configured workload.Backend groups capacity by). Empty means "not yet
-	// assigned" (pre-admission) or "default" for old rows / single-cluster deployments.
+	// ClusterName is the target execution cluster this experiment is (or will be) admitted onto
+	// (a k8s cluster today, but domain has no dependency on that). Empty means "not yet
+	// assigned" or "default" for old rows / single-cluster deployments.
 	ClusterName string `json:"cluster_name,omitempty"`
 	CodeRef     string `json:"code_ref"`
 	ConfigHash  string `json:"config_hash"`
 	DataRef     string `json:"data_ref"`
 	// Job is the agent's execution definition in the platform's own DSL — never a raw
-	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the billing/
-	// admission-facing totals derived from it once at submission time (Job.AcceleratorCount is
-	// per node; AcceleratorType/AcceleratorCount here are cached for cheap reads by scheduler/quota code
-	// that doesn't need the rest of the job definition).
+	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the
+	// billing/admission-facing canonical values derived from it once at submission time.
 	Job JobSpec `json:"job"`
-	// HypothesisID references a row registered via POST /registry/hypotheses. Required:
-	// every experiment must test a specific, previously-registered hypothesis rather than
-	// restating free text ad hoc — see Hypothesis doc.
+	// HypothesisID references a row registered via POST /registry/hypotheses. Required: every
+	// experiment must test a specific, previously-registered hypothesis, not free text ad hoc.
 	HypothesisID string `json:"hypothesis_id"`
 	Hypothesis   string `json:"hypothesis"`
 	Objective    string `json:"objective"`
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
-	Theory                 string  `json:"theory,omitempty"`
-	AcceleratorType                AcceleratorType `json:"accelerator_type"`
-	AcceleratorCount               int     `json:"accelerator_count"`
-	EstimatedDurationHours float64 `json:"estimated_duration_hours"`
-	EstimatedCostAccH       float64 `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
+	Theory                 string          `json:"theory,omitempty"`
+	AcceleratorType        AcceleratorType `json:"accelerator_type"`
+	AcceleratorCount       int             `json:"accelerator_count"`
+	EstimatedDurationHours float64         `json:"estimated_duration_hours"`
+	EstimatedCostAccH      float64         `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
 	// EstimatedCPUCoreHours/EstimatedRAMGBHours/EstimatedStorageGBHours mirror EstimatedCostAccH
-	// for the 3 additional resource dimensions — zero when the platform experiment doesn't
-	// track that dimension (see PlatformExperiment.BudgetCPUCoreHours etc).
+	// for the 3 additional dimensions — zero when the platform experiment doesn't track it.
 	EstimatedCPUCoreHours   float64          `json:"estimated_cpu_core_hours,omitempty"`
 	EstimatedRAMGBHours     float64          `json:"estimated_ram_gb_hours,omitempty"`
 	EstimatedStorageGBHours float64          `json:"estimated_storage_gb_hours,omitempty"`
@@ -53,58 +47,22 @@ type Experiment struct {
 	Status                  ExperimentStatus `json:"status"`
 	QueuedAt                *time.Time       `json:"queued_at,omitempty"`
 	SubmittedAt             *time.Time       `json:"submitted_at,omitempty"`
-	StartedAt               *time.Time       `json:"started_at,omitempty"`
-	PreemptCount            int              `json:"preempt_count"`
-	// Attempt counts distinct Job creations for this experiment: starts at 1, and is bumped
-	// by the control plane whenever a cluster-agent reports the Job gone while this
-	// experiment is still desired-running — see ClusterQueueStore.BumpAttemptOnRecreate.
-	Attempt        int    `json:"attempt"`
-	EvictionReason string `json:"eviction_reason,omitempty"`
-	// NotAdmittedReason explains why a QUEUED job wasn't admitted on its most recent skipped
-	// tick (see NotAdmittedCapacityUnavailable etc.) — stale/meaningless once the job leaves
-	// QUEUED. Pre-admission counterpart to EvictionReason.
-	NotAdmittedReason    string   `json:"not_admitted_reason,omitempty"`
-	ActualDurationHours  *float64 `json:"actual_duration_hours,omitempty"`
-	ActualCostAccH        *float64 `json:"actual_cost_acch,omitempty"`
-	ActualCPUCoreHours   *float64 `json:"actual_cpu_core_hours,omitempty"`
-	ActualRAMGBHours     *float64 `json:"actual_ram_gb_hours,omitempty"`
-	ActualStorageGBHours *float64 `json:"actual_storage_gb_hours,omitempty"`
-	Artifacts            []string `json:"artifacts"`
-	// QuotaSettledAt is set once this (terminal) experiment's final observed usage has been
-	// durably written to the metrics DB. nil means settlement is still pending/outstanding —
-	// the sole signal a background reconciler needs to retry it after a crash or a metrics-DB
-	// outage. Meaningless (left nil) for non-terminal experiments.
+	EvictionReason          string           `json:"eviction_reason,omitempty"`
+	// NotAdmittedReason is the scheduler's current decision explaining why a QUEUED job was
+	// skipped. Overwritten each decision and cleared on admission; not tick history.
+	NotAdmittedReason string   `json:"not_admitted_reason,omitempty"`
+	Artifacts         []string `json:"artifacts"`
+	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
+	// written to the metrics DB. nil means settlement is pending — the signal a background
+	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
-// ElapsedHours returns hours since StartedAt, or 0 if not started.
-func (e *Experiment) ElapsedHours() float64 {
-	if e.StartedAt == nil {
-		return 0
-	}
-	return time.Since(*e.StartedAt).Hours()
-}
-
-// CompletionFraction returns elapsed/estimated clamped to [0,1].
-func (e *Experiment) CompletionFraction() float64 {
-	if e.EstimatedDurationHours <= 0 {
-		return 0
-	}
-	f := e.ElapsedHours() / e.EstimatedDurationHours
-	return math.Max(0, math.Min(1, f))
-}
-
-// RemainingEstimatedHours returns the estimated hours still to run, floored at MinRemainingHours.
-func (e *Experiment) RemainingEstimatedHours() float64 {
-	r := e.EstimatedDurationHours - e.ElapsedHours()
-	return math.Max(MinRemainingHours, r)
-}
-
-// RequestedCPUCores returns the CPU cores this experiment requests, derived from
-// estimated_cpu_core_hours / estimated_duration_hours. Zero for accelerator jobs or when duration is
-// unset. Used by the admission loop's live CPU-capacity check for CPU-only jobs.
+// RequestedCPUCores returns CPU cores requested, derived from estimated_cpu_core_hours /
+// estimated_duration_hours. Zero for accelerator jobs or unset duration. Used by the admission
+// loop's live CPU-capacity check.
 func (e *Experiment) RequestedCPUCores() float64 {
 	if e.EstimatedDurationHours <= 0 {
 		return 0
@@ -113,24 +71,21 @@ func (e *Experiment) RequestedCPUCores() float64 {
 }
 
 // Footprint returns e's physical resource footprint in canonical units, across every dimension
-// that now has real live per-cluster capacity reporting: CPU (millicores), memory/storage
-// (bytes) — read straight from e.Job's own quantity strings (the canonical source of truth,
-// not a second derived representation — see the plan's "no request columns" correction) and
-// scaled by e.Job.Nodes() — plus its accelerator, if any (whole units, keyed by
-// AcceleratorType.FlavorName() to match capacity's own key convention).
+// with live per-cluster capacity reporting: CPU (millicores), memory/storage (bytes) — read
+// straight from e.Job's own quantity strings, scaled by e.Job.Nodes() — plus its accelerator, if
+// any, keyed by the accelerator type string itself — the same driver-published "key=value" the
+// agent submitted and that capacity reports, so the two sides join with no translation step.
 //
-// The accelerator dimension deliberately uses e.AcceleratorType/e.AcceleratorCount (the experiment's own
-// top-level, admission-facing fields), not e.Job.AcceleratorType/e.Job.AcceleratorCount (the originally
-// *requested* type before any substitution): once a job actually lands on a different
-// AcceptableAcceleratorTypes flavor than requested, UpdateAdmittedFlavor rewrites e.AcceleratorType to the
-// flavor it actually holds, and e.AcceleratorCount is already the job's TOTAL footprint (per-node
-// AcceleratorCount x NumNodes, set once at submission — see JobSpec.TotalAccelerators) — so this always reports
-// which capacity a RUNNING job is really holding, not what it originally asked for.
+// The accelerator dimension deliberately uses e.AcceleratorType/e.AcceleratorCount, not
+// e.Job.AcceleratorType/e.Job.AcceleratorCount (the originally requested type before
+// substitution): once a job lands on a different AcceptableAcceleratorTypes flavor than
+// requested, admission rewrites e.AcceleratorType to the flavor it actually holds, and
+// e.AcceleratorCount is already the job's TOTAL footprint (see JobSpec.TotalAccelerators) — so
+// this always reports what a RUNNING job really holds, not what it originally asked for.
 //
 // A malformed CPU/memory/storage quantity string should never reach this point (ValidateExperiment
-// requires and parses all three at submission) — if one somehow does, that dimension is simply
-// omitted here rather than erroring, since every caller of Footprint() treats it as an
-// unconditional value, not (Footprint, error).
+// parses all three at submission); if one does, that dimension is simply omitted rather than
+// erroring, since every caller treats Footprint() as unconditional (not (Footprint, error)).
 func (e *Experiment) Footprint() Footprint {
 	fp := NewFootprint()
 	if e.Job.CPU != "" {
@@ -154,8 +109,8 @@ func (e *Experiment) Footprint() Footprint {
 		}
 	}
 	fp = fp.Scale(int64(e.Job.Nodes()))
-	if e.AcceleratorCount > 0 {
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: e.AcceleratorType.FlavorName()}, int64(e.AcceleratorCount))
+	if e.AcceleratorCount > 0 && e.AcceleratorType != "" {
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: string(e.AcceleratorType)}, int64(e.AcceleratorCount))
 	}
 	return fp
 }

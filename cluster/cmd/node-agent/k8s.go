@@ -26,7 +26,7 @@ func inClusterPodLister() (kubernetes.Interface, error) {
 }
 
 // podExperimentIDs lists every pod on this node in the experiment-jobs namespace and returns
-// pod UID -> openresearch.io/experiment-id label value, for pods that have it set. Identity
+// pod UID -> hypothesisloop.io/experiment-id label value, for pods that have it set. Identity
 // comes from this label, set once by the control plane at pod creation
 // (workload_client.go) — never inferred from anything the pod itself reports, so it can't be
 // spoofed or drift out of sync with what actually admitted the job.

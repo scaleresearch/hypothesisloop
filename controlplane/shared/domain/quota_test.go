@@ -3,8 +3,8 @@ package domain
 import "testing"
 
 func TestDominantUtilizationExcludesUntrackedDimensions(t *testing.T) {
-	// Agent has exhausted accelerator quota but never had a CPU quota tracked at all — a CPU-only job
-	// must not read this as "0% utilized" just because guaranteed_cpu_core_hours is 0/0.
+	// Accelerator quota exhausted, CPU quota never tracked — a CPU-only job must not read
+	// this as 0% utilized just because guaranteed_cpu_core_hours is 0/0.
 	aq := &AgentQuota{
 		GuaranteedAcceleratorHours: 10, UsedGuaranteedAccH: 10, // fully used
 		GuaranteedCPUCoreHours: 0, UsedGuaranteedCPUCoreH: 0, // untracked
@@ -33,11 +33,11 @@ func TestDominantUtilizationTakesMaxAcrossRequestedDimensions(t *testing.T) {
 
 func TestDominantCostFractionComparableAcrossDimensions(t *testing.T) {
 	aq := &AgentQuota{
-		GuaranteedAcceleratorHours:      10,
-		GuaranteedCPUCoreHours: 100,
+		GuaranteedAcceleratorHours: 10,
+		GuaranteedCPUCoreHours:     100,
 	}
-	smallAcceleratorJob := &Experiment{EstimatedCostAccH: 1}     // 10% of accelerator budget
-	bigCPUJob := &Experiment{EstimatedCPUCoreHours: 90} // 90% of CPU budget
+	smallAcceleratorJob := &Experiment{EstimatedCostAccH: 1} // 10% of accelerator budget
+	bigCPUJob := &Experiment{EstimatedCPUCoreHours: 90}      // 90% of CPU budget
 
 	small := aq.DominantCostFraction(smallAcceleratorJob)
 	big := aq.DominantCostFraction(bigCPUJob)

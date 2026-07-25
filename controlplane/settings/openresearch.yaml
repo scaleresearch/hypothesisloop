@@ -1,117 +1,65 @@
-# OpenResearch platform configuration.
-# All scheduling constants, accelerator definitions, and cluster topology live here.
+# HypothesisLoop platform configuration.
+# Platform-wide rates and scheduling policy live here.
+
+services:
+  quota_port: 8081
+  scheduler_port: 8082
+  registry_port: 8083
+  metric_controller_port: 8084
+  metrics_db_url: http://greptimedb:4000
 
 
-# Accelerator types — canonical compute units. The catalog is entirely operator-defined here — any
-# vendor's model name is valid (NVIDIA, AMD, ...); nothing in the code is a closed enum.
-# Each type has:
-#   name:             display name; the value agents put in job.yaml's accelerator_type/acceptable_accelerator_types
-#   acch_rate:         cost in accelerator-hours (AccH), H100-equivalent (1 AccH = 1 H100-hour, so H100 = 1.0)
-#   flavor:           internal flavor name used for capacity accounting (native k8s Job
-#                     scheduling — no external queueing operator)
-#   cluster_accelerators:     number of accelerators of this type in the cluster
-#   node_label_value: the node label value real nodes of this type carry (set by the
-#                     vendor's device-plugin/feature-discovery add-on). Required for every
-#                     type agents can request: the backend builds a nodeAffinity from this
-#                     for every job (job.accelerator_type alone, or the OR of job.acceptable_accelerator_types)
-#                     — a plain accelerator_type with no acceptable_accelerator_types still must land on
-#                     hardware of exactly that model, since the extended resource request
-#                     alone only guarantees *an* accelerator node, never *the requested model*.
-#   node_label_key:   the node label KEY carrying node_label_value. Defaults to
-#                     "nvidia.com/gpu.product" (NVIDIA GPU Feature Discovery, an NVIDIA-specific
-#                     add-on — a generic accelerator system has no such standard) if omitted —
-#                     only needed for non-NVIDIA types (see the AMD example below).
-#   resource_name:    the k8s extended resource requested per accelerator of this type. Defaults to
-#                     the top-level accelerator_resource_name if omitted — only needed for
-#                     non-NVIDIA types (AMD's device plugin advertises "amd.com/gpu").
-#   taint_key:        the taint key nodes of this type carry. Defaults to the top-level
-#                     accelerator_taint_key if omitted.
+# Accelerator types — priced hardware.
+#
+# A type is named by a fact its own driver publishes, written as a fully-qualified "key=value":
+#
+#   nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3   NVIDIA GPU Feature Discovery node label
+#   amd.com/gpu.product-name=Instinct-MI300X       AMD node labeller node label
+#   tenstorrent.com/chipArch=blackhole             Tenstorrent DRA device attribute
+#
+# These strings are NOT defined here. The driver emits them; this file only attaches a price.
+# The same string is what an agent writes as job.accelerator_type, what /resource-catalog/capacity
+# reports, what quota bills, and what is labelled on the job's pods — there is no mapping table
+# anywhere, because a mapping is a place where two names can disagree.
+#
+# To see what a cluster actually publishes, read /resource-catalog/capacity: anything listed
+# there is a valid name; adding an entry below is what makes it billable (and therefore
+# submittable). Any vendor, any model, any granularity you care to price — nothing in the code
+# is a closed enum. A device is reported under every fact true of it, so pick the granularity
+# you want to bill at: pricing tenstorrent.com/chipArch=blackhole bills every Blackhole board
+# alike, while tenstorrent.com/boardType=7 would price one board model.
+#
+# acch_rate is cost in accelerator-hours (AccH), H100-equivalent (H100 = 1.0).
 #
 # Accelerators are the primary resource dimension admitted/preempted on. CPU/RAM/storage are
 # additional, optional dimensions (see quota.* below and each platform experiment's own
-# budget_cpu_core_hours/budget_ram_gb_hours/budget_storage_gb_hours) — 0/unset means "not
-# tracked," so existing accelerator-only platform experiments are unaffected. Agents declare accelerator
-# count as a plain integer in job.yaml's accelerator_count (see settings/examples/experiment-submission.yaml) — never
-# a k8s resource string. accelerator_resource_name/accelerator_taint_key below are cluster-wide fallbacks
-# used only for accelerator types that don't set their own resource_name/taint_key above; set
-# accelerator_resource_name to "cpu" as a temporary substitution on a cluster with no accelerator
-# nodes/device plugin yet.
-accelerator_resource_name: nvidia.com/gpu
-accelerator_taint_key: nvidia.com/gpu
+# budget_cpu_core_hours/budget_ram_gb_hours/budget_storage_gb_hours) — 0/unset means
+# untracked, so accelerator-only platform experiments are unaffected. Agents declare
+# accelerator count as a plain integer in job.yaml's accelerator_count, never a k8s resource
+# string.
 
 accelerator_types:
-  - name:       T4
-    acch_rate:   0.125
-    flavor:     flavor-t4
-    cluster_accelerators: 64
-    node_label_value: NVIDIA-T4
+  - name:      nvidia.com/gpu.product=Tesla-T4
+    acch_rate: 0.125
 
-  - name:       L40
-    acch_rate:   0.25
-    flavor:     flavor-l40
-    cluster_accelerators: 16
-    node_label_value: NVIDIA-L40
+  - name:      nvidia.com/gpu.product=NVIDIA-L40
+    acch_rate: 0.25
 
-  - name:       A100
-    acch_rate:   0.375
-    flavor:     flavor-a100
-    cluster_accelerators: 8
-    node_label_value: NVIDIA-A100-80GB-PCIe
+  - name:      nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+    acch_rate: 0.375
 
-  - name:       H100
-    acch_rate:   1.0
-    flavor:     flavor-h100
-    cluster_accelerators: 4
-    node_label_value: NVIDIA-H100-80GB-HBM3
+  - name:      nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+    acch_rate: 1.0
 
-  - name:       H200
-    acch_rate:   1.25
-    flavor:     flavor-h200
-    cluster_accelerators: 2
-    node_label_value: NVIDIA-H200-141GB-HBM3
+  - name:      nvidia.com/gpu.product=NVIDIA-H200
+    acch_rate: 1.25
 
-  # AMD example — demonstrates the multi-vendor catalog. A cluster can mix this entry with
-  # the NVIDIA ones above; each accelerator type carries its own resource/taint/label plumbing, so
-  # the backend requests the right extended resource and builds the right nodeAffinity per
-  # job depending on which type it asked for. Uncomment and adjust cluster_accelerators to actually
-  # use it — commented out by default since most clusters won't have this hardware.
-  # - name:       MI300X
-  #   acch_rate:   1.125
-  #   flavor:     flavor-mi300x
-  #   cluster_accelerators: 4
-  #   node_label_value: AMD-Instinct-MI300X
-  #   node_label_key: amd.com/gpu.device-id
-  #   resource_name: amd.com/gpu
-  #   taint_key: amd.com/gpu
+  # Add a rate when jobs may request another accelerator type.
+  # - name:      amd.com/gpu.product-name=Instinct-MI300X
+  #   acch_rate: 1.125
 
-  # Tenstorrent Blackhole (QuietBox v2) — allocated via Kubernetes Dynamic Resource Allocation
-  # (resource.k8s.io) instead of a device-plugin extended resource: no node_label_value/
-  # node_label_key/resource_name/taint_key at all (allocation_mode: dra ignores them; see
-  # AcceleratorTypeConfig.AllocationMode's doc in controlplane/shared/config/types.go), because
-  # Tenstorrent's own tt-operator stack (see localdev/k3s-tenstorrent-qb2/README.md) advertises devices as
-  # ResourceSlices under DeviceClass "tenstorrent.com" and the backend requests them with a
-  # ResourceClaimTemplate instead. acch_rate is a rough placeholder pending real benchmarking
-  # against H100 — adjust once this cluster has comparative throughput numbers.
-  - name:       Tenstorrent-Blackhole
-    acch_rate:   0.5
-    # flavor must equal AcceleratorType.FlavorName()'s derivation ("flavor-" + lowercase name,
-    # see controlplane/shared/domain/accelerator.go) — the admission loop's own footprint/need
-    # computation calls FlavorName() directly rather than reading this field back, so a flavor
-    # value that doesn't match it silently desyncs "available capacity" (keyed by this field)
-    # from "what a job needs" (keyed by FlavorName()) and the job can never admit. Every other
-    # entry in this catalog already follows this convention (T4 -> flavor-t4, etc).
-    flavor:     flavor-tenstorrent-blackhole
-    cluster_accelerators: 4
-    allocation_mode: dra
-    device_class_name: tenstorrent.com
-
-# Accelerator types that are interchangeable for admission purposes (same Hopper SM architecture).
-# An H100 request may be satisfied with an H200; the control plane adjusts cost accordingly.
-# Only list types that share the same vendor plumbing (resource_name/taint_key/node_label_key)
-# — see settings/examples/experiment-submission.yaml's acceptable_accelerator_types doc for why mixing vendors in one
-# group doesn't work (the k8s resource request is a single specific name).
-interchangeable_groups:
-  - [H100, H200]
+  - name:      tenstorrent.com/chipArch=blackhole
+    acch_rate: 0.5
 
 # Flat per-unit quota rates for the non-accelerator resource dimensions — 1.0 by default (no
 # hardware-tier variation to normalize away, unlike accelerators). Override here if you want, e.g.,
@@ -155,14 +103,13 @@ scheduler:
   # How often the admission loop ticks (picks up queued experiments).
   loop_heartbeat_seconds: 10
 
-  # How long to wait for a preempted k8s Job to be deleted before continuing.
-  preempt_timeout_seconds: 30
+  # Pod shutdown grace period: default when a job doesn't request its own, and the cap on
+  # whatever a job does request.
+  default_termination_grace_period_seconds: 5
+  max_termination_grace_period_seconds: 30
 
   # How often the JobWatcher polls a running k8s Job for phase transitions.
   job_poll_interval_seconds: 5
-
-  # How often the JobWatcher scans for newly ADMITTED/SUBMITTED jobs to watch.
-  admitted_scan_interval_seconds: 10
 
   # How long a job may stay SUBMITTED/ADMITTED without reporting RUNNING before job_watcher
   # evicts it (reason stuck_pending) and fully refunds its reservation. Bounds capacity held by
@@ -183,14 +130,14 @@ scheduler:
   guaranteed_fairness_window_seconds: 60
 
   # Control-plane-side GC sweep: how often to look for SUBMITTED/ADMITTED/RUNNING experiments
-  # with no recent cluster_job_reports row, and how stale "no recent report" means. Alert-only.
+  # whose desired state has no recent job-phase observation in metrics storage. Alert-only.
   stale_desired_state_sweep_interval_seconds: 600
   stale_desired_state_threshold_seconds: 300
 
   # How often the metric controller reconciles running experiments.
-  reconcile_interval_seconds: 30
+  reconcile_interval_seconds: 5
 
-  # Fallback silence window when a platform experiment has no report_interval_seconds set.
+  # Default silence cadence when a platform experiment does not define one.
   default_report_interval_seconds: 30
 
   # Multiplier on report_interval_seconds; no metric push for this many intervals triggers eviction.
@@ -212,7 +159,6 @@ scheduler:
   # Kubernetes Job retries (RestartPolicy=OnFailure) before k8s marks the Job Failed.
   # Absorbs transient pod flakes; a persistently crashing job exhausts these retries and is
   # failed natively by k8s (job watcher then records FAILED and refunds unused AccH).
-  job_backoff_limit: 3
 
   # k8s ActiveDeadlineSeconds hard ceiling, as a multiple of estimated_duration_hours.
   # Backstop for the overrun guard. E.g. 1.5 = hard-kill at 150% of estimated runtime.

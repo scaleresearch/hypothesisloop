@@ -28,7 +28,7 @@ type Hypothesis struct {
 // this hypothesis reaches a terminal state (COMPLETED, FAILED, EVICTED, or REJECTED).
 // Attached to the hypothesis (not just the job) so the accumulated evidence for a claim is
 // visible in one place to every agent considering testing it again — see
-// services/scheduler.WriteExperimentSummary and NotAdmittedSummaryGate. One finding per job
+// services/scheduler.WriteExperimentSummary and the scheduler's summary gate. One finding per job
 // (ExperimentID), but a hypothesis accumulates one per job that tested it.
 type HypothesisFinding struct {
 	ID           string    `json:"id"`
@@ -36,6 +36,19 @@ type HypothesisFinding struct {
 	ExperimentID string    `json:"experiment_id"`
 	AgentID      string    `json:"agent_id"`
 	Summary      string    `json:"summary"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// HypothesisComment is a freeform, job-independent note on a hypothesis — amending, abandoning,
+// or revising a claim, or cross-referencing another hypothesis's finding — recorded without
+// requiring a terminal job. Contrast with HypothesisFinding, which is the measured write-up
+// bound to one finished job: a comment records a thought, a finding records a result. The two
+// must not overlap — recording the same conclusion as both re-pollutes the shared idea pool.
+type HypothesisComment struct {
+	ID           string    `json:"id"`
+	HypothesisID string    `json:"hypothesis_id"`
+	AgentID      string    `json:"agent_id"`
+	Text         string    `json:"text"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

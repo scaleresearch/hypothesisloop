@@ -6,7 +6,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // RegisterHypothesis registers a new hypothesis within a platform experiment, or returns the
@@ -34,10 +35,12 @@ func (s *Service) GetHypothesis(ctx context.Context, id string) (*domain.Hypothe
 	return h, nil
 }
 
-// ListHypotheses returns every hypothesis registered within a platform experiment, most
-// recent first — the shared idea pool agents draw from and add to for that platform experiment.
-func (s *Service) ListHypotheses(ctx context.Context, platformExperimentID string) ([]*domain.Hypothesis, error) {
-	hs, err := s.store.ListHypotheses(ctx, platformExperimentID)
+// ListHypotheses returns hypotheses registered within a platform experiment, most recent
+// first, each carrying finding/comment counts — the shared idea pool agents draw from and add
+// to. agentID restricts to one agent's own hypotheses when non-empty; limit is bounded and
+// defaulted by the store — see db.HypothesesStore.ListHypotheses.
+func (s *Service) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, limit int) ([]*db.HypothesisListItem, error) {
+	hs, err := s.store.ListHypotheses(ctx, platformExperimentID, agentID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
@@ -51,4 +54,25 @@ func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID strin
 		return nil, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
 	}
 	return fs, nil
+}
+
+// AddHypothesisComment records a freeform, job-independent note against a hypothesis — see
+// domain.HypothesisComment for how this differs from a finding.
+func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentID, text string) (*domain.HypothesisComment, error) {
+	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, agentID, text)
+	if err != nil {
+		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
+	}
+	s.logger.Info("hypothesis comment added",
+		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID))
+	return c, nil
+}
+
+// ListHypothesisComments returns every comment filed against a hypothesis, oldest first.
+func (s *Service) ListHypothesisComments(ctx context.Context, hypothesisID string) ([]*domain.HypothesisComment, error) {
+	cs, err := s.store.ListCommentsByHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.ListHypothesisComments: %w", err)
+	}
+	return cs, nil
 }

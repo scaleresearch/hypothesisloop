@@ -4,14 +4,14 @@ import "testing"
 
 func TestFootprintScaleMultiNode(t *testing.T) {
 	j := JobSpec{
-		CPU:      "500m",
-		Memory:   "1Gi",
-		Storage:  "2Gi",
-		AcceleratorType:  AcceleratorH100,
+		CPU:              "500m",
+		Memory:           "1Gi",
+		Storage:          "2Gi",
 		AcceleratorCount: 2,
-		NumNodes: 4,
+		AcceleratorType:  "example.com/product=test-accelerator",
+		NumNodes:         4,
 	}
-	fp, err := j.Footprint()
+	fp, err := j.Footprint(j.AcceleratorType)
 	if err != nil {
 		t.Fatalf("Footprint: %v", err)
 	}
@@ -20,8 +20,7 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 		t.Errorf("cpu millicores = %d, want 2000", got)
 	}
 	// Accelerator: 2 accelerators/node * 4 nodes = 8, matches TotalAccelerators(). Flavor key uses
-	// AcceleratorType.FlavorName() ("flavor-h100"), matching capacity reporting's key convention.
-	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: AcceleratorH100.FlavorName()}]; got != int64(j.TotalAccelerators()) {
+	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: "example.com/product=test-accelerator"}]; got != int64(j.TotalAccelerators()) {
 		t.Errorf("accelerator count = %d, want %d", got, j.TotalAccelerators())
 	}
 	// Memory: 1GiB/node * 4 nodes.
@@ -33,7 +32,7 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 
 func TestFootprintFractionalCPUPrecision(t *testing.T) {
 	j := JobSpec{CPU: "250m", NumNodes: 1}
-	fp, err := j.Footprint()
+	fp, err := j.Footprint(j.AcceleratorType)
 	if err != nil {
 		t.Fatalf("Footprint: %v", err)
 	}
@@ -44,7 +43,7 @@ func TestFootprintFractionalCPUPrecision(t *testing.T) {
 
 func TestFootprintMalformedQuantityRejected(t *testing.T) {
 	j := JobSpec{CPU: "not-a-quantity"}
-	if _, err := j.Footprint(); err == nil {
+	if _, err := j.Footprint(""); err == nil {
 		t.Error("expected error for malformed CPU quantity, got nil")
 	}
 }

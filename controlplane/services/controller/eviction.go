@@ -7,14 +7,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
-// evict marks the experiment EVICTED, terminates the backend workload, and refunds unused accelerator
-// hours — status transition, eviction reason, and every resource-dimension refund happen in one
-// DB transaction (TransitionAndRefund), so a crash mid-eviction can never leave a durably
-// EVICTED experiment with a partial refund.
+// evict marks the experiment EVICTED and refunds unused accelerator hours. Status transition,
+// reason, and refund happen in one DB transaction (TransitionAndRefund), so a crash mid-eviction
+// can never leave a partial refund.
 func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, now time.Time) error {
 	updated, err := c.store.TransitionTerminal(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
@@ -25,13 +24,8 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 		return nil
 	}
 	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
-	// exp may have been ADMITTED/SUBMITTED (not yet RUNNING) when evicted — release any
-	// pending-capacity reservation so it doesn't permanently blackhole that capacity slice.
-	_ = c.store.DeletePendingReservation(ctx, exp.ID)
-
-	// Status is already EVICTED above — the cluster-agent's next reconcile pass removes the
-	// Job on its own. Settling final usage is a separate, independently-retryable step (see
-	// settleAndMark) — its failure must never undo or block the transition above.
+	// Settling final usage is a separate, independently-retryable step (see settleAndMark) —
+	// its failure must never undo or block the transition above.
 	exp.Status = domain.StatusEvicted
 	exp.EvictionReason = string(reason)
 	c.settleAndMark(ctx, exp)
@@ -86,9 +80,6 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 					continue
 				}
 				obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionExperimentClosed)).Inc()
-				// SUBMITTED jobs may hold a pending reservation (QUEUED never does) — release
-				// it unconditionally; a no-op if none exists.
-				_ = c.store.DeletePendingReservation(ctx, exp.ID)
 				exp.Status = domain.StatusRejected
 				exp.EvictionReason = string(domain.EvictionExperimentClosed)
 				c.settleAndMark(ctx, exp)

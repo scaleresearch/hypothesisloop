@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,8 +10,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 // tick runs one full admission pass. Single-threaded — no concurrent ticks.
@@ -23,11 +24,9 @@ func (l *Loop) tick(ctx context.Context) error {
 	start := time.Now()
 	defer func() { obsmetrics.AdmissionTickDuration.Observe(time.Since(start).Seconds()) }()
 
-	// Reprioritize all queued jobs after every tick, regardless of which pass admitted or
-	// skipped anything — deferred so every exit path (including the guaranteed-only and
-	// no-burst-capacity early returns below) actually runs it, not just the path that reaches
-	// the bottom of the function. Queue order needs to stay fresh (novelty shifts as jobs
-	// start/finish, age increases, etc.) even on a tick where nothing was queued for burst.
+	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
+	// exit path (including early returns below) runs it, keeping queue order fresh even when
+	// nothing was queued for burst.
 	if l.reprioritizer != nil {
 		defer func() {
 			if err := l.reprioritizer.RePrioritize(ctx); err != nil {
@@ -36,63 +35,54 @@ func (l *Loop) tick(ctx context.Context) error {
 		}()
 	}
 
-	// 1. Get available physical capacity as a canonical domain.Footprint per cluster — a pooled
-	// cluster-less total would hide which specific cluster has room, so a job could get admitted
-	// against a combined number while the one cluster it actually lands on is full.
+	// 1. Get available physical capacity as a domain.Footprint per cluster — a pooled total
+	// would hide which cluster has room, admitting against a combined number while the actual
+	// target cluster is full.
 	gAvail, bAvail, err := l.workload.GetFlavorCapacity(ctx)
 	if err != nil {
 		return err
 	}
-
-	// 2. RUNNING jobs need no separate subtraction here. Every capacity dimension
-	// GetFlavorCapacity reports (CPU, accelerator, RAM, storage) is now a live, cluster-agent-
-	// computed allocatable-minus-requested number counted only against pods actually assigned
-	// to a node (see workload.GetLiveCPUCapacity/GetLiveAcceleratorCapacity/GetLiveRAMCapacity/
-	// GetLiveStorageCapacity's doc comments) — a RUNNING job's pod is scheduled by definition,
-	// so its footprint is already reflected in every one of those live numbers. Subtracting it
-	// again here would double-count it and manufacture false scarcity, the same bug this used
-	// to carve a CPU-only exception for; now that every dimension is live and assigned-pod-
-	// scoped, the exception covers the whole footprint, so the loop itself is dead weight —
-	// removed rather than kept as an always-empty no-op (matches important.md's "less retained
-	// machinery" principle).
-
-	// 2b. Close the pending-pod race: subtract every durably reserved-but-not-yet-confirmed-
-	// running job's footprint (see pending_capacity_reservations' schema comment), across ALL
-	// dimensions including CPU. A reservation only exists between MarkSubmitted and
-	// job_watcher observing the pod RUNNING (see submitJob/onRunning), so by construction it is
-	// never yet reflected in live capacity — subtracting it here is never a double-count. This
-	// is what actually closes SCHEDULING_GENERALIZATION_PLAN.md's "durable pending-capacity
-	// reservations" cross-cutting fix: a second tick before the cluster-agent has created the
-	// pod now sees this capacity as already claimed instead of trusting a stale point-in-time
-	// live number, for every admission dimension, not just the ones that used to have a
-	// separate accelerator-only subtraction.
-	pendingByCluster, err := l.store.ListPendingReservationsByCluster(ctx)
+	nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("per-node accelerator capacity: %w", err)
 	}
-	for cluster, fp := range pendingByCluster {
-		if _, ok := gAvail[cluster]; !ok {
-			continue
-		}
-		subtractFootprint(gAvail[cluster], fp)
-		subtractFootprint(bAvail[cluster], fp)
+	nodeLabels, err := l.workload.GetNodeLabels(ctx)
+	if err != nil {
+		return fmt.Errorf("node labels: %w", err)
 	}
+
+	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
+	// ADMITTED/RUNNING). No second reservation or live-usage subtraction here — either would
+	// double-count. MarkSubmitted is itself the durable capacity claim.
 
 	// 3. Get all QUEUED experiments.
 	queued, err := l.store.ListQueuedExperiments(ctx)
 	if err != nil {
 		return err
 	}
+	completion, err := l.completionFractions(ctx, queued)
+	if err != nil {
+		return err
+	}
 
-	// 3a. Enforce the summary gate: skip agents who have COMPLETED experiments without a
-	// summary. The gate runs at POST /experiments submission time, but a batch of jobs
-	// submitted before any run completes will all be in QUEUED already. We re-check here
-	// so that completion of one job pauses the rest until summaries are written.
+	// 3a. Enforce the summary gate: skip agents with COMPLETED experiments missing a summary.
+	// The gate also runs at submission time, but a batch submitted before any run completes is
+	// already QUEUED, so re-check here to pause the rest until summaries are written.
 	summaryBlocked := map[string]bool{} // key: agentID+"/"+platformExpID
 	filtered := queued[:0]
 	for _, exp := range queued {
 		if exp.PlatformExperimentID == "" {
 			filtered = append(filtered, exp)
+			continue
+		}
+		held, err := l.store.IsAgentHeld(ctx, exp.PlatformExperimentID, exp.AgentID)
+		if err != nil {
+			return fmt.Errorf("phase2 hold for %s: %w", exp.ID, err)
+		}
+		if held {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedPhase2Hold); err != nil {
+				return err
+			}
 			continue
 		}
 		key := exp.AgentID + "/" + exp.PlatformExperimentID
@@ -104,15 +94,15 @@ func (l *Loop) tick(ctx context.Context) error {
 		}
 		blocked, err := l.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
 		if err != nil {
-			l.logger.Warn("summary gate check failed, allowing experiment",
-				zap.String("exp", exp.ID), zap.Error(err))
-			blocked = false
+			return fmt.Errorf("summary gate for %s: %w", exp.ID, err)
 		}
 		summaryBlocked[key] = blocked
 		if !blocked {
 			filtered = append(filtered, exp)
 		} else {
-			l.setNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedSummaryGate)
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedSummaryGate); err != nil {
+				return err
+			}
 		}
 	}
 	queued = filtered
@@ -120,86 +110,77 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 4. Guaranteed pass: FIFO by age bucket, quota-ratio tiebreak within a bucket, then
 	// completion proximity DESC, then shortest job first.
 	guaranteed := filterTier(queued, domain.CapacityGuaranteed)
-	sortGuaranteed(guaranteed, l.fetchQuotaMap(ctx, guaranteed), l.guaranteedFairnessWindow)
-
-	// Snapshot pre-tick availability so a skip can be classified: capacity_unavailable (no
-	// capacity for this job existed even before this tick admitted anything) vs outranked
-	// (capacity existed, but other guaranteed jobs earlier in this tick's sort order already
-	// claimed it) — see #15 in competetors/SYNTHESIS_GAPS_AND_PLAN.md.
+	guaranteedQuotas, err := l.fetchQuotaMap(ctx, guaranteed)
+	if err != nil {
+		return err
+	}
+	sortGuaranteed(guaranteed, guaranteedQuotas, completion, l.guaranteedFairnessWindow)
 	gAvailInitial := cloneAvail(gAvail)
 
+	// Snapshot pre-tick availability so a skip can be classified: capacity_unavailable (no
+	// capacity existed before this tick) vs outranked (capacity existed, but other guaranteed
+	// jobs earlier in sort order already claimed it).
 	for _, exp := range guaranteed {
-		// A job already assigned a cluster (a retry after this tick previously claimed it, see
-		// submitJob) stays pinned there — its flavor was already resolved on the attempt that
-		// pinned it, so just recompute its footprint under that flavor; otherwise pick a
-		// (cluster, flavor) pair among the requested type and any AcceptableAcceleratorTypes where the
-		// job's whole footprint fits jointly across every dimension it requests — see
-		// resolveClusterAndFootprint's and clusterWithBestFit's doc comments for the exact policy.
+		// A job already assigned a cluster (pinned by a prior attempt in submitJob) stays
+		// pinned — just recompute its footprint under that flavor; otherwise pick a (cluster,
+		// flavor) pair among the requested type and any AcceptableAcceleratorTypes where the
+		// whole footprint fits — see resolveClusterAndFootprint/clusterWithBestFit.
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {
 			fp = exp.Footprint()
 		} else {
-			cluster, fp = resolveClusterAndFootprint(gAvail, exp)
+			cluster, fp = resolveClusterAndFootprint(gAvail, nodeAvail, nodeLabels, exp)
 		}
-		if !domain.Fits(gAvail[cluster], fp) {
-			// Doesn't fit on cluster — try to preempt that cluster's own burst jobs to make
-			// room. Preemption is scoped to this one cluster: freeing a burst job on a
-			// different cluster wouldn't make room for this job here.
+		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
+			exp.AcceleratorType = exp.Job.AcceleratorType
+			fp = exp.Footprint()
+			cluster = clusterWithBestFit(gAvail, fp)
+		}
+		if !domain.Fits(gAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeLabels[cluster], exp) {
+			// Try to preempt that cluster's own burst jobs to make room; scoped to this cluster
+			// since freeing a burst job elsewhere wouldn't help here.
 			running, err := l.store.ListRunningExperiments(ctx)
 			if err != nil {
 				return err
 			}
 			burstRunning := filterTierCluster(running, domain.CapacityBurst, cluster)
-			shortage := shortfall(gAvail[cluster], fp)
+			shortage := preemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeLabels[cluster], exp, fp)
 			l.logger.Info("guaranteed job needs preemption",
 				zap.String("exp", exp.ID), zap.String("cluster", cluster),
 				zap.String("avail", footprintStr(gAvail[cluster])), zap.String("need", footprintStr(fp)),
 				zap.String("shortage", footprintStr(shortage)),
 				zap.Int("burst_candidates", len(burstRunning)))
-			freed, err := l.preempt(ctx, shortage, burstRunning)
-			if err != nil {
+			// preempt() only requeues victims — it never waits for their Jobs to disappear, so
+			// this tick can't know the accelerator is really free yet. exp stays QUEUED; a
+			// later tick's fresh capacity read admits it once the resource is genuinely gone.
+			if err := l.preempt(ctx, shortage, burstRunning, exp); err != nil {
 				l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
-				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-				l.setNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp))
-				continue
 			}
-			if len(freed) > 0 {
-				var freedTotal int64
-				for _, v := range freed {
-					freedTotal += v
-				}
-				if freedTotal > 0 {
-					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "preempted").Add(float64(freedTotal))
-				}
+			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp)); err != nil {
+				return err
 			}
-			if gAvail[cluster] == nil {
-				gAvail[cluster] = domain.NewFootprint()
-			}
-			gAvail[cluster].AddFootprint(freed)
-			l.logger.Info("preemption result",
-				zap.String("exp", exp.ID), zap.String("freed", footprintStr(freed)),
-				zap.String("avail_after", footprintStr(gAvail[cluster])),
-				zap.Bool("fits_now", domain.Fits(gAvail[cluster], fp)))
-			if !domain.Fits(gAvail[cluster], fp) {
-				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-				l.setNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp))
-				continue // not enough even after preemption
-			}
+			continue
 		}
 		if err := l.submitJob(ctx, exp, cluster); err != nil {
 			l.logger.Error("submit guaranteed job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+			reason := domain.NotAdmittedWorkloadCreation
+			if errors.Is(err, errAdmissionCapacityChanged) {
+				reason = domain.NotAdmittedCapacityUnavailable
+			}
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+				return err
+			}
 			continue
 		}
 		subtractFootprint(gAvail[cluster], fp)
-		// bAvail is the same shared physical pool's other view (see the capacity-accounting
-		// comment on step 2 above) — without this, a job the burst pass admits later in this
-		// same tick can still see the unit this guaranteed job just claimed as free and
-		// double-book it, since bAvail was only synced against *pre-tick* occupancy.
+		// bAvail is the same shared pool's other view — without this, the burst pass later in
+		// this tick could still see this unit as free and double-book it.
 		subtractFootprint(bAvail[cluster], fp)
+		reservePlacement(nodeAvail[cluster], nodeLabels[cluster], exp)
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "admitted").Inc()
-		l.setNotAdmittedReason(ctx, exp.ID, "")
 	}
 
 	// 5. Burst pass: fairness-weighted (least quota used first), then completion proximity, shortest job first.
@@ -218,15 +199,19 @@ func (l *Loop) tick(ctx context.Context) error {
 	if totalBAvail <= 0 {
 		for _, exp := range burst {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			l.setNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedCapacityUnavailable)
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedCapacityUnavailable); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
 
 	// Fetch quota usage for fairness ordering.
-	quotaMap := l.fetchQuotaMap(ctx, burst)
-	sortBurst(burst, quotaMap)
-
+	quotaMap, err := l.fetchQuotaMap(ctx, burst)
+	if err != nil {
+		return err
+	}
+	sortBurst(burst, quotaMap, completion)
 	bAvailInitial := cloneAvail(bAvail)
 
 	for _, exp := range burst {
@@ -235,29 +220,77 @@ func (l *Loop) tick(ctx context.Context) error {
 		if cluster != "" {
 			fp = exp.Footprint()
 		} else {
-			cluster, fp = resolveClusterAndFootprint(bAvail, exp)
+			cluster, fp = resolveClusterAndFootprint(bAvail, nodeAvail, nodeLabels, exp)
 		}
-		if !domain.Fits(bAvail[cluster], fp) {
+		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
+			exp.AcceleratorType = exp.Job.AcceleratorType
+			fp = exp.Footprint()
+			cluster = clusterWithBestFit(bAvail, fp)
+		}
+		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeLabels[cluster], exp) {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			l.setNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp))
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp)); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := l.submitJob(ctx, exp, cluster); err != nil {
 			l.logger.Error("submit burst job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
+			reason := domain.NotAdmittedWorkloadCreation
+			if errors.Is(err, errAdmissionCapacityChanged) {
+				reason = domain.NotAdmittedCapacityUnavailable
+			}
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+				return err
+			}
 			continue
 		}
 		subtractFootprint(bAvail[cluster], fp)
+		reservePlacement(nodeAvail[cluster], nodeLabels[cluster], exp)
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "admitted").Inc()
-		l.setNotAdmittedReason(ctx, exp.ID, "")
 	}
 
 	return nil
 }
 
+func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint) string {
+	for key := range footprint {
+		if current[key] < initial[key] {
+			return domain.NotAdmittedOutranked
+		}
+	}
+	return domain.NotAdmittedCapacityUnavailable
+}
+
+func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
+	out := make(map[string]domain.Footprint, len(avail))
+	for cluster, fp := range avail {
+		copy := make(domain.Footprint, len(fp))
+		for key, value := range fp {
+			copy[key] = value
+		}
+		out[cluster] = copy
+	}
+	return out
+}
+
+// quotaCanCoverFlavor is an early, non-authoritative filter for a more expensive acceptable
+// flavor; ReserveAdmittedFlavor's transaction remains the final concurrency-safe check.
+func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool {
+	if quota == nil || exp.AcceleratorCount <= 0 {
+		return false
+	}
+	newCost := exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+	used, limit := quota.UsedBurstAccH, quota.BurstAcceleratorHours
+	if exp.CapacityTier == domain.CapacityGuaranteed {
+		used, limit = quota.UsedGuaranteedAccH, quota.GuaranteedAcceleratorHours
+	}
+	return used-exp.EstimatedCostAccH+newCost <= limit
+}
+
 // footprintStr renders a Footprint for logging — domain.Footprint's struct-keyed map can't be
-// marshalled by zap.Any (JSON object keys must be strings), so every call site that wants to log
-// one needs this instead.
+// marshalled by zap.Any (JSON keys must be strings).
 func footprintStr(fp domain.Footprint) string {
 	parts := make([]string, 0, len(fp))
 	for k, v := range fp {
@@ -267,9 +300,8 @@ func footprintStr(fp domain.Footprint) string {
 	return "{" + strings.Join(parts, ",") + "}"
 }
 
-// subtractFootprint subtracts fp from avail in place, dimension by dimension, clamped at zero
-// per dimension (capacity never goes negative in the maps callers read back). No-op if avail is
-// nil (cluster not present in the capacity map).
+// subtractFootprint subtracts fp from avail in place, clamped at zero per dimension. No-op if
+// avail is nil (cluster not present in the capacity map).
 func subtractFootprint(avail domain.Footprint, fp domain.Footprint) {
 	if avail == nil {
 		return
@@ -295,47 +327,94 @@ func shortfall(avail domain.Footprint, footprint domain.Footprint) domain.Footpr
 	return out
 }
 
-// cloneAvail deep-copies a per-cluster availability map so a pre-tick snapshot isn't mutated by
-// the tick's own admission bookkeeping.
-func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
-	out := make(map[string]domain.Footprint, len(avail))
-	for cluster, fp := range avail {
-		cp := make(domain.Footprint, len(fp))
-		for k, v := range fp {
-			cp[k] = v
+// preemptionShortfall keeps accelerator availability in the placement domain declared by the
+// job. Cluster-level extended-resource totals combine devices from nodes with different labels,
+// so they cannot answer whether (for example) A100 capacity is available when L40 capacity is
+// idle. CPU, memory, storage, and other resources retain their cluster-level shortfall.
+func preemptionShortfall(clusterAvail domain.Footprint, byNode map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment, footprint domain.Footprint) domain.Footprint {
+	out := shortfall(clusterAvail, footprint)
+	if exp.Job.AcceleratorCount <= 0 {
+		return out
+	}
+	key := string(exp.AcceleratorType)
+	capacities := make([]int64, 0, len(byNode))
+	for node, capacity := range byNode {
+		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			capacities = append(capacities, capacity[key])
 		}
-		out[cluster] = cp
+	}
+	sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
+
+	perRank := int64(exp.Job.AcceleratorCount)
+	var missing int64
+	if requiresDistinctHosts(exp) {
+		for rank := 0; rank < exp.Job.Nodes(); rank++ {
+			available := int64(0)
+			if rank < len(capacities) {
+				available = capacities[rank]
+			}
+			if available < perRank {
+				missing += perRank - available
+			}
+		}
+	} else {
+		for rank := 0; rank < exp.Job.Nodes(); rank++ {
+			if len(capacities) == 0 {
+				missing += perRank
+				continue
+			}
+			sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
+			if capacities[0] < perRank {
+				missing += perRank - capacities[0]
+				capacities[0] = 0
+			} else {
+				capacities[0] -= perRank
+			}
+		}
+	}
+	acceleratorKey := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: key}
+	if missing > out[acceleratorKey] {
+		out[acceleratorKey] = missing
 	}
 	return out
 }
 
-// candidateAcceleratorTypes returns the flavors admission should try for exp, in preference order:
-// the originally requested exp.AcceleratorType first, then any distinct AcceptableAcceleratorTypes. AcceleratorCount is
-// already flavor-independent (it's the job's total footprint, fixed at submission — see
-// Experiment.Footprint's doc comment), so trying an alternate only changes which accelerator key
-// the footprint is keyed under, nothing else.
+// candidateAcceleratorTypes returns the flavors admission should try for exp, in preference
+// order: exp.AcceleratorType first, then any distinct AcceptableAcceleratorTypes.
+// AcceleratorCount is already flavor-independent, so trying an alternate only changes which
+// accelerator key the footprint is keyed under.
 func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType {
-	types := []domain.AcceleratorType{exp.AcceleratorType}
-	seen := map[domain.AcceleratorType]bool{exp.AcceleratorType: true}
+	if exp.Job.AcceleratorType == "" {
+		return nil
+	}
+	types := make([]domain.AcceleratorType, 0, 1+len(exp.Job.AcceptableAcceleratorTypes))
+	types = append(types, exp.Job.AcceleratorType)
+	// The requested type is allowed to also appear in AcceptableAcceleratorTypes (see the
+	// admission check in admission.go), so collapse that overlap here rather than retrying the
+	// same flavor twice — "distinct" above is this dedup, not an assumption about the input.
+	seen := map[domain.AcceleratorType]bool{exp.Job.AcceleratorType: true}
 	for _, t := range exp.Job.AcceptableAcceleratorTypes {
-		if !seen[t] {
-			seen[t] = true
-			types = append(types, t)
+		if seen[t] {
+			continue
 		}
+		seen[t] = true
+		types = append(types, t)
 	}
 	return types
 }
 
-// resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for a job with no cluster
-// pinned yet, trying every candidate flavor (requested type first) and returning the first one
-// that fits outright on some cluster — see candidateAcceleratorTypes. This is what lets a job whose
-// requested flavor is saturated still land on a free AcceptableAcceleratorTypes alternative instead of
-// sitting QUEUED with idle capacity elsewhere (findings.md's "acceptable_accelerator_types cannot be
-// scheduled correctly"). If no candidate fits outright, falls back to the originally requested
-// flavor's own best-fit cluster (possibly needing preemption, possibly "") so the caller's
-// existing preemption path still runs — this fix only covers the outright-fit case; preemption
-// remains scoped to the originally requested flavor.
-func resolveClusterAndFootprint(avail map[string]domain.Footprint, exp *domain.Experiment) (string, domain.Footprint) {
+// resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for an unpinned job, trying
+// every candidate flavor (requested type first) and returning the first that fits outright on
+// some cluster — see candidateAcceleratorTypes. This lets a job whose requested flavor is
+// saturated land on a free AcceptableAcceleratorTypes alternative instead of sitting QUEUED with
+// idle capacity elsewhere. If nothing fits outright, falls back to the requested flavor's own
+// best-fit cluster so the caller's preemption path still runs.
+func resolveClusterAndFootprint(avail map[string]domain.Footprint, nodeAvail map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
+	if exp.Job.AcceleratorCount <= 0 {
+		fp := exp.Footprint()
+		return clusterWithBestFit(avail, fp), fp
+	}
+
 	requested := exp.AcceleratorType
 	var fallbackCluster string
 	var fallbackFP domain.Footprint
@@ -346,24 +425,104 @@ func resolveClusterAndFootprint(avail map[string]domain.Footprint, exp *domain.E
 		if i == 0 {
 			fallbackCluster, fallbackFP = cluster, fp
 		}
-		if cluster != "" && domain.Fits(avail[cluster], fp) {
-			return cluster, fp
+		clusters := make([]string, 0, len(avail))
+		for name := range avail {
+			clusters = append(clusters, name)
+		}
+		sort.Strings(clusters)
+		for _, candidate := range clusters {
+			if domain.Fits(avail[candidate], fp) && topologyFits(nodeAvail[candidate], nodeLabels[candidate], exp) {
+				return candidate, fp
+			}
 		}
 	}
 	exp.AcceleratorType = requested
 	return fallbackCluster, fallbackFP
 }
 
+func requiresDistinctHosts(exp *domain.Experiment) bool {
+	if exp.Job.Nodes() <= 1 || exp.Job.AcceleratorCount <= 0 {
+		return false
+	}
+	return exp.Job.Topology == nil || exp.Job.Topology.SpreadAcrossHosts == nil || *exp.Job.Topology.SpreadAcrossHosts
+}
+
+// topologyFits proves that every rank of a hard spread-across-hosts accelerator job has a
+// distinct currently-schedulable node with enough free devices of the selected flavor.
+func topologyFits(byNode map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
+	remaining := cloneNodeCapacity(byNode)
+	return reservePlacement(remaining, labelsByNode, exp)
+}
+
+func labelsMatch(actual, required map[string]string) bool {
+	for key, value := range required {
+		if actual[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func desiredPlacementFits(byNode map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment) bool {
+	remaining := cloneNodeCapacity(byNode)
+	for _, exp := range desired {
+		if !reservePlacement(remaining, labelsByNode, exp) {
+			return false
+		}
+	}
+	return reservePlacement(remaining, labelsByNode, candidate)
+}
+
+func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string]int64 {
+	cloned := make(map[string]map[string]int64, len(byNode))
+	for node, capacity := range byNode {
+		cloned[node] = make(map[string]int64, len(capacity))
+		for key, count := range capacity {
+			cloned[node][key] = count
+		}
+	}
+	return cloned
+}
+
+func reservePlacement(byNode map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
+	if exp.Job.AcceleratorCount <= 0 {
+		return true
+	}
+	key := string(exp.AcceleratorType)
+	nodes := make([]string, 0, len(byNode))
+	for node := range byNode {
+		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			nodes = append(nodes, node)
+		}
+	}
+	sort.Strings(nodes)
+	used := make(map[string]bool)
+	for rank := 0; rank < exp.Job.Nodes(); rank++ {
+		selected := ""
+		for _, node := range nodes {
+			if requiresDistinctHosts(exp) && used[node] {
+				continue
+			}
+			if byNode[node][key] >= int64(exp.Job.AcceleratorCount) {
+				selected = node
+				break
+			}
+		}
+		if selected == "" {
+			return false
+		}
+		byNode[selected][key] -= int64(exp.Job.AcceleratorCount)
+		used[selected] = true
+	}
+	return true
+}
+
 // clusterWithBestFit picks a target cluster for footprint among every configured cluster in
 // avail (iterated in stable, sorted-by-name order for determinism):
 //  1. the first cluster where footprint already Fits — a job that fits outright always beats
-//     one that would need preemption, and among clusters it already fits on, cluster name order
-//     is as good a deterministic tie-break as any (this is a resource-fit predicate, not a
-//     load-balancing one).
+//     one that would need preemption; cluster name order is the tiebreak among those
 //  2. otherwise, the cluster with the smallest total shortage (sum across dimensions of
-//     max(0, need-have)) — the best candidate for preempt() to try freeing room on, stated
-//     explicitly as "fewest units to free," not implied by an ad hoc "most available" scalar
-//     comparison the way the old single-dimension version was.
+//     max(0, need-have)) — the best candidate for preempt() to free room on
 func clusterWithBestFit(avail map[string]domain.Footprint, footprint domain.Footprint) string {
 	names := make([]string, 0, len(avail))
 	for c := range avail {

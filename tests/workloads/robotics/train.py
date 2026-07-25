@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
 """
-OpenResearch robotics workload — minimal stub, no real computation.
+HypothesisLoop robotics workload — minimal stub, no real computation.
 
 Simulates training a single VLA (vision-language-action) baseline policy for
 robotic manipulation. Every job runs the *same* model/architecture — what
 differs between competing agents is the hypothesis: a specific hyperparameter
 bet (learning rate, action-chunk length, camera views, batch size) about what
 will push the baseline's task success rate higher. Emits metrics on a real
-timer, sleeping OPENRESEARCH_REPORT_INTERVAL_SECONDS between each step so the
+timer, sleeping HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS between each step so the
 registry receives a live stream rather than a batch dump.
 
 Environment variables injected by the scheduler:
-  OPENRESEARCH_EXPERIMENT_ID           - unique experiment UUID
-  OPENRESEARCH_AGENT_ID                - agent/researcher identifier
-  OPENRESEARCH_PROJECT_ID              - project identifier
-  OPENRESEARCH_REPORT_INTERVAL_SECONDS - seconds between metric pushes (default: 5)
-  OPENRESEARCH_REGISTRY_URL            - OpenResearch registry HTTP base URL
-  OPENRESEARCH_DURATION_SECONDS        - total run time in seconds (default: 60)
-  OPENRESEARCH_BASELINE                - declared baseline value to beat
-  OPENRESEARCH_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
-  OPENRESEARCH_ACCELERATOR_COUNT               - number of accelerators
+  HYPOTHESISLOOP_EXPERIMENT_ID           - unique experiment UUID
+  HYPOTHESISLOOP_AGENT_ID                - agent/researcher identifier
+  HYPOTHESISLOOP_PROJECT_ID              - project identifier
+  HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS - seconds between metric pushes (default: 5)
+  HYPOTHESISLOOP_REGISTRY_URL            - HypothesisLoop registry HTTP base URL
+  HYPOTHESISLOOP_DURATION_SECONDS        - total run time in seconds (default: 60)
+  HYPOTHESISLOOP_BASELINE                - declared baseline value to beat
+  HYPOTHESISLOOP_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
+  HYPOTHESISLOOP_ACCELERATOR_COUNT               - number of accelerators
 
 Hypothesis knobs (the actual hyperparameters each competing job is betting on
 — set explicitly per submission, not sampled, so results are reproducible and
 attributable to the stated hypothesis):
-  OPENRESEARCH_LEARNING_RATE           - optimizer learning rate (default: 3e-4)
-  OPENRESEARCH_CHUNK_LEN               - action-chunk length (default: 16)
-  OPENRESEARCH_CAMERA_VIEWS            - number of camera viewpoints (default: 1)
-  OPENRESEARCH_BATCH_SIZE              - batch size (default: 32)
+  HYPOTHESISLOOP_LEARNING_RATE           - optimizer learning rate (default: 3e-4)
+  HYPOTHESISLOOP_CHUNK_LEN               - action-chunk length (default: 16)
+  HYPOTHESISLOOP_CAMERA_VIEWS            - number of camera viewpoints (default: 1)
+  HYPOTHESISLOOP_BATCH_SIZE              - batch size (default: 32)
 """
 
 import os
@@ -41,23 +41,23 @@ import urllib.request
 
 # Config from environment
 
-EXP_ID     = os.environ.get("OPENRESEARCH_EXPERIMENT_ID", "local-test")
-AGENT_ID   = os.environ.get("OPENRESEARCH_AGENT_ID", "agent-dev")
-PROJECT_ID = os.environ.get("OPENRESEARCH_PROJECT_ID", "dev")
+EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
+AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
+PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
 METRIC     = "task_success_rate"
 DIRECTION  = "maximize"
-INTERVAL   = int(os.environ.get("OPENRESEARCH_REPORT_INTERVAL_SECONDS", "5"))
-DURATION   = int(os.environ.get("OPENRESEARCH_DURATION_SECONDS", "60"))
-REG_URL    = os.environ.get("OPENRESEARCH_REGISTRY_URL", "http://localhost:8083")
-BASELINE   = float(os.environ.get("OPENRESEARCH_BASELINE", "0.30"))
-ACCELERATOR_TYPE   = os.environ.get("OPENRESEARCH_ACCELERATOR_TYPE", "A100")
-ACCELERATOR_COUNT  = int(os.environ.get("OPENRESEARCH_ACCELERATOR_COUNT", "1"))
+INTERVAL   = int(os.environ.get("HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS", "5"))
+DURATION   = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "60"))
+REG_URL    = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "http://localhost:8083")
+BASELINE   = float(os.environ.get("HYPOTHESISLOOP_BASELINE", "0.30"))
+ACCELERATOR_TYPE   = os.environ.get("HYPOTHESISLOOP_ACCELERATOR_TYPE", "A100")
+ACCELERATOR_COUNT  = int(os.environ.get("HYPOTHESISLOOP_ACCELERATOR_COUNT", "1"))
 
 # The hypothesis under test: same baseline model, explicit hyperparameter bet.
-LEARNING_RATE = float(os.environ.get("OPENRESEARCH_LEARNING_RATE", "3e-4"))
-CHUNK_LEN     = int(os.environ.get("OPENRESEARCH_CHUNK_LEN", "16"))
-CAMERA_VIEWS  = int(os.environ.get("OPENRESEARCH_CAMERA_VIEWS", "1"))
-BATCH_SIZE    = int(os.environ.get("OPENRESEARCH_BATCH_SIZE", "32"))
+LEARNING_RATE = float(os.environ.get("HYPOTHESISLOOP_LEARNING_RATE", "3e-4"))
+CHUNK_LEN     = int(os.environ.get("HYPOTHESISLOOP_CHUNK_LEN", "16"))
+CAMERA_VIEWS  = int(os.environ.get("HYPOTHESISLOOP_CAMERA_VIEWS", "1"))
+BATCH_SIZE    = int(os.environ.get("HYPOTHESISLOOP_BATCH_SIZE", "32"))
 
 # Per-experiment noise seed — every run (even repeat rounds from the same agent)
 # gets its own noise draw, so results vary run to run the way a real training
@@ -150,7 +150,7 @@ def patch_status(status: str, final_metric=None) -> None:
 def main() -> None:
     steps = max(4, DURATION // max(1, INTERVAL))
 
-    print("OpenResearch robotics (VLA baseline) workload starting")
+    print("HypothesisLoop robotics (VLA baseline) workload starting")
     print(f"  experiment: {EXP_ID}  agent: {AGENT_ID}  project: {PROJECT_ID}")
     print(f"  primary metric: {METRIC} ({DIRECTION})")
     print(f"  steps: {steps}  interval: {INTERVAL}s  total: ~{steps * INTERVAL}s")
@@ -162,11 +162,15 @@ def main() -> None:
 
     best = None
     final_value = None
+    last_success = None
 
     for step in range(steps):
         fraction = (step + 1) / steps
 
         success = task_success_rate_at(fraction)
+        if last_success is not None:
+            success = max(success, last_success + 1e-6)
+        last_success = success
         act_mse = action_mse_at(fraction)
         lr_now  = lr_schedule(fraction)
         epoch   = int(fraction * 50)

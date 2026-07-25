@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,17 +15,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/services/controller"
-	"github.com/scaleresearch/openresearch/controlplane/services/quota"
-	"github.com/scaleresearch/openresearch/controlplane/services/registry"
-	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
-	"github.com/scaleresearch/openresearch/controlplane/services/settlement"
-	"github.com/scaleresearch/openresearch/controlplane/shared/api"
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
-	openresearchcfg "github.com/scaleresearch/openresearch/controlplane/shared/config"
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metrics"
 )
 
 // metrics-service hosts registry-service and metric-controller together: one
@@ -42,18 +43,16 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	registryPort := envOrDefault("REGISTRY_PORT", "8083")
-	controllerPort := envOrDefault("METRIC_CONTROLLER_PORT", "8084")
+	pcfg := hypothesisloopcfg.MustLoad(requiredEnv("HYPOTHESISLOOP_CONFIG", logger))
+	registryPort := strconv.Itoa(pcfg.Services.RegistryPort)
+	controllerPort := strconv.Itoa(pcfg.Services.MetricControllerPort)
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		logger.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	metricsDBURL := os.Getenv("GREPTIMEDB_URL")
-	if metricsDBURL == "" {
-		metricsDBURL = "http://greptimedb:4000"
-	}
+	metricsDBURL := pcfg.Services.MetricsDBURL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pool, err := db.NewPool(ctx, db.Config{DSN: dsn})
@@ -65,7 +64,6 @@ func main() {
 
 	store := db.NewStore(pool, metricsDBURL)
 
-	pcfg := openresearchcfg.MustLoad(envOrDefault("OPENRESEARCH_CONFIG", "settings/openresearch.yaml"))
 	domain.SetAcceleratorRates(pcfg.RateByName)
 	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
 	domain.SetRAMGBHourRate(pcfg.RAMGBHourRate)
@@ -129,7 +127,7 @@ func newRegistryServer(store *db.Store, metricsDBURL, port string, logger *zap.L
 	outer.Handle("/metrics", promhttp.Handler())
 	// Registry API via Huma, registered at full /registry/* paths so /openapi.json and
 	// /explore live at the port root.
-	doc := apidocs.New(outer, "openresearch registry-service", "1.0.0",
+	doc := apidocs.New(outer, "hypothesisloop registry-service", "1.0.0",
 		"Hypotheses, experiment metrics and lineage. See the quota-service /explore for the cross-cutting platform rules.\n")
 	registry.RegisterHuma(doc, handler)
 	doc.MountExplore(outer)
@@ -143,7 +141,7 @@ func newRegistryServer(store *db.Store, metricsDBURL, port string, logger *zap.L
 	}
 }
 
-func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *openresearchcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
+func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
@@ -200,9 +198,10 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 	return srv, runCancel
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func requiredEnv(key string, logger *zap.Logger) string {
+	value := os.Getenv(key)
+	if value == "" {
+		logger.Fatal(key + " environment variable is required")
 	}
-	return def
+	return value
 }

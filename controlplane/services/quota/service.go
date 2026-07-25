@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"go.uber.org/zap"
 )
 
@@ -16,11 +16,9 @@ type Store interface {
 	GetAgentLedger(ctx context.Context, agentID string) ([]*domain.CreditLedgerEntry, error)
 }
 
-// AgentProvisioner sets up any per-agent resources a scheduling backend needs at agent
-// registration time. The native backend (workload.JobWorkloadClient/ClusterSet) has no
-// per-agent backend object to create — shared queues/priority classes are enough — so this is
-// currently a no-op there. A different backend (e.g. one that models per-agent quota as a
-// native object) would do real work here; subset of workload.Backend.
+// AgentProvisioner performs any backend-specific durable registration work. The production
+// desired-state backend implements this as an explicit no-op because agents share the same
+// PostgreSQL schema.
 type AgentProvisioner interface {
 	ProvisionAgent(ctx context.Context, agentID string) error
 }
@@ -28,13 +26,15 @@ type AgentProvisioner interface {
 // Service implements the quota domain logic.
 type Service struct {
 	store       Store
-	provisioner AgentProvisioner // nil = skip backend provisioning
+	provisioner AgentProvisioner
 	logger      *zap.Logger
 }
 
-// NewService constructs a quota Service. provisioner may be nil if running without
-// a live cluster connection (backend provisioning will be skipped on agent registration).
+// NewService constructs a quota Service. All dependencies are required.
 func NewService(store Store, provisioner AgentProvisioner, logger *zap.Logger) *Service {
+	if store == nil || provisioner == nil || logger == nil {
+		panic("quota: store, provisioner, and logger are required")
+	}
 	return &Service{store: store, provisioner: provisioner, logger: logger}
 }
 
@@ -58,7 +58,6 @@ func (s *Service) RegisterAgent(ctx context.Context, id, name string) (*domain.A
 	s.logger.Info("agent registered", zap.String("id", id), zap.String("name", name))
 	return agent, nil
 }
-
 
 // ListBalances returns every registered agent's all-time credit_ledger balance. See
 // domain.AgentBalance's doc comment: nothing currently writes to credit_ledger, so Balance

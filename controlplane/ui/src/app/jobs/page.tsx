@@ -215,7 +215,7 @@ export default function JobsPage() {
                       ) : '—'}
                     </td>
                     <td>
-                      <Badge status={status}>{status}</Badge>
+					  <Badge status={status}>{status}</Badge>
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3 }}>
                           {j.not_admitted_reason}

@@ -7,13 +7,18 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ExperimentsStore provides persistence for domain.Experiment.
 type ExperimentsStore struct {
 	pool *Pool
+}
+
+type sqlExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
 // NewExperimentsStore creates an ExperimentsStore backed by pool.
@@ -30,15 +35,17 @@ const experimentColumns = `
 	estimated_duration_hours, estimated_cost_acch,
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
-	queued_at, submitted_at, started_at, preempt_count, attempt, eviction_reason, not_admitted_reason,
-	actual_duration_hours, actual_cost_acch,
-	actual_cpu_core_hours, actual_ram_gb_hours, actual_storage_gb_hours,
+	queued_at, submitted_at, eviction_reason, not_admitted_reason,
 	artifacts, quota_settled_at,
 	created_at, updated_at
 `
 
 // CreateExperiment inserts a new experiment row.
 func (s *ExperimentsStore) CreateExperiment(ctx context.Context, exp *domain.Experiment) error {
+	return createExperiment(ctx, s.pool.pool, exp)
+}
+
+func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Experiment) error {
 	artifacts := exp.Artifacts
 	if artifacts == nil {
 		artifacts = []string{}
@@ -46,6 +53,9 @@ func (s *ExperimentsStore) CreateExperiment(ctx context.Context, exp *domain.Exp
 
 	if exp.CapacityTier == "" {
 		exp.CapacityTier = domain.CapacityGuaranteed
+	}
+	if exp.Status == domain.StatusQueued && exp.NotAdmittedReason == "" {
+		exp.NotAdmittedReason = domain.NotAdmittedCapacityUnavailable
 	}
 	// ClusterName is deliberately left as-is (usually empty) here: it's assigned by the
 	// admission loop, capacity-aware, at the moment a specific cluster's room is actually
@@ -60,9 +70,7 @@ INSERT INTO experiments (
 	estimated_duration_hours, estimated_cost_acch,
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
-	actual_duration_hours, actual_cost_acch,
-	actual_cpu_core_hours, actual_ram_gb_hours, actual_storage_gb_hours,
-	artifacts,
+	queued_at, not_admitted_reason, artifacts,
 	created_at, updated_at
 ) VALUES (
 	$1, $2, $3, $4, $5, $6,
@@ -72,18 +80,20 @@ INSERT INTO experiments (
 	$17, $18,
 	$19, $20, $21,
 	$22, $23, $24, $25,
-	$26, $27,
-	$28, $29, $30,
-	$31,
-	$32, $33
+	$26, NULLIF($27, ''), $28,
+	$29, $30
 )`
 
-	jobSpec, err := json.Marshal(exp.Job)
+	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
+	// duplicate them inside job_spec; scanExperiment reconstructs the per-node API fields.
+	persistedJob := exp.Job
+	persistedJob.AcceleratorCount = 0
+	jobSpec, err := json.Marshal(persistedJob)
 	if err != nil {
 		return fmt.Errorf("experiments_store.CreateExperiment: marshal job spec: %w", err)
 	}
 
-	_, err = s.pool.pool.Exec(ctx, q,
+	_, err = executor.Exec(ctx, q,
 		exp.ID, exp.ParentID, exp.AgentID, exp.PlatformExperimentID, exp.ProjectID, exp.ClusterName,
 		exp.CodeRef, exp.ConfigHash, exp.DataRef, jobSpec,
 		exp.HypothesisID, exp.Hypothesis, exp.Objective, exp.Theory,
@@ -91,22 +101,11 @@ INSERT INTO experiments (
 		exp.EstimatedDurationHours, exp.EstimatedCostAccH,
 		exp.EstimatedCPUCoreHours, exp.EstimatedRAMGBHours, exp.EstimatedStorageGBHours,
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
-		exp.ActualDurationHours, exp.ActualCostAccH,
-		exp.ActualCPUCoreHours, exp.ActualRAMGBHours, exp.ActualStorageGBHours,
-		artifacts,
+		exp.CreatedAt, exp.NotAdmittedReason, artifacts,
 		exp.CreatedAt, exp.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("experiments_store.CreateExperiment: %w", err)
-	}
-	return nil
-}
-
-// DeleteExperiment removes an experiment row by ID. Used by Submit to unwind the reconcilable
-// anchor when the quota debit that follows its creation fails — see scheduler.Submit.
-func (s *ExperimentsStore) DeleteExperiment(ctx context.Context, id string) error {
-	if _, err := s.pool.pool.Exec(ctx, `DELETE FROM experiments WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("experiments_store.DeleteExperiment: %w", err)
 	}
 	return nil
 }
@@ -193,24 +192,14 @@ func (s *ExperimentsStore) UpdateExperiment(ctx context.Context, exp *domain.Exp
 UPDATE experiments SET
 	status                  = $2,
 	priority_score          = $3,
-	actual_duration_hours   = $4,
-	actual_cost_acch         = $5,
-	actual_cpu_core_hours   = $6,
-	actual_ram_gb_hours     = $7,
-	actual_storage_gb_hours = $8,
-	artifacts               = $9,
-	updated_at              = $10
+	artifacts               = $4,
+	updated_at              = $5
 WHERE id = $1`
 
 	_, err := s.pool.pool.Exec(ctx, q,
 		exp.ID,
 		string(exp.Status),
 		exp.PriorityScore,
-		exp.ActualDurationHours,
-		exp.ActualCostAccH,
-		exp.ActualCPUCoreHours,
-		exp.ActualRAMGBHours,
-		exp.ActualStorageGBHours,
 		artifacts,
 		exp.UpdatedAt,
 	)
@@ -222,7 +211,10 @@ WHERE id = $1`
 
 // UpdateExperimentStatus updates only the status field (and updated_at).
 func (s *ExperimentsStore) UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error {
-	const q = `UPDATE experiments SET status = $2, updated_at = NOW() WHERE id = $1`
+	if status == domain.StatusQueued {
+		return fmt.Errorf("experiments_store.UpdateExperimentStatus: QUEUED requires MarkQueued with a reason")
+	}
+	const q = `UPDATE experiments SET status = $2, not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1`
 	_, err := s.pool.pool.Exec(ctx, q, id, string(status))
 	if err != nil {
 		return fmt.Errorf("experiments_store.UpdateExperimentStatus: %w", err)

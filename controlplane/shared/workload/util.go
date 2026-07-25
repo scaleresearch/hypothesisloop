@@ -14,7 +14,12 @@ import (
 func jobName(experimentID string) string {
 	name := "exp-" + experimentID
 	if len(name) > 63 {
-		name = name[:63]
+		// Two IDs sharing a >59-char prefix would collide on a plain truncation, and the job name
+		// is the reconciliation identity — one experiment would silently adopt another's Job.
+		// Suffix a short hash of the full ID so truncated names stay unique and deterministic.
+		h := sha256.Sum256([]byte(experimentID))
+		suffix := fmt.Sprintf("-%x", h[:4]) // 9 chars: '-' + 8 hex
+		name = name[:63-len(suffix)] + suffix
 	}
 	return name
 }
@@ -30,7 +35,9 @@ func sanitizeLabel(s string) string {
 	}
 	v := strings.ToLower(strings.Trim(b.String(), "-."))
 	if len(v) > 63 {
-		v = v[:63]
+		// Trim again after truncating: a cut landing on a '-'/'.' would otherwise leave an
+		// invalid trailing char (k8s label values must start and end alphanumeric).
+		v = strings.Trim(v[:63], "-.")
 	}
 	return v
 }

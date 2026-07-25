@@ -2,65 +2,61 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// preempt selects and evicts a set of burst victims sufficient to cover needed — a shortage
-// Footprint that may span multiple dimensions at once (e.g. a mixed CPU+accelerator job that's
-// short on both). The whole victim set is planned and verified before anything is evicted (see
-// the fill-back pass below) — vector preemption, not a scalar count. Returns the Footprint
-// actually freed (only for victims whose deletion was positively confirmed — see the wait loop
-// at the bottom).
-func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunning []*domain.Experiment) (domain.Footprint, error) {
+var errAdmissionCapacityChanged = errors.New("capacity changed during admission")
+
+// preempt selects and requeues burst victims sufficient to cover needed, a shortage Footprint
+// that may span multiple dimensions (e.g. CPU+accelerator both short). The whole victim set is
+// planned and verified before anything is evicted (see the fill-back pass below) — vector
+// preemption, not a scalar count. Requeuing is fire-and-forget: this tick never waits for a
+// victim's Job to disappear; whichever future tick first observes the resource genuinely free
+// admits the preempting job.
+func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunning []*domain.Experiment, preemptor *domain.Experiment) error {
 	if len(burstRunning) == 0 || len(needed) == 0 {
-		return domain.NewFootprint(), nil
+		return nil
 	}
 
-	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job that spent most of its
-	// wall-clock life in a reschedule/node-death gap hasn't actually made more progress than one
-	// admitted more recently, and shouldn't be spared preemption on that basis. Computed once up
-	// front (not in the sort comparator) since it's a GreptimeDB query per job. A query error is
-	// logged and treated as 0 observed hours — the conservative choice for a "prefer to evict the
-	// job that's made the least progress" heuristic, not a wall-clock fallback for accounting.
+	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job stuck in a
+	// reschedule/node-death gap hasn't made more progress than one admitted more recently.
+	// Computed once up front since it's a GreptimeDB query per job; an error aborts the pass
+	// rather than inventing zero progress.
 	elapsed := make(map[string]float64, len(burstRunning))
 	for _, exp := range burstRunning {
 		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback, l.observedGapCap, l.observedStep)
 		if err != nil {
-			l.logger.Warn("preempt: observed elapsed hours", zap.String("id", exp.ID), zap.Error(err))
-			hours = 0
+			return fmt.Errorf("preempt: observed elapsed hours for %s: %w", exp.ID, err)
 		}
 		elapsed[exp.ID] = hours
 	}
 
-	// footprintSize collapses a heterogeneous multi-dimension footprint into one comparable
-	// scalar (sum of all dimensions' canonical units) purely for the "largest footprint first"
-	// tiebreak below — not used anywhere accounting actually happens.
+	contributions := make(map[string]domain.Footprint, len(burstRunning))
+	for _, exp := range burstRunning {
+		contributions[exp.ID] = preemptionContribution(exp, preemptor)
+	}
+
+	// footprintSize collapses a multi-dimension footprint into one scalar, purely for the
+	// "largest footprint first" tiebreak below — never used for actual accounting.
 	footprintSize := func(exp *domain.Experiment) int64 {
 		var n int64
-		for _, v := range exp.Footprint() {
+		for _, v := range contributions[exp.ID] {
 			n += v
 		}
 		return n
 	}
 
-	// Sort victims: fewest prior preemptions first — without this, "least observed elapsed
-	// hours" alone repeatedly re-selects the same burst job every time it's barely restarted
-	// before the next preemption need arrives, starving it indefinitely while its
-	// less-recently-hit siblings are never touched. Preempt count is the fairness primary key;
-	// least elapsed time (minimize wasted work) and largest footprint (fewest evictions) remain
-	// the tiebreaks among jobs that have been preempted equally often.
+	// Least observed runtime first (minimizes wasted work), largest footprint as tiebreak
+	// (minimizes eviction count). No preemption history retained between ticks.
 	sort.Slice(burstRunning, func(i, j int) bool {
-		pi, pj := burstRunning[i].PreemptCount, burstRunning[j].PreemptCount
-		if pi != pj {
-			return pi < pj
-		}
 		ei, ej := elapsed[burstRunning[i].ID], elapsed[burstRunning[j].ID]
 		if ei != ej {
 			return ei < ej
@@ -75,23 +71,32 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		if domain.Fits(freed, needed) {
 			break
 		}
+		contribution := contributions[victim.ID]
+		useful := false
+		for key, want := range needed {
+			if freed[key] < want && contribution[key] > 0 {
+				useful = true
+				break
+			}
+		}
+		if !useful {
+			continue
+		}
 		selected = append(selected, victim)
-		freed.AddFootprint(victim.Footprint())
+		freed.AddFootprint(contribution)
 	}
 
-	if len(selected) == 0 {
-		return domain.NewFootprint(), nil
+	// Never disrupt jobs for a partial plan. If the complete candidate set cannot free every
+	// deficient dimension, leave all victims running and retry from fresh actual state later.
+	if len(selected) == 0 || !domain.Fits(freed, needed) {
+		return nil
 	}
 
-	// Fill-back pass: footprints are heterogeneous, so the loop above can overshoot (e.g.
-	// victim N-1 alone already covers needed but victim N still got selected). Walk backward
-	// and reprieve any victim whose removal from the selected set still leaves the remaining
-	// freed footprint covering needed — minimizes total evictions instead of evicting whatever
-	// fit first. This is the "verify the post-preemption vector fits" step the plan calls for,
-	// applied per-candidate-removal rather than once at the end, so it also states the fewest-
-	// victims objective explicitly.
+	// Fill-back pass: heterogeneous footprints can make the loop above overshoot (e.g. victim
+	// N-1 alone already covers needed but N still got selected). Walk backward and reprieve any
+	// victim whose removal still leaves freed covering needed — minimizes total evictions.
 	for i := len(selected) - 1; i >= 0; i-- {
-		vfp := selected[i].Footprint()
+		vfp := contributions[selected[i].ID]
 		trial := freed.Sub(vfp)
 		if domain.Fits(trial, needed) {
 			freed = trial
@@ -107,25 +112,26 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		)
 	}
 
-	// Requeue every victim FIRST (status RUNNING -> QUEUED), sequentially: this is the actual
-	// "delete" instruction — it moves each victim out of the desired-running set a
-	// cluster-agent reconciles against, before we ever wait for its Job to disappear. Doing
-	// this before waiting is required, not just a style choice: if we waited first, the
-	// cluster-agent would still see the (still-RUNNING) experiment as desired and would never
-	// remove the Job, so WaitForJobDeletion would time out on every preemption.
+	// Requeue every victim (RUNNING -> QUEUED) and stop — never waits for its Job to actually
+	// disappear. Live capacity, read fresh each tick, reflects the resource as free once that's
+	// genuinely true.
 	//
-	// Do not refund quota on preemption: the job is returning to QUEUED and will run again,
-	// so its remaining estimated cost must stay debited — but at the new, shortened estimate,
-	// not the stale original one. All four resource dimensions are rescaled by the same ratio
-	// (remaining/original duration) that estimated_duration_hours itself is rescaled by, so a
-	// job's $/hour-equivalent rate stays intact across preemption, and the metrics-DB
-	// reservation for every dimension is corrected to match in the same step — otherwise
-	// reconcile's quota-exhaustion delta (actual − current estimate) and settlement's per-hour
-	// rate would be comparing a still-original reservation against a now-rescaled estimate. The
-	// completion handler issues the unused-budget refund when the job eventually finishes.
-	var requeued []*domain.Experiment
+	// Do not refund quota on preemption: the job returns to QUEUED and will run again, so its
+	// remaining cost stays debited — but rescaled to the new, shortened estimate. All four
+	// resource dimensions are rescaled by the same ratio so a job's $/hour rate stays intact
+	// across preemption, and the metrics-DB reservation is corrected to match in the same step
+	// (otherwise reconcile's quota-exhaustion delta and settlement's rate would compare a stale
+	// reservation against a rescaled estimate). The completion handler refunds unused budget
+	// when the job eventually finishes.
 	for _, victim := range selected {
-		remaining := victim.RemainingEstimatedHours()
+		remaining := victim.EstimatedDurationHours - elapsed[victim.ID]
+		minimum := domain.MinRemainingHours
+		if victim.EstimatedDurationHours < minimum {
+			minimum = victim.EstimatedDurationHours
+		}
+		if remaining < minimum {
+			remaining = minimum
+		}
 		ratio := 0.0
 		if victim.EstimatedDurationHours > 0 {
 			ratio = remaining / victim.EstimatedDurationHours
@@ -139,106 +145,102 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 			l.logger.Error("requeue preempted job", zap.String("id", victim.ID), zap.Error(err))
 			continue
 		}
-		requeued = append(requeued, victim)
 
-		if victim.PlatformExperimentID == "" {
+	}
+
+	return nil
+}
+
+// preemptionContribution is the capacity a victim can actually return to the preemptor's
+// placement domain. Extended resources such as nvidia.com/gpu are shared by multiple hardware
+// models; equal resource names alone do not mean evicting one model makes another available.
+func preemptionContribution(victim, preemptor *domain.Experiment) domain.Footprint {
+	contribution := victim.Footprint()
+	if preemptor.Job.AcceleratorCount <= 0 {
+		return contribution
+	}
+	// Accelerator capacity is keyed by the driver-published type, so "does evicting this victim
+	// free the hardware the preemptor needs" is now just string equality — no comparing resource
+	// names and node selectors to guess whether two jobs sit on the same hardware.
+	if victim.AcceleratorType != preemptor.AcceleratorType {
+		delete(contribution, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(preemptor.AcceleratorType)})
+	}
+	return contribution
+}
+
+
+// completionFractions derives queue ordering progress from metrics on each tick. The returned
+// map is ephemeral scratch data, never retained or persisted.
+func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experiment) (map[string]float64, error) {
+	out := make(map[string]float64, len(exps))
+	now := time.Now().UTC()
+	for _, exp := range exps {
+		if exp.EstimatedDurationHours <= 0 {
 			continue
 		}
-		for _, dim := range []struct {
-			rt     domain.ResourceType
-			amount float64
-		}{
-			{domain.ResourceAcceleratorHours, newCostAccH},
-			{domain.ResourceCPUCoreHours, newCPU},
-			{domain.ResourceRAMGBHours, newRAM},
-			{domain.ResourceStorageGBHours, newStorage},
-		} {
-			if dim.amount <= 0 {
-				continue
-			}
-			if err := l.quota.CorrectReservation(ctx, victim.AgentID, victim.PlatformExperimentID, victim.ID, dim.rt, victim.CapacityTier, dim.amount); err != nil {
-				l.logger.Error("correct reservation after requeue",
-					zap.String("id", victim.ID), zap.String("resource", string(dim.rt)), zap.Error(err))
-			}
+		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, now, ObservedMaxLookback, l.observedGapCap, l.observedStep)
+		if err != nil {
+			return nil, fmt.Errorf("completion fraction: observed elapsed hours for %s: %w", exp.ID, err)
 		}
+		fraction := hours / exp.EstimatedDurationHours
+		if fraction < 0 {
+			fraction = 0
+		} else if fraction > 1 {
+			fraction = 1
+		}
+		out[exp.ID] = fraction
 	}
-
-	// Now wait for each victim's Job to actually disappear, in parallel — avoids serialising
-	// WaitForJobDeletion across hundreds of jobs. A victim only contributes to actualFreed if
-	// its own wait positively confirms deletion within the timeout: a timeout means Kubernetes
-	// may still be holding those accelerators, so counting them as freed here would let this same tick
-	// admit a guaranteed job against capacity that physically doesn't exist yet. Timed-out
-	// victims stay requeued (out of the running set) but their capacity is simply not counted
-	// this tick — the next tick reads fresh live capacity and will pick it up once actually gone.
-	var mu sync.Mutex
-	actualFreed := domain.NewFootprint()
-	var wg sync.WaitGroup
-	for _, victim := range requeued {
-		wg.Add(1)
-		go func(v *domain.Experiment) {
-			defer wg.Done()
-			if err := l.workload.WaitForJobDeletion(ctx, v, l.preemptTimeout); err != nil {
-				l.logger.Warn("wait for job deletion", zap.String("id", v.ID), zap.Error(err))
-				return
-			}
-			mu.Lock()
-			actualFreed.AddFootprint(v.Footprint())
-			mu.Unlock()
-		}(victim)
-	}
-	wg.Wait()
-
-	return actualFreed, nil
+	return out, nil
 }
 
 // submitJob marks the experiment SUBMITTED and assigns it to clusterName in the DB first
-// (atomically — see MarkSubmitted), durably reserves its footprint against that cluster (see
-// pending_capacity_reservations' schema comment — closes the race where a second tick, before
-// the cluster-agent has actually created the pod, would otherwise see live capacity as still
-// free), then creates the backend workload. Order matters: marking and reserving first ensures
-// the in-flight footprint is always visible to the next tick, on the right cluster, even if the
-// backend write is slow. On backend failure we roll back to QUEUED and drop the reservation so
-// the job re-enters the queue rather than leaking in an untracked SUBMITTED state or holding a
-// phantom claim on capacity it never actually got.
+// (atomically — see MarkSubmitted), then creates the backend workload. MarkSubmitted is itself
+// the durable capacity claim because GetFlavorCapacity subtracts all desired experiments. On
+// backend failure we roll back to QUEUED so the next tick can retry from durable state.
 func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string) error {
-	if err := l.store.MarkSubmitted(ctx, exp.ID, clusterName); err != nil {
+	// resolveClusterAndFootprint may have substituted an AcceptableAcceleratorTypes alternative
+	// for the originally requested flavor to find a cluster the job fits on — persist that now
+	// so the record matches from the start. This is also what lets onRunning's flavor-
+	// substitution debit correctly detect whether our guess here matches the real k8s placement.
+	if exp.AcceleratorCount > 0 && exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType {
+		newEstCost := exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+		if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, exp.AcceleratorType, newEstCost); err != nil {
+			return fmt.Errorf("reserve selected accelerator flavor: %w", err)
+		}
+		exp.EstimatedCostAccH = newEstCost
+	}
+	fp := exp.Footprint()
+	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+		guaranteed, burst, err := l.workload.GetFlavorCapacity(ctx)
+		if err != nil {
+			return false, err
+		}
+		available := guaranteed
+		if exp.CapacityTier == domain.CapacityBurst {
+			available = burst
+		}
+		if !domain.Fits(available[clusterName], fp) {
+			return false, nil
+		}
+		nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
+		if err != nil {
+			return false, err
+		}
+		nodeLabels, err := l.workload.GetNodeLabels(ctx)
+		if err != nil {
+			return false, err
+		}
+		return desiredPlacementFits(nodeAvail[clusterName], nodeLabels[clusterName], desired, exp), nil
+	})
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return errAdmissionCapacityChanged
 	}
 	exp.ClusterName = clusterName
-	// resolveClusterAndFootprint may have substituted an AcceptableAcceleratorTypes alternative for the
-	// originally requested flavor (exp.Job.AcceleratorType) to find a cluster this job actually fits on
-	// — persist that now so the record matches from the start, not just once job_watcher's
-	// onRunning observes the real k8s placement. onRunning's own flavor-substitution debit
-	// compares its k8s-observed type against exp.AcceleratorType, so this write is also what lets that
-	// comparison correctly detect "no further correction needed" when our guess here matches
-	// where the pod actually lands, vs. "the real placement differs from what we reserved" when
-	// it doesn't.
-	if exp.AcceleratorCount > 0 && exp.AcceleratorType != exp.Job.AcceleratorType {
-		newEstCost := exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
-		if err := l.store.UpdateAdmittedFlavor(ctx, exp.ID, exp.AcceleratorType, newEstCost); err != nil {
-			l.logger.Warn("persist admission-time flavor substitution",
-				zap.String("exp", exp.ID), zap.Error(err))
-		}
-	}
-	if err := l.store.UpsertPendingReservation(ctx, exp.ID, clusterName, exp.Footprint()); err != nil {
-		// Fail closed, not best-effort: tick() step 2 (the SUBMITTED/ADMITTED/RUNNING fallback
-		// accounting this comment used to describe) was removed once GetFlavorCapacity became
-		// fully live — there is no longer any other mechanism protecting this job's claimed
-		// capacity, so a silently dropped reservation would reopen the exact double-admission
-		// race pending reservations exist to close. Roll back to QUEUED instead.
-		l.logger.Error("upsert pending reservation", zap.String("exp", exp.ID), zap.Error(err))
-		if rbErr := l.store.MarkQueued(ctx, exp.ID); rbErr != nil {
-			l.logger.Error("rollback to QUEUED failed after reservation error",
-				zap.String("exp", exp.ID), zap.Error(rbErr))
-		}
-		return err
-	}
 	if err := l.workload.CreateWorkload(ctx, exp); err != nil {
-		if delErr := l.store.DeletePendingReservation(ctx, exp.ID); delErr != nil {
-			l.logger.Warn("delete pending reservation after workload creation error",
-				zap.String("exp", exp.ID), zap.Error(delErr))
-		}
-		if rbErr := l.store.MarkQueued(ctx, exp.ID); rbErr != nil {
+		if rbErr := l.store.MarkQueued(ctx, exp.ID, domain.NotAdmittedWorkloadCreation); rbErr != nil {
 			l.logger.Error("rollback to QUEUED failed after workload creation error",
 				zap.String("exp", exp.ID), zap.Error(rbErr))
 		}
@@ -247,23 +249,18 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 	return nil
 }
 
-// quotaKey builds the (AgentID, PlatformExperimentID) composite key quota is actually tracked
-// under — matches fetchQuotaMap's dedup key. Exported as a helper so every consumer of the map
-// fetchQuotaMap returns agrees on how to look an experiment's own ratio up.
+// quotaKey builds the (AgentID, PlatformExperimentID) composite key quota is tracked under —
+// matches fetchQuotaMap's dedup key, so every consumer agrees on the lookup.
 func quotaKey(agentID, platformExpID string) string {
 	return agentID + "/" + platformExpID
 }
 
 // fetchQuotaMap builds a map of (agentID, platformExperimentID) -> *domain.AgentQuota for
-// guaranteed/burst ordering. Keyed by the composite (AgentID, PlatformExperimentID) pair, not
-// AgentID alone: an agent can run multiple platform experiments concurrently, each with its own
-// quota pool, so a map keyed by AgentID alone would let a second platform experiment's quota
-// silently overwrite the first's. The full AgentQuota (not a single precomputed ratio) is kept
-// so sortGuaranteed/sortBurst can compute each experiment's own dominant-utilization fairness
-// ratio (see domain.AgentQuota.DominantUtilization) against the dimensions THAT job actually
-// requests — a fixed single ratio per agent can't do that, since two jobs from the same agent
-// competing on different dimensions (e.g. one accelerator-only, one CPU-only) need different ratios.
-func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map[string]*domain.AgentQuota {
+// guaranteed/burst ordering. Keyed by the composite pair, not AgentID alone, since an agent can
+// run multiple platform experiments concurrently each with its own quota pool. The full
+// AgentQuota (not a precomputed ratio) is kept so sortGuaranteed/sortBurst can compute each
+// experiment's own dominant-utilization ratio against the dimensions that job actually requests.
+func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) (map[string]*domain.AgentQuota, error) {
 	seen := map[string]bool{}
 	result := map[string]*domain.AgentQuota{}
 	for _, exp := range exps {
@@ -273,32 +270,13 @@ func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) map
 		}
 		seen[key] = true
 		aq, err := l.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
-		if err != nil || aq == nil {
-			continue
+		if err != nil {
+			return nil, fmt.Errorf("fetch quota for %s: %w", key, err)
+		}
+		if aq == nil {
+			return nil, fmt.Errorf("fetch quota for %s: quota not found", key)
 		}
 		result[key] = aq
 	}
-	return result
-}
-
-// notAdmittedReasonFor classifies a skipped job: if current availability, for every dimension
-// the job actually needs, still equals what it was before this tick touched it, nothing was
-// ever available (capacity never existed this tick, independent of competition); if any needed
-// dimension is now lower, other jobs admitted earlier in this same tick's sort order consumed
-// it (outranked).
-func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint) string {
-	for k := range footprint {
-		if current[k] < initial[k] {
-			return domain.NotAdmittedOutranked
-		}
-	}
-	return domain.NotAdmittedCapacityUnavailable
-}
-
-// setNotAdmittedReason is a best-effort write — a failure here never blocks scheduling, it only
-// degrades the "why hasn't this been admitted" debugging signal for one tick.
-func (l *Loop) setNotAdmittedReason(ctx context.Context, expID, reason string) {
-	if err := l.store.UpdateNotAdmittedReason(ctx, expID, reason); err != nil {
-		l.logger.Warn("set not_admitted_reason", zap.String("exp", expID), zap.Error(err))
-	}
+	return result, nil
 }

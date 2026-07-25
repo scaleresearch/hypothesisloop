@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"go.uber.org/zap"
 )
 
@@ -26,6 +26,10 @@ type PlatformExperimentsStore interface {
 	UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
+	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
+	AddDesiredQuotaUsageOne(ctx context.Context, quota *domain.AgentQuota) error
+	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error)) (rejectionReason string, err error)
+	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, observed func(context.Context, string, string) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
 	HasTop3History(ctx context.Context, agentID string) (bool, error)
 	IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error)
@@ -38,9 +42,6 @@ type PlatformExperimentsStore interface {
 	// moving the amount and marking the donation fulfilled in one transaction. See
 	// db.PlatformExperimentsStore.FulfillDonationTx.
 	FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, donorUsedGuaranteed float64) (bool, error)
-	// WithAdmissionLock serializes CheckAndDebitQuota's read-then-reserve step across every
-	// control-service replica — see db.PlatformExperimentsStore.WithAdmissionLock.
-	WithAdmissionLock(ctx context.Context, agentID, platformExpID string, fn func(ctx context.Context) error) error
 	// Donation persistence (experiment-scoped donations).
 	CreateDonationRequest(ctx context.Context, req *domain.DonationRequest) error
 	GetDonationRequest(ctx context.Context, id string) (*domain.DonationRequest, error)
@@ -57,16 +58,16 @@ type PlatformExperimentsService struct {
 }
 
 // NewPlatformExperimentsService constructs the service. metricsDBURL is the GreptimeDB instance
-// backing agent quota consumption (used_guaranteed_*/used_burst_*) — the sole store for it;
-// store only ever holds the guaranteed/burst allocation.
+// backing observed agent quota consumption. PostgreSQL holds allocations and current desired
+// experiment estimates.
 func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string) *PlatformExperimentsService {
 	return &PlatformExperimentsService{store: store, usage: metricsdb.NewUsageTracker(metricsDBURL), cfg: cfg, logger: logger}
 }
 
 // CreatePlatformExperimentRequest is the input for Create.
 type CreatePlatformExperimentRequest struct {
-	Name          string  `json:"name"`
-	Description   string  `json:"description"`
+	Name                   string  `json:"name"`
+	Description            string  `json:"description"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
 	// BudgetCPUCoreHours/BudgetRAMGBHours/BudgetStorageGBHours are optional; 0 means that
 	// resource dimension isn't tracked for this platform experiment (Accelerator-only, as before).

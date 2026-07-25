@@ -10,8 +10,8 @@ import (
 // per status report by the control plane (clusteragentapi.Handler.PushStatus), straight from
 // what cluster-agent observed (workload.JobWorkloadClient.ResolveAdmittedAcceleratorType). This
 // is the sole record of job→physical-node attribution anywhere in the system: it is not also
-// stored in Postgres (cluster_job_reports has no node column) — per this repo's "metrics only in
-// the metrics store, no duplicates between relational db and metrics storage" rule, since this is
+// stored in Postgres — per this repo's "metrics only in the metrics store, no duplicates between
+// relational db and metrics storage" rule, since this is
 // exactly the kind of fact (observed at runtime, needed for post-hoc traceability, never used for
 // an admission/billing decision) the metrics store already owns for accelerator type.
 const experimentNodeMetric = "experiment_node_active"

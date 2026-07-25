@@ -5,14 +5,13 @@
 #               resources. This is NOT a Kubernetes manifest and never will be: Kubernetes
 #               (or whatever backend is configured) is treated purely as a downlevel
 #               execution engine. The backend compiles this down into whatever native
-#               resource it needs (a batch/v1 Job today), merging in this cluster's own
-#               operator-set defaults (see cluster/infra/job-defaults-configmap.yaml) for
-#               anything left unset here.
+#               resource it needs (a batch/v1 Job today). Execution-affecting fields are
+#               explicit so the same desired state compiles identically on every cluster.
 #   - metadata: the research/bookkeeping fields (hypothesis, project linkage, cost tier,
 #               ...) that have nothing to do with how the job executes.
 #
-# See tests/workloads/generic/job.yaml for the minimal fixture the e2e smoke test submits (just the
-# `job` section — its `metadata` is generated inline by tests/scenarios/phase2-and-settlement.sh per agent).
+# See tests/workloads/generic/job.yaml for the minimal fixture the e2e smoke test submits
+# (just `job` — `metadata` is generated inline by tests/scenarios/phase2-and-settlement.sh).
 
 job:
   # --- What to run -------------------------------------------------------------------
@@ -22,42 +21,53 @@ job:
     MY_APP_CONFIG: "whatever-your-training-code-needs"
 
   # --- Resources ---------------------------------------------------------------------
-  # cpu/memory/storage: plain quantity strings. Omit any of them to use this cluster's own
-  # default (see cluster/infra/job-defaults-configmap.yaml) — useful when you don't care and
-  # don't want to guess at a number that might be wrong for this particular cluster. If the
-  # platform experiment you're submitting into sets a CPU/RAM/storage budget (in addition to
-  # its accelerator-hours budget), whatever you request here (× num_nodes × estimated_duration_hours)
-  # is debited from that budget the same way accelerator-hours already are — omitting a field here
-  # means that dimension isn't billed/capped for this submission (the actual value used is
-  # resolved later by the cluster, invisible to the control plane's own accounting).
+  # cpu/memory/storage: required plain quantity strings. If the platform experiment sets a
+  # CPU/RAM/storage budget (besides accelerator-hours), what you request here (× num_nodes ×
+  # estimated_duration_hours) is debited from it the same way accelerator-hours already are.
   cpu: "4"
   memory: "16Gi"
   storage: "10Gi"
 
-  # accelerator_type/accelerator_count: the only place accelerator count is ever declared — a plain integer, not a
-  # k8s resource quantity string. accelerator_count is PER NODE (see num_nodes below); billing and
-  # quota accounting are computed against accelerator_count * num_nodes. Note: every resource
-  # dimension here is also subject to the operator's per-job maximum caps (openresearch.yaml's
-  # quota.max_accelerator_count_per_job etc) — a submission exceeding a cap is rejected at admission,
-  # before any quota is touched.
-  accelerator_type: H100
+  # accelerator_type/accelerator_count: the only place accelerator count is declared — a plain
+  # integer, not a k8s resource string. accelerator_count is PER NODE (see num_nodes below);
+  # billing/quota accounting use accelerator_count * num_nodes. Every resource dimension here
+  # is also subject to the operator's per-job maximum caps (hypothesisloop.yaml's
+  # quota.max_accelerator_count_per_job etc) — exceeding a cap is rejected at admission, before
+  # any quota is touched.
   accelerator_count: 1
+  # accelerator_type names the hardware the way its own driver publishes it, as a fully-qualified
+  # "key=value" — NVIDIA's GPU Feature Discovery writes the node label
+  # nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3; Tenstorrent's DRA driver publishes the device
+  # attribute tenstorrent.com/chipArch=blackhole. Read GET /resource-catalog/capacity to see
+  # exactly which strings a cluster currently has, and submit one of them verbatim: capacity,
+  # billing and placement all use this same string, so there is nothing to translate.
+  #
+  # How it is requested (a DRA claim, or an extended resource plus node affinity) is worked out
+  # from the cluster's live inventory — never declared here.
+  accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
 
-  # acceptable_accelerator_types: optional. If your training code doesn't care which of several
-  # hardware tiers it lands on, list them here instead of hard-requiring accelerator_type exactly —
-  # the backend places the job on any node of one of these types. The rate you're billed is
-  # adjusted to whichever type it actually lands on either way. Only list types that share
-  # the same vendor (the k8s resource request is one specific extended-resource name — you
-  # can't ask for "AMD or NVIDIA" in a single container); mixing vendors here means the
-  # non-matching entries are silently ignored when the backend builds node affinity.
-  # acceptable_accelerator_types: [H100, H200]
+  # acceptable_accelerator_types: alternatives this job runs equally well on, in preference order.
+  # Admission may place the job on any of them when the first choice is busy, and bills whichever
+  # one actually ran.
+  # acceptable_accelerator_types:
+  #   - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+
+  # accelerator_tolerations: taint keys to tolerate so the pod may land on tainted accelerator
+  # nodes (whether a cluster taints them is a property of that cluster, not of the hardware).
+  accelerator_tolerations: [nvidia.com/gpu]
+
+  # accelerator_pod_resources: extra per-node requests the accelerator itself needs, e.g.
+  # accelerator_pod_resources: {hugepages-1Gi: 4Gi}
+
+  # node_selector: ordinary Kubernetes node selection for anything that is NOT the accelerator —
+  # a zone, a disk class, a kernel version. ANDed with wherever the accelerator lives. Optional.
+  # node_selector: {topology.kubernetes.io/zone: us-east-1a}
 
   # extra_resources: any k8s extended resource beyond accelerator_type/accelerator_count — TPUs
-  # (google.com/tpu), other AI accelerators (habana.ai/gaudi, aws.amazon.com/neuron, ...),
-  # or anything else a device plugin on this cluster advertises. Plain quantity strings per
-  # node, same convention as cpu/memory/storage. Unlike accelerator_count, these are NOT billed or
-  # capped by the quota system today — they pass straight through to the pod's resource
-  # requests so the job still lands on the right hardware.
+  # (google.com/tpu), other AI accelerators (habana.ai/gaudi, aws.amazon.com/neuron, ...), or
+  # anything else a device plugin advertises. Plain quantity strings per node, like
+  # cpu/memory/storage. Unlike accelerator_count, NOT billed or capped by quota — passes
+  # straight through to the pod's resource requests.
   # extra_resources:
   #   google.com/tpu: "8"
 
@@ -68,50 +78,46 @@ job:
   # other node's retry budget), and completion gated on rank 0 finishing (stragglers on other
   # ranks don't hold up the job). Every node gets these env vars automatically, no further DSL
   # needed:
-  #   OPENRESEARCH_RANK         this node's index (0 = rank 0 / the "master"/"head")
-  #   OPENRESEARCH_WORLD_SIZE   total node count (== num_nodes)
-  #   OPENRESEARCH_MASTER_ADDR  rank 0's stable DNS name (a headless Service is created
+  #   HYPOTHESISLOOP_RANK         this node's index (0 = rank 0 / the "master"/"head")
+  #   HYPOTHESISLOOP_WORLD_SIZE   total node count (== num_nodes)
+  #   HYPOTHESISLOOP_MASTER_ADDR  rank 0's stable DNS name (a headless Service is created
   #                             alongside the job so this actually resolves)
-  #   OPENRESEARCH_MASTER_PORT  fixed rendezvous port (29500) — one job, one port, no
+  #   HYPOTHESISLOOP_MASTER_PORT  fixed rendezvous port (29500) — one job, one port, no
   #                             cross-job collision
   #
-  # PyTorch DDP: run `torchrun --nnodes=$OPENRESEARCH_WORLD_SIZE
-  # --node-rank=$OPENRESEARCH_RANK --master-addr=$OPENRESEARCH_MASTER_ADDR
-  # --master-port=$OPENRESEARCH_MASTER_PORT train.py` as this job's command on every node —
+  # PyTorch DDP: run `torchrun --nnodes=$HYPOTHESISLOOP_WORLD_SIZE
+  # --node-rank=$HYPOTHESISLOOP_RANK --master-addr=$HYPOTHESISLOOP_MASTER_ADDR
+  # --master-port=$HYPOTHESISLOOP_MASTER_PORT train.py` as this job's command on every node —
   # torchrun itself handles the rest (worker processes, NCCL init).
   #
   # Ray (e.g. RLlib for RL training): rank 0 runs `ray start --head
-  # --port=$OPENRESEARCH_MASTER_PORT` then submits the job locally; every other rank runs
-  # `ray start --address=$OPENRESEARCH_MASTER_ADDR:$OPENRESEARCH_MASTER_PORT --block` (a
+  # --port=$HYPOTHESISLOOP_MASTER_PORT` then submits the job locally; every other rank runs
+  # `ray start --address=$HYPOTHESISLOOP_MASTER_ADDR:$HYPOTHESISLOOP_MASTER_PORT --block` (a
   # worker that just joins the cluster and blocks). A simple shell entrypoint branching on
-  # `[ "$OPENRESEARCH_RANK" = "0" ]` covers both roles from one image/command.
+  # `[ "$HYPOTHESISLOOP_RANK" = "0" ]` covers both roles from one image/command.
   num_nodes: 1
 
   # topology: placement requirements for a distributed run — only meaningful when num_nodes > 1.
   # topology:
-  #   # spread_across_hosts (default true whenever num_nodes > 1): no two of this job's nodes
-  #   # land on the same physical host. This is what actually gets you num_nodes independent
-  #   # accelerators of parallelism instead of two ranks silently sharing one host's accelerators. Only set
-  #   # this to false on a tiny local/dev cluster with fewer hosts than num_nodes.
+  #   # spread_across_hosts (default true when num_nodes > 1): no two of this job's nodes land
+  #   # on the same physical host, so you get real parallelism instead of ranks sharing a
+  #   # host's accelerators. Set false only on a small dev cluster with fewer hosts than num_nodes.
   #   spread_across_hosts: true
-  #   # same_zone (default false): best-effort preference to keep all of this job's nodes in
-  #   # the same topology zone/rack, minimizing cross-zone network latency for gradient
-  #   # all-reduce (NCCL) — the usual reason distributed training throughput craters when
-  #   # ranks are scattered across a datacenter. It's a preference, not a requirement: the
-  #   # first rank scheduled has no sibling yet to co-locate with, so this can never be a hard
-  #   # requirement without risking the whole job going unschedulable.
+  #   # same_zone (default false): best-effort preference to keep this job's nodes in the same
+  #   # topology zone/rack, minimizing cross-zone latency for gradient all-reduce (NCCL). A
+  #   # preference, not a requirement — enforcing it could leave the job unschedulable.
   #   same_zone: true
 
   # shm_size: /dev/shm size (e.g. "4Gi"). k8s defaults /dev/shm to a tiny tmpfs, which
   # silently breaks PyTorch's multiprocess DataLoader workers and NCCL's shared-memory IPC
-  # under load — both are common requirements for real multi-accelerator/multi-host training. Omit
-  # to use this cluster's default.
+  # under load — both are common requirements for real multi-accelerator/multi-host training.
+  # Omit to use no explicit shared-memory volume.
   # shm_size: "4Gi"
 
   # --- Retry -----------------------------------------------------------------------------
   # max_retries: how many times a failing node is retried before the job is marked failed.
-  # Omit to use this cluster's default.
-  # max_retries: 3
+  # Required and non-negative.
+  max_retries: 3
 
 metadata:
   # Which agent and platform experiment this run belongs to. Required for quota

@@ -9,9 +9,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // reasonError preserves the historical {"reason","message"} error envelope used
@@ -39,13 +39,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ID   string `json:"id" doc:"Stable unique agent id"`
-			Name string `json:"name" doc:"Human-readable display name"`
+			Name string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
-		if in.Body.ID == "" || in.Body.Name == "" {
-			return nil, huma.Error400BadRequest("id and name are required")
+		if in.Body.ID == "" {
+			return nil, huma.Error400BadRequest("id is required")
 		}
-		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, in.Body.Name)
+		// id is the only identity that matters; name is presentation-only (UI/leaderboard), so
+		// requiring it would reject an otherwise complete registration over a cosmetic field.
+		name := in.Body.Name
+		if name == "" {
+			name = in.Body.ID
+		}
+		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name)
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 				return nil, huma.Error409Conflict("agent already exists: " + in.Body.ID)
@@ -150,6 +156,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "update-platform-experiment", Method: "PUT", Path: "/platform-experiments/{id}",
 		Summary: "Update a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "Amends an experiment while its status is open — including `metrics`, so a ranking " +
+			"metric found to be mis-specified can be corrected in place instead of closing the " +
+			"experiment and discarding every agent's registered hypotheses and baseline work. " +
+			"Rejected once the status is no longer open.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body CreatePlatformExperimentRequest
@@ -439,8 +449,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
-		Description: "Live, per-cluster {accelerator_type, available, total}. Check before choosing accelerator_type — a type with no live capacity anywhere QUEUES FOREVER (never errors). Empty when the operator wired no live-capacity reporting.",
-	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Description: "Live {accelerator_type, available, total} per cluster. accelerator_type is the exact string " +
+			"a job spec's accelerator_type takes — the value its driver publishes — so what you read here is what " +
+			"you submit. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER (never errors). " +
+			"Only currently-schedulable nodes count, so powered-off hardware never appears here.",}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
 			Clusters []ClusterCapacity `json:"clusters"`
 		}
@@ -462,7 +474,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		out.Body.Clusters = buildClusterCapacity(available, total, peh.flavorNameFn)
+		out.Body.Clusters = buildClusterCapacity(available, total)
 		return out, nil
 	})
 }

@@ -2,11 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // Submit runs the admission gate for an experiment. On success the experiment is
@@ -146,7 +147,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// "explicit resource requests" cross-cutting fix), so there is no more "left unset,
 	// resolved later by a cluster-side default" case to work around here.
 	//
-	// RAM/storage are Class B (SCHEDULING_GENERALIZATION_PLAN.md): hard physical-fit-checked
+	// RAM/storage are hard physical-fit-checked
 	// at admission (see domain.Experiment.Footprint()/domain.Fits, wired into loop_tick.go) but
 	// deliberately never estimated/debited as hours here — EstimatedRAMGBHours/
 	// EstimatedStorageGBHours are left at 0 for every new submission from this point on. This
@@ -159,8 +160,8 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// new debit ever happens against it, so its guaranteed/burst pools simply stop moving.
 	// Historical ActualRAMGBHours/ActualStorageGBHours on already-terminal experiments are
 	// untouched (this is a forward-only behavior change, not a backfill/rewrite).
-	if exp.EstimatedCostAccH == 0 {
-		exp.EstimatedCostAccH = exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+	if exp.EstimatedCostAccH == 0 && exp.AcceleratorCount > 0 {
+		exp.EstimatedCostAccH = estimatedAcceleratorCost(exp)
 	}
 	if exp.EstimatedCPUCoreHours == 0 && pe.BudgetCPUCoreHours > 0 {
 		if cores, err := workload.ParseCPUCores(exp.Job.CPU); err == nil && cores > 0 {
@@ -204,12 +205,8 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return nil
 	}
 
-	// New experiment: the GreptimeDB quota reservation is keyed by experiment id, but nothing can
-	// find, settle, or repair a reservation whose experiment row doesn't exist — every reconciler
-	// keys off Postgres rows (N2). So create the reconcilable anchor first, then debit; if the
-	// debit fails, delete the anchor. This ordering guarantees a reservation never outlives its
-	// row: the worst case is a briefly-created row with no reservation (fully reconcilable), never
-	// an invisible, permanent quota leak.
+	// Atomically validate aggregate desired estimates plus observed settled usage and insert the
+	// PostgreSQL desired-state row under the per-agent admission lock.
 	now := time.Now().UTC()
 	exp.CreatedAt = now
 	exp.UpdatedAt = now
@@ -217,13 +214,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	exp.PriorityScore = priorityScore
 	// ClusterName is intentionally left unset here: the admission loop assigns it, capacity-aware,
 	// at the moment this job is actually admitted onto a specific cluster (see loop_tick.go).
-	if err := s.store.CreateExperiment(ctx, exp); err != nil {
-		return fmt.Errorf("scheduler: create experiment: %w", err)
-	}
-	if err := s.debitAllResources(ctx, exp); err != nil {
-		// The reservation never took hold — remove the anchor so the agent can retry cleanly.
-		if delErr := s.store.DeleteExperiment(ctx, exp.ID); delErr != nil {
-			return fmt.Errorf("scheduler: delete experiment after failed debit: %w (original: %v)", delErr, err)
+	if err := s.quota.AdmitExperiment(ctx, exp); err != nil {
+		var insufficient interface{ InsufficientQuota() bool }
+		if !errors.As(err, &insufficient) {
+			return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 		}
 		return &AdmissionError{
 			Reason:  ReasonInsufficientCredits,
@@ -236,4 +230,11 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		s.loop.Trigger()
 	}
 	return nil
+}
+
+func estimatedAcceleratorCost(exp *domain.Experiment) float64 {
+	if exp.AcceleratorCount == 0 {
+		return 0
+	}
+	return exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 }

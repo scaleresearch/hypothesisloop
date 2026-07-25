@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // CancelExperiment cancels a QUEUED or RUNNING/ADMITTED experiment.
-//   - QUEUED: marks as REJECTED and issues a full credit refund.
+//   - QUEUED/SUBMITTED: marks as REJECTED.
 //   - ADMITTED/RUNNING: marks as EVICTED (which is itself the deletion signal — the
 //     cluster-agent reconciles its Jobs to the set of SUBMITTED/ADMITTED/RUNNING
-//     experiments, so moving out of that set is what makes the Job go away) and issues
-//     a partial refund for unused accelerator-hours.
+//     experiments, so moving out of that set is what makes the Job go away).
+//
+// Every path then uses the canonical settlement service; there is no cancellation-specific
+// accounting implementation.
 func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {
@@ -24,42 +26,27 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 
 	switch exp.Status {
 	case domain.StatusQueued, domain.StatusSubmitted:
-		// Use a conditional update to guard against concurrent cancellation issuing a
-		// double refund. If the row was already transitioned by a concurrent request,
-		// treat it as a no-op rather than returning an error.
-		updated, err := s.store.TransitionStatus(ctx, id, exp.Status, domain.StatusRejected)
+		updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
 		if err != nil {
 			return fmt.Errorf("cancel: update status: %w", err)
 		}
 		if !updated {
 			return nil // concurrent cancellation already handled it
 		}
-		_ = s.store.UpdateEvictionReason(ctx, id, string(domain.EvictionCancelled))
-		// A SUBMITTED job may still hold a durable pending-capacity claim (see
-		// pending_capacity_reservations' schema comment) — release it, or tick() would keep
-		// subtracting it from live capacity for a job that no longer exists.
-		_ = s.store.DeletePendingReservation(ctx, id)
-		// Never started running: 0 observed cost.
-		s.refundAllResources(ctx, exp, 0, 0)
-		return nil
+		exp.Status = domain.StatusRejected
 
 	case domain.StatusAdmitted, domain.StatusRunning:
-		if err := s.store.UpdateExperimentStatus(ctx, id, domain.StatusEvicted); err != nil {
+		updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
+		if err != nil {
 			return fmt.Errorf("cancel: update status: %w", err)
 		}
-		_ = s.store.UpdateEvictionReason(ctx, id, string(domain.EvictionCancelled))
-		// ADMITTED jobs may still hold a pending reservation (RUNNING ones already had theirs
-		// cleared by job_watcher's onRunning) — release it unconditionally; a no-op if already gone.
-		_ = s.store.DeletePendingReservation(ctx, id)
-		fraction, acceleratorCost, err := s.observedFraction(ctx, exp)
-		if err != nil {
-			return fmt.Errorf("cancel: %w", err)
+		if !updated {
+			return nil
 		}
-		s.refundAllResources(ctx, exp, fraction, acceleratorCost)
+		exp.Status = domain.StatusEvicted
 		if s.loop != nil {
 			s.loop.Trigger()
 		}
-		return nil
 
 	default:
 		return &AdmissionError{
@@ -67,6 +54,16 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			Message: fmt.Sprintf("cannot cancel experiment in status %s", exp.Status),
 		}
 	}
+	if s.settler == nil {
+		return fmt.Errorf("cancel: quota settler is required")
+	}
+	if err := s.settler.Settle(ctx, exp); err != nil {
+		return fmt.Errorf("cancel: settle observed usage: %w", err)
+	}
+	if err := s.store.MarkQuotaSettled(ctx, exp.ID); err != nil {
+		return fmt.Errorf("cancel: mark quota settled: %w", err)
+	}
+	return nil
 }
 
 // WriteExperimentSummary files the agent's post-run write-up on a terminal experiment,

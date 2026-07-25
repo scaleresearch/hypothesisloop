@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Get returns a single experiment by ID.

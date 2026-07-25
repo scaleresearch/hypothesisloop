@@ -145,9 +145,8 @@ export interface CreatePlatformExperimentRequest {
   name: string
   description?: string
   budget_accelerator_hours: number
-  // Optional additional CPU budget, tracked the same way as budget_accelerator_hours
-  // (guaranteed/burst split, debited at submission, refunded on completion). 0/omitted
-  // means that dimension isn't tracked for this platform experiment.
+  // Optional CPU budget. Current PostgreSQL estimates and settled metrics observations
+  // contribute to its guaranteed/burst usage. 0/omitted means it is not tracked.
   budget_cpu_core_hours?: number
   /** @deprecated RAM is no longer an hours-billed budget dimension — physical fit-only check at
    * admission now. Always sent as 0 by the UI; kept in the request type only because the backend

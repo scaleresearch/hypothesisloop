@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // TransitionTerminal atomically transitions an experiment from `from` to `to` (EVICTED or
@@ -20,7 +20,7 @@ import (
 // settlement in that case.
 func (s *Store) TransitionTerminal(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (updated bool, err error) {
 	tag, err := s.ExperimentsStore.pool.pool.Exec(ctx, `
-		UPDATE experiments SET status = $3, eviction_reason = $4, updated_at = NOW()
+		UPDATE experiments SET status = $3, eviction_reason = $4, not_admitted_reason = NULL, updated_at = NOW()
 		WHERE id = $1 AND status = $2`, id, string(from), string(to), reason)
 	if err != nil {
 		return false, fmt.Errorf("db.TransitionTerminal: %w", err)

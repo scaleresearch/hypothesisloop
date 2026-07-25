@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/db"
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // phase2BoundaryFraction is the fixed fraction of total budget at which phase 2 triggers.
@@ -27,13 +27,12 @@ type Phase2Store interface {
 	ListPhase2HeldAgents(ctx context.Context, platformExpID string) ([]string, error)
 	IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error)
 
-	// Quota redistribution. Accelerator-hours is the primary/always-populated dimension driving the
-	// phase-2 trigger itself (GetTotalConsumedAccH); CPU/RAM/storage redistribute alongside it
-	// for any platform experiment that also tracks them (see redistributeResource).
+	// Quota redistribution. Accelerator-hours drives the phase-2 trigger itself
+	// (GetTotalConsumedAccH); CPU/RAM/storage redistribute alongside it (see redistributeResource).
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
-	// RedistributePhase2Quota atomically applies every zero/add op and claims completion in one
-	// transaction — see db.PlatformExperimentsStore.RedistributePhase2Quota. Returns (false, nil)
-	// if this platform experiment's redistribution was already committed by an earlier call.
+	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
+	// RedistributePhase2Quota atomically applies every zero/add op and claims completion.
+	// Returns (false, nil) if already committed by an earlier call.
 	RedistributePhase2Quota(ctx context.Context, platformExpID string, zeros []db.Phase2ZeroOp, adds []db.Phase2AddOp) (bool, error)
 
 	// Job control for held agents.
@@ -41,29 +40,24 @@ type Phase2Store interface {
 	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
-	// TransitionTerminal atomically transitions status and records the reason in one DB
-	// transaction — see db.Store.TransitionTerminal. Does not write usage; the caller settles
-	// separately (see Controller.settleAndMark).
+	// TransitionTerminal atomically transitions status and records the reason. Does not write
+	// usage; the caller settles separately (see Controller.settleAndMark).
 	TransitionTerminal(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
-	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
-	// durably written — see services/settlement.
+	// MarkQuotaSettled records that a terminal experiment's final usage was durably written.
 	MarkQuotaSettled(ctx context.Context, id string) error
 }
 
-// checkPhase2Transition checks whether a running platform experiment has consumed ≥ phase2_boundary
-// fraction of its budget, and if so, triggers the phase-2 transition atomically.
-// Returns without error if phase 2 is already active or if the boundary has not been reached.
+// checkPhase2Transition triggers the phase-2 transition once a running platform experiment has
+// consumed ≥ phase2_boundary fraction of its budget. No-op if already active or below boundary.
 func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) error {
 	if pe.Phase != 1 {
 		// Already triggered — retry any hold application a prior crash left incomplete.
 		return c.reconcilePhase2Hold(ctx, pe, runningExps)
 	}
 
-	// Compute total consumed: settled observed (from the metrics DB) + live actual of running
-	// attempts. TotalObservedAccH counts only kind=observed, i.e. jobs that have actually settled —
-	// never a queued or running job's reservation — so a large queued job can no longer prematurely
-	// trip the boundary (P0-a/N1). Running jobs therefore contribute their full live actual cost
-	// here, not just an overrun on top of an estimate.
+	// Total consumed = settled observed usage (TotalObservedAccH, kind=observed only — never a
+	// queued/running reservation, so a large queued job can't prematurely trip the boundary)
+	// plus running jobs' live actual cost.
 	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.ID)
 	if err != nil {
 		return fmt.Errorf("phase2: TotalObservedAccH: %w", err)
@@ -97,12 +91,10 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 		zap.Float64("boundary_acch", boundary*pe.BudgetAcceleratorHours),
 	)
 
-	// Compute 75th percentile thresholds and determine which agents are active.
 	activeAgentIDs, heldAgentIDs, err := c.computePhase2Admission(ctx, pe, runningExps)
 	if errors.Is(err, ErrPhase2MetricsUnavailable) {
-		// Fail open: postpone the transition rather than commit every agent to held with
-		// no active agent left to receive the redistributed budget. The next reconcile
-		// pass retries once metric data is available again.
+		// Fail open: postpone rather than commit every agent to held with no active agent
+		// left to receive redistributed budget. Retries next reconcile pass.
 		c.logger.Warn("phase2: postponing transition, metric data unavailable",
 			zap.String("platform_experiment", pe.ID))
 		return nil
@@ -136,10 +128,8 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 }
 
 // reconcilePhase2Hold retries hold application for a platform experiment already past the
-// trigger: heldAgentIDs is read back from the durable experiment_phase2_holds table, so it
-// survives a crash no matter how far applyPhase2Hold got last time. activeAgentIDs isn't
-// recomputed — redistribution runs at most once (RedistributePhase2Quota), so a retry never
-// needs it.
+// trigger: heldAgentIDs is read back from the durable experiment_phase2_holds table, surviving
+// a crash. activeAgentIDs isn't recomputed since redistribution runs at most once.
 func (c *Controller) reconcilePhase2Hold(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) error {
 	heldAgentIDs, err := c.phase2Store.ListPhase2HeldAgents(ctx, pe.ID)
 	if err != nil {

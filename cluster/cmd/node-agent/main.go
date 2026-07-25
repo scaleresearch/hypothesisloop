@@ -1,13 +1,13 @@
-// openresearch-node-agent runs as a DaemonSet on each cluster node.
-// It reads per-pod CPU utilization from cgroup v2 every 2 seconds and POSTs
-// the samples to the control plane's /internal/node-metrics endpoint.
+// hypothesisloop-node-agent runs as a DaemonSet on each cluster node.
+// It relists active pod cgroups and POSTs fresh execution observations to the control plane.
 //
 // Environment variables:
-//   NODE_NAME                  — Kubernetes node name (downward API)
-//   OPENRESEARCH_CONTROL_PLANE_URL  — base URL of the control plane (default: http://metric-controller:8084)
-//   PUSH_INTERVAL_MS           — push interval in ms (default: 2000)
 //
-// File layout: this file holds the main loop and control-plane push/retry logic;
+//	NODE_NAME                  — Kubernetes node name (downward API)
+//	HYPOTHESISLOOP_CONTROL_PLANE_URL  — required base URL of the control plane
+//	PUSH_INTERVAL_MS           — required positive push interval in ms
+//
+// File layout: this file holds the stateless main loop and control-plane push logic;
 // cgroup.go holds cgroup v2 cpu.stat reading; k8s.go holds pod-identity lookup.
 package main
 
@@ -23,29 +23,20 @@ import (
 )
 
 const (
-	cgroupRoot      = "/sys/fs/cgroup/kubepods.slice"
-	defaultCPURL    = "http://metric-controller:8084"
-	defaultInterval = 2 * time.Second
-
-	// maxPending bounds the retry buffer so a prolonged control-plane outage can't grow
-	// memory without limit. At the default 2s interval this covers a 15-minute outage.
-	maxPending = 450
-
+	cgroupRoot = "/sys/fs/cgroup/kubepods.slice"
 	// jobsNamespace is where the control plane creates every experiment Job — must match
-	// workload.OpenResearchNamespace (controlplane/shared/workload/workload_client.go). Not
+	// workload.HypothesisLoopNamespace (controlplane/shared/workload/workload_client.go). Not
 	// imported directly: this binary is deliberately dependency-free from the control plane.
-	jobsNamespace = "openresearch-jobs"
+	jobsNamespace = "hypothesisloop-jobs"
 
 	// experimentIDLabel is set on every experiment pod's template by the control plane
 	// (see workload_client.go) — the same label this agent reads back to tag its samples.
-	experimentIDLabel = "openresearch.io/experiment-id"
-
+	experimentIDLabel = "hypothesisloop.io/experiment-id"
 )
 
 type podSample struct {
-	PodUID       string  `json:"pod_uid"`
-	ExperimentID string  `json:"experiment_id,omitempty"`
-	CPUUtilPct   float64 `json:"cpu_util_pct"`
+	PodUID       string `json:"pod_uid"`
+	ExperimentID string `json:"experiment_id,omitempty"`
 }
 
 type pushPayload struct {
@@ -65,42 +56,31 @@ type cpuStatEntry struct {
 func main() {
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		nodeName, _ = os.Hostname()
+		log.Fatal("NODE_NAME is required")
 	}
-	cpURL := os.Getenv("OPENRESEARCH_CONTROL_PLANE_URL")
+	cpURL := os.Getenv("HYPOTHESISLOOP_CONTROL_PLANE_URL")
 	if cpURL == "" {
-		cpURL = defaultCPURL
+		log.Fatal("HYPOTHESISLOOP_CONTROL_PLANE_URL is required")
 	}
 	endpoint := cpURL + "/internal/node-metrics"
 
-	interval := defaultInterval
-	if ms := os.Getenv("PUSH_INTERVAL_MS"); ms != "" {
-		if n, err := strconv.Atoi(ms); err == nil {
-			interval = time.Duration(n) * time.Millisecond
-		}
+	ms := os.Getenv("PUSH_INTERVAL_MS")
+	n, err := strconv.Atoi(ms)
+	if err != nil || n <= 0 {
+		log.Fatal("PUSH_INTERVAL_MS must be a positive integer")
 	}
+	interval := time.Duration(n) * time.Millisecond
 
-	log.Printf("openresearch-node-agent starting: node=%s endpoint=%s interval=%s", nodeName, endpoint, interval)
+	log.Printf("hypothesisloop-node-agent starting: node=%s endpoint=%s interval=%s", nodeName, endpoint, interval)
 
 	kubeClient, err := inClusterPodLister()
 	if err != nil {
-		// Identity tagging is best-effort: CPU samples still flow untagged (experiment_id
-		// empty) rather than the agent refusing to start over an RBAC/API-server hiccup.
-		log.Printf("pod identity watch disabled: %v", err)
+		log.Fatalf("pod identity client: %v", err)
 	}
 
 	ctx := context.Background()
 
-	// Previous readings for delta computation.
-	prev := map[string]cpuStatEntry{}
-	prevTime := time.Now()
-
 	client := &http.Client{Timeout: 5 * time.Second}
-
-	// pending holds payloads that failed to send, oldest first, so a network blip or
-	// control-plane restart never silently drops a sample — every reading either reaches
-	// the control plane or is still sitting here waiting to be retried.
-	var pending []pushPayload
 
 	for {
 		time.Sleep(interval)
@@ -110,11 +90,6 @@ func main() {
 		// zone here so that's never a question, even though Go's time.Time comparisons are
 		// already zone-independent given a correct absolute instant.
 		now := time.Now().UTC()
-		elapsed := now.Sub(prevTime).Seconds()
-		if elapsed <= 0 {
-			elapsed = interval.Seconds()
-		}
-
 		current := readAllPodStats()
 		samples := []podSample{}
 
@@ -122,57 +97,22 @@ func main() {
 		// construction (a missed update just means it self-corrects on the very next
 		// iteration two seconds later), so it needs no reconnect/relist bookkeeping of its
 		// own — simpler and just as reliable as a long-lived watch for this cadence.
-		var expByUID map[string]string
-		if kubeClient != nil {
-			expByUID, err = podExperimentIDs(ctx, kubeClient, nodeName)
-			if err != nil {
-				log.Printf("pod identity list error: %v", err)
-			}
+		expByUID, err := podExperimentIDs(ctx, kubeClient, nodeName)
+		if err != nil {
+			log.Printf("pod identity list error: %v", err)
+			continue
 		}
 
-		for path, cur := range current {
-			if p, ok := prev[path]; ok && cur.podUID != "" {
-				deltaUsec := float64(cur.usageUsec) - float64(p.usageUsec)
-				if deltaUsec < 0 {
-					deltaUsec = 0
-				}
-				// CPU utilization: delta microseconds / (elapsed seconds * 1e6) * 100
-				util := (deltaUsec / (elapsed * 1e6)) * 100
-				if util > 100 {
-					util = 100
-				}
-				samples = append(samples, podSample{PodUID: cur.podUID, ExperimentID: expByUID[cur.podUID], CPUUtilPct: util})
+		for _, cur := range current {
+			if cur.podUID != "" && expByUID[cur.podUID] != "" {
+				samples = append(samples, podSample{PodUID: cur.podUID, ExperimentID: expByUID[cur.podUID]})
 			}
 		}
-
-		prev = current
-		prevTime = now
 
 		if len(samples) > 0 {
-			pending = append(pending, pushPayload{Node: nodeName, Timestamp: now, Pods: samples})
-		}
-
-		pending = flushPending(client, endpoint, pending)
-
-		if dropped := len(pending) - maxPending; dropped > 0 {
-			log.Printf("retry buffer full: dropping %d oldest payload(s) after prolonged outage", dropped)
-			pending = pending[dropped:]
+			push(client, endpoint, pushPayload{Node: nodeName, Timestamp: now, Pods: samples})
 		}
 	}
-}
-
-// flushPending sends buffered payloads to the control plane in order, oldest first, stopping at
-// the first failure so delivery order (and thus timestamp ordering) is preserved. Payloads that
-// still fail to send remain in the returned slice for the next tick to retry — nothing is
-// dropped except under the maxPending cap in the caller.
-func flushPending(client *http.Client, endpoint string, pending []pushPayload) []pushPayload {
-	i := 0
-	for ; i < len(pending); i++ {
-		if !push(client, endpoint, pending[i]) {
-			break
-		}
-	}
-	return pending[i:]
 }
 
 func push(client *http.Client, endpoint string, payload pushPayload) bool {

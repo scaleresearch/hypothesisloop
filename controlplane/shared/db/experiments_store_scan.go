@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ---- helpers ----
@@ -19,8 +19,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
 	var acceleratorType, capacityTier, status string
 	var artifacts []string
-	var evictionReason *string
-	var notAdmittedReason *string
+	var evictionReason, notAdmittedReason *string
 	var jobSpec []byte
 
 	if err := row.Scan(
@@ -31,9 +30,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
 		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
-		&exp.QueuedAt, &exp.SubmittedAt, &exp.StartedAt, &exp.PreemptCount, &exp.Attempt, &evictionReason, &notAdmittedReason,
-		&exp.ActualDurationHours, &exp.ActualCostAccH,
-		&exp.ActualCPUCoreHours, &exp.ActualRAMGBHours, &exp.ActualStorageGBHours,
+		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
 		&artifacts, &exp.QuotaSettledAt,
 		&exp.CreatedAt, &exp.UpdatedAt,
 	); err != nil {
@@ -46,8 +43,18 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		}
 	}
 	exp.AcceleratorType = domain.AcceleratorType(acceleratorType)
+	nodes := exp.Job.Nodes()
+	if nodes <= 0 || exp.AcceleratorCount%nodes != 0 {
+		return nil, fmt.Errorf("scan experiment %s: total accelerator_count %d is not divisible by num_nodes %d", exp.ID, exp.AcceleratorCount, nodes)
+	}
+	exp.Job.AcceleratorCount = exp.AcceleratorCount / nodes
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
+	// Once admitted, accelerator_type is the scheduler's concrete desired flavor. Compile the
+	// cluster-facing JobSpec to that exact choice rather than leaving Kubernetes free to consume
+	// a different acceptable flavor than PostgreSQL reserved.
+	if exp.Status == domain.StatusSubmitted || exp.Status == domain.StatusAdmitted || exp.Status == domain.StatusRunning {
+	}
 	if evictionReason != nil {
 		exp.EvictionReason = *evictionReason
 	}

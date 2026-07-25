@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/openresearch/controlplane/shared/domain"
-	"github.com/scaleresearch/openresearch/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // ErrPhase2MetricsUnavailable signals that no configured metric query returned usable data,
@@ -113,6 +113,20 @@ func (c *Controller) applyMetricAdmission(ctx context.Context, platformExpID str
 		vals = append(vals, v)
 	}
 	sort.Float64s(vals)
+
+	// A metric on which every agent scores identically cannot rank anyone: the threshold is
+	// drawn from the observed spread, so a zero spread admits the whole field on every sweep.
+	// That is indistinguishable from a healthy all-clear here, so say so — it is almost always
+	// a saturated/clamped metric definition rather than a real tie (see the normalized
+	// val_accuracy ceiling removed from tests/workloads/tenstorrent/train.py).
+	if len(vals) > 1 && vals[0] == vals[len(vals)-1] {
+		c.logger.Warn("phase2: metric has zero spread across agents, cannot rank — check for a saturated or clamped metric definition",
+			zap.String("platform_experiment_id", platformExpID),
+			zap.String("metric", metric.Key),
+			zap.Float64("value", vals[0]),
+			zap.Int("agents", len(vals)))
+	}
+
 	idx := int(pctl * float64(len(vals)))
 	if idx >= len(vals) {
 		idx = len(vals) - 1

@@ -8,11 +8,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/scaleresearch/openresearch/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/openresearch/controlplane/services/quota"
-	"github.com/scaleresearch/openresearch/controlplane/services/registry"
-	"github.com/scaleresearch/openresearch/controlplane/services/scheduler"
-	"github.com/scaleresearch/openresearch/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 func get(t *testing.T, r chi.Router, path string) (int, string) {
@@ -57,7 +57,7 @@ func TestSmoke(t *testing.T) {
 		{"quota", rq, "POST /agents"},
 		{"scheduler", rs, "POST /experiments"},
 		{"registry", rr, "POST /registry/hypotheses"},
-		{"cluster", rc, "desired-state"},
+		{"cluster", rc, "POST /{name}/reconcile"},
 	} {
 		if code, body := get(t, tc.r, "/openapi.json"); code != 200 || len(body) < 100 {
 			t.Errorf("%s /openapi.json code=%d len=%d", tc.name, code, len(body))

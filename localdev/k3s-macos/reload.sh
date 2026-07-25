@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Rebuilds every image from current source and pushes the result into every place that
-# caches one: podman's local store, the k3s server's containerd, and each fake-accelerator-node
+# caches one: podman's local store, the k3s server's containerd, and each dev/test node
 # container's own containerd (each is a separate container with its own containerd, so a
-# `make images` alone never reaches them — see add-fake-nodes.sh's comment on this). Then
+# `make images` alone never reaches them — see dev-nodes-up.sh's comment on this). Then
 # force-recreates the control-plane containers and bounces the cluster-agent/node-agent
 # pods so they actually pull the freshly-imported image instead of running stale code.
 #
@@ -14,8 +14,7 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/../../controlplane/infra/docker-compose.yaml"
-IMAGES=(openresearch-node-agent openresearch-cluster-agent openresearch-workload openresearch-robotics-workload)
+IMAGES=(hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload)
 
 wait_for() {
   local max="$1" delay="$2" desc="$3"; shift 3
@@ -43,13 +42,13 @@ if [[ "$(uname)" == "Darwin" ]]; then
     fi
   done
 
-  # Only fake nodes that actually exist right now — install.sh/add-fake-nodes.sh own
+  # Only fake nodes that actually exist right now — install.sh/dev-nodes-up.sh own
   # creating them; this script's job is just keeping whatever's already running in sync.
   # (`mapfile`/`readarray` isn't available under macOS's stock bash 3.2, hence the loop.)
   FAKE_NODES=()
   while IFS= read -r node; do
     [[ -n "${node}" ]] && FAKE_NODES+=("${node}")
-  done < <(podman ps --format '{{.Names}}' --filter name=fake-accelerator-node)
+  done < <(podman ps --format '{{.Names}}' --filter name=fake-)
   if [[ "${#FAKE_NODES[@]}" -gt 0 ]]; then
     echo "==> Importing images into ${#FAKE_NODES[@]} fake node container(s)..."
     for node in "${FAKE_NODES[@]}"; do
@@ -67,20 +66,20 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 echo "==> Recreating control-plane containers..."
-podman compose -f "${COMPOSE_FILE}" up -d --force-recreate control-service metrics-service >/dev/null
+bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" reload >/dev/null
 wait_for 20 1 "control-service to accept connections" \
   curl -sf -o /dev/null "http://localhost:8082/experiments"
 
-if kubectl --context "${CONTEXT_NAME}" get deploy/openresearch-cluster-agent -n openresearch &>/dev/null; then
+if kubectl --context "${CONTEXT_NAME}" get deploy/hypothesisloop-cluster-agent -n hypothesisloop &>/dev/null; then
   echo "==> Restarting cluster-agent/node-agent pods..."
-  kubectl --context "${CONTEXT_NAME}" -n openresearch delete pods --all >/dev/null
+  kubectl --context "${CONTEXT_NAME}" -n hypothesisloop delete pods --all >/dev/null
   wait_for 30 2 "cluster-agent pod ready" \
-    kubectl --context "${CONTEXT_NAME}" -n openresearch wait --for=condition=Ready \
-      pod -l app=openresearch-cluster-agent --timeout=1s
+    kubectl --context "${CONTEXT_NAME}" -n hypothesisloop wait --for=condition=Ready \
+      pod -l app=hypothesisloop-cluster-agent --timeout=1s
   wait_for 30 2 "node-agent pods ready" \
-    kubectl --context "${CONTEXT_NAME}" -n openresearch wait --for=condition=Ready \
-      pod -l app=openresearch-node-agent --timeout=1s
+    kubectl --context "${CONTEXT_NAME}" -n hypothesisloop wait --for=condition=Ready \
+      pod -l app=hypothesisloop-node-agent --timeout=1s
 fi
 
 echo "==> Reload complete."
-kubectl --context "${CONTEXT_NAME}" -n openresearch get pods 2>/dev/null || true
+kubectl --context "${CONTEXT_NAME}" -n hypothesisloop get pods 2>/dev/null || true
