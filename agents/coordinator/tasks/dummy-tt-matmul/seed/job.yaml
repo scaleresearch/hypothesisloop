@@ -1,0 +1,24 @@
+# Starting-point job definition for the dummy-tt-matmul task: train.py opens the DRA-allocated
+# device via ttnn and runs real bf16 matmuls, submitted verbatim as the `job` field of
+# POST /experiments (see controlplane/settings/examples/experiment-submission.yaml for the
+# fully-commented DSL reference).
+#
+# The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
+# control plane's admission loop picks whichever registered cluster reports live capacity for
+# that flavor (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
+# allocation_mode: dra) — nothing here names a cluster directly.
+image: localhost/hypothesisloop-tenstorrent-workload:latest
+
+# memory/cpu sized for the real tt-metal runtime: pre-compiled firmware/kernel JIT loading and
+# dispatch buffers for a 4096x4096 bf16 matmul measurably exceed a few hundred MiB — an
+# under-sized limit gets silently OOMKilled mid-run (confirmed: 256Mi OOMKilled every run; 4Gi
+# comfortably clears it with room to spare on this QuietBox's 240GiB allocatable).
+cpu: "2"
+memory: "4Gi"
+storage: "1Gi"
+max_retries: 3
+
+accelerator_count: 1
+accelerator_type: tenstorrent.com/chipArch=blackhole
+accelerator_pod_resources:
+  hugepages-1Gi: 4Gi

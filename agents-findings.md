@@ -1,0 +1,2 @@
+# HypothesisLoop findings log
+

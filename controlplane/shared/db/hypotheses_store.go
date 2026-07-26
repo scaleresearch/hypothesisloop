@@ -42,7 +42,7 @@ func NewHypothesesStore(pool *Pool) *HypothesesStore {
 	return &HypothesesStore{pool: pool}
 }
 
-const hypothesisColumns = `id, agent_id, platform_experiment_id, text, created_at`
+const hypothesisColumns = `id, agent_id, platform_experiment_id, text, status, created_at`
 
 // newHypothesisID generates a UUIDv7-formatted string, matching the ID scheme used
 // elsewhere for agent-visible entities.
@@ -93,14 +93,15 @@ func (s *HypothesesStore) FindOrCreateHypothesis(ctx context.Context, agentID, p
 		AgentID:              agentID,
 		PlatformExperimentID: platformExperimentID,
 		Text:                 text,
+		Status:               domain.HypothesisOpen,
 		CreatedAt:            time.Now().UTC(),
 	}
 
 	const q = `
-INSERT INTO hypotheses (id, agent_id, platform_experiment_id, text, normalized_text, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO hypotheses (id, agent_id, platform_experiment_id, text, normalized_text, status, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (platform_experiment_id, normalized_text) DO NOTHING`
-	tag, err := s.pool.pool.Exec(ctx, q, h.ID, h.AgentID, h.PlatformExperimentID, h.Text, normalized, h.CreatedAt)
+	tag, err := s.pool.pool.Exec(ctx, q, h.ID, h.AgentID, h.PlatformExperimentID, h.Text, normalized, h.Status, h.CreatedAt)
 	if err != nil {
 		return nil, false, fmt.Errorf("hypotheses_store.FindOrCreateHypothesis: insert: %w", err)
 	}
@@ -168,7 +169,7 @@ func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperiment
 	args = append(args, limit)
 
 	q := `
-SELECT h.id, h.agent_id, h.platform_experiment_id, h.text, h.created_at,
+SELECT h.id, h.agent_id, h.platform_experiment_id, h.text, h.status, h.created_at,
        COUNT(DISTINCT f.id) AS finding_count, COUNT(DISTINCT c.id) AS comment_count
 FROM hypotheses h
 LEFT JOIN hypothesis_findings f ON f.hypothesis_id = h.id
@@ -192,7 +193,7 @@ LIMIT $` + fmt.Sprint(len(args))
 	for rows.Next() {
 		h := &domain.Hypothesis{}
 		item := &HypothesisListItem{Hypothesis: h}
-		if err := rows.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.CreatedAt, &item.FindingCount, &item.CommentCount); err != nil {
+		if err := rows.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.Status, &h.CreatedAt, &item.FindingCount, &item.CommentCount); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListHypotheses: scan: %w", err)
 		}
 		out = append(out, item)
@@ -294,8 +295,40 @@ FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC`
 
 func scanHypothesis(row rowScanner) (*domain.Hypothesis, error) {
 	h := &domain.Hypothesis{}
-	if err := row.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.CreatedAt); err != nil {
+	if err := row.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.Status, &h.CreatedAt); err != nil {
 		return nil, err
+	}
+	return h, nil
+}
+
+// ErrNotOwner is returned by UpdateHypothesisStatus when callerAgentID doesn't match the
+// hypothesis's own agent_id — a hypothesis's status is the owning agent's own claim to a verdict
+// on its own idea, not a call any other agent (or the operator) gets to make.
+var ErrNotOwner = fmt.Errorf("hypotheses_store: caller does not own this hypothesis")
+
+// UpdateHypothesisStatus sets a hypothesis's status, but only if callerAgentID matches the
+// hypothesis's own agent_id — enforced in the same statement as the write (not a separate
+// read-then-check) so there's no TOCTOU window. Returns ErrNotOwner if the hypothesis exists but
+// belongs to a different agent, or a "not found" nil/nil if no such hypothesis exists at all —
+// callers distinguish the two with a preceding existence check if they need a different message.
+func (s *HypothesesStore) UpdateHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
+	const q = `UPDATE hypotheses SET status = $3 WHERE id = $1 AND agent_id = $2 RETURNING ` + hypothesisColumns
+	row := s.pool.pool.QueryRow(ctx, q, id, callerAgentID, status)
+	h, err := scanHypothesis(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Either the hypothesis doesn't exist, or it does but belongs to someone else —
+			// distinguish so the caller can return 404 vs 403 instead of always one or the other.
+			existing, getErr := s.GetHypothesis(ctx, id)
+			if getErr != nil {
+				return nil, fmt.Errorf("hypotheses_store.UpdateHypothesisStatus: %w", getErr)
+			}
+			if existing == nil {
+				return nil, nil
+			}
+			return nil, ErrNotOwner
+		}
+		return nil, fmt.Errorf("hypotheses_store.UpdateHypothesisStatus: %w", err)
 	}
 	return h, nil
 }

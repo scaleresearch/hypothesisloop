@@ -68,7 +68,7 @@ func (c *Controller) checkPhase2Transition(ctx context.Context, pe *domain.Platf
 		if exp.PlatformExperimentID != pe.ID {
 			continue
 		}
-		actual, err := c.observedAcceleratorCost(ctx, exp.ID, exp.AcceleratorCount, now)
+		actual, err := c.observedAcceleratorCost(ctx, exp, now)
 		if err != nil {
 			c.logger.Error("checkPhase2Transition: observed accelerator cost", zap.String("experiment", exp.ID), zap.Error(err))
 			continue

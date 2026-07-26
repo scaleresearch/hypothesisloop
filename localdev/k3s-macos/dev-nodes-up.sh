@@ -58,7 +58,7 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT_NAME}" "${name}"
 
-  lib_import_images "${name}" hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload
+  lib_import_images "${name}" hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload
   # Real node capacity as reported by cAdvisor is the VM/host's full size, not this
   # container's cgroup quota — cap it down to what it can truly deliver (same reasoning as
   # localdev/lib/fake-gpu-node.sh's own doc comment) while also giving it fake GPU capacity.

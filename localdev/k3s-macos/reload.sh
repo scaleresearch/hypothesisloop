@@ -14,7 +14,7 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGES=(hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload)
+IMAGES=(hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload )
 
 wait_for() {
   local max="$1" delay="$2" desc="$3"; shift 3

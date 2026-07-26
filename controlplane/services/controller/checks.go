@@ -177,7 +177,7 @@ func (c *Controller) researcherHasCapacity(ctx context.Context, exp *domain.Expe
 	}
 	var accDeltaG, accDeltaB, cpuDeltaG, cpuDeltaB float64
 	for _, r := range running {
-		actual, err := c.observedAcceleratorCost(ctx, r.ID, r.AcceleratorCount, now)
+		actual, err := c.observedAcceleratorCost(ctx, r, now)
 		if err != nil {
 			return false, fmt.Errorf("observed accelerator cost for %s: %w", r.ID, err)
 		}

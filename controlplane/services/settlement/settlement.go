@@ -67,27 +67,31 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		return fmt.Errorf("settlement: first observed: %w", err)
 	}
 	neverStarted := !observed
-	var hours, acceleratorCost float64
+	var hours float64
 	if !neverStarted && exp.EstimatedDurationHours > 0 {
 		var err error
 		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, now, s.maxLookback, s.gapCap, s.step)
 		if err != nil {
 			return fmt.Errorf("settlement: observed elapsed hours: %w", err)
 		}
-
-		acceleratorCost, err = metricsdb.ObservedAcceleratorCost(ctx, s.metricsDBURL, exp.ID, exp.AcceleratorCount, now, s.maxLookback, s.gapCap, s.step)
-		if err != nil {
-			return fmt.Errorf("settlement: observed accelerator cost: %w", err)
-		}
 	}
 
-	// CPU/RAM/storage have no independent "actual" measurement like accelerator does (which
-	// comes from real alive-time samples) — the best signal is each dimension's estimated
-	// per-hour rate (estimate / duration) times cumulative observed hours. This rate is
-	// invariant across a preemption requeue's proportional rescale (see
-	// experiments_store_lifecycle.RequeuePreempted), so it's correct whether or not the job was
-	// preempted. The old approach (observed/currentEstimate) overcharged post-preemption jobs,
-	// since currentEstimate only covers the shortened remaining work.
+	// Every dimension, accelerator included, settles at its estimated per-hour rate (estimate /
+	// duration) times cumulative observed hours. This rate is invariant across a preemption
+	// requeue's proportional rescale (see experiments_store_lifecycle.RequeuePreempted), so it's
+	// correct whether or not the job was preempted. The old approach (observed/currentEstimate)
+	// overcharged post-preemption jobs, since currentEstimate only covers the shortened
+	// remaining work.
+	//
+	// Accelerator used to be billed differently: metricsdb.ObservedAcceleratorCost queried a
+	// separate "which type is this job actually running on right now" live marker per grid
+	// point, to bill a mid-run reschedule onto a different type correctly segment-by-segment.
+	// That marker depended on catching a job's RUNNING phase within a poll window — for jobs
+	// that start and finish faster than one poll tick (routine for short benchmark jobs), it was
+	// never written, so accelerator cost silently settled at 0 regardless of real runtime. The
+	// flat per-job rate below can't bill a mid-run type change correctly, but a fixed
+	// AcceleratorType per job's whole run is already the common case, and this needs no live
+	// observation at all — it can't ever silently zero out.
 	rateCost := func(estimated float64) float64 {
 		if exp.EstimatedDurationHours <= 0 {
 			return 0
@@ -100,7 +104,7 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		estimated    float64
 		amount       float64
 	}{
-		{domain.ResourceAcceleratorHours, exp.EstimatedCostAccH, acceleratorCost},
+		{domain.ResourceAcceleratorHours, exp.EstimatedCostAccH, rateCost(exp.EstimatedCostAccH)},
 		{domain.ResourceCPUCoreHours, exp.EstimatedCPUCoreHours, rateCost(exp.EstimatedCPUCoreHours)},
 		{domain.ResourceRAMGBHours, exp.EstimatedRAMGBHours, rateCost(exp.EstimatedRAMGBHours)},
 		{domain.ResourceStorageGBHours, exp.EstimatedStorageGBHours, rateCost(exp.EstimatedStorageGBHours)},

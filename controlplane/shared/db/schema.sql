@@ -43,6 +43,15 @@ CREATE TYPE capacity_tier AS ENUM (
     'burst'
 );
 
+-- hypothesis_status is the owning agent's own verdict on its claim (see domain.HypothesisStatus)
+-- — a closed enum is correct here, unlike accelerator_type above: these three values are a fixed
+-- design decision, not an operator-extensible catalog.
+CREATE TYPE hypothesis_status AS ENUM (
+    'open',
+    'confirmed',
+    'inconclusive'
+);
+
 -- ---------------------------------------------------------------------------
 -- agents
 -- ---------------------------------------------------------------------------
@@ -102,12 +111,16 @@ CREATE TABLE platform_experiments (
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE hypotheses (
-    id                     TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    agent_id               TEXT        NOT NULL REFERENCES agents(id),
-    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
-    text                   TEXT        NOT NULL,
-    normalized_text        TEXT        NOT NULL,
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                     TEXT              PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    agent_id               TEXT              NOT NULL REFERENCES agents(id),
+    platform_experiment_id TEXT              NOT NULL REFERENCES platform_experiments(id),
+    text                   TEXT              NOT NULL,
+    normalized_text        TEXT              NOT NULL,
+    -- The owning agent's own verdict on this claim — see domain.HypothesisStatus. Every existing
+    -- row backfills to 'open' via this column default (this schema has no migration history; a
+    -- fresh apply and an in-place ADD COLUMN both get the same backfill from one DEFAULT clause).
+    status                 hypothesis_status NOT NULL DEFAULT 'open',
+    created_at             TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX idx_hypotheses_platform_normalized_text ON hypotheses(platform_experiment_id, normalized_text);

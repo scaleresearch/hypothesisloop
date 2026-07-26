@@ -39,11 +39,13 @@ RUN git clone --depth 1 --filter=blob:none \
     https://github.com/tenstorrent/tt-metal.git $TT_METAL_SRC \
     && chown -R agent:agent $TT_METAL_SRC
 
-# Build context is the repo root (see Makefile `experimentator-image`) so the workload samples
-# can be baked in: WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks
-# like — read, copy, adapt into its own repo. Not run here (no device); read-only reference.
+# Build context is the repo root (see Makefile `experimentator-image`) so the task seed
+# environments can be baked in: WORKLOAD_SAMPLES is the agent's starting point for what a job
+# workload looks like — read, copy, adapt into its own repo. Sourced from
+# agents/coordinator/tasks/*/seed/, not tests/workloads/ (that tree is test-only fixture code,
+# not agent-facing). Not run here (no device); read-only reference.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
-COPY tests/workloads $WORKLOAD_SAMPLES
+COPY agents/coordinator/tasks $WORKLOAD_SAMPLES
 
 WORKDIR /agent
 COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .

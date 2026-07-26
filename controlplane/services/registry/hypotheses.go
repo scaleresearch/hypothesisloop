@@ -2,12 +2,21 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+)
+
+// ErrHypothesisNotFound and ErrHypothesisNotOwner are the two ways SetHypothesisStatus can fail
+// on ownership, distinguished so the HTTP layer can return 404 vs 403 rather than one status for
+// both.
+var (
+	ErrHypothesisNotFound = fmt.Errorf("hypothesis not found")
+	ErrHypothesisNotOwner = db.ErrNotOwner
 )
 
 // RegisterHypothesis registers a new hypothesis within a platform experiment, or returns the
@@ -45,6 +54,29 @@ func (s *Service) ListHypotheses(ctx context.Context, platformExperimentID, agen
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
 	return hs, nil
+}
+
+// SetHypothesisStatus sets a hypothesis's status on behalf of callerAgentID — the owning agent's
+// own verdict on its own claim (see domain.HypothesisStatus). Ownership is enforced by the store
+// in the same statement as the write; this just translates its two failure modes into errors the
+// HTTP layer can map to 404/403 (see ErrHypothesisNotFound/ErrHypothesisNotOwner).
+func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
+	if !domain.ValidHypothesisStatus(status) {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: invalid status %q", status)
+	}
+	h, err := s.store.UpdateHypothesisStatus(ctx, id, callerAgentID, status)
+	if err != nil {
+		if errors.Is(err, db.ErrNotOwner) {
+			return nil, ErrHypothesisNotOwner
+		}
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+	}
+	if h == nil {
+		return nil, ErrHypothesisNotFound
+	}
+	s.logger.Info("hypothesis status updated",
+		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)))
+	return h, nil
 }
 
 // ListHypothesisFindings returns every finding filed against a hypothesis, oldest first.

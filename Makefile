@@ -126,10 +126,9 @@ images:
 	podman build -f cluster/build/Dockerfile.node-agent              -t localhost/hypothesisloop-node-agent .
 	podman build -f cluster/build/Dockerfile.cluster-agent           -t localhost/hypothesisloop-cluster-agent .
 	podman build -f tests/workloads/generic/Dockerfile.train    -t localhost/hypothesisloop-workload tests/workloads/generic/
-	podman build -f tests/workloads/robotics/Dockerfile.train -t localhost/hypothesisloop-robotics-workload tests/workloads/robotics/
 
-# Root build context (not agents/experimentator/) so the Dockerfile can bake in tests/workloads
-# as the agent's WORKLOAD_SAMPLES starting point.
+# Root build context (not agents/experimentator/) so the Dockerfile can bake in
+# agents/coordinator/tasks as the agent's WORKLOAD_SAMPLES starting point.
 experimentator-image:
 	podman build -f agents/experimentator/Dockerfile -t localhost/hypothesisloop-experimentator .
 

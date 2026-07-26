@@ -202,7 +202,7 @@ echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
 # then install the node-agent DaemonSet + cluster-agent Deployment. Without this, jobs submitted
 # to the control plane have nothing polling for them on this cluster and stay QUEUED forever.
 STAGE_T0=$(date +%s)
-for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload; do
+for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload; do
   if podman image inspect "localhost/${img}:latest" &>/dev/null; then
     echo "==> Importing ${img} into k3s..."
     podman save "localhost/${img}:latest" | sudo k3s ctr images import -

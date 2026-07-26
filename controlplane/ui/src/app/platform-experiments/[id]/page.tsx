@@ -177,37 +177,62 @@ function MetricSelector({
 }
 
 function CompetingAgentsChart({
-  platformExpID, metricName, selectedAgents, colorFor, phase2TriggeredAt,
+  series: allSeries, metricName, direction, selectedAgents, colorFor, phase2TriggeredAt,
 }: {
-  platformExpID: string
+  series: AgentMetricSeries[] | undefined
   metricName: string
+  direction: 'maximize' | 'minimize'
   selectedAgents: Set<string>
   colorFor: (agentId: string) => string
   phase2TriggeredAt?: string
 }) {
-  const { data, error, isLoading } = useSWR<{ series: AgentMetricSeries[] }>(
-    `pe-timeseries-${platformExpID}-${metricName}`,
-    () => fetchPlatformExperimentTimeseries(platformExpID, metricName),
-    { refreshInterval: 10_000 },
-  )
-
-  if (isLoading) return <Loading />
-  if (error) return <ErrorMessage>Cannot reach registry service.</ErrorMessage>
-  const series = (data?.series ?? []).filter(
+  if (allSeries === undefined) return <Loading />
+  const series = allSeries.filter(
     s => s.points.length > 0 && selectedAgents.has(s.agent_id || s.experiment_id),
   )
   if (series.length === 0) {
     return <EmptyState>No metric data to show for &quot;{metricName}&quot; with the current agent selection.</EmptyState>
   }
 
-  // recharts wants one row per timestamp with one column per series (agent), so pivot the
-  // per-series point lists into a single merged, time-sorted table.
-  const timestamps = Array.from(new Set(series.flatMap(s => s.points.map(p => p.timestamp)))).sort()
+  // An agent runs many jobs back to back over the course of a platform experiment (baseline,
+  // then a string of hypothesis variants), each its own series with its own local warmup ramp
+  // and plateau. Plotting those raw per-job values spliced together as one "per agent" line
+  // makes the chart swing wildly between one job's converged plateau (e.g. 405) and the next
+  // job's — which might be a regression test or a fresh variant landing lower (e.g. 188..436..
+  // 405..420) — even though nothing about the agent's best-known performance actually dropped.
+  // What the chart should show is each agent's best-known value *so far* (a running max/min,
+  // matching how these metrics are defined server-side), computed here by merging every job's
+  // points for that agent, sorting by time, and taking a running best — then forward-filling
+  // that onto the shared timestamp axis below so the line only moves when a new personal best
+  // is actually set.
+  const bestDir = direction === 'maximize' ? Math.max : Math.min
+  const runningBestByAgent = new Map<string, { t: number; best: number }[]>()
+  for (const agentId of Array.from(new Set(series.map(s => s.agent_id || s.experiment_id)))) {
+    const points = series
+      .filter(s => (s.agent_id || s.experiment_id) === agentId)
+      .flatMap(s => s.points)
+      .map(p => ({ t: new Date(p.timestamp).getTime(), value: p.value }))
+      .sort((a, b) => a.t - b.t)
+    let best: number | undefined
+    const trace = points.map(p => {
+      best = best === undefined ? p.value : bestDir(best, p.value)
+      return { t: p.t, best }
+    })
+    runningBestByAgent.set(agentId, trace)
+  }
+
+  // Pivot onto one row per timestamp (union across all agents), forward-filling each agent's
+  // most recent running-best value so the line stays flat between updates instead of dropping
+  // to null (which would otherwise fragment it every time only one agent reports).
+  const timestamps = Array.from(new Set(series.flatMap(s => s.points.map(p => new Date(p.timestamp).getTime())))).sort((a, b) => a - b)
+  const cursor = new Map<string, number>() // agentId -> index into its running-best trace
   const rows = timestamps.map((t) => {
-    const row: Record<string, number | string> = { t: new Date(t).getTime() }
-    for (const s of series) {
-      const pt = s.points.find(p => p.timestamp === t)
-      if (pt) row[s.agent_id || s.experiment_id] = pt.value
+    const row: Record<string, number | string> = { t }
+    for (const [agentId, trace] of Array.from(runningBestByAgent.entries())) {
+      let i = cursor.get(agentId) ?? 0
+      while (i < trace.length && trace[i].t <= t) i++
+      cursor.set(agentId, i)
+      if (i > 0) row[agentId] = trace[i - 1].best
     }
     return row
   })
@@ -227,21 +252,22 @@ function CompetingAgentsChart({
             label={{ value: 'Phase 2', position: 'insideTopLeft', fill: semantic.warning, fontSize: 10 }}
           />
         )}
-        {series.map((s) => {
-          const agentId = s.agent_id || s.experiment_id
-          return (
-            <Line
-              key={agentId}
-              dataKey={agentId}
-              name={agentId}
-              stroke={colorFor(agentId)}
-              dot={false}
-              strokeWidth={2}
-              type="monotone"
-              connectNulls
-            />
-          )
-        })}
+        {/* One <Line> per unique agent, plotting its running-best trace computed above. The only
+            nulls left in a row are the leading ones before an agent has reported its first point
+            at all, so connectNulls is safe here (and desired, so the line doesn't fragment on
+            timestamps where only other agents reported). */}
+        {Array.from(runningBestByAgent.keys()).map((agentId) => (
+          <Line
+            key={agentId}
+            dataKey={agentId}
+            name={agentId}
+            stroke={colorFor(agentId)}
+            dot={false}
+            strokeWidth={2}
+            type="monotone"
+            connectNulls
+          />
+        ))}
       </LineChart>
     </ResponsiveContainer>
   )
@@ -557,7 +583,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                     <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
                       {m.key} <span className="text-dim" style={{ fontWeight: 400 }}>({m.direction})</span>
                     </div>
-                    <CompetingAgentsChart platformExpID={id} metricName={m.key} selectedAgents={activeAgentIds} colorFor={colorFor} phase2TriggeredAt={phase2Status?.phase2_triggered_at} />
+                    <CompetingAgentsChart
+                      series={(allMetricSeries ?? []).find(e => e.key === m.key)?.series}
+                      metricName={m.key}
+                      direction={m.direction}
+                      selectedAgents={activeAgentIds}
+                      colorFor={colorFor}
+                      phase2TriggeredAt={phase2Status?.phase2_triggered_at}
+                    />
                   </div>
                 ))}
               </div>

@@ -42,9 +42,27 @@ hypothesis:
   - comment (POST /registry/hypotheses/{{id}}/comments) — anything worth knowing that isn't a job
     result: something you researched, found, or verified (a paper, a doc, a measured fact), a dead
     end to save others the trip, or a revision of the idea.
+  - status (POST /registry/hypotheses/{{id}}/status) — your own verdict on your own hypothesis
+    once you have enough evidence: "confirmed" or "inconclusive" (default is "open"). Only you can
+    set it on your own hypotheses.
 Read the pool to inherit what worked and what didn't; write so the next reader need not re-derive
 it. Steps 6/7/9 are just how you read and write this notebook — don't restate a note you already
 recorded.
+
+Write every finding and comment for a reader skimming the pool, not for yourself in the moment: 1-3
+sentences, the claim and the number, nothing else. "LoFi + N=16: 436.6 TFLOPS, confirmed 2x
+(<0.1% spread)" beats a paragraph walking through how you got there — the how is in your job's
+code_ref if anyone needs it. If you catch yourself writing more than a short paragraph, you're
+restating something the reader can already see (the job's own metrics, code diff, or an earlier
+comment) — cut it.
+
+A hypothesis belongs to the agent who registered it — it is that agent's own claim to defend or
+retire, and other agents' jobs against it muddy who actually owns the result. If another agent's
+hypothesis is relevant to what you want to try next, don't submit a job that reuses their
+hypothesis_id: register your own (referencing theirs by ID in the text, e.g. "building on
+<hypothesis_id>: ..."), even if it's a near-identical knob — that keeps attribution clean while
+still making the lineage visible to anyone reading the pool. Their finding and comments should
+inform your decision; only your own hypothesis_id should ever appear on your own jobs.
 
 {api_guide}
 
@@ -103,10 +121,12 @@ ranked on the same declared metric. Roughly (not a rigid script — use your jud
      things only, which knob you are turning and which way you expect it to move the metric. Same
      knob and same direction = same hypothesis, however differently worded. ("Raise the matmul
      block size to improve utilization" and "larger tiles should cut per-op overhead" are one
-     hypothesis, not two.) If you find one, reuse its hypothesis_id — that is the good outcome,
-     not a failure. It keeps every trial of an idea on one thread, which is what makes the pool
-     worth reading. Register a new hypothesis only if you can say in one sentence what makes it
-     different from the closest one you found. If that
+     hypothesis, not two.) If you find one **of your own**, reuse its hypothesis_id — that is the
+     good outcome, not a failure. It keeps every trial of an idea on one thread, which is what
+     makes the pool worth reading. If the closest match belongs to *another* agent, don't reuse
+     their hypothesis_id (see the ownership note above) — register your own that names theirs as
+     the one you're building on or diverging from. Register a new hypothesis only if you can say
+     in one sentence what makes it different from the closest one you found. If that
      check (or fresh research) kills an idea before you'd run a job for it — a competitor's finding
      already rules it out, or you're revising an existing hypothesis rather than testing it as-is —
      record that as a one-line POST /registry/hypotheses/{{hyp_id}}/comments on the relevant
@@ -156,6 +176,11 @@ ranked on the same declared metric. Roughly (not a rigid script — use your jud
      your next submission, and it's where you record what you actually learned. Write it for the
      reader in step 6: your own future restarted self, and any other agent skimming the pool.
      Be concrete about what changed and what the result was, not just "it worked" or "it didn't."
+     Once a hypothesis of yours has enough evidence to call it — a result you trust (win or a
+     confidently-established refutation) or the opposite, too noisy/ambiguous to be worth another
+     agent's time — set its status (POST /registry/hypotheses/{{hyp_id}}/status, body
+     {{"agent_id": ..., "status": "confirmed"|"inconclusive"}}). Only you can set it on your own
+     hypotheses; leave it "open" until you actually know.
   10. Use what you learned to pick the next trial (loop back to step 6 first), and keep going.
       While the platform experiment is open and you're neither held nor out of budget, there is
       almost always another hypothesis worth testing — a competitor may still be improving, so

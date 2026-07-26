@@ -6,11 +6,19 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { useState } from 'react'
 import { fetchAllHypotheses, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
-import type { Hypothesis, PlatformExperiment, Agent } from '@/types'
+import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+
+const STATUS_FILTERS: Array<{ value: HypothesisStatus | ''; label: string }> = [
+  { value: '', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'inconclusive', label: 'Inconclusive' },
+]
 
 function relTime(iso: string) {
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -34,6 +42,7 @@ function HypothesesPageContent() {
   const searchParams = useSearchParams()
   const peID = searchParams.get('pe') ?? ''
   const [agentFilter, setAgentFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState<HypothesisStatus | ''>('')
 
   const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
 
@@ -60,6 +69,7 @@ function HypothesesPageContent() {
     let all = hypotheses ?? []
     if (peID) all = all.filter(h => h.platform_experiment_id === peID)
     if (agentFilter) all = all.filter(h => h.agent_id === agentFilter)
+    if (statusFilter) all = all.filter(h => (h.status ?? 'open') === statusFilter)
     return all
   })()
 
@@ -120,6 +130,25 @@ function HypothesesPageContent() {
         {agentFilter && (
           <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
         )}
+
+        <span className="uppercase-label" style={{ marginLeft: 8 }}>Status</span>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value as HypothesisStatus | '')}
+          className="mono"
+          style={{
+            fontSize: 12,
+            padding: '5px 10px',
+            border: '1px solid rgba(255,255,255,.16)',
+            borderRadius: 6,
+            background: 'var(--surface-2)',
+            color: 'var(--foreground)',
+          }}
+        >
+          {STATUS_FILTERS.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
       </div>
 
       {isLoading && <Loading />}
@@ -136,6 +165,7 @@ function HypothesesPageContent() {
               <tr>
                 <th>ID</th>
                 <th>Text</th>
+                <th>Status</th>
                 <th>Platform Experiment</th>
                 <th>Registered by</th>
                 <th>Created</th>
@@ -144,7 +174,7 @@ function HypothesesPageContent() {
             <tbody>
               {list.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <div className="empty-state">
                       No hypotheses found
                       {peID ? ` in "${peByID.get(peID)?.name ?? peID}"` : ''}
@@ -167,6 +197,7 @@ function HypothesesPageContent() {
                     <td style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.text}>
                       {h.text}
                     </td>
+                    <td><Badge status={h.status ?? 'open'}>{h.status ?? 'open'}</Badge></td>
                     <td style={{ fontSize: 12 }}>
                       <Link
                         href={`/platform-experiments/${h.platform_experiment_id}`}

@@ -81,10 +81,9 @@ submit_job() {
 # submit_job_ext PE_ID AGENT TIER HOURS JOB_FILE ENV_JSON [ACCELERATOR_TYPE] [ACCELERATOR_COUNT] [NUM_NODES]
 #                [PROJECT_ID] [THEORY] [OBJECTIVE] [HYP_TEXT] [JOB_OVERRIDE_JSON]
 #                -> prints job id on stdout
-# Full-control variant used by scenarios that need to inject env vars (e.g. the robotics
-# workload's HYPOTHESISLOOP_LEARNING_RATE), a custom hypothesis/theory, or override raw job
-# fields (cpu/storage/accelerator_count/... — see mk_body.py's JOB_OVERRIDE_JSON doc) without hand-
-# rolling their own JSON body.
+# Full-control variant used by scenarios that need to inject env vars, a custom
+# hypothesis/theory, or override raw job fields (cpu/storage/accelerator_count/... — see
+# mk_body.py's JOB_OVERRIDE_JSON doc) without hand-rolling their own JSON body.
 submit_job_ext() {
   local pe_id="$1" agent="$2" tier="$3" hours="$4" job_file="$5" env_json="${6:-}" \
         accelerator_type="${7:-}" accelerator_count="${8:-}" num_nodes="${9:-}" \

@@ -303,4 +303,39 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Body   *domain.HypothesisComment
 		}{Status: http.StatusCreated, Body: c}, nil
 	})
+
+	apidocs.Register(doc, huma.Operation{
+		OperationID: "registry-set-hypothesis-status", Method: "POST", Path: "/registry/hypotheses/{id}/status",
+		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
+		Description: "One of open (default) / confirmed (a validated result, positive or negative, worth " +
+			"another agent reading closely) / inconclusive (noisy or not worth drilling into). Only the " +
+			"agent_id that registered the hypothesis may change its status — the caller's agent_id must " +
+			"match, or this returns 403.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			AgentID string                  `json:"agent_id"`
+			Status  domain.HypothesisStatus `json:"status"`
+		}
+	}) (*struct{ Body *domain.Hypothesis }, error) {
+		if in.Body.AgentID == "" {
+			return nil, huma.Error400BadRequest("agent_id is required")
+		}
+		if !domain.ValidHypothesisStatus(in.Body.Status) {
+			return nil, huma.Error400BadRequest("status must be one of: open, confirmed, inconclusive")
+		}
+		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, in.Body.AgentID, in.Body.Status)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrHypothesisNotFound):
+				return nil, huma.Error404NotFound("hypothesis not found")
+			case errors.Is(err, ErrHypothesisNotOwner):
+				return nil, huma.Error403Forbidden("agent_id does not own this hypothesis")
+			default:
+				h.logger.Error("set hypothesis status", zap.Error(err))
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+		}
+		return &struct{ Body *domain.Hypothesis }{Body: hyp}, nil
+	})
 }

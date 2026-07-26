@@ -46,7 +46,7 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT}" "${name}"
 
-  lib_import_images "${name}" hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload
+  lib_import_images "${name}" hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload
   bash "${DIR}/../lib/fake-gpu-node.sh" "${CONTEXT}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
 done
 

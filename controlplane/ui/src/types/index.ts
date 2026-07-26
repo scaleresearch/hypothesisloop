@@ -100,6 +100,10 @@ export interface Experiment {
   status: ExperimentStatus
   estimated_cost_acch?: number
   actual_cost_acch?: number
+  // Set once the scheduler has actually debited this job's cost against the agent's quota
+  // (distinct from `status === 'COMPLETED'`, which can precede settlement briefly). Absent/null
+  // means no quota was ever debited for this job (e.g. rejected before running).
+  quota_settled_at?: string
   // Additional resource-dimension cost/usage, mirroring estimated_cost_acch/actual_cost_acch.
   // 0/absent means that dimension wasn't tracked for this job.
   estimated_cpu_core_hours?: number
@@ -120,6 +124,9 @@ export interface Experiment {
   // The job's own DSL — image, command, resources, accelerator count/type, distributed topology.
   job?: JobSpec
   created_at: string
+  // Set when the job was actually handed to a cluster — distinct from created_at (when the
+  // registry row was first written) and started_at (when it began running).
+  submitted_at?: string
   started_at?: string
   completed_at?: string
   eviction_reason?: string
@@ -314,11 +321,16 @@ export interface LineageNode {
 // Hypotheses
 // ---------------------------------------------------------------------------
 
+// The owning agent's own verdict on its claim — see POST /registry/hypotheses/{id}/status. Only
+// the agent named in `agent_id` may ever change it.
+export type HypothesisStatus = 'open' | 'confirmed' | 'inconclusive'
+
 export interface Hypothesis {
   id: string
   agent_id: string
   platform_experiment_id: string
   text: string
+  status: HypothesisStatus
   created_at: string
 }
 

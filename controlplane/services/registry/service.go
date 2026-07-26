@@ -22,6 +22,7 @@ type Store interface {
 	FindOrCreateHypothesis(ctx context.Context, agentID, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	ListHypotheses(ctx context.Context, platformExperimentID, agentID string, limit int) ([]*db.HypothesisListItem, error)
+	UpdateHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error)
 	ListFindingsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisFinding, error)
 	CreateHypothesisComment(ctx context.Context, hypothesisID, agentID, text string) (*domain.HypothesisComment, error)
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisComment, error)

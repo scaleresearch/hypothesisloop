@@ -27,7 +27,7 @@ FACTS ABOUT THE PROBLEM
   - The perf number comes from:
       python -m tracy -p -r -v -m pytest \
         tests/ttnn/nightly/unit_tests/operations/sdpa/test_sparse_sdpa_msa_perf.py
-  - tests/workloads/tenstorrent/ shows how a job opens its DRA-allocated device
-    and reports metrics — a starting point, not a template.
+  - agents/coordinator/tasks/dummy-tt-matmul/seed/ shows how a job opens its
+    DRA-allocated device and reports metrics — a starting point, not a template.
   - One Tenstorrent ASIC per pod; only that device node is visible in the
     container.

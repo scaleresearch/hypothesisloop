@@ -28,7 +28,10 @@ sure the environment can actually accept jobs:
   attach it with `lib_attach_node` from `localdev/lib/node.sh` (not manual kubectl), and confirm
   `GET $QUOTA_URL/resource-catalog/capacity` shows `tenstorrent.com/chipArch=blackhole` available.
 - Control-plane services (quota/scheduler/registry) and the node/cluster agents are up.
-- The shared code repo (CODE_REPO_URL) exists and is seeded with a starting workload.
+- The shared code repo (CODE_REPO_URL) exists and is seeded with the loaded task's own
+  `seed/` directory (e.g. `agents/coordinator/tasks/dummy-tt-matmul/seed/`) as its starting
+  workload — each task owns a self-contained environment under `agents/coordinator/tasks/`;
+  never seed from or point agents at `tests/workloads/`, which is test-only fixture code.
 Detach the node again once the run is done.
 
 ## Spawning agents

@@ -3,8 +3,8 @@
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
-import type { PlatformExperiment } from '@/types'
+import { fetchHypothesis, fetchPlatformExperiment, fetchExperimentMetrics } from '@/lib/api'
+import type { PlatformExperiment, MetricDefinition } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
@@ -17,6 +17,28 @@ function relTime(iso: string) {
   if (s < 3600) return `${Math.round(s / 60)}m ago`
   if (s < 86400) return `${Math.round(s / 3600)}h ago`
   return new Date(iso).toLocaleDateString()
+}
+
+// The registry's job record has no final_metric_value field at all (confirmed against the live
+// API — it was always undefined, rendering "—" for every job regardless of outcome). The real
+// per-job metric history lives in the metrics store, keyed by metric_name — this fetches it for
+// one job and reduces to the platform experiment's primary metric's best-known value (max for
+// "maximize", min for "minimize"), matching how the platform-experiment scoreboard derives a
+// job's result rather than trusting a job-record field that was never populated.
+function JobFinalMetric({ jobId, primaryMetric }: { jobId: string; primaryMetric?: MetricDefinition }) {
+  const { data } = useSWR(
+    primaryMetric ? ['job-metrics', jobId] : null,
+    () => fetchExperimentMetrics(jobId),
+    { refreshInterval: 15_000 },
+  )
+  if (!primaryMetric) return <span className="text-muted">—</span>
+  const values = (data ?? [])
+    .filter(p => (p.metric_name ?? 'default') === primaryMetric.key)
+    .map(p => p.metric_value ?? p.value)
+    .filter((v): v is number => v != null)
+  if (values.length === 0) return <span className="text-muted">—</span>
+  const best = primaryMetric.direction === 'maximize' ? Math.max(...values) : Math.min(...values)
+  return <span className="accent">{best.toFixed(4)}</span>
 }
 
 export default function HypothesisDetailPage({ params }: { params: { id: string } }) {
@@ -43,6 +65,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const jobs = data.jobs ?? []
   const findings = data.findings ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
+  const primaryMetric = pe?.metrics?.[0]
 
   return (
     <div>
@@ -57,6 +80,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           </div>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="mono text-dim" style={{ fontSize: 14 }}>{data.id.slice(0, 8)}…</span>
+            <Badge status={data.status ?? 'open'}>{data.status ?? 'open'}</Badge>
           </h1>
           <p style={{ fontStyle: 'italic', marginTop: 4 }}>{data.text}</p>
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
@@ -115,7 +139,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>Tier</th>
                 <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
-                <th style={{ textAlign: 'right' }}>Final Metric</th>
+                <th style={{ textAlign: 'right' }}>Best {primaryMetric?.key ?? 'Metric'}</th>
                 <th>Submitted</th>
               </tr>
             </thead>
@@ -148,12 +172,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>
-                      <span className={j.final_metric_value != null ? 'accent' : 'text-muted'}>
-                        {j.final_metric_value != null ? j.final_metric_value.toFixed(4) : '—'}
-                      </span>
+                      <JobFinalMetric jobId={job.id} primaryMetric={primaryMetric} />
                     </td>
                     <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
-                      {relTime(j.created_at)}
+                      {relTime(j.submitted_at ?? j.created_at)}
                     </td>
                   </tr>
                 )

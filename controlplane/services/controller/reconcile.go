@@ -138,12 +138,12 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	// running jobs (their estimate was already in UsedGuaranteedAccH).
 	// Same delta correction as accelerator, applied to every tracked budget dimension: the Used*
 	// fields carry running jobs' *estimates*, so we swap each running job's estimate for its
-	// observed-so-far cost. Accelerator is billed per-type (observedAcceleratorCost); CPU is
-	// linear, so its observed cost is observedElapsedHours × RequestedCPUCores(). RAM/storage are
-	// not enforced here because nothing debits an observed RAM/storage figure to true up against.
+	// observed-so-far cost. Accelerator is billed flat at its admitted type (observedAcceleratorCost);
+	// CPU is linear, so its observed cost is observedElapsedHours × RequestedCPUCores(). RAM/storage
+	// are not enforced here because nothing debits an observed RAM/storage figure to true up against.
 	var accDeltaG, accDeltaB, cpuDeltaG, cpuDeltaB float64
 	for _, exp := range running {
-		accActual, err := c.observedAcceleratorCost(ctx, exp.ID, exp.AcceleratorCount, now)
+		accActual, err := c.observedAcceleratorCost(ctx, exp, now)
 		if err != nil {
 			return fmt.Errorf("observed accelerator cost for %s: %w", exp.ID, err)
 		}

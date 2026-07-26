@@ -17,11 +17,41 @@ import (
 // different platform experiment is a distinct hypothesis — different research programs don't
 // share an idea pool.
 type Hypothesis struct {
-	ID                   string    `json:"id"`
-	AgentID              string    `json:"agent_id"`
-	PlatformExperimentID string    `json:"platform_experiment_id"`
-	Text                 string    `json:"text"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                   string           `json:"id"`
+	AgentID              string           `json:"agent_id"`
+	PlatformExperimentID string           `json:"platform_experiment_id"`
+	Text                 string           `json:"text"`
+	Status               HypothesisStatus `json:"status"`
+	CreatedAt            time.Time        `json:"created_at"`
+}
+
+// HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
+// wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
+// filterable field instead. Only the agent named in Hypothesis.AgentID may ever change it (see
+// registry.Service.SetHypothesisStatus) — it's "own your claims," not a global judgment call
+// another agent or the operator gets to make on someone else's hypothesis.
+type HypothesisStatus string
+
+const (
+	// HypothesisOpen is the default: still being tested, no verdict yet.
+	HypothesisOpen HypothesisStatus = "open"
+	// HypothesisConfirmed means the owning agent considers the claim validated — either a real
+	// improvement it trusts, or a real, confidently-established negative/refuted result. Either
+	// way, worth another agent reading closely.
+	HypothesisConfirmed HypothesisStatus = "confirmed"
+	// HypothesisInconclusive means noisy, ambiguous, or not worth another agent's time drilling
+	// into further.
+	HypothesisInconclusive HypothesisStatus = "inconclusive"
+)
+
+// ValidHypothesisStatus reports whether s is one of the three recognized statuses.
+func ValidHypothesisStatus(s HypothesisStatus) bool {
+	switch s {
+	case HypothesisOpen, HypothesisConfirmed, HypothesisInconclusive:
+		return true
+	default:
+		return false
+	}
 }
 
 // HypothesisFinding is the post-run write-up an agent files after one of its jobs testing

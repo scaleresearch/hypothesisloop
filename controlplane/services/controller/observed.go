@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
@@ -43,9 +45,26 @@ func (c *Controller) observedElapsedHours(ctx context.Context, experimentID stri
 	return metricsdb.ObservedElapsedHours(ctx, c.metricsDBURL, experimentID, now, c.observedMaxLookback(), c.observedGapCap(), c.observedStep())
 }
 
-// observedAcceleratorCost returns experimentID's true accelerator cost, billed per accelerator
-// type it actually ran on — see metricsdb.ObservedAcceleratorCost. Replaces the flat
-// elapsedHours × count × Cost() formula so a job rescheduled mid-run bills each segment correctly.
-func (c *Controller) observedAcceleratorCost(ctx context.Context, experimentID string, acceleratorCount int, now time.Time) (float64, error) {
-	return metricsdb.ObservedAcceleratorCost(ctx, c.metricsDBURL, experimentID, acceleratorCount, now, c.observedMaxLookback(), c.observedGapCap(), c.observedStep())
+// observedAcceleratorCost returns exp's accelerator cost so far: observed elapsed hours ×
+// accelerator count × exp.AcceleratorType's registered rate. Billed flat at exp.AcceleratorType
+// — the flavor admission already recorded as authoritative in Postgres (see domain.Experiment's
+// AcceleratorType doc) — rather than a live per-type observation from the metrics store. That
+// mechanism could bill a mid-run reschedule onto a different type correctly segment-by-segment,
+// but required catching a job's RUNNING phase within a poll window to ever record anything; for
+// jobs shorter than one poll tick it silently zeroed the whole run's accelerator cost (see
+// services/settlement.Settler.Settle). This can't ever silently zero out, at the cost of slightly
+// undercharging the rare mid-run type change.
+func (c *Controller) observedAcceleratorCost(ctx context.Context, exp *domain.Experiment, now time.Time) (float64, error) {
+	if exp.AcceleratorCount <= 0 || exp.AcceleratorType == "" {
+		return 0, nil
+	}
+	hours, err := c.observedElapsedHours(ctx, exp.ID, now)
+	if err != nil {
+		return 0, err
+	}
+	rate, ok := exp.AcceleratorType.LookupCost()
+	if !ok {
+		return 0, fmt.Errorf("observed accelerator cost for %s: no registered rate for accelerator type %q", exp.ID, exp.AcceleratorType)
+	}
+	return hours * float64(exp.AcceleratorCount) * rate, nil
 }

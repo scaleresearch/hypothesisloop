@@ -56,8 +56,11 @@ function ExperimentCard({
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
 
+  // Fetched unconditionally (not gated on `expanded`) — the Budget Used / Utilization stat
+  // tiles above the expand toggle need this data too, otherwise they show 0 until the card
+  // is expanded once.
   const { data: quotas } = useSWR<AgentQuota[]>(
-    expanded ? ['pe-quotas', pe.id] : null,
+    ['pe-quotas', pe.id],
     () => fetchPlatformExperimentQuotas(pe.id),
     { refreshInterval: 10_000 },
   )

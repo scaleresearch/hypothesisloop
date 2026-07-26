@@ -161,7 +161,7 @@ sys.stdout.write(re.sub(
   chmod 600 "${HOME}/.kube/k3s-container.yaml"
 
   # Import workload images into k3s containerd (pre-built by `make images`).
-  for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload hypothesisloop-robotics-workload; do
+  for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload; do
     if podman image exists "${img}:latest" 2>/dev/null; then
       echo "==> Importing ${img} into k3s..."
       podman save "${img}:latest" | sudo k3s ctr images import -

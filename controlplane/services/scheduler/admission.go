@@ -14,6 +14,13 @@ import (
 // "latest". Matches "<any-git-remote-url>@<40-hex-char-sha>"; only the "@<sha>" suffix is enforced.
 var codeRefPattern = regexp.MustCompile(`^\S+@[0-9a-f]{40}$`)
 
+// experimentIDPattern mirrors Kubernetes' RFC 1123 DNS subdomain rule. The experiment ID is
+// used verbatim by cluster-agent to name the Job/Pod/ResourceClaimTemplate it creates
+// (e.g. "exp-<id>-accelerator"), so any ID k8s would reject must be rejected here — at
+// submission time, with a message the submitter can act on — rather than accepted and left to
+// fail silently in an endless cluster-agent reconcile loop against a name it can never create.
+var experimentIDPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
 // Admission error reason constants.
 const (
 	ReasonInsufficientCredits = "insufficient_credits"
@@ -39,6 +46,12 @@ func (e *AdmissionError) Error() string {
 func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp == nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "experiment is nil"}
+	}
+	if exp.ID == "" {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "id is required"}
+	}
+	if !experimentIDPattern.MatchString(exp.ID) {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "id must be a valid Kubernetes RFC 1123 DNS subdomain: lowercase alphanumeric characters and '-' only, starting and ending with an alphanumeric character (the ID is used verbatim in cluster resource names)"}
 	}
 	if exp.AgentID == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "agent_id is required"}
