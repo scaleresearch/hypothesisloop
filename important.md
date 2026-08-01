@@ -4,6 +4,7 @@
 - no caches / in-ram state. we trust that our storage is performant and we care about simplicity, so we do not introduce duplicates or eventual consistency, except between clusters and the scheduler
 - cluster software fetches desired state and reconciles it; commands go one way only. cluster software sends metrics and other important information about jobs to the control plane; the control plane makes the decisions
 - the control plane decides, and every decision is written as desired state. no push, no "kill" command, no second path to the same effect
+- the control plane shall not be coupled with k8s; runtime software receives state from the control plane and decides how to run it within its own ecosystem
 - never bake a decision (a deadline, a threshold, a policy) into the desired state we hand a cluster - that creates a second decision-maker we cannot revoke
 - the control plane can accept connections and requests from multiple clusters, and can dispatch jobs to multiple clusters
 - metrics and the overall design shall be very reactive, as we react to job state changes and reschedule fast. the code and its loops shall be reactive, close to real time

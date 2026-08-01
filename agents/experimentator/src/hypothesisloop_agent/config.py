@@ -1,5 +1,5 @@
 """Agent configuration — every knob is an env var with a default, no config library, mirroring
-how cluster-agent/node-agent are configured (see cluster/cmd/*/main.go)."""
+how cluster-agent/node-agent are configured (see runtime/k8s/cmd/*/main.go)."""
 from __future__ import annotations
 
 import os
@@ -17,7 +17,7 @@ def _env_float(name: str, default: float) -> float:
 
 @dataclass
 class Config:
-    # Same URLs used by tests/lib/common.sh and cluster/cmd/cluster-agent.
+    # Same URLs used by tests/lib/common.sh and runtime/k8s/cmd/cluster-agent.
     quota_url: str = field(default_factory=lambda: _env("QUOTA_URL", "http://localhost:8081"))
     sched_url: str = field(default_factory=lambda: _env("SCHED_URL", "http://localhost:8082"))
     registry_url: str = field(default_factory=lambda: _env("REGISTRY_URL", "http://localhost:8083"))

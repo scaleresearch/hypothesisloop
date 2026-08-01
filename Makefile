@@ -26,15 +26,15 @@ reset:
 # KUBECONFIG_PATH point at (or current kubectl context).
 # Usage: make cluster-agent-up CLUSTER=<name> [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [CONTROLPLANE_URL=...] [REGISTRY_URL=...]
 cluster-agent-up:
-	CLUSTER_NAME="$(CLUSTER)" bash cluster/infra/install.sh
+	CLUSTER_NAME="$(CLUSTER)" bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
-	CLUSTER_NAME="$(CLUSTER)" bash cluster/infra/destroy.sh
+	CLUSTER_NAME="$(CLUSTER)" bash runtime/k8s/infra/destroy.sh
 
 # ---- Local dev cluster bootstrap --------------------------------------------
 # Spins up a local k3s cluster (control-plane only, tainted no-workload — see install.sh), then
 # installs the cluster-agent bundle onto it (localdev/k3s-macos/install.sh calls
-# cluster/infra/install.sh itself) and provisions the dev nodes (see k3s-dev-nodes-up below),
+# runtime/k8s/infra/install.sh itself) and provisions the dev nodes (see k3s-dev-nodes-up below),
 # so this target alone produces a fully working local dev cluster. Set NODE_COUNT=0 to stay
 # control-plane only.
 k3s-up: images
@@ -123,8 +123,8 @@ tt-start:
 images:
 	podman build -f controlplane/build/Dockerfile.control-service    -t localhost/hypothesisloop-control-service .
 	podman build -f controlplane/build/Dockerfile.metrics-service    -t localhost/hypothesisloop-metrics-service .
-	podman build -f cluster/build/Dockerfile.node-agent              -t localhost/hypothesisloop-node-agent .
-	podman build -f cluster/build/Dockerfile.cluster-agent           -t localhost/hypothesisloop-cluster-agent .
+	podman build -f runtime/k8s/build/Dockerfile.node-agent              -t localhost/hypothesisloop-node-agent .
+	podman build -f runtime/k8s/build/Dockerfile.cluster-agent           -t localhost/hypothesisloop-cluster-agent .
 	podman build -f tests/workloads/generic/Dockerfile.train    -t localhost/hypothesisloop-workload tests/workloads/generic/
 
 # Root build context (not agents/experimentator/) so the Dockerfile can bake in
