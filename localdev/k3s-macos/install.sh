@@ -14,7 +14,7 @@ CONTEXT_NAME="k3s-local"
 # binds the whole gang atomically for parallelism==completions Indexed Jobs, which is exactly
 # the shape workload_client.go:BuildJob already produces for multi-node distributed jobs. No
 # control-plane code change needed to use it — just these cluster-level feature gates. See
-# cluster/docs/execution-layer.md.
+# runtime/docs/execution-layer.md.
 #
 # Three gates, not two: GenericWorkload (base Workload API) and WorkloadWithJob (Job controller
 # auto-creates Workload/PodGroup for qualifying Jobs) only get the objects created — the actual
@@ -183,7 +183,7 @@ source "${SCRIPT_DIR}/../lib/node.sh"
 
 # The control-plane node donates zero capacity to workloads by default — it never runs
 # training pods, but node-agent's DaemonSet tolerates every taint
-# (cluster/infra/node-agent-daemonset.yaml) so it still monitors this node. Import just that
+# (runtime/k8s/infra/node-agent-daemonset.yaml) so it still monitors this node. Import just that
 # image here; workload/cluster-agent images land on whatever nodes dev-nodes-up.sh attaches or
 # creates below.
 CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"
@@ -207,7 +207,7 @@ kubectl --context "${CONTEXT_NAME}" get nodes
 echo "==> Installing cluster-agent bundle onto local cluster..."
 STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  bash "${SCRIPT_DIR}/../../cluster/infra/install.sh"
+  bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # Provision the schedulable dev/test nodes (see dev-nodes-up.sh) — on macOS/laptop dev they're the

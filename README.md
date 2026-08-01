@@ -79,7 +79,7 @@ HypothesisLoop is split into two kinds of deployable things:
   purely to cut deploy units, with no change to either's HTTP surface (still
   listening on their historical ports).
 - **Cluster agent** — installed once per *target* Kubernetes cluster where
-  training jobs actually run (`cluster/infra/`): the node-agent DaemonSet
+  training jobs actually run (`runtime/k8s/infra/`): the node-agent DaemonSet
   (per-node CPU metrics) and the cluster-agent Deployment, which is the
   only component with real k8s credentials anywhere in this system. It
   calls the control plane's `/internal/clusters/{name}/reconcile`

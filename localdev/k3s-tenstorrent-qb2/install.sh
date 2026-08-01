@@ -216,7 +216,7 @@ done
 HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
 CLUSTER_NAME="tt-quietbox" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   CONTROLPLANE_URL="http://${HOST_IP}:8082" REGISTRY_URL="http://${HOST_IP}:8083" METRICS_URL="http://${HOST_IP}:8084" \
-  bash "${SCRIPT_DIR}/../../cluster/infra/install.sh"
+  bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # Donates zero capacity to workloads by default, same as localdev/k3s-macos/install.sh — applied

@@ -28,7 +28,7 @@ tests/workload-robotics/
 
 # Infra definitions (not needed at runtime)
 controlplane/infra/
-cluster/infra/
+runtime/k8s/infra/
 localdev/
 tests/*.sh
 

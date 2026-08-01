@@ -32,7 +32,8 @@ func (w *JobWatcher) Start(ctx context.Context) {
 }
 
 // scanAndWatch is retained as the package's reconciliation entry point. Each call is a complete
-// stateless pass over every desired-running experiment.
+// stateless pass over every desired-running experiment. A single experiment's reconcile error
+// (e.g. a stuck job whose backend poll fails) must not stop the pass from reaching the rest.
 func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	statuses := []domain.ExperimentStatus{
 		domain.StatusSubmitted,
@@ -46,7 +47,8 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 		}
 		for _, exp := range exps {
 			if err := w.reconcileOne(ctx, exp); err != nil {
-				return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
+				w.logger.Error("job_watcher: reconcile experiment",
+					zap.String("experiment_id", exp.ID), zap.Error(err))
 			}
 		}
 	}

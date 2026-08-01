@@ -9,3 +9,4 @@
 - we shall keep in mind that connection might break, nodes might break, cluster might become unavailable for a while, metrics might be delayed, clusters scale up and down - that should be considered
 - control plane and cluster must have at most 1 config file each; we should be able to plug-in tomorrow any cluster i.e of k8s with nvidia/tenstorrent/amd accelerators and flow should just continue to work
 - auth & security at the moment are not a priority
+- control plane shall not coupled with k8s, runtime software receives state from control plane and decides how to run it within it's own ecosystem

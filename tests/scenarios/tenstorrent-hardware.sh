@@ -103,6 +103,63 @@ COUNT=$(echo "$M" | py "import sys,json; d=json.load(sys.stdin); assert isinstan
   && pass "$COUNT metric point(s) pushed from the real pod via registry-service" \
   || fail "0 metric points recorded — pod may not have actually run/reported"
 
+# file_finding here (not just at the bottom) because it gates further submissions from the same
+# agent+PE_ID: the bare-node-agent job below reuses both, and would get 403 summary_required
+# otherwise.
 file_finding "$JOB_ID" "Tenstorrent e2e: real DRA allocation on tt-quietbox confirmed."
+
+echo "==> Submitting the same job straight to this host's bare-node agent (no k3s/DRA involved) --"
+# Proves runtime/bare-metal/internal/podexec's own Tenstorrent probe (tenstorrent.go) finds and
+# uses the same real hardware this scenario just proved k3s's DRA path can reach — same
+# accelerator_type string, same physical cards, the other supported runtime.
+BARE_CLUSTER="tt-bare-e2e-${RUN_ID}"
+BARE_SCRATCH="$(mktemp -d)"
+BARE_AGENT_BIN="$TMPDIR_T/bare-agent"
+BARE_AGENT_LOG="$TMPDIR_T/bare-agent.log"
+( cd "$REPO_ROOT" && go build -o "$BARE_AGENT_BIN" ./runtime/bare-metal/cmd/bare-agent )
+
+CLUSTER_NAME="$BARE_CLUSTER" \
+CONTROLPLANE_URL="$SCHED_URL" \
+REGISTRY_URL="$REGISTRY_URL" \
+HYPOTHESISLOOP_CONFIG="${REPO_ROOT}/controlplane/settings/hypothesisloop.yaml" \
+SCRATCH_DIR="$BARE_SCRATCH" \
+NODE_NAME="tt-bare-e2e-node-${RUN_ID}" \
+"$BARE_AGENT_BIN" > "$BARE_AGENT_LOG" 2>&1 &
+BARE_AGENT_PID=$!
+trap 'kill "$BARE_AGENT_PID" 2>/dev/null || true; wait "$BARE_AGENT_PID" 2>/dev/null || true; rm -rf "$BARE_SCRATCH" "$TMPDIR_T"; lib_detach_node "${TT_CONTEXT}" tt-quietbox' EXIT
+
+wait_until "bare-agent registered cluster $BARE_CLUSTER" 15 1 \
+  bash -c "curl -sf '$SCHED_URL/internal/clusters' | grep -q '\"$BARE_CLUSTER\"'" \
+  || fail "bare-agent never showed up as a reachable cluster (see $BARE_AGENT_LOG)"
+
+# The bare-agent talks to whichever container engine it resolved to (see runtime/bare-metal/
+# internal/podexec/util.go's resolveEngineClient, logged at startup) — not necessarily the same
+# one `make tt-hardware-image` built the workload image into (that target always uses podman).
+# Build it directly into the resolved engine's own local store so this step is self-contained
+# and idempotent regardless of which engine is present on this host.
+BARE_ENGINE="$(grep -oE 'engine=(podman|docker)' "$BARE_AGENT_LOG" | head -1 | cut -d= -f2)"
+"$BARE_ENGINE" build -f "${REPO_ROOT}/tests/workloads/tenstorrent/Dockerfile.train" \
+  -t localhost/hypothesisloop-tenstorrent-workload "${REPO_ROOT}/tests/workloads/tenstorrent/" > /dev/null
+
+# Same job.yaml, byte-for-byte, as the k3s submission above: accelerator_pod_resources
+# (hugepages) has no bare-metal equivalent, so podexec.BuildContainerSpec logs a warning and
+# ignores it rather than rejecting the job — the control plane picks the runtime, not the spec.
+BARE_JOB_ID=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "tenstorrent.com/chipArch=blackhole" "1" "" "$JOB_FILE")
+curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${BARE_JOB_ID}/admit" \
+  -H 'Content-Type: application/json' -d "{\"cluster_name\": \"$BARE_CLUSTER\"}"
+BARE_STATUS=$(wait_for_completion_after_running "$BARE_JOB_ID" "0.02" "$ADMISSION_BUDGET_SECONDS" || true)
+[[ "$(get_field "$BARE_JOB_ID" cluster_name)" == "$BARE_CLUSTER" ]] \
+  && pass "bare-node job admitted onto this host's bare-agent ($BARE_CLUSTER), not k3s" \
+  || fail "bare-node job landed on cluster_name='$(get_field "$BARE_JOB_ID" cluster_name)', expected $BARE_CLUSTER"
+[[ "$BARE_STATUS" == "COMPLETED" ]] \
+  && pass "bare-node job reached COMPLETED using the real Tenstorrent device directly (no k3s/DRA)" \
+  || fail "bare-node job did not reach COMPLETED (status=$BARE_STATUS, eviction_reason=$(get_field "$BARE_JOB_ID" eviction_reason)) — see $BARE_AGENT_LOG"
+BARE_M=$(dashboard_metrics "$BARE_JOB_ID")
+BARE_COUNT=$(echo "$BARE_M" | py "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list); print(len(d))")
+[[ "$BARE_COUNT" -ge 1 ]] \
+  && pass "$BARE_COUNT metric point(s) pushed from the real bare-node container via registry-service" \
+  || fail "0 metric points recorded from the bare-node job — container may not have actually run/reported"
+[[ "$BARE_STATUS" == "COMPLETED" ]] && file_finding "$BARE_JOB_ID" "Tenstorrent e2e: real device access via bare-node agent confirmed."
+
 close_platform_experiment "$PE_ID"
 finish
