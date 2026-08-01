@@ -45,7 +45,7 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 // Self-healing complement to Close(): if close succeeded in the DB but pod termination or
 // refunds failed, the next reconcile tick finishes the cleanup automatically.
 func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
-	closedPEs, err := c.phase2Store.ListPlatformExperiments(ctx, "closed")
+	closedPEs, err := c.stagesStore.ListPlatformExperiments(ctx, "closed")
 	if err != nil {
 		return fmt.Errorf("reconcileClosedExperiments: list closed PEs: %w", err)
 	}

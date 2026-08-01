@@ -15,7 +15,7 @@ source "$DIR/../lib/cluster.sh"
 
 JOB_HOURS="0.025"
 # H100, not T4: T4 is every other parallel-set scenario's default accelerator type (job-lifecycle,
-# mixed-admission, phase2-and-settlement, cpu-quota-guard's own dimension aside), so
+# mixed-admission, stages-and-settlement, cpu-quota-guard's own dimension aside), so
 # num_nodes=2 T4 jobs here would have to out-rank a constant stream of fresh guaranteed-tier
 # submissions from those sibling scenarios for the scheduler's fairness-window priority —
 # real capacity was free but priority never favored these jobs within any reasonable wait
@@ -27,7 +27,7 @@ AGENTS=("agent-dist-depth-${RUN_ID}" "agent-dist-pressure-a-${RUN_ID}" "agent-di
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
 # Budget sized well above what Part1+Part2 will actually debit (H100's acch_rate=1.0 is the
 # AccH baseline itself, so num_nodes=2 jobs cost exactly 2x their wall-clock hours) — also
-# comfortably clears the phase-2 hold trigger at 40% of budget (see preemption-requeue.sh's
+# comfortably clears the first stage boundary at 40% of budget (see preemption-requeue.sh's
 # identical reasoning for why that matters).
 PE_ID=$(create_platform_experiment "distributed-jobs-${RUN_ID}" 20.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"

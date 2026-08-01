@@ -19,10 +19,10 @@ ACCELERATOR_TYPE="nvidia.com/gpu.product=NVIDIA-L40"
 L40_ACCH_RATE=0.25
 AGENTS=("agent-cap-a-${RUN_ID}" "agent-cap-b-${RUN_ID}" "agent-cap-c-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
-# Budget deliberately generous, same reasoning as preemption-requeue.sh: the controller's
-# phase-2 transition gates on realized (not estimated) usage crossing a fraction of this
-# budget, so under real scheduling delay (heavier under concurrent test-suite load) a tight
-# budget can trip phase2 hold mid-scenario for reasons unrelated to what this scenario tests.
+# Budget deliberately generous, same reasoning as preemption-requeue.sh: a stage boundary gates
+# on realized (not estimated) usage crossing a share of this budget, so under real scheduling
+# delay (heavier under concurrent test-suite load) a tight budget can cut an agent mid-scenario
+# for reasons unrelated to what this scenario tests.
 PE_ID=$(create_platform_experiment "capacity-safety-${RUN_ID}" 50.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 

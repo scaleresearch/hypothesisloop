@@ -8,43 +8,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
-
-// sweepStaleDesiredState flags (log + gauge, never mutates) SUBMITTED/ADMITTED/RUNNING
-// experiments with no recent cluster job report — orphaned desired-state that survived an
-// extended cluster-agent outage combined with a control-plane bug/crash. cluster-agent's own
-// ~2-3s reconcile is already GC-like on the cluster side; this is the rarer control-plane-side
-// case that reactive cleanup alone doesn't catch. Alert-only by design — an operator decides
-// what to do with a flagged experiment, this never auto-evicts or auto-corrects it.
-func (c *Controller) sweepStaleDesiredState(ctx context.Context) error {
-	var stale []*domain.Experiment
-	for _, status := range []domain.ExperimentStatus{domain.StatusSubmitted, domain.StatusAdmitted, domain.StatusRunning} {
-		exps, err := c.store.ListExperimentsWithStatus(ctx, status)
-		if err != nil {
-			return fmt.Errorf("sweepStaleDesiredState: list %s: %w", status, err)
-		}
-		for _, exp := range exps {
-			_, found, err := metricsdb.LatestJobPhase(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, c.staleDesiredStateThreshold)
-			if err != nil {
-				return fmt.Errorf("sweepStaleDesiredState: phase %s: %w", exp.ID, err)
-			}
-			if !found {
-				stale = append(stale, exp)
-			}
-		}
-	}
-	obsmetrics.StaleDesiredStateExperiments.Set(float64(len(stale)))
-	for _, exp := range stale {
-		c.logger.Warn("stale desired-state: no recent cluster job report",
-			zap.String("id", exp.ID),
-			zap.String("status", string(exp.Status)),
-			zap.String("cluster", exp.ClusterName),
-		)
-	}
-	return nil
-}
 
 // Reconcile runs one full reconciliation pass over all running experiments.
 func (c *Controller) Reconcile(ctx context.Context) error {
@@ -57,30 +22,31 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	now := time.Now().UTC()
 
-	// Build PE report-interval map and metric-direction map; run phase-2 checks in one pass.
+	// Build the PE report-interval map and advance stage ladders in one pass.
 	reportIntervalByPE := map[string]time.Duration{}
-	metricDirectionsByPE := map[string]map[string]string{}
-	if c.phase2Store != nil {
-		pes, err := c.phase2Store.ListPlatformExperiments(ctx, "running")
+	if c.stagesStore != nil {
+		pes, err := c.stagesStore.ListPlatformExperiments(ctx, "running")
 		if err != nil {
-			return fmt.Errorf("phase2: list platform experiments: %w", err)
+			return fmt.Errorf("stages: list platform experiments: %w", err)
 		}
 		for _, pe := range pes {
 			if pe.ReportIntervalSeconds > 0 {
 				reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
 			}
-			metricDirectionsByPE[pe.ID] = make(map[string]string, len(pe.Metrics))
+			// Stage ranking reads these directions per boundary; fail fast on a bad contract
+			// rather than at the cut, where a malformed direction would silently skew a cut.
+			seen := make(map[string]bool, len(pe.Metrics))
 			for _, md := range pe.Metrics {
 				if md.Key == "" || (md.Direction != "maximize" && md.Direction != "minimize") {
-					return fmt.Errorf("phase2: platform experiment %s has invalid metric contract", pe.ID)
+					return fmt.Errorf("stages: platform experiment %s has invalid metric contract", pe.ID)
 				}
-				if _, duplicate := metricDirectionsByPE[pe.ID][md.Key]; duplicate {
-					return fmt.Errorf("phase2: platform experiment %s has duplicate metric %q", pe.ID, md.Key)
+				if seen[md.Key] {
+					return fmt.Errorf("stages: platform experiment %s has duplicate metric %q", pe.ID, md.Key)
 				}
-				metricDirectionsByPE[pe.ID][md.Key] = md.Direction
+				seen[md.Key] = true
 			}
-			if err := c.checkPhase2Transition(ctx, pe, exps); err != nil {
-				return fmt.Errorf("phase2: check transition for %s: %w", pe.ID, err)
+			if err := c.advanceStages(ctx, pe, exps); err != nil {
+				return fmt.Errorf("stages: advance %s: %w", pe.ID, err)
 			}
 		}
 	}
@@ -88,7 +54,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	// Evict active jobs belonging to closed platform experiments (spec op 7c).
 	// This runs on every tick, so it self-heals if the Close() call only updated DB
 	// status but pod termination or refunds were not yet completed.
-	if c.phase2Store != nil {
+	if c.stagesStore != nil {
 		if err := c.reconcileClosedExperiments(ctx); err != nil {
 			return fmt.Errorf("reconcile closed experiments: %w", err)
 		}
@@ -111,7 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	}
 
 	for _, exp := range exps {
-		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, metricDirectionsByPE[exp.PlatformExperimentID]); err != nil {
+		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE); err != nil {
 			return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
 		}
 	}
@@ -269,8 +235,10 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	return nil
 }
 
-func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, metricDirectionByName map[string]string) error {
-	// 1. Silence check.
+// reconcileOne evicts exp only when it has gone silent. Quality is the agent's own call: it
+// reads its metrics and cancels a bad run itself, and quota exhaustion bounds the damage if it
+// doesn't.
+func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration) error {
 	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE)
 	if err != nil {
 		return err
@@ -278,32 +246,5 @@ func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, n
 	if evict {
 		return c.evict(ctx, exp, reason, now)
 	}
-
-	// 2. Overrun — only evict if the researcher has no remaining capacity.
-	// If they still have quota headroom, let the job continue past the 1.5× estimate.
-	evict, reason, err = c.checkOverrun(ctx, exp, now)
-	if err != nil {
-		return err
-	}
-	if evict {
-		hasCapacity, err := c.researcherHasCapacity(ctx, exp, now)
-		if err != nil {
-			return err
-		}
-		if !hasCapacity {
-			return c.evict(ctx, exp, reason, now)
-		}
-	}
-
-	// 3. Metric decline: evict if all observed metrics have been monotonically declining
-	// for longer than metricDeclineFraction × estimated_duration_hours.
-	evict, reason, err = c.checkMetricDecline(ctx, exp, now, metricDirectionByName)
-	if err != nil {
-		return err
-	}
-	if evict {
-		return c.evict(ctx, exp, reason, now)
-	}
-
 	return nil
 }

@@ -8,11 +8,7 @@ import (
 )
 
 func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
-	c := &JobWorkloadClient{
-		registryURL:           RegistryURLDefault,
-		jobDeadlineMultiplier: DefaultJobDeadlineMultiplier,
-		minJobDeadlineSeconds: DefaultMinJobDeadlineSeconds,
-	}
+	c := &JobWorkloadClient{registryURL: RegistryURLDefault}
 	exp := &domain.Experiment{
 		ID: "hugepage-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
@@ -47,7 +43,7 @@ var nvidiaPlacement = AcceleratorPlacement{
 
 func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 	c := &JobWorkloadClient{
-		registryURL: "http://registry", jobDeadlineMultiplier: 1.5, minJobDeadlineSeconds: 1,
+		registryURL:                          "http://registry",
 		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
 	}
 	exp := &domain.Experiment{ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,

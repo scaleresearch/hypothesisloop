@@ -81,21 +81,38 @@ done
 # connectivity-loss runs last: disconnects cluster-agent, so nothing else should run alongside it.
 reordered=()
 has_connectivity_loss=0
-for name in "${exclusive_set[@]}"; do
+for name in ${exclusive_set[@]+"${exclusive_set[@]}"}; do
   if [[ "$name" == "connectivity-loss" ]]; then has_connectivity_loss=1; continue; fi
   reordered+=("$name")
 done
 [[ "$has_connectivity_loss" -eq 1 ]] && reordered+=(connectivity-loss)
-exclusive_set=("${reordered[@]}")
+exclusive_set=(${reordered[@]+"${reordered[@]}"})
 
 # One deterministic ceiling for every scenario. A scenario that needs a larger special case is
 # too slow or is hiding an unreliable assertion and must be fixed at its source.
 SCENARIO_TIMEOUT_SECONDS="${SCENARIO_TIMEOUT_SECONDS:-240}"
 
+# GNU coreutils' timeout isn't on macOS by default (and gtimeout only if brew coreutils is
+# installed) — fall back to a watchdog that kills the scenario itself after the same ceiling.
+run_with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"; return $?; fi
+  if command -v gtimeout >/dev/null 2>&1; then gtimeout "$secs" "$@"; return $?; fi
+  "$@" &
+  local job=$!
+  ( sleep "$secs"; kill -TERM "$job" 2>/dev/null ) &
+  local watchdog=$!
+  local rc=0
+  wait "$job" || rc=$?
+  kill -TERM "$watchdog" 2>/dev/null
+  wait "$watchdog" 2>/dev/null || true
+  return "$rc"
+}
+
 run_one() {
   local name="$1" t0 t1 rc elapsed
   t0=$(date +%s)
-  timeout "$SCENARIO_TIMEOUT_SECONDS" bash "$DIR/scenarios/${name}.sh" > "$LOG_DIR/${name}.log" 2>&1
+  run_with_timeout "$SCENARIO_TIMEOUT_SECONDS" bash "$DIR/scenarios/${name}.sh" > "$LOG_DIR/${name}.log" 2>&1
   rc=$?
   echo "$rc" > "$LOG_DIR/${name}.rc"
   t1=$(date +%s)
@@ -107,15 +124,15 @@ run_one() {
 START=$(date +%s)
 run_parallel_group() {
   local label="$1"; shift
-  local names=("$@") pids=() name pid
+  local names=(${@+"$@"}) pids=() name pid
   [[ "${#names[@]}" -gt 0 ]] || return 0
   echo "==> Running ${#names[@]} ${label} scenario(s) concurrently: ${names[*]}"
   for name in "${names[@]}"; do run_one "$name" & pids+=("$!"); done
-  for pid in "${pids[@]}"; do wait "$pid"; done
+  for pid in ${pids[@]+"${pids[@]}"}; do wait "$pid"; done
 }
 
-run_parallel_group fast "${fast_set[@]}"
-run_parallel_group slow "${slow_set[@]}"
+run_parallel_group fast ${fast_set[@]+"${fast_set[@]}"}
+run_parallel_group slow ${slow_set[@]+"${slow_set[@]}"}
 
 # cluster-agent Ready check for the CLUSTER_EXCLUSIVE loop below — deliberately NOT sourcing
 # tests/lib/common.sh here (it sets `set -e`, which would change this script's own top-level
@@ -126,7 +143,7 @@ cluster_agent_ready() {
 
 if [[ "${#exclusive_set[@]}" -gt 0 ]]; then
   echo "==> Running ${#exclusive_set[@]} cluster-exclusive scenario(s) sequentially: ${exclusive_set[*]}"
-  for name in "${exclusive_set[@]}"; do
+  for name in ${exclusive_set[@]+"${exclusive_set[@]}"}; do
     cluster_agent_ready || {
       echo "  [FAIL] cluster-agent is not ready before ${name}" >&2
       echo "1" > "$LOG_DIR/${name}.rc"
@@ -140,7 +157,7 @@ fi
 
 if [[ "${#hardware_set[@]}" -gt 0 ]]; then
   echo "==> Running ${#hardware_set[@]} hardware scenario(s) sequentially: ${hardware_set[*]}"
-  for name in "${hardware_set[@]}"; do run_one "$name"; done
+  for name in ${hardware_set[@]+"${hardware_set[@]}"}; do run_one "$name"; done
 fi
 ELAPSED=$(( $(date +%s) - START ))
 
@@ -149,7 +166,7 @@ echo "=========================================================="
 echo "RESULTS (${ELAPSED}s)"
 echo "=========================================================="
 FAILED=0
-for name in "${fast_set[@]}" "${slow_set[@]}" "${exclusive_set[@]}" "${hardware_set[@]}"; do
+for name in ${fast_set[@]+"${fast_set[@]}"} ${slow_set[@]+"${slow_set[@]}"} ${exclusive_set[@]+"${exclusive_set[@]}"} ${hardware_set[@]+"${hardware_set[@]}"}; do
   [[ -z "$name" ]] && continue
   rc=$(<"$LOG_DIR/${name}.rc")
   secs=$(<"$LOG_DIR/${name}.elapsed")
@@ -164,7 +181,7 @@ done
 if [[ "$FAILED" == "1" ]]; then
   echo ""
   echo "==> Full output for failed scenarios:"
-  for name in "${fast_set[@]}" "${slow_set[@]}" "${exclusive_set[@]}" "${hardware_set[@]}"; do
+  for name in ${fast_set[@]+"${fast_set[@]}"} ${slow_set[@]+"${slow_set[@]}"} ${exclusive_set[@]+"${exclusive_set[@]}"} ${hardware_set[@]+"${hardware_set[@]}"}; do
     [[ -z "$name" ]] && continue
     rc=$(<"$LOG_DIR/${name}.rc")
     if [[ "$rc" != "0" ]]; then

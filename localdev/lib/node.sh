@@ -17,6 +17,8 @@ lib_create_node() {
   local network="${8:-}" ip="${9:-}"
   local podman_cmd="${NODE_PODMAN:-podman}"
 
+  # Expanded below as ${net_args[@]+"${net_args[@]}"}: under `set -u`, macOS's bash 3.2 treats
+  # an unset-because-empty array as an unbound variable.
   local net_args=()
   [[ -n "$network" ]] && net_args+=(--network "$network")
   [[ -n "$ip" ]] && net_args+=(--ip "$ip")
@@ -25,7 +27,7 @@ lib_create_node() {
     --privileged --cgroupns=host \
     --cpus="$cpus" --memory="$memory" \
     -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /var/run \
-    "${net_args[@]}" \
+    ${net_args[@]+"${net_args[@]}"} \
     -e K3S_URL="$server_url" -e K3S_TOKEN="$token" -e K3S_NODE_NAME="$name" \
     "$image" agent --kubelet-arg=feature-gates=KubeletInUserNamespace=true \
     "--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%" \

@@ -99,14 +99,14 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		return "", fmt.Errorf("admit experiment: observed usage: %w", err)
 	}
 
-	var held bool
+	var cut bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM experiment_phase2_holds WHERE platform_experiment_id=$1 AND agent_id=$2
-	)`, exp.PlatformExperimentID, exp.AgentID).Scan(&held); err != nil {
-		return "", fmt.Errorf("admit experiment: hold: %w", err)
+		SELECT 1 FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2
+	)`, exp.PlatformExperimentID, exp.AgentID).Scan(&cut); err != nil {
+		return "", fmt.Errorf("admit experiment: stage cut: %w", err)
 	}
-	if held {
-		return "agent is held under phase-2 budget rules", nil
+	if cut {
+		return "agent was cut at a stage boundary", nil
 	}
 
 	allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`

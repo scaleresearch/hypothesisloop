@@ -43,10 +43,6 @@ const (
 // Named values used by focused workload-builder tests. New requires every operational value
 // explicitly and never applies these implicitly.
 const (
-	// DefaultJobDeadlineMultiplier multiplies estimated_duration_hours for ActiveDeadlineSeconds.
-	DefaultJobDeadlineMultiplier = 1.5
-	// DefaultMinJobDeadlineSeconds is the ActiveDeadlineSeconds floor.
-	DefaultMinJobDeadlineSeconds = int64(300)
 	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
 	DefaultTerminationGracePeriodSeconds = int64(5)
 	// DefaultMaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
@@ -57,10 +53,6 @@ type Config struct {
 	KubeconfigPath string
 	KubeContext    string
 	RegistryURL    string
-	// JobDeadlineMultiplier multiplies estimated_duration_hours for ActiveDeadlineSeconds.
-	JobDeadlineMultiplier float64
-	// MinJobDeadlineSeconds is the ActiveDeadlineSeconds floor.
-	MinJobDeadlineSeconds int
 	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
 	DefaultTerminationGracePeriodSeconds int
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
@@ -75,8 +67,6 @@ type JobWorkloadClient struct {
 	kube                                 kubernetes.Interface
 	dyn                                  dynamic.Interface
 	registryURL                          string
-	jobDeadlineMultiplier                float64
-	minJobDeadlineSeconds                int64
 	defaultTerminationGracePeriodSeconds int64
 	maxTerminationGracePeriodSeconds     int64
 	// pricedAcceleratorTypes bounds what capacity reporting names — see Config.PricedAcceleratorTypes.
@@ -87,8 +77,8 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if cfg.RegistryURL == "" {
 		return nil, fmt.Errorf("workload: RegistryURL is required")
 	}
-	if cfg.JobDeadlineMultiplier <= 0 || cfg.MinJobDeadlineSeconds <= 0 || cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 {
-		return nil, fmt.Errorf("workload: retry, deadline, and termination settings must be positive")
+	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 {
+		return nil, fmt.Errorf("workload: termination settings must be positive")
 	}
 	restCfg, err := buildRestConfig(cfg.KubeconfigPath, cfg.KubeContext)
 	if err != nil {
@@ -108,8 +98,6 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 		return nil, fmt.Errorf("workload: dynamic client: %w", err)
 	}
 	reg := cfg.RegistryURL
-	deadlineMult := cfg.JobDeadlineMultiplier
-	minDeadline := int64(cfg.MinJobDeadlineSeconds)
 	defaultGrace := int64(cfg.DefaultTerminationGracePeriodSeconds)
 	maxGrace := int64(cfg.MaxTerminationGracePeriodSeconds)
 	priced := make(map[string]bool, len(cfg.PricedAcceleratorTypes))
@@ -120,8 +108,6 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 		kube:                                 kube,
 		dyn:                                  dyn,
 		registryURL:                          reg,
-		jobDeadlineMultiplier:                deadlineMult,
-		minJobDeadlineSeconds:                minDeadline,
 		defaultTerminationGracePeriodSeconds: defaultGrace,
 		maxTerminationGracePeriodSeconds:     maxGrace,
 		pricedAcceleratorTypes:               priced,

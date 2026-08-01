@@ -19,12 +19,12 @@ import (
 // to a job that cannot legitimately be reporting progress. Callers surface it as a 4xx rather
 // than a 500: the client sent bad data, the server did not fail. Rejecting these at the door
 // keeps NaN/Inf and late/forged samples out of the metrics store, where they would otherwise
-// poison phase-2 percentile rankings and silence/decline detection.
+// poison stage-boundary rankings and silence/decline detection.
 var ErrInvalidMetric = errors.New("invalid metric")
 
 // RecordMetric pushes a metric datapoint directly to GreptimeDB via Prometheus remote write.
 // Labels: job_id, platform_experiment_id, agent_id, metric_name.
-// These labels enable phase-2 percentile queries to filter and group by experiment/agent.
+// These labels enable stage-boundary ranking queries to filter and group by experiment/agent.
 func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName string, fractionComplete, value float64) error {
 	// Reject malformed values before touching the store: NaN/Inf and out-of-range fractions
 	// would silently corrupt percentile rankings and completion-progress reads.

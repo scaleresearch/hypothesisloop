@@ -32,7 +32,7 @@ AGENT="tt-e2e-agent-${RUN_ID}"
 register_agent "$AGENT"
 # Declare the metrics tests/workloads/tenstorrent/train.py actually pushes — raw measured
 # TFLOPS, not the generic val_accuracy default. tflops_measured is a running max, so it is
-# unbounded (no clamp to saturate the ranking) and monotonic (cannot trip metric_decline).
+# unbounded (no clamp to saturate the ranking) and monotonic.
 PE_ID=$(create_platform_experiment "tt-e2e-${RUN_ID}" 1.0 1 5 0 \
   '[{"key": "tflops_measured", "direction": "maximize"}, {"key": "latency_ms", "direction": "minimize"}]')
 signup_and_start "$PE_ID" "$AGENT"

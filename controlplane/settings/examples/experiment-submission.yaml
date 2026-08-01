@@ -11,7 +11,7 @@
 #               ...) that have nothing to do with how the job executes.
 #
 # See tests/workloads/generic/job.yaml for the minimal fixture the e2e smoke test submits
-# (just `job` — `metadata` is generated inline by tests/scenarios/phase2-and-settlement.sh).
+# (just `job` — `metadata` is generated inline by tests/scenarios/stages-and-settlement.sh).
 
 job:
   # --- What to run -------------------------------------------------------------------
@@ -150,9 +150,8 @@ metadata:
   # PriorityClass today).
   capacity_tier: guaranteed
 
-  # Wall-clock budget this run is expected to need. Drives the backend's hard deadline
-  # (a safety backstop) and cost estimation — the platform's own overrun guard, not
-  # something you configure per-job in job.yaml.
+  # Wall-clock budget this run is expected to need. Drives admission and cost estimation
+  # only — nothing kills a job for exceeding it, quota exhaustion is the limit that bites.
   estimated_duration_hours: 6.0
 
   # Optional: set if this run is a continuation of (or comparison against) a prior one —

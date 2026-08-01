@@ -82,10 +82,6 @@ quota:
   # experiment. Prevents queue flooding. 0 = unlimited.
   max_submissions_per_hour: 100
 
-  # Fraction of estimated_duration_hours after which a monotonically declining primary
-  # metric triggers eviction. E.g. 0.3 = evict if metrics decline for 30% of runtime.
-  metric_decline_fraction: 0.3
-
   # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is
   # independent of (and on top of) budget sizing: size these relative to your smallest
@@ -113,8 +109,7 @@ scheduler:
 
   # How long a job may stay SUBMITTED/ADMITTED without reporting RUNNING before job_watcher
   # evicts it (reason stuck_pending) and fully refunds its reservation. Bounds capacity held by
-  # jobs that never actually start (e.g. unschedulable) far tighter than the native
-  # ActiveDeadlineSeconds ceiling.
+  # jobs that never actually start (e.g. unschedulable).
   stuck_pending_timeout_seconds: 300
 
   # How stale a cluster-agent's heartbeat may be before the cluster is treated as Unreachable:
@@ -128,11 +123,6 @@ scheduler:
   # bounding how far a steady-submitting agent's own jobs can jump ahead of other agents'
   # equally-entitled jobs.
   guaranteed_fairness_window_seconds: 60
-
-  # Control-plane-side GC sweep: how often to look for SUBMITTED/ADMITTED/RUNNING experiments
-  # whose desired state has no recent job-phase observation in metrics storage. Alert-only.
-  stale_desired_state_sweep_interval_seconds: 600
-  stale_desired_state_threshold_seconds: 300
 
   # How often the metric controller reconciles running experiments.
   reconcile_interval_seconds: 5
@@ -149,32 +139,28 @@ scheduler:
   # reporting cadence turns a normal self-heal into a false permanent eviction.
   min_silence_window_seconds: 60
 
-  # Multiplier on estimated_duration_hours beyond which a job is considered overrunning.
-  # E.g. 1.5 = evict if job has run for 150% of its estimated duration.
-  overrun_multiplier: 1.5
-
-  # Number of most-recent metric datapoints retained per experiment for decline detection.
-  metric_window_size: 20
-
   # Kubernetes Job retries (RestartPolicy=OnFailure) before k8s marks the Job Failed.
   # Absorbs transient pod flakes; a persistently crashing job exhausts these retries and is
   # failed natively by k8s (job watcher then records FAILED and refunds unused AccH).
 
-  # k8s ActiveDeadlineSeconds hard ceiling, as a multiple of estimated_duration_hours.
-  # Backstop for the overrun guard. E.g. 1.5 = hard-kill at 150% of estimated runtime.
-  job_deadline_multiplier: 1.5
 
-  # Floor for ActiveDeadlineSeconds so very short jobs still get a sane minimum budget.
-  min_job_deadline_seconds: 300
+# Stages — the elimination ladder (see docs/stages.md)
+#
+# An ordered list of stages, each two numbers:
+#   length_pct  share of the experiment this stage spans; all stages must sum to 100
+#   evict_pct   share of *surviving* agents cut when the stage ends; 0 cuts nobody
+#
+# Progress across the ladder is max(budget_consumed / total_budget, elapsed / duration), so
+# whichever runs out first advances it. The final stage must have evict_pct 0 — nothing
+# follows it. Fixed at creation per platform experiment; this is only the default applied to
+# a platform experiment created without its own ladder.
+#
+#   [{length_pct: 100, evict_pct: 0}]                       one stage, no cuts
+#   [{20,25}, {30,25}, {50,0}]                              three stages, a quarter cut twice
 
-
-# Phase 2 (signal-gated competition)
-
-phase2:
-  # Fraction of total experiment budget consumed before phase 2 triggers.
-  boundary_fraction: 0.40
-
-  # Metric percentile cut at phase-2 boundary. Agents whose best metric value falls
-  # above this percentile (maximize) or below 1-percentile (minimize) advance to phase 2.
-  # 0.75 means top-quartile agents advance; bottom 25% are held.
-  admission_percentile: 0.75
+stages:
+  default:
+    - length_pct: 40
+      evict_pct: 75
+    - length_pct: 60
+      evict_pct: 0

@@ -20,9 +20,9 @@ type QuotaConfig struct {
 	Top3BonusFraction float64 `json:"top3_bonus_fraction"`
 	// BurstFraction is burst_quota = guaranteed * burst_fraction.
 	BurstFraction float64 `json:"burst_fraction"`
-	// Phase1ExploreFraction is the fraction of total budget allocated as initial per-agent
-	// quota (the explore window). Matches the phase-2 boundary fraction.
-	Phase1ExploreFraction float64 `json:"phase1_explore_fraction"`
+	// DefaultStages is the elimination ladder applied to a platform experiment created
+	// without its own. See docs/stages.md.
+	DefaultStages []Stage `json:"default_stages"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
 	// a single platform experiment. 0 means unlimited.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`
@@ -45,7 +45,7 @@ func DefaultQuotaConfig() QuotaConfig {
 	return QuotaConfig{
 		Top3BonusFraction:     0.25,
 		BurstFraction:         2.0,
-		Phase1ExploreFraction: Phase1ExploreFraction,
+		DefaultStages:         DefaultStages,
 		MaxSubmissionsPerHour: 100,
 		MetricDeclineFraction: 0.3,
 	}

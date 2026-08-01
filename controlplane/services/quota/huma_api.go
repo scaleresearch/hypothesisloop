@@ -111,6 +111,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error400BadRequest("name and budget_accelerator_hours are required")
 		}
 		pe, err := peh.svc.Create(ctx, in.Body)
+		if errors.Is(err, domain.ErrInvalidStages) {
+			return nil, huma.Error400BadRequest(err.Error())
+		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -136,7 +139,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, phase and the list of signed-up agents.",
+		Description: "Returns status, budget, the stage ladder and the list of signed-up agents.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -286,12 +289,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, huma.Operation{
-		OperationID: "get-phase2-status", Method: "GET", Path: "/platform-experiments/{id}/phase2-status",
-		Summary: "Get phase-2 status for a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Reports current phase and, in phase 2, which signed-up agents are active vs held (evicted, blocked from resubmitting). boundary_fraction is the configured budget fraction at which phase 2 triggers — never hardcode it.",
+		OperationID: "get-stages", Method: "GET", Path: "/platform-experiments/{id}/stages",
+		Summary: "Get the stage ladder and current standing of a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "Reports the configured elimination ladder, which stage is running, how far through the experiment we are, and which signed-up agents are still active vs cut (jobs stopped, blocked from resubmitting). Exact standings and per-agent rank are deliberately not exposed — an agent can see whether it is cut, not how close it is.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
-	}) (*struct{ Body Phase2StatusResponse }, error) {
+	}) (*struct{ Body StagesStatusResponse }, error) {
 		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -299,39 +302,42 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if pe == nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
-		heldAgents, err := peh.svc.store.ListPhase2HeldAgents(ctx, in.ID)
+		cuts, err := peh.svc.store.ListCutAgents(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		if heldAgents == nil {
-			heldAgents = []string{}
+		if cuts == nil {
+			cuts = []domain.AgentCut{}
 		}
-		allSignups, _ := peh.svc.store.ListSignups(ctx, in.ID)
-		heldSet := make(map[string]bool, len(heldAgents))
-		for _, a := range heldAgents {
-			heldSet[a] = true
+		cutSet := make(map[string]bool, len(cuts))
+		for _, c := range cuts {
+			cutSet[c.AgentID] = true
+		}
+		advances, err := peh.svc.store.ListStageAdvances(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if advances == nil {
+			advances = []domain.StageAdvance{}
+		}
+		allSignups, err := peh.svc.store.ListSignups(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		activeAgents := []string{}
 		for _, a := range allSignups {
-			if !heldSet[a] {
+			if !cutSet[a] {
 				activeAgents = append(activeAgents, a)
 			}
 		}
-		var triggeredAt *string
-		if pe.Phase2TriggeredAt != nil {
-			s := pe.Phase2TriggeredAt.Format("2006-01-02T15:04:05Z")
-			triggeredAt = &s
-		}
-		boundaryFraction := peh.svc.cfg.Phase1ExploreFraction
-		if boundaryFraction == 0 {
-			boundaryFraction = domain.Phase1ExploreFraction
-		}
-		return &struct{ Body Phase2StatusResponse }{Body: Phase2StatusResponse{
-			Phase:             pe.Phase,
-			Phase2TriggeredAt: triggeredAt,
-			ActiveAgents:      activeAgents,
-			HeldAgents:        heldAgents,
-			BoundaryFraction:  boundaryFraction,
+		return &struct{ Body StagesStatusResponse }{Body: StagesStatusResponse{
+			Stages:               pe.Stages,
+			CurrentStage:         pe.CurrentStage,
+			Progress:             peh.svc.stageProgress(ctx, pe),
+			NextBoundaryProgress: domain.BoundaryProgress(pe.Stages, pe.CurrentStage),
+			Advances:             advances,
+			ActiveAgents:         activeAgents,
+			CutAgents:            cuts,
 		}}, nil
 	})
 
@@ -452,7 +458,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Live {accelerator_type, available, total} per cluster. accelerator_type is the exact string " +
 			"a job spec's accelerator_type takes — the value its driver publishes — so what you read here is what " +
 			"you submit. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER (never errors). " +
-			"Only currently-schedulable nodes count, so powered-off hardware never appears here.",}, func(ctx context.Context, _ *struct{}) (*struct {
+			"Only currently-schedulable nodes count, so powered-off hardware never appears here."}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
 			Clusters []ClusterCapacity `json:"clusters"`
 		}
@@ -479,11 +485,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 }
 
-// Phase2StatusResponse is the response body for GET /platform-experiments/{id}/phase2-status.
-type Phase2StatusResponse struct {
-	Phase             int      `json:"phase"`
-	Phase2TriggeredAt *string  `json:"phase2_triggered_at,omitempty"`
-	ActiveAgents      []string `json:"active_agents"`
-	HeldAgents        []string `json:"held_agents"`
-	BoundaryFraction  float64  `json:"boundary_fraction"`
+// StagesStatusResponse is the response body for GET /platform-experiments/{id}/stages.
+// Boundaries are published ahead so agents can plan; live rank is not, so agents cannot time
+// submissions around the cut line instead of improving their metric. See docs/stages.md.
+type StagesStatusResponse struct {
+	Stages       []domain.Stage `json:"stages"`
+	CurrentStage int            `json:"current_stage"`
+	// Progress is max(budget_consumed / total_budget, elapsed / duration) — the single clock
+	// driving every boundary.
+	Progress             float64 `json:"progress"`
+	NextBoundaryProgress float64 `json:"next_boundary_progress"`
+	// Advances records each boundary already crossed and when.
+	Advances     []domain.StageAdvance `json:"advances"`
+	ActiveAgents []string              `json:"active_agents"`
+	CutAgents    []domain.AgentCut     `json:"cut_agents"`
 }

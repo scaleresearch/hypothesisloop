@@ -74,9 +74,8 @@ func main() {
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:         pcfg.Quota.Top3BonusFraction,
 		BurstFraction:             pcfg.Quota.BurstFraction,
-		Phase1ExploreFraction:     pcfg.Phase2.BoundaryFraction,
+		DefaultStages:             pcfg.Stages.Default,
 		MaxSubmissionsPerHour:     pcfg.Quota.MaxSubmissionsPerHour,
-		MetricDeclineFraction:     pcfg.Quota.MetricDeclineFraction,
 		MaxAcceleratorCountPerJob: pcfg.Quota.MaxAcceleratorCountPerJob,
 		MaxCPUCoresPerJob:         pcfg.Quota.MaxCPUCoresPerJob,
 		MaxRAMGBPerJob:            pcfg.Quota.MaxRAMGBPerJob,

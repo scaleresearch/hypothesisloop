@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full multi-agent smoke flow: every submitted job reaches a terminal state, the platform
-# experiment transitions to phase 2 once enough agents report, every terminal job gets a
+# experiment advances past its first stage boundary once enough budget burns, every terminal job gets a
 # durably settled quota (until quota_settled_at is written, PostgreSQL deliberately keeps the
 # terminal job's estimate in desired usage so a crash cannot undercount it before the observed
 # metric is durable), and the dashboard-facing Prometheus/registry endpoints
@@ -12,7 +12,7 @@ source "$DIR/../lib/api.sh"
 
 AGENTS=("agent-alpha-${RUN_ID}" "agent-beta-${RUN_ID}" "agent-gamma-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
-PE_ID=$(create_platform_experiment "phase2-settlement-${RUN_ID}" 0.03 "${#AGENTS[@]}")
+PE_ID=$(create_platform_experiment "stages-settlement-${RUN_ID}" 0.03 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
 declare -a JOBS
@@ -34,21 +34,25 @@ done
   && pass "all ${#JOBS[@]} jobs reached a terminal state" \
   || fail "not all jobs reached a terminal state within 90s"
 
-phase2_status_json() { curl -sf "$QUOTA_URL/platform-experiments/${PE_ID}/phase2-status"; }
-get_phase2_phase() { phase2_status_json | py "import sys,json; print(json.load(sys.stdin)['phase'])"; }
-phase2_reached() { [[ "$(get_phase2_phase)" == "2" ]]; }
-if wait_until "phase-2 transition" 60 1 phase2_reached; then
-  pass "platform experiment transitioned to phase 2"
-  P2=$(phase2_status_json)
-	ACTIVE_N=$(echo "$P2" | py "import sys,json; print(len(json.load(sys.stdin)['active_agents']))")
-	HELD_N=$(echo "$P2" | py "import sys,json; print(len(json.load(sys.stdin)['held_agents']))")
-  echo "  phase 2: active=${ACTIVE_N} held=${HELD_N} (of ${#AGENTS[@]} agents)"
-  TOTAL_N=$((ACTIVE_N + HELD_N))
+stages_json() { curl -sf "$QUOTA_URL/platform-experiments/${PE_ID}/stages"; }
+get_current_stage() { stages_json | py "import sys,json; print(json.load(sys.stdin)['current_stage'])"; }
+advanced() { [[ "$(get_current_stage)" -ge 2 ]]; }
+if wait_until "first stage boundary" 60 1 advanced; then
+  pass "platform experiment advanced past its first stage boundary"
+  ST=$(stages_json)
+	ACTIVE_N=$(echo "$ST" | py "import sys,json; print(len(json.load(sys.stdin)['active_agents']))")
+	CUT_N=$(echo "$ST" | py "import sys,json; print(len(json.load(sys.stdin)['cut_agents']))")
+  echo "  stage $(get_current_stage): active=${ACTIVE_N} cut=${CUT_N} (of ${#AGENTS[@]} agents)"
+  TOTAL_N=$((ACTIVE_N + CUT_N))
   [[ "$TOTAL_N" -eq "${#AGENTS[@]}" ]] \
-    && pass "active+held agent counts are consistent with the ${#AGENTS[@]} signed-up agents" \
-    || fail "active($ACTIVE_N)+held($HELD_N) agents don't add up against ${#AGENTS[@]} signed-up agents"
+    && pass "active+cut agent counts are consistent with the ${#AGENTS[@]} signed-up agents" \
+    || fail "active($ACTIVE_N)+cut($CUT_N) agents don't add up against ${#AGENTS[@]} signed-up agents"
+  # 3 agents is below the guardrail floor, so the boundary must advance without cutting anyone.
+  [[ "$CUT_N" -eq 0 ]] \
+    && pass "no agent cut with only ${#AGENTS[@]} survivors (guardrail floor)" \
+    || fail "cut $CUT_N agent(s) despite only ${#AGENTS[@]} survivors"
 else
-  fail "phase-2 transition not observed within timeout"
+  fail "stage boundary not observed within timeout"
 fi
 
 all_jobs_settled() {

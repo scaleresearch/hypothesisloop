@@ -67,11 +67,6 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 
 	backoff := int32(*spec.MaxRetries)
 
-	deadline := int64(exp.EstimatedDurationHours * c.jobDeadlineMultiplier * 3600)
-	if deadline < c.minJobDeadlineSeconds {
-		deadline = c.minJobDeadlineSeconds
-	}
-
 	terminationGrace := c.defaultTerminationGracePeriodSeconds
 	if spec.TerminationGracePeriodSeconds != nil {
 		terminationGrace = *spec.TerminationGracePeriodSeconds
@@ -245,8 +240,7 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 			},
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit:          &backoff,
-			ActiveDeadlineSeconds: &deadline,
+			BackoffLimit: &backoff,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

@@ -32,8 +32,9 @@ type PlatformExperimentsStore interface {
 	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, observed func(context.Context, string, string) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
 	HasTop3History(ctx context.Context, agentID string) (bool, error)
-	IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error)
-	ListPhase2HeldAgents(ctx context.Context, platformExpID string) ([]string, error)
+	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
+	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
+	ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error)
 	GetAgent(ctx context.Context, agentID string) (*domain.Agent, error)
 	ListAgents(ctx context.Context) ([]*domain.Agent, error)
 	UpdateAgent(ctx context.Context, agent *domain.Agent) error
@@ -79,10 +80,25 @@ type CreatePlatformExperimentRequest struct {
 	ReportIntervalSeconds int                       `json:"report_interval_seconds"` // expected reporting cadence
 	StartsAt              time.Time                 `json:"starts_at"`
 	EndsAt                time.Time                 `json:"ends_at"`
+	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
+	// (config stages.default). See docs/stages.md.
+	Stages []domain.Stage `json:"stages,omitempty"`
 }
 
 // AgentResult is (agentID, finalMetric) used when closing an experiment.
 type AgentResult struct {
 	AgentID     string  `json:"agent_id"`
 	FinalMetric float64 `json:"final_metric"`
+}
+
+// stageProgress is the read-only value served by GET /platform-experiments/{id}/stages. It omits
+// the in-flight cost of running jobs that the controller's authoritative value includes, so it
+// can trail the boundary the controller acts on.
+func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *domain.PlatformExperiment) float64 {
+	consumed, err := metricsdb.TotalObservedAccH(ctx, s.usage.URL(), pe.ID)
+	if err != nil {
+		s.logger.Warn("stages: observed usage unavailable, reporting wall-clock progress only",
+			zap.String("platformExpID", pe.ID), zap.Error(err))
+	}
+	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, time.Now().UTC())
 }

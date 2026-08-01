@@ -14,12 +14,11 @@ ACCELERATOR_COUNT_PER_BURST=4
 BURST_JOBS_N=2
 AGENTS=("agent-preempt-a-${RUN_ID}" "agent-preempt-b-${RUN_ID}" "agent-preempt-c-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
-# Budget deliberately generous: phase-2 transition triggers at a hardcoded fraction of
-# budget_accelerator_hours consumed (domain.Phase1ExploreFraction — the PE's phase2_boundary
-# field does NOT gate this; see controller/phase2.go's checkPhase2Transition), unrelated to
-# what this scenario tests. A100 (high acch_rate) with accelerator_count=4 burst jobs could,
-# under scheduling delay, cross that threshold and put an agent on hold mid-scenario — give it
-# enough headroom that can't happen.
+# Budget deliberately generous: a stage boundary trips once budget_accelerator_hours consumed
+# reaches the first stage's share of the ladder (see controller/stages.go), unrelated to what
+# this scenario tests. A100 (high acch_rate) with accelerator_count=4 burst jobs could, under
+# scheduling delay, cross that boundary and cut an agent mid-scenario — give it enough headroom
+# that can't happen.
 PE_ID=$(create_platform_experiment "preemption-${RUN_ID}" 50.0 "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 

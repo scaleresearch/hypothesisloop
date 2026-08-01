@@ -8,11 +8,11 @@ register_agent() {
 }
 
 # create_platform_experiment NAME BUDGET MAX_AGENTS [REPORT_INTERVAL_SECONDS]
-#                            [BUDGET_CPU_CORE_HOURS] [METRICS_JSON] -> prints PE_ID
-# Phase-2 boundary is a global controller config (controlplane/shared/config Phase2.BoundaryFraction),
-# not a per-request field, so there's no phase2 positional here at all. starts_at/ends_at are
-# required by the Huma schema but the zero value is treated downstream as "start
-# immediately"/"never expires".
+#                            [BUDGET_CPU_CORE_HOURS] [METRICS_JSON] [STAGES_JSON] -> prints PE_ID
+# STAGES_JSON is the elimination ladder (docs/stages.md); omitted means the platform default from
+# config stages.default. starts_at/ends_at are required by the Huma schema but the zero value is
+# treated downstream as "start immediately"/"never expires" — with both zero the ladder advances
+# on budget alone, which is what every scenario here wants.
 #
 # METRICS_JSON must name metrics the scenario's workload actually emits — a declared metric
 # nobody pushes yields no admission data, and a metric the workload pushes but nobody declares
@@ -27,7 +27,12 @@ create_platform_experiment() {
   # the whole scenario for every caller that omits the argument.
   local metrics="${6-}"
   [[ -z "$metrics" ]] && metrics='[{"key": "val_accuracy", "direction": "maximize"}]'
+  # Same two-step reason as metrics above: a literal '}' can't live in a default-value expansion.
+  local stages="${7-}"
+  local stages_field=""
+  [[ -n "$stages" ]] && stages_field="\"stages\": $stages,"
   curl -sf -X POST "$QUOTA_URL/platform-experiments" -H 'Content-Type: application/json' -d "{
+    $stages_field
     \"name\": \"$name\",
     \"description\": \"$name\",
     \"budget_accelerator_hours\": $budget,

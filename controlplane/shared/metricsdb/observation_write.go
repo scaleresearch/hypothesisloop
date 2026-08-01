@@ -9,7 +9,7 @@ import (
 // a node-agent CPU sample tagged with the pod's experiment ID, or (via IsAlive/
 // ObservedElapsedHours also matching experiment_metric_value) a job-reported training metric.
 // This file is the only place that reads or writes "how long has this experiment really run":
-// every caller (silence detection, refund/eviction accounting, phase-2 boundary, the scheduler's
+// every caller (silence detection, refund/eviction accounting, stage boundaries, the scheduler's
 // Cancel handler) calls straight into GreptimeDB, so the answer is always recomputed from what's
 // actually stored — no cache, in this process or any other, to fall out of sync or get lost on
 // restart.

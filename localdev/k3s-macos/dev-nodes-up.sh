@@ -46,7 +46,10 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   entry="${ACCELERATOR_TYPES[$(( (i - 1) % ${#ACCELERATOR_TYPES[@]} ))]}"
   # Suffixed by index (not just the type name) so NODE_COUNT beyond the 4 listed types never
   # collides two nodes onto the same container name.
-  type="${entry%%:*}" label="${entry#*:}" name="fake-${type,,}-${i}"
+  # Lowercased via tr, not ${type,,} — that expansion needs bash 4, and macOS ships 3.2
+  # (same constraint reload.sh notes for mapfile/readarray).
+  type="${entry%%:*}" label="${entry#*:}"
+  name="fake-$(printf '%s' "${type}" | tr '[:upper:]' '[:lower:]')-${i}"
 
   if podman inspect "${name}" &>/dev/null && ! kubectl --context "${CONTEXT_NAME}" get node "${name}" &>/dev/null; then
     lib_destroy_node "${CONTEXT_NAME}" "${name}"

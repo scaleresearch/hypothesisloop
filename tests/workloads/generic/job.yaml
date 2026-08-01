@@ -2,12 +2,12 @@
 # as the hypothesisloop-workload image — see Dockerfile.train). This is a domain.JobSpec, the
 # platform's own DSL, never a raw Kubernetes manifest (see
 # controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
-# reference). tests/scenarios/phase2-and-settlement.sh reads this file as-is and submits it
+# reference). tests/scenarios/stages-and-settlement.sh reads this file as-is and submits it
 # verbatim as the `job` field of every POST /experiments call — per-run bits (hypothesis,
 # agent, platform experiment) live in the request's `metadata`, not here, since this file
 # describes how the job runs, identical for every agent in the e2e run.
 #
-# Kept deliberately plain/single-node: scenarios/phase2-and-settlement.sh sizes its platform-experiment budget
+# Kept deliberately plain/single-node: scenarios/stages-and-settlement.sh sizes its platform-experiment budget
 # assuming exactly 1 accelerator per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
 # here would double the accelerator-hours cost per submission and starve the budget. The
 # distributed-training path (num_nodes, topology, acceptable_accelerator_types) is verified

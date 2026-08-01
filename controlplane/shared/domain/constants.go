@@ -3,11 +3,6 @@ package domain
 // MinRemainingHours is the minimum rescheduled duration after preemption (15 minutes).
 const MinRemainingHours = 0.25
 
-// Phase1ExploreFraction is the fraction of total budget consumed before phase-2 eviction
-// triggers. Agents' initial quotas are capped to this fraction so no single agent can
-// exhaust the explore window alone.
-const Phase1ExploreFraction = 0.40
-
 // ExperimentStatus represents the lifecycle state of an agent job.
 type ExperimentStatus string
 
@@ -26,7 +21,7 @@ const (
 	NotAdmittedCapacityUnavailable = "capacity_unavailable"
 	NotAdmittedOutranked           = "outranked"
 	NotAdmittedSummaryGate         = "summary_gate"
-	NotAdmittedPhase2Hold          = "phase2_hold"
+	NotAdmittedStageCut            = "stage_cut"
 	NotAdmittedWorkloadCreation    = "workload_creation_failed"
 )
 
@@ -46,14 +41,14 @@ type EvictionReason string
 
 const (
 	EvictionSilent           EvictionReason = "silent"
-	EvictionOverrun          EvictionReason = "overrun"
 	EvictionCrashLoop        EvictionReason = "crash_loop"
 	EvictionQuotaExhaustion  EvictionReason = "quota_exhaustion"
 	EvictionExperimentClosed EvictionReason = "experiment_closed"
 	EvictionAgentRemoved     EvictionReason = "agent_removed"
 	EvictionCancelled        EvictionReason = "cancelled"
-	EvictionPhase2Hold       EvictionReason = "phase2_hold"
-	EvictionMetricDecline    EvictionReason = "metric_decline"
+	// EvictionStageCut terminates an agent's jobs when it is cut at a stage boundary.
+	// Terminal for the rest of the platform experiment — see docs/stages.md.
+	EvictionStageCut EvictionReason = "stage_cut"
 	// EvictionStuckPending marks a job that was admitted (SUBMITTED/ADMITTED) but never
 	// reported RUNNING within StuckPendingTimeoutSeconds — e.g. unschedulable due to
 	// fragmentation or a bad image. See job_watcher.go.

@@ -164,8 +164,8 @@ export interface PlatformExperiment {
   starts_at?: string
   ends_at?: string
   status: PlatformExperimentStatus
-  phase: number                       // 1 or 2 (Domain 10)
-  phase2_triggered_at?: string        // ISO timestamp when phase 2 started
+  stages: Array<{ length_pct: number; evict_pct: number }>  // the elimination ladder
+  current_stage: number               // 1-based index into stages
   signup_count: number
   signed_up_agents?: string[]
   metrics?: MetricDefinition[]

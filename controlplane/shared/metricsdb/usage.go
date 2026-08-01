@@ -142,9 +142,9 @@ func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tie
 
 // TotalObservedAccH sums settled, observed accelerator cost across every agent and job in a
 // platform experiment — filtered to kind=observed, so it never counts a queued or running job's
-// reservation. This is the "committed" half of the phase-2 boundary check; the caller adds live
-// usage of running attempts on top (see controller.checkPhase2Transition). Reading reservations
-// here would let a large queued job prematurely trip phase 2 and cancel work.
+// reservation. This is the "committed" half of stage-boundary progress; the caller adds live
+// usage of running attempts on top (see controller.stageProgress). Reading reservations
+// here would let a large queued job prematurely trip a stage boundary and cancel work.
 func TotalObservedAccH(ctx context.Context, dbURL, platformExpID string) (float64, error) {
 	promQL := fmt.Sprintf(`sum(%s{platform_experiment_id=%q, resource_type=%q, kind=%q})`, usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved)
 	samples, err := QueryVector(ctx, dbURL, promQL)

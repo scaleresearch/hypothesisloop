@@ -187,36 +187,45 @@ ranked on the same declared metric. Roughly (not a rigid script — use your jud
       "good enough" is rarely final. Running out of obvious ideas is exactly when going back to
       the literature for a different technique earns its keep. Deciding you're genuinely done is
       allowed, but justify
-      it in your final summary. Stop for real when the platform experiment closes, you're held
-      (phase 2 below), or nothing credible is left to try.
+      it in your final summary. Stop for real when the platform experiment closes, you're cut at
+      a stage boundary (below), or nothing credible is left to try.
 
 Errors from the platform APIs are signal, not noise — read the full response body, don't just
 retry blindly or treat a 4xx as generic failure:
   - Every rejected submission includes a `reason` and a `message` telling you exactly what to fix
     (e.g. missing/unknown hypothesis_id, platform experiment not running yet, you haven't signed
-    up, you have unsummarized COMPLETED jobs blocking new submissions, you're rate-limited, you're
-    held under phase 2). Fix the actual thing named and retry — don't paraphrase the error away or
-    give up because a submission bounced once.
+    up, you have unsummarized COMPLETED jobs blocking new submissions, you're rate-limited, you
+    were cut at a stage boundary). Fix the actual thing named and retry — don't paraphrase the
+    error away or give up because a submission bounced once.
   - A `429 rate_limited` means slow down, not stop — wait and resubmit.
-  - A `422 agent_held` means the phase-2 hold below applies to you now; further submissions will
-    keep failing until the platform experiment ends. That's a real stop condition, not a bug.
+  - A `422 agent_held` means you were cut at a stage boundary (below). A cut is terminal:
+    further submissions keep failing until the platform experiment ends. That's a real stop
+    condition, not a bug.
 
 Rules, not suggestions:
   - Never fabricate or inflate a metric value. The platform does not run a server-side sanity
     check on what you report — that means the integrity of the whole result depends on you
     reporting honestly, not on being caught. A gamed number produces a meaningless experiment.
-  - Respect metric-decline eviction: a job with no improving metric for 30% of its own
-    estimated_duration_hours gets killed early. Don't set an unrealistically short
-    estimated_duration_hours to dodge this — it only shrinks your own grace window.
+  - Police your own runs. Nothing kills a job for converging badly or for exceeding its
+    estimated_duration_hours — that judgement is yours. Read its metrics (GET
+    /registry/experiments/{{id}}/metrics) and cancel a run that has clearly stopped improving
+    (POST scheduler /experiments/{{id}}/cancel). Every hour you let a doomed job run is an hour
+    of your own quota you cannot spend on a better one, and quota exhaustion is a hard stop.
   - Report metrics at a steady cadence while a job runs, not all at the end (silent jobs get
     evicted as presumed-stuck).
-  - Around ~40% of the platform experiment's budget consumed, it enters phase 2: agents ranked
-    below the cutoff on their best metric so far are held — running jobs evicted, further
-    submissions rejected with `422 agent_held` (enforced platform-side, not just informational).
-    There's no way to see your exact percentile in advance — the only real defense is genuinely
-    improving your metric before that point. Check GET
-    /platform-experiments/{platform_experiment_id}/phase2-status
-    if you want to confirm your own state directly rather than waiting to be rejected.
+  - The platform experiment runs as a ladder of stages, and a share of the surviving agents is
+    cut at each stage boundary. Progress along the ladder is whichever of budget consumed or time
+    elapsed runs out first, so boundaries arrive on their own even if nobody is spending. Being
+    cut is terminal: running jobs evicted, queued jobs rejected, further submissions rejected with
+    `422 agent_held` (enforced platform-side, not just informational). You keep read access to
+    hypotheses and findings.
+    You survive a boundary if you survive on at least one of the platform experiment's metrics,
+    judged on your *best* value on that metric so far — one good result is enough, and losing runs
+    don't count against you. Specialising hard on one metric is a viable strategy.
+    GET /platform-experiments/{platform_experiment_id}/stages shows the stage list, which stage is
+    running, how far along it is, and whether you are cut. It deliberately does not show anyone's
+    rank: there's no way to see how close to the line you are, so the only real defense is
+    genuinely improving your metric before the boundary.
 """
 
 

@@ -12,12 +12,12 @@ import {
   fetchPlatformExperimentQuotas,
   fetchExperimentsByPlatformExperiment,
   fetchDonations,
-  fetchPhase2Status,
+  fetchStages,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
   fetchHypotheses,
 } from '@/lib/api'
-import type { Phase2Status } from '@/lib/api'
+import type { StagesStatus } from '@/lib/api'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries, MetricDefinition, Hypothesis } from '@/types'
 import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -177,14 +177,15 @@ function MetricSelector({
 }
 
 function CompetingAgentsChart({
-  series: allSeries, metricName, direction, selectedAgents, colorFor, phase2TriggeredAt,
+  series: allSeries, metricName, direction, selectedAgents, colorFor, boundaries,
 }: {
   series: AgentMetricSeries[] | undefined
   metricName: string
   direction: 'maximize' | 'minimize'
   selectedAgents: Set<string>
   colorFor: (agentId: string) => string
-  phase2TriggeredAt?: string
+  /** Every stage boundary already crossed, as {stage_index, advanced_at}. */
+  boundaries?: StagesStatus['advances']
 }) {
   if (allSeries === undefined) return <Loading />
   const series = allSeries.filter(
@@ -244,14 +245,15 @@ function CompetingAgentsChart({
         <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={CHART_TICK} />
         <YAxis tick={CHART_TICK} />
         <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={CHART_TOOLTIP_STYLE} />
-        {phase2TriggeredAt && (
+        {(boundaries ?? []).map(b => (
           <ReferenceLine
-            x={new Date(phase2TriggeredAt).getTime()}
+            key={b.stage_index}
+            x={new Date(b.advanced_at).getTime()}
             stroke={semantic.warning}
             strokeDasharray="4 4"
-            label={{ value: 'Phase 2', position: 'insideTopLeft', fill: semantic.warning, fontSize: 10 }}
+            label={{ value: `End of stage ${b.stage_index}`, position: 'insideTopLeft', fill: semantic.warning, fontSize: 10 }}
           />
-        )}
+        ))}
         {/* One <Line> per unique agent, plotting its running-best trace computed above. The only
             nulls left in a row are the leading ones before an agent has reported its first point
             at all, so connectNulls is safe here (and desired, so the line doesn't fragment on
@@ -433,9 +435,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  const { data: phase2Status } = useSWR<Phase2Status>(
-    ['pe-phase2', id],
-    () => fetchPhase2Status(id),
+  const { data: stagesStatus } = useSWR<StagesStatus>(
+    ['pe-stages', id],
+    () => fetchStages(id),
     { refreshInterval: 10_000 },
   )
 
@@ -589,7 +591,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       direction={m.direction}
                       selectedAgents={activeAgentIds}
                       colorFor={colorFor}
-                      phase2TriggeredAt={phase2Status?.phase2_triggered_at}
+                      boundaries={stagesStatus?.advances}
                     />
                   </div>
                 ))}
@@ -599,53 +601,72 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         </Pod>
       )}
 
-      {/* Phase Banner */}
-      {phase2Status && (
-        <Pod style={{ borderLeft: `3px solid ${phase2Status.phase === 2 ? semantic.warning : 'var(--accent)'}` }}>
+      {/* Stage ladder — boundaries are published, per-agent rank deliberately is not
+          (see docs/stages.md). */}
+      {stagesStatus && stagesStatus.stages.length > 0 && (
+        <Pod style={{ borderLeft: `3px solid ${stagesStatus.cut_agents.length > 0 ? semantic.warning : 'var(--accent)'}` }}>
           <PodContent>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div className="mono" style={{
                 fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
-                background: phase2Status.phase === 2 ? 'rgba(251, 191, 36, 0.14)' : 'rgba(124, 108, 240, 0.16)',
-                color: phase2Status.phase === 2 ? semantic.warning : semantic.accent,
+                background: 'rgba(124, 108, 240, 0.16)', color: semantic.accent,
               }}>
-                {phase2Status.phase === 2 ? 'PHASE 2 — Signal-Gated' : 'PHASE 1 — Open Competition'}
+                STAGE {stagesStatus.current_stage} OF {stagesStatus.stages.length}
               </div>
-              {phase2Status.phase === 1 && (
-                <span className="text-dim">
-                  Phase 2 triggers at {Math.round(phase2Status.boundary_fraction * 100)}% budget consumed
-                </span>
-              )}
-              {phase2Status.phase === 2 && phase2Status.phase2_triggered_at && (
-                <span className="text-dim">
-                  Triggered {new Date(phase2Status.phase2_triggered_at).toLocaleString()}
-                </span>
-              )}
+              <span className="text-dim">
+                {Math.round(stagesStatus.progress * 100)}% through the experiment
+                {stagesStatus.current_stage < stagesStatus.stages.length && (
+                  <> — next boundary at {Math.round(stagesStatus.next_boundary_progress * 100)}%,
+                    cutting {stagesStatus.stages[stagesStatus.current_stage - 1].evict_pct}% of survivors</>
+                )}
+                {stagesStatus.current_stage >= stagesStatus.stages.length && <> — final stage, no cut remaining</>}
+              </span>
             </div>
-            {phase2Status.phase === 2 && (
-              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <div className="uppercase-label" style={{ color: semantic.success, marginBottom: 6 }}>
-                    Active Agents ({phase2Status.active_agents.length})
+
+            {/* The ladder itself: one segment per stage, sized by its share of the experiment. */}
+            <div style={{ display: 'flex', gap: 3, marginTop: 12 }}>
+              {stagesStatus.stages.map((stage, i) => {
+                const stageNo = i + 1
+                const done = stageNo < stagesStatus.current_stage
+                const current = stageNo === stagesStatus.current_stage
+                return (
+                  <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }}>
+                    <div style={{
+                      height: 8, borderRadius: 2,
+                      background: done ? semantic.accent : current ? 'rgba(124,108,240,0.45)' : 'var(--border)',
+                    }} />
+                    <div className="mono text-dim" style={{ fontSize: 10, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}
+                    </div>
                   </div>
-                  {phase2Status.active_agents.length === 0
-                    ? <span className="text-dim">none</span>
-                    : phase2Status.active_agents.map(a => (
-                      <div key={a} className="mono" style={{ fontSize: 12, padding: '2px 8px', margin: '2px 4px 2px 0', background: 'rgba(74,222,128,0.12)', color: semantic.success, borderRadius: 999, display: 'inline-block' }}>{a}</div>
-                    ))}
+                )
+              })}
+            </div>
+
+            <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div className="uppercase-label" style={{ color: semantic.success, marginBottom: 6 }}>
+                  Active Agents ({stagesStatus.active_agents.length})
                 </div>
-                <div>
-                  <div className="uppercase-label" style={{ color: semantic.danger, marginBottom: 6 }}>
-                    Held Agents ({phase2Status.held_agents.length})
-                  </div>
-                  {phase2Status.held_agents.length === 0
-                    ? <span className="text-dim">none</span>
-                    : phase2Status.held_agents.map(a => (
-                      <div key={a} className="mono" style={{ fontSize: 12, padding: '2px 8px', margin: '2px 4px 2px 0', background: 'rgba(242,89,107,0.12)', color: semantic.danger, borderRadius: 999, display: 'inline-block' }}>{a}</div>
-                    ))}
-                </div>
+                {stagesStatus.active_agents.length === 0
+                  ? <span className="text-dim">none</span>
+                  : stagesStatus.active_agents.map(a => (
+                    <div key={a} className="mono" style={{ fontSize: 12, padding: '2px 8px', margin: '2px 4px 2px 0', background: 'rgba(74,222,128,0.12)', color: semantic.success, borderRadius: 999, display: 'inline-block' }}>{a}</div>
+                  ))}
               </div>
-            )}
+              <div>
+                <div className="uppercase-label" style={{ color: semantic.danger, marginBottom: 6 }}>
+                  Cut Agents ({stagesStatus.cut_agents.length})
+                </div>
+                {stagesStatus.cut_agents.length === 0
+                  ? <span className="text-dim">none</span>
+                  : stagesStatus.cut_agents.map(c => (
+                    <div key={c.agent_id} className="mono" style={{ fontSize: 12, padding: '2px 8px', margin: '2px 4px 2px 0', background: 'rgba(242,89,107,0.12)', color: semantic.danger, borderRadius: 999, display: 'inline-block' }}>
+                      {c.agent_id} <span style={{ opacity: 0.7 }}>· stage {c.stage_index}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
           </PodContent>
         </Pod>
       )}
@@ -698,8 +719,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   const quota = (quotas ?? []).find(q => q.agent_id === entry.agentId)
                   const usedAccH = quota ? quota.used_guaranteed_acch + quota.used_burst_acch : 0
                   const totalAccH = quota ? quota.guaranteed_accelerator_hours + quota.burst_accelerator_hours : 0
-                  const isHeld = phase2Status?.phase === 2 && phase2Status.held_agents.includes(entry.agentId)
-                  const isActive = phase2Status?.phase === 2 && phase2Status.active_agents.includes(entry.agentId)
+                  const isCut = (stagesStatus?.cut_agents ?? []).some(c => c.agent_id === entry.agentId)
+                  const isActive = !isCut && (stagesStatus?.cut_agents.length ?? 0) > 0
+                    && (stagesStatus?.active_agents ?? []).includes(entry.agentId)
                   const isExpanded = expandedAgentId === entry.agentId
                   const colCount = 5 + Math.max(metrics.length, 1)
                   return (
@@ -707,8 +729,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <tr
                         onClick={() => setExpandedAgentId(isExpanded ? null : entry.agentId)}
                         style={{
-                          background: isHeld ? 'rgba(251,191,36,0.06)' : entry.isWinner ? 'rgba(124,108,240,0.05)' : undefined,
-                          opacity: isHeld ? 0.65 : 1, cursor: 'pointer',
+                          background: isCut ? 'rgba(251,191,36,0.06)' : entry.isWinner ? 'rgba(124,108,240,0.05)' : undefined,
+                          opacity: isCut ? 0.65 : 1, cursor: 'pointer',
                         }}
                       >
                         <td className="mono" style={{ fontWeight: 600 }}>#{i + 1}</td>
@@ -716,7 +738,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                           <span className="text-muted" style={{ display: 'inline-block', width: 12 }}>{isExpanded ? '▾' : '▸'}</span>
                           {entry.agentId}
                           {entry.isWinner && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.accent, fontWeight: 700 }}>WINNER</span>}
-                          {isHeld && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.danger, fontWeight: 400 }}>HELD</span>}
+                          {isCut && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.danger, fontWeight: 400 }}>CUT</span>}
                           {isActive && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.success, fontWeight: 400 }}>ACTIVE</span>}
                         </td>
                         {metrics.length > 0 ? metrics.map(m => {

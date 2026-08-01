@@ -54,14 +54,14 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
-	held, err := s.store.IsAgentHeld(ctx, exp.PlatformExperimentID, exp.AgentID)
+	cut, err := s.store.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID)
 	if err != nil {
-		return fmt.Errorf("scheduler: check phase2 held: %w", err)
+		return fmt.Errorf("scheduler: check stage cut: %w", err)
 	}
-	if held {
+	if cut {
 		return &AdmissionError{
 			Reason:  "agent_held",
-			Message: "agent is held under phase-2 budget rules (ranked below the cutoff) and cannot submit new jobs for the rest of this platform experiment — check GET /platform-experiments/{id}/phase2-status",
+			Message: "agent was cut at a stage boundary and cannot submit new jobs for the rest of this platform experiment — check GET /platform-experiments/{id}/stages",
 		}
 	}
 

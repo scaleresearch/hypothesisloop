@@ -27,9 +27,9 @@ type Store interface {
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
-	// IsAgentHeld reports whether the agent is under a phase-2 budget hold (see
-	// controller/phase2.go's TriggerPhase2) — held agents may not submit new jobs.
-	IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// IsAgentCut reports whether the agent was cut at a stage boundary (see
+	// controller/stages.go) — a cut is terminal, and cut agents may not submit new jobs.
+	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment
 	// without a summary in the given platform experiment.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)

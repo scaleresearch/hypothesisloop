@@ -1,11 +1,14 @@
 - robust, simple, easy to refactor and read code, no fallbacks - one path or error, fail fast
-- is there a simpler structural solution with the same guarantees and less retained machinery - if so, use it
-- metrics only in metrics store, no duplicates between relational db and metrics storage. when metrics are needed - metrics storage is assumed to be able to reply in real-time
-- no caches/in-ram states, we trust that our storage is performant and care about simplicity and do not introduce duplicates, eventual consistency besides clusters - scheduler
-- cluster software of software fetches desired state and reconciliates, only one way commands; cluster software sends metrics and other important information about jobs to control plane; control plane makes decisions
-- control plane can accept connections & requests from multiple cluster and can dispatch jobs also to multiple clusters
-- metrics and overal design shall be very reactive as we're reacting to job state changes and re-scheduling fast too, code and loop shall be reactive, close to real-time
-- we aim to keep in postgresql desired state and cluster software pulls that desired state and tries to make it happen, metrics show actual state with a small delay and postgresql shows desired one
-- we shall keep in mind that connection might break, nodes might break, cluster might become unavailable for a while, metrics might be delayed, clusters scale up and down - that should be considered
-- control plane and cluster must have at most 1 config file each; we should be able to plug-in tomorrow any cluster i.e of k8s with nvidia/tenstorrent/amd accelerators and flow should just continue to work
-- auth & security at the moment are not a priority
+- is there a simpler structural solution with the same guarantees and less retained machinery? if so, use it
+- metrics only in the metrics store, no duplicates between the relational db and metrics storage. when metrics are needed, the metrics store is assumed to answer in real time
+- no caches / in-ram state. we trust that our storage is performant and we care about simplicity, so we do not introduce duplicates or eventual consistency, except between clusters and the scheduler
+- cluster software fetches desired state and reconciles it; commands go one way only. cluster software sends metrics and other important information about jobs to the control plane; the control plane makes the decisions
+- the control plane decides, and every decision is written as desired state. no push, no "kill" command, no second path to the same effect
+- never bake a decision (a deadline, a threshold, a policy) into the desired state we hand a cluster - that creates a second decision-maker we cannot revoke
+- the control plane can accept connections and requests from multiple clusters, and can dispatch jobs to multiple clusters
+- metrics and the overall design shall be very reactive, as we react to job state changes and reschedule fast. the code and its loops shall be reactive, close to real time
+- we aim to keep the desired state in postgresql; cluster software pulls that desired state and tries to make it happen. metrics show the actual state with a small delay, postgresql shows the desired one
+- we shall keep in mind that connections might break, nodes might break, a cluster might become unavailable for a while, metrics might be delayed, and clusters scale up and down - all of that should be considered
+- the control plane and the cluster must have at most 1 config file each. we should be able to plug in any cluster tomorrow, e.g. k8s with nvidia / tenstorrent / amd accelerators, and the flow should just continue to work
+- auth and security are not a priority at the moment
+- do not add comments at the top of files unless they capture a hard-learned lesson. the code should be self-explanatory

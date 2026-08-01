@@ -66,20 +66,11 @@ type Controller struct {
 	reconcileInterval time.Duration
 	logger            *zap.Logger
 
-	// Control-plane-side GC sweep (item #8): low-frequency, alert-only pass flagging orphaned
-	// desired-state entries. 0 disables it.
-	gcSweepInterval            time.Duration
-	staleDesiredStateThreshold time.Duration
+	// Stage ladder support (docs/stages.md). Optional — boundaries are skipped if nil.
+	stagesStore  StagesStore
+	metricsDBURL string
 
-	// Phase 2 support (Domain 10). Optional — phase transitions are skipped if nil.
-	phase2Store               Phase2Store
-	metricsDBURL              string
-	phase2BoundaryFrac        float64
-	phase2AdmissionPercentile float64
-
-	metricDeclineFraction float64
 	silenceMultiplier     float64
-	overrunMultiplier     float64
 	defaultReportInterval time.Duration
 	minSilenceWindow      time.Duration
 }
@@ -118,20 +109,8 @@ func (c *Controller) settleAndMark(ctx context.Context, exp *domain.Experiment) 
 	}
 }
 
-// WithMetricDeclineFraction sets the fraction of estimated_duration_hours after which a
-// continuously declining primary metric triggers eviction. Default 0.3 (30%).
-func (c *Controller) WithMetricDeclineFraction(f float64) *Controller {
-	c.metricDeclineFraction = f
-	return c
-}
-
 func (c *Controller) WithSilenceMultiplier(m float64) *Controller {
 	c.silenceMultiplier = m
-	return c
-}
-
-func (c *Controller) WithOverrunMultiplier(m float64) *Controller {
-	c.overrunMultiplier = m
 	return c
 }
 
@@ -153,27 +132,11 @@ func (c *Controller) WithSchedulerLoop(l SchedulerLoop) *Controller {
 	return c
 }
 
-// WithPhase2Store enables Domain 10 two-phase experiment execution. The metricsDBURL
-// is used to query metric percentiles at the phase boundary.
-func (c *Controller) WithPhase2Store(s Phase2Store, metricsDBURL string) *Controller {
-	c.phase2Store = s
+// WithStagesStore enables the stage ladder. The metricsDBURL is used to rank agents at each
+// stage boundary. The ladder itself is per-platform-experiment config, not a controller knob.
+func (c *Controller) WithStagesStore(s StagesStore, metricsDBURL string) *Controller {
+	c.stagesStore = s
 	c.metricsDBURL = metricsDBURL
-	return c
-}
-
-// WithPhase2Boundary sets the budget fraction at which phase 2 triggers.
-// Defaults to the package-level constant if not called.
-func (c *Controller) WithPhase2Boundary(frac float64) *Controller {
-	c.phase2BoundaryFrac = frac
-	return c
-}
-
-// WithPhase2AdmissionPercentile sets the percentile used to separate passing agents
-// from held agents at the phase-2 boundary. For a maximize metric the top fraction
-// above this percentile passes; for a minimize metric the bottom fraction below
-// (1 - percentile) passes. Defaults to 0.75 if not called.
-func (c *Controller) WithPhase2AdmissionPercentile(p float64) *Controller {
-	c.phase2AdmissionPercentile = p
 	return c
 }
 
@@ -183,29 +146,19 @@ func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 	return c
 }
 
-// WithGCSweep enables the control-plane-side GC sweep at the given interval, flagging
-// SUBMITTED/ADMITTED/RUNNING experiments whose most recent cluster job report is older than
-// staleAfter. Alert-only — see sweepStaleDesiredState.
-func (c *Controller) WithGCSweep(interval, staleAfter time.Duration) *Controller {
-	c.gcSweepInterval = interval
-	c.staleDesiredStateThreshold = staleAfter
-	return c
-}
-
 // Start launches the reconcile loop in a goroutine; it stops when ctx is
 // cancelled and returns the first non-context error (if any).
 func (c *Controller) Start(ctx context.Context) error {
-	if c.store == nil || c.quota == nil || c.settler == nil || c.phase2Store == nil || c.logger == nil {
-		return fmt.Errorf("controller: store, quota, settler, phase2 store, and logger are required")
+	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.logger == nil {
+		return fmt.Errorf("controller: store, quota, settler, stages store, and logger are required")
 	}
 	if c.metricsDBURL == "" {
 		return fmt.Errorf("controller: metrics DB URL is required")
 	}
-	if c.reconcileInterval <= 0 || c.gcSweepInterval <= 0 || c.staleDesiredStateThreshold <= 0 ||
-		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 || c.metricDeclineFraction <= 0 ||
-		c.silenceMultiplier <= 0 || c.overrunMultiplier <= 0 || c.phase2BoundaryFrac <= 0 ||
-		c.phase2BoundaryFrac >= 1 || c.phase2AdmissionPercentile <= 0 || c.phase2AdmissionPercentile >= 1 {
-		return fmt.Errorf("controller: all timing, multiplier, and phase fractions must be explicitly valid")
+	if c.reconcileInterval <= 0 ||
+		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 ||
+		c.silenceMultiplier <= 0 {
+		return fmt.Errorf("controller: all timing and multiplier values must be explicitly valid")
 	}
 	go func() {
 		ticker := time.NewTicker(c.reconcileInterval)
@@ -221,23 +174,6 @@ func (c *Controller) Start(ctx context.Context) error {
 			}
 		}
 	}()
-
-	if c.gcSweepInterval > 0 {
-		go func() {
-			ticker := time.NewTicker(c.gcSweepInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if err := c.sweepStaleDesiredState(ctx); err != nil {
-						c.logger.Error("stale desired-state sweep error", zap.Error(err))
-					}
-				}
-			}
-		}()
-	}
 
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Load reads the YAML file at path and returns a validated Config.
@@ -58,20 +60,19 @@ func (c *Config) build() error {
 	if c.CPUCoreHourRate <= 0 || c.RAMGBHourRate <= 0 || c.StorageGBHourRate <= 0 {
 		return fmt.Errorf("all resource-hour rates must be positive")
 	}
-	if c.Quota.BurstFraction <= 0 || c.Quota.MetricDeclineFraction <= 0 {
-		return fmt.Errorf("quota burst_fraction and metric_decline_fraction must be positive")
+	if c.Quota.BurstFraction <= 0 {
+		return fmt.Errorf("quota burst_fraction must be positive")
 	}
 	s := c.Scheduler
 	if s.LoopHeartbeatSeconds <= 0 || s.JobPollIntervalSeconds <= 0 ||
 		s.StuckPendingTimeoutSeconds <= 0 || s.ClusterUnreachableAfterSeconds <= 0 || s.GuaranteedFairnessWindowSeconds <= 0 ||
-		s.StaleDesiredStateSweepIntervalSeconds <= 0 || s.StaleDesiredStateThresholdSeconds <= 0 || s.ReconcileIntervalSeconds <= 0 ||
+		s.ReconcileIntervalSeconds <= 0 ||
 		s.DefaultTerminationGracePeriodSeconds <= 0 || s.MaxTerminationGracePeriodSeconds <= 0 || s.DefaultReportIntervalSeconds <= 0 ||
-		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 || s.OverrunMultiplier <= 0 || s.MetricWindowSize <= 0 ||
-		s.JobDeadlineMultiplier <= 0 || s.MinJobDeadlineSeconds <= 0 {
+		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
 	}
-	if c.Phase2.BoundaryFraction <= 0 || c.Phase2.BoundaryFraction >= 1 || c.Phase2.AdmissionPercentile <= 0 || c.Phase2.AdmissionPercentile >= 1 {
-		return fmt.Errorf("phase2 fractions must be strictly between 0 and 1")
+	if err := domain.ValidateStages(c.Stages.Default); err != nil {
+		return fmt.Errorf("stages.default: %w", err)
 	}
 	services := c.Services
 	if services.QuotaPort <= 0 || services.SchedulerPort <= 0 || services.RegistryPort <= 0 || services.MetricControllerPort <= 0 || services.MetricsDBURL == "" {

@@ -41,7 +41,7 @@ type LoopStore interface {
 	// HasUnsummarizedCompleted enforces the summary gate during admission so batch-submitted
 	// jobs cannot bypass it.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
-	IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error)
+	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without

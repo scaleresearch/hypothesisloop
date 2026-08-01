@@ -21,22 +21,32 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if reportInterval <= 0 {
 		reportInterval = 30
 	}
+	stages := req.Stages
+	if len(stages) == 0 {
+		stages = s.cfg.DefaultStages
+	}
+	// Fixed at creation, so it is rejected here rather than defended against downstream.
+	if err := domain.ValidateStages(stages); err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+	}
 	pe := &domain.PlatformExperiment{
-		ID:                    "pe-" + uuid.New().String()[:8],
-		Name:                  req.Name,
-		Description:           req.Description,
-		BudgetAcceleratorHours:         req.BudgetAcceleratorHours,
-		BudgetCPUCoreHours:    req.BudgetCPUCoreHours,
-		BudgetRAMGBHours:      req.BudgetRAMGBHours,
-		BudgetStorageGBHours:  req.BudgetStorageGBHours,
-		MaxAgents:             req.MaxAgents,
-		Metrics:               metrics,
-		ReportIntervalSeconds: reportInterval,
-		StartsAt:              req.StartsAt,
-		EndsAt:                req.EndsAt,
-		Status:                domain.PlatformExpOpen,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		ID:                     "pe-" + uuid.New().String()[:8],
+		Name:                   req.Name,
+		Description:            req.Description,
+		BudgetAcceleratorHours: req.BudgetAcceleratorHours,
+		BudgetCPUCoreHours:     req.BudgetCPUCoreHours,
+		BudgetRAMGBHours:       req.BudgetRAMGBHours,
+		BudgetStorageGBHours:   req.BudgetStorageGBHours,
+		MaxAgents:              req.MaxAgents,
+		Metrics:                metrics,
+		ReportIntervalSeconds:  reportInterval,
+		StartsAt:               req.StartsAt,
+		EndsAt:                 req.EndsAt,
+		Status:                 domain.PlatformExpOpen,
+		Stages:                 stages,
+		CurrentStage:           1,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}
 	if pe.MaxAgents <= 0 {
 		pe.MaxAgents = 100
@@ -172,15 +182,13 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	quotas := make([]*domain.AgentQuota, 0, len(resolved))
 	now := time.Now().UTC()
 
-	// Cap initial allocation to the explore window so no agent can exhaust the
-	// full budget before phase-2 eviction kicks in. Applied uniformly to every resource
-	// dimension the platform experiment tracks — Accelerator is always populated; CPU/RAM/storage
-	// budgets of 0 correctly allocate 0 (AllocateQuota(0, ...) returns 0,0), which is exactly
-	// "not tracked."
-	exploreFrac := s.cfg.Phase1ExploreFraction
-	if exploreFrac <= 0 {
-		exploreFrac = domain.Phase1ExploreFraction
-	}
+	// Only the first stage's share of the budget is released now; each later stage releases its
+	// own share at the boundary it starts (see controller.applyCut). This is what stops one agent
+	// exhausting the whole budget before the ladder has cut anyone. Applied uniformly to every
+	// resource dimension the platform experiment tracks — Accelerator is always populated;
+	// CPU/RAM/storage budgets of 0 correctly allocate 0 (AllocateQuota(0, ...) returns 0,0),
+	// which is exactly "not tracked."
+	exploreFrac := pe.Stages[0].LengthPct / 100.0
 
 	for _, ab := range resolved {
 		acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
@@ -197,18 +205,18 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 		)
 
 		aq := &domain.AgentQuota{
-			ID:                       uuid.New().String(),
-			AgentID:                  ab.id,
-			PlatformExperimentID:     id,
-			GuaranteedAcceleratorHours:        acceleratorGuaranteed,
-			BurstAcceleratorHours:             acceleratorBurst,
-			GuaranteedCPUCoreHours:   cpuGuaranteed,
-			BurstCPUCoreHours:        cpuBurst,
-			GuaranteedRAMGBHours:     ramGuaranteed,
-			BurstRAMGBHours:          ramBurst,
-			GuaranteedStorageGBHours: storageGuaranteed,
-			BurstStorageGBHours:      storageBurst,
-			CreatedAt:                now,
+			ID:                         uuid.New().String(),
+			AgentID:                    ab.id,
+			PlatformExperimentID:       id,
+			GuaranteedAcceleratorHours: acceleratorGuaranteed,
+			BurstAcceleratorHours:      acceleratorBurst,
+			GuaranteedCPUCoreHours:     cpuGuaranteed,
+			BurstCPUCoreHours:          cpuBurst,
+			GuaranteedRAMGBHours:       ramGuaranteed,
+			BurstRAMGBHours:            ramBurst,
+			GuaranteedStorageGBHours:   storageGuaranteed,
+			BurstStorageGBHours:        storageBurst,
+			CreatedAt:                  now,
 		}
 		if err := s.store.UpsertAgentQuota(ctx, aq); err != nil {
 			return nil, fmt.Errorf("platform_experiments.Start: upsert quota for %s: %w", ab.id, err)
@@ -273,10 +281,10 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			// auto-closed (ends_at-expired) platform experiment — the only realistic path for a
 			// real deadline-bound experiment. RecordTop3/HasTop3History (the quota bonus new
 			// experiments give agents with a prior top-3) is effectively dead code as a result.
-			// Fix: compute topResults here from the same per-agent-best-metric ranking phase-2
-			// admission already does (metricsdb.QueryAgentValues with a max_over_time/
+			// Fix: compute topResults here from the same per-agent-best-metric ranking a stage
+			// boundary already does (metricsdb.QueryAgentValues with a max_over_time/
 			// min_over_time PromQL over experiment_metric_value, see
-			// controller.applyMetricAdmission), keyed off pe.Metrics[0] as the primary metric,
+			// controller.cutOnMetric), keyed off pe.Metrics[0] as the primary metric,
 			// sorted best-first, then pass the top 3 into Close. Deliberately not done here —
 			// see agent/ session notes: no leaderboard/reputation use case needs it yet.
 			if err := s.Close(ctx, pe.ID, nil); err != nil {

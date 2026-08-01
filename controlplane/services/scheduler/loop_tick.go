@@ -75,12 +75,12 @@ func (l *Loop) tick(ctx context.Context) error {
 			filtered = append(filtered, exp)
 			continue
 		}
-		held, err := l.store.IsAgentHeld(ctx, exp.PlatformExperimentID, exp.AgentID)
+		cut, err := l.store.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID)
 		if err != nil {
-			return fmt.Errorf("phase2 hold for %s: %w", exp.ID, err)
+			return fmt.Errorf("stage cut for %s: %w", exp.ID, err)
 		}
-		if held {
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedPhase2Hold); err != nil {
+		if cut {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedStageCut); err != nil {
 				return err
 			}
 			continue

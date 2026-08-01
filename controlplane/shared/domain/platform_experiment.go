@@ -43,10 +43,12 @@ type PlatformExperiment struct {
 	StartsAt              time.Time                `json:"starts_at"`
 	EndsAt                time.Time                `json:"ends_at"`
 	Status                PlatformExperimentStatus `json:"status"`
-	Phase                 int                      `json:"phase"` // 1 or 2
-	Phase2TriggeredAt     *time.Time               `json:"phase2_triggered_at,omitempty"`
-	SignedUpAgents        []string                 `json:"signed_up_agents,omitempty"`
-	SignupCount           int                      `json:"signup_count"`
-	CreatedAt             time.Time                `json:"created_at"`
-	UpdatedAt             time.Time                `json:"updated_at"`
+	// Stages is the elimination ladder, fixed at creation. See docs/stages.md.
+	Stages []Stage `json:"stages"`
+	// CurrentStage is the 1-based index into Stages of the stage currently running.
+	CurrentStage   int       `json:"current_stage"`
+	SignedUpAgents []string  `json:"signed_up_agents,omitempty"`
+	SignupCount    int       `json:"signup_count"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }

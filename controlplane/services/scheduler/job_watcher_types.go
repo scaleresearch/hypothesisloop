@@ -7,7 +7,7 @@ package scheduler
 //
 // Responsibility split:
 //   - JobWatcher: backend workload status → DB status sync and quota accounting on completion.
-//   - Controller (services/controller): policy-driven eviction (silence, overrun,
+//   - Controller (services/controller): policy-driven eviction (silence,
 //     quota exhaustion, metric decline). Terminates jobs that are running but should stop.
 //
 // JobWatcher is only concerned with jobs that finish naturally or are already gone;

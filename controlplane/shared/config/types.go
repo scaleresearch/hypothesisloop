@@ -1,6 +1,8 @@
 // Package config loads hypothesisloop.yaml and exposes a typed Config used across all services.
 package config
 
+import "github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+
 // AcceleratorTypeConfig defines platform-wide accelerator identity and exchange rate.
 type AcceleratorTypeConfig struct {
 	Name     string  `yaml:"name"`
@@ -24,10 +26,6 @@ type QuotaConfig struct {
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour
 	// within a single platform experiment. 0 means unlimited.
 	MaxSubmissionsPerHour int `yaml:"max_submissions_per_hour"`
-	// MetricDeclineFraction triggers metric-decline eviction when a job's primary metric
-	// has been monotonically declining for this fraction of its estimated_duration_hours.
-	// E.g. 0.3 = evict after metrics decline for 30% of the job's estimated time.
-	MetricDeclineFraction float64 `yaml:"metric_decline_fraction"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap how much of
 	// each resource dimension a single job may request (per node × num_nodes total), on top
@@ -53,18 +51,10 @@ type SchedulerConfig struct {
 	// window narrower than realistic node-death/reschedule recovery time — without this, a
 	// pod that's mid-reschedule (not hung, just briefly quiet while k8s recreates it elsewhere)
 	// gets permanently EVICTED before it ever gets a chance to resume reporting.
-	MinSilenceWindowSeconds int     `yaml:"min_silence_window_seconds"`
-	OverrunMultiplier       float64 `yaml:"overrun_multiplier"`
-	MetricWindowSize        int     `yaml:"metric_window_size"`
-	// JobDeadlineMultiplier sets the backend's hard deadline ceiling as a multiple of
-	// estimated_duration_hours. Acts as the backstop for the overrun guard.
-	JobDeadlineMultiplier float64 `yaml:"job_deadline_multiplier"`
-	// MinJobDeadlineSeconds is the floor for ActiveDeadlineSeconds so very short jobs still
-	// get a sane minimum wall-clock budget.
-	MinJobDeadlineSeconds int `yaml:"min_job_deadline_seconds"`
+	MinSilenceWindowSeconds int `yaml:"min_silence_window_seconds"`
 	// StuckPendingTimeoutSeconds bounds how long a job may stay SUBMITTED/ADMITTED without ever
 	// reporting RUNNING before job_watcher evicts it (reason stuck_pending) and fully refunds
-	// its reservation, instead of waiting out the much longer native ActiveDeadlineSeconds.
+	// its reservation.
 	StuckPendingTimeoutSeconds int `yaml:"stuck_pending_timeout_seconds"`
 	// ClusterUnreachableAfterSeconds bounds how stale a cluster-agent's heartbeat may be before
 	// the cluster is treated as Unreachable: its live-reported capacity (see GetLiveCPUCapacity)
@@ -78,30 +68,17 @@ type SchedulerConfig struct {
 	// steady-submitting agent would otherwise get from pure exact-FIFO. Same shape as every
 	// other *_seconds field here: 0/unset falls back to the default below, not "disabled".
 	GuaranteedFairnessWindowSeconds int `yaml:"guaranteed_fairness_window_seconds"`
-	// StaleDesiredStateSweepIntervalSeconds is how often the control-plane-side GC sweep runs:
-	// flags (alert-only, never auto-corrects) SUBMITTED/ADMITTED/RUNNING experiments with no
-	// recent actual-state phase metric — an orphaned desired-state entry that survived an
-	// extended cluster-agent outage combined with a control-plane bug/crash.
-	StaleDesiredStateSweepIntervalSeconds int `yaml:"stale_desired_state_sweep_interval_seconds"`
-	// StaleDesiredStateThresholdSeconds is how old a missing/stale report must be before an
-	// experiment is flagged — a large multiple of the ~3s status-report cadence so transient
-	// gaps never false-positive.
-	StaleDesiredStateThresholdSeconds int `yaml:"stale_desired_state_threshold_seconds"`
 	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
 	DefaultTerminationGracePeriodSeconds int `yaml:"default_termination_grace_period_seconds"`
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
 	MaxTerminationGracePeriodSeconds int `yaml:"max_termination_grace_period_seconds"`
 }
 
-// Phase2Config holds phase-2 transition constants.
-type Phase2Config struct {
-	// BoundaryFraction is the fraction of total budget consumed before phase 2 triggers.
-	BoundaryFraction float64 `yaml:"boundary_fraction"`
-	// AdmissionPercentile is the metric percentile cut used to separate passing agents from
-	// held agents at the phase-2 boundary. For maximize metrics, agents whose best value is
-	// above this percentile pass. For minimize metrics, agents whose best value is below
-	// (1 - AdmissionPercentile) pass. Default 0.75 (top quartile advances).
-	AdmissionPercentile float64 `yaml:"admission_percentile"`
+// StagesConfig holds the platform-wide default elimination ladder.
+type StagesConfig struct {
+	// Default is the ladder applied to a platform experiment created without its own.
+	// Validated by domain.ValidateStages at load. See docs/stages.md.
+	Default []domain.Stage `yaml:"default"`
 }
 
 type ServicesConfig struct {
@@ -114,11 +91,11 @@ type ServicesConfig struct {
 
 // Config is the top-level parsed config from hypothesisloop.yaml.
 type Config struct {
-	AcceleratorTypes      []AcceleratorTypeConfig `yaml:"accelerator_types"`
-	Quota                 QuotaConfig             `yaml:"quota"`
-	Scheduler             SchedulerConfig         `yaml:"scheduler"`
-	Phase2                Phase2Config            `yaml:"phase2"`
-	Services              ServicesConfig          `yaml:"services"`
+	AcceleratorTypes []AcceleratorTypeConfig `yaml:"accelerator_types"`
+	Quota            QuotaConfig             `yaml:"quota"`
+	Scheduler        SchedulerConfig         `yaml:"scheduler"`
+	Stages           StagesConfig            `yaml:"stages"`
+	Services         ServicesConfig          `yaml:"services"`
 	// CPUCoreHourRate/RAMGBHourRate/StorageGBHourRate are the flat per-unit quota rates for
 	// the non-Accelerator resource dimensions (default 1.0 — see domain.SetCPUCoreHourRate etc).
 	CPUCoreHourRate   float64 `yaml:"cpu_core_hour_rate"`

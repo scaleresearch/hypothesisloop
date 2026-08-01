@@ -70,9 +70,8 @@ func main() {
 	domain.SetStorageGBHourRate(pcfg.StorageGBHourRate)
 
 	quotaCfg := domain.QuotaConfig{
-		Top3BonusFraction:     pcfg.Quota.Top3BonusFraction,
-		BurstFraction:         pcfg.Quota.BurstFraction,
-		MetricDeclineFraction: pcfg.Quota.MetricDeclineFraction,
+		Top3BonusFraction: pcfg.Quota.Top3BonusFraction,
+		BurstFraction:     pcfg.Quota.BurstFraction,
 	}
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
@@ -148,20 +147,13 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 	// wiring at all: eviction is purely a status update (services/controller) — the
 	// cluster-agent's own reconcile loop removes the Job once status leaves the desired set.
 	ctrl := controller.New(store, peSvc, logger).
-		WithMetricDeclineFraction(quotaCfg.MetricDeclineFraction).
 		WithSilenceMultiplier(pcfg.Scheduler.SilenceMultiplier).
-		WithOverrunMultiplier(pcfg.Scheduler.OverrunMultiplier).
-		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds)*time.Second).
-		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds)*time.Second).
-		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds)*time.Second).
-		WithGCSweep(
-			time.Duration(pcfg.Scheduler.StaleDesiredStateSweepIntervalSeconds)*time.Second,
-			time.Duration(pcfg.Scheduler.StaleDesiredStateThresholdSeconds)*time.Second,
-		)
-	// Wire Phase 2 store and GreptimeDB (Prometheus-compatible) URL for Domain 10 two-phase execution.
-	ctrl = ctrl.WithPhase2Store(peFullStore, metricsDBURL).
-		WithPhase2Boundary(pcfg.Phase2.BoundaryFraction).
-		WithPhase2AdmissionPercentile(pcfg.Phase2.AdmissionPercentile)
+		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second).
+		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds) * time.Second).
+		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)
+	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
+	// is per-platform-experiment config (docs/stages.md), not a controller-wide setting.
+	ctrl = ctrl.WithStagesStore(peFullStore, metricsDBURL)
 
 	// settler durably writes a terminal experiment's final observed usage (see
 	// services/settlement) — used both inline by the controller for the fast path and by the

@@ -157,6 +157,8 @@ export interface CreatePlatformExperimentRequest {
   max_agents: number
   metrics?: MetricDefinition[]
   report_interval_seconds?: number
+  /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
+  stages?: Stage[]
   starts_at: string
   ends_at: string
 }
@@ -261,14 +263,32 @@ export function fetchExperimentsByPlatformExperiment(platformExpID: string): Pro
   return apiFetch<Experiment[]>(url.toString())
 }
 
-export interface Phase2Status {
-  phase: number
-  phase2_triggered_at?: string
-  active_agents: string[]
-  held_agents: string[]
-  boundary_fraction: number
+export interface Stage {
+  length_pct: number
+  evict_pct: number
 }
 
-export function fetchPhase2Status(platformExpID: string): Promise<Phase2Status> {
-  return apiFetch<Phase2Status>(`${QUOTA_URL}/platform-experiments/${platformExpID}/phase2-status`)
+export interface AgentCut {
+  agent_id: string
+  stage_index: number
+}
+
+export interface StageAdvance {
+  stage_index: number
+  advanced_at: string
+}
+
+/** Deliberately carries no per-agent rank or standings — see docs/stages.md. */
+export interface StagesStatus {
+  stages: Stage[]
+  current_stage: number
+  progress: number
+  next_boundary_progress: number
+  advances: StageAdvance[]
+  active_agents: string[]
+  cut_agents: AgentCut[]
+}
+
+export function fetchStages(platformExpID: string): Promise<StagesStatus> {
+  return apiFetch<StagesStatus>(`${QUOTA_URL}/platform-experiments/${platformExpID}/stages`)
 }

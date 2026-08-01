@@ -32,22 +32,27 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // CreatePlatformExperiment inserts a new platform experiment.
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, phase, phase2_triggered_at, created_at, updated_at)
+INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: marshal metrics: %w", err)
 	}
-	phase := pe.Phase
-	if phase == 0 {
-		phase = 1
+	// The ladder is fixed at creation, so it is validated here rather than defended against
+	// on every read.
+	if err := domain.ValidateStages(pe.Stages); err != nil {
+		return fmt.Errorf("platform_experiments_store.Create: %w", err)
+	}
+	stages, err := json.Marshal(pe.Stages)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Create: marshal stages: %w", err)
 	}
 	_, err = s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
 		pe.StartsAt, pe.EndsAt, string(pe.Status),
-		phase, pe.Phase2TriggeredAt,
+		stages, 1,
 		pe.CreatedAt, pe.UpdatedAt,
 	)
 	if err != nil {
@@ -59,18 +64,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, phase, phase2_triggered_at, created_at, updated_at
+SELECT id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at
 FROM platform_experiments
 WHERE id = $1`
 
 	pe := &domain.PlatformExperiment{}
 	var status string
-	var metricsRaw []byte
+	var metricsRaw, stagesRaw []byte
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &pe.EndsAt, &status,
-		&pe.Phase, &pe.Phase2TriggeredAt,
+		&stagesRaw, &pe.CurrentStage,
 		&pe.CreatedAt, &pe.UpdatedAt,
 	)
 	if err != nil {
@@ -82,10 +87,10 @@ WHERE id = $1`
 	if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal metrics: %w", err)
 	}
-	pe.Status = domain.PlatformExperimentStatus(status)
-	if pe.Phase == 0 {
-		pe.Phase = 1
+	if err := json.Unmarshal(stagesRaw, &pe.Stages); err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
+	pe.Status = domain.PlatformExperimentStatus(status)
 	return pe, nil
 }
 
@@ -100,7 +105,7 @@ func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, 
 SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
-       pe.phase, pe.phase2_triggered_at,
+       pe.stages, pe.current_stage,
        pe.created_at, pe.updated_at,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
@@ -128,12 +133,12 @@ ORDER BY pe.created_at DESC`
 	for rows.Next() {
 		pe := &domain.PlatformExperiment{}
 		var status string
-		var metricsRaw []byte
+		var metricsRaw, stagesRaw []byte
 		if err := rows.Scan(
 			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &pe.EndsAt, &status,
-			&pe.Phase, &pe.Phase2TriggeredAt,
+			&stagesRaw, &pe.CurrentStage,
 			&pe.CreatedAt, &pe.UpdatedAt,
 			&pe.SignupCount,
 		); err != nil {
@@ -142,10 +147,10 @@ ORDER BY pe.created_at DESC`
 		if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal metrics: %w", err)
 		}
-		pe.Status = domain.PlatformExperimentStatus(status)
-		if pe.Phase == 0 {
-			pe.Phase = 1
+		if err := json.Unmarshal(stagesRaw, &pe.Stages); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
 		}
+		pe.Status = domain.PlatformExperimentStatus(status)
 		out = append(out, pe)
 	}
 	return out, rows.Err()
@@ -181,146 +186,141 @@ WHERE id=$1`
 	return nil
 }
 
-// TriggerPhase2 atomically sets phase=2 and phase2_triggered_at, and records held agent IDs.
-// It is a one-way operation: it only fires when phase=1 (atomic guard in WHERE clause).
-// Returns false if phase 2 was already triggered (another routine beat us to it).
-func (s *PlatformExperimentsStore) TriggerPhase2(ctx context.Context, platformExpID string, heldAgentIDs []string) (bool, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.TriggerPhase2: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	tag, err := tx.Exec(ctx,
-		`UPDATE platform_experiments SET phase=2, phase2_triggered_at=NOW(), updated_at=NOW() WHERE id=$1 AND phase=1`,
-		platformExpID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.TriggerPhase2: update: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return false, nil // already phase 2
-	}
-
-	for _, agentID := range heldAgentIDs {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO experiment_phase2_holds (platform_experiment_id, agent_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			platformExpID, agentID,
-		); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.TriggerPhase2: insert hold %s: %w", agentID, err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.TriggerPhase2: commit: %w", err)
-	}
-	return true, nil
-}
-
-// ListPhase2HeldAgents returns agent IDs that are on hold for a platform experiment.
-func (s *PlatformExperimentsStore) ListPhase2HeldAgents(ctx context.Context, platformExpID string) ([]string, error) {
-	const q = `SELECT agent_id FROM experiment_phase2_holds WHERE platform_experiment_id=$1 ORDER BY held_at ASC`
-	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.ListPhase2HeldAgents: %w", err)
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
-// Phase2ZeroOp strips one resource dimension's guaranteed/burst allocation from one held agent.
-type Phase2ZeroOp struct {
+// StageZeroOp strips one resource dimension's guaranteed/burst allocation from one cut agent.
+type StageZeroOp struct {
 	AgentID      string
 	ResourceType domain.ResourceType
 }
 
-// Phase2AddOp adds delta to one resource dimension's guaranteed allocation for one active agent.
-type Phase2AddOp struct {
+// StageAddOp adds delta to one resource dimension's guaranteed allocation for one surviving agent.
+type StageAddOp struct {
 	AgentID      string
 	ResourceType domain.ResourceType
 	Delta        float64
 }
 
-// RedistributePhase2Quota atomically applies every held-agent zero and active-agent add for a
-// platform experiment's phase-2 transition, in one Postgres transaction, and durably claims that
-// this platform experiment's redistribution is done — all inside the same commit. Findings.md #9:
-// this is what makes redistribution crash-safe. A naive "loop over N UPDATE statements, mark done
-// after" can be interrupted mid-loop, and re-running AddToAgentGuaranteedQuota's delta a second
-// time would double-credit an agent — there is no idempotent way to retry a partially-applied
-// delta. Wrapping every op plus the completion marker in one transaction makes the whole
-// redistribution all-or-nothing: any crash before commit leaves phase2_redistributed_at NULL and
-// nothing applied, so a retry (see Controller.reconcilePhase2Hold) redoes the entire thing safely
-// from scratch; any crash after commit has already applied everything exactly once.
+// AdvanceStage commits one stage boundary in a single Postgres transaction: it claims
+// stageIndex in platform_experiment_stage_advances, records the cut agents, applies every
+// zero/add quota op, and moves current_stage to stageIndex+1.
 //
-// Returns (false, nil) if this platform experiment's redistribution was already committed by an
-// earlier call — the caller must skip straight to retrying job-stopping (idempotent on its own)
-// instead of re-applying ops.
-func (s *PlatformExperimentsStore) RedistributePhase2Quota(ctx context.Context, platformExpID string, zeros []Phase2ZeroOp, adds []Phase2AddOp) (bool, error) {
+// All of it is one commit because quota moves are the only part that cannot be retried: re-running
+// an add's delta would double-credit an agent, and there is no idempotent way to retry a
+// partially-applied delta. Any crash before commit leaves the advance row absent and nothing
+// applied, so the next reconcile tick redoes the whole boundary safely from scratch; any crash
+// after commit has already applied everything exactly once. Job-stopping for cut agents is
+// naturally idempotent and lives outside this transaction, retried every tick.
+//
+// Returns (false, nil) if this boundary was already committed by an earlier call — the caller
+// must skip straight to retrying job-stopping instead of re-applying ops.
+func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs []string, zeros []StageZeroOp, adds []StageAddOp) (bool, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: begin tx: %w", err)
+		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// FOR UPDATE serializes concurrent callers (e.g. two control-service replicas both
-	// reconciling the same platform experiment) on this row, so only one of them ever observes
-	// phase2_redistributed_at IS NULL and proceeds to apply ops.
-	var alreadyDone bool
-	if err := tx.QueryRow(ctx,
-		`SELECT phase2_redistributed_at IS NOT NULL FROM platform_experiments WHERE id=$1 FOR UPDATE`,
-		platformExpID,
-	).Scan(&alreadyDone); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: check: %w", err)
+	// The primary key on (platform_experiment_id, stage_index) is the claim: exactly one caller
+	// inserts a row for this boundary, so concurrent control-service replicas reconciling the
+	// same platform experiment can never both apply the ops.
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO platform_experiment_stage_advances (platform_experiment_id, stage_index)
+		 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		platformExpID, stageIndex,
+	)
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: claim: %w", err)
 	}
-	if alreadyDone {
-		return false, nil
+	if tag.RowsAffected() == 0 {
+		return false, nil // boundary already committed
+	}
+
+	for _, agentID := range cutAgentIDs {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
+			 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+			platformExpID, agentID, stageIndex,
+		); err != nil {
+			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: insert cut %s: %w", agentID, err)
+		}
 	}
 
 	for _, z := range zeros {
 		guaranteed, burst := resourceQuotaColumns(z.ResourceType)
 		q := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed, burst)
 		if _, err := tx.Exec(ctx, q, z.AgentID, platformExpID); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: zero %s/%s: %w", z.AgentID, z.ResourceType, err)
+			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: zero %s/%s: %w", z.AgentID, z.ResourceType, err)
 		}
 	}
 	for _, a := range adds {
 		guaranteed, _ := resourceQuotaColumns(a.ResourceType)
 		q := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s + $3 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed)
 		if _, err := tx.Exec(ctx, q, a.AgentID, platformExpID, a.Delta); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: add %s/%s: %w", a.AgentID, a.ResourceType, err)
+			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: add %s/%s: %w", a.AgentID, a.ResourceType, err)
 		}
 	}
 
 	if _, err := tx.Exec(ctx,
-		`UPDATE platform_experiments SET phase2_redistributed_at=NOW(), updated_at=NOW() WHERE id=$1`,
-		platformExpID,
+		`UPDATE platform_experiments SET current_stage=$2, updated_at=NOW() WHERE id=$1`,
+		platformExpID, stageIndex+1,
 	); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: mark done: %w", err)
+		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: bump current_stage: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RedistributePhase2Quota: commit: %w", err)
+		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: commit: %w", err)
 	}
 	return true, nil
 }
 
-// IsAgentHeld returns true if the agent is on phase-2 hold for the given platform experiment.
-func (s *PlatformExperimentsStore) IsAgentHeld(ctx context.Context, platformExpID, agentID string) (bool, error) {
-	const q = `SELECT 1 FROM experiment_phase2_holds WHERE platform_experiment_id=$1 AND agent_id=$2`
+// ListCutAgents returns agent IDs cut at any stage boundary of a platform experiment,
+// oldest cut first.
+func (s *PlatformExperimentsStore) ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error) {
+	const q = `SELECT agent_id, stage_index FROM platform_experiment_cuts WHERE platform_experiment_id=$1 ORDER BY cut_at ASC`
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListCutAgents: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.AgentCut
+	for rows.Next() {
+		var c domain.AgentCut
+		if err := rows.Scan(&c.AgentID, &c.StageIndex); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListStageAdvances returns every boundary this platform experiment has crossed, in order.
+func (s *PlatformExperimentsStore) ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error) {
+	const q = `SELECT stage_index, advanced_at FROM platform_experiment_stage_advances WHERE platform_experiment_id=$1 ORDER BY stage_index ASC`
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListStageAdvances: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StageAdvance
+	for rows.Next() {
+		var a domain.StageAdvance
+		if err := rows.Scan(&a.StageIndex, &a.AdvancedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// IsAgentCut returns true if the agent was cut at a stage boundary of the given platform
+// experiment. A cut is terminal for the rest of the experiment.
+func (s *PlatformExperimentsStore) IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error) {
+	const q = `SELECT 1 FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2`
 	var dummy int
 	err := s.pool.pool.QueryRow(ctx, q, platformExpID, agentID).Scan(&dummy)
 	if err == pgx.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.IsAgentHeld: %w", err)
+		return false, fmt.Errorf("platform_experiments_store.IsAgentCut: %w", err)
 	}
 	return true, nil
 }

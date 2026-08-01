@@ -82,16 +82,11 @@ CREATE TABLE platform_experiments (
     status               platform_experiment_status NOT NULL DEFAULT 'draft',
     metrics              JSONB                      NOT NULL DEFAULT '[]',
     report_interval_seconds INTEGER                 NOT NULL DEFAULT 30,
-    phase                INTEGER                    NOT NULL DEFAULT 1,
-    phase2_triggered_at  TIMESTAMPTZ,
-    -- Set exactly once, inside the same transaction as phase-2's one-time quota redistribution
-    -- (zero held agents, add their remaining budget to active agents) — see
-    -- db.PlatformExperimentsStore.RedistributePhase2Quota. Job-stopping for held agents is
-    -- naturally idempotent and safe to retry every reconcile tick, but redistribution moves
-    -- quota between agents and would double-add on a naive retry — this column (committed
-    -- atomically with the redistribution writes) is what lets a crash between TriggerPhase2 and
-    -- full application resume without redoing (and corrupting) that step.
-    phase2_redistributed_at TIMESTAMPTZ,
+    -- The elimination ladder: an ordered list of {length_pct, evict_pct}, fixed at creation.
+    -- Validated by domain.ValidateStages before insert. See docs/stages.md.
+    stages               JSONB                      NOT NULL DEFAULT '[{"length_pct":40,"evict_pct":75},{"length_pct":60,"evict_pct":0}]',
+    -- 1-based index into stages of the stage currently running.
+    current_stage        INTEGER                    NOT NULL DEFAULT 1,
     created_at           TIMESTAMPTZ                NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ                NOT NULL DEFAULT now()
 );
@@ -328,16 +323,31 @@ CREATE TABLE experiment_top3 (
 CREATE INDEX idx_experiment_top3_agent ON experiment_top3(agent_id);
 
 -- ---------------------------------------------------------------------------
--- experiment_phase2_holds — agents held for Phase 2 admission
+-- platform_experiment_cuts — agents cut at a stage boundary. Terminal: jobs stopped and
+-- further submissions rejected 422 for the rest of the experiment. See docs/stages.md.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE experiment_phase2_holds (
+CREATE TABLE platform_experiment_cuts (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT        NOT NULL REFERENCES agents(id),
-    held_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    stage_index            INTEGER     NOT NULL,
+    cut_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (platform_experiment_id, agent_id)
 );
 
-CREATE INDEX idx_phase2_holds_platform ON experiment_phase2_holds(platform_experiment_id);
+CREATE INDEX idx_pe_cuts_platform ON platform_experiment_cuts(platform_experiment_id);
+
+-- ---------------------------------------------------------------------------
+-- platform_experiment_stage_advances — one row per boundary crossed, committed with that
+-- boundary's cuts and quota moves (see AdvanceStage). Quota moves would double-apply on a naive
+-- retry; this row is what makes a crash mid-advance resume rather than re-run.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE platform_experiment_stage_advances (
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
+    stage_index            INTEGER     NOT NULL,
+    advanced_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (platform_experiment_id, stage_index)
+);
 
 COMMIT;

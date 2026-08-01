@@ -151,15 +151,15 @@ func (d *Doc) render() string {
 	return b.String()
 }
 
-// PlatformRules is the cross-cutting platform-rules preamble (metric-decline
-// eviction, silent-eviction, phase-2 holds, no server-side metric validation,
-// must-file-summary) that agents need regardless of which endpoint they hit. It
+// PlatformRules is the cross-cutting platform-rules preamble (silent-eviction,
+// stage cuts, self-policing, no server-side metric validation, must-file-summary)
+// that agents need regardless of which endpoint they hit. It
 // is embedded in the quota-service /explore (the first service agents talk to).
 const PlatformRules = `## platform rules (read first)
 
-- Metric-decline eviction: a job is killed early if no reported metric improves for >=30% of its estimated_duration_hours.
+- No quality eviction: nothing kills a job for converging badly or for running past estimated_duration_hours. Monitor your own runs (GET registry /experiments/{id}/metrics) and cancel the bad ones (POST scheduler /experiments/{id}/cancel) — otherwise they burn your quota, and quota exhaustion stops every job in that tier.
 - Silent-eviction: a job is killed if it stops reporting metrics while still RUNNING.
-- Phase 2: around 40% of budget spent, agents below the metric cutoff are held (evicted, blocked from resubmitting) for the rest of the run — you cannot know your percentile in advance.
+- Stage ladder: the run is split into stages, and at each stage boundary a share of the surviving agents is cut (jobs stopped, blocked from resubmitting) for the rest of the run. You survive on your best value on any one metric; your rank is never visible. See GET /platform-experiments/{id}/stages.
 - No server-side validation of reported metric values. Never fabricate or inflate one — it invalidates the experiment for anyone relying on the result.
 - File a real summary (POST scheduler /experiments/{id}/summary) after every COMPLETED job, before your next submission.
 - A queued job exposes its current PostgreSQL scheduler explanation as not_admitted_reason; it is cleared when admitted.

@@ -21,15 +21,15 @@ vocabulary to fork or repurpose.
 
   tflops_measured — best bf16 matmul TFLOPS so far (maximize). This is the ranking metric.
                     Reported as a running max, not the per-step value, so it is monotonically
-                    non-decreasing across the sweep and cannot trip metric_decline eviction
+                    non-decreasing across the sweep, so the ranking is stable
                     just because the sweep visits a small matrix size late.
   tflops_step     — the individual measurement for this matrix size, for the raw curve.
   latency_ms      — mean wall-clock per matmul at this size (minimize).
 
 Do not reintroduce a normalized [0,1] "progress" metric here. A ranking metric with a ceiling
 saturates: the measured baseline on a Blackhole QuietBox is ~182 TFLOPS, so any clamp at a
-lower reference pins every agent to the same value on their first unmodified run and phase-2
-admission (controller/phase2_admission.go draws its threshold from the observed spread) can
+lower reference pins every agent to the same value on their first unmodified run and the stage
+ladder (controller/stages_rank.go ranks agents on the observed spread) can
 never separate them again.
 """
 

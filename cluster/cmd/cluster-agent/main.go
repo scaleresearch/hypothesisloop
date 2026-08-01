@@ -53,8 +53,6 @@ func main() {
 	// no kubeconfig/context, which is exactly what a pod running inside the cluster has.
 	jwc, err := workload.New(workload.Config{
 		RegistryURL:                          registryURL,
-		JobDeadlineMultiplier:                pcfg.Scheduler.JobDeadlineMultiplier,
-		MinJobDeadlineSeconds:                pcfg.Scheduler.MinJobDeadlineSeconds,
 		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
 		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
 		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
