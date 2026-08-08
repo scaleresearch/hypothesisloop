@@ -23,19 +23,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+# Where each task's files sit inside its unpacked archive. The download URLs deliberately live
+# only in seed/fetch_data.sh: this module never fetches anything, and a second copy of a URL is a
+# second thing to keep correct.
 TASK_SPECS = {
-    "task3": {
-        "root": "Task_3",
-        "session": "ses-01",
-        "image": "t1w",
-        "url": "https://sid.erda.dk/share_redirect/fmeuvo1EdF/Task_3.zip",
-    },
-    "task5": {
-        "root": "Task_5",
-        "session": "ses_01",
-        "image": "t1",
-        "url": "https://huggingface.co/datasets/medarc/smri-fm/resolve/main/fomo_eval/Task_5.zip",
-    },
+    "task3": {"root": "Task_3", "session": "ses-01", "image": "t1w"},
+    "task5": {"root": "Task_5", "session": "ses_01", "image": "t1"},
 }
 
 
