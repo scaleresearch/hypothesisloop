@@ -1,0 +1,33 @@
+# Job image for smri-fm-fomo-tune.
+#
+# This experiment runs *inference* against a frozen checkpoint. It needs exactly the same
+# tt-metal/tt-train build the smri-fm pretraining experiment already has -- same pin, same
+# vendored patch, same python_env -- so it starts from that image rather than rebuilding
+# tt-metal from source (a multi-hour cold build for a byte-identical result). Everything this
+# experiment adds is Python.
+#
+# PINNED BY DIGEST, not `:latest` (checklist item 10): a mutable tag would let two waves of jobs
+# silently run different tt-metal binaries under the same image name. The digest below is
+# localhost/hypothesisloop-smri-fm-workload built at TT_METAL_REF
+# d9a68815f5fcf08a5bfbffb6f1f811823fba8edd + tenstorrent/patches/vendored-tt-metal-changes.patch.
+# That REF must stay identical here, in Dockerfile.experimentator, in seed/job*.yaml and in
+# experiment.md -- a drift between them invalidates every result without raising anything.
+ARG BASE_IMAGE=localhost/hypothesisloop-smri-fm-workload@sha256:90930359be7709678f4c355380e0f62a4c9feeffa626a496da501f74a5dbbb69
+FROM ${BASE_IMAGE}
+
+ENV TT_METAL_REF=d9a68815f5fcf08a5bfbffb6f1f811823fba8edd
+
+# This experiment's own tree, at its own path -- the base image's /build/smri-fm is left exactly
+# as it is, because TT_METAL_HOME, the editable-install .pth files and LD_LIBRARY_PATH all point
+# into it.
+COPY . /build/smri-fm-fomo-tune/
+
+# PYTHONPATH order is load-bearing: this experiment's vendored `smri_mae`/`smri_mae_tt` must
+# shadow the base image's editable installs of the same package names, so a job runs the source
+# that ships with THIS experiment and not whatever the pretraining experiment's tree currently
+# holds. PYTHONPATH entries precede site-packages .pth paths in sys.path, which is what makes
+# that true; verified by importing and printing __file__ in the built image, not assumed.
+ENV PYTHONPATH=/build/smri-fm-fomo-tune/tenstorrent/src:/build/smri-fm-fomo-tune/src:/build/smri-fm/tenstorrent/tt-metal
+
+WORKDIR /build/smri-fm-fomo-tune
+ENTRYPOINT ["/build/smri-fm-fomo-tune/seed/run_job.sh"]
