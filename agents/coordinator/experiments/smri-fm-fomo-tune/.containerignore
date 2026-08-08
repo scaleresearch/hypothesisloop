@@ -1,2 +1,4 @@
+generated/
 **/__pycache__
 **/*.pyc
+.git
