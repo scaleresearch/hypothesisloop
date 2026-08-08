@@ -138,7 +138,19 @@ throughout, per the pretraining port's own numerics policy.
     visible `/dev/tenstorrent` devices, `TT_METAL_REF` and job id into `metrics.json` next to the
     score.
 
-## 6. Task 3 (brain age) -- wired, not validated
+## 6. Open items
+
+- **`Dockerfile.experimentator` has not finished building on this host.** `make
+  experimentator-image EXPERIMENT=smri-fm-fomo-tune` was started and is stuck in its
+  `git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git` step -- this node's
+  outbound link runs at ~2.5 MB/s and tt-metal is large. It is not a defect in the file: that
+  clone step is byte-identical to the one in `smri-fm/Dockerfile.experimentator`, which built
+  successfully on this same host. Re-run the make target when the link is faster (buildah caches
+  the completed layers, so it resumes from the clone).
+- `seed/fetch_data.sh`'s Task_3 branch is untested end to end; its Task_5 and checkpoint branches
+  produced the tree currently under `/home/ttuser/fomo-tune-data`.
+
+## 7. Task 3 (brain age) -- wired, not validated
 
 Task 3 shares `run_task.py`, `backbone_tt.py`, `data.py` and the gate unchanged; only the head
 (`RidgeCV`) and label type differ, and `seed/job.yaml` is its job spec. It has **not** been run
