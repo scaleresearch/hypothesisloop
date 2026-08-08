@@ -23,6 +23,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import socket
 import sys
 import time
 from pathlib import Path
@@ -76,6 +78,25 @@ def cross_validate(task: str, features: np.ndarray, y: np.ndarray) -> np.ndarray
         logger.info(f"fold {fold + 1}/{N_FOLDS} n={len(test)} ({time.perf_counter() - start:.0f}s)")
         post_metric((fold + 1) / N_FOLDS, float(time.perf_counter() - start), "cv_seconds")
     return oof
+
+
+def environment_fingerprint() -> dict:
+    """Which physical thing produced this number.
+
+    An accelerator *type* is not enough to compare results across nodes: a
+    different card, a different firmware bundle, or a different tt-metal build
+    can move a number on its own, and that gets read as a real effect unless the
+    result carries its own provenance (checklist item 13). Written into
+    `metrics.json` next to the score, so a stored result stays interpretable
+    after the job pod is gone.
+    """
+    devices = sorted(p.name for p in Path("/dev/tenstorrent").iterdir()) if Path("/dev/tenstorrent").is_dir() else []
+    return {
+        "hostname": socket.gethostname(),
+        "tt_devices_visible": devices,
+        "tt_metal_ref": os.environ.get("TT_METAL_REF", "unset"),
+        "job_id": os.environ.get("HYPOTHESISLOOP_JOB_ID", "local"),
+    }
 
 
 def main() -> None:
@@ -135,6 +156,7 @@ def main() -> None:
 
     record = {
         "task": args.task,
+        "environment": environment_fingerprint(),
         "n_subjects": len(subjects),
         "l_vis": backbone.contract.l_vis,
         "encoder_seq_len": backbone.contract.encoder_seq_len,
@@ -147,12 +169,13 @@ def main() -> None:
         "".join(json.dumps({"subject": s.subject, "label": float(y[i]), "pred": float(oof[i])}) + "\n" for i, s in enumerate(subjects))
     )
 
+    # The result record goes to stdout FIRST: the runtime collects the job's logs, so the score
+    # survives even if every metric POST below fails (checklist item 11).
+    logger.info("result: " + json.dumps(record))
     for name in ("pearson_r", "mae", "auroc"):
         if name in summary:
-            post_metric(1.0, float(summary[name]), name)
-    post_metric(1.0, record["seconds_per_subject"], "seconds_per_subject")
-
-    logger.info("result: " + "  ".join(f"{k}={v}" for k, v in record.items()))
+            post_metric(1.0, float(summary[name]), name, attempts=5)
+    post_metric(1.0, record["seconds_per_subject"], "seconds_per_subject", attempts=5)
 
 
 if __name__ == "__main__":
