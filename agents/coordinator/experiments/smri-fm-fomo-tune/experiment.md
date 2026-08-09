@@ -78,6 +78,24 @@ USE seed/ -- everything below already works on this hardware; none of it is a sp
     `backbone_tt.py` is where features/pooling live (the thing most hypotheses edit),
     `parity_fomo.py` is the correctness gate.
 
+HOW TO RUN A HYPOTHESIS THAT EDITS CODE (pooling, head, transform -- almost all of them)
+  Nearly every real lever above is a Python edit, not an env var: `job.task5.yaml`'s `command`
+  runs the fixed baseline baked into `image` and ignores `code_ref` entirely, so submitting it
+  unmodified always replays the seed regardless of what you changed. To actually run your edit:
+  keep `image`, `host_mounts`, `env`, `cpu`/`memory`/`accelerator_*` from `seed/job.task5.yaml`
+  exactly as they are (they already have the built tt-metal/ttnn env and the data/checkpoint
+  mount you need), and replace only `command` with:
+
+      ["bash", "-lc", "url=${HYPOTHESISLOOP_CODE_REF%@*}; sha=${HYPOTHESISLOOP_CODE_REF##*@}; \
+       git clone \"$url\" /w && cd /w && git checkout \"$sha\" && \
+       PYTHONPATH=/w/tenstorrent/src:/w/src:/build/smri-fm/tenstorrent/tt-metal exec bash seed/run_job.sh"]
+
+  Add `GIT_TOKEN` to `env` (same token you push with) so the pod can clone your branch -- the
+  base image has `git` but no baked credential. This is still the zero-build/cheap path: nothing
+  here compiles, the clone is Python source only, PYTHONPATH just makes your checkout shadow the
+  image's baked-in copy of `fomo_tune_tt`/`smri_mae`/`smri_mae_tt`. Push and set `code_ref` per
+  the system prompt's standing rule (full 40-char SHA, commit right before each submit).
+
 WHERE THE DATA AND CHECKPOINT LIVE (node-local, pre-fetched, do not re-download)
   On tt-quietbox: `/home/ttuser/fomo-tune-data`, bind-mounted read-only into every job at
   `/data/fomo`. Layout:
