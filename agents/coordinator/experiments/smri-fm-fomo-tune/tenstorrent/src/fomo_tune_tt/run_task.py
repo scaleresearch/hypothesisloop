@@ -111,7 +111,6 @@ def main() -> None:
         help="encoder sequence budget (l_vis + 1 must be tile-aligned). Omitted: measured over "
         "this task's own subjects, which costs one host-side transform pass over the dataset.",
     )
-    parser.add_argument("--limit-subjects", type=int, help="smoke-test knob: embed only the first N subjects")
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,8 +122,6 @@ def main() -> None:
     )
 
     subjects = load_task(args.task, args.data_root)
-    if args.limit_subjects:
-        subjects = subjects[: args.limit_subjects]
     logger.info(f"{args.task}: {len(subjects)} subjects from {args.data_root}")
 
     l_vis = args.l_vis
