@@ -53,6 +53,10 @@ Checkpoint: `medarc/walnut` `checkpoints/walnut-v0-1/vitl/sub-52k/checkpoint-las
 | Encoder forward, seq_len 12960 | 2.6 - 3.2 s/subject |
 | Whole task 5 job (gate + 48 embeddings + CV) | ~4 min |
 
+Three separate jobs were submitted through `POST /experiments` and ran on tt-quietbox
+(`exp-fomo-task5-2865be9d`, `-a96b6841`, `-8a726930`); all three COMPLETED and posted
+`auroc=0.9930555555555556`, byte-identical, which is the reproduction check item 12 asks for.
+
 The 0.99306 sits inside upstream's own CI and upstream's 0.995 sits inside ours. With 48 subjects
 one swapped pair moves AUROC by ~0.002, so this is a reproduction, not a regression.
 
@@ -91,7 +95,9 @@ throughout, per the pretraining port's own numerics policy.
    ranking metric with justification, levers, constraints, pinned refs, node-local data path, and
    the measured `L_VIS` constant so no agent re-derives it. `seed/` holds working, hardware-run
    code (`run_job.sh`, `job.task5.yaml`, `fetch_data.sh`, `build_and_import.sh`, `metrics.py`).
-   `Dockerfile.experimentator` exists and carries this experiment's own pins. Baseline is stamped
+   `Dockerfile.experimentator` builds (`make experimentator-image
+   EXPERIMENT=smri-fm-fomo-tune`, verified: both pins resolve inside the image to
+   `11e53ab1...` and `d9a68815...`). Baseline is stamped
    against upstream commit + checkpoint + dataset URL. AUROC is justified in the objective block,
    not just named. The description talks about representation/pooling/head choices (the domain)
    and calls the accelerator a solved black box.
@@ -143,15 +149,11 @@ throughout, per the pretraining port's own numerics policy.
 
 ## 6. Open items
 
-- **`Dockerfile.experimentator` has not finished building on this host.** `make
-  experimentator-image EXPERIMENT=smri-fm-fomo-tune` was started and is stuck in its
-  `git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git` step -- this node's
-  outbound link runs at ~2.5 MB/s and tt-metal is large. It is not a defect in the file: that
-  clone step is byte-identical to the one in `smri-fm/Dockerfile.experimentator`, which built
-  successfully on this same host. Re-run the make target when the link is faster (buildah caches
-  the completed layers, so it resumes from the clone).
 - `seed/fetch_data.sh`'s Task_3 branch is untested end to end; its Task_5 and checkpoint branches
   produced the tree currently under `/home/ttuser/fomo-tune-data`.
+- The three validation jobs all ran on tt-quietbox. Nothing here has been exercised on a second
+  node, so `host_mounts`' node-locality (item 10) is correct by construction but untested in the
+  "job lands somewhere else" case.
 
 ## 7. Task 3 (brain age) -- wired, not validated
 
