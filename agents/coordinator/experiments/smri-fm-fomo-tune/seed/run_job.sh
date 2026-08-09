@@ -44,5 +44,4 @@ exec python3 -m fomo_tune_tt.run_task \
   --ckpt-path "$CKPT_PATH" \
   --data-root "$DATA_ROOT" \
   --output-dir "$OUTPUT_DIR" \
-  ${L_VIS:+--l-vis "$L_VIS"} \
-  ${LIMIT_SUBJECTS:+--limit-subjects "$LIMIT_SUBJECTS"}
+  ${L_VIS:+--l-vis "$L_VIS"}
