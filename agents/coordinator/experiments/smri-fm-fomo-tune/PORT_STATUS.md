@@ -32,9 +32,12 @@ else -- parameter modules, sincos table, fused QKV, MLP, tile rules -- is the pr
 unchanged.
 
 `fomo_tune_tt/checkpoint.py` builds `EncoderParams` directly from the checkpoint rather than
-calling `smri_mae_tt.params.state_dict_to_tt` (which writes into an already-constructed
-Encoder/Decoder pair). There is no decoder here, and constructing 300M Xavier-sampled parameters
-purely to overwrite them is waste; the checkpoint is the source, not a later overwrite.
+reusing the pretraining port's `params.py`, which writes a state dict into an already-constructed
+Encoder/Decoder pair. There is no decoder here, and constructing 300M Xavier-sampled parameters
+purely to overwrite them is waste; the checkpoint is the source, not a later overwrite. So
+`params.py` is not vendored here, and neither is `ops_tt/flash_attention.py` (the pretraining
+port's alternative attention, which nothing on this path calls) -- vendoring code no import
+reaches just makes the tree look bigger than it is.
 
 ## 3. Measured results (all on tt-quietbox, real Blackhole, real checkpoint)
 
