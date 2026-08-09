@@ -1,18 +1,19 @@
 """Read a walnut sMRI-MAE checkpoint into the numpy `EncoderParams` the TT
 encoder is constructed from.
 
-`smri_mae_tt.params.state_dict_to_tt` writes a state dict into an
-*already-built* `Encoder`/`Decoder` pair. That is the right shape for a
-training run (build fresh, then optionally resume), but wrong here twice over:
-this port has no decoder at all, and building the encoder from freshly sampled
-Xavier/trunc-normal arrays only to overwrite all 300M of them is pure waste.
-So the checkpoint is the *source* of `EncoderParams`, not a later overwrite --
-one path, no dead initialization.
+The pretraining port's `params.py` writes a state dict into an *already-built*
+`Encoder`/`Decoder` pair. That is the right shape for a training run (build
+fresh, then optionally resume), but wrong here twice over: this port has no
+decoder at all, and building the encoder from freshly sampled
+Xavier/trunc-normal arrays only to overwrite all 300M of them is pure waste. So
+the checkpoint is the *source* of `EncoderParams`, not a later overwrite -- one
+path, no dead initialization, and `params.py` is not vendored into this
+experiment at all.
 
-The torch-side key and shape conventions are the ones
-`smri_mae_tt.params.torch_key_and_shape` defines (LayerNorm `weight`/`bias` <->
-TT `gamma`/`beta`; TT's leading `(1, 1)` singletons); this module reuses that
-function rather than restating them.
+Two naming conventions have to be bridged, both handled explicitly below:
+`torch.nn.LayerNorm` calls its parameters `weight`/`bias` where
+`modules_tt.LayerNorm` calls them `gamma`/`beta`, and every TT parameter array
+carries leading `(1, 1)` singleton dimensions that the torch tensor lacks.
 """
 
 from __future__ import annotations
