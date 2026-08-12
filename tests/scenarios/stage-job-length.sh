@@ -60,7 +60,7 @@ echo "  final: status=$STATUS eviction_reason=${REASON:-n/a}"
 
 # Eviction settles like any other terminal path — the agent is billed for what genuinely ran,
 # not for the estimate it submitted.
-USED=$(quota_used_guaranteed "$AGENT" "$PE_ID")
+USED=$(quota_used_guaranteed "$PE_ID" "$AGENT")
 py "import sys; sys.exit(0 if $USED > 0 else 1)" \
   && pass "the evicted job settled against observed usage (${USED} AccH)" \
   || fail "evicted job settled to ${USED} AccH — nothing was billed for a job that ran"
