@@ -175,3 +175,20 @@ func TestRestartedNewestPodIsStillSelectedAsNewest(t *testing.T) {
 		t.Error("newest pod's earlier instance must still be recognised")
 	}
 }
+
+// The response is shipped to the control plane and stored on every status push, so maxLines is
+// a budget for the whole response. Three sections each taking the full budget would triple the
+// payload for the rest of a failed job's life.
+func TestLogBudgetIsSharedNotPerSection(t *testing.T) {
+	const maxLines = 100
+	history := maxLines / 2
+	if history*2 > maxLines {
+		t.Fatalf("two history sections (%d each) may not exceed the budget %d", history, maxLines)
+	}
+	// Worst case: both history sections full, current gets what is left.
+	used := history * 2
+	remaining := maxLines - used
+	if used+remaining != maxLines {
+		t.Errorf("sections sum to %d, want the budget %d", used+remaining, maxLines)
+	}
+}

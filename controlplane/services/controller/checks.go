@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -69,9 +71,14 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// warn to stderr, that failure is otherwise completely silent, reaching an operator as
 		// "stuck job" with no hint the metrics path is at fault. Tell them apart here, where the
 		// evidence is, so the eviction reason names the actual problem.
+		// This query only refines the label — the decision to evict is already made above. A
+		// failure here must not cancel it, or a job that genuinely needs killing keeps burning
+		// quota because a diagnostic lookup was unavailable. Fall back to the generic reason.
 		reported, err := metricsdb.HasEverReportedMetric(ctx, c.metricsDBURL, exp.ID, c.observedMaxLookback())
 		if err != nil {
-			return false, "", fmt.Errorf("silence ever-reported: %w", err)
+			c.logger.Warn("job silence: ever-reported lookup failed, reporting generic silence",
+				zap.String("id", exp.ID), zap.Error(err))
+			return true, domain.EvictionSilent, nil
 		}
 		if !reported {
 			return true, domain.EvictionNeverReportedMetrics, nil
