@@ -57,8 +57,31 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 	case firstWaiting != nil:
 		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, nil
 	case firstTerminated != nil:
-		return "", firstTerminated.Message, maxRestarts, nil
+		return terminatedPhaseDetail(firstTerminated, maxRestarts)
 	default:
 		return "", "", maxRestarts, nil
 	}
+}
+
+// terminatedPhaseDetail describes a container that exited non-zero. The exit code and
+// Kubernetes' own termination Reason used to be dropped on the floor here, and
+// Terminated.Message is empty unless the workload writes to terminationMessagePath — which a
+// crashing Python process does not. The result was a FAILED experiment carrying no failure
+// information whatsoever: the record showed a status and nothing else, leaving the job's log
+// tail as the single diagnostic channel. Reported through phase_detail rather than a new column
+// because it reaches the experiment record on the existing path, with no schema change.
+func terminatedPhaseDetail(t *corev1.ContainerStateTerminated, restarts int32) (string, string, int32, error) {
+	reason := domain.PhaseReasonContainerFailed
+	if t.Reason == "OOMKilled" {
+		reason = domain.PhaseReasonOOMKilled
+	}
+	message := fmt.Sprintf("container exited with code %d", t.ExitCode)
+	if t.Reason != "" {
+		message += " (" + t.Reason + ")"
+	}
+	// Only present when the workload wrote to terminationMessagePath; usually empty.
+	if t.Message != "" {
+		message += ": " + t.Message
+	}
+	return reason, message, restarts, nil
 }

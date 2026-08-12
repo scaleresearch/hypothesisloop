@@ -114,6 +114,13 @@ const (
 	PhaseReasonConfigError = "config_error"
 	// PhaseReasonInvalidImage: the image reference itself is malformed, not merely unpullable.
 	PhaseReasonInvalidImage = "invalid_image"
+	// PhaseReasonContainerFailed: the workload's own process exited non-zero. Deliberately NOT
+	// in NeverSelfHealsPhaseReasons — a job with retries left should use them; this reports what
+	// happened, it does not decide the job's fate.
+	PhaseReasonContainerFailed = "container_failed"
+	// PhaseReasonOOMKilled: the container was killed for exceeding its memory limit. Distinct
+	// from a plain non-zero exit because the fix is different — raise the request, not the code.
+	PhaseReasonOOMKilled = "oom_killed"
 )
 
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on
