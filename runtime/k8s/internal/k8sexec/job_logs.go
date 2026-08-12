@@ -13,11 +13,18 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-// FetchLogTail returns the last maxLines lines of experimentID's own pod's current stdout,
-// read live from the Kubernetes API (never cached, never stored by this executor itself — see
-// agentloop.LogTailer). Returns (nil, nil) rather than an error if the pod doesn't exist yet or
-// has no container started (e.g. still Pending): that's an ordinary transient state for a job
-// that was just admitted, not a failure worth logging every reconcile tick.
+// FetchLogTail returns the last maxLines lines of experimentID's pod output, read live from the
+// Kubernetes API (never cached, never stored by this executor itself — see agentloop.LogTailer).
+// Returns (nil, nil) rather than an error if the pod doesn't exist yet or has no container
+// started (e.g. still Pending): that's an ordinary transient state for a job that was just
+// admitted, not a failure worth logging every reconcile tick.
+//
+// When an attempt has already failed, its output is included ahead of the current pod's. A retry
+// starts a brand-new pod, so reporting only the newest one replaced the failed attempt's
+// traceback with the replacement's startup banner — with max_retries=N that happened N times and
+// the job reached FAILED with every error discarded, leaving the reason it failed recorded
+// nowhere at all once the pods were deleted. Both are returned so a retry cannot erase the one
+// thing worth reading.
 func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error) {
 	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
@@ -28,17 +35,70 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 	if len(pods.Items) == 0 {
 		return nil, nil
 	}
-	// A Job normally has exactly one live pod for its current attempt; if a retry left more than
-	// one listable, the most recently created is the one actually producing output right now.
-	pod := pods.Items[0]
-	for _, p := range pods.Items[1:] {
-		if p.CreationTimestamp.After(pod.CreationTimestamp.Time) {
-			pod = p
+	newest, failed := selectLogPods(pods.Items)
+
+	var lines []string
+	// Failed attempt first: it is the older output, and it is the part that explains the failure.
+	if failed != nil {
+		failedLines, err := c.podTail(ctx, experimentID, failed.Name, maxLines)
+		if err != nil {
+			return nil, err
+		}
+		if len(failedLines) > 0 {
+			lines = append(lines, fmt.Sprintf("--- failed attempt (pod %s, exit %d) ---",
+				failed.Name, terminatedExitCode(failed)))
+			lines = append(lines, failedLines...)
 		}
 	}
+	if newest != nil && (failed == nil || newest.Name != failed.Name) {
+		currentLines, err := c.podTail(ctx, experimentID, newest.Name, maxLines)
+		if err != nil {
+			return nil, err
+		}
+		if len(currentLines) > 0 {
+			if len(lines) > 0 {
+				lines = append(lines, fmt.Sprintf("--- current attempt (pod %s) ---", newest.Name))
+			}
+			lines = append(lines, currentLines...)
+		}
+	}
+	return lines, nil
+}
 
+// selectLogPods picks the pod producing output now, and the most recent attempt that already
+// terminated non-zero, if there is one. They are usually different pods: a retry replaces the
+// failed pod rather than reusing it.
+func selectLogPods(items []corev1.Pod) (newest, failed *corev1.Pod) {
+	for i := range items {
+		p := &items[i]
+		if newest == nil || p.CreationTimestamp.After(newest.CreationTimestamp.Time) {
+			newest = p
+		}
+		if terminatedExitCode(p) > 0 {
+			if failed == nil || p.CreationTimestamp.After(failed.CreationTimestamp.Time) {
+				failed = p
+			}
+		}
+	}
+	return newest, failed
+}
+
+// terminatedExitCode returns the highest non-zero exit code among p's terminated containers, or
+// 0 when none has terminated in failure.
+func terminatedExitCode(p *corev1.Pod) int32 {
+	var code int32
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode > code {
+			code = cs.State.Terminated.ExitCode
+		}
+	}
+	return code
+}
+
+// podTail reads the last maxLines lines of one pod's logs.
+func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName string, maxLines int) ([]string, error) {
 	tailLines := int64(maxLines)
-	req := c.kube.CoreV1().Pods(HypothesisLoopNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+	req := c.kube.CoreV1().Pods(HypothesisLoopNamespace).GetLogs(podName, &corev1.PodLogOptions{
 		TailLines: &tailLines,
 	})
 	stream, err := req.Stream(ctx)
@@ -52,7 +112,7 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 		if apierrors.IsBadRequest(err) || apierrors.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("k8sexec.FetchLogTail: open log stream for %s (pod %s): %w", experimentID, pod.Name, err)
+		return nil, fmt.Errorf("k8sexec.FetchLogTail: open log stream for %s (pod %s): %w", experimentID, podName, err)
 	}
 	defer stream.Close()
 
