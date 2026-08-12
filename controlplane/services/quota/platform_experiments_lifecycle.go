@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"go.uber.org/zap"
 )
@@ -16,6 +17,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	metrics := req.Metrics
 	if metrics == nil {
 		metrics = []domain.MetricDefinition{}
+	}
+	if err := domain.ValidateMetricDefinitions(metrics); err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
 	reportInterval := req.ReportIntervalSeconds
 	if reportInterval <= 0 {
@@ -90,6 +94,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 		pe.MaxAgents = req.MaxAgents
 	}
 	if req.Metrics != nil {
+		if err := domain.ValidateMetricDefinitions(req.Metrics); err != nil {
+			return nil, fmt.Errorf("platform_experiments.Update: %w", err)
+		}
 		pe.Metrics = req.Metrics
 	}
 	if req.ReportIntervalSeconds > 0 {
@@ -236,8 +243,16 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	return quotas, nil
 }
 
+// SetSummary records the operator's narrative verdict on a run. Unlike every other field, this is
+// writable after the experiment closes — a summary only exists once the run is over.
+func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) error {
+	return s.store.SetPlatformExperimentSummary(ctx, id, summary)
+}
+
 // Close transitions a running experiment to closed and records top-3 placements.
-// topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries).
+// topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries). When it is
+// empty the standings are derived from the metrics store instead: closing must never silently
+// discard the outcome of a run just because the caller was a timer rather than a person.
 func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topResults []AgentResult) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
@@ -248,6 +263,15 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 	}
 	if pe.Status != domain.PlatformExpRunning && pe.Status != domain.PlatformExpOpen {
 		return fmt.Errorf("invalid_transition: experiment is %s", pe.Status)
+	}
+
+	if len(topResults) == 0 {
+		derived, err := s.derivedTopResults(ctx, id)
+		if err != nil {
+			s.logger.Warn("close: deriving standings failed, closing without placements",
+				zap.String("platformExpID", id), zap.Error(err))
+		}
+		topResults = derived
 	}
 
 	// Record top-3 placements and increment periods_active.
@@ -269,7 +293,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	now := time.Now()
 	for _, status := range []string{string(domain.PlatformExpOpen), string(domain.PlatformExpRunning)} {
-		pes, err := s.store.ListPlatformExperiments(ctx, status)
+		pes, err := s.store.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: status})
 		if err != nil {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)
 		}
@@ -308,7 +332,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 // since there's no scheduled moment to sweep against; only a non-zero, past StartsAt auto-fires.
 func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	now := time.Now()
-	pes, err := s.store.ListPlatformExperiments(ctx, string(domain.PlatformExpOpen))
+	pes, err := s.store.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: string(domain.PlatformExpOpen)})
 	if err != nil {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}

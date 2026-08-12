@@ -50,3 +50,11 @@ secrets/
 # Logs
 *.log
 logs/
+
+# Per-experiment heavy/gitignored local state (datasets, tt-metal build trees, checkpoints) --
+# huge (tens of GB for smri-fm) and never needed baked into an image: agents/experimentator's
+# Dockerfile.base only needs experiment.md/seed/ text+scripts, and each experiment's own
+# Dockerfile.experimentator clones tt-metal fresh at its own pin rather than reusing this copy.
+agents/coordinator/experiments/*/datasets/
+agents/coordinator/experiments/*/tenstorrent/tt-metal/
+agents/coordinator/experiments/*/checkpoints/

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"go.uber.org/zap"
@@ -13,9 +14,11 @@ import (
 type PlatformExperimentsStore interface {
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
-	ListPlatformExperiments(ctx context.Context, statusFilter string) ([]*domain.PlatformExperiment, error)
+	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
+	CountPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) (int, error)
 	UpdatePlatformExperimentStatus(ctx context.Context, id string, status domain.PlatformExperimentStatus) error
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error
+	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	Signup(ctx context.Context, platformExpID, agentID string) error
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
@@ -52,17 +55,18 @@ type PlatformExperimentsStore interface {
 
 // PlatformExperimentsService manages the Platform Experiment lifecycle.
 type PlatformExperimentsService struct {
-	store  PlatformExperimentsStore
-	usage  *metricsdb.UsageTracker
-	cfg    domain.QuotaConfig
-	logger *zap.Logger
+	store        PlatformExperimentsStore
+	usage        *metricsdb.UsageTracker
+	metricsDBURL string
+	cfg          domain.QuotaConfig
+	logger       *zap.Logger
 }
 
 // NewPlatformExperimentsService constructs the service. metricsDBURL is the GreptimeDB instance
 // backing observed agent quota consumption. PostgreSQL holds allocations and current desired
 // experiment estimates.
 func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string) *PlatformExperimentsService {
-	return &PlatformExperimentsService{store: store, usage: metricsdb.NewUsageTracker(metricsDBURL), cfg: cfg, logger: logger}
+	return &PlatformExperimentsService{store: store, usage: metricsdb.NewUsageTracker(metricsDBURL), metricsDBURL: metricsDBURL, cfg: cfg, logger: logger}
 }
 
 // CreatePlatformExperimentRequest is the input for Create.

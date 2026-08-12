@@ -59,11 +59,15 @@ func TestShortfallOnlyCountsDeficitDimensions(t *testing.T) {
 func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
 	need := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 1}
 	initial := domain.Footprint{cpuKey: 1000, acceleratorKey("flavor-t4"): 1}
-	if got := notAdmittedReasonFor(initial, initial, need); got != domain.NotAdmittedCapacityUnavailable {
+	if got := notAdmittedReasonFor(initial, initial, need, nil); got != domain.NotAdmittedCapacityUnavailable {
 		t.Fatalf("unchanged insufficient capacity reason = %q", got)
 	}
 	current := domain.Footprint{cpuKey: 500, acceleratorKey("flavor-t4"): 1}
-	if got := notAdmittedReasonFor(current, initial, need); got != domain.NotAdmittedOutranked {
+	if got := notAdmittedReasonFor(current, initial, need, nil); got != domain.NotAdmittedOutranked {
 		t.Fatalf("capacity consumed earlier in tick reason = %q", got)
+	}
+	shortage := domain.Footprint{cpuKey: 1000}
+	if got := notAdmittedReasonFor(initial, initial, need, shortage); got != domain.NotAdmittedCapacityUnavailable+": short "+footprintStr(shortage) {
+		t.Fatalf("detailed shortage reason = %q", got)
 	}
 }

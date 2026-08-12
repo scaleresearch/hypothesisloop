@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
@@ -22,10 +23,11 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	now := time.Now().UTC()
 
-	// Build the PE report-interval map and advance stage ladders in one pass.
+	// Build the PE report-interval and stage job-length maps and advance stage ladders in one pass.
 	reportIntervalByPE := map[string]time.Duration{}
+	maxJobHoursByPE := map[string]float64{}
 	if c.stagesStore != nil {
-		pes, err := c.stagesStore.ListPlatformExperiments(ctx, "running")
+		pes, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "running"})
 		if err != nil {
 			return fmt.Errorf("stages: list platform experiments: %w", err)
 		}
@@ -33,17 +35,17 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			if pe.ReportIntervalSeconds > 0 {
 				reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
 			}
-			// Stage ranking reads these directions per boundary; fail fast on a bad contract
-			// rather than at the cut, where a malformed direction would silently skew a cut.
-			seen := make(map[string]bool, len(pe.Metrics))
-			for _, md := range pe.Metrics {
-				if md.Key == "" || (md.Direction != "maximize" && md.Direction != "minimize") {
-					return fmt.Errorf("stages: platform experiment %s has invalid metric contract", pe.ID)
-				}
-				if seen[md.Key] {
-					return fmt.Errorf("stages: platform experiment %s has duplicate metric %q", pe.ID, md.Key)
-				}
-				seen[md.Key] = true
+			// Read before advanceStages: a boundary crossed on this tick takes effect from the
+			// next one, so no job is evicted under a cap it was never running under.
+			if maxHours := pe.CurrentMaxJobHours(); maxHours > 0 {
+				maxJobHoursByPE[pe.ID] = maxHours
+			}
+			// Stage ranking reads this contract per boundary; fail fast on a bad one rather
+			// than at the cut, where it would silently skew a cut. Create/Update already
+			// reject a bad contract before an experiment can ever reach here — this is
+			// defense against a row written before that validation existed.
+			if err := domain.ValidateMetricDefinitions(pe.Metrics); err != nil {
+				return fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err)
 			}
 			if err := c.advanceStages(ctx, pe, exps); err != nil {
 				return fmt.Errorf("stages: advance %s: %w", pe.ID, err)
@@ -77,7 +79,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	}
 
 	for _, exp := range exps {
-		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE); err != nil {
+		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, maxJobHoursByPE); err != nil {
 			return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
 		}
 	}
@@ -235,10 +237,25 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	return nil
 }
 
-// reconcileOne evicts exp only when it has gone silent. Quality is the agent's own call: it
-// reads its metrics and cancels a bad run itself, and quota exhaustion bounds the damage if it
-// doesn't.
-func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration) error {
+// reconcileOne evicts exp when it has gone silent or has outrun the current stage's job-length
+// cap. Quality is the agent's own call: it reads its metrics and cancels a bad run itself, and
+// quota exhaustion bounds the damage if it doesn't.
+func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64) error {
+	if maxHours, ok := maxJobHoursByPE[exp.PlatformExperimentID]; ok {
+		hours, err := c.observedElapsedHours(ctx, exp.ID, now)
+		if err != nil {
+			return fmt.Errorf("stage job length: %w", err)
+		}
+		if hours > maxHours {
+			c.logger.Info("stage job-length cap exceeded",
+				zap.String("exp", exp.ID),
+				zap.Float64("observed_hours", hours),
+				zap.Float64("max_job_hours", maxHours),
+			)
+			return c.evict(ctx, exp, domain.EvictionJobTooLong, now)
+		}
+	}
+
 	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE)
 	if err != nil {
 		return err

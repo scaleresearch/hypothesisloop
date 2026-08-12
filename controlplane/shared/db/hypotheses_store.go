@@ -4,14 +4,24 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
+
+// ErrUnknownAgent is returned when a write references an agent_id that has never registered —
+// a foreign-key violation the caller sent bad data to cause, not a server fault, so callers map
+// it to 4xx rather than 500.
+var ErrUnknownAgent = errors.New("unknown agent_id")
+
+// pgForeignKeyViolation is the PostgreSQL SQLSTATE for a foreign-key constraint violation.
+const pgForeignKeyViolation = "23503"
 
 // defaultHypothesisListLimit and maxHypothesisListLimit bound every ListHypotheses read so a
 // weeks-long platform experiment's accumulated pool can never flood an agent's catch-up read —
@@ -152,8 +162,12 @@ func (s *HypothesesStore) GetHypothesis(ctx context.Context, id string) (*domain
 // first, each carrying its finding/comment counts. Bounded at the store so the endpoint can
 // never return unbounded rows even if a caller forgets a limit: limit <= 0 uses
 // defaultHypothesisListLimit, and any limit above maxHypothesisListLimit is clamped down to
-// it. agentID, if non-empty, restricts the result to that agent's own hypotheses.
-func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, limit int) ([]*HypothesisListItem, error) {
+// it. agentID, if non-empty, restricts the result to that agent's own hypotheses. status, if
+// non-empty, restricts the result to that one status (open/confirmed/inconclusive) — lets a
+// caller pull just the still-actionable rows (open/inconclusive) or just the settled ones
+// (confirmed) instead of paying to fetch and filter the whole pool client-side, which matters
+// once a platform experiment's hypothesis count grows past a single catch-up's easy skim.
+func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit int) ([]*HypothesisListItem, error) {
 	if limit <= 0 {
 		limit = defaultHypothesisListLimit
 	} else if limit > maxHypothesisListLimit {
@@ -165,6 +179,10 @@ func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperiment
 	if agentID != "" {
 		args = append(args, agentID)
 		clauses = append(clauses, fmt.Sprintf("h.agent_id = $%d", len(args)))
+	}
+	if status != "" {
+		args = append(args, status)
+		clauses = append(clauses, fmt.Sprintf("h.status = $%d", len(args)))
 	}
 	args = append(args, limit)
 
@@ -267,6 +285,10 @@ func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesi
 INSERT INTO hypothesis_comments (id, hypothesis_id, agent_id, text, created_at)
 VALUES ($1, $2, $3, $4, $5)`
 	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.AgentID, c.Text, c.CreatedAt); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w: %s", ErrUnknownAgent, agentID)
+		}
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
 	}
 	return c, nil

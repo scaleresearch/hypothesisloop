@@ -1,0 +1,27 @@
+# This experiment's own overlay on the shared agents/experimentator/Dockerfile.base -- see that
+# file's header for what's generic vs. what belongs here. sparse-sdpa is a ttnn workload, so the
+# agent needs tt-metal + TT-NN source to read (compute itself happens in job pods, which have no
+# source tree of their own -- see core.py's WORKLOAD_SAMPLES comment).
+FROM localhost/hypothesisloop-experimentator-base
+
+USER root
+
+# tt-metal + TT-NN source baked in: the agent container has no /dev/tenstorrent (compute happens
+# in job pods running Tenstorrent's release image), so this is here to be *read*, not run — the
+# op sources, kernels and tests the agent needs to form hypotheses about what to change. TT-NN
+# is not a separate repo: it ships inside tt-metal as ttnn/, so one clone baked in covers both
+# (TTNN_SRC below points at it directly). Shallow + blobless: full history/blobs are ~GBs and
+# nothing here needs them; git backfills any blob on demand when the agent actually reads a file.
+# Pinned (not "main" HEAD-at-build-time) and must match seed/Dockerfile.workload,
+# seed/Dockerfile.workload-src and seed/job.yaml's TT_METAL_REF exactly -- job builds-from-source
+# (seed/build_and_run.sh) clone this same rev, so agent and job stay on identical source and only
+# move together when this pin is deliberately bumped in all four places.
+ARG TT_METAL_REF=e45135c5516c6ab18cf855c585d31da684fe64db
+ENV TT_METAL_REF=${TT_METAL_REF}
+ENV TT_METAL_SRC=/opt/tt-metal
+ENV TTNN_SRC=/opt/tt-metal/ttnn
+RUN git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git $TT_METAL_SRC \
+    && git -C $TT_METAL_SRC checkout $TT_METAL_REF \
+    && chown -R agent:agent $TT_METAL_SRC
+
+USER agent

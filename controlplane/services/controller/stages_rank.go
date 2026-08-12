@@ -33,9 +33,17 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 		return nil, nil, err
 	}
 
-	// A stage that cuts nobody, an unrankable field (no metrics), and a field already at the
-	// guardrail floor all mean the same thing here: advance, cut no one.
-	if stage.EvictPct == 0 || len(pe.Metrics) == 0 || len(survivors) < minSurvivorsForCut {
+	rankingMetrics := make([]domain.MetricDefinition, 0, len(pe.Metrics))
+	for _, metric := range pe.Metrics {
+		if metric.EffectiveRole() == domain.MetricRoleRanking {
+			rankingMetrics = append(rankingMetrics, metric)
+		}
+	}
+
+	// A stage that cuts nobody, an unrankable field (no ranking metrics — constraint/attribute
+	// metrics never cut), and a field already at the guardrail floor all mean the same thing
+	// here: advance, cut no one.
+	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < minSurvivorsForCut {
 		return survivors, nil, nil
 	}
 
@@ -43,7 +51,7 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	// cut only if that is every metric that produced usable data.
 	cutCount := make(map[string]int, len(survivors))
 	healthyMetrics := 0
-	for _, metric := range pe.Metrics {
+	for _, metric := range rankingMetrics {
 		cutOnMetric, hadData, err := c.cutOnMetric(ctx, pe.ID, metric, stage, survivors)
 		if err != nil {
 			c.logger.Warn("stages: metric ranking query failed, skipping metric",

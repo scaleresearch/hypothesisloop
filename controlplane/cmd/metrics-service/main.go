@@ -129,7 +129,7 @@ func newRegistryServer(store *db.Store, metricsDBURL, port string, logger *zap.L
 	doc := apidocs.New(outer, "hypothesisloop registry-service", "1.0.0",
 		"Hypotheses, experiment metrics and lineage. See the quota-service /explore for the cross-cutting platform rules.\n")
 	registry.RegisterHuma(doc, handler)
-	doc.MountExplore(outer)
+	doc.MountExploreAudience(outer, "/explore", apidocs.AudienceAgent)
 
 	return &http.Server{
 		Addr:         ":" + port,

@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import { fetchAllHypotheses, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
 import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -12,6 +13,7 @@ import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 
 const STATUS_FILTERS: Array<{ value: HypothesisStatus | ''; label: string }> = [
   { value: '', label: 'All' },
@@ -65,7 +67,7 @@ function HypothesesPageContent() {
     { refreshInterval: 15_000 },
   )
 
-  const list = (() => {
+  const filtered = (() => {
     let all = hypotheses ?? []
     if (peID) all = all.filter(h => h.platform_experiment_id === peID)
     if (agentFilter) all = all.filter(h => h.agent_id === agentFilter)
@@ -78,6 +80,32 @@ function HypothesesPageContent() {
     else router.push('/hypotheses')
   }
 
+  const sortedPEs = useMemo(
+    () => [...(platformExperiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [platformExperiments],
+  )
+  const sortedAgentOptions = useMemo(
+    () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [agents],
+  )
+
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'created_at', desc: true }])
+  const hypothesisColumns = useMemo(() => [
+    { accessorKey: 'text', header: 'Text' },
+    { accessorKey: 'status', header: 'Status' },
+    { accessorKey: 'agent_id', header: 'Registered by' },
+    { accessorKey: 'created_at', header: 'Created' },
+  ], [])
+  const hypothesisTable = useReactTable({
+    data: filtered,
+    columns: hypothesisColumns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  })
+  const list = hypothesisTable.getRowModel().rows.map(r => r.original)
+
   return (
     <div>
       <PageHeader
@@ -86,69 +114,34 @@ function HypothesesPageContent() {
         actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <span className="uppercase-label">Platform Experiment</span>
-        <select
+        <SearchableSelect
           value={peID}
-          onChange={e => setPEFilter(e.target.value)}
-          className="mono"
-          style={{
-            fontSize: 12,
-            padding: '5px 10px',
-            border: '1px solid rgba(255,255,255,.16)',
-            borderRadius: 6,
-            background: 'var(--surface-2)',
-            color: 'var(--foreground)',
-          }}
-        >
-          <option value="">All ({(hypotheses ?? []).length})</option>
-          {(platformExperiments ?? []).map(pe => (
-            <option key={pe.id} value={pe.id}>{pe.name}</option>
-          ))}
-        </select>
+          onChange={setPEFilter}
+          allLabel={`All (${(hypotheses ?? []).length})`}
+          options={sortedPEs.map(pe => ({ value: pe.id, label: pe.name }))}
+        />
         {peID && <Link href="/hypotheses" className="text-link" style={{ fontSize: 12 }}>Clear filter</Link>}
 
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
-        <select
+        <SearchableSelect
           value={agentFilter}
-          onChange={e => setAgentFilter(e.target.value)}
-          className="mono"
-          style={{
-            fontSize: 12,
-            padding: '5px 10px',
-            border: '1px solid rgba(255,255,255,.16)',
-            borderRadius: 6,
-            background: 'var(--surface-2)',
-            color: 'var(--foreground)',
-          }}
-        >
-          <option value="">All agents</option>
-          {(agents ?? []).map(a => (
-            <option key={a.id} value={a.id}>{a.name ?? a.id}</option>
-          ))}
-        </select>
+          onChange={setAgentFilter}
+          allLabel="All agents"
+          options={sortedAgentOptions.map(a => ({ value: a.id, label: a.name ?? a.id }))}
+        />
         {agentFilter && (
           <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
         )}
 
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Status</span>
-        <select
+        <SearchableSelect
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value as HypothesisStatus | '')}
-          className="mono"
-          style={{
-            fontSize: 12,
-            padding: '5px 10px',
-            border: '1px solid rgba(255,255,255,.16)',
-            borderRadius: 6,
-            background: 'var(--surface-2)',
-            color: 'var(--foreground)',
-          }}
-        >
-          {STATUS_FILTERS.map(f => (
-            <option key={f.value} value={f.value}>{f.label}</option>
-          ))}
-        </select>
+          onChange={v => setStatusFilter(v as HypothesisStatus | '')}
+          allLabel="All"
+          options={STATUS_FILTERS.filter(f => f.value !== '').map(f => ({ value: f.value, label: f.label }))}
+        />
       </div>
 
       {isLoading && <Loading />}
@@ -164,11 +157,25 @@ function HypothesesPageContent() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Text</th>
-                <th>Status</th>
+                {(['text', 'status'] as const).map(colId => {
+                  const h = hypothesisTable.getColumn(colId)!
+                  return (
+                    <th key={colId} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={h.getToggleSortingHandler()}>
+                      {String(h.columnDef.header)}
+                      {h.getIsSorted() === 'desc' ? ' ▼' : h.getIsSorted() === 'asc' ? ' ▲' : ''}
+                    </th>
+                  )
+                })}
                 <th>Platform Experiment</th>
-                <th>Registered by</th>
-                <th>Created</th>
+                {(['agent_id', 'created_at'] as const).map(colId => {
+                  const h = hypothesisTable.getColumn(colId)!
+                  return (
+                    <th key={colId} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={h.getToggleSortingHandler()}>
+                      {String(h.columnDef.header)}
+                      {h.getIsSorted() === 'desc' ? ' ▼' : h.getIsSorted() === 'asc' ? ' ▲' : ''}
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>

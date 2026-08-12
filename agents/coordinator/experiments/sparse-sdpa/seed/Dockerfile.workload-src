@@ -1,0 +1,31 @@
+# Variant of Dockerfile.workload for the FROM-SOURCE path (build_and_run.sh).
+#
+# Why this exists: build_and_run.sh's original flow (clone tt-metal from GitHub, then
+# `build_metal.sh` from cold) is ~1GB of fetch plus a full C++ build — far longer than any job
+# length cap an exploratory stage would set, and it repeats in full for every single job because
+# a pod keeps nothing between runs. Every from-source hypothesis therefore died before it ever
+# reached the device.
+#
+# This image bakes in the tt-metal tree at the pinned $TT_METAL_REF *already built*, plus a warm
+# ccache. A job that applies a small tt-metal.patch then rebuilds only touches the handful of
+# translation units the patch changed, so patch -> build -> measure is minutes, not an hour.
+FROM localhost/hypothesisloop-sparse-sdpa-workload:latest
+
+ARG TT_METAL_REF=e45135c5516c6ab18cf855c585d31da684fe64db
+ENV TT_METAL_BUILD_SRC=/opt/tt-metal-build
+ENV CCACHE_DIR=/opt/ccache
+ENV CCACHE_MAXSIZE=20G
+
+RUN apt-get update && apt-get install -y --no-install-recommends ccache && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --recurse-submodules --shallow-submodules \
+      https://github.com/tenstorrent/tt-metal.git ${TT_METAL_BUILD_SRC} \
+ && cd ${TT_METAL_BUILD_SRC} \
+ && git checkout ${TT_METAL_REF} \
+ && git submodule update --init --recursive
+
+RUN cd ${TT_METAL_BUILD_SRC} \
+ && ./build_metal.sh --enable-ccache --build-type Release \
+ && ccache -s
+
+ENTRYPOINT ["/opt/venv/bin/python3", "harness.py"]

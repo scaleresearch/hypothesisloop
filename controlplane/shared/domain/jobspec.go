@@ -85,6 +85,17 @@ type JobSpec struct {
 	// system today; passes straight through to pod resource requests/limits so the job can still
 	// get scheduled onto the right hardware.
 	ExtraResources map[string]string `json:"extra_resources,omitempty" yaml:"extra_resources,omitempty"`
+
+	// HostMounts bind-mounts a static, already-populated directory on whichever node the job
+	// lands on, read-only, into the container — keyed by the container path the job expects to
+	// read it at, valued by the host path on the node. This is the platform's lightweight
+	// hostPath-volume equivalent: for data that already exists on disk out of band (a dataset
+	// fetched once, ahead of time), never a fetch-on-demand cache — if the named host path
+	// doesn't exist on the node a job actually gets placed on, the job fails fast (missing mount)
+	// rather than silently running without the data. Because it's node-local, a job only sees the
+	// mount if it lands on a node that has it; NodeSelector is the tool for pinning a job to nodes
+	// known to carry a given mount. Supported identically by both the k8s and bare-metal backends.
+	HostMounts map[string]string `json:"host_mounts,omitempty" yaml:"host_mounts,omitempty"`
 }
 
 // TopologySpec expresses placement requirements for a distributed job's nodes — the difference

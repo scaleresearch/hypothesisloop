@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
@@ -38,6 +39,9 @@ func main() {
 	// control plane lives outside the cluster (e.g. http://host.docker.internal:8083).
 	registryURL := agentloop.RequiredEnv(binaryName, "REGISTRY_URL")
 	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
+	// Optional: how many trailing log lines to report per job per status push. Not required —
+	// agentloop.DefaultLogTailLines (100) applies when unset.
+	logTailLines, _ := strconv.Atoi(os.Getenv("LOG_TAIL_LINES"))
 
 	jwc, err := k8sexec.New(k8sexec.Config{
 		RegistryURL:                          registryURL,
@@ -72,6 +76,8 @@ func main() {
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
+		LogTailLines:      logTailLines,
+		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
 		Log:               log,
 	}
 	a.Run(ctx)

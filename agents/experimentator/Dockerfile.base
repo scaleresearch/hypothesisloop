@@ -1,3 +1,12 @@
+# Shared base for every experiment's own experimentator image (see
+# agents/coordinator/experiments/<name>/Dockerfile.experimentator, which FROMs this image and
+# layers on that experiment's own runtime source/pins -- tt-metal today, but nothing here assumes
+# that; a non-tt-metal experiment's overlay just skips that layer). Everything below is identical
+# across experiments: the agent harness itself, git/Claude Code plumbing, and the read-only
+# WORKLOAD_SAMPLES reference. Keep experiment-specific source/deps out of this file -- they belong
+# in the per-experiment overlay so one experiment's pin bump can't silently change what every other
+# experiment's agent reads.
+#
 # Thin, deliberately unopinionated: uv-managed deps (claude-agent-sdk bundles its own Claude
 # Code CLI binary, no separate install needed) + curl (the agent will likely reach for it via
 # its Bash tool anyway). No sandboxing of what the agent can do *inside* this container — the
@@ -27,25 +36,14 @@ RUN git config --system credential.helper \
 # therefore required, not optional, for this container to start at all.
 RUN useradd --create-home --shell /bin/bash agent
 
-# tt-metal + TT-NN source baked in: the agent container has no /dev/tenstorrent (compute happens
-# in job pods running Tenstorrent's release image), so this is here to be *read*, not run — the
-# op sources, kernels and tests the agent needs to form hypotheses about what to change. TT-NN
-# is not a separate repo: it ships inside tt-metal as ttnn/, so one clone baked in covers both
-# (TTNN_SRC below points at it directly). Shallow + blobless: full history/blobs are ~GBs and
-# nothing here needs them; git backfills any blob on demand when the agent actually reads a file.
-ENV TT_METAL_SRC=/opt/tt-metal
-ENV TTNN_SRC=/opt/tt-metal/ttnn
-RUN git clone --depth 1 --filter=blob:none \
-    https://github.com/tenstorrent/tt-metal.git $TT_METAL_SRC \
-    && chown -R agent:agent $TT_METAL_SRC
-
-# Build context is the repo root (see Makefile `experimentator-image`) so the task seed
+# Build context is the repo root (see Makefile `experimentator-base-image`) so the experiment seed
 # environments can be baked in: WORKLOAD_SAMPLES is the agent's starting point for what a job
 # workload looks like — read, copy, adapt into its own repo. Sourced from
-# agents/coordinator/tasks/*/seed/, not tests/workloads/ (that tree is test-only fixture code,
-# not agent-facing). Not run here (no device); read-only reference.
+# agents/coordinator/experiments/*/seed/, not tests/workloads/ (that tree is test-only fixture
+# code, not agent-facing). Not run here (no device); read-only reference. Deliberately not
+# experiment-specific: an agent benefits from seeing every experiment's seed, not just its own.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
-COPY agents/coordinator/tasks $WORKLOAD_SAMPLES
+COPY agents/coordinator/experiments $WORKLOAD_SAMPLES
 
 WORKDIR /agent
 COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
@@ -57,5 +55,16 @@ COPY agents/experimentator/src/ src/
 RUN mkdir -p /agent/workspace && chown -R agent:agent /agent
 ENV AGENT_WORKDIR=/agent/workspace
 
+# Pre-create ~/.claude owned by agent: bind-mounting a single file into a path whose parent
+# directory doesn't exist yet (e.g. -v ~/.claude/.credentials.json:/home/agent/.claude/...:ro)
+# makes the container runtime auto-create that directory as root:root, which then blocks the
+# CLI's own writes under it (e.g. session-env) with a permission error. Also run with
+# --userns=keep-id (see coordinator/instructions.md) so a bind-mounted host dotfile's owning
+# UID actually matches the agent user inside the container instead of mapping to root.
+RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+
 USER agent
 ENTRYPOINT ["uv", "run", "python3", "-m", "hypothesisloop_agent"]
+# A per-experiment overlay that needs to install/clone as root (e.g. tt-metal source) must
+# `USER root` for that layer and switch back to `USER agent` itself afterwards -- ENTRYPOINT is
+# inherited as-is and does not need repeating.

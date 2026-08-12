@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperiments, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
+import { fetchExperimentsPage, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
 import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -12,6 +12,8 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Pagination } from '@/components/ui/pagination'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 
@@ -25,6 +27,24 @@ function relTime(iso: string) {
 }
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
+const PAGE_SIZE = 25
+
+type SortKey = 'created_at' | 'priority_score' | 'status'
+
+function SortHeader({ label, sortKey, active, dir, onClick, align }: {
+  label: string
+  sortKey: SortKey
+  active: boolean
+  dir: 'asc' | 'desc'
+  onClick: (k: SortKey) => void
+  align?: 'right'
+}) {
+  return (
+    <th style={{ textAlign: align, cursor: 'pointer', userSelect: 'none' }} onClick={() => onClick(sortKey)}>
+      {label} {active ? (dir === 'desc' ? '▼' : '▲') : ''}
+    </th>
+  )
+}
 
 export default function JobsPage() {
   const router = useRouter()
@@ -32,17 +52,47 @@ export default function JobsPage() {
   const [peFilter, setPEFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [cancelling, setCancelling] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+  const [sortKey, setSortKey] = useState<SortKey>('created_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
+  const sortedAgents = useMemo(
+    () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [agents],
+  )
   const { data: platformExperiments } = useSWR<PlatformExperiment[]>('platform-experiments-all', () => fetchPlatformExperiments())
+  const sortedPEs = useMemo(
+    () => [...(platformExperiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [platformExperiments],
+  )
   const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
 
-  const { data: jobs, error, isLoading, mutate } = useSWR<Experiment[]>(
-    ['jobs', agentFilter, peFilter],
-    () => fetchExperiments({ agent_id: agentFilter || undefined, platform_experiment_id: peFilter || undefined, limit: 200 }),
-    { refreshInterval: 8_000 },
+  function toggleSort(key: SortKey) {
+    setPage(0)
+    if (key === sortKey) {
+      setSortDir(d => (d === 'desc' ? 'asc' : 'desc'))
+    } else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  const sort = `${sortDir === 'desc' ? '-' : ''}${sortKey}`
+
+  const { data, error, isLoading, mutate } = useSWR(
+    ['jobs', agentFilter, peFilter, statusFilter, page, sort],
+    () => fetchExperimentsPage({
+      agent_id: agentFilter || undefined,
+      platform_experiment_id: peFilter || undefined,
+      status: statusFilter || undefined,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+      sort,
+    }),
+    { refreshInterval: 8_000, keepPreviousData: true },
   )
 
   async function handleCancel(e: React.MouseEvent, id: string) {
@@ -59,16 +109,15 @@ export default function JobsPage() {
     }
   }
 
-  const list = jobs ?? []
+  const visible = data?.items ?? []
+  const total = data?.total ?? 0
 
-  const running   = list.filter(j => j.status === 'RUNNING' as any).length
-  const queued    = list.filter(j => ['SUBMITTED', 'QUEUED', 'ADMITTED'].includes(j.status as any)).length
-  const evicted   = list.filter(j => j.status === 'EVICTED' as any).length
-  const completed = list.filter(j => j.status === 'COMPLETED' as any).length
-
-  const visible = statusFilter
-    ? list.filter(j => (statusFilter === 'QUEUED' ? ['SUBMITTED', 'QUEUED', 'ADMITTED'] : [statusFilter]).includes(j.status as any))
-    : list
+  // KPI strip counts the current page only when server-paginated data is all we have loaded —
+  // acceptable here since these are "what's on screen" tiles, not claimed platform totals.
+  const running   = visible.filter(j => j.status === 'RUNNING' as any).length
+  const queued    = visible.filter(j => ['SUBMITTED', 'QUEUED', 'ADMITTED'].includes(j.status as any)).length
+  const evicted   = visible.filter(j => j.status === 'EVICTED' as any).length
+  const completed = visible.filter(j => j.status === 'COMPLETED' as any).length
 
   return (
     <div>
@@ -80,10 +129,10 @@ export default function JobsPage() {
 
       {/* KPI strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
-        <StatTile label="Running" value={running} color={semantic.success} />
-        <StatTile label="Queued / Pending" value={queued} color={semantic.warning} />
-        <StatTile label="Completed" value={completed} color={semantic.accent} />
-        <StatTile label="Evicted" value={evicted} color={semantic.danger} />
+        <StatTile label="Running (page)" value={running} color={semantic.success} />
+        <StatTile label="Queued / Pending (page)" value={queued} color={semantic.warning} />
+        <StatTile label="Completed (page)" value={completed} color={semantic.accent} />
+        <StatTile label="Evicted (page)" value={evicted} color={semantic.danger} />
       </div>
 
       {/* Filters */}
@@ -91,63 +140,33 @@ export default function JobsPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="uppercase-label">Status</span>
           <div style={{ display: 'flex', gap: 6 }}>
-            <Chip active={statusFilter === ''} onClick={() => setStatusFilter('')}>All</Chip>
-            <Chip active={statusFilter === 'RUNNING'} onClick={() => setStatusFilter('RUNNING')}>Running</Chip>
-            <Chip active={statusFilter === 'QUEUED'} onClick={() => setStatusFilter('QUEUED')}>Queued</Chip>
-            <Chip active={statusFilter === 'COMPLETED'} onClick={() => setStatusFilter('COMPLETED')}>Completed</Chip>
-            <Chip active={statusFilter === 'EVICTED'} onClick={() => setStatusFilter('EVICTED')}>Evicted</Chip>
-            <Chip active={statusFilter === 'FAILED'} onClick={() => setStatusFilter('FAILED')}>Failed</Chip>
+            <Chip active={statusFilter === ''} onClick={() => { setStatusFilter(''); setPage(0) }}>All</Chip>
+            <Chip active={statusFilter === 'RUNNING'} onClick={() => { setStatusFilter('RUNNING'); setPage(0) }}>Running</Chip>
+            <Chip active={statusFilter === 'QUEUED'} onClick={() => { setStatusFilter('QUEUED'); setPage(0) }}>Queued</Chip>
+            <Chip active={statusFilter === 'COMPLETED'} onClick={() => { setStatusFilter('COMPLETED'); setPage(0) }}>Completed</Chip>
+            <Chip active={statusFilter === 'EVICTED'} onClick={() => { setStatusFilter('EVICTED'); setPage(0) }}>Evicted</Chip>
+            <Chip active={statusFilter === 'FAILED'} onClick={() => { setStatusFilter('FAILED'); setPage(0) }}>Failed</Chip>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="uppercase-label">Agent</span>
-          <select
+          <SearchableSelect
             value={agentFilter}
-            onChange={e => setAgentFilter(e.target.value)}
-            className="mono"
-            style={{
-              fontSize: 12,
-              padding: '5px 10px',
-              border: '1px solid rgba(255,255,255,.16)',
-              borderRadius: 6,
-              background: 'var(--surface-2)',
-              color: 'var(--foreground)',
-            }}
-          >
-            <option value="">All agents</option>
-            {(agents ?? []).map(a => (
-              <option key={a.id} value={a.id}>{a.name ?? a.id}</option>
-            ))}
-          </select>
-          {agentFilter && (
-            <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
-          )}
+            onChange={v => { setAgentFilter(v); setPage(0) }}
+            allLabel="All agents"
+            options={sortedAgents.map(a => ({ value: a.id, label: a.name ?? a.id }))}
+          />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="uppercase-label">Platform Experiment</span>
-          <select
+          <SearchableSelect
             value={peFilter}
-            onChange={e => setPEFilter(e.target.value)}
-            className="mono"
-            style={{
-              fontSize: 12,
-              padding: '5px 10px',
-              border: '1px solid rgba(255,255,255,.16)',
-              borderRadius: 6,
-              background: 'var(--surface-2)',
-              color: 'var(--foreground)',
-            }}
-          >
-            <option value="">All experiments</option>
-            {(platformExperiments ?? []).map(pe => (
-              <option key={pe.id} value={pe.id}>{pe.name}</option>
-            ))}
-          </select>
-          {peFilter && (
-            <Button variant="link" onClick={() => setPEFilter('')}>Clear</Button>
-          )}
+            onChange={v => { setPEFilter(v); setPage(0) }}
+            allLabel="All experiments"
+            options={sortedPEs.map(pe => ({ value: pe.id, label: pe.name }))}
+          />
         </div>
       </div>
 
@@ -157,7 +176,7 @@ export default function JobsPage() {
       <Pod>
         <PodHeader>
           Job List
-          {visible.length > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({visible.length})</span>}
+          {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
         </PodHeader>
         <PodContent scrollX>
           <table className="wa-table">
@@ -166,14 +185,14 @@ export default function JobsPage() {
                 <th>Job ID</th>
                 <th>Agent</th>
                 <th>Experiment</th>
-                <th>Status</th>
+                <SortHeader label="Status" sortKey="status" active={sortKey === 'status'} dir={sortDir} onClick={toggleSort} />
                 <th>Cluster</th>
                 <th>Tier</th>
                 <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
                 <th style={{ textAlign: 'right' }}>Final Metric</th>
                 <th>Hypothesis</th>
-                <th>Submitted</th>
+                <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} />
                 <th></th>
               </tr>
             </thead>
@@ -278,6 +297,7 @@ export default function JobsPage() {
               })}
             </tbody>
           </table>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </PodContent>
       </Pod>
     </div>

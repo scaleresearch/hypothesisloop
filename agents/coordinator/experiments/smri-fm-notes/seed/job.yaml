@@ -1,0 +1,75 @@
+# Starting-point job definition for smri-fm. Config-only jobs (CLI flags to main_pretrain_tt.py
+# only, no source edit) run straight off `image` below. A structural (tt-metal/tt-train source
+# edit) job uses build_and_run.sh instead of `command` below -- see that script and
+# experiment.md's "expensive path" section.
+#
+# Dataset access: host_mounts below bind-mounts this host's already-fetched dataset
+# (~40GB, agents/coordinator/experiments/smri-fm/datasets/FOMO_with_dwi/) read-only into
+# every job that lands on THIS node, at /data/dataset -- no per-job re-download. This is a
+# node-local hostPath-style mount (both k8s and bare-metal backends support host_mounts
+# identically, see controlplane/shared/domain/jobspec.go), not a cluster-wide shared volume: a
+# job that lands on a *different* node has nothing at that path and must fetch the dataset
+# itself. run_job.sh handles this: it uses the mount if present, and falls back to
+# fetch_dataset.sh (into ephemeral job storage) only if it's missing. If/when this experiment's
+# fleet spans more than this one node, add the same host_mounts path (pointed at that node's own
+# pre-fetched copy) via a per-node job.yaml variant, or accept the fetch-fallback cost on
+# unfamiliar nodes.
+image: localhost/hypothesisloop-smri-fm-workload:latest
+
+# Matches Dockerfile.workload's ENTRYPOINT exactly (also the path the whole project tree is
+# preserved at in the image -- see that Dockerfile's comment on why /build/smri-fm, not /app).
+command: ["/build/smri-fm/seed/run_job.sh"]
+
+# This variant is for THIS host (tt-quietbox) specifically -- host_mounts is a node-local path,
+# not portable. See seed/job.tt-small.yaml for the tt-small-node variant (different host path,
+# same dataset, verified identical by checksum).
+host_mounts:
+  /data/dataset: /home/ttuser/projects/hypothesisloop/agents/coordinator/experiments/smri-fm/datasets/FOMO_with_dwi
+
+# tt-quietbox has 4 chips on one node -- sizing cpu/memory for exclusive use of the whole node
+# (as an earlier version of this file did, cpu:"14") means only ONE job can ever be admitted at a
+# time no matter how many chips are free (hit for real 2026-08-08: a 2nd job sat QUEUED with
+# not_admitted_reason "capacity_unavailable: short cpu:=12435" while 3 of 4 chips were idle).
+# Node allocatable is 16 cpu / ~233Gi memory; kube-system/tt-operator/cluster-agent DaemonSets
+# permanently reserve ~0.335 cpu of that. Sized here so 4 concurrent jobs (one per chip) fit:
+# 4 * 3800m = 15200m (< 15665m usable), 4 * 48Gi = 192Gi (< 233Gi usable) -- real headroom on
+# both dimensions, not an exact saturation. Re-check against `kubectl describe node` if this
+# node's chip count or allocatable ever changes.
+cpu: "3800m"
+memory: "48Gi"
+# Sized for the fetch-fallback case (host_mounts missing on this node): with the dataset
+# host-mounted (the common case here) this is generous headroom for checkpoints (316.2M-param
+# model, a handful of step_*.pt saves at --checkpoint-every) + wandb local buffers. Ephemeral
+# storage on this node is ~3.7TB, so 4 concurrent jobs at 80Gi each is nowhere near a real limit.
+storage: "80Gi"
+max_retries: 3
+
+env:
+  # Must match this experiment's Dockerfile.experimentator's TT_METAL_REF exactly, or a
+  # from-source build (build_and_run.sh) builds against different source than what was read to
+  # form the hypothesis. v0.75.0, commit d9a68815f5fcf08a5bfbffb6f1f811823fba8edd, plus
+  # tenstorrent/patches/vendored-tt-metal-changes.patch (already applied in the image at build
+  # time for the fast/prebuilt path; build_and_run.sh re-applies it for a from-source build).
+  TT_METAL_REF: "d9a68815f5fcf08a5bfbffb6f1f811823fba8edd"
+  HYPOTHESISLOOP_R2_ENV_FILE: "/app/.env"
+  # This host's P300 board is physically dual-chip, but accelerator_count: 1 below only grants
+  # this job one /dev/tenstorrent/<N> device -- UMD then sees "1 chip, expected 2 for board type
+  # p300" and refuses to pick a fabric mesh config on its own (TT_FATAL: custom fabric mesh graph
+  # descriptor path must be specified for CUSTOM cluster type). p100's descriptor is the [1,1]
+  # single-chip shape this needs (p300's own descriptor assumes both chips are visible).
+  TT_MESH_GRAPH_DESC_PATH: "/build/smri-fm/tenstorrent/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto"
+  # main_pretrain_tt.py flags -- change these for a cheap/config-only sweep, never the image.
+  PRESET: "full-vitl-real"
+  STEPS: "6000"
+  BASE_LR: "1.5e-4"
+  WEIGHT_DECAY: "0.05"
+  WARMUP_STEPS: "200"
+  SEED: "0"
+  LOG_EVERY: "10"
+  EVAL_EVERY: "500"
+  CHECKPOINT_EVERY: "500"
+
+accelerator_count: 1
+accelerator_type: tenstorrent.com/chipArch=blackhole
+accelerator_pod_resources:
+  hugepages-1Gi: 4Gi

@@ -21,23 +21,42 @@ func (w *JobWatcher) onStuckPending(ctx context.Context, exp *domain.Experiment)
 		zap.String("id", exp.ID),
 		zap.Duration("timeout", w.stuckPendingTimeout),
 	)
+	w.evictNeverStarted(ctx, exp, domain.EvictionStuckPending)
+}
 
+// onUnschedulable evicts a job whose runtime reported a phase-detail reason in
+// domain.NeverSelfHealsPhaseReasons — a bad image or a malformed container config that will
+// never resolve itself — well before the generic stuckPendingTimeout would otherwise catch it.
+// Checked regardless of exp.Status (see reconcileOne): a Kubernetes Job counts as "Active",
+// and so as RUNNING here, from the moment its pod exists, even while that pod is stuck in
+// ImagePullBackOff and its container has never actually started.
+func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment, reason, message string) {
+	w.logger.Warn("job_watcher: never-self-heals phase detail, evicting",
+		zap.String("id", exp.ID),
+		zap.String("phase_reason", reason),
+		zap.String("phase_message", message),
+	)
+	w.evictNeverStarted(ctx, exp, domain.EvictionUnschedulable)
+}
+
+// evictNeverStarted is the shared body of onStuckPending/onUnschedulable: a job whose container
+// never actually started is evicted. Settle computes observed usage from real metrics either
+// way, so this naturally zeroes out to a full refund when nothing genuinely ran — true for both
+// callers even though onUnschedulable may fire after exp.Status already reads RUNNING.
+func (w *JobWatcher) evictNeverStarted(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
 	updated, err := w.store.TransitionStatus(ctx, exp.ID, exp.Status, domain.StatusEvicted)
 	if err != nil {
-		w.logger.Error("job_watcher: stuck_pending transition", zap.String("id", exp.ID), zap.Error(err))
+		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
 		return
 	}
 	if !updated {
-		// Already moved on (e.g. started running right before this check) — nothing to do.
+		// Already moved on (e.g. finished right before this check) — nothing to do.
 		return
 	}
-	if err := w.store.UpdateEvictionReason(ctx, exp.ID, string(domain.EvictionStuckPending)); err != nil {
+	if err := w.store.UpdateEvictionReason(ctx, exp.ID, string(reason)); err != nil {
 		w.logger.Warn("job_watcher: set eviction reason", zap.String("id", exp.ID), zap.Error(err))
 	}
-	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStuckPending)).Inc()
-
-	// exp never reported RUNNING, so Settle naturally computes 0 elapsed hours, zeroing its
-	// reservation. On failure, services/settlement.Reconciler retries — nothing gets stuck.
+	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
 	w.settleQuota(ctx, exp)
 }
 
@@ -68,7 +87,10 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 		var err error
 		admittedType, err = w.backend.GetAdmittedAcceleratorType(ctx, exp)
 		if err != nil {
-			w.logger.Error("job_watcher: observed accelerator type", zap.String("id", exp.ID), zap.Error(err))
+			// Expected and self-healing: right after Running is first observed, the
+			// cluster-agent may not have recorded which accelerator type it landed on yet.
+			// The next scan tick retries and normally succeeds, so this isn't error-worthy.
+			w.logger.Warn("job_watcher: observed accelerator type not yet available, will retry", zap.String("id", exp.ID), zap.Error(err))
 			return "", false
 		}
 		if admittedType != exp.AcceleratorType {

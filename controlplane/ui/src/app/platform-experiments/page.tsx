@@ -3,8 +3,9 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react'
 import {
-  fetchPlatformExperiments,
+  fetchPlatformExperimentsPage,
   fetchPlatformExperimentQuotas,
   createPlatformExperiment,
   updatePlatformExperiment,
@@ -18,6 +19,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Pagination } from '@/components/ui/pagination'
+import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 
@@ -97,9 +100,7 @@ function ExperimentCard({
       </PodHeader>
 
       <PodContent onClick={() => router.push(`/platform-experiments/${pe.id}`)}>
-        {pe.description && (
-          <p className="text-dim" style={{ fontSize: 13, marginBottom: 12, whiteSpace: 'pre-wrap' }}>{pe.description}</p>
-        )}
+        {pe.description && <CollapsibleDescription text={pe.description} style={{ marginBottom: 12 }} />}
 
         {pe.metrics && pe.metrics.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -113,13 +114,13 @@ function ExperimentCard({
             {pe.stages.map((s, i) => {
               const active = i + 1 === pe.current_stage
               return (
-                <span key={i} className="mono" title={`Stage ${i + 1}: spans ${s.length_pct}% of the run${s.evict_pct > 0 ? `, then cuts ${s.evict_pct}% of survivors` : ', no cut'}`} style={{
+                <span key={i} className="mono" title={`Stage ${i + 1}: spans ${s.length_pct}% of the run${s.evict_pct > 0 ? `, then cuts ${s.evict_pct}% of survivors` : ', no cut'}${s.max_job_hours ? `; no job may run longer than ${s.max_job_hours}h` : '; no job length limit'}`} style={{
                   fontSize: 11, padding: '3px 9px', borderRadius: 999,
                   background: active ? 'rgba(96,165,250,0.12)' : 'var(--surface-2)',
                   border: `1px solid ${active ? semantic.accent : 'var(--border)'}`,
                   color: active ? 'var(--foreground)' : 'var(--muted-fg)',
                 }}>
-                  {s.length_pct}% {s.evict_pct > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}
+                  {s.length_pct}% {s.evict_pct > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}{s.max_job_hours ? ` · ≤${s.max_job_hours}h/job` : ''}
                 </span>
               )
             })}
@@ -241,7 +242,7 @@ interface FormState {
   ends_at: string
   metrics: MetricDefinition[]
   report_interval_seconds: number
-  stages: Stage[]
+  stages: StageDraft[]
 }
 
 // Field wraps one input with its label and the one-line explanation of what it actually does.
@@ -255,25 +256,61 @@ function Field({ label, hint, children }: { label: React.ReactNode; hint?: React
   )
 }
 
-const DEFAULT_STAGES: Stage[] = [{ length_pct: 40, evict_pct: 75 }, { length_pct: 60, evict_pct: 0 }]
+// StageDraft holds what's typed, not what's parsed. A number-typed field cannot represent a
+// half-edited value: clearing it yields "", Number("") is 0, and the input snaps back to 0 before
+// the next digit is typed. Strings let a field be empty while editing; the ladder is parsed once,
+// on submit.
+type StageDraft = { length_pct: string; evict_pct: string; max_job_hours: string }
+
+const DEFAULT_STAGES: StageDraft[] = [
+  { length_pct: '40', evict_pct: '75', max_job_hours: '' },
+  { length_pct: '60', evict_pct: '0', max_job_hours: '' },
+]
+
+function toDrafts(stages: Stage[]): StageDraft[] {
+  return stages.map(s => ({
+    length_pct: String(s.length_pct),
+    evict_pct: String(s.evict_pct),
+    max_job_hours: s.max_job_hours ? String(s.max_job_hours) : '',
+  }))
+}
+
+// An empty max_job_hours means "no limit" and parses to 0; an empty length/evict is a genuine
+// gap that stagesError reports.
+function toStages(drafts: StageDraft[]): Stage[] {
+  return drafts.map(s => ({
+    length_pct: Number(s.length_pct),
+    evict_pct: Number(s.evict_pct),
+    max_job_hours: s.max_job_hours.trim() === '' ? 0 : Number(s.max_job_hours),
+  }))
+}
 
 // stagesError mirrors domain.ValidateStages so the form rejects a bad ladder before the API does.
-function stagesError(stages: Stage[]): string | null {
+function stagesError(stages: StageDraft[]): string | null {
   if (stages.length === 0) return 'Add at least one stage.'
   if (stages.length > 8) return 'At most 8 stages.'
+  if (stages.some(s => s.length_pct.trim() === '' || s.evict_pct.trim() === '')) return 'Every stage needs a length % and an evict %.'
+  if (stages.some(s => !Number.isFinite(Number(s.length_pct)) || !Number.isFinite(Number(s.evict_pct)))) return 'Stage percentages must be numbers.'
   const total = stages.reduce((s, x) => s + Number(x.length_pct), 0)
   if (stages.some(s => Number(s.length_pct) <= 0)) return 'Every stage must be longer than 0%.'
   if (stages.some(s => Number(s.evict_pct) < 0 || Number(s.evict_pct) >= 100)) return 'Evict % must be between 0 and 99.'
-  if (total < 99.999 || total > 100.001) return `Stage lengths must add up to 100% (currently ${total}%).`
+  if (stages.some(s => s.max_job_hours.trim() !== '' && (!Number.isFinite(Number(s.max_job_hours)) || Number(s.max_job_hours) < 0))) return 'Max job hours must be a positive number, or empty for no limit.'
+  if (total < 99.999 || total > 100.001) return `Stage lengths must add up to 100% (currently ${round2(total)}%).`
   if (Number(stages[stages.length - 1].evict_pct) !== 0) return 'The final stage must evict 0% — nothing follows it.'
   return null
 }
 
-function StagesEditor({ stages, onChange }: { stages: Stage[]; onChange: (s: Stage[]) => void }) {
-  const err = stagesError(stages)
-  const total = stages.reduce((s, x) => s + Number(x.length_pct), 0)
+// Length totals are summed from free-typed decimals; 33.33+33.33+33.34 must read as 100, not
+// 99.99999999999999.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
 
-  function setStage(i: number, patch: Partial<Stage>) {
+function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s: StageDraft[]) => void }) {
+  const err = stagesError(stages)
+  const total = round2(stages.reduce((s, x) => s + Number(x.length_pct || 0), 0))
+
+  function setStage(i: number, patch: Partial<StageDraft>) {
     onChange(stages.map((s, idx) => idx === i ? { ...s, ...patch } : s))
   }
 
@@ -281,21 +318,23 @@ function StagesEditor({ stages, onChange }: { stages: Stage[]; onChange: (s: Sta
     <div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
         <Button type="button" size="sm" onClick={() => onChange(DEFAULT_STAGES)}>Platform default (40/75, 60/0)</Button>
-        <Button type="button" size="sm" onClick={() => onChange([{ length_pct: 100, evict_pct: 0 }])}>Single stage, no cuts</Button>
-        <Button type="button" size="sm" onClick={() => onChange([{ length_pct: 20, evict_pct: 50 }, { length_pct: 30, evict_pct: 25 }, { length_pct: 50, evict_pct: 0 }])}>Three stages</Button>
+        <Button type="button" size="sm" onClick={() => onChange([{ length_pct: '100', evict_pct: '0', max_job_hours: '' }])}>Single stage, no cuts</Button>
+        <Button type="button" size="sm" onClick={() => onChange([{ length_pct: '20', evict_pct: '50', max_job_hours: '' }, { length_pct: '30', evict_pct: '25', max_job_hours: '' }, { length_pct: '50', evict_pct: '0', max_job_hours: '' }])}>Three stages</Button>
+        <Button type="button" size="sm" onClick={() => onChange([{ length_pct: '30', evict_pct: '25', max_job_hours: '1' }, { length_pct: '70', evict_pct: '0', max_job_hours: '' }])}>Explore then commit (1h cap, then none)</Button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
         <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>#</span>
         <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Length %</span>
         <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Evict %</span>
+        <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Max job h</span>
         <span />
         {stages.map((s, i) => (
           <React.Fragment key={i}>
             <span className="mono text-dim" style={{ fontSize: 12 }}>{i + 1}</span>
             <input
               style={INPUT_STYLE} type="number" min={0.1} max={100} step={1} value={s.length_pct}
-              onChange={e => setStage(i, { length_pct: Number(e.target.value) })}
+              onChange={e => setStage(i, { length_pct: e.target.value })}
             />
             <input
               style={{ ...INPUT_STYLE, opacity: i === stages.length - 1 ? 0.5 : 1 }}
@@ -303,11 +342,17 @@ function StagesEditor({ stages, onChange }: { stages: Stage[]; onChange: (s: Sta
               value={s.evict_pct}
               disabled={i === stages.length - 1}
               title={i === stages.length - 1 ? 'The final stage cannot evict — nothing follows it' : undefined}
-              onChange={e => setStage(i, { evict_pct: Number(e.target.value) })}
+              onChange={e => setStage(i, { evict_pct: e.target.value })}
+            />
+            <input
+              style={INPUT_STYLE} type="number" min={0} step={0.5} value={s.max_job_hours}
+              placeholder="no limit"
+              title="Longest a single job may run while this stage is current. Leave empty for no limit."
+              onChange={e => setStage(i, { max_job_hours: e.target.value })}
             />
             <button
               type="button"
-              onClick={() => onChange(stages.filter((_, idx) => idx !== i).map((st, idx, arr) => idx === arr.length - 1 ? { ...st, evict_pct: 0 } : st))}
+              onClick={() => onChange(stages.filter((_, idx) => idx !== i).map((st, idx, arr) => idx === arr.length - 1 ? { ...st, evict_pct: '0' } : st))}
               disabled={stages.length <= 1}
               style={{ background: 'none', border: 'none', cursor: stages.length <= 1 ? 'default' : 'pointer', color: 'var(--muted-fg)', opacity: stages.length <= 1 ? 0.3 : 0.7, fontSize: 14 }}
               title="Remove this stage"
@@ -322,8 +367,8 @@ function StagesEditor({ stages, onChange }: { stages: Stage[]; onChange: (s: Sta
           disabled={stages.length >= 8}
           onClick={() => onChange([
             ...stages.slice(0, -1),
-            { ...stages[stages.length - 1], evict_pct: 25 },
-            { length_pct: 0, evict_pct: 0 },
+            { ...stages[stages.length - 1], evict_pct: '25' },
+            { length_pct: '', evict_pct: '0', max_job_hours: '' },
           ])}
         >+ Add stage</Button>
         <span className="mono text-dim" style={{ fontSize: 11, color: Math.abs(total - 100) < 0.001 ? semantic.success : semantic.warning }}>
@@ -464,13 +509,13 @@ function ExperimentModal({
     ends_at: initial?.ends_at ? new Date(initial.ends_at).toISOString().slice(0, 16) : localDatetime(8),
     metrics: initial?.metrics ?? [],
     report_interval_seconds: initial?.report_interval_seconds ?? 30,
-    stages: initial?.stages?.length ? initial.stages : DEFAULT_STAGES,
+    stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
   })
   const [step, setStep] = useState<1 | 2>(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  function set(field: keyof FormState, value: string | number | MetricDefinition[] | Stage[]) {
+  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[]) {
     setForm(f => ({ ...f, [field]: value }))
   }
 
@@ -515,7 +560,7 @@ function ExperimentModal({
         report_interval_seconds: Number(form.report_interval_seconds),
         // Omitted when editing: the backend fixes the ladder at creation and silently ignores
         // it on update, so sending it would imply an edit that never happens.
-        ...(isEdit ? {} : { stages: form.stages.map(s => ({ length_pct: Number(s.length_pct), evict_pct: Number(s.evict_pct) })) }),
+        ...(isEdit ? {} : { stages: toStages(form.stages) }),
         starts_at: new Date(form.starts_at).toISOString(),
         ends_at: new Date(form.ends_at).toISOString(),
       }
@@ -624,7 +669,7 @@ function ExperimentModal({
                   label={isEdit ? 'Stage ladder (fixed at creation)' : 'Stage ladder'}
                   hint={isEdit
                     ? <>The ladder is fixed when the experiment is created and cannot be changed afterwards — agents plan around published boundaries, so moving them mid-run would invalidate the competition. Create a new platform experiment to use a different ladder.</>
-                    : <>The run is split into stages. When a stage ends, that share of the <em>surviving</em> agents with the worst metrics is cut: their jobs stop, they cannot resubmit, and their unspent budget is redistributed to the survivors. Lengths must total 100%, and the final stage always evicts 0% because nothing follows it. Cuts are skipped entirely while 4 or fewer agents remain, so a small roster advances without eliminations.</>}
+                    : <>The run is split into stages. When a stage ends, that share of the <em>surviving</em> agents with the worst metrics is cut: their jobs stop, they cannot resubmit, and their unspent budget is redistributed to the survivors. Lengths must total 100%, and the final stage always evicts 0% because nothing follows it. Cuts are skipped entirely while 4 or fewer agents remain, so a small roster advances without eliminations. <strong>Max job h</strong> caps how long any single job may run during a stage (leave empty for no limit): a short cap early forces agents to explore with many small runs, and lifting it later lets the surviving ideas be validated with long ones. It is enforced — over-long submissions are rejected, and a job that outruns the cap is evicted.</>}
                 >
                   {isEdit ? (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -633,7 +678,7 @@ function ExperimentModal({
                           fontSize: 11, padding: '3px 9px', borderRadius: 999,
                           background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted-fg)',
                         }}>
-                          {i + 1}: {s.length_pct}% {s.evict_pct > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}
+                          {i + 1}: {s.length_pct}% {Number(s.evict_pct) > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}{s.max_job_hours ? ` · ≤${s.max_job_hours}h/job` : ''}
                         </span>
                       ))}
                     </div>
@@ -675,21 +720,75 @@ function ExperimentModal({
 
 // ---- Page ----
 
+const PAGE_SIZE = 10
+
+const SORT_OPTIONS = [
+  { value: '-created_at', label: 'Newest first' },
+  { value: 'created_at', label: 'Oldest first' },
+  { value: 'name', label: 'Name (A–Z)' },
+  { value: '-name', label: 'Name (Z–A)' },
+]
+
+function SortListbox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const current = SORT_OPTIONS.find(o => o.value === value) ?? SORT_OPTIONS[0]
+  return (
+    <Listbox value={value} onChange={onChange} as="div" style={{ position: 'relative' }}>
+      <ListboxButton
+        className="mono"
+        style={{
+          fontSize: 12, padding: '5px 10px', border: '1px solid rgba(255,255,255,.16)', borderRadius: 6,
+          background: 'var(--surface-2)', color: 'var(--foreground)', cursor: 'pointer', minWidth: 140, textAlign: 'left',
+        }}
+      >
+        Sort: {current.label}
+      </ListboxButton>
+      <ListboxOptions
+        style={{
+          position: 'absolute', zIndex: 20, top: '100%', left: 0, marginTop: 4, minWidth: 160,
+          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-raised)',
+          boxShadow: 'var(--shadow-lg)', padding: 4,
+        }}
+      >
+        {SORT_OPTIONS.map(o => (
+          <ListboxOption key={o.value} value={o.value} className="mono">
+            {({ focus, selected }: { focus: boolean; selected: boolean }) => (
+              <div style={{
+                fontSize: 12, padding: '6px 8px', borderRadius: 4, cursor: 'pointer',
+                background: focus ? 'var(--surface-2)' : 'transparent',
+                color: selected ? 'var(--accent-light)' : 'var(--foreground)',
+              }}>
+                {o.label}
+              </div>
+            )}
+          </ListboxOption>
+        ))}
+      </ListboxOptions>
+    </Listbox>
+  )
+}
+
 export default function PlatformExperimentsPage() {
   const [statusFilter, setStatusFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState('-created_at')
+  const [page, setPage] = useState(0)
   const [modal, setModal] = useState<{ open: boolean; editing?: PlatformExperiment | null }>({ open: false })
 
-  const { data: experiments, error, isLoading, mutate } = useSWR<PlatformExperiment[]>(
-    ['platform-experiments', statusFilter],
-    () => fetchPlatformExperiments(statusFilter || undefined),
-    { refreshInterval: 10_000 },
+  const { data, error, isLoading, mutate } = useSWR(
+    ['platform-experiments', statusFilter, search, sort, page],
+    () => fetchPlatformExperimentsPage({
+      status: statusFilter || undefined,
+      q: search || undefined,
+      sort,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    }),
+    { refreshInterval: 10_000, keepPreviousData: true },
   )
 
+  const experiments = data?.items ?? []
+  const total = data?.total ?? 0
   const statuses = ['', 'open', 'running', 'draft', 'closed']
-  const counts = (experiments ?? []).reduce((acc, pe) => {
-    acc[pe.status] = (acc[pe.status] ?? 0) + 1
-    return acc
-  }, {} as Record<string, number>)
 
   return (
     <div>
@@ -712,33 +811,36 @@ export default function PlatformExperimentsPage() {
         }
       />
 
-      {experiments && experiments.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-          {(['open', 'running', 'draft', 'closed'] as const).map(s => (
-            counts[s] ? (
-              <Badge key={s} status={s} style={{ fontSize: 12, padding: '3px 10px' }}>
-                {counts[s]} {s}
-              </Badge>
-            ) : null
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {statuses.map(s => (
+            <Chip key={s} active={statusFilter === s} onClick={() => { setStatusFilter(s); setPage(0) }}>
+              {s || 'All'}
+            </Chip>
           ))}
         </div>
-      )}
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-        {statuses.map(s => (
-          <Chip key={s} active={statusFilter === s} onClick={() => setStatusFilter(s)}>
-            {s || 'All'}
-          </Chip>
-        ))}
+        <input
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(0) }}
+          placeholder="Search name or description…"
+          className="mono"
+          style={{
+            fontSize: 12, padding: '5px 10px', border: '1px solid rgba(255,255,255,.16)', borderRadius: 6,
+            background: 'var(--surface-2)', color: 'var(--foreground)', minWidth: 220,
+          }}
+        />
+
+        <SortListbox value={sort} onChange={v => { setSort(v); setPage(0) }} />
       </div>
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Failed to load platform experiments — is the stack running?</ErrorMessage>}
 
-      {experiments && experiments.length === 0 && (
+      {!isLoading && experiments.length === 0 && (
         <Pod>
           <PodContent style={{ textAlign: 'center', padding: 24 }}>
-            <span className="text-dim">No platform experiments found.</span>{' '}
+            <span className="text-dim">No platform experiments found{search ? ` matching "${search}"` : ''}.</span>{' '}
             <Button variant="link" onClick={() => setModal({ open: true })}>
               Create the first one.
             </Button>
@@ -746,13 +848,15 @@ export default function PlatformExperimentsPage() {
         </Pod>
       )}
 
-      {experiments?.map(pe => (
+      {experiments.map(pe => (
         <ExperimentCard
           key={pe.id}
           pe={pe}
           onEdit={pe => setModal({ open: true, editing: pe })}
         />
       ))}
+
+      <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
     </div>
   )
 }

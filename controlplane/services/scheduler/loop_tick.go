@@ -50,6 +50,17 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("node labels: %w", err)
 	}
+	// Installed (not free) capacity, read only when the disbalance evictor is enabled — it is
+	// the sole consumer, and an extra metrics query every tick is not worth paying for a pass
+	// that is off. Clusters missing a fresh report are absent here, which disables the pass for
+	// exactly those clusters (see evictDisbalanced).
+	var totalCapacity map[string]domain.Footprint
+	if l.evictor != nil && l.disbalanceTolerance > 0 {
+		totalCapacity, err = l.workload.GetTotalCapacity(ctx)
+		if err != nil {
+			return fmt.Errorf("total capacity: %w", err)
+		}
+	}
 
 	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
 	// ADMITTED/RUNNING). No second reservation or live-usage subtraction here — either would
@@ -68,11 +79,33 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 3a. Enforce the summary gate: skip agents with COMPLETED experiments missing a summary.
 	// The gate also runs at submission time, but a batch submitted before any run completes is
 	// already QUEUED, so re-check here to pause the rest until summaries are written.
+	// 3b. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
+	// was running must not slip through after the ladder tightened. Held, not rejected — a later
+	// stage may lift the cap, and then it admits normally.
 	summaryBlocked := map[string]bool{} // key: agentID+"/"+platformExpID
+	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
 	filtered := queued[:0]
 	for _, exp := range queued {
 		if exp.PlatformExperimentID == "" {
 			filtered = append(filtered, exp)
+			continue
+		}
+		limit, seen := maxJobHours[exp.PlatformExperimentID]
+		if !seen {
+			pe, err := l.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
+			if err != nil {
+				return fmt.Errorf("stage job length for %s: %w", exp.ID, err)
+			}
+			if pe == nil {
+				return fmt.Errorf("stage job length for %s: platform experiment %s not found", exp.ID, exp.PlatformExperimentID)
+			}
+			limit = pe.CurrentMaxJobHours()
+			maxJobHours[exp.PlatformExperimentID] = limit
+		}
+		if limit > 0 && exp.EstimatedDurationHours > limit {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedJobTooLong); err != nil {
+				return err
+			}
 			continue
 		}
 		cut, err := l.store.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID)
@@ -157,8 +190,11 @@ func (l *Loop) tick(ctx context.Context) error {
 			if err := l.preempt(ctx, shortage, burstRunning, exp); err != nil {
 				l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 			}
+			if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
+				l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp)); err != nil {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp, shortage)); err != nil {
 				return err
 			}
 			continue
@@ -228,8 +264,11 @@ func (l *Loop) tick(ctx context.Context) error {
 			cluster = clusterWithBestFit(bAvail, fp)
 		}
 		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeLabels[cluster], exp) {
+			if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
+				l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp)); err != nil {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp, nil)); err != nil {
 				return err
 			}
 			continue
@@ -254,11 +293,18 @@ func (l *Loop) tick(ctx context.Context) error {
 	return nil
 }
 
-func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint) string {
+func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint, shortage domain.Footprint) string {
 	for key := range footprint {
 		if current[key] < initial[key] {
 			return domain.NotAdmittedOutranked
 		}
+	}
+	// The shortfall vector is otherwise only visible in the scheduler's own logs (see the
+	// "guaranteed job needs preemption" log a few lines above this call site) -- a submitter has
+	// no other way to tell "your request is oversized for this cluster" from "the cluster is
+	// just busy right now", and no way to self-diagnose which resource to shrink.
+	if len(shortage) > 0 {
+		return domain.NotAdmittedCapacityUnavailable + ": short " + footprintStr(shortage)
 	}
 	return domain.NotAdmittedCapacityUnavailable
 }
@@ -327,6 +373,33 @@ func shortfall(avail domain.Footprint, footprint domain.Footprint) domain.Footpr
 	return out
 }
 
+// foldLookup is map[key] with a case-insensitive fallback (see domain.AcceleratorType.MatchesLabels).
+func foldLookup(m map[string]int64, key string) int64 {
+	if v, ok := m[key]; ok {
+		return v
+	}
+	for k, v := range m {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return 0
+}
+
+// foldMatchingKey returns the key in m matching want case-insensitively, or want itself if
+// none matches (a subsequent m[want] lookup then correctly misses/reads zero).
+func foldMatchingKey(m map[string]int64, want string) string {
+	if _, ok := m[want]; ok {
+		return want
+	}
+	for k := range m {
+		if strings.EqualFold(k, want) {
+			return k
+		}
+	}
+	return want
+}
+
 // preemptionShortfall keeps accelerator availability in the placement domain declared by the
 // job. Cluster-level extended-resource totals combine devices from nodes with different labels,
 // so they cannot answer whether (for example) A100 capacity is available when L40 capacity is
@@ -336,11 +409,11 @@ func preemptionShortfall(clusterAvail domain.Footprint, byNode map[string]map[st
 	if exp.Job.AcceleratorCount <= 0 {
 		return out
 	}
-	key := string(exp.AcceleratorType)
+	key := strings.ToLower(string(exp.AcceleratorType))
 	capacities := make([]int64, 0, len(byNode))
 	for node, capacity := range byNode {
 		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			capacities = append(capacities, capacity[key])
+			capacities = append(capacities, foldLookup(capacity, key))
 		}
 	}
 	sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
@@ -499,11 +572,16 @@ func reservePlacement(byNode map[string]map[string]int64, labelsByNode map[strin
 	used := make(map[string]bool)
 	for rank := 0; rank < exp.Job.Nodes(); rank++ {
 		selected := ""
+		var nodeKey string
 		for _, node := range nodes {
 			if requiresDistinctHosts(exp) && used[node] {
 				continue
 			}
-			if byNode[node][key] >= int64(exp.Job.AcceleratorCount) {
+			// byNode retains each device's own raw driver-reported casing (see
+			// domain.AcceleratorType.MatchesLabels re: casing) — find the matching key
+			// case-insensitively rather than assuming it equals key verbatim.
+			nodeKey = foldMatchingKey(byNode[node], key)
+			if byNode[node][nodeKey] >= int64(exp.Job.AcceleratorCount) {
 				selected = node
 				break
 			}
@@ -511,7 +589,7 @@ func reservePlacement(byNode map[string]map[string]int64, labelsByNode map[strin
 		if selected == "" {
 			return false
 		}
-		byNode[selected][key] -= int64(exp.Job.AcceleratorCount)
+		byNode[selected][nodeKey] -= int64(exp.Job.AcceleratorCount)
 		used[selected] = true
 	}
 	return true

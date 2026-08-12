@@ -151,7 +151,11 @@ func newQuotaServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStor
 	// with the cross-cutting platform-rules preamble (agents talk to quota first).
 	doc := apidocs.New(r, "hypothesisloop quota-service", "1.0.0", apidocs.PlatformRules)
 	quota.RegisterHuma(doc, handler, peHandler)
-	doc.MountExplore(r)
+	// /explore is what the research agent fetches into its own system prompt at startup — it
+	// must contain nothing an agent isn't permitted to call, so it's the agent-only digest.
+	// /explore/coordinator is the same registrations' operator/dashboard-admin-only view.
+	doc.MountExploreAudience(r, "/explore", apidocs.AudienceAgent)
+	doc.MountExploreAudience(r, "/explore/coordinator", apidocs.AudienceCoordinator)
 	r.Handle("/metrics", promhttp.Handler())
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -204,7 +208,8 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
+		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep).
+		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 
 	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run
@@ -246,7 +251,8 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 	schedDoc := apidocs.New(outer, "hypothesisloop scheduler-service", "1.0.0",
 		"Job submission and experiment lifecycle. See the quota-service /explore for the cross-cutting platform rules.\n")
 	scheduler.RegisterHuma(schedDoc, schedulerHandler)
-	schedDoc.MountExplore(outer)
+	schedDoc.MountExploreAudience(outer, "/explore", apidocs.AudienceAgent)
+	schedDoc.MountExploreAudience(outer, "/explore/coordinator", apidocs.AudienceCoordinator)
 
 	return &http.Server{
 		Addr:         ":" + port,

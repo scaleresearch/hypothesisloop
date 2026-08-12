@@ -17,6 +17,7 @@ package k8sexec
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -100,9 +101,11 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	reg := cfg.RegistryURL
 	defaultGrace := int64(cfg.DefaultTerminationGracePeriodSeconds)
 	maxGrace := int64(cfg.MaxTerminationGracePeriodSeconds)
+	// Lowercased: real driver-reported casing and hypothesisloop.yaml's casing can differ for
+	// the same hardware (see domain.AcceleratorType.MatchesLabels).
 	priced := make(map[string]bool, len(cfg.PricedAcceleratorTypes))
 	for _, name := range cfg.PricedAcceleratorTypes {
-		priced[name] = true
+		priced[strings.ToLower(name)] = true
 	}
 	return &JobWorkloadClient{
 		kube:                                 kube,

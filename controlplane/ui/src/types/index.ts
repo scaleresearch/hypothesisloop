@@ -144,6 +144,11 @@ export interface MetricDefinition {
   key: string
   direction: 'maximize' | 'minimize'
   description?: string
+  // role decides what this metric is for: ranking (counts for cuts/standings, the default when
+  // omitted), constraint (must satisfy bound or the job is excluded from standings), attribute
+  // (shown, never ranked). See docs/stages.md.
+  role?: 'ranking' | 'constraint' | 'attribute'
+  bound?: number
 }
 
 export interface PlatformExperiment {
@@ -164,7 +169,7 @@ export interface PlatformExperiment {
   starts_at?: string
   ends_at?: string
   status: PlatformExperimentStatus
-  stages: Array<{ length_pct: number; evict_pct: number }>  // the elimination ladder
+  stages: Array<{ length_pct: number; evict_pct: number; max_job_hours?: number }>  // the elimination ladder
   current_stage: number               // 1-based index into stages
   signup_count: number
   signed_up_agents?: string[]

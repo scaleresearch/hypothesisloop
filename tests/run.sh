@@ -25,9 +25,10 @@ SLOW_TESTS=(
   preemption-requeue
 )
 
-# Needs real Tenstorrent hardware — excluded unless explicitly requested.
+# Needs real accelerator hardware — excluded unless explicitly requested.
 HARDWARE_ONLY=(
   tenstorrent-hardware
+  nvidia-hardware
 )
 
 is_exclusive() {

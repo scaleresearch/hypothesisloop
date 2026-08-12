@@ -65,6 +65,16 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	// 3aa. Stage job-length cap. Rejecting at submit is the honest half of the gate — the agent
+	// learns the limit before spending anything. The controller enforces the other half against
+	// observed runtime, since estimated_duration_hours is a claim, not a guarantee.
+	if maxHours := pe.CurrentMaxJobHours(); maxHours > 0 && exp.EstimatedDurationHours > maxHours {
+		return &AdmissionError{
+			Reason:  ReasonJobTooLong,
+			Message: fmt.Sprintf("estimated_duration_hours %g exceeds the %g h per-job limit of stage %d — split the work into shorter runs, or wait for a later stage (see GET /platform-experiments/{id}/stages)", exp.EstimatedDurationHours, maxHours, pe.CurrentStage),
+		}
+	}
+
 	// 3a. Summary gate: block submissions when the agent has COMPLETED experiments without
 	// a summary. Only successful runs are gated — FAILED/EVICTED are excluded because
 	// documenting infrastructure failures adds little signal and unfairly penalises noisy
