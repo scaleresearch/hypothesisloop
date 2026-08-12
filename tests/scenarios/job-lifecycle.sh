@@ -28,7 +28,9 @@ S=$(wait_for_status "$STUCK" "RUNNING,COMPLETED,FAILED,EVICTED,REJECTED" 20 || t
 S=$(get_status "$STUCK")
 if [[ "$S" == "QUEUED" ]]; then
 	pass "stayed QUEUED — never falsely admitted for an unsatisfiable request"
-	[[ "$(get_field "$STUCK" not_admitted_reason)" == "capacity_unavailable" ]] \
+	# The reason is a code optionally followed by ": <detail>" naming what was short, so match the
+	# code rather than the whole string.
+	[[ "$(get_field "$STUCK" not_admitted_reason)" == capacity_unavailable* ]] \
 		&& pass "current PostgreSQL scheduler decision explains the queue state (capacity_unavailable)" \
 		|| fail "queued unsatisfiable job has wrong not_admitted_reason=$(get_field "$STUCK" not_admitted_reason)"
   sleep 5

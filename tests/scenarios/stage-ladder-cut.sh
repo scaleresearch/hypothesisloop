@@ -28,7 +28,7 @@ JOB_HOURS=0.0084
 # time the boundary trips, so the cut is drawn from real data rather than from whoever started
 # first. It also leaves each agent 0.075*0.2/6 = 0.0025 guaranteed AccH, comfortably above one
 # job's ~0.0021, so nothing queues behind quota instead of running.
-BUDGET=0.075
+BUDGET=$(scale_budget 0.075)
 PE_ID=$(create_platform_experiment "stage-ladder-${RUN_ID}" "$BUDGET" "${#AGENTS[@]}" 10 0 "" "$STAGES")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 

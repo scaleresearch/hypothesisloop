@@ -12,7 +12,7 @@ source "$DIR/../lib/api.sh"
 
 AGENTS=("agent-alpha-${RUN_ID}" "agent-beta-${RUN_ID}" "agent-gamma-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
-PE_ID=$(create_platform_experiment "stages-settlement-${RUN_ID}" 0.03 "${#AGENTS[@]}")
+PE_ID=$(create_platform_experiment "stages-settlement-${RUN_ID}" "$(scale_budget 0.03)" "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
 declare -a JOBS
