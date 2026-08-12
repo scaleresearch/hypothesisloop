@@ -93,3 +93,4 @@ vendor/
 # vendored toolchains) cloned in place, not content of this repo. Only the coordinator's
 # own experiment.md/seed/ files under agents/coordinator/experiments/<name>/ are tracked.
 agents/coordinator/experiments/smri-fm/
+agents/coordinator/experiments/smri-fm-notes/
