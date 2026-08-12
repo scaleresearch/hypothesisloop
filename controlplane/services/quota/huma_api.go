@@ -138,6 +138,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Body       []*domain.PlatformExperiment
 		TotalCount int `header:"X-Total-Count"`
 	}, error) {
+		if in.Status != "" && !domain.ValidPlatformExperimentStatus(domain.PlatformExperimentStatus(in.Status)) {
+			return nil, huma.Error400BadRequest("unknown status " + in.Status)
+		}
 		filter := db.PlatformExperimentsFilter{
 			Status: in.Status,
 			Search: in.Search,

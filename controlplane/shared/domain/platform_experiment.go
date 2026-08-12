@@ -14,6 +14,18 @@ const (
 	PlatformExpClosed  PlatformExperimentStatus = "closed"
 )
 
+// ValidPlatformExperimentStatus reports whether s is one of the recognized statuses. As with
+// ValidExperimentStatus, filtering on an unrecognized value would otherwise reach Postgres as a
+// bad enum literal and surface as a 500.
+func ValidPlatformExperimentStatus(s PlatformExperimentStatus) bool {
+	switch s {
+	case PlatformExpOpen, PlatformExpRunning, PlatformExpClosed:
+		return true
+	default:
+		return false
+	}
+}
+
 // MetricRole classifies what a declared MetricDefinition is for. Declaring a metric no longer
 // implies it's ranked — see MetricDefinition.Role.
 type MetricRole string

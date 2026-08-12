@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -112,5 +114,49 @@ func TestListExperimentsDefaultsToNoFilter(t *testing.T) {
 	}
 	if (spy.gotList != domain.ExperimentFilter{}) {
 		t.Errorf("bare list built filter %+v, want the zero filter", spy.gotList)
+	}
+}
+
+// The original defect was an unrecognized filter being ignored: the caller believed it had
+// filtered and read the whole table instead. Unknown params must be refused, not dropped.
+func TestUnknownQueryParameterIsRejected(t *testing.T) {
+	spy := &filterSpyStore{}
+	r := schedulerRouter(spy)
+
+	code, body := get(t, r, "/experiments?platfrom_experiment_id=pe-1")
+	if code != http.StatusUnprocessableEntity && code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 4xx for an unknown query param; body=%s", code, body)
+	}
+	if !strings.Contains(body, "platfrom_experiment_id") {
+		t.Errorf("error should name the offending param, got: %s", body)
+	}
+}
+
+func TestKnownQueryParametersStillAccepted(t *testing.T) {
+	spy := &filterSpyStore{}
+	r := schedulerRouter(spy)
+
+	for _, q := range []string{
+		"/experiments",
+		"/experiments?agent=a1",
+		"/experiments?platform_experiment_id=pe-1&status=RUNNING&search=x&limit=1&offset=0&sort=-created_at",
+	} {
+		if code, body := get(t, r, q); code != 200 {
+			t.Errorf("GET %s = %d, want 200; body=%s", q, code, body)
+		}
+	}
+}
+
+// status is a Postgres enum, so an unrecognized value used to reach the driver and surface as a
+// 500 — a client mistake reported as a server fault.
+func TestUnknownStatusIsClientError(t *testing.T) {
+	r := schedulerRouter(&filterSpyStore{})
+	if code, body := get(t, r, "/experiments?status=bogus"); code != http.StatusBadRequest {
+		t.Fatalf("status=bogus returned %d, want 400; body=%s", code, body)
+	}
+	for _, s := range []string{"QUEUED", "RUNNING", "COMPLETED", "EVICTED", "REJECTED", "FAILED", "SUBMITTED", "ADMITTED"} {
+		if code, body := get(t, r, "/experiments?status="+s); code != 200 {
+			t.Errorf("status=%s returned %d, want 200; body=%s", s, code, body)
+		}
 	}
 }
