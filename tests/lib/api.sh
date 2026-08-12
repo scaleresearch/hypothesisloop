@@ -42,7 +42,7 @@ create_platform_experiment() {
     \"report_interval_seconds\": $report_interval,
     \"starts_at\": \"0001-01-01T00:00:00Z\",
     \"ends_at\": \"0001-01-01T00:00:00Z\"
-  }" | py "import sys,json; print(json.load(sys.stdin)['id'])"
+  }" | py "import sys,json; print(json.load(sys.stdin)['id'])" | tee -a "$CREATED_PE_LOG"
 }
 
 # signup_and_start PE_ID AGENT...

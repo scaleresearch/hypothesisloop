@@ -37,7 +37,36 @@ TEST_ACCELERATOR_POD_RESOURCES="${TEST_ACCELERATOR_POD_RESOURCES:-}"
 RUN_ID="$(date +%s)-$$"
 
 TMPDIR_T="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR_T"' EXIT
+
+# Every platform experiment a scenario creates is recorded here (a file, not an array: the
+# create call runs in a $(...) subshell, so an array assignment would not survive it).
+CREATED_PE_LOG="${TMPDIR_T}/created-platform-experiments"
+: > "$CREATED_PE_LOG"
+
+# A scenario that dies mid-way — a failed assertion, the suite's timeout, an operator ^C — used
+# to leave its platform experiment `running`. That is not leftover noise: a running platform
+# experiment still admits jobs, so it keeps competing for the same accelerators as a real run.
+# Close them however the scenario exits.
+cleanup_created_platform_experiments() {
+  [[ -s "$CREATED_PE_LOG" ]] || return 0
+  local pe
+  while read -r pe; do
+    [[ -n "$pe" ]] || continue
+    curl -sf -m 10 -X POST "$API_URL/platform-experiments/${pe}/close" \
+      -H 'Content-Type: application/json' -d '{}' >/dev/null 2>&1 || true
+  done < "$CREATED_PE_LOG"
+}
+
+on_exit() {
+  local rc=$?
+  cleanup_created_platform_experiments
+  rm -rf "$TMPDIR_T"
+  return "$rc"
+}
+trap on_exit EXIT
+# Without these a ^C or the suite's `timeout` kills the shell without running the EXIT trap.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 py() { python3 -c "$@"; }
 
