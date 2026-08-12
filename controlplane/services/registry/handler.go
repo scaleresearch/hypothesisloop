@@ -46,22 +46,10 @@ type hypothesisWithJobs struct {
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	// ---- experiments (registry records) ----
 
-	// Listing lives on the scheduler service only (GET /experiments) — same table, same filters;
-	// no second endpoint duplicating it here. Use SCHED_URL for listing/filtering/search/
-	// pagination, REGISTRY_URL for a single experiment's phase_detail, lineage, metrics and logs.
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "registry-get-experiment", Method: "GET", Path: "/registry/experiments/{id}",
-		Summary: "Get a registered experiment", Tags: []string{"experiments"},
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct{ Body *domain.Experiment }, error) {
-		exp, err := h.svc.Get(ctx, in.ID)
-		if err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &struct{ Body *domain.Experiment }{Body: exp}, nil
-	})
+	// Reading experiments — the list and a single row, both with phase_detail — lives on the
+	// scheduler service only (GET /experiments, GET /experiments/{id}); no endpoint duplicating
+	// it here. What is unique to the registry is what hangs off an experiment: its lineage,
+	// metrics, logs and hypotheses.
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-get-lineage", Method: "GET", Path: "/registry/experiments/{id}/lineage",

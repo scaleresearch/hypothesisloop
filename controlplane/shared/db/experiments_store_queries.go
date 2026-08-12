@@ -14,7 +14,7 @@ func (s *ExperimentsStore) GetLineage(ctx context.Context, id string) ([]*domain
 WITH RECURSIVE lineage AS (
 	SELECT` + experimentColumns + `FROM experiments WHERE id = $1
 	UNION ALL
-	SELECT` + experimentColumns + `FROM experiments e
+	SELECT` + experimentColumnsQualified + `FROM experiments e
 	INNER JOIN lineage l ON e.id = l.parent_id
 )
 SELECT` + experimentColumns + `FROM lineage ORDER BY created_at ASC`

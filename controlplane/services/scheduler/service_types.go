@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -104,6 +106,10 @@ type Service struct {
 	credits    domain.CreditConfig
 	loop       Triggerable
 	settler    QuotaSettler
+	// metricsDBURL enables phase_detail enrichment on experiment reads. Empty disables it: the
+	// detail is diagnostic, so a read still succeeds without it.
+	metricsDBURL string
+	logger       *zap.Logger
 }
 
 // NewService constructs a Scheduler Service with the provided dependencies and
@@ -135,6 +141,13 @@ func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 // WithQuotaSettler wires the one canonical metrics-based terminal accounting path.
 func (s *Service) WithQuotaSettler(settler QuotaSettler) *Service {
 	s.settler = settler
+	return s
+}
+
+// WithPhaseDetail enables merging the runtime's latest phase detail into experiment reads.
+func (s *Service) WithPhaseDetail(metricsDBURL string, logger *zap.Logger) *Service {
+	s.metricsDBURL = metricsDBURL
+	s.logger = logger
 	return s
 }
 

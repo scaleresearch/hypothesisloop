@@ -202,7 +202,8 @@ func newSchedulerServer(pool *db.Pool, store *db.Store, peFullStore *db.Platform
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store).
 		WithQuotaConfig(quotaCfg).
-		WithQuotaSettler(settler)
+		WithQuotaSettler(settler).
+		WithPhaseDetail(metricsDBURL, logger)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
 		WithReprioritizer(schedulerSvc).
