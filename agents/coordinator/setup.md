@@ -15,9 +15,8 @@ shown. Resolve against the live environment, never guess.
     KUBE_CONTEXT=k3s-tt
     NODE_NAME=tt-quietbox
     CHIP_ARCH=tenstorrent.com/chipArch=blackhole
-    QUOTA_URL=http://localhost:8081            # resource-catalog + platform-experiment CRUD
-    SCHED_URL=http://localhost:8082            # job submission, /experiments/*
-    REGISTRY_URL=http://localhost:8083         # hypothesis/metric registry
+    API_URL=http://localhost:8081              # the whole API: platform experiments, jobs,
+                                               # hypotheses, metrics, resource catalog
     METRICS_URL=http://localhost:8084
     CODE_REPO_URL=<set below>
     GIT_TOKEN=<set below>
@@ -36,7 +35,7 @@ silently improvise.
    persistent `CLAUDE_CODE_OAUTH_TOKEN` (gitignored) if present. Missing file → step 3 falls back
    to mounted dotfiles.
 1. **Capacity.** `lib_attach_node $KUBE_CONTEXT $NODE_NAME` (`localdev/lib/node.sh`, not manual
-   kubectl). Confirm `GET $QUOTA_URL/resource-catalog/capacity` shows `$CHIP_ARCH` with >=
+   kubectl). Confirm `GET $API_URL/resource-catalog/capacity` shows `$CHIP_ARCH` with >=
    `NUM_AGENTS*CHIPS_PER_AGENT` devices. `lib_detach_node` again once done.
    **Note on board topology:** some Tenstorrent boards physically pair multiple ASICs on one card
    (e.g. P300 = 2 ASICs per physical board). Exposing a single `/dev/tenstorrent/N` node or
@@ -89,11 +88,11 @@ silently improvise.
 
 ## 2. Create the platform experiment
 
-`POST $QUOTA_URL/platform-experiments`, `description` = `$EXPERIMENT`'s `experiment.md`
+`POST $API_URL/platform-experiments`, `description` = `$EXPERIMENT`'s `experiment.md`
 `EXPERIMENT DESCRIPTION` block **verbatim** (the only thing agents read about the objective —
 system prompt is experiment-agnostic).
 
-Required fields (`GET $QUOTA_URL/openapi.json` is the source of truth): `name`, `description`,
+Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `description`,
 `budget_accelerator_hours`, `max_agents`, `metrics`, `report_interval_seconds`, `starts_at`,
 `ends_at` (RFC3339).
 
@@ -124,7 +123,7 @@ experimentator-image EXPERIMENT=$EXPERIMENT`. One container per agent, unique `A
 
     podman run -d --name agent-<id> --network host --userns=keep-id \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
-      -e QUOTA_URL=$QUOTA_URL -e SCHED_URL=$SCHED_URL -e REGISTRY_URL=$REGISTRY_URL \
+      -e API_URL=$API_URL \
       -e CODE_REPO_URL=$CODE_REPO_URL -e GIT_TOKEN=$GIT_TOKEN \
       ${CLAUDE_CODE_OAUTH_TOKEN:+-e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN} \
       -v ~/.claude/.credentials.json:/home/agent/.claude/.credentials.json:ro \

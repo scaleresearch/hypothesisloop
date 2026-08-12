@@ -85,7 +85,7 @@ type CreatePlatformExperimentRequest struct {
 	StartsAt              time.Time                 `json:"starts_at"`
 	EndsAt                time.Time                 `json:"ends_at"`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
-	// (config stages.default). See docs/stages.md.
+	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
 }
 

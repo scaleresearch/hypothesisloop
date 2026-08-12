@@ -23,7 +23,7 @@ signup_and_start "$PE_ID" "$AGENT"
 
 # The cap must round-trip and be published to agents — they can only plan around a limit they
 # can read.
-PUBLISHED=$(curl -sf "$QUOTA_URL/platform-experiments/${PE_ID}/stages" \
+PUBLISHED=$(curl -sf "$API_URL/platform-experiments/${PE_ID}/stages" \
   | py "import sys,json; print(float(json.load(sys.stdin)['stages'][0]['max_job_hours']))")
 py "import sys; sys.exit(0 if $PUBLISHED == $CAP_HOURS else 1)" \
   && pass "max_job_hours=${CAP_HOURS} is published on the stages endpoint" \

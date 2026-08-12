@@ -15,8 +15,7 @@ var ErrInvalidStages = errors.New("stages")
 const MaxStages = 8
 
 // Stage is one rung of the elimination ladder: LengthPct is its share of the experiment (all
-// stages sum to 100), EvictPct the share of surviving agents cut when it ends. See
-// docs/stages.md.
+// stages sum to 100), EvictPct the share of surviving agents cut when it ends..
 type Stage struct {
 	LengthPct float64 `json:"length_pct" yaml:"length_pct"`
 	EvictPct  float64 `json:"evict_pct" yaml:"evict_pct"`
@@ -44,7 +43,7 @@ type StageAdvance struct {
 	AdvancedAt time.Time `json:"advanced_at"`
 }
 
-// ValidateStages enforces docs/stages.md at creation, so nothing downstream defends against a
+// ValidateStages enforces the stage ladder at creation, so nothing downstream defends against a
 // malformed ladder.
 func ValidateStages(stages []Stage) error {
 	if len(stages) == 0 || len(stages) > MaxStages {

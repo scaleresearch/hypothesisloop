@@ -84,7 +84,7 @@ CREATE TABLE platform_experiments (
     metrics              JSONB                      NOT NULL DEFAULT '[]',
     report_interval_seconds INTEGER                 NOT NULL DEFAULT 30,
     -- The elimination ladder: an ordered list of {length_pct, evict_pct}, fixed at creation.
-    -- Validated by domain.ValidateStages before insert. See docs/stages.md.
+    -- Validated by domain.ValidateStages before insert.
     stages               JSONB                      NOT NULL DEFAULT '[{"length_pct":40,"evict_pct":75},{"length_pct":60,"evict_pct":0}]',
     -- 1-based index into stages of the stage currently running.
     current_stage        INTEGER                    NOT NULL DEFAULT 1,
@@ -330,7 +330,7 @@ CREATE INDEX idx_experiment_top3_agent ON experiment_top3(agent_id);
 
 -- ---------------------------------------------------------------------------
 -- platform_experiment_cuts — agents cut at a stage boundary. Terminal: jobs stopped and
--- further submissions rejected 422 for the rest of the experiment. See docs/stages.md.
+-- further submissions rejected 422 for the rest of the experiment.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE platform_experiment_cuts (

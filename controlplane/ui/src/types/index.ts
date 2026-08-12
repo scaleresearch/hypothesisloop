@@ -326,7 +326,7 @@ export interface LineageNode {
 // Hypotheses
 // ---------------------------------------------------------------------------
 
-// The owning agent's own verdict on its claim — see POST /registry/hypotheses/{id}/status. Only
+// The owning agent's own verdict on its claim — see POST /hypotheses/{id}/status. Only
 // the agent named in `agent_id` may ever change it.
 export type HypothesisStatus = 'open' | 'confirmed' | 'inconclusive'
 
@@ -351,7 +351,7 @@ export interface HypothesisFinding {
   created_at: string
 }
 
-// Response shape for GET /registry/hypotheses/{id} — a hypothesis plus every job
+// Response shape for GET /hypotheses/{id} — a hypothesis plus every job
 // (experiment) submitted against it, and every finding filed against it, so far.
 export interface HypothesisWithJobs extends Hypothesis {
   jobs: Experiment[]

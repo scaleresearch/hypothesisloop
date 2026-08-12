@@ -69,7 +69,7 @@ else
     || pass "second CPU-only job correctly stayed non-admitted while CPU budget is exhausted (status=$(get_status "$SECOND"))"
 
   echo "  -- cancelling the CPU-exhausting job frees CPU headroom for the gated one --"
-  curl -sf -X POST "$SCHED_URL/experiments/${BIG}/cancel" > /dev/null || true
+  curl -sf -X POST "$API_URL/experiments/${BIG}/cancel" > /dev/null || true
   wait_for_status "$BIG" "EVICTED,REJECTED,FAILED" 15 > /dev/null || true
   S3=$(wait_for_status "$SECOND" "RUNNING,COMPLETED" "$ADMISSION_BUDGET_SECONDS" || true)
   [[ "$S3" == "RUNNING" || "$S3" == "COMPLETED" ]] \

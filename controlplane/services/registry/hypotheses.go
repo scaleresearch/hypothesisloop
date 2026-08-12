@@ -49,15 +49,24 @@ func (s *Service) GetHypothesis(ctx context.Context, id string) (*domain.Hypothe
 // to. agentID restricts to one agent's own hypotheses when non-empty; status restricts to one
 // status (open/confirmed/inconclusive) when non-empty; limit is bounded and defaulted by the
 // store — see db.HypothesesStore.ListHypotheses.
-func (s *Service) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit int) ([]*db.HypothesisListItem, error) {
+func (s *Service) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*db.HypothesisListItem, error) {
 	if status != "" && !domain.ValidHypothesisStatus(status) {
 		return nil, fmt.Errorf("registry.ListHypotheses: invalid status %q", status)
 	}
-	hs, err := s.store.ListHypotheses(ctx, platformExperimentID, agentID, status, limit)
+	hs, err := s.store.ListHypotheses(ctx, platformExperimentID, agentID, status, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
 	return hs, nil
+}
+
+// CountHypotheses returns the total matching the same filters, ignoring limit/offset.
+func (s *Service) CountHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus) (int, error) {
+	total, err := s.store.CountHypotheses(ctx, platformExperimentID, agentID, status)
+	if err != nil {
+		return 0, fmt.Errorf("registry.CountHypotheses: %w", err)
+	}
+	return total, nil
 }
 
 // SetHypothesisStatus sets a hypothesis's status on behalf of callerAgentID — the owning agent's

@@ -36,7 +36,7 @@ print(sum(int(node["status"]["allocatable"].get("nvidia.com/gpu", 0)) for node i
 # catalog that keyed on the extended resource alone would report one merged pool that matches no
 # submittable accelerator_type, and an agent picking from it would queue forever.
 echo "  -- catalog reports live capacity under the driver-published type strings --"
-CATALOG=$(curl -sf "$QUOTA_URL/resource-catalog/capacity")
+CATALOG=$(curl -sf "$API_URL/resource-catalog/capacity")
 for pair in "${REQUESTED}:${REQUESTED_CAPACITY}" "${ALTERNATIVE}:${ALTERNATIVE_CAPACITY}"; do
   want_type="${pair%:*}" want_total="${pair##*:}"
   got_total=$(printf '%s' "$CATALOG" | WANT="$want_type" py '

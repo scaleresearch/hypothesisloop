@@ -106,10 +106,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 
 	// 2b. Validate hypothesis reference: every experiment must test a specific,
-	// previously-registered hypothesis (POST /registry/hypotheses) rather than restating
+	// previously-registered hypothesis (POST /hypotheses) rather than restating
 	// free text ad hoc. Denormalize its text onto the experiment for cheap reads.
 	if exp.HypothesisID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required — register or retrieve one via POST /registry/hypotheses"}
+		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required — register or retrieve one via POST /hypotheses"}
 	}
 	hyp, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
 	if err != nil {
@@ -118,7 +118,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if hyp == nil {
 		return &AdmissionError{
 			Reason:  ReasonMalformed,
-			Message: fmt.Sprintf("hypothesis %s not found — register it first via POST /registry/hypotheses", exp.HypothesisID),
+			Message: fmt.Sprintf("hypothesis %s not found — register it first via POST /hypotheses", exp.HypothesisID),
 		}
 	}
 	// The hypothesis must belong to the same platform experiment this job is submitted under.

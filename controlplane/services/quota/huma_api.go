@@ -86,7 +86,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "get-agent-ledger", Method: "GET", Path: "/ledger/{agentID}",
+		OperationID: "get-agent-ledger", Method: "GET", Path: "/agents/{agentID}/ledger",
 		Summary: "Get an agent's credit ledger", Tags: []string{"agents"},
 	}, func(ctx context.Context, in *struct {
 		AgentID string `path:"agentID"`
@@ -352,13 +352,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-agent-quota", Method: "GET", Path: "/quota/{agentID}/experiment/{experimentID}",
+		OperationID: "get-agent-quota", Method: "GET", Path: "/platform-experiments/{id}/quotas/{agentID}",
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent.",
 	}, func(ctx context.Context, in *struct {
-		AgentID      string `path:"agentID"`
-		ExperimentID string `path:"experimentID"`
+		ID      string `path:"id"`
+		AgentID string `path:"agentID"`
 	}) (*struct{ Body *domain.AgentQuota }, error) {
-		aq, err := peh.svc.GetQuota(ctx, in.AgentID, in.ExperimentID)
+		aq, err := peh.svc.GetQuota(ctx, in.AgentID, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -567,7 +568,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 // StagesStatusResponse is the response body for GET /platform-experiments/{id}/stages.
 // Boundaries are published ahead so agents can plan; live rank is not, so agents cannot time
-// submissions around the cut line instead of improving their metric. See docs/stages.md.
+// submissions around the cut line instead of improving their metric.
 type StagesStatusResponse struct {
 	Stages       []domain.Stage `json:"stages"`
 	CurrentStage int            `json:"current_stage"`

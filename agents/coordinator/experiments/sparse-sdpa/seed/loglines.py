@@ -5,7 +5,7 @@ Push-only, by design: the job process is the only thing that ever talks to the c
 about its own logs (same direction as metric posts) -- the control plane never reaches into a
 cluster to read a pod's stdout. This module keeps a small in-process ring buffer of the job's
 own last N print()'d lines and POSTs the whole buffer to
-`{REGISTRY_URL}/registry/experiments/{id}/logs` on demand, replacing (not appending to) whatever
+`{API_URL}/experiments/{id}/logs` on demand, replacing (not appending to) whatever
 was stored before. Once the job stops calling push(), whatever was last pushed is what stays
 visible -- there is no accumulating archive.
 
@@ -55,10 +55,10 @@ class LogTail:
     """
 
     def __init__(self, *, max_lines: int | None = None, experiment_id: str | None = None,
-                 registry_url: str | None = None, tee_stdio: bool = True):
+                 api_url: str | None = None, tee_stdio: bool = True):
         self.max_lines = max_lines or int(os.environ.get("LOG_TAIL_LINES", DEFAULT_LOG_TAIL_LINES))
         self.experiment_id = experiment_id or os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-        self.registry_url = registry_url or os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "")
+        self.api_url = api_url or os.environ.get("HYPOTHESISLOOP_API_URL", "")
         self._buf: deque = deque(maxlen=self.max_lines)
         if tee_stdio:
             sys.stdout = _TeeStream(sys.stdout, self._buf)
@@ -66,11 +66,11 @@ class LogTail:
 
     def push(self) -> None:
         """POSTs the current buffer, replacing whatever was stored before. Never raises --
-        a log-tail push failing must never take down the job itself. No registry_url (running
+        a log-tail push failing must never take down the job itself. No api_url (running
         outside the platform, e.g. a local smoke test) means push is a silent no-op."""
-        if not self.registry_url:
+        if not self.api_url:
             return
-        url = f"{self.registry_url}/registry/experiments/{self.experiment_id}/logs"
+        url = f"{self.api_url}/experiments/{self.experiment_id}/logs"
         payload = json.dumps({"lines": list(self._buf)}).encode()
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
         try:

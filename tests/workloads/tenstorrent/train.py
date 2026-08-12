@@ -13,7 +13,7 @@ written (KMD 2.10.0, firmware 19.11.0, sustained ~106 TFLOPS bf16 at n=2048).
 Environment variables injected by the scheduler (see tests/workloads/generic/train.py's doc comment —
 identical contract, this workload is a drop-in for the same HYPOTHESISLOOP_* env vars):
   HYPOTHESISLOOP_EXPERIMENT_ID, HYPOTHESISLOOP_AGENT_ID, HYPOTHESISLOOP_PROJECT_ID
-  HYPOTHESISLOOP_REGISTRY_URL
+  HYPOTHESISLOOP_API_URL
 
 Metric contract: this workload pushes its real measurements under their own names, in their
 own units — nothing is normalized or rescaled. A platform experiment's MetricDefinition.Key
@@ -44,7 +44,7 @@ import urllib.request
 EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
 AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
 PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
-REG_URL    = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "http://localhost:8083")
+API_URL    = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
 
 # DRA gives this pod exactly one Tenstorrent device (accelerator_count: 1 in
 # tests/workloads/tenstorrent/job.yaml) and only that device's /dev/tenstorrent/N node is
@@ -59,7 +59,7 @@ TIMED_ITERS = 10
 
 
 def post_metric(fraction: float, value: float, metric_name: str) -> None:
-    url = f"{REG_URL}/registry/experiments/{EXP_ID}/metrics"
+    url = f"{API_URL}/experiments/{EXP_ID}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:

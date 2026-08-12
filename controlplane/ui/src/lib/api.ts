@@ -14,9 +14,8 @@ import type {
   HypothesisWithJobs,
 } from '@/types'
 
-const QUOTA_URL = process.env.NEXT_PUBLIC_QUOTA_URL || 'http://localhost:8081'
-const REGISTRY_URL = process.env.NEXT_PUBLIC_REGISTRY_URL || 'http://localhost:8083'
-const SCHED_URL = process.env.NEXT_PUBLIC_SCHED_URL || 'http://localhost:8082'
+// One API, one base URL — quota, scheduler and registry operations are all served together.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081'
 
 async function apiFetch<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: 'no-store' })
@@ -52,19 +51,19 @@ async function apiFetchPage<T>(url: string): Promise<Page<T>> {
 // Registered target clusters and whether each one's cluster-agent is currently connected
 // (has polled desired-state recently). The control plane never dials a cluster itself.
 export function fetchClusters(): Promise<ClustersResponse> {
-  return apiFetch<ClustersResponse>(`${SCHED_URL}/internal/clusters`)
+  return apiFetch<ClustersResponse>(`${API_URL}/internal/clusters`)
 }
 
 export function fetchAgentBalances(): Promise<AgentBalance[]> {
-  return apiFetch<AgentBalance[]>(`${QUOTA_URL}/balances`)
+  return apiFetch<AgentBalance[]>(`${API_URL}/balances`)
 }
 
 export function fetchAgents(): Promise<Agent[]> {
-  return apiFetch<Agent[]>(`${QUOTA_URL}/agents`)
+  return apiFetch<Agent[]>(`${API_URL}/agents`)
 }
 
 export function fetchAgentLedger(agentID: string): Promise<CreditLedgerEntry[]> {
-  return apiFetch<CreditLedgerEntry[]>(`${QUOTA_URL}/ledger/${agentID}`)
+  return apiFetch<CreditLedgerEntry[]>(`${API_URL}/agents/${agentID}/ledger`)
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +84,7 @@ export interface ExperimentsParams {
 }
 
 export function fetchExperimentsPage(params?: ExperimentsParams): Promise<Page<Experiment>> {
-  const url = new URL(`${SCHED_URL}/experiments`)
+  const url = new URL(`${API_URL}/experiments`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
@@ -99,15 +98,15 @@ export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {
-  return apiFetch<Experiment>(`${SCHED_URL}/experiments/${id}`)
+  return apiFetch<Experiment>(`${API_URL}/experiments/${id}`)
 }
 
 export function fetchExperimentLineage(id: string): Promise<LineageNode[]> {
-  return apiFetch<LineageNode[]>(`${REGISTRY_URL}/registry/experiments/${id}/lineage`)
+  return apiFetch<LineageNode[]>(`${API_URL}/experiments/${id}/lineage`)
 }
 
 export function fetchExperimentMetrics(id: string): Promise<MetricDataPoint[]> {
-  return apiFetch<MetricDataPoint[]>(`${REGISTRY_URL}/registry/experiments/${id}/metrics`)
+  return apiFetch<MetricDataPoint[]>(`${API_URL}/experiments/${id}/metrics`)
 }
 
 // Full metric history for every competing job in a platform experiment — one series per
@@ -118,7 +117,7 @@ export function fetchPlatformExperimentTimeseries(
   lookbackHours = 24,
 ): Promise<{ series: AgentMetricSeries[] }> {
   return apiFetch<{ series: AgentMetricSeries[] }>(
-    `${REGISTRY_URL}/registry/platform-experiments/${platformExpID}/metrics-timeseries?metric_name=${encodeURIComponent(metricName)}&lookback_hours=${lookbackHours}`,
+    `${API_URL}/platform-experiments/${platformExpID}/metrics-timeseries?metric_name=${encodeURIComponent(metricName)}&lookback_hours=${lookbackHours}`,
   )
 }
 
@@ -132,7 +131,7 @@ export function fetchPlatformExperimentTimeseries(
 // this once per ID; see fetchAllHypotheses below for that aggregation.
 export function fetchHypotheses(platformExperimentID: string): Promise<Hypothesis[]> {
   return apiFetch<Hypothesis[]>(
-    `${REGISTRY_URL}/registry/hypotheses?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
+    `${API_URL}/hypotheses?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
   )
 }
 
@@ -156,11 +155,11 @@ export async function fetchAllHypotheses(platformExperimentIDs: string[]): Promi
 }
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {
-  return apiFetch<HypothesisWithJobs>(`${REGISTRY_URL}/registry/hypotheses/${id}`)
+  return apiFetch<HypothesisWithJobs>(`${API_URL}/hypotheses/${id}`)
 }
 
 export async function cancelExperiment(id: string): Promise<void> {
-  const res = await fetch(`${SCHED_URL}/experiments/${id}/cancel`, { method: 'POST', cache: 'no-store' })
+  const res = await fetch(`${API_URL}/experiments/${id}/cancel`, { method: 'POST', cache: 'no-store' })
   if (!res.ok) throw new Error(`cancel failed: ${res.status}`)
 }
 
@@ -191,7 +190,7 @@ export interface CreatePlatformExperimentRequest {
 }
 
 export async function createPlatformExperiment(req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
-  const res = await fetch(`${QUOTA_URL}/platform-experiments`, {
+  const res = await fetch(`${API_URL}/platform-experiments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -212,7 +211,7 @@ export interface PlatformExperimentsParams {
 }
 
 export function fetchPlatformExperimentsPage(params?: PlatformExperimentsParams): Promise<Page<PlatformExperiment>> {
-  const url = new URL(`${QUOTA_URL}/platform-experiments`)
+  const url = new URL(`${API_URL}/platform-experiments`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
@@ -226,11 +225,11 @@ export function fetchPlatformExperiments(status?: string): Promise<PlatformExper
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {
-  return apiFetch<PlatformExperiment>(`${QUOTA_URL}/platform-experiments/${id}`)
+  return apiFetch<PlatformExperiment>(`${API_URL}/platform-experiments/${id}`)
 }
 
 export async function signupPlatformExperiment(id: string, agentID: string): Promise<{ status: string }> {
-  const res = await fetch(`${QUOTA_URL}/platform-experiments/${id}/signup`, {
+  const res = await fetch(`${API_URL}/platform-experiments/${id}/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ agent_id: agentID }),
@@ -241,11 +240,11 @@ export async function signupPlatformExperiment(id: string, agentID: string): Pro
 }
 
 export function fetchAgentQuota(agentID: string, platformExpID: string): Promise<AgentQuota> {
-  return apiFetch<AgentQuota>(`${QUOTA_URL}/quota/${agentID}/experiment/${platformExpID}`)
+  return apiFetch<AgentQuota>(`${API_URL}/platform-experiments/${platformExpID}/quotas/${agentID}`)
 }
 
 export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<AgentQuota[]> {
-  return apiFetch<AgentQuota[]>(`${QUOTA_URL}/platform-experiments/${platformExpID}/quotas`)
+  return apiFetch<AgentQuota[]>(`${API_URL}/platform-experiments/${platformExpID}/quotas`)
 }
 
 // Resource pricing reference data (Accelerator type rates, CPU/RAM/storage flat rates) — fetched
@@ -258,7 +257,7 @@ export interface ResourceCatalog {
 }
 
 export function fetchResourceCatalog(): Promise<ResourceCatalog> {
-  return apiFetch<ResourceCatalog>(`${QUOTA_URL}/resource-catalog`)
+  return apiFetch<ResourceCatalog>(`${API_URL}/resource-catalog`)
 }
 
 // Live, per-cluster accelerator capacity — what's actually schedulable right now, as opposed to
@@ -272,11 +271,11 @@ export interface ResourceCapacity {
 }
 
 export function fetchResourceCapacity(): Promise<ResourceCapacity> {
-  return apiFetch<ResourceCapacity>(`${QUOTA_URL}/resource-catalog/capacity`)
+  return apiFetch<ResourceCapacity>(`${API_URL}/resource-catalog/capacity`)
 }
 
 export async function updatePlatformExperiment(id: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
-  const res = await fetch(`${QUOTA_URL}/platform-experiments/${id}`, {
+  const res = await fetch(`${API_URL}/platform-experiments/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -297,13 +296,13 @@ export interface DonationRequest {
 }
 
 export function fetchDonations(status?: string): Promise<DonationRequest[]> {
-  const url = new URL(`${QUOTA_URL}/donations`)
+  const url = new URL(`${API_URL}/donations`)
   if (status) url.searchParams.set('status', status)
   return apiFetch<DonationRequest[]>(url.toString())
 }
 
 export function fetchExperimentsByPlatformExperiment(platformExpID: string): Promise<Experiment[]> {
-  const url = new URL(`${SCHED_URL}/experiments`)
+  const url = new URL(`${API_URL}/experiments`)
   url.searchParams.set('platform_experiment_id', platformExpID)
   return apiFetch<Experiment[]>(url.toString())
 }
@@ -337,5 +336,5 @@ export interface StagesStatus {
 }
 
 export function fetchStages(platformExpID: string): Promise<StagesStatus> {
-  return apiFetch<StagesStatus>(`${QUOTA_URL}/platform-experiments/${platformExpID}/stages`)
+  return apiFetch<StagesStatus>(`${API_URL}/platform-experiments/${platformExpID}/stages`)
 }

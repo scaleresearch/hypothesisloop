@@ -65,7 +65,7 @@ S=$(wait_for_status "$RUNNER" "RUNNING,COMPLETED,FAILED" "$ADMISSION_BUDGET_SECO
 [[ -z "$(get_field "$RUNNER" not_admitted_reason)" ]] \
 	&& pass "not_admitted_reason cleared atomically on admission" \
 	|| fail "admitted job retained stale not_admitted_reason=$(get_field "$RUNNER" not_admitted_reason)"
-curl -sf -X POST "$SCHED_URL/experiments/${RUNNER}/cancel" > /dev/null
+curl -sf -X POST "$API_URL/experiments/${RUNNER}/cancel" > /dev/null
 S=$(wait_for_status "$RUNNER" "EVICTED,COMPLETED,FAILED" 30 || true)
 if [[ "$S" == "EVICTED" ]]; then
   pass "cancelling a RUNNING job terminates it as EVICTED (reason=$(get_field "$RUNNER" eviction_reason)) — different outcome than cancelling while QUEUED"

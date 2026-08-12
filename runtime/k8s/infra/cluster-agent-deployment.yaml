@@ -92,10 +92,8 @@ spec:
           env:
             - name: CLUSTER_NAME
               value: "__CLUSTER_NAME__"
-            - name: CONTROLPLANE_URL
-              value: "__CONTROLPLANE_URL__"
-            - name: REGISTRY_URL
-              value: "__REGISTRY_URL__"
+            - name: API_URL
+              value: "__API_URL__"
           resources:
             requests:
               cpu: "10m"

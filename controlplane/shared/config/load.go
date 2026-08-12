@@ -80,7 +80,7 @@ func (c *Config) build() error {
 		return fmt.Errorf("stages.default: %w", err)
 	}
 	services := c.Services
-	if services.QuotaPort <= 0 || services.SchedulerPort <= 0 || services.RegistryPort <= 0 || services.MetricControllerPort <= 0 || services.MetricsDBURL == "" {
+	if services.APIPort <= 0 || services.MetricControllerPort <= 0 || services.MetricsDBURL == "" {
 		return fmt.Errorf("all service ports and metrics_db_url are required")
 	}
 	return nil

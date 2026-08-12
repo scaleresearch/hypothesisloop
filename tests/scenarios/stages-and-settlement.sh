@@ -34,7 +34,7 @@ done
   && pass "all ${#JOBS[@]} jobs reached a terminal state" \
   || fail "not all jobs reached a terminal state within 90s"
 
-stages_json() { curl -sf "$QUOTA_URL/platform-experiments/${PE_ID}/stages"; }
+stages_json() { curl -sf "$API_URL/platform-experiments/${PE_ID}/stages"; }
 get_current_stage() { stages_json | py "import sys,json; print(json.load(sys.stdin)['current_stage'])"; }
 advanced() { [[ "$(get_current_stage)" -ge 2 ]]; }
 if wait_until "first stage boundary" 60 1 advanced; then

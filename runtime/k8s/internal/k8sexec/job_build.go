@@ -144,7 +144,7 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 		{Name: "HYPOTHESISLOOP_CODE_REF", Value: exp.CodeRef},
 		{Name: "HYPOTHESISLOOP_CONFIG_HASH", Value: exp.ConfigHash},
 		{Name: "HYPOTHESISLOOP_DATA_REF", Value: exp.DataRef},
-		{Name: "HYPOTHESISLOOP_REGISTRY_URL", Value: c.registryURL},
+		{Name: "HYPOTHESISLOOP_API_URL", Value: c.apiURL},
 		{Name: "HYPOTHESISLOOP_ACCELERATOR_TYPE", Value: string(exp.AcceleratorType)},
 		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", exp.AcceleratorCount)},
 		{Name: "HYPOTHESISLOOP_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},

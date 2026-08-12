@@ -110,8 +110,7 @@ bash localdev/tunnels/tunnels.sh status  # re-check anytime; URLs re-randomize o
 GOOS=linux GOARCH=amd64 go build -o /tmp/bare-agent ./runtime/bare-metal/cmd/bare-agent
 scp -i ~/.ssh/vastai_hypothesisloop -P <port> /tmp/bare-agent controlplane/settings/hypothesisloop.yaml root@<ip>:/root/
 ssh ... 'CLUSTER_NAME=my-gpu-node \
-  CONTROLPLANE_URL=<scheduler tunnel URL> \
-  REGISTRY_URL=<registry tunnel URL> \
+  API_URL=<control-plane API tunnel URL> \
   HYPOTHESISLOOP_CONFIG=/root/hypothesisloop.yaml \
   NODE_NAME=my-gpu-node \
   nohup /root/bare-agent > /root/bare-agent.log 2>&1 &'
@@ -124,7 +123,7 @@ Verify registration: `curl <scheduler tunnel>/internal/clusters` and
 
 Use `localdev/k3s-nvidia/install.sh` (mirrors `localdev/k3s-tenstorrent-qb2/`) — installs
 nvidia-container-toolkit, k3s (`--docker`), the NVIDIA device plugin, GPU Feature Discovery,
-and the cluster-agent bundle in one shot. Requires `CONTROLPLANE_URL`/`REGISTRY_URL`/
+and the cluster-agent bundle in one shot. Requires `API_URL`/
 `METRICS_URL` env vars pointed at your tunnels. See that script's header comment for why it
 manually applies GPU Feature Discovery's node labels (no Node Feature Discovery installed).
 

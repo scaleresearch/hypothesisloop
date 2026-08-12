@@ -143,7 +143,7 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 		ShmSize: spec.ShmSizeBytes,
 		Binds:   binds,
 		// Host networking: this runtime always runs on a single bare node with no orchestrated
-		// service mesh, so "reachable from inside the container" (e.g. REGISTRY_URL) means
+		// service mesh, so "reachable from inside the container" (e.g. API_URL) means
 		// whatever's reachable from the host itself, including localhost — a bridge network
 		// would put the container on its own loopback, breaking that.
 		NetworkMode: "host",

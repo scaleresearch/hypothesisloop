@@ -68,7 +68,7 @@ def prepare() -> RunSetup:
     # any other, described in the live API guide, and the agent decides for itself when/whether
     # to do them. client is also used for the run loop's own stop-condition check (platform
     # experiment closed), not for taking actions on the agent's behalf.
-    client = api_client.PlatformClient(cfg.quota_url, cfg.sched_url, cfg.registry_url)
+    client = api_client.PlatformClient(cfg.api_url)
 
     # The API contract, fetched live from the running services rather than checked in anywhere:
     # this is the prompt's only source of endpoints (see SYSTEM_PROMPT_TEMPLATE), so it is

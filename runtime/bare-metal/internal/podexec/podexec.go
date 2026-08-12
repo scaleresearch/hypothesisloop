@@ -36,7 +36,7 @@ const (
 // Config mirrors k8sexec.Config's shape: every operational value is required explicitly, no
 // implicit defaults.
 type Config struct {
-	RegistryURL string
+	APIURL string
 	// DefaultTerminationGracePeriodSeconds/MaxTerminationGracePeriodSeconds mirror
 	// k8sexec.Config exactly — see there for meaning.
 	DefaultTerminationGracePeriodSeconds int
@@ -56,7 +56,7 @@ type Config struct {
 }
 
 type Executor struct {
-	registryURL                          string
+	apiURL                               string
 	defaultTerminationGracePeriodSeconds int64
 	maxTerminationGracePeriodSeconds     int64
 	pricedAcceleratorTypes               map[string]bool
@@ -80,8 +80,8 @@ type Executor struct {
 }
 
 func New(cfg Config) (*Executor, error) {
-	if cfg.RegistryURL == "" {
-		return nil, fmt.Errorf("podexec: RegistryURL is required")
+	if cfg.APIURL == "" {
+		return nil, fmt.Errorf("podexec: APIURL is required")
 	}
 	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 {
 		return nil, fmt.Errorf("podexec: termination settings must be positive")
@@ -115,7 +115,7 @@ func New(cfg Config) (*Executor, error) {
 		return nil, err
 	}
 	return &Executor{
-		registryURL:                          cfg.RegistryURL,
+		apiURL:                               cfg.APIURL,
 		defaultTerminationGracePeriodSeconds: int64(cfg.DefaultTerminationGracePeriodSeconds),
 		maxTerminationGracePeriodSeconds:     int64(cfg.MaxTerminationGracePeriodSeconds),
 		pricedAcceleratorTypes:               priced,

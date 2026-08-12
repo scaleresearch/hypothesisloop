@@ -13,7 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// StagesStore is the persistence interface for the stage ladder (docs/stages.md).
+// StagesStore is the persistence interface for the stage ladder.
 type StagesStore interface {
 	// Platform experiment queries.
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
@@ -43,7 +43,7 @@ type StagesStore interface {
 }
 
 // advanceStages advances a running platform experiment's ladder by at most one stage per tick,
-// cutting the configured share of survivors at the boundary it crosses. See docs/stages.md.
+// cutting the configured share of survivors at the boundary it crosses.
 func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) error {
 	// Boundaries already crossed may have left job-stopping incomplete (a crash between the
 	// AdvanceStage commit and the eviction sweep). Retrying it is free — it is idempotent.

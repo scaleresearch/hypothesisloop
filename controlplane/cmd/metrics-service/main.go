@@ -11,30 +11,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metrics"
 )
 
-// metrics-service hosts registry-service and metric-controller together: one
-// writes samples to GreptimeDB (registry, via remote write) and the other
-// reads them back to drive eviction decisions (metric-controller), so they're
-// the two halves of the same metrics pipeline. The node-agent metric push
-// endpoint and the reconcile/eviction loop stay on their own internal mux,
-// separate from the registry's experiment API, exactly as they were as
-// standalone services.
+// metrics-service hosts the metric-controller: the node-agent metric push endpoint and the
+// reconcile/eviction loop that reads samples back out of GreptimeDB to drive stage boundaries
+// and evictions. It serves nothing agent- or UI-facing — the whole public API lives on
+// control-service's single listener.
 func main() {
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -44,7 +38,6 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 
 	pcfg := hypothesisloopcfg.MustLoad(requiredEnv("HYPOTHESISLOOP_CONFIG", logger))
-	registryPort := strconv.Itoa(pcfg.Services.RegistryPort)
 	controllerPort := strconv.Itoa(pcfg.Services.MetricControllerPort)
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -76,18 +69,11 @@ func main() {
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
 
-	registryServer := newRegistryServer(store, metricsDBURL, registryPort, logger)
 	controllerServer, runCancel := newControllerServer(store, peFullStore, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	go func() {
-		logger.Info("registry listening", zap.String("addr", registryServer.Addr))
-		if err := registryServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal("metrics-service: registry listen", zap.Error(err))
-		}
-	}()
 	go func() {
 		logger.Info("metric-controller health endpoint", zap.String("addr", controllerServer.Addr))
 		if err := controllerServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -101,43 +87,10 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
-	if err := registryServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("metrics-service: registry shutdown", zap.Error(err))
-	}
 	if err := controllerServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("metrics-service: metric-controller shutdown", zap.Error(err))
 	}
 	logger.Info("metrics-service: stopped")
-}
-
-func newRegistryServer(store *db.Store, metricsDBURL, port string, logger *zap.Logger) *http.Server {
-	svc := registry.New(store, logger, metricsDBURL)
-	handler := registry.NewHandler(svc, logger)
-
-	outer := chi.NewRouter()
-	outer.Use(api.RecoveryMiddleware(logger))
-	outer.Use(api.LoggingMiddleware(logger))
-	outer.Use(api.CORSMiddleware)
-	outer.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"status":"ok"}`)
-	})
-	outer.Handle("/metrics", promhttp.Handler())
-	// Registry API via Huma, registered at full /registry/* paths so /openapi.json and
-	// /explore live at the port root.
-	doc := apidocs.New(outer, "hypothesisloop registry-service", "1.0.0",
-		"Hypotheses, experiment metrics and lineage. See the quota-service /explore for the cross-cutting platform rules.\n")
-	registry.RegisterHuma(doc, handler)
-	doc.MountExploreAudience(outer, "/explore", apidocs.AudienceAgent)
-
-	return &http.Server{
-		Addr:         ":" + port,
-		Handler:      outer,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
 }
 
 func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
@@ -152,7 +105,7 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds) * time.Second).
 		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
-	// is per-platform-experiment config (docs/stages.md), not a controller-wide setting.
+	// is per-platform-experiment config, not a controller-wide setting.
 	ctrl = ctrl.WithStagesStore(peFullStore, metricsDBURL)
 
 	// settler durably writes a terminal experiment's final observed usage (see
@@ -175,10 +128,15 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/internal/node-metrics", metrics.NewPushHandler(metricsDBURL))
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	// Both spellings, same as the API server — a caller should never have to remember which
+	// of /health and /healthz a given process happens to answer.
+	health := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, `{"status":"ok"}`)
-	})
+	}
+	mux.HandleFunc("/health", health)
+	mux.HandleFunc("/healthz", health)
 
 	srv := &http.Server{
 		Addr:         ":" + port,

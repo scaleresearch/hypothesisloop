@@ -30,7 +30,7 @@ sys.path.insert(0, os.environ.get("TT_METAL_TEST_UTILS_PATH", "/opt/tt-metal-tes
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 EXP_ID = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-REG_URL = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "http://localhost:8083")
+API_URL = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
 DEVICE_ID = int(os.environ.get("DSA_DEVICE_ID", 0))
 
 # Official "prod-sparse" shape from test_sparse_sdpa.py::test_sparse_sdpa_perf -- the canonical
@@ -49,7 +49,7 @@ _NV = {
 
 
 def post_metric(fraction: float, value: float, metric_name: str) -> None:
-    url = f"{REG_URL}/registry/experiments/{EXP_ID}/metrics"
+    url = f"{API_URL}/experiments/{EXP_ID}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:

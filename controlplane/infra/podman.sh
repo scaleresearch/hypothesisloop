@@ -36,8 +36,8 @@ run_services() {
     -v "$ROOT/controlplane/settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro" \
     localhost/hypothesisloop-metrics-service:latest >/dev/null
 
-  wait_for_http http://localhost:8082/experiments
-  wait_for_http http://localhost:8083/health
+  wait_for_http http://localhost:8081/health
+  wait_for_http http://localhost:8084/health
 }
 
 case "$ACTION" in
@@ -48,7 +48,7 @@ case "$ACTION" in
     podman volume create --ignore "$GREPTIME_VOLUME" >/dev/null
     podman pod create --name "$POD" \
       --add-host greptimedb:127.0.0.1 \
-      -p 5433:5432 -p 8081:8081 -p 8082:8082 -p 8083:8083 -p 8084:8084 \
+      -p 5433:5432 -p 8081:8081 -p 8084:8084 \
       -p 4010:4000 -p 4001:4001 >/dev/null
 
     podman run -d --pod "$POD" --name hypothesisloop-postgres \
@@ -114,8 +114,8 @@ EOF
     ;;
   start)
     podman pod start "$POD"
-    wait_for_http http://localhost:8082/experiments
-    wait_for_http http://localhost:8083/health
+    wait_for_http http://localhost:8081/health
+    wait_for_http http://localhost:8084/health
     ;;
   stop)
     podman pod stop "$POD"

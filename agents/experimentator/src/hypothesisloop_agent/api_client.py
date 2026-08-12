@@ -33,22 +33,20 @@ def _request(method: str, url: str, payload: dict | None = None, timeout: float 
 
 
 class PlatformClient:
-    def __init__(self, quota_url: str, sched_url: str, registry_url: str):
-        self.quota_url = quota_url.rstrip("/")
-        self.sched_url = sched_url.rstrip("/")
-        self.registry_url = registry_url.rstrip("/")
+    def __init__(self, api_url: str):
+        self.api_url = api_url.rstrip("/")
 
     def get_platform_experiment(self, pe_id: str) -> dict:
-        return _request("GET", f"{self.quota_url}/platform-experiments/{pe_id}")
+        return _request("GET", f"{self.api_url}/platform-experiments/{pe_id}")
 
     def fetch_api_guide(self) -> str:
-        """Concatenate each service's live /explore digest, generated from its Huma-registered
-        operations so it can never drift. The quota digest also carries the platform rules, which
-        the system prompt treats as binding rather than restating — so a failure to fetch raises
-        instead of embedding a note: an agent briefed without the rules would compete blind.
+        """The API's live /explore digest, generated from its registered operations so it can
+        never drift. It also carries the platform rules, which the system prompt treats as
+        binding rather than restating — so a failure to fetch raises instead of embedding a
+        note: an agent briefed without the rules would compete blind.
         """
         parts: list[str] = []
-        for base in (self.quota_url, self.sched_url, self.registry_url):
+        for base in (self.api_url,):
             url = f"{base}/explore"
             try:
                 req = urllib.request.Request(url, method="GET")

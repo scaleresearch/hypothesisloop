@@ -33,7 +33,7 @@ reset:
 # Installs/removes the node-agent DaemonSet + cluster-agent Deployment (the
 # only component with real k8s credentials) on the cluster KUBE_CONTEXT/
 # KUBECONFIG_PATH point at (or current kubectl context).
-# Usage: make cluster-agent-up CLUSTER=<name> [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [CONTROLPLANE_URL=...] [REGISTRY_URL=...]
+# Usage: make cluster-agent-up CLUSTER=<name> [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [API_URL=...]
 cluster-agent-up:
 	CLUSTER_NAME="$(CLUSTER)" bash runtime/k8s/infra/install.sh
 
