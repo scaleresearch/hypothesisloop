@@ -17,6 +17,19 @@ const (
 	StatusRejected  ExperimentStatus = "REJECTED"
 )
 
+// ValidExperimentStatus reports whether s is one of the recognized statuses. Callers filtering on
+// a status validate here first: the column is a Postgres enum, so an unrecognized value otherwise
+// surfaces as a driver error and a 500 rather than the client mistake it is.
+func ValidExperimentStatus(s ExperimentStatus) bool {
+	switch s {
+	case StatusSubmitted, StatusQueued, StatusAdmitted, StatusRunning,
+		StatusCompleted, StatusFailed, StatusEvicted, StatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	NotAdmittedCapacityUnavailable = "capacity_unavailable"
 	NotAdmittedOutranked           = "outranked"

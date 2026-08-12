@@ -103,6 +103,10 @@ type Doc struct {
 // exposes /openapi.json, /openapi.yaml and /docs on the same router.
 func New(r chi.Router, title, version, preamble string) *Doc {
 	cfg := huma.DefaultConfig(title, version)
+	// A filter the server doesn't know is a filter that wasn't applied, and returning unfiltered
+	// data for it is indistinguishable from a correct answer — a caller filtering by a mistyped or
+	// imagined param silently reads the whole table and believes it. 400 instead, naming the param.
+	cfg.RejectUnknownQueryParameters = true
 	return &Doc{API: humachi.New(r, cfg), title: title, preamble: preamble}
 }
 
