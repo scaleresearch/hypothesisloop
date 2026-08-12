@@ -87,6 +87,15 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 		// surface as failed pods for the Job controller's per-index accounting, rather
 		// than being retried in-place by the kubelet.
 		restartPolicy = corev1.RestartPolicyNever
+	} else if spec.MaxRetries != nil && *spec.MaxRetries == 0 {
+		// Retries happen at two independent layers: BackoffLimit recreates the pod, and
+		// RestartPolicy=OnFailure has the kubelet restart the container in place. max_retries
+		// only reaches the first, so under OnFailure a job asking for zero retries still got
+		// restarted — observed live as restart_count=1 with max_retries=0, on a diagnostic run
+		// chosen specifically to fail once and cheaply. Honour the request: with no retries
+		// asked for there is no reason to keep the in-place layer, and Never makes the failure
+		// surface as a failed pod instead.
+		restartPolicy = corev1.RestartPolicyNever
 	}
 
 	resources := corev1.ResourceRequirements{
