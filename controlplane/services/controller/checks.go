@@ -63,6 +63,19 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 			// not evidence of a hung process. Let the reschedule finish; next tick re-checks.
 			return false, "", nil
 		}
+		// Same silence, two very different causes. A job that reported and then stopped has a
+		// hung or dead training process; one that never reported at all has a reporting path
+		// that never worked — and because workloads typically swallow the post failure and only
+		// warn to stderr, that failure is otherwise completely silent, reaching an operator as
+		// "stuck job" with no hint the metrics path is at fault. Tell them apart here, where the
+		// evidence is, so the eviction reason names the actual problem.
+		reported, err := metricsdb.HasEverReportedMetric(ctx, c.metricsDBURL, exp.ID, c.observedMaxLookback())
+		if err != nil {
+			return false, "", fmt.Errorf("silence ever-reported: %w", err)
+		}
+		if !reported {
+			return true, domain.EvictionNeverReportedMetrics, nil
+		}
 		return true, domain.EvictionSilent, nil
 	}
 	return false, "", nil
