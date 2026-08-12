@@ -45,7 +45,7 @@ type submitRequest struct {
 // RegisterHuma registers the public, research-agent-facing scheduler operations
 // at their full paths (/experiments...).
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
@@ -86,24 +86,50 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
 		Summary: "List experiments", Tags: []string{"experiments"},
-		Description: "Filter with ?agent=<id> and/or ?status=<STATUS>.",
+		Description: "Filter with ?agent, ?platform_experiment_id, ?status, ?search (substring match " +
+			"against hypothesis/objective/theory), ?limit, ?offset. ?sort selects order: created_at, " +
+			"priority_score, or status, optionally prefixed with - for descending (default -created_at " +
+			"is NOT the default order — omit ?sort to keep the historical priority-then-recency order). " +
+			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Agent  string `query:"agent"`
-		Status string `query:"status"`
-	}) (*struct{ Body []*domain.Experiment }, error) {
-		exps, err := h.svc.store.ListExperiments(ctx, domain.ExperimentFilter{
-			AgentID: in.Agent, Status: domain.ExperimentStatus(in.Status),
-		})
+		Agent                string `query:"agent"`
+		PlatformExperimentID string `query:"platform_experiment_id"`
+		Status               string `query:"status"`
+		Search               string `query:"search"`
+		Limit                int    `query:"limit"`
+		Offset               int    `query:"offset"`
+		Sort                 string `query:"sort"`
+	}) (*struct {
+		Body       []*domain.Experiment
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		filter := domain.ExperimentFilter{
+			AgentID:              in.Agent,
+			PlatformExperimentID: in.PlatformExperimentID,
+			Status:               domain.ExperimentStatus(in.Status),
+			Search:               in.Search,
+			Limit:                in.Limit,
+			Offset:               in.Offset,
+			Sort:                 in.Sort,
+		}
+		exps, err := h.svc.store.ListExperiments(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body []*domain.Experiment }{Body: exps}, nil
+		total, err := h.svc.store.CountExperiments(ctx, filter)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct {
+			Body       []*domain.Experiment
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: exps, TotalCount: total}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
 		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED.",
@@ -120,7 +146,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.Experiment }{Body: exp}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "admit-experiment", Method: "POST", Path: "/experiments/{id}/admit",
 		Summary: "Force-admit a QUEUED experiment onto a named cluster", Tags: []string{"experiments"},
 		Description: "Operator endpoint. Requires an explicit valid cluster_name and still respects capacity accounting.",
@@ -133,7 +159,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return h.admit(ctx, in.ID, in.Body.ClusterName)
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
 		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
 		Description: "Credits are refunded.",
@@ -159,7 +185,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return out, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
 		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}.",
@@ -191,7 +217,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return out, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "reprioritize", Method: "POST", Path: "/experiments/reprioritize",
 		Summary: "Trigger an immediate re-prioritization pass", Tags: []string{"experiments"},
 	}, func(ctx context.Context, _ *struct{}) (*struct {

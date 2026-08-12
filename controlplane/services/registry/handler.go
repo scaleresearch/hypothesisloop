@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -45,30 +46,11 @@ type hypothesisWithJobs struct {
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	// ---- experiments (registry records) ----
 
-	apidocs.Register(doc, huma.Operation{
-		OperationID: "registry-list-experiments", Method: "GET", Path: "/registry/experiments",
-		Summary: "List registered experiments", Tags: []string{"experiments"},
-		Description: "Filter with ?agent, ?platform_experiment_id, ?status, ?limit.",
-	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent"`
-		PlatformExperimentID string `query:"platform_experiment_id"`
-		Status               string `query:"status"`
-		Limit                int    `query:"limit"`
-	}) (*struct{ Body []*domain.Experiment }, error) {
-		filter := domain.ExperimentFilter{
-			AgentID:              in.Agent,
-			PlatformExperimentID: in.PlatformExperimentID,
-			Status:               domain.ExperimentStatus(in.Status),
-			Limit:                in.Limit,
-		}
-		exps, err := h.svc.List(ctx, filter)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		return &struct{ Body []*domain.Experiment }{Body: exps}, nil
-	})
+	// Listing lives on the scheduler service only (GET /experiments) — same table, same filters;
+	// no second endpoint duplicating it here. Use SCHED_URL for listing/filtering/search/
+	// pagination, REGISTRY_URL for a single experiment's phase_detail, lineage, metrics and logs.
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-get-experiment", Method: "GET", Path: "/registry/experiments/{id}",
 		Summary: "Get a registered experiment", Tags: []string{"experiments"},
 	}, func(ctx context.Context, in *struct {
@@ -81,7 +63,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.Experiment }{Body: exp}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-get-lineage", Method: "GET", Path: "/registry/experiments/{id}/lineage",
 		Summary: "Get an experiment's lineage chain", Tags: []string{"experiments"},
 		Description: "What a result was derived from.",
@@ -97,7 +79,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	// ---- metrics ----
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-get-metrics", Method: "GET", Path: "/registry/experiments/{id}/metrics",
 		Summary: "Get an experiment's metric timeseries", Tags: []string{"metrics"},
 		Description: "{metric_name, fraction_complete, metric_value} points.",
@@ -111,7 +93,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body []*domain.MetricDataPoint }{Body: ts}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-append-metric", Method: "POST", Path: "/registry/experiments/{id}/metrics",
 		Summary: "Append a metric sample for an experiment", Tags: []string{"metrics"},
 		DefaultStatus: 204,
@@ -138,7 +120,31 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return nil, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	// No POST here: log tails are never pushed by the job/research-agent side of the API --
+	// only a cluster-agent may report a job's log tail (via /internal/clusters/{name}/status,
+	// see clusteragentapi), same as job phase. This is read-only.
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "registry-get-log-tail", Method: "GET", Path: "/registry/experiments/{id}/logs",
+		Summary: "Get the job's most recently reported log tail", Tags: []string{"metrics"},
+		Description: "Returns up to the last `n` lines the owning cluster-agent last reported " +
+			"(default 10 -- pass a larger ?n for more, up to however many were last reported). " +
+			"Empty (not an error) if none has been reported yet.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+		N  int    `query:"n" default:"10"`
+	}) (*struct{ Body []string }, error) {
+		lines, err := h.svc.GetLogTail(ctx, in.ID, in.N)
+		if err != nil {
+			if errors.Is(err, ErrInvalidMetric) {
+				return nil, huma.Error404NotFound(err.Error())
+			}
+			h.logger.Error("get log tail", zap.String("id", in.ID), zap.Error(err))
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body []string }{Body: lines}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-platform-experiment-timeseries", Method: "GET",
 		Path:    "/registry/platform-experiments/{id}/metrics-timeseries",
 		Summary: "Get per-job metric history across a platform experiment", Tags: []string{"metrics"},
@@ -174,14 +180,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	// ---- hypotheses ----
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-register-hypothesis", Method: "POST", Path: "/registry/hypotheses",
 		Summary: "Register a hypothesis", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
-		Description: "Idempotent within a platform_experiment_id: text equivalent (modulo case/whitespace) to an " +
-			"existing hypothesis returns that row with HTTP 200 and already_existed=true; a newly created one " +
-			"returns 201. The returned id is metadata.hypothesis_id for the job that tests it. Every job must " +
-			"reference a hypothesis registered under the same platform_experiment_id.",
+		Description: "Idempotent within a platform_experiment_id: text equivalent to an existing hypothesis " +
+			"(modulo case/whitespace) returns that row with 200 and already_existed=true, a new one 201. The " +
+			"returned id is metadata.hypothesis_id for the job testing it; every job must reference a " +
+			"hypothesis from its own platform experiment.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			AgentID              string `json:"agent_id"`
@@ -219,29 +225,33 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Status: status, Body: hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed}}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-list-hypotheses", Method: "GET", Path: "/registry/hypotheses",
 		Summary: "List hypotheses for a platform experiment", Tags: []string{"hypotheses"},
-		Description: "Requires ?platform_experiment_id. Optional ?agent restricts to one agent's own " +
-			"hypotheses; ?limit bounds the result (default/max 200), most recent first. Each row carries " +
-			"finding_count/comment_count — drill into GET /registry/hypotheses/{id} for the bodies only " +
-			"when a count or relevance justifies it, to keep catch-up reads cheap.",
+		Description: "Requires ?platform_experiment_id; optional ?agent for one agent's own, " +
+			"?status (open|confirmed|refuted|inconclusive) for just that status, ?limit " +
+			"(default/max 200), most recent first. Rows carry finding_count/comment_count — drill " +
+			"into GET /registry/hypotheses/{id} only where a count or relevance earns it.",
 	}, func(ctx context.Context, in *struct {
-		PlatformExperimentID string `query:"platform_experiment_id"`
-		Agent                string `query:"agent"`
-		Limit                int    `query:"limit"`
+		PlatformExperimentID string                  `query:"platform_experiment_id"`
+		Agent                string                  `query:"agent"`
+		Status               domain.HypothesisStatus `query:"status"`
+		Limit                int                     `query:"limit"`
 	}) (*struct{ Body []*db.HypothesisListItem }, error) {
 		if in.PlatformExperimentID == "" {
 			return nil, huma.Error400BadRequest("platform_experiment_id is required")
 		}
-		hs, err := h.svc.ListHypotheses(ctx, in.PlatformExperimentID, in.Agent, in.Limit)
+		if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
+			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid status %q", in.Status))
+		}
+		hs, err := h.svc.ListHypotheses(ctx, in.PlatformExperimentID, in.Agent, in.Status, in.Limit)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct{ Body []*db.HypothesisListItem }{Body: hs}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-get-hypothesis", Method: "GET", Path: "/registry/hypotheses/{id}",
 		Summary: "Get a hypothesis with its jobs, findings, and comments", Tags: []string{"hypotheses"},
 	}, func(ctx context.Context, in *struct {
@@ -269,14 +279,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{Hypothesis: hyp, Jobs: jobs, Findings: findings, Comments: comments}}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-add-hypothesis-comment", Method: "POST", Path: "/registry/hypotheses/{id}/comments",
 		Summary: "Add a comment to a hypothesis", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
-		Description: "Records a freeform, job-independent note (abandon/revise/cross-reference) on a " +
-			"hypothesis, distinct from a finding (which requires a terminal job). Check the hypothesis's " +
-			"existing comments (from GET /registry/hypotheses/{id}) before posting to avoid re-recording " +
-			"the same conclusion.",
+		Description: "A freeform note with no job behind it (abandon/revise/cross-reference), as opposed to " +
+			"a finding, which requires a terminal job. Read the hypothesis's existing comments (GET " +
+			"/registry/hypotheses/{id}) first — don't re-record a conclusion already there.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -295,6 +304,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		c, err := h.svc.AddHypothesisComment(ctx, in.ID, in.Body.AgentID, in.Body.Text)
 		if err != nil {
+			if errors.Is(err, db.ErrUnknownAgent) {
+				return nil, huma.Error400BadRequest("unknown_agent: " + in.Body.AgentID)
+			}
 			h.logger.Error("add hypothesis comment", zap.Error(err))
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -304,13 +316,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Status: http.StatusCreated, Body: c}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "registry-set-hypothesis-status", Method: "POST", Path: "/registry/hypotheses/{id}/status",
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
-		Description: "One of open (default) / confirmed (a validated result, positive or negative, worth " +
-			"another agent reading closely) / inconclusive (noisy or not worth drilling into). Only the " +
-			"agent_id that registered the hypothesis may change its status — the caller's agent_id must " +
-			"match, or this returns 403.",
+		Description: "open (default) / confirmed (validated as a real improvement) / refuted " +
+			"(confidently established as not working) / inconclusive (noisy or not worth drilling " +
+			"into). Only the registering agent_id may set it; anyone else gets 403.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -322,7 +333,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("agent_id is required")
 		}
 		if !domain.ValidHypothesisStatus(in.Body.Status) {
-			return nil, huma.Error400BadRequest("status must be one of: open, confirmed, inconclusive")
+			return nil, huma.Error400BadRequest("status must be one of: open, confirmed, refuted, inconclusive")
 		}
 		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, in.Body.AgentID, in.Body.Status)
 		if err != nil {

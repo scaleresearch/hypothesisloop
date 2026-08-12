@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -50,8 +51,13 @@ type Experiment struct {
 	EvictionReason          string           `json:"eviction_reason,omitempty"`
 	// NotAdmittedReason is the scheduler's current decision explaining why a QUEUED job was
 	// skipped. Overwritten each decision and cleared on admission; not tick history.
-	NotAdmittedReason string   `json:"not_admitted_reason,omitempty"`
-	Artifacts         []string `json:"artifacts"`
+	NotAdmittedReason string `json:"not_admitted_reason,omitempty"`
+	// PhaseDetail is the runtime's latest explanation for why this job's container hasn't
+	// started or has been restarting, merged in live from the metrics store on every read —
+	// never persisted to PostgreSQL (metrics only in the metrics store, important.md #3). Nil
+	// when nothing has been reported yet.
+	PhaseDetail *PhaseDetail `json:"phase_detail,omitempty"`
+	Artifacts   []string     `json:"artifacts"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
@@ -110,7 +116,9 @@ func (e *Experiment) Footprint() Footprint {
 	}
 	fp = fp.Scale(int64(e.Job.Nodes()))
 	if e.AcceleratorCount > 0 && e.AcceleratorType != "" {
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: string(e.AcceleratorType)}, int64(e.AcceleratorCount))
+		// Lowercased so Fits()'s exact-match join works regardless of casing (see
+		// AcceleratorType.MatchesLabels and JobSpec.Footprint, which does the same).
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(string(e.AcceleratorType))}, int64(e.AcceleratorCount))
 	}
 	return fp
 }
@@ -124,5 +132,24 @@ type ExperimentFilter struct {
 	HypothesisID         string
 	Status               ExperimentStatus
 	Since                time.Time
-	Limit                int
+	// Search matches against hypothesis/objective/theory text, case-insensitively, substring
+	// match (mirrors PlatformExperimentsFilter.Search).
+	Search string
+	Limit  int
+	// Offset skips this many matching rows before applying Limit — used for page-by-page
+	// listing. Zero means "from the start".
+	Offset int
+	// Sort selects the ORDER BY column and direction, as "field" (ascending) or "-field"
+	// (descending). Empty keeps the store's default order. See ExperimentSortFields for the
+	// allowed field names.
+	Sort string
+}
+
+// ExperimentSortFields are the column names ExperimentFilter.Sort may reference, mapped to
+// their underlying SQL column. Keeping an explicit allowlist (rather than passing the query
+// param straight into ORDER BY) is what makes Sort safe against SQL injection.
+var ExperimentSortFields = map[string]string{
+	"created_at":     "created_at",
+	"priority_score": "priority_score",
+	"status":         "status",
 }
