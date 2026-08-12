@@ -19,6 +19,9 @@ const ObservedMaxLookback = 14 * 24 * time.Hour
 type Store interface {
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error)
+	// CountExperiments returns the total matching filter, ignoring Limit/Offset/Sort — used to
+	// populate list-experiments' X-Total-Count header for pagination.
+	CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error)
 	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
