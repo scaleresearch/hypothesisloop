@@ -37,10 +37,20 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 	}
 	newest, failed := selectLogPods(pods.Items)
 
+	// maxLines is a budget for the whole response, not per section. This runs on every status
+	// push for every job and the result is shipped to the control plane and stored, so letting
+	// each section have the full budget would triple the payload for the rest of a failed job's
+	// life. History gets at most half; a traceback's tail is short and the current attempt is
+	// what changes.
+	historyBudget := maxLines / 2
+	if historyBudget < 1 {
+		historyBudget = 1
+	}
+
 	var lines []string
 	// Failed attempt first: it is the older output, and it is the part that explains the failure.
 	if failed != nil {
-		failedLines, err := c.podTail(ctx, experimentID, failed.Name, maxLines, false)
+		failedLines, err := c.podTail(ctx, experimentID, failed.Name, historyBudget, false)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +65,7 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 	// instance's output — the traceback — is only reachable with Previous, so without this a
 	// restart silently replaces the reason the job failed with the reason it is still alive.
 	if newest != nil && podHasRestarted(newest) {
-		prevLines, err := c.podTail(ctx, experimentID, newest.Name, maxLines, true)
+		prevLines, err := c.podTail(ctx, experimentID, newest.Name, historyBudget, true)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +76,11 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 		}
 	}
 	if newest != nil && (failed == nil || newest.Name != failed.Name) {
-		currentLines, err := c.podTail(ctx, experimentID, newest.Name, maxLines, false)
+		remaining := maxLines - len(lines)
+		if remaining < 1 {
+			remaining = 1
+		}
+		currentLines, err := c.podTail(ctx, experimentID, newest.Name, remaining, false)
 		if err != nil {
 			return nil, err
 		}
@@ -76,6 +90,13 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 			}
 			lines = append(lines, currentLines...)
 		}
+	}
+	// Belt and braces: the section headers themselves can nudge a few lines past the budget.
+	// Trim from the end, not the start — overflow is only ever a handful of lines, and dropping
+	// the newest current-attempt output costs nothing next to losing the failure section and its
+	// header, which is the whole point of the response.
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
 	}
 	return lines, nil
 }
