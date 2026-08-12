@@ -136,7 +136,7 @@ type ExperimentMeta struct {
 	ParentID             *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
 
 	// HypothesisID is required: the ID of a hypothesis previously registered (or retrieved,
-	// if equivalent text already existed) via POST /registry/hypotheses.
+	// if equivalent text already existed) via POST /hypotheses.
 	HypothesisID string `json:"hypothesis_id" yaml:"hypothesis_id"`
 	Hypothesis   string `json:"hypothesis" yaml:"hypothesis"`
 	Objective    string `json:"objective" yaml:"objective"`

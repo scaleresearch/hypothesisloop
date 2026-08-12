@@ -129,7 +129,7 @@ type PlatformExperiment struct {
 	StartsAt              time.Time                `json:"starts_at"`
 	EndsAt                time.Time                `json:"ends_at"`
 	Status                PlatformExperimentStatus `json:"status"`
-	// Stages is the elimination ladder, fixed at creation. See docs/stages.md.
+	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
 	CurrentStage int `json:"current_stage"`

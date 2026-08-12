@@ -153,7 +153,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		"HYPOTHESISLOOP_CODE_REF":          exp.CodeRef,
 		"HYPOTHESISLOOP_CONFIG_HASH":       exp.ConfigHash,
 		"HYPOTHESISLOOP_DATA_REF":          exp.DataRef,
-		"HYPOTHESISLOOP_REGISTRY_URL":      e.registryURL,
+		"HYPOTHESISLOOP_API_URL":           e.apiURL,
 		"HYPOTHESISLOOP_ACCELERATOR_TYPE":  string(exp.AcceleratorType),
 		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", exp.AcceleratorCount),
 		"HYPOTHESISLOOP_DURATION_SECONDS":  fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600)),

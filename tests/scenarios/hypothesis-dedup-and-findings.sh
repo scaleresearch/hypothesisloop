@@ -24,7 +24,7 @@ signup_and_start "$PE_ID" "$AGENT_A" "$AGENT_B"
 
 echo "  -- registering equivalent hypothesis text twice returns the same row, not a duplicate --"
 TEXT="Higher learning rate converges faster to a better task_success_rate"
-FIRST=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" -H 'Content-Type: application/json' \
+FIRST=$(curl -sf -X POST "$API_URL/hypotheses" -H 'Content-Type: application/json' \
   -d "{\"agent_id\": \"$AGENT_A\", \"platform_experiment_id\": \"$PE_ID\", \"text\": \"$TEXT\"}")
 FIRST_ID=$(echo "$FIRST" | py "import sys,json; print(json.load(sys.stdin)['id'])")
 FIRST_ALREADY=$(echo "$FIRST" | py "import sys,json; print(json.load(sys.stdin).get('already_existed'))")
@@ -32,7 +32,7 @@ FIRST_ALREADY=$(echo "$FIRST" | py "import sys,json; print(json.load(sys.stdin).
   && pass "first registration of new hypothesis text: already_existed=False" \
   || fail "first registration should be already_existed=False, got $FIRST_ALREADY"
 
-SECOND=$(curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" -H 'Content-Type: application/json' \
+SECOND=$(curl -sf -X POST "$API_URL/hypotheses" -H 'Content-Type: application/json' \
   -d "{\"agent_id\": \"$AGENT_B\", \"platform_experiment_id\": \"$PE_ID\", \"text\": \"$TEXT\"}")
 SECOND_ID=$(echo "$SECOND" | py "import sys,json; print(json.load(sys.stdin)['id'])")
 SECOND_ALREADY=$(echo "$SECOND" | py "import sys,json; print(json.load(sys.stdin).get('already_existed'))")
@@ -51,7 +51,7 @@ S=$(wait_for_completion_after_running "$JOB" "0.02" "$ADMISSION_BUDGET_SECONDS" 
 if [[ "$S" == "COMPLETED" ]]; then
   SUMMARY_TEXT="Achieved 0.81 val_accuracy — e2e cross-agent findings-visibility coverage"
   file_finding "$JOB" "$SUMMARY_TEXT"
-  HYP_VIEW=$(curl -sf "$REGISTRY_URL/registry/hypotheses/${FIRST_ID}")
+  HYP_VIEW=$(curl -sf "$API_URL/hypotheses/${FIRST_ID}")
   FOUND=$(echo "$HYP_VIEW" | py "
 import sys, json
 d = json.load(sys.stdin)
@@ -59,7 +59,7 @@ findings = d.get('findings') or []
 print(any('$SUMMARY_TEXT' in (f.get('summary') or '') for f in findings))
 ")
   [[ "$FOUND" == "True" ]] \
-    && pass "finding filed by $AGENT_A is visible via GET /registry/hypotheses/{id} (readable by any agent, e.g. $AGENT_B)" \
+    && pass "finding filed by $AGENT_A is visible via GET /hypotheses/{id} (readable by any agent, e.g. $AGENT_B)" \
     || fail "finding filed by $AGENT_A was not present in the hypothesis's shared findings list"
 else
   fail "job never reached COMPLETED (status=$S) — cannot exercise cross-agent findings visibility"

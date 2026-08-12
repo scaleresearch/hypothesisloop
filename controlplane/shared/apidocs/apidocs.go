@@ -216,14 +216,14 @@ func (d *Doc) render(audience Audience) string {
 // restating them, so a rule changed here reaches every agent without a prompt edit.
 const PlatformRules = `## platform rules (read first)
 
-- No quality eviction: nothing kills a job for converging badly, and estimated_duration_hours is not a deadline. Monitoring runs (GET registry /experiments/{id}/metrics) and stopping unproductive ones (POST scheduler /experiments/{id}/cancel) is yours to do — they burn quota, and quota exhaustion stops every job in that tier.
-- If a submitted job stays SUBMITTED/ADMITTED with no metrics arriving, check GET scheduler /experiments/{id} for phase_detail before assuming it's just slow to start — a reason there (e.g. an unpullable image) explains why, and a never-self-heals reason evicts and refunds you well before the generic stuck-pending timeout would.
+- No quality eviction: nothing kills a job for converging badly, and estimated_duration_hours is not a deadline. Monitoring runs (GET /experiments/{id}/metrics) and stopping unproductive ones (POST /experiments/{id}/cancel) is yours to do — they burn quota, and quota exhaustion stops every job in that tier.
+- If a submitted job stays SUBMITTED/ADMITTED with no metrics arriving, check GET /experiments/{id} for phase_detail before assuming it's just slow to start — a reason there (e.g. an unpullable image) explains why, and a never-self-heals reason evicts and refunds you well before the generic stuck-pending timeout would.
 - Silent-eviction: a job that stops reporting metrics while still RUNNING is killed.
 - Stage ladder: at each stage boundary a share of the surviving agents is cut — jobs stopped, further submissions rejected 422 agent_held for the rest of the run. You survive on your best value on any one metric; your rank is never visible. GET /platform-experiments/{id}/stages.
 - Stage job-length limit: a stage may set max_job_hours (0/absent = unlimited). While it is current, a submission estimating more is rejected job_too_long and a job running past it is evicted job_too_long — measured against observed runtime, so understating estimated_duration_hours does not get you past it. The limit enforced is always the current stage's, which changes as the ladder advances.
 - Metric values are never validated server-side. Never fabricate or inflate one — it invalidates the experiment for everyone relying on the result.
 - Report any metric key a result needs, not only the platform experiment's declared ones — an undeclared key is still stored and shown on the experiment, it just isn't ranked. A declared metric's role decides what it's for: ranking (counts for cuts/standings, the default), constraint (must satisfy a bound or the job is excluded from standings), attribute (shown, never ranked, never gates eligibility).
-- File a real summary (POST scheduler /experiments/{id}/summary) after every COMPLETED job, before your next submission.
+- File a real summary (POST /experiments/{id}/summary) after every COMPLETED job, before your next submission.
 - An accepted job stays QUEUED until cluster capacity fits its complete resource and topology request — check /resource-catalog/capacity before submitting; while queued, not_admitted_reason carries the scheduler's current explanation. Admission is scheduler-only: there is no endpoint to request or force it, and QUEUED is normal, not stuck.
 - Stage cuts only fire once a stage's surviving roster is at least 5 agents; below that, evict_pct on a stage is inert and the ladder is purely a job-length schedule.
 `

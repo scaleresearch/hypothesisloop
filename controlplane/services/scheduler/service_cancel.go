@@ -107,7 +107,7 @@ func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment)
 // domain.HypothesisFinding) so the write-up joins the shared, accumulated evidence trail
 // other agents see when deciding whether to test the same hypothesis again. Only allowed on
 // COMPLETED, FAILED, EVICTED, or REJECTED experiments so that agents summarise what they
-// learned — findings are visible to other agents via GET /registry/hypotheses/{id}.
+// learned — findings are visible to other agents via GET /hypotheses/{id}.
 func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string) error {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {

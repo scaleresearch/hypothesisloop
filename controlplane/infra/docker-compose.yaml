@@ -28,7 +28,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Hosts quota-service and scheduler-service on their historical ports 8081/8082 —
+  # Hosts the entire agent- and UI-facing API on one port (8081) —
   # scheduler already calls straight into the quota package for refunds/adjustments,
   # so they share one Postgres connection pool instead of duplicating it.
   control-service:
@@ -43,7 +43,6 @@ services:
       - ../settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro
     ports:
       - "8081:8081"
-      - "8082:8082"
     networks:
       - hypothesisloop-net
     depends_on:
@@ -52,7 +51,7 @@ services:
       greptimedb:
         condition: service_started
 
-  # Hosts registry-service and metric-controller on their historical ports 8083/8084 —
+  # Hosts the internal metric-controller only (8084) —
   # registry writes samples to GreptimeDB and metric-controller reads them back to
   # drive eviction, so they're the write/read halves of the same metrics pipeline.
   metrics-service:
@@ -63,7 +62,6 @@ services:
     volumes:
       - ../settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro
     ports:
-      - "8083:8083"
       - "8084:8084"
     networks:
       - hypothesisloop-net

@@ -2,9 +2,7 @@
 # Platform-wide rates and scheduling policy live here.
 
 services:
-  quota_port: 8081
-  scheduler_port: 8082
-  registry_port: 8083
+  api_port: 8081
   metric_controller_port: 8084
   metrics_db_url: http://greptimedb:4000
 
@@ -167,7 +165,7 @@ scheduler:
   # failed natively by k8s (job watcher then records FAILED and refunds unused AccH).
 
 
-# Stages — the elimination ladder (see docs/stages.md)
+# Stages — the elimination ladder
 #
 # An ordered list of stages:
 #   length_pct     share of the experiment this stage spans; all stages must sum to 100

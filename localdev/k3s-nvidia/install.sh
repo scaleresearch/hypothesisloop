@@ -23,7 +23,7 @@
 #
 # Required env vars (no defaults — this platform always runs the control plane on a different
 # host than the GPU node itself, so there's no "just use localhost" fallback):
-#   CONTROLPLANE_URL, REGISTRY_URL, METRICS_URL — reachable from this host (see
+#   API_URL, METRICS_URL — reachable from this host (see
 #   localdev/tunnels/ if the control plane is local and this is a remote rented box).
 #
 # Idempotent: safe to re-run.
@@ -32,8 +32,7 @@ set -euo pipefail
 CONTEXT_NAME="k3s-nvidia"
 CLUSTER_NAME="k3s-nvidia"
 
-: "${CONTROLPLANE_URL:?set CONTROLPLANE_URL (e.g. a localdev/tunnels/ URL reaching :8082)}"
-: "${REGISTRY_URL:?set REGISTRY_URL (e.g. a localdev/tunnels/ URL reaching :8083)}"
+: "${API_URL:?set API_URL (e.g. a localdev/tunnels/ URL reaching :8081)}"
 : "${METRICS_URL:?set METRICS_URL (e.g. a localdev/tunnels/ URL reaching :8084)}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -148,9 +147,9 @@ for img in cluster-agent node-agent; do
   docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "localhost/hypothesisloop-${img}:latest" "${ROOT}" >/dev/null
 done
 
-echo "==> Installing cluster-agent bundle (control plane: ${CONTROLPLANE_URL})..."
+echo "==> Installing cluster-agent bundle (API: ${API_URL})..."
 CLUSTER_NAME="${CLUSTER_NAME}" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  CONTROLPLANE_URL="${CONTROLPLANE_URL}" REGISTRY_URL="${REGISTRY_URL}" METRICS_URL="${METRICS_URL}" \
+  API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" \
   bash "${ROOT}/runtime/k8s/infra/install.sh"
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}  Cluster name: ${CLUSTER_NAME}"

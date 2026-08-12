@@ -167,23 +167,14 @@ func (s *HypothesesStore) GetHypothesis(ctx context.Context, id string) (*domain
 // caller pull just the still-actionable rows (open/inconclusive) or just the settled ones
 // (confirmed) instead of paying to fetch and filter the whole pool client-side, which matters
 // once a platform experiment's hypothesis count grows past a single catch-up's easy skim.
-func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit int) ([]*HypothesisListItem, error) {
+func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*HypothesisListItem, error) {
 	if limit <= 0 {
 		limit = defaultHypothesisListLimit
 	} else if limit > maxHypothesisListLimit {
 		limit = maxHypothesisListLimit
 	}
 
-	clauses := []string{"h.platform_experiment_id = $1"}
-	args := []any{platformExperimentID}
-	if agentID != "" {
-		args = append(args, agentID)
-		clauses = append(clauses, fmt.Sprintf("h.agent_id = $%d", len(args)))
-	}
-	if status != "" {
-		args = append(args, status)
-		clauses = append(clauses, fmt.Sprintf("h.status = $%d", len(args)))
-	}
+	clauses, args := hypothesisFilterClauses(platformExperimentID, agentID, status)
 	args = append(args, limit)
 
 	q := `
@@ -196,6 +187,10 @@ WHERE ` + strings.Join(clauses, " AND ") + `
 GROUP BY h.id
 ORDER BY h.created_at DESC
 LIMIT $` + fmt.Sprint(len(args))
+	if offset > 0 {
+		args = append(args, offset)
+		q += " OFFSET $" + fmt.Sprint(len(args))
+	}
 
 	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -353,4 +348,32 @@ func (s *HypothesesStore) UpdateHypothesisStatus(ctx context.Context, id, caller
 		return nil, fmt.Errorf("hypotheses_store.UpdateHypothesisStatus: %w", err)
 	}
 	return h, nil
+}
+
+// hypothesisFilterClauses builds the WHERE fragment shared by ListHypotheses and
+// CountHypotheses, so a page and its total can never be computed over different predicates.
+func hypothesisFilterClauses(platformExperimentID, agentID string, status domain.HypothesisStatus) ([]string, []any) {
+	clauses := []string{"h.platform_experiment_id = $1"}
+	args := []any{platformExperimentID}
+	if agentID != "" {
+		args = append(args, agentID)
+		clauses = append(clauses, fmt.Sprintf("h.agent_id = $%d", len(args)))
+	}
+	if status != "" {
+		args = append(args, status)
+		clauses = append(clauses, fmt.Sprintf("h.status = $%d", len(args)))
+	}
+	return clauses, args
+}
+
+// CountHypotheses returns how many hypotheses match, ignoring limit/offset — the total a
+// paginating caller shows, matching the X-Total-Count convention of every other list endpoint.
+func (s *HypothesesStore) CountHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus) (int, error) {
+	clauses, args := hypothesisFilterClauses(platformExperimentID, agentID, status)
+	q := `SELECT COUNT(*) FROM hypotheses h WHERE ` + strings.Join(clauses, " AND ")
+	var total int
+	if err := s.pool.pool.QueryRow(ctx, q, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("hypotheses_store.CountHypotheses: %w", err)
+	}
+	return total, nil
 }

@@ -25,7 +25,7 @@ type Experiment struct {
 	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the
 	// billing/admission-facing canonical values derived from it once at submission time.
 	Job JobSpec `json:"job"`
-	// HypothesisID references a row registered via POST /registry/hypotheses. Required: every
+	// HypothesisID references a row registered via POST /hypotheses. Required: every
 	// experiment must test a specific, previously-registered hypothesis, not free text ad hoc.
 	HypothesisID string `json:"hypothesis_id"`
 	Hypothesis   string `json:"hypothesis"`

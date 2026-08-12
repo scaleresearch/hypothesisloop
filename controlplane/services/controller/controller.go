@@ -66,7 +66,7 @@ type Controller struct {
 	reconcileInterval time.Duration
 	logger            *zap.Logger
 
-	// Stage ladder support (docs/stages.md). Optional — boundaries are skipped if nil.
+	// Stage ladder support. Optional — boundaries are skipped if nil.
 	stagesStore  StagesStore
 	metricsDBURL string
 

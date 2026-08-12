@@ -32,7 +32,7 @@ BUDGET=$(scale_budget 0.075)
 PE_ID=$(create_platform_experiment "stage-ladder-${RUN_ID}" "$BUDGET" "${#AGENTS[@]}" 10 0 "" "$STAGES")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
-stages_json() { curl -sf "$QUOTA_URL/platform-experiments/${PE_ID}/stages"; }
+stages_json() { curl -sf "$API_URL/platform-experiments/${PE_ID}/stages"; }
 jq_stages() { stages_json | py "import sys,json; d=json.load(sys.stdin); $1"; }
 
 # The ladder must come back exactly as configured — this is the write path (POST with an
@@ -51,7 +51,7 @@ EXPECTED=$(py "print([(20.0, 50.0), (30.0, 25.0), (50.0, 0.0)])")
 # Initial allocation is capped to the first stage's share (20%), not the whole budget — the rest
 # is released at the boundaries.
 quota_guaranteed() {
-  curl -sf "$QUOTA_URL/quota/$1/experiment/${PE_ID}" \
+  curl -sf "$API_URL/platform-experiments/${PE_ID}/quotas/$1" \
     | py "import sys,json; print(json.load(sys.stdin)['guaranteed_accelerator_hours'])"
 }
 FIRST_ALLOC=$(quota_guaranteed "${AGENTS[0]}")

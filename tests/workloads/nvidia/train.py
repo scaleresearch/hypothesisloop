@@ -22,7 +22,7 @@ import urllib.request
 EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
 AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
 PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
-REG_URL    = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "http://localhost:8083")
+API_URL    = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
 
 # Repeats the sweep in a loop, sleeping REPEAT_SLEEP_SECONDS between passes, until killed —
 # lets a scenario request a job that stays RUNNING long enough to observe live metrics and/or
@@ -36,7 +36,7 @@ TIMED_ITERS = 20
 
 
 def post_metric(fraction: float, value: float, metric_name: str) -> None:
-    url = f"{REG_URL}/registry/experiments/{EXP_ID}/metrics"
+    url = f"{API_URL}/experiments/{EXP_ID}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:

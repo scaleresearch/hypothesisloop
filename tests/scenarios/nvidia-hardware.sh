@@ -45,8 +45,7 @@ JOB="" JOB2="" JOB3="" JOB4="" JOB5=""
 ( cd "$ROOT" && go build -o "$AGENT_BIN" ./runtime/bare-metal/cmd/bare-agent )
 
 CLUSTER_NAME="$CLUSTER_NAME" \
-CONTROLPLANE_URL="$SCHED_URL" \
-REGISTRY_URL="$REGISTRY_URL" \
+API_URL="$API_URL" \
 HYPOTHESISLOOP_CONFIG="$ROOT/controlplane/settings/hypothesisloop.yaml" \
 SCRATCH_DIR="$SCRATCH_DIR" \
 NODE_NAME="nvidia-e2e-node-${RUN_ID}" \
@@ -58,7 +57,7 @@ AGENT_PID=$!
 # this scenario ever submits, not just the first one, however far the script got before exiting.
 cleanup() {
   for j in "$JOB" "$JOB2" "$JOB3" "$JOB4" "$JOB5"; do
-    [[ -n "$j" ]] && curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${j}/cancel"
+    [[ -n "$j" ]] && curl -s -o /dev/null -X POST "$API_URL/experiments/${j}/cancel"
   done
   kill "$AGENT_PID" 2>/dev/null || true
   wait "$AGENT_PID" 2>/dev/null || true
@@ -74,7 +73,7 @@ trap cleanup EXIT
 force_admit() {
   local job="$1" cluster="$2"
   for i in 1 2 3 4 5; do
-    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCHED_URL/experiments/${job}/admit" \
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API_URL/experiments/${job}/admit" \
       -H 'Content-Type: application/json' -d "{\"cluster_name\": \"$cluster\"}")
     [[ "$code" == "200" ]] && return 0
     sleep 2
@@ -85,7 +84,7 @@ force_admit() {
 
 echo "  -- bare-agent started (pid=$AGENT_PID, cluster=$CLUSTER_NAME), waiting for registration --"
 wait_until "bare-agent registered cluster $CLUSTER_NAME" 15 1 \
-  bash -c "curl -sf '$SCHED_URL/internal/clusters' | grep -q '\"$CLUSTER_NAME\"'" \
+  bash -c "curl -sf '$API_URL/internal/clusters' | grep -q '\"$CLUSTER_NAME\"'" \
   || fail "bare-agent never showed up as a reachable cluster (see $AGENT_LOG)"
 
 echo "  -- building real NVIDIA workload image ($ENGINE) --"
@@ -132,7 +131,7 @@ C2=$(get_field "$JOB2" cluster_name)
 [[ ( "$S2" == "SUBMITTED" || "$S2" == "QUEUED" ) && -z "$C2" ]] \
   && pass "job requesting $OTHER_TYPE correctly stayed unadmitted (status=$S2) — scheduler did not misroute it onto $CLUSTER_NAME" \
   || fail "job requesting hardware this cluster lacks should stay SUBMITTED/QUEUED with no cluster, got status=$S2 cluster_name='$C2'"
-curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${JOB2}/cancel"
+curl -s -o /dev/null -X POST "$API_URL/experiments/${JOB2}/cancel"
 
 # ==> mid-run metrics + eviction + post-eviction reuse: a long-running job (train.py's repeat
 # mode) that streams metrics while RUNNING, gets evicted mid-run, and is confirmed to actually
@@ -147,11 +146,11 @@ force_admit "$JOB3" "$CLUSTER_NAME" || true
 # shell functions (py, get_status, ...) aren't available there — every check below inlines
 # curl+python3 -c directly instead of calling them.
 wait_until "JOB3 reaches RUNNING" 20 1 bash -c \
-  "[[ \$(curl -sf '$SCHED_URL/experiments/${JOB3}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"status\"])') == RUNNING ]]" \
+  "[[ \$(curl -sf '$API_URL/experiments/${JOB3}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"status\"])') == RUNNING ]]" \
   || fail "JOB3 never reached RUNNING (status=$(get_status "$JOB3"))"
 
 wait_until "JOB3 reports >=2 metric samples while RUNNING" 30 2 bash -c \
-  "[[ \$(curl -sf '$REGISTRY_URL/registry/experiments/${JOB3}/metrics' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))') -ge 2 ]]" \
+  "[[ \$(curl -sf '$API_URL/experiments/${JOB3}/metrics' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))') -ge 2 ]]" \
   && pass "metrics streamed mid-run from a real GPU container" \
   || fail "fewer than 2 metric samples landed while JOB3 was RUNNING"
 
@@ -161,9 +160,9 @@ CONTAINER_NAME_3="$("$ENGINE" ps --filter "label=hypothesisloop.io/experiment-id
   || fail "no local $ENGINE container found for JOB3"
 
 echo "  ==> evicting JOB3 mid-run --"
-curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${JOB3}/cancel"
+curl -s -o /dev/null -X POST "$API_URL/experiments/${JOB3}/cancel"
 wait_until "JOB3 reaches EVICTED" 15 1 bash -c \
-  "[[ \$(curl -sf '$SCHED_URL/experiments/${JOB3}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"status\"])') == EVICTED ]]" \
+  "[[ \$(curl -sf '$API_URL/experiments/${JOB3}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"status\"])') == EVICTED ]]" \
   || fail "JOB3 never reached EVICTED (status=$(get_status "$JOB3"))"
 wait_until "JOB3's container actually stops" 20 1 \
   bash -c "[[ -z \"\$($ENGINE ps --filter label=hypothesisloop.io/experiment-id=${JOB3} --filter status=running --format '{{.Names}}')\" ]]" \
@@ -192,7 +191,7 @@ if command -v kubectl >/dev/null 2>&1 && kubectl --context "$NVIDIA_K3S_CONTEXT"
   kill "$AGENT_PID" 2>/dev/null || true
   wait "$AGENT_PID" 2>/dev/null || true
   wait_until "bare-node cluster $CLUSTER_NAME drops out of /internal/clusters" 40 1 \
-    bash -c "! curl -sf '$SCHED_URL/internal/clusters' | grep -q '\"$CLUSTER_NAME\"'"
+    bash -c "! curl -sf '$API_URL/internal/clusters' | grep -q '\"$CLUSTER_NAME\"'"
   echo "  ==> k3s leg: submitting real GPU job via cluster-agent (context=$NVIDIA_K3S_CONTEXT) --"
   K3S_CLUSTER_NAME="k3s-nvidia"
   K3S_GPU_PRODUCT="$(kubectl --context "$NVIDIA_K3S_CONTEXT" get nodes -o json \

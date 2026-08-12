@@ -61,10 +61,10 @@ const (
 	EvictionAgentRemoved     EvictionReason = "agent_removed"
 	EvictionCancelled        EvictionReason = "cancelled"
 	// EvictionStageCut terminates an agent's jobs when it is cut at a stage boundary.
-	// Terminal for the rest of the platform experiment — see docs/stages.md.
+	// Terminal for the rest of the platform experiment — see the stage ladder.
 	EvictionStageCut EvictionReason = "stage_cut"
 	// EvictionJobTooLong terminates a job that has run longer than the current stage's
-	// max_job_hours. See docs/stages.md.
+	// max_job_hours.
 	EvictionJobTooLong EvictionReason = "job_too_long"
 	// EvictionStuckPending marks a job that was admitted (SUBMITTED/ADMITTED) but never
 	// reported RUNNING within StuckPendingTimeoutSeconds — e.g. unschedulable due to

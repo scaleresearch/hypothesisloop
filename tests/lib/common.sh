@@ -9,9 +9,7 @@ set -euo pipefail
 # when a scenario is run standalone since there's no contention to budget for.
 ADMISSION_BUDGET_SECONDS="${ADMISSION_BUDGET_SECONDS:-60}"
 
-QUOTA_URL="${QUOTA_URL:-http://localhost:8081}"
-SCHED_URL="${SCHED_URL:-http://localhost:8082}"
-REGISTRY_URL="${REGISTRY_URL:-http://localhost:8083}"
+API_URL="${API_URL:-http://localhost:8081}"
 PROM_URL="${PROM_URL:-http://localhost:4000/v1/prometheus}"
 JOB_NS="${JOB_NS:-hypothesisloop-jobs}"
 CLUSTER_NS="${CLUSTER_NS:-hypothesisloop}"

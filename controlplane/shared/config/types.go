@@ -89,14 +89,16 @@ type SchedulerConfig struct {
 // StagesConfig holds the platform-wide default elimination ladder.
 type StagesConfig struct {
 	// Default is the ladder applied to a platform experiment created without its own.
-	// Validated by domain.ValidateStages at load. See docs/stages.md.
+	// Validated by domain.ValidateStages at load.
 	Default []domain.Stage `yaml:"default"`
 }
 
 type ServicesConfig struct {
-	QuotaPort            int    `yaml:"quota_port"`
-	SchedulerPort        int    `yaml:"scheduler_port"`
-	RegistryPort         int    `yaml:"registry_port"`
+	// APIPort serves the whole agent- and UI-facing API — quota, scheduler and registry
+	// operations on one router, so there is a single base URL, a single /openapi.json and a
+	// single /explore to discover all of it.
+	APIPort int `yaml:"api_port"`
+	// MetricControllerPort serves the internal controller only; nothing agent-facing.
 	MetricControllerPort int    `yaml:"metric_controller_port"`
 	MetricsDBURL         string `yaml:"metrics_db_url"`
 }

@@ -78,7 +78,7 @@ func splitLongLines(lines []string, maxLineChars int) []string {
 // Agent drives one cluster/node's reconcile and status-report loops against an Executor.
 type Agent struct {
 	ClusterName       string
-	ControlPlaneURL   string
+	APIURL            string
 	Executor          agentexec.Executor
 	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
@@ -244,7 +244,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 	if err != nil {
 		return nil, fmt.Errorf("encode reconcile snapshot: %w", err)
 	}
-	url := fmt.Sprintf("%s/internal/clusters/%s/reconcile", a.ControlPlaneURL, a.ClusterName)
+	url := fmt.Sprintf("%s/internal/clusters/%s/reconcile", a.APIURL, a.ClusterName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
@@ -382,7 +382,7 @@ func (a *Agent) pushStatus(ctx context.Context, reports []statusReportWire) {
 		a.Log("push status: encode request: %v", err)
 		return
 	}
-	url := fmt.Sprintf("%s/internal/clusters/%s/status", a.ControlPlaneURL, a.ClusterName)
+	url := fmt.Sprintf("%s/internal/clusters/%s/status", a.APIURL, a.ClusterName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 	if err != nil {
 		a.Log("push status: build request: %v", err)
