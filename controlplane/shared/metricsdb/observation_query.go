@@ -47,6 +47,20 @@ func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Durati
 	return metric, nil
 }
 
+// HasEverReportedMetric reports whether experimentID has produced even one job-reported metric
+// sample within maxLookback. Deliberately ignores the heartbeat: the heartbeat proves the pod
+// exists, this proves the workload's own reporting path works. A job that never produced a
+// single sample is not "quiet since it hung" — its metrics path is broken (wrong URL, a stale
+// helper baked into the image, a swallowed exception), which needs a different fix than a hung
+// process and so is worth telling apart at eviction time.
+func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, maxLookback time.Duration) (bool, error) {
+	reported, err := isAliveOn(ctx, dbURL, "experiment_metric_value", "job_id", experimentID, maxLookback)
+	if err != nil {
+		return false, fmt.Errorf("metricsdb.HasEverReportedMetric: %w", err)
+	}
+	return reported, nil
+}
+
 // aliveGridPoints returns the set of `step`-spaced grid timestamps (Unix seconds) between since
 // and now at which metric{labelKey=id} shows a sample within the preceding gapCap. The query
 // implements the gap cap via last_over_time's range-vector window, so a genuine gap (reschedule,

@@ -54,12 +54,18 @@ func (s ExperimentStatus) IsTerminal() bool {
 type EvictionReason string
 
 const (
-	EvictionSilent           EvictionReason = "silent"
-	EvictionCrashLoop        EvictionReason = "crash_loop"
-	EvictionQuotaExhaustion  EvictionReason = "quota_exhaustion"
-	EvictionExperimentClosed EvictionReason = "experiment_closed"
-	EvictionAgentRemoved     EvictionReason = "agent_removed"
-	EvictionCancelled        EvictionReason = "cancelled"
+	EvictionSilent EvictionReason = "silent"
+	// EvictionNeverReportedMetrics is silence by a job that never reported a single metric, as
+	// opposed to one that reported and then went quiet. The distinction matters because the
+	// causes are different: a hung training process versus a reporting path that never worked
+	// at all (wrong URL, a stale metrics helper baked into the image, an exception the workload
+	// swallows). Reported as plain silence, both look like "the job hung".
+	EvictionNeverReportedMetrics EvictionReason = "never_reported_metrics"
+	EvictionCrashLoop            EvictionReason = "crash_loop"
+	EvictionQuotaExhaustion      EvictionReason = "quota_exhaustion"
+	EvictionExperimentClosed     EvictionReason = "experiment_closed"
+	EvictionAgentRemoved         EvictionReason = "agent_removed"
+	EvictionCancelled            EvictionReason = "cancelled"
 	// EvictionStageCut terminates an agent's jobs when it is cut at a stage boundary.
 	// Terminal for the rest of the platform experiment — see the stage ladder.
 	EvictionStageCut EvictionReason = "stage_cut"
