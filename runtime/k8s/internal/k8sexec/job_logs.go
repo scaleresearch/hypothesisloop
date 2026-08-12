@@ -40,7 +40,7 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 	var lines []string
 	// Failed attempt first: it is the older output, and it is the part that explains the failure.
 	if failed != nil {
-		failedLines, err := c.podTail(ctx, experimentID, failed.Name, maxLines)
+		failedLines, err := c.podTail(ctx, experimentID, failed.Name, maxLines, false)
 		if err != nil {
 			return nil, err
 		}
@@ -50,8 +50,23 @@ func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID strin
 			lines = append(lines, failedLines...)
 		}
 	}
+	// A container that crashes under RestartPolicy=OnFailure restarts *in place*: same pod, same
+	// name, and GetLogs then serves the replacement instance's startup banner. The crashed
+	// instance's output — the traceback — is only reachable with Previous, so without this a
+	// restart silently replaces the reason the job failed with the reason it is still alive.
+	if newest != nil && podHasRestarted(newest) {
+		prevLines, err := c.podTail(ctx, experimentID, newest.Name, maxLines, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(prevLines) > 0 {
+			lines = append(lines, fmt.Sprintf("--- crashed instance before restart (pod %s, exit %d) ---",
+				newest.Name, lastTerminationExitCode(newest)))
+			lines = append(lines, prevLines...)
+		}
+	}
 	if newest != nil && (failed == nil || newest.Name != failed.Name) {
-		currentLines, err := c.podTail(ctx, experimentID, newest.Name, maxLines)
+		currentLines, err := c.podTail(ctx, experimentID, newest.Name, maxLines, false)
 		if err != nil {
 			return nil, err
 		}
@@ -95,11 +110,13 @@ func terminatedExitCode(p *corev1.Pod) int32 {
 	return code
 }
 
-// podTail reads the last maxLines lines of one pod's logs.
-func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName string, maxLines int) ([]string, error) {
+// podTail reads the last maxLines lines of one pod's logs. previous reads the instance before
+// the most recent restart — the equivalent of kubectl logs --previous.
+func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName string, maxLines int, previous bool) ([]string, error) {
 	tailLines := int64(maxLines)
 	req := c.kube.CoreV1().Pods(HypothesisLoopNamespace).GetLogs(podName, &corev1.PodLogOptions{
 		TailLines: &tailLines,
+		Previous:  previous,
 	})
 	stream, err := req.Stream(ctx)
 	if err != nil {
@@ -126,4 +143,27 @@ func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName s
 		return nil, fmt.Errorf("k8sexec.FetchLogTail: read log stream for %s: %w", experimentID, err)
 	}
 	return lines, nil
+}
+
+// podHasRestarted reports whether any container in p has been restarted at least once, meaning
+// an earlier instance's output exists only behind PodLogOptions.Previous.
+func podHasRestarted(p *corev1.Pod) bool {
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.RestartCount > 0 || cs.LastTerminationState.Terminated != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// lastTerminationExitCode returns the exit code of the instance that ran before the most recent
+// restart, or 0 when nothing has terminated.
+func lastTerminationExitCode(p *corev1.Pod) int32 {
+	var code int32
+	for _, cs := range p.Status.ContainerStatuses {
+		if t := cs.LastTerminationState.Terminated; t != nil && t.ExitCode > code {
+			code = t.ExitCode
+		}
+	}
+	return code
 }
