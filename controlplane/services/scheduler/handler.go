@@ -132,11 +132,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
-		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED.",
+		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED. " +
+			"Carries phase_detail: the runtime's latest reason a job hasn't started or is restarting.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.Experiment }, error) {
-		exp, err := h.svc.store.GetExperiment(ctx, in.ID)
+		exp, err := h.svc.GetExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

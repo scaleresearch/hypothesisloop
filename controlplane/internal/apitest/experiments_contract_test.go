@@ -1,0 +1,116 @@
+package apitest
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+)
+
+// filterSpyStore records the filter list-experiments builds, so the test asserts on what the
+// handler actually forwards to storage rather than on a re-implementation of the query.
+type filterSpyStore struct {
+	scheduler.Store
+	gotList  domain.ExperimentFilter
+	gotCount domain.ExperimentFilter
+	items    []*domain.Experiment
+	total    int
+}
+
+func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentFilter) ([]*domain.Experiment, error) {
+	s.gotList = f
+	return s.items, nil
+}
+
+func (s *filterSpyStore) CountExperiments(_ context.Context, f domain.ExperimentFilter) (int, error) {
+	s.gotCount = f
+	return s.total, nil
+}
+
+func schedulerRouter(store scheduler.Store) chi.Router {
+	r := chi.NewRouter()
+	d := apidocs.New(r, "scheduler", "1.0.0", "")
+	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil)))
+	return r
+}
+
+func TestListExperimentsForwardsEveryFilter(t *testing.T) {
+	spy := &filterSpyStore{total: 45}
+	r := schedulerRouter(spy)
+
+	code, _ := get(t, r, "/experiments?agent=a1&platform_experiment_id=pe-1&status=RUNNING"+
+		"&search=min_lr&limit=10&offset=20&sort=-created_at")
+	if code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+
+	want := domain.ExperimentFilter{
+		AgentID: "a1", PlatformExperimentID: "pe-1", Status: domain.ExperimentStatus("RUNNING"),
+		Search: "min_lr", Limit: 10, Offset: 20, Sort: "-created_at",
+	}
+	if spy.gotList != want {
+		t.Errorf("ListExperiments filter =\n %+v\nwant\n %+v", spy.gotList, want)
+	}
+	// The total must describe the whole match set, so Count sees the same predicates. It
+	// legitimately still carries Limit/Offset — the store ignores them (see CountExperiments).
+	if spy.gotCount.PlatformExperimentID != want.PlatformExperimentID ||
+		spy.gotCount.Search != want.Search || spy.gotCount.AgentID != want.AgentID ||
+		spy.gotCount.Status != want.Status {
+		t.Errorf("CountExperiments filter predicates = %+v, want them to match %+v", spy.gotCount, want)
+	}
+}
+
+// The bug this endpoint was fixed for: an unrecognized filter silently returned every row.
+func TestListExperimentsHonoursPlatformExperimentFilter(t *testing.T) {
+	spy := &filterSpyStore{}
+	r := schedulerRouter(spy)
+
+	if code, _ := get(t, r, "/experiments?platform_experiment_id=pe-d564bb90"); code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if spy.gotList.PlatformExperimentID != "pe-d564bb90" {
+		t.Fatalf("platform_experiment_id was dropped: filter = %+v", spy.gotList)
+	}
+}
+
+func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
+	spy := &filterSpyStore{
+		total: 45,
+		items: []*domain.Experiment{{ID: "job-1"}, {ID: "job-2"}},
+	}
+	r := schedulerRouter(spy)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/experiments?limit=2", nil))
+	if got := rec.Header().Get("X-Total-Count"); got != "45" {
+		t.Errorf("X-Total-Count = %q, want %q — a page must report the full match count", got, "45")
+	}
+
+	var body []*domain.Experiment
+	b, _ := io.ReadAll(rec.Body)
+	if err := json.Unmarshal(b, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if len(body) != 2 {
+		t.Errorf("returned %d items, want the 2 on this page", len(body))
+	}
+}
+
+func TestListExperimentsDefaultsToNoFilter(t *testing.T) {
+	spy := &filterSpyStore{}
+	r := schedulerRouter(spy)
+
+	if code, _ := get(t, r, "/experiments"); code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if (spy.gotList != domain.ExperimentFilter{}) {
+		t.Errorf("bare list built filter %+v, want the zero filter", spy.gotList)
+	}
+}

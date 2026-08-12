@@ -52,3 +52,17 @@ func TestExperimentOrderByDescending(t *testing.T) {
 		t.Fatalf("experimentOrderBy(-created_at) = %q, want %q", got, "created_at DESC")
 	}
 }
+
+// The lineage CTE joins experiments against itself, where a bare column name is ambiguous.
+func TestQualifyColumnsPrefixesEveryColumn(t *testing.T) {
+	got := qualifyColumns("\n\tid, parent_id,\n\tcreated_at\n", "e")
+	want := "\n\te.id, e.parent_id, e.created_at\n"
+	if got != want {
+		t.Fatalf("qualifyColumns = %q, want %q", got, want)
+	}
+	for _, c := range strings.Split(experimentColumnsQualified, ",") {
+		if !strings.HasPrefix(strings.TrimSpace(c), "e.") {
+			t.Errorf("column %q is not alias-qualified", strings.TrimSpace(c))
+		}
+	}
+}

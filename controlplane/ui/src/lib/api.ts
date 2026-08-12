@@ -99,7 +99,7 @@ export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {
-  return apiFetch<Experiment>(`${REGISTRY_URL}/registry/experiments/${id}`)
+  return apiFetch<Experiment>(`${SCHED_URL}/experiments/${id}`)
 }
 
 export function fetchExperimentLineage(id: string): Promise<LineageNode[]> {

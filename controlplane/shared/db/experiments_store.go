@@ -27,6 +27,23 @@ func NewExperimentsStore(pool *Pool) *ExperimentsStore {
 }
 
 // experimentColumns is the canonical column list for SELECT queries.
+// experimentColumnsQualified is experimentColumns with every name prefixed by an "e." alias, for
+// queries where a second relation is in scope and a bare column name would be ambiguous.
+var experimentColumnsQualified = qualifyColumns(experimentColumns, "e")
+
+func qualifyColumns(cols, alias string) string {
+	var b strings.Builder
+	b.WriteString("\n\t")
+	for i, c := range strings.Split(cols, ",") {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(alias + "." + strings.TrimSpace(c))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 const experimentColumns = `
 	id, parent_id, agent_id, platform_experiment_id, project_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec,
