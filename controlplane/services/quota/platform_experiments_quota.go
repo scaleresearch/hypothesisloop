@@ -48,35 +48,6 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 	return quotas, nil
 }
 
-// allocationFor returns the (guaranteed, burst) allocation limit for resourceType on aq — the
-// Postgres-side allocation limit. Current usage combines desired estimates from PostgreSQL and
-// settled observations from the metrics store.
-func allocationFor(aq *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier) float64 {
-	guaranteed := tier == domain.CapacityGuaranteed
-	switch resourceType {
-	case domain.ResourceCPUCoreHours:
-		if guaranteed {
-			return aq.GuaranteedCPUCoreHours
-		}
-		return aq.BurstCPUCoreHours
-	case domain.ResourceRAMGBHours:
-		if guaranteed {
-			return aq.GuaranteedRAMGBHours
-		}
-		return aq.BurstRAMGBHours
-	case domain.ResourceStorageGBHours:
-		if guaranteed {
-			return aq.GuaranteedStorageGBHours
-		}
-		return aq.BurstStorageGBHours
-	default: // domain.ResourceAcceleratorHours
-		if guaranteed {
-			return aq.GuaranteedAcceleratorHours
-		}
-		return aq.BurstAcceleratorHours
-	}
-}
-
 type insufficientQuotaError struct{ message string }
 
 func (e *insufficientQuotaError) Error() string           { return e.message }
@@ -120,32 +91,6 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 		return &insufficientQuotaError{message: reason}
 	}
 	return nil
-}
-
-func usedFor(aq *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier) float64 {
-	guaranteed := tier == domain.CapacityGuaranteed
-	switch resourceType {
-	case domain.ResourceCPUCoreHours:
-		if guaranteed {
-			return aq.UsedGuaranteedCPUCoreH
-		}
-		return aq.UsedBurstCPUCoreH
-	case domain.ResourceRAMGBHours:
-		if guaranteed {
-			return aq.UsedGuaranteedRAMGBH
-		}
-		return aq.UsedBurstRAMGBH
-	case domain.ResourceStorageGBHours:
-		if guaranteed {
-			return aq.UsedGuaranteedStorageGBH
-		}
-		return aq.UsedBurstStorageGBH
-	default:
-		if guaranteed {
-			return aq.UsedGuaranteedAccH
-		}
-		return aq.UsedBurstAccH
-	}
 }
 
 func (s *PlatformExperimentsService) SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error {

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -139,9 +140,9 @@ func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformE
 			case float64:
 				ts = t
 			}
-			var val float64
-			if s, ok := v[1].(string); ok {
-				fmt.Sscanf(s, "%f", &val)
+			val, ok := parseSampleValue(v[1])
+			if !ok {
+				continue
 			}
 			series.Points = append(series.Points, domain.MetricSeriesPoint{
 				Timestamp: time.Unix(int64(ts), 0).UTC(),
@@ -177,9 +178,9 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 			if t, ok := v[0].(float64); ok {
 				ts = t
 			}
-			var val float64
-			if s, ok := v[1].(string); ok {
-				fmt.Sscanf(s, "%f", &val)
+			val, ok := parseSampleValue(v[1])
+			if !ok {
+				continue
 			}
 			out = append(out, &domain.MetricDataPoint{
 				ExperimentID:     experimentID,
@@ -234,12 +235,27 @@ func (s *Service) queryFractionsByTimestamp(ctx context.Context, query string, s
 			if t, ok := v[0].(float64); ok {
 				ts = t
 			}
-			var val float64
-			if s, ok := v[1].(string); ok {
-				fmt.Sscanf(s, "%f", &val)
+			val, ok := parseSampleValue(v[1])
+			if !ok {
+				continue
 			}
 			out[int64(ts)] = val
 		}
 	}
 	return out, nil
+}
+
+// parseSampleValue converts one Prometheus sample value. A sample the backend cannot express as
+// a number is skipped rather than recorded as 0: these values feed rankings and stage cuts, where
+// a spurious 0 reads as a real result — a perfect score on any minimized metric.
+func parseSampleValue(v any) (float64, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	return f, true
 }

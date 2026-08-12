@@ -27,7 +27,7 @@ func candidateEngineSockets() []struct{ name, host string } {
 // either engine unmodified; only the socket path differs.
 func resolveEngineClient(ctx context.Context) (*client.Client, string, error) {
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
-		cli, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
+		cli, err := client.New(client.WithHost(host))
 		if err != nil {
 			return nil, "", fmt.Errorf("podexec: connect to DOCKER_HOST %s: %w", host, err)
 		}
@@ -38,7 +38,7 @@ func resolveEngineClient(ctx context.Context) (*client.Client, string, error) {
 	}
 	var errs []error
 	for _, candidate := range candidateEngineSockets() {
-		cli, err := client.NewClientWithOpts(client.WithHost(candidate.host), client.WithAPIVersionNegotiation())
+		cli, err := client.New(client.WithHost(candidate.host))
 		if err != nil {
 			errs = append(errs, err)
 			continue

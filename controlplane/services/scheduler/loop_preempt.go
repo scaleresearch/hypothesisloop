@@ -169,7 +169,6 @@ func preemptionContribution(victim, preemptor *domain.Experiment) domain.Footpri
 	return contribution
 }
 
-
 // completionFractions derives queue ordering progress from metrics on each tick. The returned
 // map is ephemeral scratch data, never retained or persisted.
 func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experiment) (map[string]float64, error) {

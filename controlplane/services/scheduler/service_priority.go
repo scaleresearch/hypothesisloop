@@ -36,23 +36,6 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 	return nil
 }
 
-// resourceCosts returns (resourceType, estimatedAmount) pairs for every dimension exp uses —
-// Accelerator is always included (even 0-cost); CPU/RAM/storage only appear when non-zero.
-func resourceCosts(exp *domain.Experiment) []struct {
-	resourceType domain.ResourceType
-	amount       float64
-} {
-	return []struct {
-		resourceType domain.ResourceType
-		amount       float64
-	}{
-		{domain.ResourceAcceleratorHours, exp.EstimatedCostAccH},
-		{domain.ResourceCPUCoreHours, exp.EstimatedCPUCoreHours},
-		{domain.ResourceRAMGBHours, exp.EstimatedRAMGBHours},
-		{domain.ResourceStorageGBHours, exp.EstimatedStorageGBHours},
-	}
-}
-
 // computePriority calculates the weighted priority score for an experiment.
 //
 // Priority = w1*novelty + w3*costEfficiency

@@ -164,14 +164,14 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	}
 
 	cs := containerSpec{
-		Name:         containerName(exp.ID),
-		Image:        spec.Image,
-		Command:      spec.Command,
-		Args:         spec.Args,
-		Env:          env,
-		NanoCPUs:     nanoCPUs,
-		MemoryBytes:  memQty.Value(),
-		ShmSizeBytes: shmSizeBytes,
+		Name:           containerName(exp.ID),
+		Image:          spec.Image,
+		Command:        spec.Command,
+		Args:           spec.Args,
+		Env:            env,
+		NanoCPUs:       nanoCPUs,
+		MemoryBytes:    memQty.Value(),
+		ShmSizeBytes:   shmSizeBytes,
 		Devices:        placement.DevicePaths,
 		Mounts:         hugepageMounts,
 		ReadOnlyMounts: readOnlyMounts,
