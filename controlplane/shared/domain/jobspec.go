@@ -61,8 +61,11 @@ type JobSpec struct {
 	// ordinary torch.distributed.init_process_group(env://) script works with no glue code. The
 	// Job completes only once every rank succeeds — no coordinator-only completion mode.
 	NumNodes int `json:"num_nodes,omitempty" yaml:"num_nodes,omitempty"`
-	// MaxRetries is how many times a failing node is retried before the job is marked
-	// failed. Required and non-negative.
+	// MaxRetries is how many times a failing node is RETRIED, not how many attempts run: N
+	// means up to N+1 attempts, so max_retries 2 gives 3 runs before the job is marked failed
+	// and max_retries 0 means a single attempt with no retry. Worth being deliberate about —
+	// every retry of a job that fails for a deterministic reason (a code bug, a bad config)
+	// re-burns its full accelerator time to reach the same failure. Required and non-negative.
 	MaxRetries *int `json:"max_retries" yaml:"max_retries"`
 
 	// TerminationGracePeriodSeconds overrides the cluster's default pod shutdown grace period.
