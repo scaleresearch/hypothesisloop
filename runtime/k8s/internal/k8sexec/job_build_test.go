@@ -109,3 +109,50 @@ func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+func jobWithRetries(retries int) *domain.Experiment {
+	return &domain.Experiment{
+		ID: "retry-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			MaxRetries:       intPtr(retries),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+}
+
+// Retries live at two layers: BackoffLimit recreates the pod, RestartPolicy=OnFailure has the
+// kubelet restart the container in place. max_retries only reaches the first, so a job asking
+// for zero retries was still restarted — seen live as restart_count=1 with max_retries=0 on a
+// diagnostic chosen to fail once and cheaply.
+func TestBuildJobMaxRetriesZeroDisablesInPlaceRestart(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	job, err := c.BuildJob(jobWithRetries(0), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyNever {
+		t.Errorf("restart policy = %q, want Never so max_retries=0 means exactly one attempt", got)
+	}
+	if got := *job.Spec.BackoffLimit; got != 0 {
+		t.Errorf("backoff limit = %d, want 0", got)
+	}
+}
+
+// With retries actually requested, in-place restart stays on — it is the cheaper recovery for a
+// transient fault, and the caller has said retrying is acceptable.
+func TestBuildJobKeepsInPlaceRestartWhenRetriesRequested(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	job, err := c.BuildJob(jobWithRetries(2), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyOnFailure {
+		t.Errorf("restart policy = %q, want OnFailure when retries are requested", got)
+	}
+	if got := *job.Spec.BackoffLimit; got != 2 {
+		t.Errorf("backoff limit = %d, want 2", got)
+	}
+}

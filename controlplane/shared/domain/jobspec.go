@@ -63,9 +63,16 @@ type JobSpec struct {
 	NumNodes int `json:"num_nodes,omitempty" yaml:"num_nodes,omitempty"`
 	// MaxRetries is how many times a failing node is RETRIED, not how many attempts run: N
 	// means up to N+1 attempts, so max_retries 2 gives 3 runs before the job is marked failed
-	// and max_retries 0 means a single attempt with no retry. Worth being deliberate about —
-	// every retry of a job that fails for a deterministic reason (a code bug, a bad config)
-	// re-burns its full accelerator time to reach the same failure. Required and non-negative.
+	// and max_retries 0 means a single attempt. Worth being deliberate about — every retry of a
+	// job that fails for a deterministic reason (a code bug, a bad config) re-burns its full
+	// accelerator time to reach the same failure, so 0 is the honest setting for a diagnostic
+	// run you expect to fail. Required and non-negative.
+	//
+	// It bounds pod-level retries. A container can also be restarted in place by the kubelet,
+	// which is a separate mechanism this field does not reach — so max_retries 0 is executed
+	// with in-place restarts disabled too, to make "no retries" mean one attempt rather than
+	// one pod. For N > 0 the two layers still compose: up to N+1 pods, each of which the
+	// kubelet may also restart.
 	MaxRetries *int `json:"max_retries" yaml:"max_retries"`
 
 	// TerminationGracePeriodSeconds overrides the cluster's default pod shutdown grace period.
