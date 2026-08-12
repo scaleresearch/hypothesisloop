@@ -141,6 +141,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Status != "" && !domain.ValidPlatformExperimentStatus(domain.PlatformExperimentStatus(in.Status)) {
 			return nil, huma.Error400BadRequest("unknown status " + in.Status)
 		}
+		if !domain.ValidSortField(in.Sort, db.PlatformExperimentSortFields) {
+			return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
+		}
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
 		filter := db.PlatformExperimentsFilter{
 			Status: in.Status,
 			Search: in.Search,

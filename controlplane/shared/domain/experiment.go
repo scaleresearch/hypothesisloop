@@ -153,3 +153,15 @@ var ExperimentSortFields = map[string]string{
 	"priority_score": "priority_score",
 	"status":         "status",
 }
+
+// ValidSortField reports whether sort names a field in allowed, ignoring a leading "-" for
+// descending. Empty is valid and means the store's default order. Callers check this before
+// querying: an unrecognized field otherwise falls back to the default silently, so a caller who
+// mistyped one gets a differently-ordered page and no indication the sort was dropped.
+func ValidSortField(sort string, allowed map[string]string) bool {
+	if sort == "" {
+		return true
+	}
+	_, ok := allowed[strings.TrimPrefix(sort, "-")]
+	return ok
+}

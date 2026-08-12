@@ -160,3 +160,28 @@ func TestUnknownStatusIsClientError(t *testing.T) {
 		}
 	}
 }
+
+// A mistyped sort field used to fall through to the default order, so the caller got a
+// differently-ordered page with no sign the sort had been dropped.
+func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
+	r := schedulerRouter(&filterSpyStore{})
+	for _, q := range []string{
+		"/experiments?sort=-created", // near-miss for created_at
+		"/experiments?sort=bogus",
+		"/experiments?limit=-1",
+		"/experiments?offset=-1",
+	} {
+		if code, body := get(t, r, q); code != http.StatusBadRequest {
+			t.Errorf("GET %s = %d, want 400; body=%s", q, code, body)
+		}
+	}
+	for _, q := range []string{
+		"/experiments?sort=created_at", "/experiments?sort=-created_at",
+		"/experiments?sort=priority_score", "/experiments?sort=-status",
+		"/experiments?limit=0&offset=0",
+	} {
+		if code, body := get(t, r, q); code != 200 {
+			t.Errorf("GET %s = %d, want 200; body=%s", q, code, body)
+		}
+	}
+}
