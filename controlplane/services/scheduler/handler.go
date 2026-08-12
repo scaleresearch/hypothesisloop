@@ -89,7 +89,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
 		Summary: "List experiments", Tags: []string{"experiments"},
-		Description: "Filter with ?agent, ?platform_experiment_id, ?status, ?search (substring match " +
+		Description: "Filter with ?agent, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
+			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
+			"changed since a previous session), ?search (substring match " +
 			"against hypothesis/objective/theory), ?limit, ?offset. ?sort selects order: created_at, " +
 			"priority_score, or status, optionally prefixed with - for descending (default -created_at " +
 			"is NOT the default order — omit ?sort to keep the historical priority-then-recency order). " +
@@ -97,7 +99,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent"`
 		PlatformExperimentID string `query:"platform_experiment_id"`
+		HypothesisID         string `query:"hypothesis_id"`
+		ProjectID            string `query:"project_id"`
 		Status               string `query:"status"`
+		Since                string `query:"since"`
 		Search               string `query:"search"`
 		Limit                int    `query:"limit"`
 		Offset               int    `query:"offset"`
@@ -115,10 +120,21 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
+		var since time.Time
+		if in.Since != "" {
+			parsed, err := time.Parse(time.RFC3339, in.Since)
+			if err != nil {
+				return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
+			}
+			since = parsed
+		}
 		filter := domain.ExperimentFilter{
 			AgentID:              in.Agent,
 			PlatformExperimentID: in.PlatformExperimentID,
+			HypothesisID:         in.HypothesisID,
+			ProjectID:            in.ProjectID,
 			Status:               domain.ExperimentStatus(in.Status),
+			Since:                since,
 			Search:               in.Search,
 			Limit:                in.Limit,
 			Offset:               in.Offset,
