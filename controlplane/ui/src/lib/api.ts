@@ -109,6 +109,13 @@ export function fetchExperimentMetrics(id: string): Promise<MetricDataPoint[]> {
   return apiFetch<MetricDataPoint[]>(`${API_URL}/experiments/${id}/metrics`)
 }
 
+// The job's most recently reported stdout/stderr tail. For a failed job this is usually the
+// only place the error itself appears — the record carries a status and a phase_detail reason,
+// but the traceback lives here.
+export function fetchExperimentLogs(id: string, n = 200): Promise<string[]> {
+  return apiFetch<string[]>(`${API_URL}/experiments/${id}/logs?n=${n}`)
+}
+
 // Full metric history for every competing job in a platform experiment — one series per
 // job/agent — for a leaderboard/competition-over-time dashboard.
 export function fetchPlatformExperimentTimeseries(

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics } from '@/lib/api'
+import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
@@ -27,6 +27,11 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
 
   const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
+  const { data: logs } = useSWR(
+    job ? `logs-${id}` : null,
+    () => fetchExperimentLogs(id),
+    { refreshInterval: 10_000 },
+  )
   const { data: metrics } = useSWR(
     job ? `metrics-${id}` : null,
     () => fetchExperimentMetrics(id),
@@ -107,6 +112,55 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               metric at eviction: {j.metric_at_eviction.toFixed(4)}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Why isn't it running / why did it stop. phase_detail is the runtime's own account —
+          an image that won't pull, a config the runtime rejected, or the exit code of a
+          container that died. For a failed job this is the difference between "it broke" and
+          knowing what broke. */}
+      {j.phase_detail && (j.phase_detail.reason || j.phase_detail.message) && (
+        <div
+          style={{
+            background: 'rgba(255,153,153,.07)',
+            border: '1px solid rgba(255,153,153,.3)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14,
+          }}
+        >
+          <strong style={{ color: semantic.danger }}>Runtime:</strong>{' '}
+          {j.phase_detail.reason && (
+            <span className="mono" style={{ color: semantic.danger, fontSize: 13 }}>
+              {j.phase_detail.reason}
+            </span>
+          )}
+          {j.phase_detail.message && (
+            <span className="text-muted" style={{ marginLeft: 8, fontSize: 13 }}>
+              {j.phase_detail.message}
+            </span>
+          )}
+          {j.phase_detail.restart_count ? (
+            <span className="mono text-muted" style={{ marginLeft: 12, fontSize: 12 }}>
+              restarts: {j.phase_detail.restart_count}
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      {/* A queued job never errors on its own; this is the scheduler's current reason. */}
+      {j.status === 'QUEUED' && j.not_admitted_reason && (
+        <div
+          style={{
+            background: 'rgba(166,152,255,.06)',
+            border: '1px solid rgba(166,152,255,.25)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14,
+          }}
+        >
+          <strong style={{ color: semantic.accent }}>Not admitted:</strong>{' '}
+          <span className="mono text-muted" style={{ fontSize: 12 }}>{j.not_admitted_reason}</span>
         </div>
       )}
 
@@ -213,6 +267,28 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           </PodContent>
         </Pod>
       )}
-    </div>
+    
+      {/* The job's own output. For a failed job the traceback usually lives only here — the
+          record carries a reason code, not the error. Includes the crashed instance's output
+          when a container restarted, which is otherwise unreachable. */}
+      <Pod style={{ marginBottom: 12 }}>
+        <PodHeader>Logs</PodHeader>
+        <PodContent>
+          {logs && logs.length > 0 ? (
+            <pre
+              className="mono"
+              style={{
+                margin: 0, fontSize: 12, lineHeight: 1.5, maxHeight: 420,
+                overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            >
+              {logs.join('\n')}
+            </pre>
+          ) : (
+            <EmptyState>No log output reported yet.</EmptyState>
+          )}
+        </PodContent>
+      </Pod>
+</div>
   )
 }
