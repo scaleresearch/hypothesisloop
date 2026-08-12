@@ -13,3 +13,4 @@
 - the control plane and the cluster must have at most 1 config file each. we should be able to plug in any cluster tomorrow, e.g. k8s with nvidia / tenstorrent / amd accelerators, and the flow should just continue to work
 - auth and security are not a priority at the moment
 - do not add comments at the top of files unless they capture a hard-learned lesson. the code should be self-explanatory
+- job processes may only push metrics to the platform — logs and debug comments must be collected and relayed by the supervising runtime/experimentator agent, never self-reported by the job.

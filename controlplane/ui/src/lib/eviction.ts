@@ -8,6 +8,7 @@ export const EVICTION_REASON_LABELS: Record<string, string> = {
   agent_removed: 'Agent removed',
   cancelled: 'Cancelled',
   stage_cut: 'Cut at stage boundary',
+  job_too_long: 'Ran past the stage job-length limit',
   // Historical rows from before the stage ladder replaced the two-phase mechanism.
   phase2_hold: 'Held for Phase 2',
   stuck_pending: 'Stuck pending admission',

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -125,18 +126,21 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	inUse := map[string]int64{}
 	for _, d := range devices {
 		for _, label := range d.Labels {
-			if !e.pricedAcceleratorTypes[label] {
+			if !e.pricedAcceleratorTypes[strings.ToLower(label)] {
 				continue
 			}
 			total[label]++
 		}
 	}
+	// Folded: total's label casing and a running job's requested casing can differ (see
+	// domain.AcceleratorType.MatchesLabels); joining on exact match previously undercounted
+	// in-use devices, letting a second job double-book an occupied one.
 	for label, count := range requests.accelerators {
-		inUse[label] = count
+		inUse[strings.ToLower(label)] += count
 	}
 	available = map[string]int64{}
 	for label, t := range total {
-		free := t - inUse[label]
+		free := t - inUse[strings.ToLower(label)]
 		if free < 0 {
 			free = 0
 		}
@@ -264,7 +268,7 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 
 func hasLabel(labels []string, want string) bool {
 	for _, l := range labels {
-		if l == want {
+		if strings.EqualFold(l, want) {
 			return true
 		}
 	}

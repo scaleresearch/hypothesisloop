@@ -1,0 +1,36 @@
+# TT_METAL_REF must match experiment.md, Dockerfile.experimentator, and seed/job.yaml exactly.
+ARG TT_METAL_REF=d9a68815f5fcf08a5bfbffb6f1f811823fba8edd
+
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:latest-rc AS builder
+ARG TT_METAL_REF
+ENV TT_METAL_REF=${TT_METAL_REF}
+RUN apt-get update && apt-get install -y --no-install-recommends sudo && rm -rf /var/lib/apt/lists/*
+WORKDIR /build/smri-fm
+COPY . /build/smri-fm/
+# CPM cache must NOT live under tt-metal/: it pre-creates that dir before setup.sh's `git clone`
+# runs, and git refuses to clone into a non-empty directory.
+RUN --mount=type=cache,target=/var/cache/apt,id=smri-fm-apt-cache \
+    --mount=type=cache,target=/root/.cache/cpmcache,id=smri-fm-cpmcache \
+    --mount=type=cache,target=/root/.cache/ccache,id=smri-fm-ccache \
+    --mount=type=cache,target=/root/.cache/uv,id=smri-fm-uv-cache \
+    CPM_SOURCE_CACHE=/root/.cache/cpmcache \
+    CCACHE_DIR=/root/.cache/ccache \
+    UV_CACHE_DIR=/root/.cache/uv \
+    bash tenstorrent/scripts/setup.sh
+
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:latest-rc
+ARG TT_METAL_REF
+ENV TT_METAL_REF=${TT_METAL_REF}
+# /build/smri-fm must survive unchanged from the builder stage: editable-install .pth files and
+# real_data.py's relative dataset-path resolution both hardcode it.
+ENV TT_METAL_HOME=/build/smri-fm/tenstorrent/tt-metal
+ENV PYTHONPATH=/build/smri-fm/tenstorrent/tt-metal
+ENV PATH=/build/smri-fm/tenstorrent/tt-metal/python_env/bin:${PATH}
+# _ttml.so links against libpython3.12.so.1.0 with no RPATH (build log: "Set non-toolchain portion
+# of runtime path ... to \"\""); --bundle-python's copied interpreter (python_env/_python/lib) is the
+# only place that .so lives in this image, so the dynamic linker needs it on LD_LIBRARY_PATH.
+ENV LD_LIBRARY_PATH=/build/smri-fm/tenstorrent/tt-metal/python_env/_python/lib:${LD_LIBRARY_PATH}
+COPY --from=builder /build/smri-fm /build/smri-fm
+WORKDIR /build/smri-fm
+
+ENTRYPOINT ["/build/smri-fm/seed/run_job.sh"]

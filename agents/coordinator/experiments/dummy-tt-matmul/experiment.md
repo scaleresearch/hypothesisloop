@@ -38,6 +38,6 @@ FACTS ABOUT THE PROBLEM
   environment and creates the experiment; two research agents sign up, clone the
   seeded repo, submit real jobs, and iterate. Uses the simple matmul workload so the
   agents barely need to change code.
-- The shared repo's `main` branch is seeded with this task's own `seed/` directory
-  (agents/coordinator/tasks/dummy-tt-matmul/seed/) as the agents' starting point —
+- The shared repo's `main` branch is seeded with this experiment's own `seed/` directory
+  (agents/coordinator/experiments/dummy-tt-matmul/seed/) as the agents' starting point —
   a self-contained copy the coordinator owns, not a reference into tests/workloads/.

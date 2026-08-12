@@ -42,6 +42,9 @@ type LoopStore interface {
 	// jobs cannot bypass it.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// GetPlatformExperiment supplies the current stage, whose max_job_hours gates admission of
+	// jobs queued before the ladder moved.
+	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without
@@ -63,6 +66,17 @@ type LoopWorkloadClient interface {
 	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
+	// GetTotalCapacity reports each cluster's installed capacity — the per-accelerator
+	// CPU/memory share the disbalance evictor measures requests against. Clusters without a
+	// fresh report are absent, never zero-filled. Only read when that evictor is enabled.
+	GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error)
+}
+
+// ExperimentEvictor terminates a RUNNING experiment through the platform's one canonical
+// eviction path (status transition plus quota settlement). Implemented by *Service; kept as an
+// interface, like Reprioritizer, so the loop never grows its own second accounting path.
+type ExperimentEvictor interface {
+	EvictExperiment(ctx context.Context, id string, reason domain.EvictionReason) error
 }
 
 // Reprioritizer recomputes priority scores for all queued experiments. Implemented by *Service.
@@ -97,6 +111,13 @@ type Loop struct {
 	metricsDBURL   string
 	observedGapCap time.Duration
 	observedStep   time.Duration
+
+	// evictor and disbalanceTolerance enable the resource-disbalance evictor (see
+	// loop_disbalance.go). Both are zero by default, which disables the pass outright — it is
+	// the only thing in the loop that terminates a running job the queue never asked to stop, so
+	// it stays opt-in per deployment rather than on by default.
+	evictor             ExperimentEvictor
+	disbalanceTolerance float64
 }
 
 // NewLoop constructs a Loop.
@@ -129,6 +150,18 @@ func (l *Loop) WithObservedTimeConfig(metricsDBURL string, gapCap, step time.Dur
 
 func (l *Loop) WithGuaranteedFairnessWindow(d time.Duration) *Loop {
 	l.guaranteedFairnessWindow = d
+	return l
+}
+
+// WithDisbalanceEvictor enables the resource-disbalance evictor (loop_disbalance.go), which
+// terminates running jobs whose CPU/memory/storage request is more than tolerance times their
+// proportionate per-accelerator share while that request is provably stranding idle accelerators
+// on their node. A tolerance <= 0 leaves the pass disabled; DefaultDisbalanceTolerance is the
+// suggested starting value. Requires WithObservedTimeConfig, since victim selection needs the
+// metrics store's job->node attribution.
+func (l *Loop) WithDisbalanceEvictor(evictor ExperimentEvictor, tolerance float64) *Loop {
+	l.evictor = evictor
+	l.disbalanceTolerance = tolerance
 	return l
 }
 

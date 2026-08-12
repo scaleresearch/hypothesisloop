@@ -3,6 +3,7 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/moby/moby/client"
 
@@ -92,9 +93,11 @@ func New(cfg Config) (*Executor, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Lowercased (see domain.AcceleratorType.MatchesLabels) so a device isn't silently dropped
+	// from capacity over a casing mismatch with the pricing catalog.
 	priced := make(map[string]bool, len(cfg.PricedAcceleratorTypes))
 	for _, name := range cfg.PricedAcceleratorTypes {
-		priced[name] = true
+		priced[strings.ToLower(name)] = true
 	}
 	nodeName, err := localNodeName()
 	if err != nil {

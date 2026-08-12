@@ -1,0 +1,10 @@
+# Real NVIDIA compute, not a stub: pytorch/pytorch ships CUDA-enabled torch prebuilt, so this
+# image needs nothing but the script. Requires the host container engine to actually pass the
+# GPU through (podexec.startContainer's DeviceRequests path — plain --device is not enough, see
+# runtime/bare-metal/internal/podexec/container.go) and nvidia-container-toolkit installed on
+# the host so the driver userspace libraries get injected.
+FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+
+WORKDIR /app
+COPY train.py .
+ENTRYPOINT ["python3", "train.py"]

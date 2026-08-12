@@ -94,6 +94,14 @@ func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (wor
 	return phase, nil
 }
 
+// PollPhaseDetail reads the runtime's latest reported explanation for why exp's container
+// hasn't started (or has been restarting). found=false means nothing has been reported yet —
+// distinct from an empty reason, which just means the runtime has nothing notable to say.
+// Implements scheduler.PhaseDetailer.
+func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, found bool, err error) {
+	return metricsdb.GetLatestPhaseDetail(ctx, b.metricsDBURL, exp.ID)
+}
+
 // GetAdmittedAcceleratorType reads the latest observed type metric.
 func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
 	t, found, err := metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, time.Now().UTC(), b.connectedWithin)
@@ -233,6 +241,47 @@ func (b *Backend) validateCapacitySnapshot(
 // distributed admission. Missing/stale nodes are absent and can't satisfy a hard spread requirement.
 func (b *Backend) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error) {
 	return metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
+// GetTotalCapacity returns each connected cluster's installed capacity — the same `total`
+// GetFlavorCapacity derives desired-free from, exposed on its own for consumers that need the
+// cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are
+// returned; a cluster whose totals are missing or stale is omitted entirely, never zero-filled.
+func (b *Backend) GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error) {
+	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, fmt.Errorf("queuebackend: live clusters: %w", err)
+	}
+	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, fmt.Errorf("queuebackend: total CPU capacity: %w", err)
+	}
+	acceleratorTotal, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, fmt.Errorf("queuebackend: total accelerator capacity: %w", err)
+	}
+	ramTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, fmt.Errorf("queuebackend: total RAM capacity: %w", err)
+	}
+	storageTotal, err := metricsdb.LiveClusterStorageTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil {
+		return nil, fmt.Errorf("queuebackend: total storage capacity: %w", err)
+	}
+	out := make(map[string]domain.Footprint, len(heartbeats))
+	for cluster, connected := range heartbeats {
+		if !connected {
+			continue
+		}
+		cpu, cpuOK := cpuTotal[cluster]
+		ram, ramOK := ramTotal[cluster]
+		storage, storageOK := storageTotal[cluster]
+		if !cpuOK || !ramOK || !storageOK {
+			continue
+		}
+		out[cluster] = domain.CapacityFootprint(cpu, acceleratorTotal[cluster], ram, storage)
+	}
+	return out, nil
 }
 
 func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {

@@ -1,0 +1,28 @@
+# Starting-point job definition for the dummy-tt-matmul experiment: train.py opens the DRA-allocated
+# device via ttnn and runs real bf16 matmuls, submitted verbatim as the `job` field of
+# POST /experiments (see controlplane/settings/examples/experiment-submission.yaml for the
+# fully-commented DSL reference).
+#
+# The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
+# control plane's admission loop picks whichever registered cluster reports live capacity for
+# that flavor (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
+# allocation_mode: dra) — nothing here names a cluster directly.
+image: localhost/hypothesisloop-tenstorrent-workload:latest
+
+# memory/cpu sized generously for the real tt-metal runtime: pre-compiled firmware/kernel JIT
+# loading, dispatch buffers, and (for tasks that build from source, e.g. sparse-sdpa) an in-pod
+# ninja build all measurably exceed a few hundred MiB, and real experiment shapes (e.g. sparse-sdpa's
+# prod-shape T=56320-scale tensors plus a host-side torch golden computed in the same pod)
+# reliably needed 6-16Gi and OOM'd at the old 4Gi default (see improvements.md). Set high here
+# since headroom is cheap on this QuietBox's 240GiB allocatable and OOM-kills are a wasted
+# iteration either way. These are just a starting point, not a cap: this is your own job spec —
+# raise cpu/memory/storage further in your own submissions any time your workload needs it.
+cpu: "8"
+memory: "32Gi"
+storage: "1Gi"
+max_retries: 3
+
+accelerator_count: 1
+accelerator_type: tenstorrent.com/chipArch=blackhole
+accelerator_pod_resources:
+  hugepages-1Gi: 4Gi

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -114,8 +115,9 @@ func Fits(capacity, footprint Footprint) bool {
 func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, ramBytes, storageBytes int64) Footprint {
 	fp := NewFootprint()
 	fp.Add(ResourceKey{Kind: ResourceKindCPU}, int64(cpuCores*1000))
+	// Lowercased so Fits()'s exact-match join works regardless of casing (see AcceleratorType.MatchesLabels).
 	for flavor, n := range acceleratorByFlavor {
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: flavor}, n)
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(flavor)}, n)
 	}
 	fp.Add(ResourceKey{Kind: ResourceKindMemory}, ramBytes)
 	fp.Add(ResourceKey{Kind: ResourceKindStorage}, storageBytes)
@@ -158,7 +160,7 @@ func (j JobSpec) Footprint(acceleratorType AcceleratorType) (Footprint, error) {
 		if acceleratorType == "" {
 			return nil, fmt.Errorf("job.accelerator_type is required when job.accelerator_count > 0")
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: string(acceleratorType)}, int64(j.AcceleratorCount))
+		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(string(acceleratorType))}, int64(j.AcceleratorCount))
 	}
 	for name, qty := range j.ExtraResources {
 		q, err := resource.ParseQuantity(qty)

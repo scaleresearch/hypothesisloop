@@ -16,7 +16,7 @@ import (
 // StagesStore is the persistence interface for the stage ladder (docs/stages.md).
 type StagesStore interface {
 	// Platform experiment queries.
-	ListPlatformExperiments(ctx context.Context, statusFilter string) ([]*domain.PlatformExperiment, error)
+	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
 
 	// Stage boundaries.
 	// AdvanceStage atomically records the cut agents, applies every zero/add op, and claims

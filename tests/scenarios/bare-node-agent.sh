@@ -129,6 +129,19 @@ wait_until "a real $ENGINE container for $JOB exists on this host" 20 1 containe
   && pass "a real container backing $JOB exists on this host, launched directly by the bare-agent" \
   || fail "no local $ENGINE container found for $JOB — bare-agent never actually launched it"
 
+# The bare-agent's own FetchLogTail (runtime/bare-metal/internal/podexec) reads this same
+# container's stdout live and reports it alongside job phase on its next status push (see
+# runtime/shared/agentloop.reportChangedStatuses + controlplane/services/clusteragentapi) --
+# the control plane never reaches into the container engine itself. Confirms the whole chain:
+# real container -> bare-agent -> clusteragentapi -> GreptimeDB -> registry GET, no job-side
+# involvement at all (the job here is a bare `sh -c echo ...`, nothing pushes its own logs).
+job_log_tail_has_hello() {
+  curl -sf "$REGISTRY_URL/registry/experiments/${1}/logs" | grep -q "hello-from-bare-node-agent"
+}
+wait_until "registry's log-tail endpoint reports this container's own stdout" 15 1 job_log_tail_has_hello "$JOB" \
+  && pass "GET /registry/experiments/{id}/logs surfaces the real container's stdout, reported by the bare-agent itself" \
+  || fail "registry never reported the container's stdout via the log-tail endpoint"
+
 S=$(wait_for_status "$JOB" "COMPLETED,FAILED,EVICTED" 30 || true)
 [[ "$S" == "COMPLETED" ]] \
   && pass "job completed end-to-end via the bare-node agent (real container ran and exited 0)" \

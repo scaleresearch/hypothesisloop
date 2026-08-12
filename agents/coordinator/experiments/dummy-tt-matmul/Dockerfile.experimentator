@@ -1,0 +1,28 @@
+# This experiment's own overlay on the shared agents/experimentator/Dockerfile.base -- see that
+# file's header for what's generic vs. what belongs here. dummy-tt-matmul is a ttnn workload, so
+# the agent needs tt-metal + TT-NN source to read (compute itself happens in job pods, which have
+# no source tree of their own -- see core.py's WORKLOAD_SAMPLES comment); an experiment that isn't
+# built on tt-metal would skip this layer entirely, or clone something else instead.
+FROM localhost/hypothesisloop-experimentator-base
+
+USER root
+
+# tt-metal + TT-NN source baked in: the agent container has no /dev/tenstorrent (compute happens
+# in job pods running Tenstorrent's release image), so this is here to be *read*, not run — the
+# op sources, kernels and tests the agent needs to form hypotheses about what to change. TT-NN
+# is not a separate repo: it ships inside tt-metal as ttnn/, so one clone baked in covers both
+# (TTNN_SRC below points at it directly). Shallow + blobless: full history/blobs are ~GBs and
+# nothing here needs them; git backfills any blob on demand when the agent actually reads a file.
+# Pinned (not "main" HEAD-at-build-time): the job image (seed/Dockerfile.train) ships a prebuilt
+# ttnn wheel whose version can silently skew ahead of/behind whatever this clone happens to catch
+# -- keep TT_METAL_REF identical to whatever seed/Dockerfile.train pins, or agent and job end up
+# looking at different source for the same op.
+ARG TT_METAL_REF=e45135c5516c6ab18cf855c585d31da684fe64db
+ENV TT_METAL_REF=${TT_METAL_REF}
+ENV TT_METAL_SRC=/opt/tt-metal
+ENV TTNN_SRC=/opt/tt-metal/ttnn
+RUN git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git $TT_METAL_SRC \
+    && git -C $TT_METAL_SRC checkout $TT_METAL_REF \
+    && chown -R agent:agent $TT_METAL_SRC
+
+USER agent

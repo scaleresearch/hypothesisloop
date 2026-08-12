@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,9 @@ func main() {
 	controlPlaneURL := agentloop.RequiredEnv(binaryName, "CONTROLPLANE_URL")
 	registryURL := agentloop.RequiredEnv(binaryName, "REGISTRY_URL")
 	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
+	// Optional: how many trailing log lines to report per job per status push. Not required —
+	// agentloop.DefaultLogTailLines (100) applies when unset.
+	logTailLines, _ := strconv.Atoi(os.Getenv("LOG_TAIL_LINES"))
 
 	scratchDir := os.Getenv("SCRATCH_DIR")
 	if scratchDir == "" {
@@ -86,6 +90,8 @@ func main() {
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
+		LogTailLines:      logTailLines,
+		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
 		Log:               log,
 	}
 	a.Run(ctx)

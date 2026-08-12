@@ -23,10 +23,12 @@ import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
+import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
+import { EVICTION_REASON_LABELS } from '@/lib/eviction'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -42,7 +44,7 @@ function JobMetricMini({ jobId, metricName }: { jobId: string; metricName?: stri
     { refreshInterval: 10_000 },
   )
   const chartData = (metrics ?? [])
-    .filter((p) => p.recorded_at)
+    .filter((p) => p.recorded_at && (!metricName || p.metric_name === metricName))
     .map((p) => ({
       t: new Date(p.recorded_at as string).getTime(),
       value: p.metric_value ?? (p as any).value,
@@ -494,6 +496,40 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const running = (experiments ?? []).filter(e => e.status === 'RUNNING')
   const recent = (experiments ?? []).slice(0, 20)
 
+  // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
+  // different reasons (stuck on admission vs. explicitly cancelled vs. ran past a stage's job
+  // length cap), so a single opaque count hides whether evictions are a symptom of something
+  // wrong versus routine stage cuts.
+  const evicted = (experiments ?? []).filter(e => e.status === 'EVICTED')
+  const evictionReasonCounts = evicted.reduce<Record<string, number>>((acc, e) => {
+    const r = e.eviction_reason || 'unknown'
+    acc[r] = (acc[r] ?? 0) + 1
+    return acc
+  }, {})
+  const evictionBreakdown = Object.entries(evictionReasonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([r, n]) => `${EVICTION_REASON_LABELS[r] ?? r} (${n})`)
+    .join(' · ')
+
+  // The metric that actually determines standings/cuts — role: 'ranking' when the platform
+  // experiment reports several metrics, defaulting to the first (primary) one for older data
+  // that predates the role field. Used below to show each job's own "final" value, since with
+  // multiple reported metrics there's no single obvious one to show without this.
+  const rankingMetric = metrics.find(m => m.role === 'ranking') ?? primaryMetric
+
+  // Per-job final metric value, taken from the ranking metric's own timeseries (already fetched
+  // above for the "Competing Agents over time" chart) rather than any single job.final_metric_value
+  // field — the backend's Experiment record has no such field; the only place a job's metric
+  // history lives is the metrics timeseries, keyed by experiment_id.
+  const rankingSeries = rankingMetric
+    ? (allMetricSeries ?? []).find(e => e.key === rankingMetric.key)?.series ?? []
+    : []
+  const finalMetricByJobId = new Map<string, number>()
+  for (const s of rankingSeries) {
+    const pts = [...s.points].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    if (pts.length > 0) finalMetricByJobId.set(s.experiment_id, pts[pts.length - 1].value)
+  }
+
   // Default both selectors to "everything" until the user narrows them down.
   const activeAgentIds = selectedAgentIds ?? new Set(knownAgentIds)
   const activeMetricKeys = selectedMetricKeys ?? new Set(metrics.map(m => m.key))
@@ -541,7 +577,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           <PodHeader>About this Experiment</PodHeader>
           <PodContent>
             {pe.description && (
-              <p style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginBottom: pe.metrics?.length ? 12 : 0 }}>{pe.description}</p>
+              <CollapsibleDescription text={pe.description} style={{ marginBottom: pe.metrics?.length ? 12 : 0 }} />
             )}
             {pe.metrics && pe.metrics.length > 0 && (
               <div>
@@ -630,13 +666,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 const done = stageNo < stagesStatus.current_stage
                 const current = stageNo === stagesStatus.current_stage
                 return (
-                  <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }}>
+                  <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
                     <div style={{
                       height: 8, borderRadius: 2,
                       background: done ? semantic.accent : current ? 'rgba(124,108,240,0.45)' : 'var(--border)',
                     }} />
                     <div className="mono text-dim" style={{ fontSize: 10, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}
+                      {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}{stage.max_job_hours ? ` · ≤${stage.max_job_hours}h/job` : ''}
                     </div>
                   </div>
                 )
@@ -674,12 +710,18 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stats row */}
       <Pod>
         <PodContent>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 16 }}>
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
             <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
             <StatTile label="Jobs" value={(experiments?.length ?? 0).toString()} />
             <StatTile label="Running" value={running.length.toString()} color={running.length > 0 ? semantic.success : undefined} />
+            <StatTile
+              label="Evicted"
+              value={evicted.length.toString()}
+              color={evicted.length > 0 ? semantic.danger : undefined}
+              sub={evictionBreakdown || undefined}
+            />
             <StatTile label="Hypotheses" value={(hypotheses?.length ?? 0).toString()} color={semantic.accent} />
           </div>
         </PodContent>
@@ -690,7 +732,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <PodHeader>
           Scoreboard
           {metrics.length === 1 && ` — ranked by ${metrics[0].key} (${metrics[0].direction})`}
-          {metrics.length > 1 && ' — winners are the Pareto front (not beaten on every metric at once)'}
         </PodHeader>
         <PodContent scrollX>
           {scoreboard.length === 0 ? (
@@ -737,7 +778,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         <td className="mono" style={{ fontWeight: 600 }}>
                           <span className="text-muted" style={{ display: 'inline-block', width: 12 }}>{isExpanded ? '▾' : '▸'}</span>
                           {entry.agentId}
-                          {entry.isWinner && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.accent, fontWeight: 700 }}>WINNER</span>}
                           {isCut && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.danger, fontWeight: 400 }}>CUT</span>}
                           {isActive && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.success, fontWeight: 400 }}>ACTIVE</span>}
                         </td>
@@ -835,7 +875,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
       {/* Recent jobs */}
       <Pod>
-        <PodHeader>Recent Jobs</PodHeader>
+        <PodHeader>
+          Recent Jobs
+          {rankingMetric && (
+            <span className="text-dim" style={{ marginLeft: 8, fontWeight: 400 }}>
+              final metric = latest reported {rankingMetric.key}
+            </span>
+          )}
+        </PodHeader>
         <PodContent scrollX>
           {!experiments || experiments.length === 0 ? (
             <EmptyState>No jobs submitted yet.</EmptyState>
@@ -846,22 +893,32 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <th>ID</th>
                   <th>Agent</th>
                   <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Final Metric</th>
-                  <th style={{ textAlign: 'right' }}>Cost</th>
+                  <th style={{ textAlign: 'right' }}>Final Metric{rankingMetric ? ` (${rankingMetric.key})` : ''}</th>
+                  <th style={{ textAlign: 'right' }}>Est. Cost</th>
                   <th>Submitted</th>
                 </tr>
               </thead>
               <tbody>
                 {recent.map(exp => {
-                  const metric = (exp as any).final_metric ?? (exp as any).final_metric_value
-                  const cost = (exp as any).actual_cost_acch ?? exp.actual_cost_acch
+                  const metric = finalMetricByJobId.get(exp.id)
+                  const cost = exp.estimated_cost_acch
+                  const evictionLabel = exp.eviction_reason
+                    ? (EVICTION_REASON_LABELS[exp.eviction_reason] ?? exp.eviction_reason)
+                    : undefined
                   return (
                     <tr key={exp.id}>
                       <td className="mono" style={{ fontSize: 11 }}>
                         <Link href={`/jobs/${exp.id}`} className="text-link">{exp.id.slice(0, 8)}…</Link>
                       </td>
                       <td className="mono">{exp.agent_id}</td>
-                      <td><StatusBadge status={exp.status} /></td>
+                      <td>
+                        <StatusBadge status={exp.status} />
+                        {evictionLabel && (
+                          <div className="text-dim" style={{ fontSize: 10, marginTop: 2 }} title="eviction_reason">
+                            {evictionLabel}
+                          </div>
+                        )}
+                      </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{metric != null ? metric.toFixed(4) : '—'}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
                       <td className="text-dim">{new Date(exp.created_at).toLocaleString()}</td>

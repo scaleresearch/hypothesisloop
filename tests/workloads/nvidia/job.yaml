@@ -1,0 +1,19 @@
+# Standalone job definition for the NVIDIA real-hardware e2e test (see
+# tests/scenarios/nvidia-hardware.sh) — train.py runs real fp16 matmuls on whichever GPU the
+# container engine actually passes through (podexec's DeviceRequests, not a synthetic stub).
+#
+# Unlike tenstorrent.com/chipArch=blackhole (one label per chip family), NVIDIA's
+# nvidia.com/gpu.product label is exact-model (e.g. NVIDIA-H100-80GB-HBM3, see
+# controlplane/settings/hypothesisloop.yaml's accelerator_types) — there is no single value that
+# works across arbitrary NVIDIA hardware. accelerator_type below is a placeholder;
+# nvidia-hardware.sh overrides it at submit time with the value this host's own nvidia-smi
+# reports, normalized the same way runtime/bare-metal/internal/podexec/nvidia.go does.
+image: localhost/hypothesisloop-nvidia-workload:latest
+
+cpu: "1"
+memory: "2Gi"
+storage: "1Gi"
+max_retries: 0
+
+accelerator_count: 1
+accelerator_type: nvidia.com/gpu.product=REPLACE_ME

@@ -2,7 +2,7 @@
 """
 HypothesisLoop Tenstorrent workload — real hardware, not a stub.
 
-Seed for the dummy-tt-matmul task: opens the Tenstorrent device DRA allocated to this pod via
+Seed for the dummy-tt-matmul experiment: opens the Tenstorrent device DRA allocated to this pod via
 ttnn and runs real matrix multiplications on it, timing each one for real. Runs inside
 Tenstorrent's own official tt-metal release image (see Dockerfile.train) — verified against
 this QuietBox's Blackhole cards with a manual `docker run --device /dev/tenstorrent` smoke
@@ -110,4 +110,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        print(traceback.format_exc())
+        raise

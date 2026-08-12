@@ -33,6 +33,48 @@ type Reaper interface {
 	ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error
 }
 
+// LogTailer is implemented by executors that can report a job's own recent stdout/stderr —
+// k8sexec (pod logs via the Kubernetes API) and podexec (container logs) both do. Reported
+// alongside job phase in the same status push: the control plane never reaches into a cluster
+// to pull this itself, and no job process ever pushes its own logs — only the executor watching
+// it from the runtime side does, same as phase.
+type LogTailer interface {
+	FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error)
+}
+
+// PhaseDetailer is implemented by executors that can explain *why* a job's container hasn't
+// started or has been restarting — k8sexec (a pod's containerStatuses[].state.waiting/terminated)
+// and podexec (a container's inspected State) both do. reason is one of the control plane's
+// generic domain.PhaseReason* vocabulary (empty if the executor has nothing notable to report);
+// translating the runtime's own native taxonomy into that vocabulary happens here, in the
+// executor, so the control plane never learns a runtime's vocabulary (important.md #7). Read
+// live from the runtime on every call — no caching (important.md #4).
+type PhaseDetailer interface {
+	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error)
+}
+
+// DefaultLogTailLines is how many trailing lines FetchLogTail is asked for when the agent
+// binary doesn't override it (see RequiredEnv("LOG_TAIL_LINES", ...) in each cmd/'s main.go).
+const DefaultLogTailLines = 100
+
+// splitLongLines breaks any line over maxLineChars into multiple lines, done once here (client
+// side, before the report ever leaves this process) rather than left to the control plane to
+// truncate silently on ingest -- this way nothing is ever dropped, only wrapped. maxLineChars
+// comes from hypothesisloop.yaml's scheduler.max_log_tail_line_chars (see Agent.MaxLogLineChars)
+// — large enough to keep a real compiler error or stack frame intact, small enough that one
+// pathological line (a base64 blob, a JSON dump with no newlines) can't blow up a status push.
+func splitLongLines(lines []string, maxLineChars int) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for len(line) > maxLineChars {
+			out = append(out, line[:maxLineChars])
+			line = line[maxLineChars:]
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // Agent drives one cluster/node's reconcile and status-report loops against an Executor.
 type Agent struct {
 	ClusterName       string
@@ -41,7 +83,13 @@ type Agent struct {
 	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
 	StatusInterval    time.Duration
-	Log               func(format string, args ...any)
+	// LogTailLines caps how many trailing lines FetchLogTail is asked for per status push.
+	// Configurable per agent binary; DefaultLogTailLines if unset (zero).
+	LogTailLines int
+	// MaxLogLineChars is hypothesisloop.yaml's scheduler.max_log_tail_line_chars — required
+	// (config validation already enforces > 0), not defaulted here.
+	MaxLogLineChars int
+	Log             func(format string, args ...any)
 }
 
 // Run starts the reconcile and status-report loops and blocks until ctx is cancelled.
@@ -220,10 +268,14 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 }
 
 type statusReportWire struct {
-	ExperimentID            string `json:"experiment_id"`
-	Phase                   string `json:"phase"`
-	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
-	AdmittedNode            string `json:"admitted_node,omitempty"`
+	ExperimentID            string   `json:"experiment_id"`
+	Phase                   string   `json:"phase"`
+	AdmittedAcceleratorType string   `json:"admitted_accelerator_type,omitempty"`
+	AdmittedNode            string   `json:"admitted_node,omitempty"`
+	LogTail                 []string `json:"log_tail,omitempty"`
+	Reason                  string   `json:"reason,omitempty"`
+	Message                 string   `json:"message,omitempty"`
+	RestartCount            int32    `json:"restart_count,omitempty"`
 }
 
 func (a *Agent) statusReportLoop(ctx context.Context) {
@@ -276,11 +328,44 @@ func (a *Agent) reportChangedStatuses(ctx context.Context) {
 			}
 		}
 
+		var logTail []string
+		if tailer, ok := a.Executor.(LogTailer); ok && phase != workload.JobPhaseGone {
+			maxLines := a.LogTailLines
+			if maxLines <= 0 {
+				maxLines = DefaultLogTailLines
+			}
+			// Best-effort: a job that hasn't produced output yet, or a transient read error,
+			// must not block reporting phase for every other job in this same batch.
+			logTail, err = tailer.FetchLogTail(ctx, id, maxLines)
+			if err != nil {
+				a.Log("fetch log tail %s: %v", id, err)
+				logTail = nil
+			} else {
+				logTail = splitLongLines(logTail, a.MaxLogLineChars)
+			}
+		}
+
+		var reason, message string
+		var restartCount int32
+		if detailer, ok := a.Executor.(PhaseDetailer); ok && phase != workload.JobPhaseGone {
+			// Best-effort, same as log tail above: a transient read error must not block
+			// reporting phase for every other job in this same batch.
+			reason, message, restartCount, err = detailer.PollPhaseDetail(ctx, id)
+			if err != nil {
+				a.Log("poll phase detail %s: %v", id, err)
+				reason, message, restartCount = "", "", 0
+			}
+		}
+
 		reports = append(reports, statusReportWire{
 			ExperimentID:            id,
 			Phase:                   phase.String(),
 			AdmittedAcceleratorType: admittedAcceleratorType,
 			AdmittedNode:            admittedNode,
+			LogTail:                 logTail,
+			Reason:                  reason,
+			Message:                 message,
+			RestartCount:            restartCount,
 		})
 	}
 

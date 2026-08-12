@@ -56,6 +56,22 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 }
 
 func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) error {
+	// Checked regardless of exp.Status, including RUNNING: a Kubernetes Job's Active count
+	// (what PollJobPhase treats as Running, see k8sexec.PollJobPhaseAndUID) includes a pod
+	// stuck in ImagePullBackOff — the desired-state Job "exists and isn't finished" long
+	// before its container ever actually starts. A never-self-heals reason means it never
+	// will, whatever exp.Status currently says.
+	if detailer, ok := w.backend.(PhaseDetailer); ok {
+		reason, message, _, found, err := detailer.PollPhaseDetail(ctx, exp)
+		if err != nil {
+			return fmt.Errorf("poll phase detail: %w", err)
+		}
+		if found && domain.NeverSelfHealsPhaseReasons[reason] {
+			w.onUnschedulable(ctx, exp, reason, message)
+			return nil
+		}
+	}
+
 	if exp.Status != domain.StatusRunning && w.stuckPendingTimeout > 0 && exp.SubmittedAt != nil &&
 		time.Since(*exp.SubmittedAt) > w.stuckPendingTimeout {
 		w.onStuckPending(ctx, exp)

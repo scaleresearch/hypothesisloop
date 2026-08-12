@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import useSWR from 'swr'
+import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import { fetchAgentBalances, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonations } from '@/lib/api'
 import type { AgentBalance, PlatformExperiment, AgentQuota } from '@/types'
 import type { DonationRequest } from '@/lib/api'
@@ -11,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 
@@ -98,6 +100,27 @@ export default function AgentsPage() {
     return (balances ?? []).filter(b => agentSet.has(b.agent_id))
   })()
 
+  const sortedExperiments = useMemo(
+    () => [...(experiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [experiments],
+  )
+
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_bonus', desc: true }])
+  const agentColumns = useMemo(() => [
+    { accessorKey: 'agent_id', header: 'Agent ID' },
+    { accessorKey: 'top3_count', header: 'Bonus Eligibility' },
+    { accessorKey: 'performance_bonus', header: 'Perf Score' },
+  ], [])
+  const agentTable = useReactTable({
+    data: filteredBalances ?? [],
+    columns: agentColumns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  })
+  const sortedBalances = agentTable.getRowModel().rows.map(r => r.original)
+
   const selectedPE = experimentFilter ? (experiments ?? []).find(pe => pe.id === experimentFilter) ?? null : null
   const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
 
@@ -128,20 +151,12 @@ export default function AgentsPage() {
           <PodHeader>Filter</PodHeader>
           <PodContent style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span className="text-muted">By experiment:</span>
-            <select
+            <SearchableSelect
               value={experimentFilter}
-              onChange={e => setExperimentFilter(e.target.value)}
-              disabled={!experiments || experiments.length === 0}
-              style={{
-                fontSize: 12, padding: '6px 10px', border: '1px solid var(--border-dark)', borderRadius: 6,
-                background: 'var(--surface-2)', color: 'var(--foreground)',
-              }}
-            >
-              <option value="">All agents</option>
-              {(experiments ?? []).map(pe => (
-                <option key={pe.id} value={pe.id}>{pe.name} ({pe.status})</option>
-              ))}
-            </select>
+              onChange={setExperimentFilter}
+              allLabel="All agents"
+              options={sortedExperiments.map(pe => ({ value: pe.id, label: `${pe.name} (${pe.status})` }))}
+            />
             {experimentFilter && (
               <Button size="sm" onClick={() => setExperimentFilter('')}>Clear</Button>
             )}
@@ -199,9 +214,19 @@ export default function AgentsPage() {
           <table className="wa-table">
             <thead>
               <tr>
-                <th>Agent ID</th>
-                <th style={{ textAlign: 'center' }}>Bonus Eligibility</th>
-                <th style={{ textAlign: 'right' }}>Perf Score</th>
+                {agentTable.getFlatHeaders().map(h => (
+                  <th
+                    key={h.id}
+                    style={{
+                      textAlign: h.id === 'top3_count' ? 'center' : h.id === 'performance_bonus' ? 'right' : undefined,
+                      cursor: 'pointer', userSelect: 'none',
+                    }}
+                    onClick={h.column.getToggleSortingHandler()}
+                  >
+                    {String(h.column.columnDef.header)}
+                    {h.column.getIsSorted() === 'desc' ? ' ▼' : h.column.getIsSorted() === 'asc' ? ' ▲' : ''}
+                  </th>
+                ))}
                 <th></th>
               </tr>
             </thead>
@@ -214,7 +239,7 @@ export default function AgentsPage() {
                     </EmptyState>
                   </td>
                 </tr>
-              ) : filteredBalances.map(b => {
+              ) : sortedBalances.map(b => {
                 const top3 = (b as any).top3_count ?? 0
                 const hasTop3 = top3 > 0
                 const isExpanded = expandedAgent === b.agent_id

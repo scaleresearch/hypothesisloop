@@ -50,7 +50,15 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		if err != nil {
 			return false, "", fmt.Errorf("silence job phase: %w", err)
 		}
-		if found && phase != workload.JobPhaseRunning {
+		if !found {
+			// No fresh phase report at all — indistinguishable from "cluster-agent itself
+			// can't currently observe/report" (e.g. a control-plane <-> cluster connectivity
+			// gap). Can't tell whether the pod is actually gone or just unreported; assuming
+			// the latter and evicting would kill real, still-running work. Skip and let a
+			// later reconcile decide once reporting resumes.
+			return false, "", nil
+		}
+		if phase != workload.JobPhaseRunning {
 			// Pod isn't up right now (Pending/recreating/gone) — quiet is expected here,
 			// not evidence of a hung process. Let the reschedule finish; next tick re-checks.
 			return false, "", nil

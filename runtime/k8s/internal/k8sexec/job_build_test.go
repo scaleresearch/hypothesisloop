@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -32,6 +33,39 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 	}
 	if got := resources.Limits["hugepages-1Gi"]; got.Cmp(want) != 0 {
 		t.Fatalf("hugepages limit = %s, want %s", got.String(), want.String())
+	}
+}
+
+func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
+	c := &JobWorkloadClient{registryURL: RegistryURLDefault}
+	exp := &domain.Experiment{
+		ID: "host-mount-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/FOMO_with_dwi"},
+		},
+	}
+
+	job, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := job.Spec.Template.Spec.Containers[0].VolumeMounts
+	if len(mounts) != 1 || mounts[0].MountPath != "/data/dataset" || !mounts[0].ReadOnly {
+		t.Fatalf("VolumeMounts = %+v, want one read-only mount at /data/dataset", mounts)
+	}
+	vols := job.Spec.Template.Spec.Volumes
+	if len(vols) != 1 || vols[0].Name != mounts[0].Name {
+		t.Fatalf("Volumes = %+v, want one volume named %q", vols, mounts[0].Name)
+	}
+	if vols[0].HostPath == nil || vols[0].HostPath.Path != "/var/lib/hypothesisloop/datasets/FOMO_with_dwi" {
+		t.Fatalf("HostPath volume = %+v, want Path /var/lib/hypothesisloop/datasets/FOMO_with_dwi", vols[0].HostPath)
+	}
+	if vols[0].HostPath.Type == nil || *vols[0].HostPath.Type != corev1.HostPathDirectory {
+		t.Fatalf("HostPath.Type = %v, want HostPathDirectory (fail fast if not present, not DirectoryOrCreate)", vols[0].HostPath.Type)
 	}
 }
 

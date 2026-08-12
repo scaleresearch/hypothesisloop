@@ -26,6 +26,25 @@ async function apiFetch<T>(url: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// A paginated list response: the page of items plus the total match count across all pages,
+// read off the X-Total-Count response header — see the unified pagination convention shared by
+// every list endpoint (?limit, ?offset, ?sort; total in X-Total-Count).
+export interface Page<T> {
+  items: T[]
+  total: number
+}
+
+async function apiFetchPage<T>(url: string): Promise<Page<T>> {
+  const res = await fetch(url, { cache: 'no-store' })
+  if (!res.ok) {
+    throw new Error(`API error ${res.status} from ${url}`)
+  }
+  const items = (await res.json()) as T[]
+  const totalHeader = res.headers.get('X-Total-Count')
+  const total = totalHeader != null ? Number(totalHeader) : items.length
+  return { items, total }
+}
+
 // ---------------------------------------------------------------------------
 // Cluster / Quota
 // ---------------------------------------------------------------------------
@@ -59,16 +78,22 @@ export interface ExperimentsParams {
   platform_experiment_id?: string
   limit?: number
   offset?: number
+  /** "created_at" | "priority_score" | "status", optionally prefixed with "-" for descending. */
+  sort?: string
 }
 
-export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment[]> {
+export function fetchExperimentsPage(params?: ExperimentsParams): Promise<Page<Experiment>> {
   const url = new URL(`${REGISTRY_URL}/registry/experiments`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
     }
   }
-  return apiFetch<Experiment[]>(url.toString())
+  return apiFetchPage<Experiment>(url.toString())
+}
+
+export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment[]> {
+  return fetchExperimentsPage(params).then(p => p.items)
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {
@@ -174,10 +199,28 @@ export async function createPlatformExperiment(req: CreatePlatformExperimentRequ
   return res.json()
 }
 
-export function fetchPlatformExperiments(status?: string): Promise<PlatformExperiment[]> {
+export interface PlatformExperimentsParams {
+  status?: string
+  /** Search over name/description. */
+  q?: string
+  limit?: number
+  offset?: number
+  /** "created_at" | "name" | "status", optionally prefixed with "-" for descending. */
+  sort?: string
+}
+
+export function fetchPlatformExperimentsPage(params?: PlatformExperimentsParams): Promise<Page<PlatformExperiment>> {
   const url = new URL(`${QUOTA_URL}/platform-experiments`)
-  if (status) url.searchParams.set('status', status)
-  return apiFetch<PlatformExperiment[]>(url.toString())
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
+    }
+  }
+  return apiFetchPage<PlatformExperiment>(url.toString())
+}
+
+export function fetchPlatformExperiments(status?: string): Promise<PlatformExperiment[]> {
+  return fetchPlatformExperimentsPage(status ? { status } : undefined).then(p => p.items)
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {
@@ -266,6 +309,8 @@ export function fetchExperimentsByPlatformExperiment(platformExpID: string): Pro
 export interface Stage {
   length_pct: number
   evict_pct: number
+  /** Longest a single job may run while this stage is current. 0/absent = unlimited. */
+  max_job_hours?: number
 }
 
 export interface AgentCut {

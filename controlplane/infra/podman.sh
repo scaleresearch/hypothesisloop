@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ACTION="${1:?usage: podman.sh up|down|start|stop|reload}"
+ACTION="${1:?usage: podman.sh up|down|destroy|start|stop|reload}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 POD="hypothesisloop-controlplane"
 POSTGRES_VOLUME="hypothesisloop-postgres-data"
@@ -69,6 +69,34 @@ case "$ACTION" in
     run_services
     ;;
   down)
+    # Removes the pod and every container, and KEEPS the volumes: a finished run's experiments,
+    # metrics and hypotheses survive, so `down` followed by `up` is always safe. Deleting the data
+    # is `destroy`, which you have to ask for by name — this used to be `down`'s job, and one
+    # routine `down` to pick up a rebuilt image silently erased a completed 7-hour run.
+    if podman pod exists "$POD"; then
+      podman pod rm -f "$POD"
+    else
+      rc=$?
+      (( rc == 1 )) || exit "$rc"
+    fi
+    ;;
+  destroy)
+    # down + delete the postgres and GreptimeDB volumes. Irreversible: every platform experiment,
+    # experiment record, metric sample and hypothesis in this control plane goes with them.
+    if [[ "${2:-}" != "--yes" ]]; then
+      cat >&2 <<EOF
+podman.sh destroy: this DELETES ALL control-plane data (volumes $POSTGRES_VOLUME,
+$GREPTIME_VOLUME) — every platform experiment, experiment record, metric and hypothesis.
+There is no backup and no undo.
+
+If you only want to restart the services (including onto a rebuilt image), use:
+    podman.sh reload      # rebuild-aware restart, keeps data
+    podman.sh down && podman.sh up
+
+Re-run with --yes to proceed: podman.sh destroy --yes
+EOF
+      exit 1
+    fi
     if podman pod exists "$POD"; then
       podman pod rm -f "$POD"
     else
