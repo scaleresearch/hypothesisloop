@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -48,6 +49,7 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 	r := schedulerRouter(spy)
 
 	code, _ := get(t, r, "/experiments?agent=a1&platform_experiment_id=pe-1&status=RUNNING"+
+		"&hypothesis_id=h-1&project_id=proj-1&since=2026-01-02T03:04:05Z"+
 		"&search=min_lr&limit=10&offset=20&sort=-created_at")
 	if code != 200 {
 		t.Fatalf("status = %d, want 200", code)
@@ -55,6 +57,8 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 
 	want := domain.ExperimentFilter{
 		AgentID: "a1", PlatformExperimentID: "pe-1", Status: domain.ExperimentStatus("RUNNING"),
+		HypothesisID: "h-1", ProjectID: "proj-1",
+		Since:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		Search: "min_lr", Limit: 10, Offset: 20, Sort: "-created_at",
 	}
 	if spy.gotList != want {
@@ -168,6 +172,7 @@ func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
 	for _, q := range []string{
 		"/experiments?sort=-created", // near-miss for created_at
 		"/experiments?sort=bogus",
+		"/experiments?since=yesterday", // must be RFC3339, not prose
 		"/experiments?limit=-1",
 		"/experiments?offset=-1",
 	} {
