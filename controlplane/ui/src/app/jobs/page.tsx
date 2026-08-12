@@ -85,7 +85,7 @@ export default function JobsPage() {
   const { data, error, isLoading, mutate } = useSWR(
     ['jobs', agentFilter, peFilter, statusFilter, page, sort],
     () => fetchExperimentsPage({
-      agent_id: agentFilter || undefined,
+      agent: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
       limit: PAGE_SIZE,

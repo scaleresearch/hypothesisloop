@@ -71,11 +71,13 @@ export function fetchAgentLedger(agentID: string): Promise<CreditLedgerEntry[]> 
 // Registry / Experiments
 // ---------------------------------------------------------------------------
 
+// Field names are sent verbatim as query params, so they must match the API's own names.
 export interface ExperimentsParams {
   status?: string
-  tier?: string
-  agent_id?: string
+  agent?: string
   platform_experiment_id?: string
+  /** Substring match against hypothesis/objective/theory. */
+  search?: string
   limit?: number
   offset?: number
   /** "created_at" | "priority_score" | "status", optionally prefixed with "-" for descending. */
@@ -83,7 +85,7 @@ export interface ExperimentsParams {
 }
 
 export function fetchExperimentsPage(params?: ExperimentsParams): Promise<Page<Experiment>> {
-  const url = new URL(`${REGISTRY_URL}/registry/experiments`)
+  const url = new URL(`${SCHED_URL}/experiments`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
@@ -301,7 +303,7 @@ export function fetchDonations(status?: string): Promise<DonationRequest[]> {
 }
 
 export function fetchExperimentsByPlatformExperiment(platformExpID: string): Promise<Experiment[]> {
-  const url = new URL(`${REGISTRY_URL}/registry/experiments`)
+  const url = new URL(`${SCHED_URL}/experiments`)
   url.searchParams.set('platform_experiment_id', platformExpID)
   return apiFetch<Experiment[]>(url.toString())
 }

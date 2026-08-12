@@ -98,11 +98,10 @@ def _save_resume_id(setup: core.RunSetup, session_id: str | None) -> None:
 # condition being true (see core.stop_reason) — keeps the conversation (and its prompt cache)
 # alive across what would otherwise be process-ending idle exits.
 CONTINUE_PROMPT = (
-    "Your turn ended but the platform experiment is still open and you are not held. If you were "
-    "waiting on a job, poll it now (GET /experiments/{id}) and act on its current state — a "
-    "background wakeup you scheduled will NOT resume this process. If it's still running, take the "
-    "next useful step (research the next hypothesis, check the registry pool) rather than ending "
-    "your turn again to wait idle. If you have a completed job needing a summary, file it now."
+    "Your turn ended but the platform experiment is still open and you are not held. Nothing "
+    "resumes this process on a timer — a background wakeup you scheduled will NOT wake it — so "
+    "check current platform state and continue with the most useful work available rather than "
+    "ending your turn to wait idle."
 )
 
 
