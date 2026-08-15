@@ -111,23 +111,15 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		return err
 	}
 
-	// UsedGuaranteedAccH = Σ(estimated_cost of running jobs) + Σ(actual_cost of completed jobs).
-	// We want Σ(actual_running) + Σ(actual_completed) per the spec.
-	// Replace running-job estimates with actual elapsed cost by adding the per-job delta.
-	// The old code added Σ(actual_running) on top of UsedGuaranteedAccH which double-counted
-	// running jobs (their estimate was already in UsedGuaranteedAccH).
-	// Same delta correction as accelerator, applied to every tracked budget dimension: the Used*
-	// fields carry running jobs' *estimates*, so we swap each running job's estimate for its
-	// observed-so-far cost. Accelerator is billed flat at its admitted type (observedAcceleratorCost);
-	// CPU is linear, so its observed cost is observedElapsedHours × RequestedCPUCores(). RAM/storage
-	// are not enforced here because nothing debits an observed RAM/storage figure to true up against.
-	var accDeltaG, accDeltaB, cpuDeltaG, cpuDeltaB float64
+	// aq.UsedGuaranteedAccH/UsedBurstAccH already carry the actual-cost correction for every
+	// running job (c.quota.GetAgentQuota -> correctRunningCosts swaps each running job's
+	// estimate for its observed-so-far accelerator cost) — do not apply that delta again here,
+	// or a running job's overrun gets debited twice, tripping eviction early.
+	// CPU is not corrected by correctRunningCosts, so it still needs the same delta swap here.
+	// RAM/storage are not enforced here because nothing debits an observed RAM/storage figure to
+	// true up against.
+	var cpuDeltaG, cpuDeltaB float64
 	for _, exp := range running {
-		accActual, err := c.observedAcceleratorCost(ctx, exp, now)
-		if err != nil {
-			return fmt.Errorf("observed accelerator cost for %s: %w", exp.ID, err)
-		}
-		accDelta := accActual - exp.EstimatedCostAccH // negative when under-budget, positive on overrun
 		var cpuDelta float64
 		if exp.EstimatedCPUCoreHours > 0 {
 			hours, err := c.observedElapsedHours(ctx, exp.ID, now)
@@ -137,10 +129,8 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			cpuDelta = hours*exp.RequestedCPUCores() - exp.EstimatedCPUCoreHours
 		}
 		if exp.CapacityTier == domain.CapacityGuaranteed {
-			accDeltaG += accDelta
 			cpuDeltaG += cpuDelta
 		} else {
-			accDeltaB += accDelta
 			cpuDeltaB += cpuDelta
 		}
 	}
@@ -154,9 +144,9 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	spent := func(budget, used, delta float64) bool {
 		return budget > 0 && (used+delta) >= budget*0.99
 	}
-	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH, accDeltaG) ||
+	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH, 0) ||
 		spent(aq.GuaranteedCPUCoreHours, aq.UsedGuaranteedCPUCoreH, cpuDeltaG)
-	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH, accDeltaB) ||
+	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH, 0) ||
 		spent(aq.BurstCPUCoreHours, aq.UsedBurstCPUCoreH, cpuDeltaB)
 
 	if !guaranteedExhausted && !burstExhausted {
@@ -188,8 +178,8 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		c.logger.Info("quota exhaustion eviction",
 			zap.String("agent", agentID),
 			zap.String("exp", exp.ID),
-			zap.Float64("actual_guaranteed_acch", aq.UsedGuaranteedAccH+accDeltaG),
-			zap.Float64("actual_burst_acch", aq.UsedBurstAccH+accDeltaB),
+			zap.Float64("actual_guaranteed_acch", aq.UsedGuaranteedAccH),
+			zap.Float64("actual_burst_acch", aq.UsedBurstAccH),
 			zap.Float64("quota_guaranteed_acch", aq.GuaranteedAcceleratorHours),
 			zap.Float64("quota_burst_acch", aq.BurstAcceleratorHours),
 			zap.Float64("actual_guaranteed_cpuh", aq.UsedGuaranteedCPUCoreH+cpuDeltaG),
