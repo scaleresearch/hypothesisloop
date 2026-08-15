@@ -167,3 +167,24 @@ end to end, and two things are deliberately left open:
   `seed/fetch_data.sh` to finish it.
 
 At ~3s/subject the embedding pass should be ~25 minutes for task 3.
+
+## 8. Run 1 (overnight, 4 agents, 8h): real signal found, but the fleet's own best result overfit
+
+`pe-1dfdbe29` ran ~150 jobs against this seed, confirmed 44 hypotheses. The mechanistic finding
+held up: an intermediate encoder block (block 17/24, ~75% depth) replacing or fusing with the
+final layer beats final-layer-only, and only a non-linear head (RBF-SVM) could exploit it -- five
+different linear/generative-linear heads all failed to beat the mean-pool baseline. That part is
+real and reused into `experiment.md`'s LEVERS section as-is.
+
+What did *not* hold up: the fleet's headline number, AUROC 1.0 (RBF-SVM on a block-17+final fused
+feature), scored ~0.6 -- near chance -- on a hidden validation set. This was not a bug. It is
+model-selection overfitting at the fleet level: ~150 configs searched against the same fixed
+48-subject/20-fold split will eventually produce one that fits that specific sample's noise, even
+though every individual job's own cross-validation was done correctly. Reproducing a result on
+the *same* frozen split only proves it is deterministic, not that it generalizes -- the fleet
+mistook the former for the latter. `experiment.md`'s CONSTRAINTS section now carries the concrete
+guardrails this implies for run 2 (treat near-ceiling AUROC as suspect, alternate-seed diagnostic
+check before confirming a new best, prefer simple configs within the noise band over the pool's
+historical max, report search breadth alongside any reported number). Read that section before
+running a second wave -- this file records what happened, `experiment.md` is what to actually do
+differently.
