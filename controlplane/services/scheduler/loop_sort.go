@@ -149,3 +149,36 @@ func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota
 		return false
 	})
 }
+
+// interleaveByAgent regroups exps — already priority-ordered within each agent by sortBurst —
+// into round-robin order across agents: first job of agent 1, first of agent 2, ..., second of
+// agent 1, second of agent 2, .... Burst-hour quotas only cap an agent's cumulative consumption
+// over an experiment's lifetime; they say nothing about how much of the cluster's *physical*
+// burst pool one agent may hold at once. Without this, a single linear admission pass over a
+// priority-sorted list lets one agent's continuously replenished queue claim every unit of
+// capacity that frees up in a tick, ahead of another agent that only has one job waiting.
+// Interleaving bounds that to roughly a one-job lead per round, with no preemption or new
+// tracked state — agent order (and each agent's own job order) is exactly the input order, so
+// existing fairness/priority signals inside one agent's jobs are preserved untouched.
+func interleaveByAgent(exps []*domain.Experiment) []*domain.Experiment {
+	if len(exps) == 0 {
+		return exps
+	}
+	byAgent := make(map[string][]*domain.Experiment, len(exps))
+	var agentOrder []string
+	for _, e := range exps {
+		if _, seen := byAgent[e.AgentID]; !seen {
+			agentOrder = append(agentOrder, e.AgentID)
+		}
+		byAgent[e.AgentID] = append(byAgent[e.AgentID], e)
+	}
+	out := make([]*domain.Experiment, 0, len(exps))
+	for round := 0; len(out) < len(exps); round++ {
+		for _, agentID := range agentOrder {
+			if round < len(byAgent[agentID]) {
+				out = append(out, byAgent[agentID][round])
+			}
+		}
+	}
+	return out
+}
