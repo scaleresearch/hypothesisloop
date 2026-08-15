@@ -26,6 +26,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	// Build the PE report-interval and stage job-length maps and advance stage ladders in one pass.
 	reportIntervalByPE := map[string]time.Duration{}
 	maxJobHoursByPE := map[string]float64{}
+	declaredMetricKeysByPE := map[string][]string{}
 	if c.stagesStore != nil {
 		pes, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "running"})
 		if err != nil {
@@ -34,6 +35,17 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		for _, pe := range pes {
 			if pe.ReportIntervalSeconds > 0 {
 				reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
+			}
+			var rankingKeys []string
+			for _, m := range pe.Metrics {
+				// Only ranking metrics prove training progress — a constraint or attribute
+				// metric changing (or staying put) says nothing about whether the run is stuck.
+				if m.EffectiveRole() == domain.MetricRoleRanking {
+					rankingKeys = append(rankingKeys, m.Key)
+				}
+			}
+			if len(rankingKeys) > 0 {
+				declaredMetricKeysByPE[pe.ID] = rankingKeys
 			}
 			// Read before advanceStages: a boundary crossed on this tick takes effect from the
 			// next one, so no job is evicted under a cap it was never running under.
@@ -79,7 +91,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	}
 
 	for _, exp := range exps {
-		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, maxJobHoursByPE); err != nil {
+		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, maxJobHoursByPE, declaredMetricKeysByPE); err != nil {
 			return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
 		}
 	}
@@ -240,7 +252,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 // reconcileOne evicts exp when it has gone silent or has outrun the current stage's job-length
 // cap. Quality is the agent's own call: it reads its metrics and cancels a bad run itself, and
 // quota exhaustion bounds the damage if it doesn't.
-func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64) error {
+func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64, declaredMetricKeysByPE map[string][]string) error {
 	if maxHours, ok := maxJobHoursByPE[exp.PlatformExperimentID]; ok {
 		hours, err := c.observedElapsedHours(ctx, exp.ID, now)
 		if err != nil {
@@ -256,7 +268,7 @@ func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, n
 		}
 	}
 
-	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE)
+	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE, declaredMetricKeysByPE[exp.PlatformExperimentID])
 	if err != nil {
 		return err
 	}

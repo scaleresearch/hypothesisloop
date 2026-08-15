@@ -5,8 +5,7 @@ import { Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { useMemo, useState } from 'react'
-import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAllHypotheses, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
+import { fetchHypothesesPage, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
 import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -14,6 +13,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { Pagination } from '@/components/ui/pagination'
+
+const PAGE_SIZE = 25
 
 const STATUS_FILTERS: Array<{ value: HypothesisStatus | ''; label: string }> = [
   { value: '', label: 'All' },
@@ -45,37 +47,38 @@ function HypothesesPageContent() {
   const peID = searchParams.get('pe') ?? ''
   const [agentFilter, setAgentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<HypothesisStatus | ''>('')
+  const [page, setPage] = useState(0)
 
   const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
 
-  // Every hypothesis belongs to exactly one platform experiment's shared idea pool — there is
-  // no unscoped registry on the backend. To show a combined view here we fetch every platform
-  // experiment, then that hypothesis pool per platform experiment, and merge — the "Platform
-  // Experiment" column plus the filter below is what makes that structure visible instead of
-  // flattening it away.
+  // GET /hypotheses accepts an optional platform_experiment_id: omitted, it spans every
+  // platform experiment's pool server-side (ORDER BY created_at DESC LIMIT/OFFSET across all of
+  // them) — this page only ever holds the one page of rows it's currently showing. The
+  // "Platform Experiment" column plus the filter below still makes the underlying per-pool
+  // structure visible even though the read itself is unscoped.
   const { data: platformExperiments } = useSWR<PlatformExperiment[]>(
     'platform-experiments-all',
     () => fetchPlatformExperiments(),
     { refreshInterval: 30_000 },
   )
   const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
-  const peIDs = (platformExperiments ?? []).map(pe => pe.id)
 
-  const { data: hypotheses, error, isLoading, mutate } = useSWR<Hypothesis[]>(
-    peIDs.length > 0 ? ['hypotheses-all', peIDs.join(',')] : null,
-    () => fetchAllHypotheses(peIDs),
-    { refreshInterval: 15_000 },
+  const { data, error, isLoading, mutate } = useSWR(
+    ['hypotheses', peID, agentFilter, statusFilter, page],
+    () => fetchHypothesesPage({
+      platform_experiment_id: peID || undefined,
+      agent: agentFilter || undefined,
+      status: statusFilter || undefined,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    }),
+    { refreshInterval: 15_000, keepPreviousData: true },
   )
-
-  const filtered = (() => {
-    let all = hypotheses ?? []
-    if (peID) all = all.filter(h => h.platform_experiment_id === peID)
-    if (agentFilter) all = all.filter(h => h.agent_id === agentFilter)
-    if (statusFilter) all = all.filter(h => (h.status ?? 'open') === statusFilter)
-    return all
-  })()
+  const list = data?.items ?? []
+  const total = data?.total ?? 0
 
   function setPEFilter(next: string) {
+    setPage(0)
     if (next) router.push(`/hypotheses?pe=${next}`)
     else router.push('/hypotheses')
   }
@@ -88,23 +91,6 @@ function HypothesesPageContent() {
     () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [agents],
   )
-
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'created_at', desc: true }])
-  const hypothesisColumns = useMemo(() => [
-    { accessorKey: 'text', header: 'Text' },
-    { accessorKey: 'status', header: 'Status' },
-    { accessorKey: 'agent_id', header: 'Registered by' },
-    { accessorKey: 'created_at', header: 'Created' },
-  ], [])
-  const hypothesisTable = useReactTable({
-    data: filtered,
-    columns: hypothesisColumns,
-    state: { sorting },
-    onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  })
-  const list = hypothesisTable.getRowModel().rows.map(r => r.original)
 
   return (
     <div>
@@ -119,7 +105,7 @@ function HypothesesPageContent() {
         <SearchableSelect
           value={peID}
           onChange={setPEFilter}
-          allLabel={`All (${(hypotheses ?? []).length})`}
+          allLabel="All"
           options={sortedPEs.map(pe => ({ value: pe.id, label: pe.name }))}
         />
         {peID && <Link href="/hypotheses" className="text-link" style={{ fontSize: 12 }}>Clear filter</Link>}
@@ -127,18 +113,18 @@ function HypothesesPageContent() {
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
         <SearchableSelect
           value={agentFilter}
-          onChange={setAgentFilter}
+          onChange={v => { setAgentFilter(v); setPage(0) }}
           allLabel="All agents"
           options={sortedAgentOptions.map(a => ({ value: a.id, label: a.name ?? a.id }))}
         />
         {agentFilter && (
-          <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
+          <Button variant="link" onClick={() => { setAgentFilter(''); setPage(0) }}>Clear</Button>
         )}
 
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Status</span>
         <SearchableSelect
           value={statusFilter}
-          onChange={v => setStatusFilter(v as HypothesisStatus | '')}
+          onChange={v => { setStatusFilter(v as HypothesisStatus | ''); setPage(0) }}
           allLabel="All"
           options={STATUS_FILTERS.filter(f => f.value !== '').map(f => ({ value: f.value, label: f.label }))}
         />
@@ -150,32 +136,18 @@ function HypothesesPageContent() {
       <Pod>
         <PodHeader>
           Hypothesis Registry
-          {list.length > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({list.length})</span>}
+          {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
         </PodHeader>
         <PodContent scrollX>
           <table className="wa-table">
             <thead>
               <tr>
                 <th>ID</th>
-                {(['text', 'status'] as const).map(colId => {
-                  const h = hypothesisTable.getColumn(colId)!
-                  return (
-                    <th key={colId} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={h.getToggleSortingHandler()}>
-                      {String(h.columnDef.header)}
-                      {h.getIsSorted() === 'desc' ? ' ▼' : h.getIsSorted() === 'asc' ? ' ▲' : ''}
-                    </th>
-                  )
-                })}
+                <th>Text</th>
+                <th>Status</th>
                 <th>Platform Experiment</th>
-                {(['agent_id', 'created_at'] as const).map(colId => {
-                  const h = hypothesisTable.getColumn(colId)!
-                  return (
-                    <th key={colId} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={h.getToggleSortingHandler()}>
-                      {String(h.columnDef.header)}
-                      {h.getIsSorted() === 'desc' ? ' ▼' : h.getIsSorted() === 'asc' ? ' ▲' : ''}
-                    </th>
-                  )
-                })}
+                <th>Registered by</th>
+                <th>Created</th>
               </tr>
             </thead>
             <tbody>
@@ -221,6 +193,7 @@ function HypothesesPageContent() {
               })}
             </tbody>
           </table>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </PodContent>
       </Pod>
     </div>

@@ -66,23 +66,59 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []*domain.Agent }, error) {
-		agents, err := h.svc.store.ListAgents(ctx)
+		Description: "Optional ?limit (default/max 200) and ?offset, oldest first. Total " +
+			"registered count is returned in the X-Total-Count response header.",
+	}, func(ctx context.Context, in *struct {
+		Limit  int `query:"limit"`
+		Offset int `query:"offset"`
+	}) (*struct {
+		Body       []*domain.Agent
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		agents, err := h.svc.store.ListAgents(ctx, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list agents")
 		}
-		return &struct{ Body []*domain.Agent }{Body: agents}, nil
+		total, err := h.svc.store.CountAgents(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to count agents")
+		}
+		return &struct {
+			Body       []*domain.Agent
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: agents, TotalCount: total}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-balances", Method: "GET", Path: "/balances",
 		Summary: "List agent credit balances", Tags: []string{"agents"},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []*domain.AgentBalance }, error) {
-		balances, err := h.svc.ListBalances(ctx)
+		Description: "Optional ?limit (default/max 200) and ?offset, oldest first. Total " +
+			"registered count is returned in the X-Total-Count response header.",
+	}, func(ctx context.Context, in *struct {
+		Limit  int `query:"limit"`
+		Offset int `query:"offset"`
+	}) (*struct {
+		Body       []*domain.AgentBalance
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		balances, err := h.svc.ListBalances(ctx, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list balances")
 		}
-		return &struct{ Body []*domain.AgentBalance }{Body: balances}, nil
+		total, err := h.svc.CountBalances(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to count balances")
+		}
+		return &struct {
+			Body       []*domain.AgentBalance
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: balances, TotalCount: total}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
@@ -125,8 +161,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "list-platform-experiments", Method: "GET", Path: "/platform-experiments",
 		Summary: "List platform experiments", Tags: []string{"platform-experiments"},
 		Description: "Filter with ?status, ?q (search name/description), ?limit, ?offset. " +
-			"?sort selects order: created_at, name, or status, optionally prefixed with - for " +
-			"descending (default -created_at). Total match count is returned in the " +
+			"?sort selects order: created_at, starts_at, name, or status, optionally prefixed with " +
+			"- for descending (default -created_at). Total match count is returned in the " +
 			"X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Status string `query:"status" doc:"Optional status filter"`
@@ -194,9 +230,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "update-platform-experiment", Method: "PUT", Path: "/platform-experiments/{id}",
 		Summary: "Update a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Amends an experiment while its status is open, `metrics` included — a mis-specified " +
-			"ranking metric can be fixed in place instead of closing the experiment and discarding every " +
-			"agent's hypotheses and baseline work. Rejected once the status is no longer open.",
+		Description: "Amends an experiment while it is open or running. While open, every field including " +
+			"`metrics` is editable — a mis-specified ranking metric can be fixed in place instead of closing " +
+			"the experiment and discarding every agent's hypotheses and baseline work. Once running, only " +
+			"`name` and `description` can be amended; budgets, `max_agents`, `metrics`, `report_interval_seconds` " +
+			"and the schedule are locked because admission and stage decisions have already been made against " +
+			"them. Rejected once the experiment is closed.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body CreatePlatformExperimentRequest
@@ -553,11 +592,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if peh.metricsDBURL == "" {
 			return out, nil
 		}
-		available, err := metricsdb.LiveClusterAcceleratorCapacity(ctx, peh.metricsDBURL, peh.capacityFreshness)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		total, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, peh.metricsDBURL, peh.capacityFreshness)
+		available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, peh.metricsDBURL, peh.capacityFreshness)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

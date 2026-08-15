@@ -58,7 +58,14 @@ func (lq *LoopQuotaStore) GetAgentQuota(ctx context.Context, agentID, platformEx
 	if err != nil || aq == nil {
 		return aq, err
 	}
-	if err := metricsdb.PopulateUsageOne(ctx, lq.Store.usage.URL(), aq); err != nil {
+	pe, err := lq.PlatformExperimentsStore.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return nil, err
+	}
+	if pe == nil {
+		return nil, fmt.Errorf("db.LoopQuotaStore.GetAgentQuota: platform experiment %s not found", platformExpID)
+	}
+	if err := metricsdb.PopulateUsageOne(ctx, lq.Store.usage.URL(), pe.CreatedAt, aq); err != nil {
 		return nil, err
 	}
 	if err := lq.PlatformExperimentsStore.AddDesiredQuotaUsageOne(ctx, aq); err != nil {

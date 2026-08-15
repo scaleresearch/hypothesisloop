@@ -79,7 +79,7 @@ func newHypothesisID() (string, error) {
 // FindOrCreateHypothesis registers a hypothesis within a platform experiment, or returns the
 // existing row if one with equivalent normalized text already exists *in that same platform
 // experiment* — this is the real uniqueness check: it relies on the DB's UNIQUE index on
-// (platform_experiment_id, normalized_text) (schema.sql) rather than any in-process novelty
+// (platform_experiment_id, normalized_text) (shared/db/schema.sql) rather than any in-process novelty
 // heuristic. The same text registered under a different platform experiment is a distinct
 // hypothesis. Returns (hypothesis, alreadyExisted, error).
 func (s *HypothesesStore) FindOrCreateHypothesis(ctx context.Context, agentID, platformExperimentID, text string) (*domain.Hypothesis, bool, error) {
@@ -158,15 +158,18 @@ func (s *HypothesesStore) GetHypothesis(ctx context.Context, id string) (*domain
 	return h, nil
 }
 
-// ListHypotheses returns hypotheses registered within a platform experiment, most recent
-// first, each carrying its finding/comment counts. Bounded at the store so the endpoint can
-// never return unbounded rows even if a caller forgets a limit: limit <= 0 uses
-// defaultHypothesisListLimit, and any limit above maxHypothesisListLimit is clamped down to
-// it. agentID, if non-empty, restricts the result to that agent's own hypotheses. status, if
-// non-empty, restricts the result to that one status (open/confirmed/inconclusive) — lets a
-// caller pull just the still-actionable rows (open/inconclusive) or just the settled ones
-// (confirmed) instead of paying to fetch and filter the whole pool client-side, which matters
-// once a platform experiment's hypothesis count grows past a single catch-up's easy skim.
+// ListHypotheses returns hypotheses, most recent first, each carrying its finding/comment
+// counts. Bounded at the store so the endpoint can never return unbounded rows even if a
+// caller forgets a limit: limit <= 0 uses defaultHypothesisListLimit, and any limit above
+// maxHypothesisListLimit is clamped down to it. platformExperimentID, if non-empty, restricts
+// the result to that one pool; empty spans every platform experiment (the operator-facing
+// global view — a single ORDER BY created_at DESC LIMIT/OFFSET across all pools, not a
+// per-pool fetch merged client-side). agentID, if non-empty, restricts the result to that
+// agent's own hypotheses. status, if non-empty, restricts the result to that one status
+// (open/confirmed/inconclusive) — lets a caller pull just the still-actionable rows
+// (open/inconclusive) or just the settled ones (confirmed) instead of paying to fetch and
+// filter the whole pool client-side, which matters once the hypothesis count grows past a
+// single catch-up's easy skim.
 func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*HypothesisListItem, error) {
 	if limit <= 0 {
 		limit = defaultHypothesisListLimit
@@ -185,7 +188,7 @@ LEFT JOIN hypothesis_findings f ON f.hypothesis_id = h.id
 LEFT JOIN hypothesis_comments c ON c.hypothesis_id = h.id
 WHERE ` + strings.Join(clauses, " AND ") + `
 GROUP BY h.id
-ORDER BY h.created_at DESC
+ORDER BY h.created_at DESC, h.id DESC
 LIMIT $` + fmt.Sprint(len(args))
 	if offset > 0 {
 		args = append(args, offset)
@@ -215,7 +218,7 @@ LIMIT $` + fmt.Sprint(len(args))
 }
 
 // CreateHypothesisFinding records the agent's post-run write-up for a job, attached to the
-// hypothesis it tested. One finding per job (UNIQUE on experiment_id in schema.sql) — a
+// hypothesis it tested. One finding per job (UNIQUE on experiment_id in shared/db/schema.sql) — a
 // second call for the same experiment_id is a caller bug, not a legitimate "amend my
 // write-up" path, and will fail the unique constraint.
 func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesisID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error) {
@@ -352,9 +355,15 @@ func (s *HypothesesStore) UpdateHypothesisStatus(ctx context.Context, id, caller
 
 // hypothesisFilterClauses builds the WHERE fragment shared by ListHypotheses and
 // CountHypotheses, so a page and its total can never be computed over different predicates.
+// platformExperimentID is optional: empty means every platform experiment's pool (the global,
+// cross-experiment view /hypotheses without a filter needs) rather than one pool's rows.
 func hypothesisFilterClauses(platformExperimentID, agentID string, status domain.HypothesisStatus) ([]string, []any) {
-	clauses := []string{"h.platform_experiment_id = $1"}
-	args := []any{platformExperimentID}
+	clauses := []string{"1=1"}
+	args := []any{}
+	if platformExperimentID != "" {
+		args = append(args, platformExperimentID)
+		clauses = append(clauses, fmt.Sprintf("h.platform_experiment_id = $%d", len(args)))
+	}
 	if agentID != "" {
 		args = append(args, agentID)
 		clauses = append(clauses, fmt.Sprintf("h.agent_id = $%d", len(args)))

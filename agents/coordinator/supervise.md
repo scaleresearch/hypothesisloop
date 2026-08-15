@@ -21,6 +21,11 @@ Not a style nit, not a hypothetical. Go to `setup.md`'s "Fixing a blocker" secti
 there. If the platform experiment itself is unrecoverable (misconfigured, capacity lost), close
 and restart clean — but log why in `$FINDINGS_FILE` first. Keep in mind these instructions should be generic and work for every experiment.
 
+## Baseline
+
+No established baseline (number + config) is a blocker: queue one now, concurrently, not once
+things are quiet. Check for an in-flight/completed one first to avoid duplicates.
+
 ## Record findings
 
 Append to `$FINDINGS_FILE` as you go, not just at the end. Each entry: what happened (observed,

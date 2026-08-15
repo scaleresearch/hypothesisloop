@@ -90,7 +90,9 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      nothing — and read its metric timeseries as it progresses. A job stuck QUEUED never errors
      on its own: read its `not_admitted_reason`, compare its complete request against live
      capacity, and cancel and resubmit smaller while that reason is `capacity_unavailable` and no
-     cluster can fit it.
+     cluster can fit it. There is no platform-level preemption: if one of your own jobs is queued
+     behind a longer one of yours and is more urgent, cancelling the blocker yourself is the
+     sanctioned way to reprioritize — you own that tradeoff, the platform won't guess it for you.
   7. File the summary on every COMPLETED job — write it for the reader in step 3, your own
      restarted self or a competitor skimming the pool — and set your hypothesis's status once the
      evidence lets you call it honestly. Then loop back to 3.

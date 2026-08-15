@@ -100,6 +100,11 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   number, or quota throttles the fleet mid-run.
 - `metrics`: `{key, direction, role?}[]` — `"role":"ranking"` on the metric `experiment.md` calls
   RANKING METRIC, no role on the rest.
+- Every reported metric value has an implicit `metric_basis`, default `"raw"`. If a job's value
+  is on a different scale/definition than every other run's (e.g. denormalized against a
+  different reference), the job must set a non-`"raw"` `metric_basis` on that value — never
+  leave it as `"raw"` and rely on someone noticing the number looks off. A wrongly-"raw" value is
+  how a rescaled metric quietly wins a ranking it actually lost.
 - `report_interval_seconds` = the cadence the harness actually reports at.
 - `stages` (optional; omit = `domain.DefaultStages`, 40%/75%-cut then 60%/0%): `length_pct` sums
   to 100, last stage's `evict_pct` = 0, `max_job_hours` caps a stage's job length (0/absent =

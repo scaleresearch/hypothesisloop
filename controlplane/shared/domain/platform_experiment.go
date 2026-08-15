@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -102,6 +103,12 @@ func ValidateMetricDefinitions(defs []MetricDefinition) error {
 		}
 	}
 	return nil
+}
+
+// MetricDefinitionsEqual reports whether two metric declarations are the same set in the same
+// order — order matters (the first ranking metric is primary), so this is not a set comparison.
+func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
+	return reflect.DeepEqual(a, b)
 }
 
 // PlatformExperiment is the operator-defined compute envelope agents compete within.

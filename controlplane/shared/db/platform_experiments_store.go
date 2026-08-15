@@ -114,13 +114,19 @@ type PlatformExperimentsFilter struct {
 // used for SQL injection.
 var PlatformExperimentSortFields = map[string]string{
 	"created_at": "pe.created_at",
+	"starts_at":  "pe.starts_at",
 	"name":       "pe.name",
 	"status":     "pe.status",
 }
 
+// statusPriorityTiebreak ranks running/open experiments ahead of closed ones when the primary
+// sort column is tied, so a page of same-date experiments doesn't bury active ones under
+// arbitrary insertion order.
+const statusPriorityTiebreak = "(CASE WHEN pe.status = 'closed' THEN 1 ELSE 0 END)"
+
 func platformExperimentOrderBy(sort string) string {
 	if sort == "" {
-		return "pe.created_at DESC"
+		return "pe.created_at DESC, " + statusPriorityTiebreak
 	}
 	field, dir := sort, "ASC"
 	if strings.HasPrefix(sort, "-") {
@@ -128,9 +134,9 @@ func platformExperimentOrderBy(sort string) string {
 	}
 	col, ok := PlatformExperimentSortFields[field]
 	if !ok {
-		return "pe.created_at DESC"
+		return "pe.created_at DESC, " + statusPriorityTiebreak
 	}
-	return col + " " + dir
+	return col + " " + dir + ", " + statusPriorityTiebreak
 }
 
 func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string, []any) {
@@ -150,8 +156,23 @@ func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string
 	return clauses, args
 }
 
-// ListPlatformExperiments returns platform experiments matching the given filter.
+// defaultPlatformExperimentListLimit and maxPlatformExperimentListLimit bound every
+// ListPlatformExperiments read the same way ListAgents/ListHypotheses bound their own — see
+// agents_store.go/hypotheses_store.go. Limit<=0 must not mean "unbounded".
+const (
+	defaultPlatformExperimentListLimit = 200
+	maxPlatformExperimentListLimit     = 200
+)
+
+// ListPlatformExperiments returns platform experiments matching the given filter. filter.Limit
+// is defaulted and clamped to [1, maxPlatformExperimentListLimit]; limit<=0 uses the default.
 func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = defaultPlatformExperimentListLimit
+	} else if filter.Limit > maxPlatformExperimentListLimit {
+		filter.Limit = maxPlatformExperimentListLimit
+	}
+
 	clauses, args := platformExperimentFilterClauses(filter)
 	n := len(args) + 1
 
@@ -249,7 +270,13 @@ func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Cont
 }
 
 // UpdatePlatformExperiment updates mutable fields of a platform experiment.
-func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
+// UpdatePlatformExperiment writes pe's editable fields, but only if the row is still in
+// expectedStatus — the service reads status, decides which fields are safe to change for that
+// status, then calls here; without this compare-and-swap, a concurrent Start() could flip the row
+// to running between that read and this write, and a since-locked field (budget, metrics, ...)
+// computed under the stale "open" decision would land after admission already used the old value.
+// A mismatch (0 rows affected) means status moved: fail fast rather than silently no-op.
+func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
@@ -257,13 +284,16 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, budget_cpu_core_hours=$5, budget_ram_gb_hours=$6, budget_storage_gb_hours=$7, max_agents=$8, metrics=$9,
     report_interval_seconds=$10, starts_at=$11, ends_at=$12, updated_at=NOW()
-WHERE id=$1`
-	_, err = s.pool.pool.Exec(ctx, q,
+WHERE id=$1 AND status=$13`
+	tag, err := s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
-		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
+		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt, expectedStatus,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("platform_experiments_store.Update: status changed concurrently, retry")
 	}
 	return nil
 }

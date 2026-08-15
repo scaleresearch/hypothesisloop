@@ -83,11 +83,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "append-metric", Method: "POST", Path: "/experiments/{id}/metrics",
 		Summary: "Append a metric sample for an experiment", Tags: []string{"metrics"},
 		DefaultStatus: 204,
-		Description:   "Records one {metric_name, fraction_complete, metric_value} sample. No server-side validation of the value — never fabricate one.",
+		Description: "Records one {metric_name, fraction_complete, metric_value} sample. No server-side validation of the value — never fabricate one. " +
+			"metric_basis defaults to \"raw\": set it only when this value is not on the metric's usual scale (e.g. a different denormalization " +
+			"reference than normal) so it is never silently ranked against unmodified runs.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			MetricName       string  `json:"metric_name"`
+			MetricBasis      string  `json:"metric_basis,omitempty"`
 			FractionComplete float64 `json:"fraction_complete"`
 			MetricValue      float64 `json:"metric_value"`
 		}
@@ -96,7 +99,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if name == "" {
 			name = "default"
 		}
-		if err := h.svc.RecordMetric(ctx, in.ID, name, in.Body.FractionComplete, in.Body.MetricValue); err != nil {
+		if err := h.svc.RecordMetric(ctx, in.ID, name, in.Body.MetricBasis, in.Body.FractionComplete, in.Body.MetricValue); err != nil {
 			if errors.Is(err, ErrInvalidMetric) {
 				return nil, huma.Error422UnprocessableEntity(err.Error())
 			}
@@ -213,12 +216,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-hypotheses", Method: "GET", Path: "/hypotheses",
-		Summary: "List hypotheses for a platform experiment", Tags: []string{"hypotheses"},
-		Description: "Requires ?platform_experiment_id; optional ?agent for one agent's own, " +
-			"?status (open|confirmed|refuted|inconclusive) for just that status, ?limit " +
-			"(default/max 200) and ?offset, most recent first. Total match count is returned in " +
-			"the X-Total-Count response header. Rows carry finding_count/comment_count — drill " +
-			"into GET /hypotheses/{id} only where a count or relevance earns it.",
+		Summary: "List hypotheses, optionally scoped to one platform experiment", Tags: []string{"hypotheses"},
+		Description: "Optional ?platform_experiment_id restricts to one pool; omitted, every " +
+			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
+			"Optional ?agent for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
+			"for just that status, ?limit (default/max 200) and ?offset, most recent first. " +
+			"Total match count is returned in the X-Total-Count response header. Rows carry " +
+			"finding_count/comment_count — drill into GET /hypotheses/{id} only where a count or " +
+			"relevance earns it.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string                  `query:"platform_experiment_id"`
 		Agent                string                  `query:"agent"`
@@ -229,9 +234,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Body       []*db.HypothesisListItem
 		TotalCount int `header:"X-Total-Count"`
 	}, error) {
-		if in.PlatformExperimentID == "" {
-			return nil, huma.Error400BadRequest("platform_experiment_id is required")
-		}
 		if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid status %q", in.Status))
 		}

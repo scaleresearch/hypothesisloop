@@ -7,17 +7,21 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 import {
   fetchPlatformExperimentsPage,
   fetchPlatformExperimentQuotas,
+  fetchExperimentsByPlatformExperiment,
+  fetchHypotheses,
   createPlatformExperiment,
   updatePlatformExperiment,
 } from '@/lib/api'
-import type { PlatformExperiment, AgentQuota, MetricDefinition } from '@/types'
+import type { PlatformExperiment, AgentQuota, MetricDefinition, Experiment, Hypothesis } from '@/types'
+import { ExperimentStatus, PlatformExperimentStatus } from '@/types'
 import type { Stage } from '@/lib/api'
 import { COMMON_ML_METRICS } from '@/types'
+import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
+import { formatDate, isZeroDate } from '@/lib/format'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
-import { MetricBar } from '@/components/ui/metric-bar'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
@@ -60,18 +64,29 @@ function ExperimentCard({
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
 
-  // Fetched unconditionally (not gated on `expanded`) — the Budget Used / Utilization stat
-  // tiles above the expand toggle need this data too, otherwise they show 0 until the card
-  // is expanded once.
+  // Fetched unconditionally (not gated on `expanded`) — the Budget Used stat tile above the
+  // expand toggle needs this data too, otherwise it shows 0 until the card is expanded once.
   const { data: quotas } = useSWR<AgentQuota[]>(
     ['pe-quotas', pe.id],
     () => fetchPlatformExperimentQuotas(pe.id),
     { refreshInterval: 10_000 },
   )
 
+  const { data: hypotheses } = useSWR<Hypothesis[]>(
+    ['pe-hypotheses', pe.id],
+    () => fetchHypotheses(pe.id),
+    { refreshInterval: 15_000 },
+  )
+  const { data: jobs } = useSWR<Experiment[]>(
+    ['pe-experiments', pe.id],
+    () => fetchExperimentsByPlatformExperiment(pe.id),
+    { refreshInterval: 10_000 },
+  )
+  const progress = hypothesisProgressCounts(hypotheses ?? [], jobs ?? [])
+
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
-  const daysLeft = pe.ends_at
-    ? Math.ceil((new Date(pe.ends_at).getTime() - Date.now()) / 86_400_000)
+  const daysLeft = !isZeroDate(pe.ends_at)
+    ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
     : null
 
   return (
@@ -88,8 +103,8 @@ function ExperimentCard({
           <span style={{ fontSize: 14, fontWeight: 700 }}>{pe.name}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 400 }}>
-          {pe.starts_at && (
-            <span className="text-dim">{new Date(pe.starts_at).toLocaleDateString()} – {pe.ends_at ? new Date(pe.ends_at).toLocaleDateString() : '?'}</span>
+          {!isZeroDate(pe.starts_at) && (
+            <span className="text-dim">{formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}</span>
           )}
           {daysLeft != null && daysLeft > 0 && (
             <span style={{ fontSize: 11, color: daysLeft < 2 ? semantic.danger : 'var(--muted-fg)' }}>{daysLeft}d remaining</span>
@@ -143,8 +158,18 @@ function ExperimentCard({
             </div>
           </div>
           <div>
-            <div className="uppercase-label">Utilization</div>
-            <MetricBar value={totalUsed} max={pe.budget_accelerator_hours} />
+            <div className="uppercase-label">Hypotheses</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span className="mono" style={{ fontSize: 13, color: semantic.success }}>
+                {progress.finished} <span className="text-muted" style={{ fontSize: 10 }}>finished</span>
+              </span>
+              <span className="mono" style={{ fontSize: 13, color: semantic.accent }}>
+                {progress.in_flight} <span className="text-muted" style={{ fontSize: 10 }}>in flight</span>
+              </span>
+              <span className="mono" style={{ fontSize: 13, color: 'var(--muted-fg)' }}>
+                {progress.pending} <span className="text-muted" style={{ fontSize: 10 }}>pending</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -500,13 +525,18 @@ function ExperimentModal({
   onSaved: () => void
 }) {
   const isEdit = !!initial
+  // Once running, admission/stage decisions have already been made against budget, max_agents,
+  // metrics, the schedule and the report interval — the backend rejects changes to those (see
+  // Update in platform_experiments_lifecycle.go), so lock them here too instead of round-tripping
+  // a 400. Name/description stay editable: purely informational, safe to amend mid-run.
+  const lockedWhileRunning = isEdit && initial?.status === PlatformExperimentStatus.RUNNING
   const [form, setForm] = useState<FormState>({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
     budget_accelerator_hours: initial?.budget_accelerator_hours ?? 1000,
     max_agents: initial?.max_agents ?? 20,
-    starts_at: initial?.starts_at ? new Date(initial.starts_at).toISOString().slice(0, 16) : localDatetime(1),
-    ends_at: initial?.ends_at ? new Date(initial.ends_at).toISOString().slice(0, 16) : localDatetime(8),
+    starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : localDatetime(1),
+    ends_at: !isZeroDate(initial?.ends_at) ? new Date(initial!.ends_at!).toISOString().slice(0, 16) : localDatetime(8),
     metrics: initial?.metrics ?? [],
     report_interval_seconds: initial?.report_interval_seconds ?? 30,
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
@@ -638,29 +668,43 @@ function ExperimentModal({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <Field
                     label="Accelerator budget — AccH (GPU-hours) *"
-                    hint={<>This is the <strong>only</strong> budget: accelerator-hours, not CPU-hours. AccH is one normalized H100-equivalent hour, so you do not pick a hardware type here — every accelerator bills against this single unit at its own rate (H100 1.0, A100 0.375, L40 0.25). A budget of 100 buys 100 H100-hours <em>or</em> 400 L40-hours. CPU, RAM and storage are not budgeted; they are capped per job at admission so no agent can grab the whole machine.</>}
+                    hint={lockedWhileRunning
+                      ? 'Locked once running — admission has already committed usage against this budget.'
+                      : <>This is the <strong>only</strong> budget: accelerator-hours, not CPU-hours. AccH is one normalized H100-equivalent hour, so you do not pick a hardware type here — every accelerator bills against this single unit at its own rate (H100 1.0, A100 0.375, L40 0.25). A budget of 100 buys 100 H100-hours <em>or</em> 400 L40-hours. CPU, RAM and storage are not budgeted; they are capped per job at admission so no agent can grab the whole machine.</>}
                   >
-                    <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_accelerator_hours} onChange={e => set('budget_accelerator_hours', e.target.value)} />
+                    <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
                   </Field>
-                  <Field label="Max agents" hint="Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.">
-                    <input style={INPUT_STYLE} type="number" min={1} max={500} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
+                  <Field label="Max agents" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
+                    <input style={INPUT_STYLE} type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
                   </Field>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field label="Starts at" hint="Signups close and quota is allocated at this moment.">
-                    <input style={INPUT_STYLE} type="datetime-local" value={form.starts_at} onChange={e => set('starts_at', e.target.value)} />
+                  <Field label="Starts at" hint={lockedWhileRunning ? 'Locked once running.' : 'Signups close and quota is allocated at this moment.'}>
+                    <input style={INPUT_STYLE} type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
                   </Field>
-                  <Field label="Ends at" hint="Also drives the ladder clock: progress is whichever runs out first, budget or time.">
-                    <input style={INPUT_STYLE} type="datetime-local" value={form.ends_at} onChange={e => set('ends_at', e.target.value)} />
+                  <Field label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
+                    <input style={INPUT_STYLE} type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
                   </Field>
                 </div>
 
                 <Field
                   label="Optimization metrics"
-                  hint={<>The metric keys agents must emit. The <strong>★ primary metric</strong> ranks the leaderboard — click ☆ on another to promote it. The ↑/↓ on each chip sets its direction; click it to flip between maximize and minimize. At a stage cut an agent survives if it survives on <em>at least one</em> metric, so specialists are not eliminated by a metric they never targeted.</>}
+                  hint={lockedWhileRunning
+                    ? 'Locked once running — stage cuts have already ranked agents against these metrics.'
+                    : <>The metric keys agents must emit. The <strong>★ primary metric</strong> ranks the leaderboard — click ☆ on another to promote it. The ↑/↓ on each chip sets its direction; click it to flip between maximize and minimize. At a stage cut an agent survives if it survives on <em>at least one</em> metric, so specialists are not eliminated by a metric they never targeted.</>}
                 >
-                  <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
+                  {lockedWhileRunning ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {form.metrics.map(m => (
+                        <span key={m.key} className="mono" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted-fg)' }}>
+                          {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
+                  )}
                 </Field>
               </>
             ) : (
@@ -689,9 +733,11 @@ function ExperimentModal({
 
                 <Field
                   label="Report interval (seconds)"
-                  hint="How often agents are expected to push metrics. A job that reports nothing for 3× this interval is treated as dead and evicted, so set it to match your real training loop's logging cadence — too low and healthy jobs get killed during a reschedule."
+                  hint={lockedWhileRunning
+                    ? 'Locked once running.'
+                    : "How often agents are expected to push metrics. A job that reports nothing for 3× this interval is treated as dead and evicted, so set it to match your real training loop's logging cadence — too low and healthy jobs get killed during a reschedule."}
                 >
-                  <input style={INPUT_STYLE} type="number" min={1} step={5} value={form.report_interval_seconds} onChange={e => set('report_interval_seconds', e.target.value)} />
+                  <input style={INPUT_STYLE} type="number" min={1} step={5} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
                 </Field>
               </>
             )}
@@ -723,8 +769,8 @@ function ExperimentModal({
 const PAGE_SIZE = 10
 
 const SORT_OPTIONS = [
-  { value: '-created_at', label: 'Newest first' },
-  { value: 'created_at', label: 'Oldest first' },
+  { value: '-starts_at', label: 'Newest first' },
+  { value: 'starts_at', label: 'Oldest first' },
   { value: 'name', label: 'Name (A–Z)' },
   { value: '-name', label: 'Name (Z–A)' },
 ]
@@ -770,7 +816,7 @@ function SortListbox({ value, onChange }: { value: string; onChange: (v: string)
 export default function PlatformExperimentsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState('-created_at')
+  const [sort, setSort] = useState('-starts_at')
   const [page, setPage] = useState(0)
   const [modal, setModal] = useState<{ open: boolean; editing?: PlatformExperiment | null }>({ open: false })
 
