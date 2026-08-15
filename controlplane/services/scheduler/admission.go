@@ -28,6 +28,7 @@ const (
 	ReasonMalformed           = "malformed"
 	ReasonSummaryRequired     = "summary_required"
 	ReasonRateLimited         = "rate_limited"
+	ReasonJobTooLong          = "job_too_long"
 )
 
 // AdmissionError is returned when an experiment cannot be admitted.

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -31,7 +32,7 @@ func (e *reasonError) GetStatus() int { return e.status }
 func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler) {
 	// ---- agents / balances / ledger ----
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
@@ -62,30 +63,66 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *domain.Agent }{Body: agent}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []*domain.Agent }, error) {
-		agents, err := h.svc.store.ListAgents(ctx)
+		Description: "Optional ?limit (default/max 200) and ?offset, oldest first. Total " +
+			"registered count is returned in the X-Total-Count response header.",
+	}, func(ctx context.Context, in *struct {
+		Limit  int `query:"limit"`
+		Offset int `query:"offset"`
+	}) (*struct {
+		Body       []*domain.Agent
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		agents, err := h.svc.store.ListAgents(ctx, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list agents")
 		}
-		return &struct{ Body []*domain.Agent }{Body: agents}, nil
+		total, err := h.svc.store.CountAgents(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to count agents")
+		}
+		return &struct {
+			Body       []*domain.Agent
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: agents, TotalCount: total}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-balances", Method: "GET", Path: "/balances",
 		Summary: "List agent credit balances", Tags: []string{"agents"},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []*domain.AgentBalance }, error) {
-		balances, err := h.svc.ListBalances(ctx)
+		Description: "Optional ?limit (default/max 200) and ?offset, oldest first. Total " +
+			"registered count is returned in the X-Total-Count response header.",
+	}, func(ctx context.Context, in *struct {
+		Limit  int `query:"limit"`
+		Offset int `query:"offset"`
+	}) (*struct {
+		Body       []*domain.AgentBalance
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		balances, err := h.svc.ListBalances(ctx, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list balances")
 		}
-		return &struct{ Body []*domain.AgentBalance }{Body: balances}, nil
+		total, err := h.svc.CountBalances(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to count balances")
+		}
+		return &struct {
+			Body       []*domain.AgentBalance
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: balances, TotalCount: total}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
-		OperationID: "get-agent-ledger", Method: "GET", Path: "/ledger/{agentID}",
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "get-agent-ledger", Method: "GET", Path: "/agents/{agentID}/ledger",
 		Summary: "Get an agent's credit ledger", Tags: []string{"agents"},
 	}, func(ctx context.Context, in *struct {
 		AgentID string `path:"agentID"`
@@ -99,7 +136,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 	// ---- platform experiments ----
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
@@ -120,23 +157,57 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiments", Method: "GET", Path: "/platform-experiments",
 		Summary: "List platform experiments", Tags: []string{"platform-experiments"},
+		Description: "Filter with ?status, ?q (search name/description), ?limit, ?offset. " +
+			"?sort selects order: created_at, starts_at, name, or status, optionally prefixed with " +
+			"- for descending (default -created_at). Total match count is returned in the " +
+			"X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Status string `query:"status" doc:"Optional status filter"`
-	}) (*struct{ Body []*domain.PlatformExperiment }, error) {
-		pes, err := peh.svc.store.ListPlatformExperiments(ctx, in.Status)
+		Search string `query:"q" doc:"Optional search over name/description"`
+		Limit  int    `query:"limit"`
+		Offset int    `query:"offset"`
+		Sort   string `query:"sort"`
+	}) (*struct {
+		Body       []*domain.PlatformExperiment
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		if in.Status != "" && !domain.ValidPlatformExperimentStatus(domain.PlatformExperimentStatus(in.Status)) {
+			return nil, huma.Error400BadRequest("unknown status " + in.Status)
+		}
+		if !domain.ValidSortField(in.Sort, db.PlatformExperimentSortFields) {
+			return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
+		}
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		filter := db.PlatformExperimentsFilter{
+			Status: in.Status,
+			Search: in.Search,
+			Limit:  in.Limit,
+			Offset: in.Offset,
+			Sort:   in.Sort,
+		}
+		pes, err := peh.svc.store.ListPlatformExperiments(ctx, filter)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		total, err := peh.svc.store.CountPlatformExperiments(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		if pes == nil {
 			pes = []*domain.PlatformExperiment{}
 		}
-		return &struct{ Body []*domain.PlatformExperiment }{Body: pes}, nil
+		return &struct {
+			Body       []*domain.PlatformExperiment
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: pes, TotalCount: total}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Returns status, budget, the stage ladder and the list of signed-up agents.",
@@ -156,13 +227,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "update-platform-experiment", Method: "PUT", Path: "/platform-experiments/{id}",
 		Summary: "Update a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Amends an experiment while its status is open — including `metrics`, so a ranking " +
-			"metric found to be mis-specified can be corrected in place instead of closing the " +
-			"experiment and discarding every agent's registered hypotheses and baseline work. " +
-			"Rejected once the status is no longer open.",
+		Description: "Amends an experiment while it is open or running. While open, every field including " +
+			"`metrics` is editable — a mis-specified ranking metric can be fixed in place instead of closing " +
+			"the experiment and discarding every agent's hypotheses and baseline work. Once running, only " +
+			"`name` and `description` can be amended; budgets, `max_agents`, `metrics`, `report_interval_seconds` " +
+			"and the schedule are locked because admission and stage decisions have already been made against " +
+			"them. Rejected once the experiment is closed.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body CreatePlatformExperimentRequest
@@ -174,7 +247,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "signup-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/signup",
 		Summary: "Sign up an agent to a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Join before submitting jobs. Every job's metadata.platform_experiment_id must be one you are signed up to.",
@@ -203,7 +276,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return out, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "start-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/start",
 		Summary: "Start a platform experiment", Tags: []string{"platform-experiments"},
 	}, func(ctx context.Context, in *struct {
@@ -229,20 +302,24 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return out, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "close-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/close",
 		Summary: "Close a platform experiment", Tags: []string{"platform-experiments"},
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
-		Body struct {
-			TopResults []AgentResult `json:"top_results"`
+		Body *struct {
+			TopResults []AgentResult `json:"top_results,omitempty" doc:"Best-first final standings (up to 3). Omit to derive standings from the metrics store."`
 		}
 	}) (*struct {
 		Body struct {
 			Status string `json:"status"`
 		}
 	}, error) {
-		if err := peh.svc.Close(ctx, in.ID, in.Body.TopResults); err != nil {
+		var topResults []AgentResult
+		if in.Body != nil {
+			topResults = in.Body.TopResults
+		}
+		if err := peh.svc.Close(ctx, in.ID, topResults); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
 		out := &struct {
@@ -254,7 +331,49 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return out, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-platform-experiment-results", Method: "GET", Path: "/platform-experiments/{id}/results",
+		Summary: "Final standings and operator summary", Tags: []string{"platform-experiments"},
+		Description: "Per-metric standings, best-first, derived from the metrics store on every read " +
+			"(never frozen into PostgreSQL), plus the operator's narrative summary.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{ Body *PlatformExperimentResults }, error) {
+		results, err := peh.svc.Results(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error404NotFound(err.Error())
+		}
+		return &struct{ Body *PlatformExperimentResults }{Body: results}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "set-platform-experiment-summary", Method: "POST", Path: "/platform-experiments/{id}/summary",
+		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
+		Description: "Writable after the experiment closes — this is the one field whose whole point " +
+			"is to be written once the run is over and the results are in.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			Summary string `json:"summary"`
+		}
+	}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		if err := peh.svc.SetSummary(ctx, in.ID, in.Body.Summary); err != nil {
+			return nil, huma.Error400BadRequest(err.Error())
+		}
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "summary_recorded"
+		return out, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiment-quotas", Method: "GET", Path: "/platform-experiments/{id}/quotas",
 		Summary: "List per-agent quotas for a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Guaranteed/burst accelerator-hours, used vs available, per signed-up agent.",
@@ -271,14 +390,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body []*domain.AgentQuota }{Body: quotas}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
-		OperationID: "get-agent-quota", Method: "GET", Path: "/quota/{agentID}/experiment/{experimentID}",
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-agent-quota", Method: "GET", Path: "/platform-experiments/{id}/quotas/{agentID}",
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent.",
 	}, func(ctx context.Context, in *struct {
-		AgentID      string `path:"agentID"`
-		ExperimentID string `path:"experimentID"`
+		ID      string `path:"id"`
+		AgentID string `path:"agentID"`
 	}) (*struct{ Body *domain.AgentQuota }, error) {
-		aq, err := peh.svc.GetQuota(ctx, in.AgentID, in.ExperimentID)
+		aq, err := peh.svc.GetQuota(ctx, in.AgentID, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -288,10 +408,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *domain.AgentQuota }{Body: aq}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-stages", Method: "GET", Path: "/platform-experiments/{id}/stages",
 		Summary: "Get the stage ladder and current standing of a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Reports the configured elimination ladder, which stage is running, how far through the experiment we are, and which signed-up agents are still active vs cut (jobs stopped, blocked from resubmitting). Exact standings and per-agent rank are deliberately not exposed — an agent can see whether it is cut, not how close it is.",
+		Description: "The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Per-agent rank is deliberately not exposed — you can see whether you are cut, not how close you are.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body StagesStatusResponse }, error) {
@@ -343,7 +463,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 	// ---- donations ----
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-donations", Method: "GET", Path: "/donations",
 		Summary: "List donation requests", Tags: []string{"donations"},
 	}, func(ctx context.Context, in *struct {
@@ -359,7 +479,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body []*domain.DonationRequest }{Body: reqs}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "create-donation", Method: "POST", Path: "/donations",
 		Summary: "Post a donation request", Tags: []string{"donations"},
 		DefaultStatus: 201,
@@ -387,7 +507,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *domain.DonationRequest }{Body: req}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-donation", Method: "POST", Path: "/donations/{id}/cancel",
 		Summary: "Cancel an open donation request", Tags: []string{"donations"},
 	}, func(ctx context.Context, in *struct {
@@ -409,7 +529,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return out, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "fulfill-donation", Method: "POST", Path: "/donations/{id}/fulfill",
 		Summary: "Fulfill another agent's donation request", Tags: []string{"donations"},
 		Description: "Donor transfers credits_want from their experiment quota to the recipient's.",
@@ -444,21 +564,21 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 	// ---- resource catalog ----
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-resource-catalog", Method: "GET", Path: "/resource-catalog",
 		Summary: "Get accelerator/CPU/RAM/storage billing rates", Tags: []string{"resource-catalog"},
-		Description: "Static reference data: which accelerator types exist and their billing rates. Existence here does NOT mean any cluster currently has one free — check /resource-catalog/capacity for that.",
+		Description: "Static reference data: which accelerator types exist and their billing rates. Listed here does NOT mean any cluster has one free — see /resource-catalog/capacity.",
 	}, func(ctx context.Context, _ *struct{}) (*struct{ Body ResourceCatalog }, error) {
 		return &struct{ Body ResourceCatalog }{Body: peh.catalog}, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
-		Description: "Live {accelerator_type, available, total} per cluster. accelerator_type is the exact string " +
-			"a job spec's accelerator_type takes — the value its driver publishes — so what you read here is what " +
-			"you submit. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER (never errors). " +
-			"Only currently-schedulable nodes count, so powered-off hardware never appears here."}, func(ctx context.Context, _ *struct{}) (*struct {
+		Description: "Live {accelerator_type, available, total} per cluster. accelerator_type is the exact " +
+			"driver-published string a job spec takes, so what you read here is what you submit. Check before " +
+			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
+			"currently-schedulable nodes count — powered-off hardware never appears."}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
 			Clusters []ClusterCapacity `json:"clusters"`
 		}
@@ -472,11 +592,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if peh.metricsDBURL == "" {
 			return out, nil
 		}
-		available, err := metricsdb.LiveClusterAcceleratorCapacity(ctx, peh.metricsDBURL, peh.capacityFreshness)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		total, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, peh.metricsDBURL, peh.capacityFreshness)
+		available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, peh.metricsDBURL, peh.capacityFreshness)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -487,7 +603,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 // StagesStatusResponse is the response body for GET /platform-experiments/{id}/stages.
 // Boundaries are published ahead so agents can plan; live rank is not, so agents cannot time
-// submissions around the cut line instead of improving their metric. See docs/stages.md.
+// submissions around the cut line instead of improving their metric.
 type StagesStatusResponse struct {
 	Stages       []domain.Stage `json:"stages"`
 	CurrentStage int            `json:"current_stage"`

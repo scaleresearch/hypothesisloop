@@ -28,7 +28,9 @@ S=$(wait_for_status "$STUCK" "RUNNING,COMPLETED,FAILED,EVICTED,REJECTED" 20 || t
 S=$(get_status "$STUCK")
 if [[ "$S" == "QUEUED" ]]; then
 	pass "stayed QUEUED — never falsely admitted for an unsatisfiable request"
-	[[ "$(get_field "$STUCK" not_admitted_reason)" == "capacity_unavailable" ]] \
+	# The reason is a code optionally followed by ": <detail>" naming what was short, so match the
+	# code rather than the whole string.
+	[[ "$(get_field "$STUCK" not_admitted_reason)" == capacity_unavailable* ]] \
 		&& pass "current PostgreSQL scheduler decision explains the queue state (capacity_unavailable)" \
 		|| fail "queued unsatisfiable job has wrong not_admitted_reason=$(get_field "$STUCK" not_admitted_reason)"
   sleep 5
@@ -63,7 +65,7 @@ S=$(wait_for_status "$RUNNER" "RUNNING,COMPLETED,FAILED" "$ADMISSION_BUDGET_SECO
 [[ -z "$(get_field "$RUNNER" not_admitted_reason)" ]] \
 	&& pass "not_admitted_reason cleared atomically on admission" \
 	|| fail "admitted job retained stale not_admitted_reason=$(get_field "$RUNNER" not_admitted_reason)"
-curl -sf -X POST "$SCHED_URL/experiments/${RUNNER}/cancel" > /dev/null
+curl -sf -X POST "$API_URL/experiments/${RUNNER}/cancel" > /dev/null
 S=$(wait_for_status "$RUNNER" "EVICTED,COMPLETED,FAILED" 30 || true)
 if [[ "$S" == "EVICTED" ]]; then
   pass "cancelling a RUNNING job terminates it as EVICTED (reason=$(get_field "$RUNNER" eviction_reason)) — different outcome than cancelling while QUEUED"

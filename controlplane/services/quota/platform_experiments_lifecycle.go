@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"go.uber.org/zap"
 )
@@ -16,6 +17,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	metrics := req.Metrics
 	if metrics == nil {
 		metrics = []domain.MetricDefinition{}
+	}
+	if err := domain.ValidateMetricDefinitions(metrics); err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
 	reportInterval := req.ReportIntervalSeconds
 	if reportInterval <= 0 {
@@ -67,41 +71,74 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 	if pe == nil {
 		return nil, fmt.Errorf("not_found")
 	}
-	if pe.Status != domain.PlatformExpOpen {
-		return nil, fmt.Errorf("experiment_not_editable: can only edit open experiments (status: %s)", pe.Status)
+	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
+		return nil, fmt.Errorf("experiment_not_editable: can only edit open or running experiments (status: %s)", pe.Status)
 	}
+	expectedStatus := pe.Status
+	// Name/Description are informational only — an operator amending the brief mid-run cannot
+	// corrupt anything already committed to quota/admission/stage state. Every other field feeds
+	// admission math (budgets, max_agents), stage transitions (metrics), or scheduling (report
+	// interval, window) that has already been acted on once the experiment is running, so those
+	// stay locked to the open status exactly as before.
 	if req.Name != "" {
 		pe.Name = req.Name
 	}
 	pe.Description = req.Description
-	if req.BudgetAcceleratorHours > 0 {
-		pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
+	if pe.Status == domain.PlatformExpRunning {
+		// The form always echoes every field back (so an old CPU budget isn't silently zeroed,
+		// see the UI comment above the submit payload), so "field is set" alone can't detect
+		// intent to change it — it would reject on every single running-status edit, including
+		// pure name/description ones. Compare against what's already stored instead: only an
+		// actual attempted change to a locked field is rejected.
+		// datetime-local inputs (the only client today) round-trip at minute precision, so an
+		// unmodified schedule field comes back coarser than what's stored; compare at that
+		// granularity rather than false-flagging every running-status edit as a schedule change.
+		const timePrecision = time.Minute
+		locked := (req.BudgetAcceleratorHours > 0 && req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours) ||
+			(req.BudgetCPUCoreHours > 0 && req.BudgetCPUCoreHours != pe.BudgetCPUCoreHours) ||
+			(req.BudgetRAMGBHours > 0 && req.BudgetRAMGBHours != pe.BudgetRAMGBHours) ||
+			(req.BudgetStorageGBHours > 0 && req.BudgetStorageGBHours != pe.BudgetStorageGBHours) ||
+			(req.MaxAgents > 0 && req.MaxAgents != pe.MaxAgents) ||
+			(req.Metrics != nil && !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics)) ||
+			(req.ReportIntervalSeconds > 0 && req.ReportIntervalSeconds != pe.ReportIntervalSeconds) ||
+			(!req.StartsAt.IsZero() && !req.StartsAt.Truncate(timePrecision).Equal(pe.StartsAt.Truncate(timePrecision))) ||
+			(!req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision)))
+		if locked {
+			return nil, fmt.Errorf("experiment_running: only name and description can be amended once running")
+		}
+	} else {
+		if req.BudgetAcceleratorHours > 0 {
+			pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
+		}
+		if req.BudgetCPUCoreHours > 0 {
+			pe.BudgetCPUCoreHours = req.BudgetCPUCoreHours
+		}
+		if req.BudgetRAMGBHours > 0 {
+			pe.BudgetRAMGBHours = req.BudgetRAMGBHours
+		}
+		if req.BudgetStorageGBHours > 0 {
+			pe.BudgetStorageGBHours = req.BudgetStorageGBHours
+		}
+		if req.MaxAgents > 0 {
+			pe.MaxAgents = req.MaxAgents
+		}
+		if req.Metrics != nil {
+			if err := domain.ValidateMetricDefinitions(req.Metrics); err != nil {
+				return nil, fmt.Errorf("platform_experiments.Update: %w", err)
+			}
+			pe.Metrics = req.Metrics
+		}
+		if req.ReportIntervalSeconds > 0 {
+			pe.ReportIntervalSeconds = req.ReportIntervalSeconds
+		}
+		if !req.StartsAt.IsZero() {
+			pe.StartsAt = req.StartsAt
+		}
+		if !req.EndsAt.IsZero() {
+			pe.EndsAt = req.EndsAt
+		}
 	}
-	if req.BudgetCPUCoreHours > 0 {
-		pe.BudgetCPUCoreHours = req.BudgetCPUCoreHours
-	}
-	if req.BudgetRAMGBHours > 0 {
-		pe.BudgetRAMGBHours = req.BudgetRAMGBHours
-	}
-	if req.BudgetStorageGBHours > 0 {
-		pe.BudgetStorageGBHours = req.BudgetStorageGBHours
-	}
-	if req.MaxAgents > 0 {
-		pe.MaxAgents = req.MaxAgents
-	}
-	if req.Metrics != nil {
-		pe.Metrics = req.Metrics
-	}
-	if req.ReportIntervalSeconds > 0 {
-		pe.ReportIntervalSeconds = req.ReportIntervalSeconds
-	}
-	if !req.StartsAt.IsZero() {
-		pe.StartsAt = req.StartsAt
-	}
-	if !req.EndsAt.IsZero() {
-		pe.EndsAt = req.EndsAt
-	}
-	if err := s.store.UpdatePlatformExperiment(ctx, pe); err != nil {
+	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
 	return pe, nil
@@ -236,8 +273,16 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	return quotas, nil
 }
 
+// SetSummary records the operator's narrative verdict on a run. Unlike every other field, this is
+// writable after the experiment closes — a summary only exists once the run is over.
+func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) error {
+	return s.store.SetPlatformExperimentSummary(ctx, id, summary)
+}
+
 // Close transitions a running experiment to closed and records top-3 placements.
-// topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries).
+// topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries). When it is
+// empty the standings are derived from the metrics store instead: closing must never silently
+// discard the outcome of a run just because the caller was a timer rather than a person.
 func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topResults []AgentResult) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
@@ -248,6 +293,15 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 	}
 	if pe.Status != domain.PlatformExpRunning && pe.Status != domain.PlatformExpOpen {
 		return fmt.Errorf("invalid_transition: experiment is %s", pe.Status)
+	}
+
+	if len(topResults) == 0 {
+		derived, err := s.derivedTopResults(ctx, id)
+		if err != nil {
+			s.logger.Warn("close: deriving standings failed, closing without placements",
+				zap.String("platformExpID", id), zap.Error(err))
+		}
+		topResults = derived
 	}
 
 	// Record top-3 placements and increment periods_active.
@@ -269,7 +323,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	now := time.Now()
 	for _, status := range []string{string(domain.PlatformExpOpen), string(domain.PlatformExpRunning)} {
-		pes, err := s.store.ListPlatformExperiments(ctx, status)
+		pes, err := s.store.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: status})
 		if err != nil {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)
 		}
@@ -308,7 +362,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 // since there's no scheduled moment to sweep against; only a non-zero, past StartsAt auto-fires.
 func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	now := time.Now()
-	pes, err := s.store.ListPlatformExperiments(ctx, string(domain.PlatformExpOpen))
+	pes, err := s.store.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: string(domain.PlatformExpOpen)})
 	if err != nil {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}

@@ -27,6 +27,23 @@ func NewExperimentsStore(pool *Pool) *ExperimentsStore {
 }
 
 // experimentColumns is the canonical column list for SELECT queries.
+// experimentColumnsQualified is experimentColumns with every name prefixed by an "e." alias, for
+// queries where a second relation is in scope and a bare column name would be ambiguous.
+var experimentColumnsQualified = qualifyColumns(experimentColumns, "e")
+
+func qualifyColumns(cols, alias string) string {
+	var b strings.Builder
+	b.WriteString("\n\t")
+	for i, c := range strings.Split(cols, ",") {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(alias + "." + strings.TrimSpace(c))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 const experimentColumns = `
 	id, parent_id, agent_id, platform_experiment_id, project_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec,
@@ -128,6 +145,45 @@ func (s *ExperimentsStore) GetExperiment(ctx context.Context, id string) (*domai
 // ListExperiments returns experiments matching the given filter.
 // All filter fields are optional; zero values are ignored.
 func (s *ExperimentsStore) ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error) {
+	clauses, args := experimentFilterClauses(filter)
+	n := len(args) + 1
+
+	q := `SELECT` + experimentColumns + `FROM experiments
+WHERE ` + strings.Join(clauses, " AND ") + `
+ORDER BY ` + experimentOrderBy(filter.Sort)
+
+	if filter.Limit > 0 {
+		q += fmt.Sprintf(" LIMIT $%d", n)
+		args = append(args, filter.Limit)
+		n++
+	}
+	if filter.Offset > 0 {
+		q += fmt.Sprintf(" OFFSET $%d", n)
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := s.pool.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.ListExperiments: %w", err)
+	}
+	defer rows.Close()
+
+	return collectExperiments(rows)
+}
+
+// CountExperiments returns the number of experiments matching the given filter, ignoring
+// Limit/Offset/Sort — the total a caller paginating with ListExperiments should show.
+func (s *ExperimentsStore) CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error) {
+	clauses, args := experimentFilterClauses(filter)
+	q := `SELECT COUNT(*) FROM experiments WHERE ` + strings.Join(clauses, " AND ")
+	var total int
+	if err := s.pool.pool.QueryRow(ctx, q, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("experiments_store.CountExperiments: %w", err)
+	}
+	return total, nil
+}
+
+func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 	clauses := []string{"1=1"}
 	args := []any{}
 	n := 1
@@ -162,23 +218,30 @@ func (s *ExperimentsStore) ListExperiments(ctx context.Context, filter domain.Ex
 		args = append(args, filter.Since)
 		n++
 	}
-
-	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE ` + strings.Join(clauses, " AND ") + `
-ORDER BY priority_score DESC, created_at ASC`
-
-	if filter.Limit > 0 {
-		q += fmt.Sprintf(" LIMIT $%d", n)
-		args = append(args, filter.Limit)
+	if filter.Search != "" {
+		clauses = append(clauses, fmt.Sprintf("(hypothesis ILIKE $%d OR objective ILIKE $%d OR theory ILIKE $%d)", n, n, n))
+		args = append(args, "%"+filter.Search+"%")
+		n++
 	}
 
-	rows, err := s.pool.pool.Query(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.ListExperiments: %w", err)
-	}
-	defer rows.Close()
+	return clauses, args
+}
 
-	return collectExperiments(rows)
+// experimentOrderBy resolves an ExperimentFilter.Sort value into a safe ORDER BY clause,
+// falling back to the historical priority-then-recency order when Sort is unset or unknown.
+func experimentOrderBy(sort string) string {
+	if sort == "" {
+		return "priority_score DESC, created_at ASC"
+	}
+	field, dir := sort, "ASC"
+	if strings.HasPrefix(sort, "-") {
+		field, dir = sort[1:], "DESC"
+	}
+	col, ok := domain.ExperimentSortFields[field]
+	if !ok {
+		return "priority_score DESC, created_at ASC"
+	}
+	return col + " " + dir
 }
 
 // UpdateExperiment updates all mutable fields of an experiment.

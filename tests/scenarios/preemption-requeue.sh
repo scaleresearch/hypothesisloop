@@ -64,7 +64,7 @@ if [[ -n "$PREEMPTED" ]]; then
     fail "$PREEMPTED never came back after preemption (final=$VFINAL)"
     # Diagnostics: which terminal path claimed the victim, and what the cluster looked like.
     echo "  -- victim state --"
-    curl -s "$SCHED_URL/experiments/$PREEMPTED" | py "
+    curl -s "$API_URL/experiments/$PREEMPTED" | py "
 import json,sys
 e=json.load(sys.stdin)
 for k in ('status','eviction_reason','not_admitted_reason','capacity_tier',
@@ -73,7 +73,7 @@ for k in ('status','eviction_reason','not_admitted_reason','capacity_tier',
     print(f'     {k}={e.get(k)!r}')
 "
     echo "  -- all ${ACCELERATOR_TYPE} holders right now --"
-    curl -s "$SCHED_URL/experiments" | py "
+    curl -s "$API_URL/experiments" | py "
 import json,sys
 rows=json.load(sys.stdin)
 t='$ACCELERATOR_TYPE'

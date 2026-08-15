@@ -36,8 +36,7 @@ JOB=""
 ( cd "$ROOT" && go build -o "$AGENT_BIN" ./runtime/bare-metal/cmd/bare-agent )
 
 CLUSTER_NAME="$CLUSTER_NAME" \
-CONTROLPLANE_URL="$SCHED_URL" \
-REGISTRY_URL="$REGISTRY_URL" \
+API_URL="$API_URL" \
 HYPOTHESISLOOP_CONFIG="$ROOT/controlplane/settings/hypothesisloop.yaml" \
 SCRATCH_DIR="$SCRATCH_DIR" \
 NODE_NAME="bare-e2e-node-${RUN_ID}" \
@@ -52,7 +51,7 @@ AGENT_PID=$!
 # control plane for whatever else is using it (including this scenario's own next run).
 cleanup() {
   for j in "$JOB" "${JOB2:-}"; do
-    [[ -n "$j" ]] && curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${j}/cancel" || true
+    [[ -n "$j" ]] && curl -s -o /dev/null -X POST "$API_URL/experiments/${j}/cancel" || true
   done
   kill "$AGENT_PID" 2>/dev/null || true
   wait "$AGENT_PID" 2>/dev/null || true
@@ -67,7 +66,7 @@ trap cleanup EXIT
 
 echo "  -- bare-agent process started (pid=$AGENT_PID, cluster=$CLUSTER_NAME), waiting for its first reconcile --"
 wait_until "bare-agent registered cluster $CLUSTER_NAME" 15 1 \
-  bash -c "curl -sf '$SCHED_URL/internal/clusters' | grep -q '\"$CLUSTER_NAME\"'" \
+  bash -c "curl -sf '$API_URL/internal/clusters' | grep -q '\"$CLUSTER_NAME\"'" \
   || fail "bare-agent never showed up as a reachable cluster (see $AGENT_LOG)"
 
 # Ask the agent itself which container engine it resolved to (runtime/bare-metal/internal/
@@ -111,7 +110,7 @@ job_override() {
 # that would prove nothing about *this* bare-agent, so force it rather than leaving cluster
 # choice to chance/racing the automatic admission loop's own next tick.
 force_admit() {
-  curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${1}/admit" \
+  curl -s -o /dev/null -X POST "$API_URL/experiments/${1}/admit" \
     -H 'Content-Type: application/json' -d "{\"cluster_name\": \"$CLUSTER_NAME\"}"
 }
 
@@ -128,6 +127,19 @@ S=$(wait_for_status "$JOB" "RUNNING,COMPLETED,FAILED,EVICTED,REJECTED" "$ADMISSI
 wait_until "a real $ENGINE container for $JOB exists on this host" 20 1 container_exists "$JOB" \
   && pass "a real container backing $JOB exists on this host, launched directly by the bare-agent" \
   || fail "no local $ENGINE container found for $JOB — bare-agent never actually launched it"
+
+# The bare-agent's own FetchLogTail (runtime/bare-metal/internal/podexec) reads this same
+# container's stdout live and reports it alongside job phase on its next status push (see
+# runtime/shared/agentloop.reportChangedStatuses + controlplane/services/clusteragentapi) --
+# the control plane never reaches into the container engine itself. Confirms the whole chain:
+# real container -> bare-agent -> clusteragentapi -> GreptimeDB -> registry GET, no job-side
+# involvement at all (the job here is a bare `sh -c echo ...`, nothing pushes its own logs).
+job_log_tail_has_hello() {
+  curl -sf "$API_URL/experiments/${1}/logs" | grep -q "hello-from-bare-node-agent"
+}
+wait_until "registry's log-tail endpoint reports this container's own stdout" 15 1 job_log_tail_has_hello "$JOB" \
+  && pass "GET /experiments/{id}/logs surfaces the real container's stdout, reported by the bare-agent itself" \
+  || fail "registry never reported the container's stdout via the log-tail endpoint"
 
 S=$(wait_for_status "$JOB" "COMPLETED,FAILED,EVICTED" 30 || true)
 [[ "$S" == "COMPLETED" ]] \

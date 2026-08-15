@@ -9,8 +9,8 @@
 // Environment variables:
 //
 //	CLUSTER_NAME          — this node's stable identity, registered as its own cluster
-//	CONTROLPLANE_URL      — base URL of scheduler-service
-//	REGISTRY_URL          — reachable from *inside* the training container
+//	API_URL               — base URL of the control-plane API
+//	                        (must also be reachable from *inside* a workload container)
 //	HYPOTHESISLOOP_CONFIG — path to hypothesisloop.yaml
 //	SCRATCH_DIR           — filesystem Storage quotas are measured/enforced against (default /var/lib/hypothesisloop/scratch)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,9 +38,14 @@ const (
 
 func main() {
 	clusterName := agentloop.RequiredEnv(binaryName, "CLUSTER_NAME")
-	controlPlaneURL := agentloop.RequiredEnv(binaryName, "CONTROLPLANE_URL")
-	registryURL := agentloop.RequiredEnv(binaryName, "REGISTRY_URL")
+	// One URL for both polling the control plane and for the value handed to every container
+	// this agent starts as HYPOTHESISLOOP_API_URL, so it must be reachable from inside a
+	// workload container as well as from the agent process.
+	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
 	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
+	// Optional: how many trailing log lines to report per job per status push. Not required —
+	// agentloop.DefaultLogTailLines (100) applies when unset.
+	logTailLines, _ := strconv.Atoi(os.Getenv("LOG_TAIL_LINES"))
 
 	scratchDir := os.Getenv("SCRATCH_DIR")
 	if scratchDir == "" {
@@ -51,7 +57,7 @@ func main() {
 	}
 
 	exec, err := podexec.New(podexec.Config{
-		RegistryURL:                          registryURL,
+		APIURL:                               apiURL,
 		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
 		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
 		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
@@ -71,7 +77,7 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
-	log("starting: cluster=%s node=%s engine=%s control_plane=%s storage_quota_enforced=%v", clusterName, exec.NodeName(), exec.Engine(), controlPlaneURL, exec.StorageQuotaEnforced())
+	log("starting: cluster=%s node=%s engine=%s control_plane=%s storage_quota_enforced=%v", clusterName, exec.NodeName(), exec.Engine(), apiURL, exec.StorageQuotaEnforced())
 
 	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := exec.SetupCluster(setupCtx); err != nil {
@@ -81,11 +87,13 @@ func main() {
 
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
-		ControlPlaneURL:   controlPlaneURL,
+		APIURL:            apiURL,
 		Executor:          exec,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
+		LogTailLines:      logTailLines,
+		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
 		Log:               log,
 	}
 	a.Run(ctx)

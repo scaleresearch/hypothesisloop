@@ -1,0 +1,55 @@
+# Starting-point job definition: FOMO task 5 (polymicrogyria), this experiment's ranking task.
+# seed/job.yaml is the task 3 (brain age) twin -- same image, same mounts, different TASK.
+# Everything an agent varies for a hypothesis is in `env` below; no rebuild is needed for any of it.
+#
+# Dataset access: host_mounts bind-mounts this node's already-fetched, already-unpacked copy of
+# the FOMO task data + the pinned checkpoint read-only at /data/fomo. seed/fetch_data.sh put it
+# there once, as node setup -- no job downloads or unzips anything (checklist item 11). This is a
+# node-local path, so a job that lands on a different node needs that node set up the same way
+# first; the platform fails admission (rather than starting and failing oddly) if the path is
+# missing.
+image: localhost/hypothesisloop-smri-fm-fomo-tune-workload:latest
+
+command: ["/build/smri-fm-fomo-tune/seed/run_job.sh"]
+
+host_mounts:
+  /data/fomo: /home/ttuser/fomo-tune-data
+
+# tt-quietbox: 16 cpu / ~233Gi allocatable, 4 chips, DaemonSets reserve ~0.335 cpu. Sized so 4
+# concurrent jobs (one per chip) fit with headroom: 4 * 3800m = 15200m, 4 * 48Gi = 192Gi.
+# Memory is the real constraint here, not cpu: the host-side transform holds a dense
+# 208x240x208 float volume plus its patchified copy while the device runs.
+cpu: "3800m"
+memory: "48Gi"
+# The dataset is mounted, not fetched, and outputs are a few MB of json/npz. This is headroom
+# for the ttnn kernel cache and any device dump, not for data.
+storage: "20Gi"
+# Deliberately low. The failures this job can have are overwhelmingly deterministic -- a wrong
+# checkpoint path, a subject exceeding L_VIS, a PCC gate failure -- and retrying those burns a
+# chip for the same answer. 1 retry covers a flaky device open at startup, nothing more.
+max_retries: 1
+
+env:
+  # Must match seed/Dockerfile.workload's pinned base digest, Dockerfile.experimentator, and
+  # experiment.md. A drift between them means the agent read different source than the job ran,
+  # with no error anywhere.
+  TT_METAL_REF: "d9a68815f5fcf08a5bfbffb6f1f811823fba8edd"
+  # accelerator_count: 1 grants one /dev/tenstorrent/<N>; UMD then needs an explicit single-chip
+  # mesh descriptor rather than inferring one for the board type.
+  TT_MESH_GRAPH_DESC_PATH: "/build/smri-fm/tenstorrent/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto"
+
+  TASK: "task5"
+  DATA_ROOT: "/data/fomo"
+  OUTPUT_DIR: "/tmp/fomo-tune-out/task5"
+  # The correctness gate. Raising this is fine; lowering it voids the submission.
+  PCC_GATE: "0.999"
+  # Encoder sequence budget. Fixed here rather than measured per run so every job uses the same
+  # shape (and so a run does not pay a full host-side transform pass over 494 subjects just to
+  # discover a constant). Must satisfy (L_VIS + 1) % 32 == 0 and be >= every subject's observed
+  # patch count; a subject that exceeds it fails the run loudly rather than being truncated.
+  L_VIS: "12959"
+
+accelerator_count: 1
+accelerator_type: tenstorrent.com/chipArch=blackhole
+accelerator_pod_resources:
+  hugepages-1Gi: 4Gi

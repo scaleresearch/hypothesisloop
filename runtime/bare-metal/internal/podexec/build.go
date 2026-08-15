@@ -50,6 +50,29 @@ func hugepageMountsFor(experimentID string, podResources map[string]string) []st
 	return mounts
 }
 
+// resolveHostMounts validates JobSpec.HostMounts against this node's actual filesystem —
+// unlike hugepageMountsFor (which logs and drops an unresolvable request, since hugepages are a
+// soft prerequisite some workloads tolerate missing), a requested host mount that doesn't exist
+// on this node fails admission outright: a job silently running without the dataset it expects
+// at a given path is a correctness bug that looks like a working job, not a visible failure.
+func resolveHostMounts(hostMounts map[string]string) (map[string]string, error) {
+	if len(hostMounts) == 0 {
+		return nil, nil
+	}
+	resolved := make(map[string]string, len(hostMounts))
+	for containerPath, hostPath := range hostMounts {
+		info, err := os.Stat(hostPath)
+		if err != nil {
+			return nil, fmt.Errorf("podexec: host_mounts[%s]=%q: %w (this node does not have the requested dataset/directory — either it was never populated here, or the job should target a node that has it via node_selector)", containerPath, hostPath, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("podexec: host_mounts[%s]=%q is not a directory", containerPath, hostPath)
+		}
+		resolved[containerPath] = hostPath
+	}
+	return resolved, nil
+}
+
 // Placement is the bare-node analogue of k8sexec.AcceleratorPlacement: which specific local
 // devices satisfy exp's AcceleratorType/AcceleratorCount, resolved once against live inventory
 // (see resolvePlacementFor in lifecycle.go) and passed in so BuildContainerSpec stays pure.
@@ -91,6 +114,10 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		log.Printf("podexec: experiment %s requests extra_resources, which requires a k8s device plugin — ignoring on this bare node", exp.ID)
 	}
 	hugepageMounts := hugepageMountsFor(exp.ID, spec.AcceleratorPodResources)
+	readOnlyMounts, err := resolveHostMounts(spec.HostMounts)
+	if err != nil {
+		return containerSpec{}, err
+	}
 	if spec.AcceleratorCount > 0 && len(placement.DevicePaths) != spec.AcceleratorCount {
 		return containerSpec{}, fmt.Errorf("podexec: accelerator %q requested %d device(s) but placement resolved %d", exp.AcceleratorType, spec.AcceleratorCount, len(placement.DevicePaths))
 	}
@@ -126,7 +153,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		"HYPOTHESISLOOP_CODE_REF":          exp.CodeRef,
 		"HYPOTHESISLOOP_CONFIG_HASH":       exp.ConfigHash,
 		"HYPOTHESISLOOP_DATA_REF":          exp.DataRef,
-		"HYPOTHESISLOOP_REGISTRY_URL":      e.registryURL,
+		"HYPOTHESISLOOP_API_URL":           e.apiURL,
 		"HYPOTHESISLOOP_ACCELERATOR_TYPE":  string(exp.AcceleratorType),
 		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", exp.AcceleratorCount),
 		"HYPOTHESISLOOP_DURATION_SECONDS":  fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600)),
@@ -137,16 +164,17 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	}
 
 	cs := containerSpec{
-		Name:         containerName(exp.ID),
-		Image:        spec.Image,
-		Command:      spec.Command,
-		Args:         spec.Args,
-		Env:          env,
-		NanoCPUs:     nanoCPUs,
-		MemoryBytes:  memQty.Value(),
-		ShmSizeBytes: shmSizeBytes,
-		Devices:      placement.DevicePaths,
-		Mounts:       hugepageMounts,
+		Name:           containerName(exp.ID),
+		Image:          spec.Image,
+		Command:        spec.Command,
+		Args:           spec.Args,
+		Env:            env,
+		NanoCPUs:       nanoCPUs,
+		MemoryBytes:    memQty.Value(),
+		ShmSizeBytes:   shmSizeBytes,
+		Devices:        placement.DevicePaths,
+		Mounts:         hugepageMounts,
+		ReadOnlyMounts: readOnlyMounts,
 		Labels: map[string]string{
 			LabelManagedBy:       ManagedByValue,
 			LabelExperimentID:    exp.ID,

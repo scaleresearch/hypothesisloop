@@ -42,13 +42,6 @@ func sanitizeLabel(s string) string {
 	return v
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func buildRestConfig(kubeconfigPath, context string) (*rest.Config, error) {
 	if kubeconfigPath == "" && context == "" {
 		if cfg, err := rest.InClusterConfig(); err == nil {

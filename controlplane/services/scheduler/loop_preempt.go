@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -162,12 +163,11 @@ func preemptionContribution(victim, preemptor *domain.Experiment) domain.Footpri
 	// Accelerator capacity is keyed by the driver-published type, so "does evicting this victim
 	// free the hardware the preemptor needs" is now just string equality — no comparing resource
 	// names and node selectors to guess whether two jobs sit on the same hardware.
-	if victim.AcceleratorType != preemptor.AcceleratorType {
-		delete(contribution, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(preemptor.AcceleratorType)})
+	if !strings.EqualFold(string(victim.AcceleratorType), string(preemptor.AcceleratorType)) {
+		delete(contribution, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(string(preemptor.AcceleratorType))})
 	}
 	return contribution
 }
-
 
 // completionFractions derives queue ordering progress from metrics on each tick. The returned
 // map is ephemeral scratch data, never retained or persisted.

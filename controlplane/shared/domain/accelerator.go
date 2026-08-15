@@ -85,40 +85,48 @@ func (g AcceleratorType) split() (key, value string, ok bool) {
 
 // MatchesLabels reports whether a node publishing these labels carries this accelerator type.
 // Used for device-plugin hardware, whose identity the vendor publishes as a node label.
+//
+// Value compares with EqualFold: different discovery mechanisms case the same hardware
+// differently (e.g. NVIDIA's GFD emits "NVIDIA-GeForce-RTX-4090", our own NVML probe emits
+// "NVIDIA-GEFORCE-RTX-4090"). The key still compares exact — it's a vendor-qualified identifier.
 func (g AcceleratorType) MatchesLabels(labels map[string]string) bool {
 	key, value, ok := g.split()
 	if !ok {
 		return false
 	}
-	return labels[key] == value
+	return strings.EqualFold(labels[key], value)
 }
 
 // MatchesAttributes reports whether a DRA device publishing these attributes carries this
 // accelerator type. attributes are keyed by their bare attribute name as published in the
 // ResourceSlice ("chipArch"); the type's key is vendor-qualified ("tenstorrent.com/chipArch"),
-// and driver is the DRA driver name that qualifies them.
+// and driver is the DRA driver name that qualifies them. See MatchesLabels re: casing.
 func (g AcceleratorType) MatchesAttributes(driver string, attributes map[string]string) bool {
 	key, value, ok := g.split()
 	if !ok || g.Domain() != driver {
 		return false
 	}
 	bare := key[strings.Index(key, "/")+1:]
-	return attributes[bare] == value
+	return strings.EqualFold(attributes[bare], value)
 }
+
+// foldKey normalizes an accelerator type string for case-insensitive map lookups.
+func foldKey(s string) string { return strings.ToLower(s) }
 
 // acceleratorRateRegistry is populated by SetAcceleratorRates() at startup from hypothesisloop.yaml.
 // Rates are in accelerator-hours (AccH), H100-equivalent: 1 AccH = 1 H100-hour, so H100 is
-// exactly 1.0 and every other tier is its H100-relative fraction.
-var acceleratorRateRegistry = map[AcceleratorType]float64{}
+// exactly 1.0 and every other tier is its H100-relative fraction. Keyed by foldKey (see
+// MatchesLabels re: casing).
+var acceleratorRateRegistry = map[string]float64{}
 
 // SetAcceleratorRates registers AccH rates loaded from config. Call once at startup.
 func SetAcceleratorRates(rates map[string]float64) {
-	next := make(map[AcceleratorType]float64, len(rates))
+	next := make(map[string]float64, len(rates))
 	for name, rate := range rates {
 		if name == "" || rate <= 0 {
 			panic("accelerator catalog contains an empty name or non-positive rate")
 		}
-		next[AcceleratorType(name)] = rate
+		next[foldKey(name)] = rate
 	}
 	if len(next) == 0 {
 		panic("accelerator catalog is empty")
@@ -130,7 +138,7 @@ func SetAcceleratorRates(rates map[string]float64) {
 // validates catalog membership before cost calculation; internal callers must never substitute a
 // different hardware rate.
 func (g AcceleratorType) Cost() float64 {
-	if r, ok := acceleratorRateRegistry[g]; ok {
+	if r, ok := acceleratorRateRegistry[foldKey(string(g))]; ok {
 		return r
 	}
 	panic("unknown accelerator type: " + string(g))
@@ -140,7 +148,7 @@ func (g AcceleratorType) Cost() float64 {
 // never silently substitutes another rate — used by settlement paths (see
 // metricsdb.ObservedAcceleratorCost) where an unrecognized type must fail loudly.
 func (g AcceleratorType) LookupCost() (float64, bool) {
-	r, ok := acceleratorRateRegistry[g]
+	r, ok := acceleratorRateRegistry[foldKey(string(g))]
 	return r, ok
 }
 

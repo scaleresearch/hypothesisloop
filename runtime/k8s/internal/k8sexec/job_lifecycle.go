@@ -369,7 +369,7 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 	}
 	for acceleratorName, snapshot := range draSnapshots {
 		key := acceleratorName
-		if !priced[key] {
+		if !priced[strings.ToLower(key)] {
 			continue
 		}
 		available[key], total[key] = snapshot.available, snapshot.total
@@ -405,7 +405,7 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 					continue
 				}
 				key := labelKey + "=" + labelValue
-				if !priced[key] {
+				if !priced[strings.ToLower(key)] {
 					continue
 				}
 				if byNode[node.Name] == nil {

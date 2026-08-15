@@ -23,6 +23,14 @@ rules:
     resources: ["pods"]
     verbs: ["list"]
   - apiGroups: [""]
+    # pods/log: FetchLogTail reads a job's own pod's current stdout/stderr to report alongside
+    # its phase (see k8sexec.FetchLogTail, agentloop.LogTailer) — without this, GetLogs 403s and
+    # was previously failing silently (job_logs.go's Stream() error path treats any failure as
+    # "nothing to report yet", so a permissions error looked identical to a pod that just hasn't
+    # started -- confirmed live: no lines were ever reported until this rule was added).
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
     # services: one ClusterIP per submitted job (for distributed/multi-node jobs' pod-to-pod
     # discovery), created alongside the Job and deleted with it (workload_client.go create/
     # delete paths).
@@ -84,10 +92,8 @@ spec:
           env:
             - name: CLUSTER_NAME
               value: "__CLUSTER_NAME__"
-            - name: CONTROLPLANE_URL
-              value: "__CONTROLPLANE_URL__"
-            - name: REGISTRY_URL
-              value: "__REGISTRY_URL__"
+            - name: API_URL
+              value: "__API_URL__"
           resources:
             requests:
               cpu: "10m"

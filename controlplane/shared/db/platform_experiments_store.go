@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -64,7 +65,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at
+SELECT id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at
 FROM platform_experiments
 WHERE id = $1`
 
@@ -75,7 +76,7 @@ WHERE id = $1`
 		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &pe.EndsAt, &status,
-		&stagesRaw, &pe.CurrentStage,
+		&stagesRaw, &pe.CurrentStage, &pe.Summary,
 		&pe.CreatedAt, &pe.UpdatedAt,
 	)
 	if err != nil {
@@ -94,33 +95,108 @@ WHERE id = $1`
 	return pe, nil
 }
 
-// ListPlatformExperiments returns all platform experiments, optionally filtered by status.
-// Pass empty string to return all.
-func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, statusFilter string) ([]*domain.PlatformExperiment, error) {
-	var (
-		q    string
-		args []any
-	)
-	base := `
+// PlatformExperimentsFilter constrains ListPlatformExperiments/CountPlatformExperiments.
+// Zero values are ignored.
+type PlatformExperimentsFilter struct {
+	Status string
+	// Search matches against name/description, case-insensitively, substring match.
+	Search string
+	Limit  int
+	Offset int
+	// Sort selects the ORDER BY column and direction, as "field" (ascending) or "-field"
+	// (descending). Empty keeps the default, newest-first order. See
+	// PlatformExperimentSortFields for the allowed field names.
+	Sort string
+}
+
+// PlatformExperimentSortFields are the column names PlatformExperimentsFilter.Sort may
+// reference, mapped to their underlying SQL column — an explicit allowlist so Sort can't be
+// used for SQL injection.
+var PlatformExperimentSortFields = map[string]string{
+	"created_at": "pe.created_at",
+	"starts_at":  "pe.starts_at",
+	"name":       "pe.name",
+	"status":     "pe.status",
+}
+
+// statusPriorityTiebreak ranks running/open experiments ahead of closed ones when the primary
+// sort column is tied, so a page of same-date experiments doesn't bury active ones under
+// arbitrary insertion order.
+const statusPriorityTiebreak = "(CASE WHEN pe.status = 'closed' THEN 1 ELSE 0 END)"
+
+func platformExperimentOrderBy(sort string) string {
+	if sort == "" {
+		return "pe.created_at DESC, " + statusPriorityTiebreak
+	}
+	field, dir := sort, "ASC"
+	if strings.HasPrefix(sort, "-") {
+		field, dir = sort[1:], "DESC"
+	}
+	col, ok := PlatformExperimentSortFields[field]
+	if !ok {
+		return "pe.created_at DESC, " + statusPriorityTiebreak
+	}
+	return col + " " + dir + ", " + statusPriorityTiebreak
+}
+
+func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string, []any) {
+	clauses := []string{"1=1"}
+	args := []any{}
+	n := 1
+	if filter.Status != "" {
+		clauses = append(clauses, fmt.Sprintf("pe.status = $%d", n))
+		args = append(args, filter.Status)
+		n++
+	}
+	if filter.Search != "" {
+		clauses = append(clauses, fmt.Sprintf("(pe.name ILIKE $%d OR pe.description ILIKE $%d)", n, n))
+		args = append(args, "%"+filter.Search+"%")
+		n++
+	}
+	return clauses, args
+}
+
+// defaultPlatformExperimentListLimit and maxPlatformExperimentListLimit bound every
+// ListPlatformExperiments read the same way ListAgents/ListHypotheses bound their own — see
+// agents_store.go/hypotheses_store.go. Limit<=0 must not mean "unbounded".
+const (
+	defaultPlatformExperimentListLimit = 200
+	maxPlatformExperimentListLimit     = 200
+)
+
+// ListPlatformExperiments returns platform experiments matching the given filter. filter.Limit
+// is defaulted and clamped to [1, maxPlatformExperimentListLimit]; limit<=0 uses the default.
+func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = defaultPlatformExperimentListLimit
+	} else if filter.Limit > maxPlatformExperimentListLimit {
+		filter.Limit = maxPlatformExperimentListLimit
+	}
+
+	clauses, args := platformExperimentFilterClauses(filter)
+	n := len(args) + 1
+
+	q := `
 SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
-       pe.stages, pe.current_stage,
+       pe.stages, pe.current_stage, pe.summary,
        pe.created_at, pe.updated_at,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
-LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id`
+LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
+WHERE ` + strings.Join(clauses, " AND ") + `
+GROUP BY pe.id
+ORDER BY ` + platformExperimentOrderBy(filter.Sort)
 
-	if statusFilter != "" {
-		q = base + `
-WHERE pe.status = $1
-GROUP BY pe.id
-ORDER BY pe.created_at DESC`
-		args = []any{statusFilter}
-	} else {
-		q = base + `
-GROUP BY pe.id
-ORDER BY pe.created_at DESC`
+	if filter.Limit > 0 {
+		q += fmt.Sprintf(" LIMIT $%d", n)
+		args = append(args, filter.Limit)
+		n++
+	}
+	if filter.Offset > 0 {
+		q += fmt.Sprintf(" OFFSET $%d", n)
+		args = append(args, filter.Offset)
 	}
 
 	rows, err := s.pool.pool.Query(ctx, q, args...)
@@ -138,7 +214,7 @@ ORDER BY pe.created_at DESC`
 			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &pe.EndsAt, &status,
-			&stagesRaw, &pe.CurrentStage,
+			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt,
 			&pe.SignupCount,
 		); err != nil {
@@ -156,6 +232,18 @@ ORDER BY pe.created_at DESC`
 	return out, rows.Err()
 }
 
+// CountPlatformExperiments returns the number of platform experiments matching the given
+// filter, ignoring Limit/Offset/Sort — the total a paginating caller should show.
+func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) (int, error) {
+	clauses, args := platformExperimentFilterClauses(filter)
+	q := `SELECT COUNT(*) FROM platform_experiments pe WHERE ` + strings.Join(clauses, " AND ")
+	var total int
+	if err := s.pool.pool.QueryRow(ctx, q, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("platform_experiments_store.Count: %w", err)
+	}
+	return total, nil
+}
+
 // UpdatePlatformExperimentStatus transitions a platform experiment to a new status.
 func (s *PlatformExperimentsStore) UpdatePlatformExperimentStatus(ctx context.Context, id string, status domain.PlatformExperimentStatus) error {
 	const q = `UPDATE platform_experiments SET status = $2, updated_at = NOW() WHERE id = $1`
@@ -166,8 +254,29 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperimentStatus(ctx context.Co
 	return nil
 }
 
+// SetPlatformExperimentSummary records the operator's narrative verdict on a run. Separate from
+// UpdatePlatformExperiment because it is the one field that is written *after* the experiment
+// closes, when everything else is frozen.
+func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Context, id, summary string) error {
+	const q = `UPDATE platform_experiments SET summary = $2, updated_at = NOW() WHERE id = $1`
+	tag, err := s.pool.pool.Exec(ctx, q, id, summary)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.SetSummary: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("platform_experiments_store.SetSummary: not_found")
+	}
+	return nil
+}
+
 // UpdatePlatformExperiment updates mutable fields of a platform experiment.
-func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
+// UpdatePlatformExperiment writes pe's editable fields, but only if the row is still in
+// expectedStatus — the service reads status, decides which fields are safe to change for that
+// status, then calls here; without this compare-and-swap, a concurrent Start() could flip the row
+// to running between that read and this write, and a since-locked field (budget, metrics, ...)
+// computed under the stale "open" decision would land after admission already used the old value.
+// A mismatch (0 rows affected) means status moved: fail fast rather than silently no-op.
+func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
@@ -175,13 +284,16 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, budget_cpu_core_hours=$5, budget_ram_gb_hours=$6, budget_storage_gb_hours=$7, max_agents=$8, metrics=$9,
     report_interval_seconds=$10, starts_at=$11, ends_at=$12, updated_at=NOW()
-WHERE id=$1`
-	_, err = s.pool.pool.Exec(ctx, q,
+WHERE id=$1 AND status=$13`
+	tag, err := s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
-		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
+		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt, expectedStatus,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("platform_experiments_store.Update: status changed concurrently, retry")
 	}
 	return nil
 }

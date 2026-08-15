@@ -25,7 +25,7 @@ CREDITS_WANT="0.05"
 DONOR_BEFORE=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_hours)
 REQ_BEFORE=$(_quota_field "$PE_ID" "$REQUESTER" guaranteed_accelerator_hours)
 
-DONATION_ID=$(curl -sf -X POST "$QUOTA_URL/donations" -H 'Content-Type: application/json' -d "{
+DONATION_ID=$(curl -sf -X POST "$API_URL/donations" -H 'Content-Type: application/json' -d "{
   \"agent_id\": \"$REQUESTER\", \"platform_experiment_id\": \"$PE_ID\",
   \"credits_want\": $CREDITS_WANT, \"reason\": \"concurrent-fulfill stress\"
 }" | py "import sys,json; print(json.load(sys.stdin)['id'])")
@@ -33,7 +33,7 @@ DONATION_ID=$(curl -sf -X POST "$QUOTA_URL/donations" -H 'Content-Type: applicat
 # Fire 12 fulfillments of the SAME donation at once; each writes its HTTP code to a file.
 CODES_DIR=$(mktemp -d)
 for i in $(seq 1 12); do
-  ( curl -s -o /dev/null -w '%{http_code}' -X POST "$QUOTA_URL/donations/${DONATION_ID}/fulfill" \
+  ( curl -s -o /dev/null -w '%{http_code}' -X POST "$API_URL/donations/${DONATION_ID}/fulfill" \
       -H 'Content-Type: application/json' -d "{\"donor_agent_id\": \"$DONOR\"}" > "$CODES_DIR/$i" ) &
 done
 wait
@@ -57,7 +57,7 @@ REQ_DELTA=$(py "print(round(float('$REQ_AFTER' or 0) - float('$REQ_BEFORE' or 0)
 # ---------------------------------------------------------------------------
 echo "  -- P0-f: malformed / unknown-target metric samples are rejected at ingestion --"
 metric_code() { # experiment_id fraction value
-  curl -s -o /dev/null -w '%{http_code}' -X POST "$REGISTRY_URL/registry/experiments/$1/metrics" \
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$API_URL/experiments/$1/metrics" \
     -H 'Content-Type: application/json' \
     -d "{\"metric_name\":\"val_accuracy\",\"fraction_complete\":$2,\"metric_value\":$3}"
 }
@@ -85,7 +85,7 @@ FOREIGN_HYP=$(register_hypothesis "$DONOR" "$PE_OTHER")
 # fails specifically on the cross-PE hypothesis scope check — which is what we want to assert.
 JOB_ID="job-crossscope-${RUN_ID}"
 BODY=$(python3 "$LIB_DIR/mk_body.py" submit "$JOB_ID" "$DONOR" "$PE_ID" "0.02" "$JOB_FILE" "$FOREIGN_HYP" "guaranteed" "" "" "" "" "" "" "")
-XSCOPE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCHED_URL/experiments" \
+XSCOPE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API_URL/experiments" \
   -H 'Content-Type: application/json' -d "$BODY")
 [[ "$XSCOPE_CODE" -ge 400 && "$XSCOPE_CODE" -lt 500 ]] \
   && pass "submit referencing a foreign-PE hypothesis rejected (HTTP $XSCOPE_CODE)" \

@@ -2,9 +2,7 @@
 # Platform-wide rates and scheduling policy live here.
 
 services:
-  quota_port: 8081
-  scheduler_port: 8082
-  registry_port: 8083
+  api_port: 8081
   metric_controller_port: 8084
   metrics_db_url: http://greptimedb:4000
 
@@ -53,6 +51,15 @@ accelerator_types:
 
   - name:      nvidia.com/gpu.product=NVIDIA-H200
     acch_rate: 1.25
+
+  - name:      nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4070-TI
+    acch_rate: 0.1
+
+  - name:      nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
+    acch_rate: 0.15
+
+  - name:      nvidia.com/gpu.product=NVIDIA-GEFORCE-GTX-1070-TI
+    acch_rate: 0.05
 
   # Add a rate when jobs may request another accelerator type.
   # - name:      amd.com/gpu.product-name=Instinct-MI300X
@@ -104,6 +111,11 @@ scheduler:
   default_termination_grace_period_seconds: 5
   max_termination_grace_period_seconds: 30
 
+  # One line of a job's reported log tail is split (never truncated/dropped) above this many
+  # characters -- large enough to keep a real compiler error or stack frame intact, small enough
+  # that one pathological line can't blow up a single status push.
+  max_log_tail_line_chars: 2000
+
   # How often the JobWatcher polls a running k8s Job for phase transitions.
   job_poll_interval_seconds: 5
 
@@ -123,6 +135,15 @@ scheduler:
   # bounding how far a steady-submitting agent's own jobs can jump ahead of other agents'
   # equally-entitled jobs.
   guaranteed_fairness_window_seconds: 60
+
+  # Evict a RUNNING job whose CPU/memory/storage request exceeds this multiple of its
+  # proportionate per-accelerator share of the cluster, while that request is provably the only
+  # thing keeping a queued job off idle accelerators on the same node. Guards against a job
+  # taking one of a node's four accelerators and all of its cores, stranding the other three.
+  # 0 disables it (the default): this is the only pass that terminates a running job the queue
+  # never asked to stop. 3 is the suggested starting value — a job is entitled to its share, and
+  # three times that is already past any plausible host-side need.
+  resource_disbalance_tolerance: 3
 
   # How often the metric controller reconciles running experiments.
   reconcile_interval_seconds: 5
@@ -144,11 +165,17 @@ scheduler:
   # failed natively by k8s (job watcher then records FAILED and refunds unused AccH).
 
 
-# Stages — the elimination ladder (see docs/stages.md)
+# Stages — the elimination ladder
 #
-# An ordered list of stages, each two numbers:
-#   length_pct  share of the experiment this stage spans; all stages must sum to 100
-#   evict_pct   share of *surviving* agents cut when the stage ends; 0 cuts nobody
+# An ordered list of stages:
+#   length_pct     share of the experiment this stage spans; all stages must sum to 100
+#   evict_pct      share of *surviving* agents cut when the stage ends; 0 cuts nobody
+#   max_job_hours  longest a single job may run while this stage is current; 0 (the default,
+#                  and what you get by omitting it) is unlimited. Enforced twice: a submission
+#                  estimating more is rejected job_too_long, and a job that outruns the cap is
+#                  evicted job_too_long against its observed runtime. A short cap on the first
+#                  stage buys many small exploratory runs; leave it off later so validated
+#                  ideas can run long.
 #
 # Progress across the ladder is max(budget_consumed / total_budget, elapsed / duration), so
 # whichever runs out first advances it. The final stage must have evict_pct 0 — nothing
@@ -157,6 +184,8 @@ scheduler:
 #
 #   [{length_pct: 100, evict_pct: 0}]                       one stage, no cuts
 #   [{20,25}, {30,25}, {50,0}]                              three stages, a quarter cut twice
+#   [{length_pct: 30, evict_pct: 25, max_job_hours: 1},     explore in <=1h runs, then no limit
+#    {length_pct: 70, evict_pct: 0}]
 
 stages:
   default:

@@ -17,6 +17,7 @@ package k8sexec
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -32,7 +33,7 @@ const (
 	priorityValueGuaranteed = int32(1000000)
 	priorityValueBurst      = int32(100000)
 
-	RegistryURLDefault = "http://metrics-service:8083"
+	APIURLDefault = "http://metrics-service:8083"
 
 	// DistributedMasterPort is the fixed rendezvous port advertised to every rank of a
 	// distributed (NumNodes > 1) job via HYPOTHESISLOOP_MASTER_PORT — fine as a fixed port since
@@ -52,7 +53,7 @@ const (
 type Config struct {
 	KubeconfigPath string
 	KubeContext    string
-	RegistryURL    string
+	APIURL         string
 	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
 	DefaultTerminationGracePeriodSeconds int
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
@@ -66,7 +67,7 @@ type Config struct {
 type JobWorkloadClient struct {
 	kube                                 kubernetes.Interface
 	dyn                                  dynamic.Interface
-	registryURL                          string
+	apiURL                               string
 	defaultTerminationGracePeriodSeconds int64
 	maxTerminationGracePeriodSeconds     int64
 	// pricedAcceleratorTypes bounds what capacity reporting names — see Config.PricedAcceleratorTypes.
@@ -74,8 +75,8 @@ type JobWorkloadClient struct {
 }
 
 func New(cfg Config) (*JobWorkloadClient, error) {
-	if cfg.RegistryURL == "" {
-		return nil, fmt.Errorf("workload: RegistryURL is required")
+	if cfg.APIURL == "" {
+		return nil, fmt.Errorf("workload: APIURL is required")
 	}
 	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 {
 		return nil, fmt.Errorf("workload: termination settings must be positive")
@@ -97,17 +98,19 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workload: dynamic client: %w", err)
 	}
-	reg := cfg.RegistryURL
+	reg := cfg.APIURL
 	defaultGrace := int64(cfg.DefaultTerminationGracePeriodSeconds)
 	maxGrace := int64(cfg.MaxTerminationGracePeriodSeconds)
+	// Lowercased: real driver-reported casing and hypothesisloop.yaml's casing can differ for
+	// the same hardware (see domain.AcceleratorType.MatchesLabels).
 	priced := make(map[string]bool, len(cfg.PricedAcceleratorTypes))
 	for _, name := range cfg.PricedAcceleratorTypes {
-		priced[name] = true
+		priced[strings.ToLower(name)] = true
 	}
 	return &JobWorkloadClient{
 		kube:                                 kube,
 		dyn:                                  dyn,
-		registryURL:                          reg,
+		apiURL:                               reg,
 		defaultTerminationGracePeriodSeconds: defaultGrace,
 		maxTerminationGracePeriodSeconds:     maxGrace,
 		pricedAcceleratorTypes:               priced,

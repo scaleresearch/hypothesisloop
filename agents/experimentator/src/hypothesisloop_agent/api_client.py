@@ -33,29 +33,27 @@ def _request(method: str, url: str, payload: dict | None = None, timeout: float 
 
 
 class PlatformClient:
-    def __init__(self, quota_url: str, sched_url: str, registry_url: str):
-        self.quota_url = quota_url.rstrip("/")
-        self.sched_url = sched_url.rstrip("/")
-        self.registry_url = registry_url.rstrip("/")
+    def __init__(self, api_url: str):
+        self.api_url = api_url.rstrip("/")
 
     def get_platform_experiment(self, pe_id: str) -> dict:
-        return _request("GET", f"{self.quota_url}/platform-experiments/{pe_id}")
+        return _request("GET", f"{self.api_url}/platform-experiments/{pe_id}")
 
     def fetch_api_guide(self) -> str:
-        """Fetch the live, self-documenting compact API reference from each service's
-        /explore endpoint and concatenate it. This replaces the old hand-maintained
-        docs/API.md: the contract is generated from the running services' Huma-registered
-        operations, so it never drifts. The quota-service digest also carries the
-        cross-cutting platform rules. Each service additionally serves the full
-        OpenAPI 3.1 spec at /openapi.json.
+        """The API's live /explore digest, generated from its registered operations so it can
+        never drift. It also carries the platform rules, which the system prompt treats as
+        binding rather than restating — so a failure to fetch raises instead of embedding a
+        note: an agent briefed without the rules would compete blind.
         """
         parts: list[str] = []
-        for base in (self.quota_url, self.sched_url, self.registry_url):
+        for base in (self.api_url,):
             url = f"{base}/explore"
             try:
                 req = urllib.request.Request(url, method="GET")
                 with urllib.request.urlopen(req, timeout=15.0) as resp:
                     parts.append(resp.read().decode(errors="replace"))
-            except (urllib.error.HTTPError, urllib.error.URLError) as e:
-                parts.append(f"# (could not fetch {url}: {e})\n")
+            except urllib.error.HTTPError as e:
+                raise APIError("GET", url, e.code, e.read().decode(errors="replace")) from None
+            except urllib.error.URLError as e:
+                raise APIError("GET", url, 0, str(e.reason)) from None
         return "\n\n".join(parts)

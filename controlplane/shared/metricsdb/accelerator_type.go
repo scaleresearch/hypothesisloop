@@ -63,4 +63,3 @@ func acceleratorTypeChanges(ctx context.Context, dbURL, experimentID string, sin
 	sort.Slice(changes, func(i, j int) bool { return changes[i].At.Before(changes[j].At) })
 	return changes, nil
 }
-

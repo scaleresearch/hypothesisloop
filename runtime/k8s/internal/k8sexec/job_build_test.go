@@ -4,11 +4,12 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
-	c := &JobWorkloadClient{registryURL: RegistryURLDefault}
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
 	exp := &domain.Experiment{
 		ID: "hugepage-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
@@ -35,6 +36,39 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 	}
 }
 
+func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		ID: "host-mount-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/FOMO_with_dwi"},
+		},
+	}
+
+	job, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := job.Spec.Template.Spec.Containers[0].VolumeMounts
+	if len(mounts) != 1 || mounts[0].MountPath != "/data/dataset" || !mounts[0].ReadOnly {
+		t.Fatalf("VolumeMounts = %+v, want one read-only mount at /data/dataset", mounts)
+	}
+	vols := job.Spec.Template.Spec.Volumes
+	if len(vols) != 1 || vols[0].Name != mounts[0].Name {
+		t.Fatalf("Volumes = %+v, want one volume named %q", vols, mounts[0].Name)
+	}
+	if vols[0].HostPath == nil || vols[0].HostPath.Path != "/var/lib/hypothesisloop/datasets/FOMO_with_dwi" {
+		t.Fatalf("HostPath volume = %+v, want Path /var/lib/hypothesisloop/datasets/FOMO_with_dwi", vols[0].HostPath)
+	}
+	if vols[0].HostPath.Type == nil || *vols[0].HostPath.Type != corev1.HostPathDirectory {
+		t.Fatalf("HostPath.Type = %v, want HostPathDirectory (fail fast if not present, not DirectoryOrCreate)", vols[0].HostPath.Type)
+	}
+}
+
 var nvidiaPlacement = AcceleratorPlacement{
 	ResourceName:   "nvidia.com/gpu",
 	NodeLabelKey:   "nvidia.com/gpu.product",
@@ -43,7 +77,7 @@ var nvidiaPlacement = AcceleratorPlacement{
 
 func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 	c := &JobWorkloadClient{
-		registryURL:                          "http://registry",
+		apiURL:                               "http://registry",
 		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
 	}
 	exp := &domain.Experiment{ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
@@ -75,3 +109,50 @@ func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+func jobWithRetries(retries int) *domain.Experiment {
+	return &domain.Experiment{
+		ID: "retry-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			MaxRetries:       intPtr(retries),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+}
+
+// Retries live at two layers: BackoffLimit recreates the pod, RestartPolicy=OnFailure has the
+// kubelet restart the container in place. max_retries only reaches the first, so a job asking
+// for zero retries was still restarted — seen live as restart_count=1 with max_retries=0 on a
+// diagnostic chosen to fail once and cheaply.
+func TestBuildJobMaxRetriesZeroDisablesInPlaceRestart(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	job, err := c.BuildJob(jobWithRetries(0), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyNever {
+		t.Errorf("restart policy = %q, want Never so max_retries=0 means exactly one attempt", got)
+	}
+	if got := *job.Spec.BackoffLimit; got != 0 {
+		t.Errorf("backoff limit = %d, want 0", got)
+	}
+}
+
+// With retries actually requested, in-place restart stays on — it is the cheaper recovery for a
+// transient fault, and the caller has said retrying is acceptable.
+func TestBuildJobKeepsInPlaceRestartWhenRetriesRequested(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	job, err := c.BuildJob(jobWithRetries(2), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyOnFailure {
+		t.Errorf("restart policy = %q, want OnFailure when retries are requested", got)
+	}
+	if got := *job.Spec.BackoffLimit; got != 2 {
+		t.Errorf("backoff limit = %d, want 2", got)
+	}
+}

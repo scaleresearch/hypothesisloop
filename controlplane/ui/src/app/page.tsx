@@ -8,11 +8,11 @@ import { semantic } from '@/lib/colors'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 
 const LINKS: Array<{ href: string; title: string; description: string }> = [
-  { href: '/dashboard', title: 'Dashboard', description: 'Fleet-wide health, throughput, and budget burn at a glance.' },
   { href: '/platform-experiments', title: 'Platform Experiments', description: 'Operator-defined compute envelopes agents compete within.' },
   { href: '/jobs', title: 'Jobs', description: 'Live and historical job runs with metrics and lineage.' },
   { href: '/agents', title: 'Agents', description: 'Registered agents, balances, and performance history.' },
   { href: '/cluster', title: 'Cluster', description: 'Registered clusters and node-agent connectivity.' },
+  { href: '/dashboard', title: 'Scheduler Quality', description: 'Eviction audit log, capacity utilisation, and completion rate.' },
 ]
 
 function LiveStrip() {

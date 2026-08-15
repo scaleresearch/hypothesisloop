@@ -1,3 +1,7 @@
+# Local-only files (secrets, machine-specific notes) -- suffix with .local
+*.local
+*.local.*
+
 # Go
 /bin/
 *.exe
@@ -82,3 +86,11 @@ secrets/
 
 # Go module vendor directory (not tracked)
 vendor/
+# Claude Code session state (worktrees, local agent scratch)
+.claude/
+
+# Experiment working clones: each is its own upstream git repo (source, datasets,
+# vendored toolchains) cloned in place, not content of this repo. Only the coordinator's
+# own experiment.md/seed/ files under agents/coordinator/experiments/<name>/ are tracked.
+agents/coordinator/experiments/smri-fm/
+agents/coordinator/experiments/smri-fm-notes/

@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"reflect"
+	"time"
+)
 
 // PlatformExperimentStatus is the lifecycle state of a platform experiment.
 type PlatformExperimentStatus string
@@ -11,11 +15,100 @@ const (
 	PlatformExpClosed  PlatformExperimentStatus = "closed"
 )
 
+// ValidPlatformExperimentStatus reports whether s is one of the recognized statuses. As with
+// ValidExperimentStatus, filtering on an unrecognized value would otherwise reach Postgres as a
+// bad enum literal and surface as a 500.
+func ValidPlatformExperimentStatus(s PlatformExperimentStatus) bool {
+	switch s {
+	case PlatformExpOpen, PlatformExpRunning, PlatformExpClosed:
+		return true
+	default:
+		return false
+	}
+}
+
+// MetricRole classifies what a declared MetricDefinition is for. Declaring a metric no longer
+// implies it's ranked — see MetricDefinition.Role.
+type MetricRole string
+
+const (
+	// MetricRoleRanking counts for stage cuts and standings — today's behaviour, and the
+	// default when Role is left empty, so an experiment created before this field existed
+	// keeps ranking on every declared metric exactly as it always did.
+	MetricRoleRanking MetricRole = "ranking"
+	// MetricRoleConstraint must be reported and must satisfy Bound; a job that violates it is
+	// ineligible for standings but never itself ranked or cut on.
+	MetricRoleConstraint MetricRole = "constraint"
+	// MetricRoleAttribute is reported and shown, never ranked or cut on, and never gates
+	// standings eligibility — "which kind of result is this" facts (precision class, result
+	// category, ...) that the objective may care about but that have no single order.
+	MetricRoleAttribute MetricRole = "attribute"
+)
+
+// ValidMetricRole reports whether role is one of the three declared roles, or empty (which
+// PlatformExperiment.Metrics' consumers treat as MetricRoleRanking for backward compatibility).
+func ValidMetricRole(role MetricRole) bool {
+	switch role {
+	case "", MetricRoleRanking, MetricRoleConstraint, MetricRoleAttribute:
+		return true
+	default:
+		return false
+	}
+}
+
+// EffectiveRole returns d.Role, defaulting empty to MetricRoleRanking.
+func (d MetricDefinition) EffectiveRole() MetricRole {
+	if d.Role == "" {
+		return MetricRoleRanking
+	}
+	return d.Role
+}
+
 // MetricDefinition declares a single metric that jobs in a PlatformExperiment must emit.
-// The key is the Prometheus metric name; direction is "maximize" or "minimize".
+// The key is the Prometheus metric name; direction is "maximize" or "minimize". Role decides
+// what the declaration is *for* — only MetricRoleRanking metrics ever rank or cut (see
+// ValidateMetricDefinitions); Bound is required and only meaningful for MetricRoleConstraint,
+// expressed in the same direction as Direction (maximize: value must be >= Bound; minimize:
+// value must be <= Bound).
 type MetricDefinition struct {
-	Key       string `json:"key"`
-	Direction string `json:"direction"` // "maximize" | "minimize"
+	Key       string     `json:"key"`
+	Direction string     `json:"direction"` // "maximize" | "minimize"
+	Role      MetricRole `json:"role,omitempty"`
+	Bound     *float64   `json:"bound,omitempty"`
+}
+
+// ValidateMetricDefinitions enforces the metric contract at creation, so nothing downstream
+// (stage cuts, standings) needs to defend against a malformed one. Fail-fast per important.md #1.
+func ValidateMetricDefinitions(defs []MetricDefinition) error {
+	seen := make(map[string]bool, len(defs))
+	for i, d := range defs {
+		if d.Key == "" {
+			return fmt.Errorf("metric %d: key is required", i)
+		}
+		if seen[d.Key] {
+			return fmt.Errorf("metric %d: duplicate key %q", i, d.Key)
+		}
+		seen[d.Key] = true
+		if d.Direction != "maximize" && d.Direction != "minimize" {
+			return fmt.Errorf("metric %q: direction must be \"maximize\" or \"minimize\", got %q", d.Key, d.Direction)
+		}
+		if !ValidMetricRole(d.Role) {
+			return fmt.Errorf("metric %q: role must be one of ranking, constraint, attribute (or empty), got %q", d.Key, d.Role)
+		}
+		if d.EffectiveRole() == MetricRoleConstraint && d.Bound == nil {
+			return fmt.Errorf("metric %q: constraint role requires bound", d.Key)
+		}
+		if d.EffectiveRole() != MetricRoleConstraint && d.Bound != nil {
+			return fmt.Errorf("metric %q: bound is only meaningful for constraint role", d.Key)
+		}
+	}
+	return nil
+}
+
+// MetricDefinitionsEqual reports whether two metric declarations are the same set in the same
+// order — order matters (the first ranking metric is primary), so this is not a set comparison.
+func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
+	return reflect.DeepEqual(a, b)
 }
 
 // PlatformExperiment is the operator-defined compute envelope agents compete within.
@@ -43,10 +136,13 @@ type PlatformExperiment struct {
 	StartsAt              time.Time                `json:"starts_at"`
 	EndsAt                time.Time                `json:"ends_at"`
 	Status                PlatformExperimentStatus `json:"status"`
-	// Stages is the elimination ladder, fixed at creation. See docs/stages.md.
+	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
-	CurrentStage   int       `json:"current_stage"`
+	CurrentStage int `json:"current_stage"`
+	// Summary is the operator's narrative verdict on the finished run. Prose only: the standings
+	// are derived from the metrics store on read, never copied here.
+	Summary        string    `json:"summary,omitempty"`
 	SignedUpAgents []string  `json:"signed_up_agents,omitempty"`
 	SignupCount    int       `json:"signup_count"`
 	CreatedAt      time.Time `json:"created_at"`

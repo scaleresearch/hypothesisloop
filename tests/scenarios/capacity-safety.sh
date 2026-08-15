@@ -12,11 +12,11 @@ source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 source "$DIR/../lib/cluster.sh"
 
-ACCELERATOR_TYPE="nvidia.com/gpu.product=NVIDIA-L40"
-# L40's acch_rate is 0.25 (controlplane/settings/hypothesisloop.yaml) — costs are normalized to
-# H100-equivalent-hours, so a job requesting HOURS of wall-clock time on L40 reserves
-# HOURS * L40_ACCH_RATE AccH, not HOURS AccH 1:1. Keep this in sync with that config's L40 entry.
-L40_ACCH_RATE=0.25
+ACCELERATOR_TYPE="$TEST_ACCELERATOR_TYPE"
+# Costs are normalized to H100-equivalent-hours, so a job requesting HOURS of wall-clock time
+# reserves HOURS * this type's acch_rate AccH, not HOURS AccH 1:1. TEST_ACCH_RATE must match the
+# type's entry in controlplane/settings/hypothesisloop.yaml (see tests/lib/common.sh).
+ACCH_RATE="$TEST_ACCH_RATE"
 AGENTS=("agent-cap-a-${RUN_ID}" "agent-cap-b-${RUN_ID}" "agent-cap-c-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
 # Budget deliberately generous, same reasoning as preemption-requeue.sh: a stage boundary gates
@@ -28,7 +28,7 @@ signup_and_start "$PE_ID" "${AGENTS[@]}"
 
 echo "  -- PostgreSQL desired usage must remain stable across scheduler ticks --"
 JOB_HOURS=0.003
-EXPECTED_RESERVATION=$(py "print(round($JOB_HOURS * $L40_ACCH_RATE, 6))")
+EXPECTED_RESERVATION=$(py "print(round($JOB_HOURS * $ACCH_RATE, 6))")
 QA_BEFORE=$(quota_used_guaranteed "$PE_ID" "${AGENTS[0]}")
 QB_BEFORE=$(quota_used_guaranteed "$PE_ID" "${AGENTS[1]}")
 JOB_A=$(submit_job "$PE_ID" "${AGENTS[0]}" "guaranteed" "$JOB_HOURS" "$ACCELERATOR_TYPE")

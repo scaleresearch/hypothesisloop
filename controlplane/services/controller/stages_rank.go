@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"go.uber.org/zap"
@@ -33,9 +34,17 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 		return nil, nil, err
 	}
 
-	// A stage that cuts nobody, an unrankable field (no metrics), and a field already at the
-	// guardrail floor all mean the same thing here: advance, cut no one.
-	if stage.EvictPct == 0 || len(pe.Metrics) == 0 || len(survivors) < minSurvivorsForCut {
+	rankingMetrics := make([]domain.MetricDefinition, 0, len(pe.Metrics))
+	for _, metric := range pe.Metrics {
+		if metric.EffectiveRole() == domain.MetricRoleRanking {
+			rankingMetrics = append(rankingMetrics, metric)
+		}
+	}
+
+	// A stage that cuts nobody, an unrankable field (no ranking metrics — constraint/attribute
+	// metrics never cut), and a field already at the guardrail floor all mean the same thing
+	// here: advance, cut no one.
+	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < minSurvivorsForCut {
 		return survivors, nil, nil
 	}
 
@@ -43,7 +52,7 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	// cut only if that is every metric that produced usable data.
 	cutCount := make(map[string]int, len(survivors))
 	healthyMetrics := 0
-	for _, metric := range pe.Metrics {
+	for _, metric := range rankingMetrics {
 		cutOnMetric, hadData, err := c.cutOnMetric(ctx, pe.ID, metric, stage, survivors)
 		if err != nil {
 			c.logger.Warn("stages: metric ranking query failed, skipping metric",
@@ -119,11 +128,40 @@ func (c *Controller) cutOnMetric(ctx context.Context, platformExpID string, metr
 	// max_over_time/min_over_time are needed because Pushgateway stores only the latest pushed
 	// value per label set; the Prometheus timeseries tracks the scrape history, so a range query
 	// recovers the historical best.
-	promQL := fmt.Sprintf(`%s by (agent_id) (%s_over_time(experiment_metric_value{platform_experiment_id=%q, metric_name=%q}[24h]))`,
+	//
+	// Grouped by (agent_id, metric_basis), not agent_id alone: a value reported on a rescaled/
+	// non-"raw" basis must never blend into the same min/max_over_time as a raw one — that is
+	// exactly the mismatch that let a rescaled loss look like a real win at a stage cut. Only
+	// "raw" values are used for cutting; an agent with only a non-raw value for this metric is
+	// treated as no data on it below, same as an agent that never reported it at all.
+	promQL := fmt.Sprintf(`%s by (agent_id, metric_basis) (%s_over_time(experiment_metric_value{platform_experiment_id=%q, metric_name=%q}[24h]))`,
 		agg, agg, platformExpID, metric.Key)
-	best, err := metricsdb.QueryAgentValues(ctx, c.metricsDBURL, promQL)
+	samples, err := metricsdb.QueryVector(ctx, c.metricsDBURL, promQL)
 	if err != nil {
 		return nil, false, fmt.Errorf("prometheus query: %w", err)
+	}
+	best := make(map[string]float64, len(samples))
+	for _, sm := range samples {
+		agentID := sm.Labels["agent_id"]
+		if agentID == "" {
+			return nil, false, fmt.Errorf("prometheus query: result missing agent_id")
+		}
+		basis := sm.Labels["metric_basis"]
+		if basis != "" && basis != "raw" {
+			continue
+		}
+		// "" (pre-label samples) and "raw" both mean raw and must be merged with the same
+		// direction-aware aggregation, not treated as a label conflict — see the identical
+		// merge in quota.standingsOnMetric.
+		if cur, exists := best[agentID]; exists {
+			if metric.Direction == "minimize" {
+				best[agentID] = math.Min(cur, sm.Value)
+			} else {
+				best[agentID] = math.Max(cur, sm.Value)
+			}
+			continue
+		}
+		best[agentID] = sm.Value
 	}
 	if len(best) == 0 {
 		return nil, false, nil
