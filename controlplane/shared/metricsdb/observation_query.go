@@ -47,6 +47,20 @@ func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Durati
 	return metric, nil
 }
 
+// HasEverReportedMetric reports whether experimentID has produced even one job-reported metric
+// sample within maxLookback. Deliberately ignores the heartbeat: the heartbeat proves the pod
+// exists, this proves the workload's own reporting path works. A job that never produced a
+// single sample is not "quiet since it hung" — its metrics path is broken (wrong URL, a stale
+// helper baked into the image, a swallowed exception), which needs a different fix than a hung
+// process and so is worth telling apart at eviction time.
+func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, maxLookback time.Duration) (bool, error) {
+	reported, err := isAliveOn(ctx, dbURL, "experiment_metric_value", "job_id", experimentID, maxLookback)
+	if err != nil {
+		return false, fmt.Errorf("metricsdb.HasEverReportedMetric: %w", err)
+	}
+	return reported, nil
+}
+
 // aliveGridPoints returns the set of `step`-spaced grid timestamps (Unix seconds) between since
 // and now at which metric{labelKey=id} shows a sample within the preceding gapCap. The query
 // implements the gap cap via last_over_time's range-vector window, so a genuine gap (reschedule,
@@ -117,6 +131,70 @@ func unionAliveGrid(ctx context.Context, dbURL, experimentID string, since, now 
 		union[k] = true
 	}
 	return union, nil
+}
+
+// declaredMetricSpread reports, for one declared metric key, whether experimentID has posted any
+// sample within window (reported) and whether its value actually moved (changed). Two combined
+// PromQL queries: count_over_time settles presence and whether there's even enough evidence to
+// judge (a single point can't distinguish "just started" from "stuck at a constant" — see
+// AnyDeclaredMetricChanged); max_over_time - min_over_time over the same series is non-zero iff
+// the value moved between at least two points.
+func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey string, window time.Duration) (reported, changed bool, err error) {
+	countQL := fmt.Sprintf(`count_over_time(experiment_metric_value{job_id=%q, metric_name=%q}[%s])`,
+		experimentID, metricKey, promSeconds(window))
+	counts, err := QueryVector(ctx, dbURL, countQL)
+	if err != nil {
+		return false, false, err
+	}
+	if len(counts) == 0 || counts[0].Value == 0 {
+		return false, false, nil
+	}
+	if counts[0].Value < 2 {
+		// One sample only: real progress can't be ruled out yet, and it can't be confirmed
+		// either — treat exactly like "not reported", not like "stuck".
+		return false, false, nil
+	}
+	spreadQL := fmt.Sprintf(
+		`max_over_time(experiment_metric_value{job_id=%q, metric_name=%q}[%s]) - min_over_time(experiment_metric_value{job_id=%q, metric_name=%q}[%s])`,
+		experimentID, metricKey, promSeconds(window), experimentID, metricKey, promSeconds(window),
+	)
+	samples, err := QueryVector(ctx, dbURL, spreadQL)
+	if err != nil {
+		return false, false, err
+	}
+	if len(samples) == 0 {
+		return false, false, nil
+	}
+	for _, s := range samples {
+		if s.Value != 0 {
+			return true, true, nil
+		}
+	}
+	return true, false, nil
+}
+
+// AnyDeclaredMetricChanged reports whether a platform experiment's declared metrics are showing
+// real progress for experimentID, as opposed to merely arriving. reported=false means none of
+// metricKeys has posted a single sample within window yet — early warmup or a broken reporting
+// path, not evidence of a stuck job, so callers must not treat that as silence. reported=true,
+// changed=false means every declared metric that did report held a single constant value the
+// whole window: a job whose training loop hung but keeps re-emitting the same point (e.g. a
+// cached last-value) would otherwise look perpetually alive to naive "did any sample arrive"
+// silence detection. changed=true as soon as any one declared metric moved.
+func AnyDeclaredMetricChanged(ctx context.Context, dbURL, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error) {
+	for _, key := range metricKeys {
+		keyReported, keyChanged, err := declaredMetricSpread(ctx, dbURL, experimentID, key, window)
+		if err != nil {
+			return false, false, fmt.Errorf("metricsdb.AnyDeclaredMetricChanged: %q: %w", key, err)
+		}
+		if keyReported {
+			reported = true
+		}
+		if keyChanged {
+			return true, true, nil
+		}
+	}
+	return reported, false, nil
 }
 
 // FirstObserved returns the timestamp of the earliest sample (heartbeat or training metric) for

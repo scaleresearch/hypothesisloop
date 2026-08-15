@@ -18,9 +18,7 @@ def _env_float(name: str, default: float) -> float:
 @dataclass
 class Config:
     # Same URLs used by tests/lib/common.sh and runtime/k8s/cmd/cluster-agent.
-    quota_url: str = field(default_factory=lambda: _env("QUOTA_URL", "http://localhost:8081"))
-    sched_url: str = field(default_factory=lambda: _env("SCHED_URL", "http://localhost:8082"))
-    registry_url: str = field(default_factory=lambda: _env("REGISTRY_URL", "http://localhost:8083"))
+    api_url: str = field(default_factory=lambda: _env("API_URL", "http://localhost:8081"))
 
     agent_id: str = field(default_factory=lambda: _env("AGENT_ID", ""))
 

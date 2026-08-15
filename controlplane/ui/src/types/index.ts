@@ -41,6 +41,10 @@ export interface MetricDataPoint {
   fraction_complete: number
   metric_name?: string
   metric_value?: number
+  // What scale/definition metric_value is on. "raw" (the default) means unmodified; anything
+  // else means the job transformed what the number means and it must not be compared to a
+  // "raw" value from another run — show it next to the value, don't drop it.
+  metric_basis?: string
   value?: number
   step?: number
   wall_time?: string
@@ -58,6 +62,10 @@ export interface AgentMetricSeries {
   agent_id: string
   experiment_id: string
   metric_name: string
+  // Shared metric_basis for every point in this series — see MetricDataPoint.metric_basis. A
+  // job that switches basis mid-run produces a second, distinct series rather than one series
+  // mixing two scales.
+  metric_basis?: string
   points: MetricSeriesPoint[]
 }
 
@@ -144,6 +152,11 @@ export interface MetricDefinition {
   key: string
   direction: 'maximize' | 'minimize'
   description?: string
+  // role decides what this metric is for: ranking (counts for cuts/standings, the default when
+  // omitted), constraint (must satisfy bound or the job is excluded from standings), attribute
+  // (shown, never ranked). See docs/stages.md.
+  role?: 'ranking' | 'constraint' | 'attribute'
+  bound?: number
 }
 
 export interface PlatformExperiment {
@@ -164,7 +177,7 @@ export interface PlatformExperiment {
   starts_at?: string
   ends_at?: string
   status: PlatformExperimentStatus
-  stages: Array<{ length_pct: number; evict_pct: number }>  // the elimination ladder
+  stages: Array<{ length_pct: number; evict_pct: number; max_job_hours?: number }>  // the elimination ladder
   current_stage: number               // 1-based index into stages
   signup_count: number
   signed_up_agents?: string[]
@@ -299,6 +312,12 @@ export interface ClusterInfo {
   cluster_name: string
   last_seen_at: string
   connected: boolean
+  // Actual busy-vs-idle chip counts from the cluster's most recent reconcile snapshot, summed
+  // across every accelerator flavor — real hardware occupancy, not the used/budget AccH ratio
+  // shown per platform experiment. Both are 0 when no live snapshot is within the freshness
+  // window (e.g. a disconnected cluster).
+  accelerator_busy: number
+  accelerator_total: number
 }
 
 export interface ClustersResponse {
@@ -321,7 +340,7 @@ export interface LineageNode {
 // Hypotheses
 // ---------------------------------------------------------------------------
 
-// The owning agent's own verdict on its claim — see POST /registry/hypotheses/{id}/status. Only
+// The owning agent's own verdict on its claim — see POST /hypotheses/{id}/status. Only
 // the agent named in `agent_id` may ever change it.
 export type HypothesisStatus = 'open' | 'confirmed' | 'inconclusive'
 
@@ -346,7 +365,7 @@ export interface HypothesisFinding {
   created_at: string
 }
 
-// Response shape for GET /registry/hypotheses/{id} — a hypothesis plus every job
+// Response shape for GET /hypotheses/{id} — a hypothesis plus every job
 // (experiment) submitted against it, and every finding filed against it, so far.
 export interface HypothesisWithJobs extends Hypothesis {
   jobs: Experiment[]

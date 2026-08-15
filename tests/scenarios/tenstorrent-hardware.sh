@@ -119,8 +119,7 @@ BARE_AGENT_LOG="$TMPDIR_T/bare-agent.log"
 ( cd "$REPO_ROOT" && go build -o "$BARE_AGENT_BIN" ./runtime/bare-metal/cmd/bare-agent )
 
 CLUSTER_NAME="$BARE_CLUSTER" \
-CONTROLPLANE_URL="$SCHED_URL" \
-REGISTRY_URL="$REGISTRY_URL" \
+API_URL="$API_URL" \
 HYPOTHESISLOOP_CONFIG="${REPO_ROOT}/controlplane/settings/hypothesisloop.yaml" \
 SCRATCH_DIR="$BARE_SCRATCH" \
 NODE_NAME="tt-bare-e2e-node-${RUN_ID}" \
@@ -129,7 +128,7 @@ BARE_AGENT_PID=$!
 trap 'kill "$BARE_AGENT_PID" 2>/dev/null || true; wait "$BARE_AGENT_PID" 2>/dev/null || true; rm -rf "$BARE_SCRATCH" "$TMPDIR_T"; lib_detach_node "${TT_CONTEXT}" tt-quietbox' EXIT
 
 wait_until "bare-agent registered cluster $BARE_CLUSTER" 15 1 \
-  bash -c "curl -sf '$SCHED_URL/internal/clusters' | grep -q '\"$BARE_CLUSTER\"'" \
+  bash -c "curl -sf '$API_URL/internal/clusters' | grep -q '\"$BARE_CLUSTER\"'" \
   || fail "bare-agent never showed up as a reachable cluster (see $BARE_AGENT_LOG)"
 
 # The bare-agent talks to whichever container engine it resolved to (see runtime/bare-metal/
@@ -145,7 +144,7 @@ BARE_ENGINE="$(grep -oE 'engine=(podman|docker)' "$BARE_AGENT_LOG" | head -1 | c
 # (hugepages) has no bare-metal equivalent, so podexec.BuildContainerSpec logs a warning and
 # ignores it rather than rejecting the job — the control plane picks the runtime, not the spec.
 BARE_JOB_ID=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "tenstorrent.com/chipArch=blackhole" "1" "" "$JOB_FILE")
-curl -s -o /dev/null -X POST "$SCHED_URL/experiments/${BARE_JOB_ID}/admit" \
+curl -s -o /dev/null -X POST "$API_URL/experiments/${BARE_JOB_ID}/admit" \
   -H 'Content-Type: application/json' -d "{\"cluster_name\": \"$BARE_CLUSTER\"}"
 BARE_STATUS=$(wait_for_completion_after_running "$BARE_JOB_ID" "0.02" "$ADMISSION_BUDGET_SECONDS" || true)
 [[ "$(get_field "$BARE_JOB_ID" cluster_name)" == "$BARE_CLUSTER" ]] \

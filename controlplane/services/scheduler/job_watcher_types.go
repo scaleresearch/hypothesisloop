@@ -59,6 +59,14 @@ type JobBackendClient interface {
 	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error)
 }
 
+// PhaseDetailer is implemented by backends that can report a runtime's latest explanation for
+// why a job hasn't started (see domain.PhaseDetail). Optional, checked with a type assertion
+// the same way agentloop.PhaseDetailer is on the runtime side — JobBackendClient stays narrow
+// for any backend that doesn't have this to report.
+type PhaseDetailer interface {
+	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, found bool, err error)
+}
+
 // JobWatcher performs periodic stateless passes over durable desired state and drives lifecycle
 // transitions from the latest backend observations.
 type JobWatcher struct {

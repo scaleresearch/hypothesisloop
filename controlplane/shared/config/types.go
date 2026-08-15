@@ -68,23 +68,37 @@ type SchedulerConfig struct {
 	// steady-submitting agent would otherwise get from pure exact-FIFO. Same shape as every
 	// other *_seconds field here: 0/unset falls back to the default below, not "disabled".
 	GuaranteedFairnessWindowSeconds int `yaml:"guaranteed_fairness_window_seconds"`
+	// ResourceDisbalanceTolerance is the multiple of a cluster's per-accelerator CPU/memory/
+	// storage share a running job may request before the scheduler evicts it for stranding idle
+	// accelerators on its own node (see services/scheduler/loop_disbalance.go). Unlike the
+	// *_seconds fields above, 0/unset means DISABLED, not "use a default": this is the only pass
+	// that terminates a running job nobody asked to stop, so it stays opt-in per deployment.
+	// scheduler.DefaultDisbalanceTolerance is the suggested starting value.
+	ResourceDisbalanceTolerance float64 `yaml:"resource_disbalance_tolerance"`
 	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
 	DefaultTerminationGracePeriodSeconds int `yaml:"default_termination_grace_period_seconds"`
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
 	MaxTerminationGracePeriodSeconds int `yaml:"max_termination_grace_period_seconds"`
+	// MaxLogTailLineChars bounds one line of a job's reported log tail (see
+	// runtime/shared/agentloop.splitLongLines): large enough to keep a real compiler error or
+	// stack frame intact, small enough that one pathological line can't blow up a status push.
+	// Lines over this are split, never truncated/dropped.
+	MaxLogTailLineChars int `yaml:"max_log_tail_line_chars"`
 }
 
 // StagesConfig holds the platform-wide default elimination ladder.
 type StagesConfig struct {
 	// Default is the ladder applied to a platform experiment created without its own.
-	// Validated by domain.ValidateStages at load. See docs/stages.md.
+	// Validated by domain.ValidateStages at load.
 	Default []domain.Stage `yaml:"default"`
 }
 
 type ServicesConfig struct {
-	QuotaPort            int    `yaml:"quota_port"`
-	SchedulerPort        int    `yaml:"scheduler_port"`
-	RegistryPort         int    `yaml:"registry_port"`
+	// APIPort serves the whole agent- and UI-facing API — quota, scheduler and registry
+	// operations on one router, so there is a single base URL, a single /openapi.json and a
+	// single /explore to discover all of it.
+	APIPort int `yaml:"api_port"`
+	// MetricControllerPort serves the internal controller only; nothing agent-facing.
 	MetricControllerPort int    `yaml:"metric_controller_port"`
 	MetricsDBURL         string `yaml:"metrics_db_url"`
 }

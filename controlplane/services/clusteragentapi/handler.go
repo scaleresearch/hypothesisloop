@@ -56,7 +56,7 @@ func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string,
 // the /internal/clusters mount. Tagged "cluster-agent" — a separate consumer from the
 // research agent, so it gets its own OpenAPI doc / explore.
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/",
 		Summary: "List clusters and their connectivity", Tags: []string{"cluster-agent"},
 		Description: "Every cluster that has ever polled, and whether its agent is connected right now.",
@@ -66,6 +66,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 	}, error) {
 		heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, h.metricsDBURL, h.connectedWithin)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, h.metricsDBURL, h.connectedWithin)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -82,10 +86,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if connected {
 				lastSeen = now
 			}
+			var busySum, totalSum int64
+			for flavor, t := range total[name] {
+				totalSum += t
+				busySum += t - available[name][flavor]
+			}
 			out[i] = clusterInfo{
-				ClusterName: name,
-				LastSeenAt:  lastSeen,
-				Connected:   connected,
+				ClusterName:      name,
+				LastSeenAt:       lastSeen,
+				Connected:        connected,
+				AcceleratorBusy:  busySum,
+				AcceleratorTotal: totalSum,
 			}
 		}
 		resp := &struct {
@@ -97,7 +108,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return resp, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
 		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, then returns the complete PostgreSQL desired workload set for this cluster.",
@@ -178,7 +189,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return resp, nil
 	})
 
-	apidocs.Register(doc, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-push-status", Method: "POST", Path: "/{name}/status",
 		Summary: "Push job-phase observations from a cluster-agent", Tags: []string{"cluster-agent"},
 		Description: "Body: {\"reports\": [...]}. The complete snapshot is validated and written atomically; any invalid report rejects the whole request.",
@@ -210,6 +221,23 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
 				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, At: now,
 			})
+			// LogTail is optional per report (nil when the executor has nothing new, or
+			// doesn't implement LogTailer) -- only write when the agent actually sent one, so a
+			// job with no fresh output this tick doesn't wipe out its last-known tail.
+			if rep.LogTail != nil {
+				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.LogTail, now); err != nil {
+					return nil, huma.Error500InternalServerError(err.Error())
+				}
+			}
+			// Reason/Message/RestartCount are optional the same way: only write when the
+			// runtime actually has something to say about why this job's container hasn't
+			// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
+			// prior explanation with silence.
+			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 {
+				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, now); err != nil {
+					return nil, huma.Error500InternalServerError(err.Error())
+				}
+			}
 		}
 		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -247,12 +275,25 @@ type clusterInfo struct {
 	ClusterName string    `json:"cluster_name"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	Connected   bool      `json:"connected"`
+	// AcceleratorBusy/AcceleratorTotal are the cluster's most recently reported occupancy,
+	// summed across every accelerator flavor — actual busy-vs-idle chip counts from the last
+	// reconcile snapshot, not a budget-consumption ratio. Zero/absent when no live snapshot is
+	// within the connectedWithin freshness window (e.g. a disconnected cluster).
+	AcceleratorBusy  int64 `json:"accelerator_busy"`
+	AcceleratorTotal int64 `json:"accelerator_total"`
 }
 
-// statusReport is one job-status push from a cluster-agent.
+// statusReport is one job-status push from a cluster-agent. Reason/Message/RestartCount are the
+// runtime's explanation for why a job's container hasn't started (or has been restarting) — see
+// domain.PhaseDetail. Runtime-agnostic strings: each runtime (k8s, bare-metal) translates its
+// own native vocabulary into domain.PhaseReason* before this ever leaves the agent process.
 type statusReport struct {
-	ExperimentID            string `json:"experiment_id"`
-	Phase                   string `json:"phase"` // pending | running | succeeded | failed | gone
-	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
-	AdmittedNode            string `json:"admitted_node,omitempty"`
+	ExperimentID            string   `json:"experiment_id"`
+	Phase                   string   `json:"phase"` // pending | running | succeeded | failed | gone
+	AdmittedAcceleratorType string   `json:"admitted_accelerator_type,omitempty"`
+	AdmittedNode            string   `json:"admitted_node,omitempty"`
+	LogTail                 []string `json:"log_tail,omitempty"`
+	Reason                  string   `json:"reason,omitempty"`
+	Message                 string   `json:"message,omitempty"`
+	RestartCount            int32    `json:"restart_count,omitempty"`
 }

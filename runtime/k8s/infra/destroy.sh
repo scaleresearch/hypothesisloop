@@ -32,7 +32,7 @@ echo "==> Removing cluster-agent bundle from cluster '${CLUSTER_NAME}' (context:
 sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g" "${SCRIPT_DIR}/node-agent-daemonset.yaml" \
   | kctl delete -f - --ignore-not-found
 
-sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|unused|g; s|__CONTROLPLANE_URL__|unused|g; s|__REGISTRY_URL__|unused|g" \
+sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|unused|g; s|__API_URL__|unused|g" \
   "${SCRIPT_DIR}/cluster-agent-deployment.yaml" \
   | kctl delete -f - --ignore-not-found
 

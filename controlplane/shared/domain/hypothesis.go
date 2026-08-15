@@ -12,7 +12,7 @@ import (
 // ExperimentMeta.HypothesisID is required and must reference a row here whose
 // PlatformExperimentID matches the job's own PlatformExperimentID. This is the real
 // uniqueness check: a DB-level UNIQUE index on (platform_experiment_id, normalized_text)
-// (see schema.sql) rejects a second registration of the same claim within the same platform
+// (see shared/db/schema.sql) rejects a second registration of the same claim within the same platform
 // experiment, replacing the old always-novel dedup stub. The same claim registered under a
 // different platform experiment is a distinct hypothesis — different research programs don't
 // share an idea pool.
@@ -35,19 +35,22 @@ type HypothesisStatus string
 const (
 	// HypothesisOpen is the default: still being tested, no verdict yet.
 	HypothesisOpen HypothesisStatus = "open"
-	// HypothesisConfirmed means the owning agent considers the claim validated — either a real
-	// improvement it trusts, or a real, confidently-established negative/refuted result. Either
-	// way, worth another agent reading closely.
+	// HypothesisConfirmed means the owning agent has validated the claim as a real improvement —
+	// worth another agent building on it.
 	HypothesisConfirmed HypothesisStatus = "confirmed"
+	// HypothesisRefuted means the owning agent has confidently established the claim does NOT
+	// hold — a real negative result, not noise. Worth another agent reading so it isn't retested,
+	// but not something to build on.
+	HypothesisRefuted HypothesisStatus = "refuted"
 	// HypothesisInconclusive means noisy, ambiguous, or not worth another agent's time drilling
 	// into further.
 	HypothesisInconclusive HypothesisStatus = "inconclusive"
 )
 
-// ValidHypothesisStatus reports whether s is one of the three recognized statuses.
+// ValidHypothesisStatus reports whether s is one of the four recognized statuses.
 func ValidHypothesisStatus(s HypothesisStatus) bool {
 	switch s {
-	case HypothesisOpen, HypothesisConfirmed, HypothesisInconclusive:
+	case HypothesisOpen, HypothesisConfirmed, HypothesisRefuted, HypothesisInconclusive:
 		return true
 	default:
 		return false

@@ -15,11 +15,14 @@ var ErrInvalidStages = errors.New("stages")
 const MaxStages = 8
 
 // Stage is one rung of the elimination ladder: LengthPct is its share of the experiment (all
-// stages sum to 100), EvictPct the share of surviving agents cut when it ends. See
-// docs/stages.md.
+// stages sum to 100), EvictPct the share of surviving agents cut when it ends..
 type Stage struct {
 	LengthPct float64 `json:"length_pct" yaml:"length_pct"`
 	EvictPct  float64 `json:"evict_pct" yaml:"evict_pct"`
+	// MaxJobHours caps how long a single job may run while this stage is current. Zero means
+	// unlimited. A short cap on early stages pushes agents to explore with many small runs and
+	// only commit to long ones once a stage without a cap is reached.
+	MaxJobHours float64 `json:"max_job_hours,omitempty" yaml:"max_job_hours"`
 }
 
 // DefaultStages is the ladder used when a platform experiment supplies none.
@@ -40,7 +43,7 @@ type StageAdvance struct {
 	AdvancedAt time.Time `json:"advanced_at"`
 }
 
-// ValidateStages enforces docs/stages.md at creation, so nothing downstream defends against a
+// ValidateStages enforces the stage ladder at creation, so nothing downstream defends against a
 // malformed ladder.
 func ValidateStages(stages []Stage) error {
 	if len(stages) == 0 || len(stages) > MaxStages {
@@ -53,6 +56,9 @@ func ValidateStages(stages []Stage) error {
 		}
 		if s.EvictPct < 0 || s.EvictPct >= 100 {
 			return fmt.Errorf("%w: stage %d evict_pct must be in [0, 100), got %g", ErrInvalidStages, i+1, s.EvictPct)
+		}
+		if s.MaxJobHours < 0 {
+			return fmt.Errorf("%w: stage %d max_job_hours must be >= 0 (0 = unlimited), got %g", ErrInvalidStages, i+1, s.MaxJobHours)
 		}
 		total += s.LengthPct
 	}
@@ -87,6 +93,17 @@ func StageProgress(consumedAccH, budgetAccH float64, startsAt, endsAt, now time.
 		return timeProgress
 	}
 	return budgetProgress
+}
+
+// CurrentMaxJobHours is the job-length cap in force right now: the MaxJobHours of the stage
+// currently running, 0 meaning unlimited. The cap follows the ladder rather than being frozen
+// onto a job at submission — a job outliving the stage that admitted it is exactly the
+// long-run-during-exploration case the cap exists to prevent.
+func (p *PlatformExperiment) CurrentMaxJobHours() float64 {
+	if p.CurrentStage < 1 || p.CurrentStage > len(p.Stages) {
+		return 0
+	}
+	return p.Stages[p.CurrentStage-1].MaxJobHours
 }
 
 // BoundaryProgress returns the progress fraction (0..1) at which stage index (1-based) ends.

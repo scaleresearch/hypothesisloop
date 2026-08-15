@@ -1,0 +1,28 @@
+version: "2"
+
+# `make lint` is only useful if a clean run means something, so this config turns off the checks
+# whose findings here are conventional or actively unwanted, and leaves on the ones that have
+# caught real bugs (unused code, staticcheck, ineffassign).
+linters:
+  enable:
+    - ineffassign
+    - unused
+  exclusions:
+    rules:
+      # Cleanup in a defer (Close, Shutdown), and writing a line to stdout in main, have no
+      # failure a caller could act on. Checking them adds noise, not safety.
+      - linters: [errcheck]
+        source: '^\s*defer '
+      - linters: [errcheck]
+        source: 'fmt\.Fprintln\('
+      # SQL clause builders end each branch with n++ so the next one added is correct by default.
+      # The last increment is dead by construction; dropping it makes the next edit a silent bug.
+      - linters: [ineffassign]
+        path: 'shared/db/.*_store\.go'
+        text: 'ineffectual assignment to n'
+      # govet's inline analyzer only suggests inlining a vendored constructor; nothing to fix.
+      - linters: [govet]
+        text: 'should be inlined'
+      # An embedded field named in a selector documents which store the call goes through.
+      - linters: [staticcheck]
+        text: 'QF1008'

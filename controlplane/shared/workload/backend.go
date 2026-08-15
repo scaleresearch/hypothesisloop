@@ -47,6 +47,13 @@ type Backend interface {
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 
+	// GetTotalCapacity reports each cluster's installed (not free) capacity as a canonical
+	// domain.Footprint — the denominator for "how much CPU/memory does one accelerator on this
+	// cluster come with", which GetFlavorCapacity's availability numbers cannot answer. A
+	// cluster with no fresh total report is absent from the map rather than reported as zero,
+	// so callers can tell "no accelerators installed" from "no data".
+	GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error)
+
 	// ProvisionAgent sets up any per-agent resources the backend needs at agent registration
 	// time (called once, when an agent first registers with quota-service). The native
 	// backend has nothing per-agent to create, so this is a no-op; a backend modeling quota

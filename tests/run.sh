@@ -7,6 +7,14 @@
 #   bash tests/run.sh node-death eviction  # only scenarios whose filename matches these
 #   RUN_SLOW=1 bash tests/run.sh           # full suite: fast + slow group
 #   RUN_HARDWARE_TESTS=1 bash tests/run.sh # also include HARDWARE_ONLY scenarios
+#
+# Scenarios default to an NVIDIA dev cluster. To run them against other silicon, name a type the
+# cluster actually advertises and its acch_rate from controlplane/settings/hypothesisloop.yaml
+# (see TEST_ACCELERATOR_TYPE in tests/lib/common.sh) — e.g. for a Tenstorrent host:
+#   TEST_ACCELERATOR_TYPE=tenstorrent.com/chipArch=blackhole TEST_ACCH_RATE=0.5 bash tests/run.sh
+# Scenarios needing inventory the host lacks (several accelerator flavors, more than one node)
+# still skip or fail on their own preconditions; run them one at a time when accelerators are few,
+# since the whole suite runs concurrently and contends for the same chips.
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Mutate shared cluster/node/daemonset state — run sequentially, not concurrently. Structurally
@@ -25,9 +33,10 @@ SLOW_TESTS=(
   preemption-requeue
 )
 
-# Needs real Tenstorrent hardware — excluded unless explicitly requested.
+# Needs real accelerator hardware — excluded unless explicitly requested.
 HARDWARE_ONLY=(
   tenstorrent-hardware
+  nvidia-hardware
 )
 
 is_exclusive() {
@@ -59,6 +68,11 @@ matches() {
 
 LOG_DIR="$(mktemp -d)"
 trap 'rm -rf "$LOG_DIR"' EXIT
+
+# One check for the whole run: an unschedulable cluster makes every scenario fail identically and
+# unhelpfully, several minutes apart. See preflight_accelerator_schedulable.
+source "$DIR/lib/preflight.sh"
+preflight_accelerator_schedulable || exit 2
 
 fast_set=()
 slow_set=()

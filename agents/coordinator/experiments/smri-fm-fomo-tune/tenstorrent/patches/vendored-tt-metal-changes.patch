@@ -1,0 +1,325 @@
+diff --git a/tt-train/sources/ttml/metal/ops/sdpa_bw/device/kernels/compute/sdpa_bw_compute_utils.hpp b/tt-train/sources/ttml/metal/ops/sdpa_bw/device/kernels/compute/sdpa_bw_compute_utils.hpp
+index 61dad7509a..054d4394a1 100644
+--- a/tt-train/sources/ttml/metal/ops/sdpa_bw/device/kernels/compute/sdpa_bw_compute_utils.hpp
++++ b/tt-train/sources/ttml/metal/ops/sdpa_bw/device/kernels/compute/sdpa_bw_compute_utils.hpp
+@@ -151,7 +151,18 @@ inline void transpose_tile_fpu(const uint32_t cb_input, /*output cb*/ const uint
+ // Computes the per-row scalar u = sum(dO * O) needed for softmax backward.
+ // This is part of the softmax gradient: dS = P * (dP - u), where u = sum(P * dP) per row.
+ // Since O = P @ V, we have dP = dO @ V^T, and u = sum(dO * O) row-wise.
+-// The reduction is done via matmul with a column of ones (cb_mat_mul_reduction).
++//
++// M6 (2026-07-31, TENSTORRENT_PORT.md, upstream SDPA_OPTIMIZATION_PROPOSALS.md item B17):
++// the row-sum reduction uses `sfpu_reduce<SUM, Float32, REDUCE_ROW>` directly on the DST
++// register holding the elementwise dO*O accumulation, instead of the previous matmul-with-
++// a-column-of-ones trick (which needed a full pack-to-CB -> wait -> matmul -> unpack round
++// trip through `cb_mat_mul_reduction` just to sum across a tile's columns). This fuses what
++// was 2 tile_regs cycles (elementwise accumulate, then matmul-reduce) into 1, and operates
++// at full FP32 in DST throughout (matmul reduction routed the tile through SrcA/SrcB, a TF32
++// truncation point the SFPU-in-DST path avoids). `cb_mat_mul_reduction` is left as an unused
++// parameter (still loaded by the reader, harmlessly) rather than touching the reader/program
++// factory in 3 call sites for a CB that costs nothing to leave in place.
++//
+ // Computes u_scalar = rowsum(dO * O) and packs the result to cb_u_scalar_row.
+ // When cb_u_scaler_output != 0, also packs a second copy to that CB (for DRAM flush
+ // to the KV kernel). Both packs happen directly from DST at full FP32 precision,
+@@ -160,7 +171,7 @@ void compute_u_scalar_row(
+     const uint32_t cb_grad_output,
+     const uint32_t cb_attn_output,
+     /*output result*/ const uint32_t cb_u_scalar_row,
+-    /*mutmul reduction*/ const uint32_t cb_mat_mul_reduction,
++    /*unused, kept for call-site compatibility -- see M6 comment above*/ const uint32_t cb_mat_mul_reduction,
+     const uint32_t tiles_per_row,
+     const uint32_t scaler_bits,
+     const uint32_t cb_u_scaler_output) {
+@@ -178,31 +189,16 @@ void compute_u_scalar_row(
+             /* tile_idx */ tile_idx,
+             /* dst_reg_idx*/ accum_register);
+     }
+-    tile_regs_commit();
+ 
+-    pack_reconfig_data_format(cb_u_scalar_row);
+-    cb_reserve_back(cb_u_scalar_row, onetile);
+-    tile_regs_wait();
+-    pack_tile(accum_register, cb_u_scalar_row);
+-    tile_regs_release();
+-    cb_push_back(cb_u_scalar_row, onetile);
+-
+-    cb_wait_front(cb_u_scalar_row, onetile);
+-    tile_regs_acquire();
+-    reconfig_data_format(cb_u_scalar_row, cb_mat_mul_reduction);
+-
+-    // This call is required to set up the matmul correctly
+-    matmul_init(cb_u_scalar_row, cb_mat_mul_reduction, /* transpose */ 0);
+-    matmul_tiles(
+-        cb_u_scalar_row,
+-        cb_mat_mul_reduction,
+-        /* tile_idx */ 0,
+-        /* tile_idx */ 0,
+-        /* dst_reg_idx*/ accum_register);
++    // Row-sum reduction directly on DST, same cycle as the accumulation above -- no CB
++    // roundtrip needed. Sequential FPU (mul_tiles accumulate) then SFPU (reduce) on the same
++    // DST tile within one cycle matches the existing safe pattern already used elsewhere in
++    // this file (e.g. apply_softmax_statistics_on_dst's broadcast+sub+exp sequence).
++    sfpu_reduce_init<PoolType::SUM, DataFormat::Float32>();
++    sfpu_reduce<PoolType::SUM, DataFormat::Float32, ReduceDim::REDUCE_ROW>(accum_register);
+     tile_regs_commit();
+ 
+     tile_regs_wait();
+-    cb_pop_front(cb_u_scalar_row, onetile);
+     cb_reserve_back(cb_u_scalar_row, onetile);
+     pack_reconfig_data_format(cb_u_scalar_row);
+     pack_tile(accum_register, cb_u_scalar_row);
+diff --git a/tt-train/sources/ttml/metal/ops/sdpa_fw/device/kernels/compute/sdpa_fw_compute_kernel.cpp b/tt-train/sources/ttml/metal/ops/sdpa_fw/device/kernels/compute/sdpa_fw_compute_kernel.cpp
+index ea0e878455..bc5ba28323 100644
+--- a/tt-train/sources/ttml/metal/ops/sdpa_fw/device/kernels/compute/sdpa_fw_compute_kernel.cpp
++++ b/tt-train/sources/ttml/metal/ops/sdpa_fw/device/kernels/compute/sdpa_fw_compute_kernel.cpp
+@@ -192,10 +192,21 @@ FORCE_INLINE void process_single_row(uint32_t global_row_idx) {
+             cb_push_back(cb_attention_weights, Sk_chunk_t);
+         }
+ #else
+-        // USE_ATTN_MASK (provided mask) — uses a per-`n` matmul_tiles + apply_mask_on_reg path.
+-        // The per-n mask is unique (no reusable transformed tiles) and apply_mask_on_reg operates
++        // USE_ATTN_MASK (provided mask): per-`n` matmul_tiles + apply_mask_on_reg path. The
++        // per-n mask is unique (no reusable transformed tiles) and apply_mask_on_reg operates
+         // on a single DST tile + scratch, which fits comfortably here. K is laid out col-major
+         // in cb_key (uniform reader layout), so the K tile index is `feat*Sk_chunk_t + n`.
++        //
++        // AttentionMaskType::None (neither CAUSAL_MASK/BALANCED_PARALLELISM nor USE_ATTN_MASK
++        // defined): identical matmul, but apply_mask_on_reg and the cb_attn_mask pop are
++        // skipped entirely. sdpa_fw_reader_kernel.cpp only stages tiles into cb_attn_mask when
++        // USE_ATTN_MASK is defined, so touching that CB here for the None case would read
++        // uninitialized L1 -- garbage added to the scores, which overflows to Inf through the
++        // exp() in apply_exp_inplace_and_find_exp_sum below. (apply_mask_on_reg's own docstring
++        // confirms it does not apply the SDPA scale factor -- that happens later, uniformly for
++        // every mask type -- so no substitute scaling call is needed here, unlike the
++        // sdpa_bw_q/kv compute kernels' `else: mul_unary_tile(matmul_accum_reg, scaler_bits)`
++        // no-mask branch, which scale immediately because backward has no later scaled-exp step.)
+         constexpr uint32_t matmul_accum_reg = 0U;
+         for (uint32_t n = 0; n < Sk_chunk_t; ++n) {
+             matmul_init(cb_query, cb_key, /* transpose */ 1);
+@@ -209,7 +220,9 @@ FORCE_INLINE void process_single_row(uint32_t global_row_idx) {
+                     tile_idx * Sk_chunk_t + n,
+                     /* dst */ matmul_accum_reg);
+             }
++#ifdef USE_ATTN_MASK
+             apply_mask_on_reg(matmul_accum_reg, cb_attn_mask, minus_one_bits, custom_inf_bits, /* mask_tile_idx */ n);
++#endif
+             tile_regs_commit();
+             tile_regs_wait();
+             cb_reserve_back(cb_attention_weights, onetile);
+@@ -218,9 +231,11 @@ FORCE_INLINE void process_single_row(uint32_t global_row_idx) {
+             cb_push_back(cb_attention_weights, onetile);
+         }
+ 
++#ifdef USE_ATTN_MASK
+         // Every mask tile is unique per (row, k tile). Pop the whole chunk's worth so the
+         // reader can stage the next chunk.
+         cb_pop_front(cb_attn_mask, Sk_chunk_t);
++#endif
+ #endif
+         // CAUSAL_MASK/BALANCED_PARALLELISM: the two mask tiles stay permanently fronted; no pop.
+ 
+diff --git a/tt-train/sources/ttml/nanobind/nb_ops.cpp b/tt-train/sources/ttml/nanobind/nb_ops.cpp
+index dd3724c3fb..87959a0b53 100644
+--- a/tt-train/sources/ttml/nanobind/nb_ops.cpp
++++ b/tt-train/sources/ttml/nanobind/nb_ops.cpp
+@@ -284,13 +284,15 @@ void py_module(nb::module_& m) {
+             [](const autograd::TensorPtr& query,
+                const autograd::TensorPtr& key,
+                const autograd::TensorPtr& value,
+-               const std::optional<autograd::TensorPtr>& mask) -> autograd::TensorPtr {
+-                return ttml::ops::scaled_dot_product_attention(query, key, value, mask);
++               const std::optional<autograd::TensorPtr>& mask,
++               bool no_mask) -> autograd::TensorPtr {
++                return ttml::ops::scaled_dot_product_attention(query, key, value, mask, 0.0F, no_mask);
+             },
+             nb::arg("query"),
+             nb::arg("key"),
+             nb::arg("value"),
+-            nb::arg("mask") = std::nullopt);
++            nb::arg("mask") = std::nullopt,
++            nb::arg("no_mask") = false);
+         // Overload 2: mask as ttnn.Tensor (or None) - wrap it in autograd::Tensor
+         // ttnn.Tensor wraps tt::tt_metal::Tensor, so we accept that type
+         py_attention.def(
+@@ -298,17 +300,19 @@ void py_module(nb::module_& m) {
+             [](const autograd::TensorPtr& query,
+                const autograd::TensorPtr& key,
+                const autograd::TensorPtr& value,
+-               const std::optional<tt::tt_metal::Tensor>& mask) -> autograd::TensorPtr {
++               const std::optional<tt::tt_metal::Tensor>& mask,
++               bool no_mask) -> autograd::TensorPtr {
+                 std::optional<autograd::TensorPtr> mask_ptr = std::nullopt;
+                 if (mask.has_value()) {
+                     mask_ptr = autograd::create_tensor(mask.value(), false);
+                 }
+-                return ttml::ops::scaled_dot_product_attention(query, key, value, mask_ptr);
++                return ttml::ops::scaled_dot_product_attention(query, key, value, mask_ptr, 0.0F, no_mask);
+             },
+             nb::arg("query"),
+             nb::arg("key"),
+             nb::arg("value"),
+-            nb::arg("mask") = std::nullopt);
++            nb::arg("mask") = std::nullopt,
++            nb::arg("no_mask") = false);
+ 
+         py_attention.def(
+             "scaled_dot_product_attention_composite",
+diff --git a/tt-train/sources/ttml/ops/scaled_dot_product_attention.cpp b/tt-train/sources/ttml/ops/scaled_dot_product_attention.cpp
+index cde953ad33..dd01d9a25d 100644
+--- a/tt-train/sources/ttml/ops/scaled_dot_product_attention.cpp
++++ b/tt-train/sources/ttml/ops/scaled_dot_product_attention.cpp
+@@ -243,13 +243,22 @@ autograd::TensorPtr scaled_dot_product_attention(
+     const autograd::TensorPtr& key,
+     const autograd::TensorPtr& value,
+     const std::optional<autograd::TensorPtr>& mask,
+-    float dropout_probability) {
++    float dropout_probability,
++    bool no_mask) {
+     validate_qkv_shapes(query, key, value);
+ 
++    if (no_mask && mask.has_value() && mask.value()) {
++        throw std::invalid_argument(
++            "scaled_dot_product_attention: no_mask=true is incompatible with a mask tensor "
++            "(pass mask=None, or no_mask=false to apply the mask).");
++    }
++
+     // Kernels support (1, 1, S, S) mask shape - same mask for all batches/heads
+     std::optional<ttnn::Tensor> mask_tensor = std::nullopt;
+     ttml::metal::AttentionMaskType mask_type = ttml::metal::AttentionMaskType::Causal;
+-    if (mask.has_value() && mask.value()) {
++    if (no_mask) {
++        mask_type = ttml::metal::AttentionMaskType::None;
++    } else if (mask.has_value() && mask.value()) {
+         mask_tensor = mask.value()->get_value();
+         mask_type = ttml::metal::AttentionMaskType::Arbitrary;
+     }
+diff --git a/tt-train/sources/ttml/ops/scaled_dot_product_attention.hpp b/tt-train/sources/ttml/ops/scaled_dot_product_attention.hpp
+index d46211783d..27e73b918e 100644
+--- a/tt-train/sources/ttml/ops/scaled_dot_product_attention.hpp
++++ b/tt-train/sources/ttml/ops/scaled_dot_product_attention.hpp
+@@ -9,13 +9,20 @@
+ namespace ttml::ops {
+ 
+ // Fused implementation using custom sdpa_fw and sdpa_bw kernels (default)
+-// When no mask is provided, uses on-device causal mask generation
++// When no mask is provided and no_mask is false, uses on-device causal mask
++// generation. When no_mask is true, the mask argument is ignored and
++// AttentionMaskType::None is used instead: the fused kernels skip mask-bias
++// application entirely (cheaper than an explicit all-ones "Arbitrary" mask,
++// which computes and adds a zero bias for no semantic reason). Use this for
++// plain bidirectional attention where every position is always valid, e.g.
++// no static causal or padding structure exists.
+ autograd::TensorPtr scaled_dot_product_attention(
+     const autograd::TensorPtr& query,
+     const autograd::TensorPtr& key,
+     const autograd::TensorPtr& value,
+     const std::optional<autograd::TensorPtr>& mask = std::nullopt,
+-    float dropout_probability = 0.0F);
++    float dropout_probability = 0.0F,
++    bool no_mask = false);
+ 
+ // Composite implementation using individual TTNN ops (fallback)
+ autograd::TensorPtr scaled_dot_product_attention_composite(
+diff --git a/tt-train/tests/ops/sdpa_bw_op_test.cpp b/tt-train/tests/ops/sdpa_bw_op_test.cpp
+index d7c53cf92e..2e5cc3d023 100644
+--- a/tt-train/tests/ops/sdpa_bw_op_test.cpp
++++ b/tt-train/tests/ops/sdpa_bw_op_test.cpp
+@@ -575,8 +575,17 @@ void run_sdpa_backward_test(const SDPABackwardTestConfig& config) {
+     const auto grad_output = core::from_xtensor(grad_output_tensor, device);
+ 
+     // ========== Pure Float Reference (Ground Truth) ==========
++    // `attn_mask_tensor` is always a causal (lower-triangular) mask (see `generate_attn_mask`
++    // above) -- correct to pass through for Causal/Arbitrary configs (both exercise causal-shaped
++    // masking today, just via different code paths), but for AttentionMaskType::None the kernel
++    // computes genuinely unmasked (bidirectional) attention, so the float reference must skip
++    // masking too or it silently compares against the wrong ground truth. Mirrors the existing
++    // `mask_type == Arbitrary ? optional(attn_mask) : nullopt` conditional already used below for
++    // the composite/kernel calls.
++    const std::optional<xt::xarray<float>> float_ref_mask =
++        mask_type == ttml::metal::AttentionMaskType::None ? std::nullopt : std::make_optional(attn_mask_tensor);
+     auto float_gradients =
+-        float_sdpa_backward(query_tensor, key_tensor, value_tensor, grad_output_tensor, attn_mask_tensor);
++        float_sdpa_backward(query_tensor, key_tensor, value_tensor, grad_output_tensor, float_ref_mask);
+     const auto& float_dQ = float_gradients[0];
+     const auto& float_dK = float_gradients[1];
+     const auto& float_dV = float_gradients[2];
+@@ -584,7 +593,18 @@ void run_sdpa_backward_test(const SDPABackwardTestConfig& config) {
+     const auto& float_attn_output = float_gradients[4];
+ 
+     // ========== Composite Implementation (uses ttnn ops) ==========
+-    auto composite_output = composite_sdpa(query, key, value, grad_output, attn_mask, /*return_intermediate=*/true);
++    // `composite_sdpa` has no on-the-fly causal-mask generation (unlike the real `sdpa_fw`/
++    // `sdpa_bw` kernels for Causal) -- it only ever applies whatever `attn_mask` optional it's
++    // given, so Causal/Arbitrary configs both need the (always causal-shaped) mask tensor passed
++    // explicitly here. For AttentionMaskType::None the kernel path computes genuinely unmasked
++    // attention, so this reference must skip masking too, or `fw_attn_output_matches` below
++    // (a real asserted check, not just informational) would spuriously fail comparing an unmasked
++    // kernel output against a causally-masked composite reference. Same conditional shape as the
++    // float reference fix above.
++    const std::optional<ttnn::Tensor> composite_ref_mask =
++        mask_type == ttml::metal::AttentionMaskType::None ? std::nullopt : std::make_optional(attn_mask);
++    auto composite_output =
++        composite_sdpa(query, key, value, grad_output, composite_ref_mask, /*return_intermediate=*/true);
+     const auto composite_attn_output = /* attn_output */ composite_output[0];
+     [[maybe_unused]] auto composite_lse = /* logsumexp */ composite_output[1];
+     const auto dL_dQ = /* dL_dQ */ composite_output[2];
+@@ -854,6 +874,58 @@ TEST_F(SDPABackwardTest, NIGHTLY_CausalMask_LargerSequence) {
+     run_sdpa_backward_test(config);
+ }
+ 
++// ========== No-Mask (AttentionMaskType::None) Tests ==========
++//
++// Every test above exercises Causal or Arbitrary masking (and, per
++// `generate_attn_mask`, "Arbitrary" here always happens to be a causal-shaped
++// mask too -- see the float-reference conditional added above this section).
++// None of them cover `AttentionMaskType::None` (genuinely unmasked,
++// bidirectional attention), which is what this port's MAE encoder/decoder
++// actually use in production (`ops_tt/attention.py`'s
++// `bidirectional_scaled_dot_product_attention`, `no_mask=True`) -- see
++// `tenstorrent/docs/m6-optimization-results.md`'s "Redundant Q/dO/O re-read
++// theory" section for why this gap matters specifically: it is the exact
++// scale/mask-type combination any KV-kernel redundant-reread fix would
++// touch, and this test-coverage gap is why that fix was not attempted
++// without first adding this test.
++//
++// Shape chosen to match `main_pretrain_tt.full_vitl_real_contract()`'s real
++// encoder config exactly (B=24, H=16, D=64, S=544) rather than a shrunk
++// unit-test shape: `NC = batch*heads = 384` is the same total-row count the
++// real model uses (both encoder and decoder use B=24,H=16), and on this
++// host's real device grid (11x10 = 110 cores, confirmed via
++// `compute_with_storage_grid_size()`), `sdpa_bw_kv_program_factory.cpp`'s
++// `split_work_to_cores(grid, NC*St)` gives ~3072/110 ~= 27.9 rows/core with
++// `St=17` rows/group -- ~3.5 (batch,head) groups per core, matching the
++// ratio the M6 doc measured for both encoder (`~60/17`) and decoder
++// (`~307/88`) at real production scale. That ratio, not the absolute
++// sequence length, is what determines whether a core's assigned row range
++// crosses a group boundary -- the exact code path a redundant-reread fix
++// restructures -- so this shape is sufficient to catch that bug class even
++// though it uses the encoder's (not decoder's) sequence length; decoder
++// scale (S=2816) was not used here because `float_sdpa_backward`'s CPU
++// reference materializes a full `(B,H,S,S)` array (~14.6 TB in float32 at
++// decoder scale, ~433 MB at this encoder scale) -- infeasible at decoder
++// scale for a CPU-side unit test, not a limitation of the fix or this test's
++// coverage of the group-boundary bug class.
++TEST_F(SDPABackwardTest, NIGHTLY_NoMask_ProductionEncoderShape) {
++    SDPABackwardTestConfig config{
++        .batch_size = 24U,
++        .sequence_length = 544U,
++        .query_dim = 64U,
++        .key_value_dim = 64U,
++        .num_query_heads = 16U,
++        .num_kv_heads = 16U,
++        .dropout_prob = 0.0F,
++        .atol = 3e-2F,
++        .rtol = 3e-2F,
++        .fw_atol = 3e-2F,
++        .fw_rtol = 3e-2F,
++        .test_name = "NoMask_ProductionEncoderShape (B=24, S=544, D=64, H=16, mask=None)",
++        .mask_type = ttml::metal::AttentionMaskType::None};
++    run_sdpa_backward_test(config);
++}
++
+ // ========== Different V Dimension Tests (qE == kE != vE) ==========
+ 
+ // Disabled: non-deterministic accuracy failures — https://github.com/tenstorrent/tt-metal/issues/46121

@@ -28,7 +28,7 @@ restore_cluster_agent() {
 trap restore_cluster_agent EXIT
 
 cluster_absent_from_live_metrics() {
-  curl -sf "$SCHED_URL/internal/clusters/" \
+  curl -sf "$API_URL/internal/clusters/" \
     | py "import sys,json; print(all(c['cluster_name'] != sys.argv[1] for c in json.load(sys.stdin)['clusters']))" "$CLUSTER_NAME" \
     | grep -qx True
 }
@@ -144,7 +144,7 @@ else
 	disconnect_cluster_agent
 	wait_until "cluster-agent reports disconnected" 15 1 cluster_agent_disconnected \
 		|| fail "cluster-agent never became disconnected in delete-convergence phase"
-  curl -sf -X POST "$SCHED_URL/experiments/${DELETE_JOB}/cancel" > /dev/null \
+  curl -sf -X POST "$API_URL/experiments/${DELETE_JOB}/cancel" > /dev/null \
     || fail "failed to persist cancellation while cluster-agent was disconnected"
   [[ "$(get_status "$DELETE_JOB")" == "EVICTED" ]] \
     && pass "PostgreSQL desired lifecycle changed to EVICTED while reconciliation was unavailable" \

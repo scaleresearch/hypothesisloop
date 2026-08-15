@@ -4,14 +4,18 @@ import Link from 'next/link'
 import { Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import { useState } from 'react'
-import { fetchAllHypotheses, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
+import { useMemo, useState } from 'react'
+import { fetchHypothesesPage, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
 import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { SearchableSelect } from '@/components/ui/searchable-select'
+import { Pagination } from '@/components/ui/pagination'
+
+const PAGE_SIZE = 25
 
 const STATUS_FILTERS: Array<{ value: HypothesisStatus | ''; label: string }> = [
   { value: '', label: 'All' },
@@ -43,40 +47,50 @@ function HypothesesPageContent() {
   const peID = searchParams.get('pe') ?? ''
   const [agentFilter, setAgentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<HypothesisStatus | ''>('')
+  const [page, setPage] = useState(0)
 
   const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
 
-  // Every hypothesis belongs to exactly one platform experiment's shared idea pool — there is
-  // no unscoped registry on the backend. To show a combined view here we fetch every platform
-  // experiment, then that hypothesis pool per platform experiment, and merge — the "Platform
-  // Experiment" column plus the filter below is what makes that structure visible instead of
-  // flattening it away.
+  // GET /hypotheses accepts an optional platform_experiment_id: omitted, it spans every
+  // platform experiment's pool server-side (ORDER BY created_at DESC LIMIT/OFFSET across all of
+  // them) — this page only ever holds the one page of rows it's currently showing. The
+  // "Platform Experiment" column plus the filter below still makes the underlying per-pool
+  // structure visible even though the read itself is unscoped.
   const { data: platformExperiments } = useSWR<PlatformExperiment[]>(
     'platform-experiments-all',
     () => fetchPlatformExperiments(),
     { refreshInterval: 30_000 },
   )
   const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
-  const peIDs = (platformExperiments ?? []).map(pe => pe.id)
 
-  const { data: hypotheses, error, isLoading, mutate } = useSWR<Hypothesis[]>(
-    peIDs.length > 0 ? ['hypotheses-all', peIDs.join(',')] : null,
-    () => fetchAllHypotheses(peIDs),
-    { refreshInterval: 15_000 },
+  const { data, error, isLoading, mutate } = useSWR(
+    ['hypotheses', peID, agentFilter, statusFilter, page],
+    () => fetchHypothesesPage({
+      platform_experiment_id: peID || undefined,
+      agent: agentFilter || undefined,
+      status: statusFilter || undefined,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    }),
+    { refreshInterval: 15_000, keepPreviousData: true },
   )
-
-  const list = (() => {
-    let all = hypotheses ?? []
-    if (peID) all = all.filter(h => h.platform_experiment_id === peID)
-    if (agentFilter) all = all.filter(h => h.agent_id === agentFilter)
-    if (statusFilter) all = all.filter(h => (h.status ?? 'open') === statusFilter)
-    return all
-  })()
+  const list = data?.items ?? []
+  const total = data?.total ?? 0
 
   function setPEFilter(next: string) {
+    setPage(0)
     if (next) router.push(`/hypotheses?pe=${next}`)
     else router.push('/hypotheses')
   }
+
+  const sortedPEs = useMemo(
+    () => [...(platformExperiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [platformExperiments],
+  )
+  const sortedAgentOptions = useMemo(
+    () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [agents],
+  )
 
   return (
     <div>
@@ -86,69 +100,34 @@ function HypothesesPageContent() {
         actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <span className="uppercase-label">Platform Experiment</span>
-        <select
+        <SearchableSelect
           value={peID}
-          onChange={e => setPEFilter(e.target.value)}
-          className="mono"
-          style={{
-            fontSize: 12,
-            padding: '5px 10px',
-            border: '1px solid rgba(255,255,255,.16)',
-            borderRadius: 6,
-            background: 'var(--surface-2)',
-            color: 'var(--foreground)',
-          }}
-        >
-          <option value="">All ({(hypotheses ?? []).length})</option>
-          {(platformExperiments ?? []).map(pe => (
-            <option key={pe.id} value={pe.id}>{pe.name}</option>
-          ))}
-        </select>
+          onChange={setPEFilter}
+          allLabel="All"
+          options={sortedPEs.map(pe => ({ value: pe.id, label: pe.name }))}
+        />
         {peID && <Link href="/hypotheses" className="text-link" style={{ fontSize: 12 }}>Clear filter</Link>}
 
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
-        <select
+        <SearchableSelect
           value={agentFilter}
-          onChange={e => setAgentFilter(e.target.value)}
-          className="mono"
-          style={{
-            fontSize: 12,
-            padding: '5px 10px',
-            border: '1px solid rgba(255,255,255,.16)',
-            borderRadius: 6,
-            background: 'var(--surface-2)',
-            color: 'var(--foreground)',
-          }}
-        >
-          <option value="">All agents</option>
-          {(agents ?? []).map(a => (
-            <option key={a.id} value={a.id}>{a.name ?? a.id}</option>
-          ))}
-        </select>
+          onChange={v => { setAgentFilter(v); setPage(0) }}
+          allLabel="All agents"
+          options={sortedAgentOptions.map(a => ({ value: a.id, label: a.name ?? a.id }))}
+        />
         {agentFilter && (
-          <Button variant="link" onClick={() => setAgentFilter('')}>Clear</Button>
+          <Button variant="link" onClick={() => { setAgentFilter(''); setPage(0) }}>Clear</Button>
         )}
 
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Status</span>
-        <select
+        <SearchableSelect
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value as HypothesisStatus | '')}
-          className="mono"
-          style={{
-            fontSize: 12,
-            padding: '5px 10px',
-            border: '1px solid rgba(255,255,255,.16)',
-            borderRadius: 6,
-            background: 'var(--surface-2)',
-            color: 'var(--foreground)',
-          }}
-        >
-          {STATUS_FILTERS.map(f => (
-            <option key={f.value} value={f.value}>{f.label}</option>
-          ))}
-        </select>
+          onChange={v => { setStatusFilter(v as HypothesisStatus | ''); setPage(0) }}
+          allLabel="All"
+          options={STATUS_FILTERS.filter(f => f.value !== '').map(f => ({ value: f.value, label: f.label }))}
+        />
       </div>
 
       {isLoading && <Loading />}
@@ -157,7 +136,7 @@ function HypothesesPageContent() {
       <Pod>
         <PodHeader>
           Hypothesis Registry
-          {list.length > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({list.length})</span>}
+          {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
         </PodHeader>
         <PodContent scrollX>
           <table className="wa-table">
@@ -214,6 +193,7 @@ function HypothesesPageContent() {
               })}
             </tbody>
           </table>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </PodContent>
       </Pod>
     </div>

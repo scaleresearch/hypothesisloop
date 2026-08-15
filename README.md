@@ -5,10 +5,10 @@ A platform for running autonomous ML research agents against a shared compute bu
 ## What it does
 
 - **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (accelerator-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
-- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool (agents register hypothesis text once via `POST /registry/hypotheses`; registering equivalent text again returns the existing row instead of a duplicate). A completed run requires a written finding — attached to the hypothesis it tested — before the same agent can submit again.
+- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool (agents register hypothesis text once via `POST /hypotheses`; registering equivalent text again returns the existing row instead of a duplicate). A completed run requires a written finding — attached to the hypothesis it tested — before the same agent can submit again.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler distinguishes "job is mid-reschedule" from "job actually hung" before evicting for silence, and billing settles against observed usage across the gap.
 - **Inspectable eviction reasons.** Jobs are evicted with a specific reason (`silent`, `crash_loop`, `quota_exhaustion`, `stuck_pending`, ...) rather than disappearing silently. `COMPLETED`/`FAILED`/`EVICTED` are terminal.
-- **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting — and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors (see `docs/stages.md`).
+- **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting — and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors (see `the stage ladder`).
 - **No cluster credentials in the control plane.** Agents talk to a REST API; the control plane never holds a kubeconfig or dials into a target cluster.
 - **Runs on plain Kubernetes.** Jobs are scheduled as native Kubernetes `Job` objects with `PriorityClass` for admission/preemption — no external queueing operator (Kueue, Volcano, etc.) required, though the scheduling backend is pluggable if you want one.
 
@@ -116,12 +116,12 @@ make controlplane-up
 
 ```bash
 # Point kubectl at your cluster, then:
-CONTROLPLANE_URL=https://your-control-plane:8082 REGISTRY_URL=https://your-control-plane:8083 \
+API_URL=https://your-control-plane:8081 \
   make cluster-agent-up CLUSTER=my-cluster
 make controlplane-up
 ```
 
-`CONTROLPLANE_URL`/`REGISTRY_URL` just need to be reachable *outbound* from inside
+`API_URL` just needs to be reachable *outbound* from inside
 the target cluster — the control plane never needs to reach the cluster at all, so
 there's no kubeconfig or credential to hand it. Repeat `make cluster-agent-up
 CLUSTER=<name>` for every additional target cluster, and add a matching entry to
@@ -170,14 +170,19 @@ cluster access. Start here: [`tests/workloads/generic/spec.md`](tests/workloads/
 
 ## Endpoints
 
-| Service                          | URL                    |
-|----------------------------------|------------------------|
-| control-service: quota           | http://localhost:8081  |
-| control-service: scheduler       | http://localhost:8082  |
-| metrics-service: registry        | http://localhost:8083  |
-| metrics-service: metric-controller | http://localhost:8084 |
-| UI                               | http://localhost:3000  |
-| GreptimeDB                       | http://localhost:4000  |
+| Service                            | URL                    |
+|------------------------------------|------------------------|
+| API (agents + UI): all operations  | http://localhost:8081  |
+| ↳ OpenAPI schema                   | http://localhost:8081/openapi.json |
+| ↳ Agent-facing digest              | http://localhost:8081/explore |
+| ↳ Operator-facing digest           | http://localhost:8081/explore/coordinator |
+| metrics-service: metric-controller (internal) | http://localhost:8084 |
+| UI                                 | http://localhost:3000  |
+| GreptimeDB                         | http://localhost:4000  |
+
+The whole public API — quota, scheduling and registry operations — is served from that one
+port, with one OpenAPI document describing all of it. There is no per-service base URL to pick
+between.
 
 ## Makefile targets
 

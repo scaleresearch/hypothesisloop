@@ -61,8 +61,18 @@ type JobSpec struct {
 	// ordinary torch.distributed.init_process_group(env://) script works with no glue code. The
 	// Job completes only once every rank succeeds — no coordinator-only completion mode.
 	NumNodes int `json:"num_nodes,omitempty" yaml:"num_nodes,omitempty"`
-	// MaxRetries is how many times a failing node is retried before the job is marked
-	// failed. Required and non-negative.
+	// MaxRetries is how many times a failing node is RETRIED, not how many attempts run: N
+	// means up to N+1 attempts, so max_retries 2 gives 3 runs before the job is marked failed
+	// and max_retries 0 means a single attempt. Worth being deliberate about — every retry of a
+	// job that fails for a deterministic reason (a code bug, a bad config) re-burns its full
+	// accelerator time to reach the same failure, so 0 is the honest setting for a diagnostic
+	// run you expect to fail. Required and non-negative.
+	//
+	// It bounds pod-level retries. A container can also be restarted in place by the kubelet,
+	// which is a separate mechanism this field does not reach — so max_retries 0 is executed
+	// with in-place restarts disabled too, to make "no retries" mean one attempt rather than
+	// one pod. For N > 0 the two layers still compose: up to N+1 pods, each of which the
+	// kubelet may also restart.
 	MaxRetries *int `json:"max_retries" yaml:"max_retries"`
 
 	// TerminationGracePeriodSeconds overrides the cluster's default pod shutdown grace period.
@@ -85,6 +95,17 @@ type JobSpec struct {
 	// system today; passes straight through to pod resource requests/limits so the job can still
 	// get scheduled onto the right hardware.
 	ExtraResources map[string]string `json:"extra_resources,omitempty" yaml:"extra_resources,omitempty"`
+
+	// HostMounts bind-mounts a static, already-populated directory on whichever node the job
+	// lands on, read-only, into the container — keyed by the container path the job expects to
+	// read it at, valued by the host path on the node. This is the platform's lightweight
+	// hostPath-volume equivalent: for data that already exists on disk out of band (a dataset
+	// fetched once, ahead of time), never a fetch-on-demand cache — if the named host path
+	// doesn't exist on the node a job actually gets placed on, the job fails fast (missing mount)
+	// rather than silently running without the data. Because it's node-local, a job only sees the
+	// mount if it lands on a node that has it; NodeSelector is the tool for pinning a job to nodes
+	// known to carry a given mount. Supported identically by both the k8s and bare-metal backends.
+	HostMounts map[string]string `json:"host_mounts,omitempty" yaml:"host_mounts,omitempty"`
 }
 
 // TopologySpec expresses placement requirements for a distributed job's nodes — the difference
@@ -125,7 +146,7 @@ type ExperimentMeta struct {
 	ParentID             *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
 
 	// HypothesisID is required: the ID of a hypothesis previously registered (or retrieved,
-	// if equivalent text already existed) via POST /registry/hypotheses.
+	// if equivalent text already existed) via POST /hypotheses.
 	HypothesisID string `json:"hypothesis_id" yaml:"hypothesis_id"`
 	Hypothesis   string `json:"hypothesis" yaml:"hypothesis"`
 	Objective    string `json:"objective" yaml:"objective"`

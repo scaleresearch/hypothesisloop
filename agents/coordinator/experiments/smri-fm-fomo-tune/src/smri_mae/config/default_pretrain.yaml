@@ -1,0 +1,103 @@
+# Name of the run. Used for output directory suffix and wandb.
+name: pretrain
+
+# Description of the run. Goes in wandb notes.
+notes: null
+
+# Root output directory.
+# The run writes to checkpoints/<name> when name is set.
+output_dir: checkpoints
+
+# Standard 3D structural MRI volume size.
+img_size: [208, 240, 208]
+patch_size: 8
+
+# Masking.
+mask_ratio: 0.80
+pred_mask_ratio: null
+pad_to_multiple: 32
+
+# Model.
+model: mae_vit_large
+model_kwargs:
+  # target normalization: null/none, global, slice, or patch.
+  target_norm: none
+
+  no_decode_pos: false
+  mask_drop_scale: false
+
+  class_token: true
+  reg_tokens: 0
+  no_embed_class: false
+
+  decoder_depth: 4
+  drop_path_rate: 0.0
+
+# Datasets.
+datasets:
+  fomo_train:
+    url: datasets/FOMO_with_dwi/shard.{000000..001620}.tar
+    samples_per_epoch: 243200
+    shuffle: true
+    buffer_size: 8000
+    drop_last: true
+
+  fomo_val:
+    url: datasets/FOMO_with_dwi/shard.{001621..001800}.tar
+    samples_per_epoch: 26880
+    shuffle: false
+    buffer_size: 1000
+    drop_last: true
+
+train_dataset: fomo_train
+eval_datasets:
+  - fomo_val
+
+# Data loader.
+num_workers: 4
+prefetch_factor: 2
+presend_cuda: true
+
+# Optimization.
+epochs: 100
+batch_size: 64
+accum_iter: 1
+
+base_lr: 0.001
+min_lr: 1e-6
+warmup_epochs: 10
+weight_decay: 0.05
+betas: [0.9, 0.95]
+clip_grad: 1.0
+
+amp: true
+amp_dtype: bfloat16
+
+# Checkpointing.
+ckpt: null
+resume: false
+auto_resume: true
+start_epoch: 0
+checkpoint_period: 10
+max_checkpoints: 5
+
+# Evaluation.
+eval_period: 10
+
+# Sync checkpoints to an R2 bucket using the AWS CLI. Set to a URL to enable.
+r2_sync: null
+
+# Sync checkpoints to a Hugging Face Hub model repo. Set hf_repo_id to enable;
+# hf_subfolder controls where within the repo (defaults to `name`).
+hf_repo_id: null
+hf_subfolder: null
+
+device: cuda
+distributed: false
+seed: 7338
+eval_seed: 7338
+debug: false
+
+wandb: false
+wandb_entity: null
+wandb_project: smri-fm

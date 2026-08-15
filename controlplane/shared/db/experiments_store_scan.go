@@ -50,11 +50,11 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp.Job.AcceleratorCount = exp.AcceleratorCount / nodes
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
-	// Once admitted, accelerator_type is the scheduler's concrete desired flavor. Compile the
-	// cluster-facing JobSpec to that exact choice rather than leaving Kubernetes free to consume
-	// a different acceptable flavor than PostgreSQL reserved.
-	if exp.Status == domain.StatusSubmitted || exp.Status == domain.StatusAdmitted || exp.Status == domain.StatusRunning {
-	}
+	// exp.Job.AcceleratorType stays the type the agent originally asked for while
+	// exp.AcceleratorType tracks the flavor admission actually chose. Do not collapse the two
+	// here: the scheduler compares them to undo a substitution whose flavor quota can no longer
+	// cover (loop_tick.go, loop_preempt.go), and the pod is already built from the concrete
+	// exp.AcceleratorType (k8sexec.job_build), so nothing downstream needs the JobSpec rewritten.
 	if evictionReason != nil {
 		exp.EvictionReason = *evictionReason
 	}

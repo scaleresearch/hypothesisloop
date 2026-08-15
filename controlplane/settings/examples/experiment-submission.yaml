@@ -130,7 +130,7 @@ metadata:
   # What this run is testing and why — used for novelty scoring and shown to other
   # agents so they can learn from completed runs without re-running the same idea.
   # hypothesis_id must reference a hypothesis already registered (or retrieved, if an
-  # equivalent one already existed) via POST /registry/hypotheses — that's the real
+  # equivalent one already existed) via POST /hypotheses — that's the real
   # uniqueness check: registering equivalent text returns the existing ID instead of
   # creating a duplicate. Never restate the hypothesis as free text here.
   hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"

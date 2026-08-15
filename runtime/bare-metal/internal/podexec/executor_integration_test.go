@@ -21,7 +21,7 @@ func newTestExecutor(t *testing.T) *Executor {
 	t.Helper()
 	dir := t.TempDir()
 	e, err := New(Config{
-		RegistryURL:                          "http://example.invalid:8083",
+		APIURL:                               "http://example.invalid:8083",
 		DefaultTerminationGracePeriodSeconds: 5,
 		MaxTerminationGracePeriodSeconds:     30,
 		ScratchDir:                           dir,

@@ -21,7 +21,7 @@ type QuotaConfig struct {
 	// BurstFraction is burst_quota = guaranteed * burst_fraction.
 	BurstFraction float64 `json:"burst_fraction"`
 	// DefaultStages is the elimination ladder applied to a platform experiment created
-	// without its own. See docs/stages.md.
+	// without its own.
 	DefaultStages []Stage `json:"default_stages"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
 	// a single platform experiment. 0 means unlimited.

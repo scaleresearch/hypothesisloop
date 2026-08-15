@@ -1,0 +1,33 @@
+# Job image for sparse-sdpa: same Tenstorrent release base as dummy-tt-matmul's seed (ttnn
+# preinstalled at /opt/venv, cmake/ninja/clang/git already present for the build_and_run.sh
+# from-source path), plus the two things every prior run's harness needed and had to
+# hand-roll/rediscover per agent:
+#   1. torch (release wheel doesn't ship it -- needed for the host-side golden/PCC check).
+#   2. The exact upstream sparse_sdpa test-utility modules this experiment's harness.py imports
+#      directly (tests/ttnn/unit_tests/operations/sdpa/sparse_sdpa_test_utils.py,
+#      tests/ttnn/profiling/realtime_profiler_utils.py, plus their own transitive imports),
+#      pinned to the SAME $TT_METAL_REF the agent container clones for reading (see this
+#      experiment's Dockerfile.experimentator) -- this is what "reuse tt-metal's own test code,
+#      not a hand copy" actually requires: the code has to be physically present in the job image.
+# A sparse (blobless, single-commit) checkout of just tests/ttnn keeps this fast and small --
+# no need for the full ~GB tt-metal tree or a build for the fast/prebuilt-wheel path.
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:latest-rc
+
+ARG TT_METAL_REF=e45135c5516c6ab18cf855c585d31da684fe64db
+ENV TT_METAL_REF=${TT_METAL_REF}
+ENV TT_MESH_GRAPH_DESC_PATH=/opt/venv/lib/python3.10/site-packages/ttnn/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto
+ENV TT_METAL_TEST_UTILS_PATH=/opt/tt-metal-tests
+
+RUN uv pip install --python /opt/venv/bin/python3 --index-url https://download.pytorch.org/whl/cpu torch
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/tenstorrent/tt-metal.git /opt/tt-metal-tests \
+    && cd /opt/tt-metal-tests \
+    && git checkout ${TT_METAL_REF} -- tests/ttnn/unit_tests/operations/sdpa tests/ttnn/profiling \
+    && rm -rf .git
+
+WORKDIR /app
+COPY harness.py loglines.py .
+COPY build_and_run.sh .
+
+ENTRYPOINT ["/opt/venv/bin/python3", "harness.py"]

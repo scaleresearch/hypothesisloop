@@ -49,13 +49,16 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
                      "TaskOutput", "TaskStop"]
 
 
-def _log_message(message) -> None:
+def _log_message(message) -> bool:
+    """Logs message and returns True iff this message was a tool use (see idle-nudge backoff)."""
+    used_tool = False
     if isinstance(message, AssistantMessage):
         for block in message.content:
             if isinstance(block, TextBlock) and block.text.strip():
                 log.info("assistant: %s", block.text.strip()[:800])
             elif isinstance(block, ToolUseBlock):
                 log.info("tool_use: %s(%s)", block.name, json.dumps(block.input, default=str)[:400])
+                used_tool = True
     elif isinstance(message, ResultMessage):
         log.info(
             "result: subtype=%s turns=%d cost_usd=%s stop_reason=%s",
@@ -67,6 +70,7 @@ def _log_message(message) -> None:
             "rate_limit: status=%s type=%s utilization=%s resets_at=%s",
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
+    return used_tool
 
 
 def _session_file(setup: core.RunSetup) -> str:
@@ -94,11 +98,10 @@ def _save_resume_id(setup: core.RunSetup, session_id: str | None) -> None:
 # condition being true (see core.stop_reason) — keeps the conversation (and its prompt cache)
 # alive across what would otherwise be process-ending idle exits.
 CONTINUE_PROMPT = (
-    "Your turn ended but the platform experiment is still open and you are not held. If you were "
-    "waiting on a job, poll it now (GET /experiments/{id}) and act on its current state — a "
-    "background wakeup you scheduled will NOT resume this process. If it's still running, take the "
-    "next useful step (research the next hypothesis, check the registry pool) rather than ending "
-    "your turn again to wait idle. If you have a completed job needing a summary, file it now."
+    "Your turn ended but the platform experiment is still open and you are not held. Nothing "
+    "resumes this process on a timer — a background wakeup you scheduled will NOT wake it — so "
+    "check current platform state and continue with the most useful work available rather than "
+    "ending your turn to wait idle."
 )
 
 
@@ -112,6 +115,15 @@ _RECONNECT_BACKOFF_MAX_S = 900
 # resets_at read in case of a bogus/far-future timestamp, and re-check state after waking rather
 # than trusting one read for arbitrarily long.
 _MAX_SINGLE_SLEEP_S = 3600
+
+# Idle-nudge backoff: when the model ends its turn with no tool use at all (nothing to react to
+# -- no job polled, no API touched), doubling the pre-nudge sleep avoids burning a full model turn
+# every ~15-20s once an agent has converged and is just repeating "nothing changed, holding
+# steady" (observed costing real tokens over an 8h run once an agent finishes early -- see
+# improvements.md). Any turn that does use a tool resets the backoff immediately, since that's a
+# real reaction to new state, not idle polling.
+_IDLE_NUDGE_BACKOFF_INITIAL_S = 15
+_IDLE_NUDGE_BACKOFF_MAX_S = 900
 
 
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
@@ -149,14 +161,19 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     async with ClaudeSDKClient(options=options) as client:
         first_prompt = "Continue where you left off." if resume_id else "Begin."
         await client.query(first_prompt)
+        idle_nudge_backoff_s = _IDLE_NUDGE_BACKOFF_INITIAL_S
         while True:
             got_result = False
+            turn_is_error = False
+            turn_used_tool = False
             async for message in client.receive_response():
-                _log_message(message)
+                if _log_message(message):
+                    turn_used_tool = True
                 if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
                     rate_limited_resets_at = message.rate_limit_info.resets_at
                 if isinstance(message, ResultMessage):
                     got_result = True
+                    turn_is_error = message.is_error
                     session_id = getattr(message, "session_id", None) or resume_id
                     _save_resume_id(setup, session_id)
                     resume_id = session_id or resume_id
@@ -174,6 +191,16 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.warning("stream ended without a ResultMessage — treating as transient")
                 return resume_id, None
 
+            if turn_is_error:
+                # is_error=True with subtype="success" is the CLI's signal for an underlying
+                # failure it couldn't otherwise surface (auth not set up, a bad API response,
+                # ...) — e.g. "Not logged in · Please run /login". The turn still "completes"
+                # instantly with no tool use, so falling through to the normal continue-nudge
+                # path spins this loop as fast as the CLI can be invoked, forever. Route it
+                # through the same backoff as a transient error instead of re-querying immediately.
+                log.warning("turn completed with an underlying error (is_error) — treating as transient")
+                return resume_id, None
+
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
@@ -183,6 +210,12 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             # the same connection instead of letting the process exit. This is what actually
             # lets a single session span hours/days: every other "stop" here was actually just
             # the model treating an ordinary pause as the end of the whole run.
+            if turn_used_tool:
+                idle_nudge_backoff_s = _IDLE_NUDGE_BACKOFF_INITIAL_S
+            else:
+                log.info("turn ended with no tool use — idle, sleeping %.0fs before nudging", idle_nudge_backoff_s)
+                await asyncio.sleep(idle_nudge_backoff_s)
+                idle_nudge_backoff_s = min(idle_nudge_backoff_s * 2, _IDLE_NUDGE_BACKOFF_MAX_S)
             log.info("turn ended, no stop condition met — continuing session")
             await client.query(CONTINUE_PROMPT)
 

@@ -18,11 +18,21 @@ func (s *PlatformExperimentsService) GetQuota(ctx context.Context, agentID, plat
 	if aq == nil {
 		return nil, nil
 	}
-	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), aq); err != nil {
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.GetQuota: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return nil, fmt.Errorf("platform_experiments.GetQuota: platform experiment %s not found", platformExpID)
+	}
+	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetQuota: populate usage: %w", err)
 	}
 	if err := s.store.AddDesiredQuotaUsageOne(ctx, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetQuota: desired usage: %w", err)
+	}
+	if err := s.correctRunningCosts(ctx, platformExpID, []*domain.AgentQuota{aq}); err != nil {
+		return nil, fmt.Errorf("platform_experiments.GetQuota: running cost correction: %w", err)
 	}
 	return aq, nil
 }
@@ -39,42 +49,23 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: %w", err)
 	}
-	if err := metricsdb.PopulateUsage(ctx, s.usage.URL(), platformExpID, quotas); err != nil {
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.ListQuotas: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return nil, fmt.Errorf("platform_experiments.ListQuotas: platform experiment %s not found", platformExpID)
+	}
+	if err := metricsdb.PopulateUsage(ctx, s.usage.URL(), pe.CreatedAt, platformExpID, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: populate usage: %w", err)
 	}
 	if err := s.store.AddDesiredQuotaUsage(ctx, platformExpID, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: desired usage: %w", err)
 	}
-	return quotas, nil
-}
-
-// allocationFor returns the (guaranteed, burst) allocation limit for resourceType on aq — the
-// Postgres-side allocation limit. Current usage combines desired estimates from PostgreSQL and
-// settled observations from the metrics store.
-func allocationFor(aq *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier) float64 {
-	guaranteed := tier == domain.CapacityGuaranteed
-	switch resourceType {
-	case domain.ResourceCPUCoreHours:
-		if guaranteed {
-			return aq.GuaranteedCPUCoreHours
-		}
-		return aq.BurstCPUCoreHours
-	case domain.ResourceRAMGBHours:
-		if guaranteed {
-			return aq.GuaranteedRAMGBHours
-		}
-		return aq.BurstRAMGBHours
-	case domain.ResourceStorageGBHours:
-		if guaranteed {
-			return aq.GuaranteedStorageGBHours
-		}
-		return aq.BurstStorageGBHours
-	default: // domain.ResourceAcceleratorHours
-		if guaranteed {
-			return aq.GuaranteedAcceleratorHours
-		}
-		return aq.BurstAcceleratorHours
+	if err := s.correctRunningCosts(ctx, platformExpID, quotas); err != nil {
+		return nil, fmt.Errorf("platform_experiments.ListQuotas: running cost correction: %w", err)
 	}
+	return quotas, nil
 }
 
 type insufficientQuotaError struct{ message string }
@@ -88,7 +79,14 @@ func (e *insufficientQuotaError) InsufficientQuota() bool { return true }
 func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment) error {
 	reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
-		if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), aq); err != nil {
+		pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
+		if err != nil {
+			return nil, err
+		}
+		if pe == nil {
+			return nil, fmt.Errorf("platform_experiments.AdmitExperiment: platform experiment %s not found", exp.PlatformExperimentID)
+		}
+		if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
 			return nil, err
 		}
 		return aq, nil
@@ -108,7 +106,14 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost,
 		func(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 			aq := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID}
-			if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), aq); err != nil {
+			pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+			if err != nil {
+				return nil, err
+			}
+			if pe == nil {
+				return nil, fmt.Errorf("platform_experiments.ReserveAdmittedFlavor: platform experiment %s not found", platformExpID)
+			}
+			if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
 				return nil, err
 			}
 			return aq, nil
@@ -120,32 +125,6 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 		return &insufficientQuotaError{message: reason}
 	}
 	return nil
-}
-
-func usedFor(aq *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier) float64 {
-	guaranteed := tier == domain.CapacityGuaranteed
-	switch resourceType {
-	case domain.ResourceCPUCoreHours:
-		if guaranteed {
-			return aq.UsedGuaranteedCPUCoreH
-		}
-		return aq.UsedBurstCPUCoreH
-	case domain.ResourceRAMGBHours:
-		if guaranteed {
-			return aq.UsedGuaranteedRAMGBH
-		}
-		return aq.UsedBurstRAMGBH
-	case domain.ResourceStorageGBHours:
-		if guaranteed {
-			return aq.UsedGuaranteedStorageGBH
-		}
-		return aq.UsedBurstStorageGBH
-	default:
-		if guaranteed {
-			return aq.UsedGuaranteedAccH
-		}
-		return aq.UsedBurstAccH
-	}
 }
 
 func (s *PlatformExperimentsService) SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error {

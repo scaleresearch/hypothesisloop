@@ -1,0 +1,31 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+# NOT buildable where it sits: the %files paths below are relative to the build cwd, which is the
+# staging dir `build.py` writes. Build it with `python -m fomo_tune.build <run_dir>`, not by
+# pointing apptainer at this file.
+#
+# Versions are pinned to the training environment: numpy, scikit-learn and joblib because they
+# unpickle `head.joblib`, torch because that is what the checkpoint was written by.
+
+%files
+    fomo_tune /app/fomo_tune
+    smri_mae /app/smri_mae
+    model /app/model
+    predict.py /app/predict.py
+
+%post
+    pip install --no-cache-dir \
+        torch==2.8.0 \
+        numpy==2.4.6 \
+        nibabel==5.4.2 \
+        einops==0.8.2 \
+        jaxtyping==0.3.10 \
+        timm==1.0.27 \
+        huggingface-hub==0.36.2 \
+        scikit-learn==1.8.0 \
+        joblib==1.5.3 \
+        omegaconf==2.3.0
+
+%runscript
+    exec python /app/predict.py "$@"

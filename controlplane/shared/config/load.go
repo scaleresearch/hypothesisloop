@@ -68,14 +68,19 @@ func (c *Config) build() error {
 		s.StuckPendingTimeoutSeconds <= 0 || s.ClusterUnreachableAfterSeconds <= 0 || s.GuaranteedFairnessWindowSeconds <= 0 ||
 		s.ReconcileIntervalSeconds <= 0 ||
 		s.DefaultTerminationGracePeriodSeconds <= 0 || s.MaxTerminationGracePeriodSeconds <= 0 || s.DefaultReportIntervalSeconds <= 0 ||
-		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 {
+		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 || s.MaxLogTailLineChars <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
+	}
+	// Negative would silently disable the pass while reading as "configured"; 0 is the explicit
+	// off switch.
+	if s.ResourceDisbalanceTolerance < 0 {
+		return fmt.Errorf("scheduler resource_disbalance_tolerance must not be negative (0 disables it)")
 	}
 	if err := domain.ValidateStages(c.Stages.Default); err != nil {
 		return fmt.Errorf("stages.default: %w", err)
 	}
 	services := c.Services
-	if services.QuotaPort <= 0 || services.SchedulerPort <= 0 || services.RegistryPort <= 0 || services.MetricControllerPort <= 0 || services.MetricsDBURL == "" {
+	if services.APIPort <= 0 || services.MetricControllerPort <= 0 || services.MetricsDBURL == "" {
 		return fmt.Errorf("all service ports and metrics_db_url are required")
 	}
 	return nil

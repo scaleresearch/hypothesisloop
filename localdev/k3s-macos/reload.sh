@@ -68,7 +68,7 @@ fi
 echo "==> Recreating control-plane containers..."
 bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" reload >/dev/null
 wait_for 20 1 "control-service to accept connections" \
-  curl -sf -o /dev/null "http://localhost:8082/experiments"
+  curl -sf -o /dev/null "http://localhost:8081/health"
 
 if kubectl --context "${CONTEXT_NAME}" get deploy/hypothesisloop-cluster-agent -n hypothesisloop &>/dev/null; then
   echo "==> Restarting cluster-agent/node-agent pods..."

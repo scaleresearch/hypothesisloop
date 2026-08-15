@@ -15,6 +15,9 @@ func CORSMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		// Without this a browser cannot read X-Total-Count, so paginated views silently see only
+		// the current page's length as the total.
+		w.Header().Set("Access-Control-Expose-Headers", "X-Total-Count")
 
 		// Respond immediately to preflight requests.
 		if r.Method == http.MethodOptions {

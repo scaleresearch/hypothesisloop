@@ -50,7 +50,7 @@ type concurrentAdmissionWorkload struct {
 }
 
 func (w *concurrentAdmissionWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
-	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "nvidia.com/gpu.product=NVIDIA-L40"}
+	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "nvidia.com/gpu.product=nvidia-l40"}
 	available := domain.Footprint{key: 8 - w.store.claimed}
 	return map[string]domain.Footprint{"cluster-a": available}, nil, nil
 }

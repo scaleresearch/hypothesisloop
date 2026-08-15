@@ -257,16 +257,94 @@ func RecordClusterAcceleratorCapacity(ctx context.Context, dbURL, clusterName st
 // cluster per flavor, restricted to samples within `window` of now — a cluster/flavor with no
 // report inside the window is simply absent from the result (same freshness gating as
 // metricsdb.IsAlive), so a stale or disconnected cluster contributes nothing.
+//
+// Deprecated: callers that also need total capacity must use
+// LiveClusterAcceleratorAvailableAndTotal instead — reading available and total via two separate
+// queries lets each pick a different "latest heartbeat" instant (e.g. while a cluster-agent is
+// mid-registration and a new snapshot lands between the two round trips), which can publish
+// available > total even though no such state ever existed in storage.
 func LiveClusterAcceleratorCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
 	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorAvailableMetric, window)
 }
 
 // LiveClusterAcceleratorTotalCapacity is LiveClusterAcceleratorCapacity's total-capacity
 // counterpart (allocatable, not allocatable-minus-requested) — same per-cluster-per-flavor
-// shape and freshness gating. Together the two let a caller compute both "how much is free
-// right now" and "how much exists at all" per accelerator flavor per cluster.
+// shape and freshness gating.
+//
+// Deprecated: see LiveClusterAcceleratorCapacity — pair it with LiveClusterAcceleratorAvailableAndTotal
+// instead of calling this alongside LiveClusterAcceleratorCapacity as two separate queries.
 func LiveClusterAcceleratorTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
 	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorTotalMetric, window)
+}
+
+// LiveClusterAcceleratorAvailableAndTotal returns available and total accelerator capacity per
+// cluster per flavor from a single query against one shared "latest heartbeat per cluster"
+// snapshot, so the two numbers always come from the same instant. Reading them via two separate
+// queries (the old LiveClusterAcceleratorCapacity + LiveClusterAcceleratorTotalCapacity pairing)
+// let each pick its own latest-heartbeat snapshot independently; if a new snapshot lands between
+// the two round trips — most visibly while a cluster-agent is still registering and pushing its
+// first few snapshots in quick succession — available could be read from a newer instant than
+// total, transiently publishing the impossible available > total.
+func LiveClusterAcceleratorAvailableAndTotal(ctx context.Context, dbURL string, window time.Duration) (available, total map[string]map[string]int64, err error) {
+	samples, err := queryCompleteClusterAcceleratorSnapshot(ctx, dbURL, window)
+	if err != nil {
+		return nil, nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorAvailableAndTotal: %w", err)
+	}
+	available = make(map[string]map[string]int64)
+	total = make(map[string]map[string]int64)
+	for _, s := range samples {
+		cluster := s.Labels["cluster_name"]
+		acceleratorType := s.Labels["accelerator_type"]
+		kind := s.Labels["kind"]
+		if cluster == "" || acceleratorType == "" {
+			return nil, nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorAvailableAndTotal: sample missing cluster_name or accelerator_type")
+		}
+		value, err := capacityInt64(s.Value)
+		if err != nil {
+			return nil, nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorAvailableAndTotal: cluster %q accelerator type %q: %w", cluster, acceleratorType, err)
+		}
+		var target map[string]map[string]int64
+		switch kind {
+		case "available":
+			target = available
+		case "total":
+			target = total
+		default:
+			return nil, nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorAvailableAndTotal: unexpected kind %q", kind)
+		}
+		if target[cluster] == nil {
+			target[cluster] = make(map[string]int64)
+		}
+		if _, exists := target[cluster][acceleratorType]; exists {
+			return nil, nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorAvailableAndTotal: duplicate cluster %q accelerator type %q (%s)", cluster, acceleratorType, kind)
+		}
+		target[cluster][acceleratorType] = value
+	}
+	return available, total, nil
+}
+
+// queryCompleteClusterAcceleratorSnapshot is queryCompleteClusterSnapshot generalized to pull
+// both the available and total accelerator metrics in one query, joined against one shared
+// latest_heartbeat CTE so both numbers reflect the exact same reported instant per cluster.
+// Samples are tagged with a synthetic "kind" label of "available" or "total".
+func queryCompleteClusterAcceleratorSnapshot(ctx context.Context, dbURL string, window time.Duration) ([]VectorSample, error) {
+	if window <= 0 {
+		return nil, fmt.Errorf("freshness window must be positive")
+	}
+	seconds := int64(math.Ceil(window.Seconds()))
+	query := fmt.Sprintf(
+		`WITH latest_heartbeat AS (`+
+			`SELECT cluster_name, MAX(greptime_timestamp) AS snapshot_at FROM %s `+
+			`WHERE greptime_timestamp >= NOW() - INTERVAL '%d seconds' GROUP BY cluster_name`+
+			`) `+
+			`SELECT 'available' AS kind, avail.cluster_name, avail.accelerator_type, avail.greptime_timestamp, avail.greptime_value `+
+			`FROM %s avail JOIN latest_heartbeat h ON avail.cluster_name = h.cluster_name AND avail.greptime_timestamp = h.snapshot_at `+
+			`UNION ALL `+
+			`SELECT 'total' AS kind, tot.cluster_name, tot.accelerator_type, tot.greptime_timestamp, tot.greptime_value `+
+			`FROM %s tot JOIN latest_heartbeat h ON tot.cluster_name = h.cluster_name AND tot.greptime_timestamp = h.snapshot_at`,
+		clusterHeartbeatMetric, seconds, clusterAcceleratorAvailableMetric, clusterAcceleratorTotalMetric,
+	)
+	return runClusterSnapshotQuery(ctx, dbURL, query)
 }
 
 func liveClusterAcceleratorMetric(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]map[string]int64, error) {
@@ -314,6 +392,13 @@ func queryCompleteClusterSnapshot(ctx context.Context, dbURL, metricName string,
 			`ON metric.cluster_name = heartbeat.cluster_name AND metric.greptime_timestamp = heartbeat.snapshot_at`,
 		clusterHeartbeatMetric, seconds, metricName,
 	)
+	return runClusterSnapshotQuery(ctx, dbURL, query)
+}
+
+// runClusterSnapshotQuery executes query against GreptimeDB's SQL HTTP endpoint and decodes the
+// result into VectorSamples, treating every non-timestamp/value column as a label. Shared by
+// queryCompleteClusterSnapshot and queryCompleteClusterAcceleratorSnapshot.
+func runClusterSnapshotQuery(ctx context.Context, dbURL, query string) ([]VectorSample, error) {
 	u, err := url.Parse(dbURL + "/v1/sql")
 	if err != nil {
 		return nil, fmt.Errorf("query URL: %w", err)

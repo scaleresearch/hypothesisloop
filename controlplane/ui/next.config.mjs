@@ -1,8 +1,7 @@
 const nextConfig = {
   env: {
-    API_BASE_URL: process.env.API_BASE_URL || 'http://localhost:8082',
-    REGISTRY_URL: process.env.REGISTRY_URL || 'http://localhost:8083',
-    QUOTA_URL: process.env.QUOTA_URL || 'http://localhost:8081',
+    // The control plane serves its whole API from one origin; see src/lib/api.ts.
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081',
   },
 }
 

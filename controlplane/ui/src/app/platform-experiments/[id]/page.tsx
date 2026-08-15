@@ -23,10 +23,13 @@ import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
+import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
-import { formatAccH } from '@/lib/format'
+import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
+import { EVICTION_REASON_LABELS } from '@/lib/eviction'
+import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -36,13 +39,16 @@ const CHART_TOOLTIP_STYLE: React.CSSProperties = {
 }
 
 function JobMetricMini({ jobId, metricName }: { jobId: string; metricName?: string }) {
+  // 48h-scale experiments move slowly enough that 10s polling here just repeats the same
+  // full per-job history over and over; 30s keeps mini-charts fresh without redundant load
+  // when dozens of these mount at once (one per running/expanded job).
   const { data: metrics } = useSWR<MetricDataPoint[]>(
     `metrics-${jobId}`,
     () => fetchExperimentMetrics(jobId),
-    { refreshInterval: 10_000 },
+    { refreshInterval: 30_000 },
   )
   const chartData = (metrics ?? [])
-    .filter((p) => p.recorded_at)
+    .filter((p) => p.recorded_at && (!metricName || p.metric_name === metricName))
     .map((p) => ({
       t: new Date(p.recorded_at as string).getTime(),
       value: p.metric_value ?? (p as any).value,
@@ -187,14 +193,6 @@ function CompetingAgentsChart({
   /** Every stage boundary already crossed, as {stage_index, advanced_at}. */
   boundaries?: StagesStatus['advances']
 }) {
-  if (allSeries === undefined) return <Loading />
-  const series = allSeries.filter(
-    s => s.points.length > 0 && selectedAgents.has(s.agent_id || s.experiment_id),
-  )
-  if (series.length === 0) {
-    return <EmptyState>No metric data to show for &quot;{metricName}&quot; with the current agent selection.</EmptyState>
-  }
-
   // An agent runs many jobs back to back over the course of a platform experiment (baseline,
   // then a string of hypothesis variants), each its own series with its own local warmup ramp
   // and plateau. Plotting those raw per-job values spliced together as one "per agent" line
@@ -206,39 +204,77 @@ function CompetingAgentsChart({
   // points for that agent, sorting by time, and taking a running best — then forward-filling
   // that onto the shared timestamp axis below so the line only moves when a new personal best
   // is actually set.
-  const bestDir = direction === 'maximize' ? Math.max : Math.min
-  const runningBestByAgent = new Map<string, { t: number; best: number }[]>()
-  for (const agentId of Array.from(new Set(series.map(s => s.agent_id || s.experiment_id)))) {
-    const points = series
-      .filter(s => (s.agent_id || s.experiment_id) === agentId)
-      .flatMap(s => s.points)
-      .map(p => ({ t: new Date(p.timestamp).getTime(), value: p.value }))
-      .sort((a, b) => a.t - b.t)
-    let best: number | undefined
-    const trace = points.map(p => {
-      best = best === undefined ? p.value : bestDir(best, p.value)
-      return { t: p.t, best }
+  //
+  // This merge/sort/pivot touches every point across every job (tens of thousands on a large
+  // platform experiment), so it's useMemo'd on the series/selection identity rather than
+  // redone on every render — e.g. hovering the scoreboard or toggling an unrelated agent
+  // checkbox shouldn't re-walk the full history of every other chart on the page.
+  const { runningBestByAgent, rows, nonRawAgentIds } = useMemo(() => {
+    // Never merge a non-"raw"-basis series into an agent's running best: this is a "best so
+    // far" comparison chart, so a rescaled/derived value can win it exactly the way it won a
+    // ranking before this fix. Excluded agents are surfaced via nonRawAgentIds instead.
+    const series = (allSeries ?? []).filter(
+      s => s.points.length > 0 && selectedAgents.has(s.agent_id || s.experiment_id) && (!s.metric_basis || s.metric_basis === 'raw'),
+    )
+    const nonRawAgentIds = new Set(
+      (allSeries ?? [])
+        .filter(s => s.metric_basis && s.metric_basis !== 'raw' && selectedAgents.has(s.agent_id || s.experiment_id))
+        .map(s => s.agent_id || s.experiment_id),
+    )
+    const bestDir = direction === 'maximize' ? Math.max : Math.min
+    const runningBestByAgent = new Map<string, { t: number; best: number }[]>()
+    for (const agentId of Array.from(new Set(series.map(s => s.agent_id || s.experiment_id)))) {
+      const points = series
+        .filter(s => (s.agent_id || s.experiment_id) === agentId)
+        .flatMap(s => s.points)
+        .map(p => ({ t: new Date(p.timestamp).getTime(), value: p.value }))
+        .sort((a, b) => a.t - b.t)
+      let best: number | undefined
+      const trace = points.map(p => {
+        best = best === undefined ? p.value : bestDir(best, p.value)
+        return { t: p.t, best }
+      })
+      runningBestByAgent.set(agentId, trace)
+    }
+
+    // Pivot onto one row per timestamp (union across all agents), forward-filling each agent's
+    // most recent running-best value so the line stays flat between updates instead of dropping
+    // to null (which would otherwise fragment it every time only one agent reports).
+    const timestamps = Array.from(new Set(series.flatMap(s => s.points.map(p => new Date(p.timestamp).getTime())))).sort((a, b) => a - b)
+    const cursor = new Map<string, number>() // agentId -> index into its running-best trace
+    const rows = timestamps.map((t) => {
+      const row: Record<string, number | string> = { t }
+      for (const [agentId, trace] of Array.from(runningBestByAgent.entries())) {
+        let i = cursor.get(agentId) ?? 0
+        while (i < trace.length && trace[i].t <= t) i++
+        cursor.set(agentId, i)
+        if (i > 0) row[agentId] = trace[i - 1].best
+      }
+      return row
     })
-    runningBestByAgent.set(agentId, trace)
+    return { runningBestByAgent, rows, nonRawAgentIds }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSeries, direction, Array.from(selectedAgents).sort().join(',')])
+
+  if (allSeries === undefined) return <Loading />
+  if (runningBestByAgent.size === 0) {
+    return <EmptyState>No metric data to show for &quot;{metricName}&quot; with the current agent selection.</EmptyState>
   }
 
-  // Pivot onto one row per timestamp (union across all agents), forward-filling each agent's
-  // most recent running-best value so the line stays flat between updates instead of dropping
-  // to null (which would otherwise fragment it every time only one agent reports).
-  const timestamps = Array.from(new Set(series.flatMap(s => s.points.map(p => new Date(p.timestamp).getTime())))).sort((a, b) => a - b)
-  const cursor = new Map<string, number>() // agentId -> index into its running-best trace
-  const rows = timestamps.map((t) => {
-    const row: Record<string, number | string> = { t }
-    for (const [agentId, trace] of Array.from(runningBestByAgent.entries())) {
-      let i = cursor.get(agentId) ?? 0
-      while (i < trace.length && trace[i].t <= t) i++
-      cursor.set(agentId, i)
-      if (i > 0) row[agentId] = trace[i - 1].best
-    }
-    return row
-  })
-
   return (
+    <>
+      {nonRawAgentIds.size > 0 && (
+        <div
+          className="mono"
+          title="These agents also reported this metric on a non-&quot;raw&quot; basis (a rescaled/transformed value); that data is excluded from this chart and never compared to raw-basis agents."
+          style={{
+            marginBottom: 8, fontSize: 11, padding: '3px 8px', borderRadius: 4, display: 'inline-block',
+            background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
+          }}
+        >
+          Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().join(', ')}
+        </div>
+      )}
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={rows} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
@@ -272,6 +308,7 @@ function CompetingAgentsChart({
         ))}
       </LineChart>
     </ResponsiveContainer>
+    </>
   )
 }
 
@@ -334,7 +371,8 @@ function buildScoreboard(
   quotas: AgentQuota[],
   metrics: MetricDefinition[],
   metricBestsByAgent: Map<string, MetricBests>,
-): Array<{ agentId: string; metricBests: MetricBests; jobCount: number; completedCount: number; isWinner: boolean }> {
+  nonRawAgentIdsByMetric: Map<string, Set<string>> = new Map(),
+): Array<{ agentId: string; metricBests: MetricBests; jobCount: number; completedCount: number; isWinner: boolean; nonRawMetrics: string[] }> {
   const counts = new Map<string, { jobCount: number; completedCount: number }>()
   for (const exp of experiments) {
     const entry = counts.get(exp.agent_id) ?? { jobCount: 0, completedCount: 0 }
@@ -373,6 +411,7 @@ function buildScoreboard(
     jobCount: row.jobCount,
     completedCount: row.completedCount,
     isWinner: metrics.length > 0 && row.hasAnyData && dominatedByCount.get(row.agentId) === 0,
+    nonRawMetrics: metrics.filter(m => nonRawAgentIdsByMetric.get(m.key)?.has(row.agentId)).map(m => m.key),
   }))
 
   result.sort((a, b) => {
@@ -388,10 +427,24 @@ function buildScoreboard(
 // Best value per agent per metric, derived from each metric's full timeseries (same source the
 // "Competing Agents over time" chart uses) rather than the single-valued job.final_metric_value,
 // since a platform experiment can define several objectives at once.
-function bestPerAgentFromSeries(series: AgentMetricSeries[], direction: 'maximize' | 'minimize'): Map<string, number> {
+//
+// Only "raw"-basis series count toward `best`: a series reported on a rescaled/derived basis is
+// never blended into a min/max against a raw-basis competitor — that mismatch is exactly what
+// let a rescaled loss look like a real win before. An agent whose only series for this metric is
+// non-"raw" is returned in `nonRawAgentIds` so the scoreboard can flag it instead of the agent
+// simply vanishing from the ranking with no explanation.
+function bestPerAgentFromSeries(
+  series: AgentMetricSeries[],
+  direction: 'maximize' | 'minimize',
+): { best: Map<string, number>; nonRawAgentIds: Set<string> } {
   const best = new Map<string, number>()
+  const nonRawAgentIds = new Set<string>()
   for (const s of series) {
     const agentId = s.agent_id || s.experiment_id
+    if (s.metric_basis && s.metric_basis !== 'raw') {
+      nonRawAgentIds.add(agentId)
+      continue
+    }
     for (const p of s.points) {
       const cur = best.get(agentId)
       if (cur === undefined) {
@@ -401,7 +454,7 @@ function bestPerAgentFromSeries(series: AgentMetricSeries[], direction: 'maximiz
       }
     }
   }
-  return best
+  return { best, nonRawAgentIds }
 }
 
 export default function PlatformExperimentDetailPage({ params }: { params: { id: string } }) {
@@ -426,7 +479,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const { data: experiments } = useSWR<Experiment[]>(
     ['pe-experiments', id],
     () => fetchExperimentsByPlatformExperiment(id),
-    { refreshInterval: 10_000 },
+    { refreshInterval: 15_000 },
   )
 
   const { data: donations } = useSWR<DonationRequest[]>(
@@ -438,7 +491,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const { data: stagesStatus } = useSWR<StagesStatus>(
     ['pe-stages', id],
     () => fetchStages(id),
-    { refreshInterval: 10_000 },
+    { refreshInterval: 15_000 },
   )
 
   const { data: hypotheses } = useSWR<Hypothesis[]>(
@@ -448,14 +501,18 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   )
 
   // Fetch the full timeseries for every objective metric so the scoreboard can compute each
-  // agent's best value per metric (needed for Pareto winner detection below).
+  // agent's best value per metric (needed for Pareto winner detection below). This is the
+  // heaviest fetch on the page — one full per-job metric history per objective metric, across
+  // every one of the platform experiment's jobs — so it gets a slower poll than the small,
+  // cheap fetches above: a 48h-scale run doesn't meaningfully change within any 10s window,
+  // and re-fetching/re-sorting the full history that often is pure waste.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
   const { data: allMetricSeries } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
     pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(',')] : null,
     () => Promise.all(peMetricKeys.map(k =>
       fetchPlatformExperimentTimeseries(id, k).then(r => ({ key: k, series: r.series })),
     )),
-    { refreshInterval: 10_000 },
+    { refreshInterval: 30_000 },
   )
 
   // Every agent known to this platform experiment, whether via quota signup or a submitted job.
@@ -475,24 +532,63 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const primaryDir = primaryMetric?.direction ?? 'maximize'
   const metrics = pe.metrics ?? []
 
-  // Per-agent best value for each metric, built from the metrics' full timeseries.
+  // Per-agent best value for each metric, built from the metrics' full timeseries. Agents whose
+  // only reported value for a metric was on a non-"raw" basis are tracked separately so the
+  // scoreboard can flag them rather than silently excluding them with no explanation.
   const metricBestsByAgent = new Map<string, MetricBests>()
+  const nonRawAgentIdsByMetric = new Map<string, Set<string>>()
   for (const m of metrics) {
     const entry = (allMetricSeries ?? []).find(e => e.key === m.key)
-    const bestMap = bestPerAgentFromSeries(entry?.series ?? [], m.direction)
+    const { best: bestMap, nonRawAgentIds } = bestPerAgentFromSeries(entry?.series ?? [], m.direction)
     bestMap.forEach((value, agentId) => {
       const rec = metricBestsByAgent.get(agentId) ?? {}
       rec[m.key] = value
       metricBestsByAgent.set(agentId, rec)
     })
+    nonRawAgentIdsByMetric.set(m.key, nonRawAgentIds)
   }
 
-  const scoreboard = buildScoreboard(experiments ?? [], quotas ?? [], metrics, metricBestsByAgent)
+  const scoreboard = buildScoreboard(experiments ?? [], quotas ?? [], metrics, metricBestsByAgent, nonRawAgentIdsByMetric)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
+  const hypothesisProgress = hypothesisProgressCounts(hypotheses ?? [], experiments ?? [])
 
   // Running experiments
   const running = (experiments ?? []).filter(e => e.status === 'RUNNING')
   const recent = (experiments ?? []).slice(0, 20)
+
+  // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
+  // different reasons (stuck on admission vs. explicitly cancelled vs. ran past a stage's job
+  // length cap), so a single opaque count hides whether evictions are a symptom of something
+  // wrong versus routine stage cuts.
+  const evicted = (experiments ?? []).filter(e => e.status === 'EVICTED')
+  const evictionReasonCounts = evicted.reduce<Record<string, number>>((acc, e) => {
+    const r = e.eviction_reason || 'unknown'
+    acc[r] = (acc[r] ?? 0) + 1
+    return acc
+  }, {})
+  const evictionBreakdown = Object.entries(evictionReasonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([r, n]) => `${EVICTION_REASON_LABELS[r] ?? r} (${n})`)
+    .join(' · ')
+
+  // The metric that actually determines standings/cuts — role: 'ranking' when the platform
+  // experiment reports several metrics, defaulting to the first (primary) one for older data
+  // that predates the role field. Used below to show each job's own "final" value, since with
+  // multiple reported metrics there's no single obvious one to show without this.
+  const rankingMetric = metrics.find(m => m.role === 'ranking') ?? primaryMetric
+
+  // Per-job final metric value, taken from the ranking metric's own timeseries (already fetched
+  // above for the "Competing Agents over time" chart) rather than any single job.final_metric_value
+  // field — the backend's Experiment record has no such field; the only place a job's metric
+  // history lives is the metrics timeseries, keyed by experiment_id.
+  const rankingSeries = rankingMetric
+    ? (allMetricSeries ?? []).find(e => e.key === rankingMetric.key)?.series ?? []
+    : []
+  const finalMetricByJobId = new Map<string, number>()
+  for (const s of rankingSeries) {
+    const pts = [...s.points].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    if (pts.length > 0) finalMetricByJobId.set(s.experiment_id, pts[pts.length - 1].value)
+  }
 
   // Default both selectors to "everything" until the user narrows them down.
   const activeAgentIds = selectedAgentIds ?? new Set(knownAgentIds)
@@ -523,9 +619,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           <h1 style={{ marginBottom: 6 }}>{pe.name}</h1>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <StatusBadge status={pe.status} />
-            {pe.starts_at && (
+            {!isZeroDate(pe.starts_at) && (
               <span className="text-dim">
-                {new Date(pe.starts_at).toLocaleDateString()} – {pe.ends_at ? new Date(pe.ends_at).toLocaleDateString() : '?'}
+                {formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}
               </span>
             )}
             <Link href={`/hypotheses?pe=${pe.id}`} className="text-link" style={{ fontSize: 12 }}>
@@ -541,7 +637,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           <PodHeader>About this Experiment</PodHeader>
           <PodContent>
             {pe.description && (
-              <p style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginBottom: pe.metrics?.length ? 12 : 0 }}>{pe.description}</p>
+              <CollapsibleDescription text={pe.description} style={{ marginBottom: pe.metrics?.length ? 12 : 0 }} />
             )}
             {pe.metrics && pe.metrics.length > 0 && (
               <div>
@@ -630,13 +726,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 const done = stageNo < stagesStatus.current_stage
                 const current = stageNo === stagesStatus.current_stage
                 return (
-                  <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }}>
+                  <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
                     <div style={{
                       height: 8, borderRadius: 2,
-                      background: done ? semantic.accent : current ? 'rgba(124,108,240,0.45)' : 'var(--border)',
+                      background: current ? semantic.accent : done ? 'rgba(124,108,240,0.55)' : 'var(--border)',
+                      boxShadow: current ? '0 0 8px rgba(124,108,240,0.6)' : undefined,
                     }} />
                     <div className="mono text-dim" style={{ fontSize: 10, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}
+                      {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}{stage.max_job_hours ? ` · ≤${stage.max_job_hours}h/job` : ''}
                     </div>
                   </div>
                 )
@@ -674,13 +771,31 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stats row */}
       <Pod>
         <PodContent>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 16 }}>
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
             <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
-            <StatTile label="Jobs" value={(experiments?.length ?? 0).toString()} />
-            <StatTile label="Running" value={running.length.toString()} color={running.length > 0 ? semantic.success : undefined} />
-            <StatTile label="Hypotheses" value={(hypotheses?.length ?? 0).toString()} color={semantic.accent} />
+            <StatTile label="Jobs" value={(experiments?.length ?? 0).toString()} href={`/jobs?platform_experiment_id=${pe.id}`} />
+            <StatTile
+              label="Running"
+              value={running.length.toString()}
+              color={running.length > 0 ? semantic.success : undefined}
+              href={`/jobs?platform_experiment_id=${pe.id}&status=RUNNING`}
+            />
+            <StatTile
+              label="Evicted"
+              value={evicted.length.toString()}
+              color={evicted.length > 0 ? semantic.danger : undefined}
+              sub={evictionBreakdown || undefined}
+              href={`/jobs?platform_experiment_id=${pe.id}&status=EVICTED`}
+            />
+            <StatTile
+              label="Hypotheses"
+              value={(hypotheses?.length ?? 0).toString()}
+              color={semantic.accent}
+              sub={`${hypothesisProgress.finished} finished · ${hypothesisProgress.in_flight} in flight · ${hypothesisProgress.pending} pending`}
+              href={`/hypotheses?pe=${pe.id}`}
+            />
           </div>
         </PodContent>
       </Pod>
@@ -690,7 +805,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <PodHeader>
           Scoreboard
           {metrics.length === 1 && ` — ranked by ${metrics[0].key} (${metrics[0].direction})`}
-          {metrics.length > 1 && ' — winners are the Pareto front (not beaten on every metric at once)'}
         </PodHeader>
         <PodContent scrollX>
           {scoreboard.length === 0 ? (
@@ -737,9 +851,20 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         <td className="mono" style={{ fontWeight: 600 }}>
                           <span className="text-muted" style={{ display: 'inline-block', width: 12 }}>{isExpanded ? '▾' : '▸'}</span>
                           {entry.agentId}
-                          {entry.isWinner && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.accent, fontWeight: 700 }}>WINNER</span>}
                           {isCut && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.danger, fontWeight: 400 }}>CUT</span>}
                           {isActive && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.success, fontWeight: 400 }}>ACTIVE</span>}
+                          {entry.nonRawMetrics.length > 0 && (
+                            <span
+                              className="mono"
+                              title={`Also reported ${entry.nonRawMetrics.join(', ')} on a non-"raw" basis (a rescaled/transformed value). That value is never blended into ${entry.nonRawMetrics.length > 1 ? 'those rankings' : 'that ranking'} — only a raw-basis value (if any) counts here.`}
+                              style={{
+                                marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 400,
+                                background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
+                              }}
+                            >
+                              NON-RAW BASIS
+                            </span>
+                          )}
                         </td>
                         {metrics.length > 0 ? metrics.map(m => {
                           const v = entry.metricBests[m.key]
@@ -815,7 +940,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Pod>
           <PodHeader>
             Live Metrics — {primaryMetric?.key ?? 'metric'}
-            <span className="text-dim" style={{ marginLeft: 8 }}>auto-refreshes every 10 s</span>
+            <span className="text-dim" style={{ marginLeft: 8 }}>auto-refreshes every 30 s</span>
           </PodHeader>
           <PodContent>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
@@ -835,7 +960,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
       {/* Recent jobs */}
       <Pod>
-        <PodHeader>Recent Jobs</PodHeader>
+        <PodHeader>
+          Recent Jobs
+          {rankingMetric && (
+            <span className="text-dim" style={{ marginLeft: 8, fontWeight: 400 }}>
+              final metric = latest reported {rankingMetric.key}
+            </span>
+          )}
+        </PodHeader>
         <PodContent scrollX>
           {!experiments || experiments.length === 0 ? (
             <EmptyState>No jobs submitted yet.</EmptyState>
@@ -846,22 +978,32 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <th>ID</th>
                   <th>Agent</th>
                   <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Final Metric</th>
-                  <th style={{ textAlign: 'right' }}>Cost</th>
+                  <th style={{ textAlign: 'right' }}>Final Metric{rankingMetric ? ` (${rankingMetric.key})` : ''}</th>
+                  <th style={{ textAlign: 'right' }}>Est. Cost</th>
                   <th>Submitted</th>
                 </tr>
               </thead>
               <tbody>
                 {recent.map(exp => {
-                  const metric = (exp as any).final_metric ?? (exp as any).final_metric_value
-                  const cost = (exp as any).actual_cost_acch ?? exp.actual_cost_acch
+                  const metric = finalMetricByJobId.get(exp.id)
+                  const cost = exp.estimated_cost_acch
+                  const evictionLabel = exp.eviction_reason
+                    ? (EVICTION_REASON_LABELS[exp.eviction_reason] ?? exp.eviction_reason)
+                    : undefined
                   return (
                     <tr key={exp.id}>
                       <td className="mono" style={{ fontSize: 11 }}>
                         <Link href={`/jobs/${exp.id}`} className="text-link">{exp.id.slice(0, 8)}…</Link>
                       </td>
                       <td className="mono">{exp.agent_id}</td>
-                      <td><StatusBadge status={exp.status} /></td>
+                      <td>
+                        <StatusBadge status={exp.status} />
+                        {evictionLabel && (
+                          <div className="text-dim" style={{ fontSize: 10, marginTop: 2 }} title="eviction_reason">
+                            {evictionLabel}
+                          </div>
+                        )}
+                      </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{metric != null ? metric.toFixed(4) : '—'}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
                       <td className="text-dim">{new Date(exp.created_at).toLocaleString()}</td>

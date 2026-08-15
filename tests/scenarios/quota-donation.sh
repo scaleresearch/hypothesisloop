@@ -24,13 +24,13 @@ REQ_BEFORE=$(quota_used_guaranteed "$PE_ID" "$REQUESTER")  # baseline read, not 
 DONOR_GUARANTEED_BEFORE=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_hours)
 REQUESTER_GUARANTEED_BEFORE=$(_quota_field "$PE_ID" "$REQUESTER" guaranteed_accelerator_hours)
 
-DONATION_ID=$(curl -sf -X POST "$QUOTA_URL/donations" -H 'Content-Type: application/json' -d "{
+DONATION_ID=$(curl -sf -X POST "$API_URL/donations" -H 'Content-Type: application/json' -d "{
   \"agent_id\": \"$REQUESTER\", \"platform_experiment_id\": \"$PE_ID\",
   \"credits_want\": $CREDITS_WANT, \"reason\": \"e2e donation flow coverage\"
 }" | py "import sys,json; print(json.load(sys.stdin)['id'])")
 [[ -n "$DONATION_ID" ]] && pass "donation request created (id=$DONATION_ID)" || fail "donation request creation returned no id"
 
-FULFILL_CODE=$(curl -s -o /tmp/donation_fulfill.$$.json -w '%{http_code}' -X POST "$QUOTA_URL/donations/${DONATION_ID}/fulfill" \
+FULFILL_CODE=$(curl -s -o /tmp/donation_fulfill.$$.json -w '%{http_code}' -X POST "$API_URL/donations/${DONATION_ID}/fulfill" \
   -H 'Content-Type: application/json' -d "{\"donor_agent_id\": \"$DONOR\"}")
 rm -f /tmp/donation_fulfill.$$.json
 [[ "$FULFILL_CODE" -lt 300 ]] && pass "donation fulfilled (HTTP $FULFILL_CODE)" || fail "donation fulfillment failed (HTTP $FULFILL_CODE)"
@@ -47,7 +47,7 @@ REQUESTER_DELTA=$(py "print(round(float('$REQUESTER_GUARANTEED_AFTER' or 0) - fl
   || fail "expected requester credited by +$CREDITS_WANT, got $REQUESTER_DELTA"
 
 echo "  -- fulfilling an already-fulfilled donation must not double-credit --"
-REFULFILL_CODE=$(curl -s -o /tmp/donation_refulfill.$$.json -w '%{http_code}' -X POST "$QUOTA_URL/donations/${DONATION_ID}/fulfill" \
+REFULFILL_CODE=$(curl -s -o /tmp/donation_refulfill.$$.json -w '%{http_code}' -X POST "$API_URL/donations/${DONATION_ID}/fulfill" \
   -H 'Content-Type: application/json' -d "{\"donor_agent_id\": \"$DONOR\"}")
 rm -f /tmp/donation_refulfill.$$.json
 DONOR_GUARANTEED_AFTER2=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_hours)
@@ -56,13 +56,13 @@ DONOR_GUARANTEED_AFTER2=$(_quota_field "$PE_ID" "$DONOR" guaranteed_accelerator_
   || fail "re-fulfillment returned HTTP $REFULFILL_CODE or changed donor AccH ($DONOR_GUARANTEED_AFTER -> $DONOR_GUARANTEED_AFTER2)"
 
 echo "  -- a cancelled donation request cannot later be fulfilled --"
-CANCEL_DONATION_ID=$(curl -sf -X POST "$QUOTA_URL/donations" -H 'Content-Type: application/json' -d "{
+CANCEL_DONATION_ID=$(curl -sf -X POST "$API_URL/donations" -H 'Content-Type: application/json' -d "{
   \"agent_id\": \"$CANCELLER\", \"platform_experiment_id\": \"$PE_ID\",
   \"credits_want\": 0.02, \"reason\": \"e2e cancel-before-fulfill coverage\"
 }" | py "import sys,json; print(json.load(sys.stdin)['id'])")
-curl -sf -X POST "$QUOTA_URL/donations/${CANCEL_DONATION_ID}/cancel" > /dev/null
+curl -sf -X POST "$API_URL/donations/${CANCEL_DONATION_ID}/cancel" > /dev/null
 CANCELLER_GUARANTEED_BEFORE=$(_quota_field "$PE_ID" "$CANCELLER" guaranteed_accelerator_hours)
-POST_CANCEL_FULFILL_CODE=$(curl -s -o /tmp/donation_postcancel.$$.json -w '%{http_code}' -X POST "$QUOTA_URL/donations/${CANCEL_DONATION_ID}/fulfill" \
+POST_CANCEL_FULFILL_CODE=$(curl -s -o /tmp/donation_postcancel.$$.json -w '%{http_code}' -X POST "$API_URL/donations/${CANCEL_DONATION_ID}/fulfill" \
   -H 'Content-Type: application/json' -d "{\"donor_agent_id\": \"$DONOR\"}")
 rm -f /tmp/donation_postcancel.$$.json
 CANCELLER_GUARANTEED_AFTER=$(_quota_field "$PE_ID" "$CANCELLER" guaranteed_accelerator_hours)

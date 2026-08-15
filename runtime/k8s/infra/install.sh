@@ -12,10 +12,10 @@
 #
 # Parameters (env vars, all optional):
 #   CLUSTER_NAME      — label identifying this target cluster (default: local)
-#   CONTROLPLANE_URL  — outbound URL cluster-agent polls (default: http://host.containers.internal:8082)
-#   REGISTRY_URL      — outbound URL training pods push metrics to, must be reachable from
+#   API_URL           — control-plane API base URL. The cluster-agent polls it, and it is
+#                       also handed to training pods to push metrics to, so it must be reachable from
 #                       *inside* a pod in this cluster, not just from cluster-agent
-#                       (default: http://host.containers.internal:8083)
+#                       (default: http://host.containers.internal:8081)
 #   METRICS_URL       — outbound URL node-agents push observations to
 #                       (default: http://host.containers.internal:8084)
 #   KUBECONFIG_PATH   — kubeconfig file to use (default: $HOME/.kube/config)
@@ -23,8 +23,7 @@
 set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:-local}"
-CONTROLPLANE_URL="${CONTROLPLANE_URL:-http://host.containers.internal:8082}"
-REGISTRY_URL="${REGISTRY_URL:-http://host.containers.internal:8083}"
+API_URL="${API_URL:-http://host.containers.internal:8081}"
 METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
@@ -58,10 +57,10 @@ sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|${METRICS_URL}|g" "
 
 # ---- cluster-agent Deployment (RBAC + the actual reconciler) ------------------
 # The only component in this cluster with real k8s credentials. It long-polls
-# CONTROLPLANE_URL for create/delete-workload commands and pushes job status
+# API_URL for create/delete-workload commands and pushes job status
 # back — the control plane itself never opens a connection into this cluster.
-echo "==> Applying cluster-agent Deployment (control plane: ${CONTROLPLANE_URL}, registry: ${REGISTRY_URL})..."
-sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__CONTROLPLANE_URL__|${CONTROLPLANE_URL}|g; s|__REGISTRY_URL__|${REGISTRY_URL}|g" \
+echo "==> Applying cluster-agent Deployment (API: ${API_URL})..."
+sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__API_URL__|${API_URL}|g" \
   "${SCRIPT_DIR}/cluster-agent-deployment.yaml" \
   | kctl apply -f -
 

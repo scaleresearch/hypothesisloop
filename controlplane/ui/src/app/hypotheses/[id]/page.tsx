@@ -78,17 +78,34 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           >
             ← {pe?.name ?? data.platform_experiment_id.slice(0, 12) + '…'}
           </div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', wordBreak: 'break-word' }}>
             <span className="mono text-dim" style={{ fontSize: 14 }}>{data.id.slice(0, 8)}…</span>
             <Badge status={data.status ?? 'open'}>{data.status ?? 'open'}</Badge>
           </h1>
-          <p style={{ fontStyle: 'italic', marginTop: 4 }}>{data.text}</p>
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
             Registered by {data.agent_id} · {relTime(data.created_at)}
           </p>
         </div>
         <Link href="/hypotheses" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All hypotheses</Link>
       </div>
+
+      <Pod style={{ marginBottom: 12 }}>
+        <PodHeader>Hypothesis</PodHeader>
+        <PodContent>
+          <p
+            style={{
+              maxWidth: 760,
+              fontSize: 14,
+              lineHeight: 1.65,
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'break-word',
+              wordBreak: 'break-word',
+            }}
+          >
+            {data.text}
+          </p>
+        </PodContent>
+      </Pod>
 
       <Pod>
         <PodHeader>

@@ -12,19 +12,21 @@ func TestValidateStages(t *testing.T) {
 		wantErr bool
 	}{
 		{"platform default", DefaultStages, false},
-		{"single stage no cut", []Stage{{100, 0}}, false},
-		{"three stages", []Stage{{20, 25}, {30, 25}, {50, 0}}, false},
-		{"max stages", []Stage{{10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {30, 0}}, false},
+		{"single stage no cut", []Stage{{LengthPct: 100, EvictPct: 0}}, false},
+		{"three stages", []Stage{{LengthPct: 20, EvictPct: 25}, {LengthPct: 30, EvictPct: 25}, {LengthPct: 50, EvictPct: 0}}, false},
+		{"max stages", []Stage{{LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 30, EvictPct: 0}}, false},
 		{"empty", nil, true},
-		{"too many stages", []Stage{{10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {10, 5}, {20, 0}}, true},
-		{"lengths under 100", []Stage{{40, 25}, {50, 0}}, true},
-		{"lengths over 100", []Stage{{40, 25}, {70, 0}}, true},
-		{"zero-length stage", []Stage{{0, 25}, {100, 0}}, true},
-		{"negative length", []Stage{{-20, 0}, {120, 0}}, true},
-		{"negative evict", []Stage{{40, -1}, {60, 0}}, true},
-		{"evict 100 impossible", []Stage{{40, 100}, {60, 0}}, true},
-		{"cut on final stage", []Stage{{40, 25}, {60, 10}}, true},
-		{"single stage with cut", []Stage{{100, 50}}, true},
+		{"too many stages", []Stage{{LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 20, EvictPct: 0}}, true},
+		{"lengths under 100", []Stage{{LengthPct: 40, EvictPct: 25}, {LengthPct: 50, EvictPct: 0}}, true},
+		{"lengths over 100", []Stage{{LengthPct: 40, EvictPct: 25}, {LengthPct: 70, EvictPct: 0}}, true},
+		{"zero-length stage", []Stage{{LengthPct: 0, EvictPct: 25}, {LengthPct: 100, EvictPct: 0}}, true},
+		{"negative length", []Stage{{LengthPct: -20, EvictPct: 0}, {LengthPct: 120, EvictPct: 0}}, true},
+		{"negative evict", []Stage{{LengthPct: 40, EvictPct: -1}, {LengthPct: 60, EvictPct: 0}}, true},
+		{"evict 100 impossible", []Stage{{LengthPct: 40, EvictPct: 100}, {LengthPct: 60, EvictPct: 0}}, true},
+		{"cut on final stage", []Stage{{LengthPct: 40, EvictPct: 25}, {LengthPct: 60, EvictPct: 10}}, true},
+		{"single stage with cut", []Stage{{LengthPct: 100, EvictPct: 50}}, true},
+		{"job length cap", []Stage{{LengthPct: 40, EvictPct: 25, MaxJobHours: 0.5}, {LengthPct: 60, EvictPct: 0}}, false},
+		{"negative job length cap", []Stage{{LengthPct: 40, EvictPct: 25, MaxJobHours: -1}, {LengthPct: 60, EvictPct: 0}}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,13 +44,13 @@ func TestValidateStages(t *testing.T) {
 // Percentages written as thirds don't sum to exactly 100 in float64; the tolerance must accept
 // them, since an operator writing 33.33/33.33/33.34 means 100.
 func TestValidateStagesFloatSum(t *testing.T) {
-	if err := ValidateStages([]Stage{{33.33, 25}, {33.33, 25}, {33.34, 0}}); err != nil {
+	if err := ValidateStages([]Stage{{LengthPct: 33.33, EvictPct: 25}, {LengthPct: 33.33, EvictPct: 25}, {LengthPct: 33.34, EvictPct: 0}}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestBoundaryProgress(t *testing.T) {
-	stages := []Stage{{20, 25}, {30, 25}, {50, 0}}
+	stages := []Stage{{LengthPct: 20, EvictPct: 25}, {LengthPct: 30, EvictPct: 25}, {LengthPct: 50, EvictPct: 0}}
 	for _, tc := range []struct {
 		stageIndex int
 		want       float64
@@ -104,5 +106,27 @@ func TestStageProgressIgnoresZeroBounds(t *testing.T) {
 	}
 	if got := StageProgress(10, 100, time.Time{}, time.Time{}, real); got != 0.1 {
 		t.Errorf("both-zero progress = %v, want 0.1 (budget only)", got)
+	}
+}
+
+// The job-length cap in force is the current stage's, and an out-of-range CurrentStage (a
+// finished or not-yet-started ladder) means no cap rather than a panic.
+func TestCurrentMaxJobHours(t *testing.T) {
+	pe := &PlatformExperiment{
+		Stages:       []Stage{{LengthPct: 40, EvictPct: 25, MaxJobHours: 2}, {LengthPct: 60, EvictPct: 0}},
+		CurrentStage: 1,
+	}
+	if got := pe.CurrentMaxJobHours(); got != 2 {
+		t.Errorf("stage 1 cap = %v, want 2", got)
+	}
+	pe.CurrentStage = 2
+	if got := pe.CurrentMaxJobHours(); got != 0 {
+		t.Errorf("stage 2 cap = %v, want 0 (unlimited)", got)
+	}
+	for _, idx := range []int{0, 3} {
+		pe.CurrentStage = idx
+		if got := pe.CurrentMaxJobHours(); got != 0 {
+			t.Errorf("out-of-range stage %d cap = %v, want 0", idx, got)
+		}
 	}
 }

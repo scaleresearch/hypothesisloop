@@ -13,10 +13,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// StagesStore is the persistence interface for the stage ladder (docs/stages.md).
+// StagesStore is the persistence interface for the stage ladder.
 type StagesStore interface {
 	// Platform experiment queries.
-	ListPlatformExperiments(ctx context.Context, statusFilter string) ([]*domain.PlatformExperiment, error)
+	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
 
 	// Stage boundaries.
 	// AdvanceStage atomically records the cut agents, applies every zero/add op, and claims
@@ -43,7 +43,7 @@ type StagesStore interface {
 }
 
 // advanceStages advances a running platform experiment's ladder by at most one stage per tick,
-// cutting the configured share of survivors at the boundary it crosses. See docs/stages.md.
+// cutting the configured share of survivors at the boundary it crosses.
 func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) error {
 	// Boundaries already crossed may have left job-stopping incomplete (a crash between the
 	// AdvanceStage commit and the eviction sweep). Retrying it is free — it is idempotent.
@@ -98,7 +98,7 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 // Reservations never contribute — see shared/metricsdb/usage.go for why a large queued job
 // must not be able to trip a boundary.
 func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) (float64, error) {
-	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.ID)
+	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return 0, fmt.Errorf("stages: TotalObservedAccH: %w", err)
 	}

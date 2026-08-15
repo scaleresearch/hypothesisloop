@@ -12,7 +12,7 @@ Environment variables injected by the scheduler:
   HYPOTHESISLOOP_PRIMARY_METRIC          - metric name to optimize (e.g. val_accuracy)
   HYPOTHESISLOOP_METRIC_DIRECTION        - maximize | minimize
   HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS - seconds between metric pushes (default: 5)
-  HYPOTHESISLOOP_REGISTRY_URL            - HypothesisLoop registry HTTP base URL
+  HYPOTHESISLOOP_API_URL            - HypothesisLoop API base URL
   HYPOTHESISLOOP_DURATION_SECONDS        - total run time in seconds (default: 60)
   HYPOTHESISLOOP_BASELINE                - declared baseline value to beat
   HYPOTHESISLOOP_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
@@ -37,7 +37,7 @@ METRIC     = os.environ.get("HYPOTHESISLOOP_PRIMARY_METRIC", "val_accuracy")
 DIRECTION  = os.environ.get("HYPOTHESISLOOP_METRIC_DIRECTION", "maximize")
 INTERVAL   = int(os.environ.get("HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS", "5"))
 DURATION   = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "60"))
-REG_URL    = os.environ.get("HYPOTHESISLOOP_REGISTRY_URL", "http://localhost:8083")
+API_URL    = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
 BASELINE   = float(os.environ.get("HYPOTHESISLOOP_BASELINE", "0.5"))
 ACCELERATOR_TYPE   = os.environ.get("HYPOTHESISLOOP_ACCELERATOR_TYPE", "T4")
 ACCELERATOR_COUNT  = int(os.environ.get("HYPOTHESISLOOP_ACCELERATOR_COUNT", "1"))
@@ -121,7 +121,7 @@ def lr_schedule(f: float) -> float:
 
 
 def post_metric(fraction: float, value: float, metric_name: str = METRIC) -> None:
-    url = f"{REG_URL}/registry/experiments/{EXP_ID}/metrics"
+    url = f"{API_URL}/experiments/{EXP_ID}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:

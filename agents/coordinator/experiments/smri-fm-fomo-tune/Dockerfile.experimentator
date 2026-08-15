@@ -1,0 +1,41 @@
+# This experiment's overlay on the shared agents/experimentator/Dockerfile.base. Everything an
+# agent needs to *read* to form a hypothesis about the FOMO downstream tasks lives here, and
+# nowhere else -- putting any of it in the shared base would couple every other experiment's
+# agent image to this experiment's pins.
+FROM localhost/hypothesisloop-experimentator-base
+
+USER root
+
+# Upstream MedARC-AI/smri-fm, pinned. This is the source of truth for what the tasks are, what
+# the frozen "protocol" sections say, and what the published leaderboard numbers are (its
+# src/fomo_tune/README.md holds the walnut-v0.1 baselines experiment.md quotes). The vendored
+# copy under this experiment's src/ is the same tree at the same commit; this clone is here so an
+# agent can read the rest of the repo (other tasks, history, the challenge notes) without
+# guessing.
+#
+# Pinned, not a branch: this experiment's src/fomo_tune and src/smri_mae were vendored from
+# exactly this commit, and every baseline number in experiment.md is stamped against it. Moving
+# this pin without re-vendoring means the agent reads code the job does not run.
+ARG SMRI_FM_REF=11e53ab1d4bf29d3b44e3b59c7e6166233d414e1
+ENV SMRI_FM_REF=${SMRI_FM_REF}
+ENV SMRI_FM_SRC=/opt/smri-fm
+RUN git clone --filter=blob:none https://github.com/MedARC-AI/smri-fm.git $SMRI_FM_SRC \
+    && git -C $SMRI_FM_SRC checkout $SMRI_FM_REF \
+    && chown -R agent:agent $SMRI_FM_SRC
+
+# tt-metal source, baked in to be read, not run (this container has no /dev/tenstorrent --
+# compute happens in job pods). Must equal seed/job*.yaml's TT_METAL_REF and the tt-metal build
+# inside seed/Dockerfile.workload's pinned base image, or an agent forms hypotheses against
+# different source than its jobs execute -- a drift that produces no error anywhere.
+ARG TT_METAL_REF=d9a68815f5fcf08a5bfbffb6f1f811823fba8edd
+ENV TT_METAL_REF=${TT_METAL_REF}
+ENV TT_METAL_SRC=/opt/tt-metal
+RUN git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git $TT_METAL_SRC \
+    && git -C $TT_METAL_SRC checkout $TT_METAL_REF \
+    && chown -R agent:agent $TT_METAL_SRC
+
+USER agent
+
+# The vendored tt-metal patch, as a file to read rather than something applied here: it is
+# already applied inside the job image, and an agent wants to see it as a diff against the pin.
+COPY --chown=agent:agent tenstorrent/patches/vendored-tt-metal-changes.patch /home/agent/vendored-tt-metal-changes.patch

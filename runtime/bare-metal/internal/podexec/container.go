@@ -3,6 +3,8 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
@@ -89,6 +91,11 @@ type containerSpec struct {
 	StorageOptSize string   // storage-opt "size" value, e.g. "10Gi"; empty when not enforced
 	Devices        []string // host device paths, mapped straight through to the container
 	Mounts         []string // host paths bind-mounted read-write at the same path in the container (e.g. a hugetlbfs mount)
+	// ReadOnlyMounts is JobSpec.HostMounts, resolved and validated (see BuildContainerSpec):
+	// container path -> host path, mounted read-only. Distinct from Mounts because a host mount
+	// generally has a different container path than its host path (unlike hugepages) and must
+	// never be writable, since it's shared read-only across concurrent jobs.
+	ReadOnlyMounts map[string]string
 	Labels         map[string]string
 }
 
@@ -101,26 +108,50 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 	for k, v := range spec.Env {
 		env = append(env, k+"="+v)
 	}
+	// NVIDIA devices go through DeviceRequests (--gpus), not a raw DeviceMapping, so the
+	// nvidia-container-toolkit hook injects the host driver libraries CUDA images need.
 	devices := make([]container.DeviceMapping, 0, len(spec.Devices))
+	var nvidiaDeviceIDs []string
 	for _, d := range spec.Devices {
+		if id, ok := strings.CutPrefix(d, "/dev/nvidia"); ok && id != "" && id[0] >= '0' && id[0] <= '9' {
+			nvidiaDeviceIDs = append(nvidiaDeviceIDs, id)
+			continue
+		}
 		devices = append(devices, container.DeviceMapping{PathOnHost: d, PathInContainer: d, CgroupPermissions: "rwm"})
 	}
-	binds := make([]string, 0, len(spec.Mounts))
+	var deviceRequests []container.DeviceRequest
+	if len(nvidiaDeviceIDs) > 0 {
+		deviceRequests = append(deviceRequests, container.DeviceRequest{
+			Driver:       "nvidia",
+			DeviceIDs:    nvidiaDeviceIDs,
+			Capabilities: [][]string{{"gpu"}},
+		})
+	}
+	binds := make([]string, 0, len(spec.Mounts)+len(spec.ReadOnlyMounts))
 	for _, m := range spec.Mounts {
 		binds = append(binds, m+":"+m)
+	}
+	containerPaths := make([]string, 0, len(spec.ReadOnlyMounts))
+	for containerPath := range spec.ReadOnlyMounts {
+		containerPaths = append(containerPaths, containerPath)
+	}
+	sort.Strings(containerPaths)
+	for _, containerPath := range containerPaths {
+		binds = append(binds, spec.ReadOnlyMounts[containerPath]+":"+containerPath+":ro")
 	}
 	hostConfig := &container.HostConfig{
 		ShmSize: spec.ShmSizeBytes,
 		Binds:   binds,
 		// Host networking: this runtime always runs on a single bare node with no orchestrated
-		// service mesh, so "reachable from inside the container" (e.g. REGISTRY_URL) means
+		// service mesh, so "reachable from inside the container" (e.g. API_URL) means
 		// whatever's reachable from the host itself, including localhost — a bridge network
 		// would put the container on its own loopback, breaking that.
 		NetworkMode: "host",
 		Resources: container.Resources{
-			NanoCPUs: spec.NanoCPUs,
-			Memory:   spec.MemoryBytes,
-			Devices:  devices,
+			NanoCPUs:       spec.NanoCPUs,
+			Memory:         spec.MemoryBytes,
+			Devices:        devices,
+			DeviceRequests: deviceRequests,
 		},
 	}
 	if spec.StorageOptSize != "" {

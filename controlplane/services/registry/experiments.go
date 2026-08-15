@@ -7,16 +7,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Get returns a single experiment by ID.
-func (s *Service) Get(ctx context.Context, id string) (*domain.Experiment, error) {
-	exp, err := s.store.GetExperiment(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("registry.Get: %w", err)
-	}
-	return exp, nil
-}
-
-// List returns experiments matching the filter.
+// List returns experiments matching the filter — used internally (e.g. a hypothesis's jobs), not
+// exposed as its own list-experiments endpoint (that's GET /experiments on the scheduler service).
 func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	exps, err := s.store.ListExperiments(ctx, filter)
 	if err != nil {

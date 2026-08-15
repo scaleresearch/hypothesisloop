@@ -3,7 +3,7 @@
 
 register_agent() {
   local agent="$1"
-  curl -sf -X POST "$QUOTA_URL/agents" -H 'Content-Type: application/json' \
+  curl -sf -X POST "$API_URL/agents" -H 'Content-Type: application/json' \
     -d "{\"id\":\"$agent\",\"name\":\"$agent\"}" > /dev/null
 }
 
@@ -31,7 +31,7 @@ create_platform_experiment() {
   local stages="${7-}"
   local stages_field=""
   [[ -n "$stages" ]] && stages_field="\"stages\": $stages,"
-  curl -sf -X POST "$QUOTA_URL/platform-experiments" -H 'Content-Type: application/json' -d "{
+  curl -sf -X POST "$API_URL/platform-experiments" -H 'Content-Type: application/json' -d "{
     $stages_field
     \"name\": \"$name\",
     \"description\": \"$name\",
@@ -42,7 +42,7 @@ create_platform_experiment() {
     \"report_interval_seconds\": $report_interval,
     \"starts_at\": \"0001-01-01T00:00:00Z\",
     \"ends_at\": \"0001-01-01T00:00:00Z\"
-  }" | py "import sys,json; print(json.load(sys.stdin)['id'])"
+  }" | py "import sys,json; print(json.load(sys.stdin)['id'])" | tee -a "$CREATED_PE_LOG"
 }
 
 # signup_and_start PE_ID AGENT...
@@ -50,26 +50,26 @@ signup_and_start() {
   local pe_id="$1"; shift
   local agent
   for agent in "$@"; do
-    curl -sf -X POST "$QUOTA_URL/platform-experiments/${pe_id}/signup" -H 'Content-Type: application/json' \
+    curl -sf -X POST "$API_URL/platform-experiments/${pe_id}/signup" -H 'Content-Type: application/json' \
       -d "{\"agent_id\":\"$agent\"}" > /dev/null
   done
-  curl -sf -X POST "$QUOTA_URL/platform-experiments/${pe_id}/start" > /dev/null
+  curl -sf -X POST "$API_URL/platform-experiments/${pe_id}/start" > /dev/null
 }
 
 # close_platform_experiment PE_ID -> closes with no final results to report (top_results: [])
 close_platform_experiment() {
-  curl -sf -X POST "$QUOTA_URL/platform-experiments/$1/close" -H 'Content-Type: application/json' \
+  curl -sf -X POST "$API_URL/platform-experiments/$1/close" -H 'Content-Type: application/json' \
     -d '{"top_results":[]}' > /dev/null
 }
 
 cancel_job() {
-  curl -sf -X POST "$SCHED_URL/experiments/$1/cancel" > /dev/null
+  curl -sf -X POST "$API_URL/experiments/$1/cancel" > /dev/null
 }
 
 # register_hypothesis AGENT PE_ID [TEXT] -> prints hypothesis id
 register_hypothesis() {
   local agent="$1" pe_id="$2" text="${3:-}"
-  curl -sf -X POST "$REGISTRY_URL/registry/hypotheses" -H 'Content-Type: application/json' \
+  curl -sf -X POST "$API_URL/hypotheses" -H 'Content-Type: application/json' \
     -d "$(python3 "$LIB_DIR/mk_body.py" hyp "$agent" "$pe_id" "$text")" \
     | py "import sys,json; print(json.load(sys.stdin)['id'])"
 }
@@ -105,7 +105,7 @@ submit_job_ext() {
   # hide an unreliable control plane and make concurrent tests nondeterministic.
   local http_code resp
   resp=$(mktemp)
-  if ! http_code=$(curl -sS -o "$resp" -w '%{http_code}' -X POST "$SCHED_URL/experiments" -H 'Content-Type: application/json' -d "$body"); then
+  if ! http_code=$(curl -sS -o "$resp" -w '%{http_code}' -X POST "$API_URL/experiments" -H 'Content-Type: application/json' -d "$body"); then
     echo "submit_job: POST /experiments transport failure for $job_id (agent=$agent tier=$tier)" >&2
     rm -f "$resp"
     return 1
@@ -145,13 +145,13 @@ submit_job_expect_code() {
     return 1
   fi
   resp="/tmp/submit_job_expect_code.$$.json"
-  code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$SCHED_URL/experiments" -H 'Content-Type: application/json' -d "$body")
+  code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$API_URL/experiments" -H 'Content-Type: application/json' -d "$body")
   rm -f "$resp"
   echo "$code $job_id"
 }
 
-get_status() { curl -sf "$SCHED_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin)['status'])"; }
-get_field()  { curl -sf "$SCHED_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin).get('$2',''))"; }
+get_status() { curl -sf "$API_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin)['status'])"; }
+get_field()  { curl -sf "$API_URL/experiments/$1" | py "import sys,json; print(json.load(sys.stdin).get('$2',''))"; }
 
 # wait_for_status ID WANT_COMMA_LIST [TRIES] -> prints final status, returns 1 on timeout
 wait_for_status() {
@@ -207,7 +207,7 @@ assert_stable_status() {
 }
 
 quota_snapshot() {
-  curl -sf "$QUOTA_URL/platform-experiments/$1/quotas" \
+  curl -sf "$API_URL/platform-experiments/$1/quotas" \
     | py "
 import sys, json
 for q in json.load(sys.stdin):
@@ -220,7 +220,7 @@ quota_used_guaranteed_cpu() { _quota_field "$1" "$2" used_guaranteed_cpu_core_h;
 quota_guaranteed_cpu_hours() { _quota_field "$1" "$2" guaranteed_cpu_core_hours; }
 
 _quota_field() {
-  curl -sf "$QUOTA_URL/platform-experiments/$1/quotas" | py "
+  curl -sf "$API_URL/platform-experiments/$1/quotas" | py "
 import sys, json
 for q in json.load(sys.stdin):
     if q['agent_id'] == '$2':
@@ -234,11 +234,11 @@ for q in json.load(sys.stdin):
 # job they wait to COMPLETED, or the next submit_job for that agent+PE gets 403 summary_required.
 file_finding() {
   local job_id="$1" summary="${2:-e2e scenario finding for $1}"
-  curl -sf -X POST "$SCHED_URL/experiments/${job_id}/summary" -H 'Content-Type: application/json' \
+  curl -sf -X POST "$API_URL/experiments/${job_id}/summary" -H 'Content-Type: application/json' \
     -d "{\"summary\": \"$summary\"}" > /dev/null
 }
 
 dashboard_metrics() {
   # Exercises the same endpoint controlplane/ui's fetchExperimentMetrics calls.
-  curl -sf "${REGISTRY_URL}/registry/experiments/$1/metrics"
+  curl -sf "${API_URL}/experiments/$1/metrics"
 }

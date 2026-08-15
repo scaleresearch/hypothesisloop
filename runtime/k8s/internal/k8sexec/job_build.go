@@ -87,6 +87,15 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 		// surface as failed pods for the Job controller's per-index accounting, rather
 		// than being retried in-place by the kubelet.
 		restartPolicy = corev1.RestartPolicyNever
+	} else if spec.MaxRetries != nil && *spec.MaxRetries == 0 {
+		// Retries happen at two independent layers: BackoffLimit recreates the pod, and
+		// RestartPolicy=OnFailure has the kubelet restart the container in place. max_retries
+		// only reaches the first, so under OnFailure a job asking for zero retries still got
+		// restarted — observed live as restart_count=1 with max_retries=0, on a diagnostic run
+		// chosen specifically to fail once and cheaply. Honour the request: with no retries
+		// asked for there is no reason to keep the in-place layer, and Never makes the failure
+		// surface as a failed pod instead.
+		restartPolicy = corev1.RestartPolicyNever
 	}
 
 	resources := corev1.ResourceRequirements{
@@ -144,7 +153,7 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 		{Name: "HYPOTHESISLOOP_CODE_REF", Value: exp.CodeRef},
 		{Name: "HYPOTHESISLOOP_CONFIG_HASH", Value: exp.ConfigHash},
 		{Name: "HYPOTHESISLOOP_DATA_REF", Value: exp.DataRef},
-		{Name: "HYPOTHESISLOOP_REGISTRY_URL", Value: c.registryURL},
+		{Name: "HYPOTHESISLOOP_API_URL", Value: c.apiURL},
 		{Name: "HYPOTHESISLOOP_ACCELERATOR_TYPE", Value: string(exp.AcceleratorType)},
 		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", exp.AcceleratorCount)},
 		{Name: "HYPOTHESISLOOP_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
@@ -223,6 +232,35 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "dshm",
 			MountPath: "/dev/shm",
+		})
+	}
+	// HostMounts (JobSpec.HostMounts): a static, already-populated directory bind-mounted
+	// read-only from whichever node the pod lands on — the k8s side of the same feature
+	// runtime/bare-metal/internal/podexec implements via a plain bind mount. HostPathType
+	// Directory (not DirectoryOrCreate) makes the kubelet itself fail the pod if the path isn't
+	// actually there, matching the bare-metal backend's fail-fast-at-admission behavior rather
+	// than silently creating an empty directory and running without the data.
+	containerPaths := make([]string, 0, len(spec.HostMounts))
+	for containerPath := range spec.HostMounts {
+		containerPaths = append(containerPaths, containerPath)
+	}
+	sort.Strings(containerPaths)
+	hostPathType := corev1.HostPathDirectory
+	for i, containerPath := range containerPaths {
+		volName := fmt.Sprintf("host-mount-%d", i)
+		volumes = append(volumes, corev1.Volume{
+			Name: volName,
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: spec.HostMounts[containerPath],
+					Type: &hostPathType,
+				},
+			},
+		})
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      volName,
+			MountPath: containerPath,
+			ReadOnly:  true,
 		})
 	}
 

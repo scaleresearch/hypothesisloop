@@ -25,25 +25,17 @@ func get(t *testing.T, r chi.Router, path string) (int, string) {
 }
 
 func TestSmoke(t *testing.T) {
-	// quota
-	rq := chi.NewRouter()
-	dq := apidocs.New(rq, "quota", "1.0.0", apidocs.PlatformRules)
-	quota.RegisterHuma(dq, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, nil))
-	dq.MountExplore(rq)
+	// The public API is one document: quota, scheduler and registry operations are registered
+	// together exactly as control-service wires them, so /openapi.json and /explore describe
+	// every operation a caller can reach at the single base URL.
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules)
+	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, nil))
+	scheduler.RegisterHuma(doc, scheduler.NewHandler(nil))
+	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
+	doc.MountExplore(r)
 
-	// scheduler
-	rs := chi.NewRouter()
-	ds := apidocs.New(rs, "scheduler", "1.0.0", "")
-	scheduler.RegisterHuma(ds, scheduler.NewHandler(nil))
-	ds.MountExplore(rs)
-
-	// registry
-	rr := chi.NewRouter()
-	dr := apidocs.New(rr, "registry", "1.0.0", "")
-	registry.RegisterHuma(dr, registry.NewHandler(nil, nil))
-	dr.MountExplore(rr)
-
-	// cluster-agent
+	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := chi.NewRouter()
 	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "")
 	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", nil))
@@ -52,12 +44,18 @@ func TestSmoke(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		r    chi.Router
-		want string
+		want []string
 	}{
-		{"quota", rq, "POST /agents"},
-		{"scheduler", rs, "POST /experiments"},
-		{"registry", rr, "POST /registry/hypotheses"},
-		{"cluster", rc, "POST /{name}/reconcile"},
+		{"api", r, []string{
+			"POST /agents",
+			"POST /experiments",
+			"GET /experiments/{id}/metrics",
+			"GET /experiments/{id}/lineage",
+			"POST /hypotheses",
+			"GET /platform-experiments",
+			"reprioritize",
+		}},
+		{"cluster", rc, []string{"POST /{name}/reconcile"}},
 	} {
 		if code, body := get(t, tc.r, "/openapi.json"); code != 200 || len(body) < 100 {
 			t.Errorf("%s /openapi.json code=%d len=%d", tc.name, code, len(body))
@@ -66,13 +64,15 @@ func TestSmoke(t *testing.T) {
 		if code != 200 {
 			t.Errorf("%s /explore code=%d", tc.name, code)
 		}
-		if !strings.Contains(body, tc.want) {
-			t.Errorf("%s /explore missing %q; got:\n%s", tc.name, tc.want, body)
+		for _, want := range tc.want {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s /explore missing %q", tc.name, want)
+			}
 		}
-		t.Logf("%s /explore (%d bytes):\n%s", tc.name, len(body), body)
 	}
-	// /explore is one fixed output listing everything registered.
-	if _, full := get(t, rs, "/explore"); !strings.Contains(full, "reprioritize") {
-		t.Errorf("scheduler explore should list every operation including reprioritize")
+
+	// Nothing may still advertise the retired per-service prefix.
+	if _, body := get(t, r, "/explore"); strings.Contains(body, "/registry/") {
+		t.Errorf("/explore still advertises a /registry/ path:\n%s", body)
 	}
 }

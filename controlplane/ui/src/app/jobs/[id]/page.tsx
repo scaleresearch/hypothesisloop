@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics } from '@/lib/api'
+import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
@@ -27,6 +27,11 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
 
   const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
+  const { data: logs } = useSWR(
+    job ? `logs-${id}` : null,
+    () => fetchExperimentLogs(id),
+    { refreshInterval: 10_000 },
+  )
   const { data: metrics } = useSWR(
     job ? `metrics-${id}` : null,
     () => fetchExperimentMetrics(id),
@@ -50,14 +55,28 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
   // own chart instead of interleaving unrelated scales on a single line.
   const primaryMetricName = j.objective ? String(j.objective).split(/\s+/).pop() : undefined
+  // The API appends one contiguous block per underlying series (metric_name, or per retry
+  // attempt if a retry changed agent_id) rather than a single time-ordered stream, so a job
+  // with a retry has two blocks for the same metric_name back to back. Sort each metric's
+  // points by when they were recorded before charting, or the connected line jumps backward
+  // in time at the block boundary and renders as several crossing lines instead of one.
+  const sortedMetrics = [...((metrics ?? []) as MetricDataPoint[])].sort(
+    (a, b) => new Date(a.recorded_at as any).getTime() - new Date(b.recorded_at as any).getTime(),
+  )
   const seriesByMetric = new Map<string, { frac: number; value: number }[]>()
-  for (const p of (metrics ?? []) as MetricDataPoint[]) {
+  // metric_basis defaults to "raw" server-side; a metric whose points carry more than one
+  // basis (or any non-"raw" basis) changed what its value means mid-run, and that must be
+  // visible next to the chart, not silently plotted as one uniform line.
+  const basesByMetric = new Map<string, Set<string>>()
+  for (const p of sortedMetrics) {
     const name = p.metric_name ?? primaryMetricName ?? 'metric'
     if (!seriesByMetric.has(name)) seriesByMetric.set(name, [])
     seriesByMetric.get(name)!.push({
       frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
       value: p.metric_value ?? (p as any).value,
     })
+    if (!basesByMetric.has(name)) basesByMetric.set(name, new Set())
+    basesByMetric.get(name)!.add(p.metric_basis || 'raw')
   }
   const metricNames = Array.from(seriesByMetric.keys()).sort((a, b) => {
     if (a === primaryMetricName) return -1
@@ -81,9 +100,15 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             <TierBadge tier={j.capacity_tier} />
           </h1>
           <p style={{ fontStyle: 'italic' }}>
-            {j.hypothesis_id ? (
-              <Link href={`/hypotheses/${j.hypothesis_id}`} className="text-link">{j.hypothesis}</Link>
-            ) : j.hypothesis}
+            {j.hypothesis}
+            {j.hypothesis_id && (
+              <>
+                {' '}
+                <Link href={`/hypotheses/${j.hypothesis_id}`} className="text-link" style={{ fontStyle: 'normal', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  View hypothesis →
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <Link href="/jobs" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All jobs</Link>
@@ -107,6 +132,55 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               metric at eviction: {j.metric_at_eviction.toFixed(4)}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Why isn't it running / why did it stop. phase_detail is the runtime's own account —
+          an image that won't pull, a config the runtime rejected, or the exit code of a
+          container that died. For a failed job this is the difference between "it broke" and
+          knowing what broke. */}
+      {j.phase_detail && (j.phase_detail.reason || j.phase_detail.message) && (
+        <div
+          style={{
+            background: 'rgba(255,153,153,.07)',
+            border: '1px solid rgba(255,153,153,.3)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14,
+          }}
+        >
+          <strong style={{ color: semantic.danger }}>Runtime:</strong>{' '}
+          {j.phase_detail.reason && (
+            <span className="mono" style={{ color: semantic.danger, fontSize: 13 }}>
+              {j.phase_detail.reason}
+            </span>
+          )}
+          {j.phase_detail.message && (
+            <span className="text-muted" style={{ marginLeft: 8, fontSize: 13 }}>
+              {j.phase_detail.message}
+            </span>
+          )}
+          {j.phase_detail.restart_count ? (
+            <span className="mono text-muted" style={{ marginLeft: 12, fontSize: 12 }}>
+              restarts: {j.phase_detail.restart_count}
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      {/* A queued job never errors on its own; this is the scheduler's current reason. */}
+      {j.status === 'QUEUED' && j.not_admitted_reason && (
+        <div
+          style={{
+            background: 'rgba(166,152,255,.06)',
+            border: '1px solid rgba(166,152,255,.25)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14,
+          }}
+        >
+          <strong style={{ color: semantic.accent }}>Not admitted:</strong>{' '}
+          <span className="mono text-muted" style={{ fontSize: 12 }}>{j.not_admitted_reason}</span>
         </div>
       )}
 
@@ -142,10 +216,25 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         <PodContent>
           {metricNames.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: metricNames.length > 1 ? '1fr 1fr' : '1fr', gap: 16 }}>
-              {metricNames.map((name, i) => (
+              {metricNames.map((name, i) => {
+                const bases = Array.from(basesByMetric.get(name) ?? [])
+                const nonRaw = bases.filter(b => b !== 'raw')
+                return (
                 <div key={name}>
                   <div className="mono text-muted" style={{ fontSize: 11, marginBottom: 4 }}>
                     {name}{name === primaryMetricName ? ' (objective)' : ''}
+                    {nonRaw.length > 0 && (
+                      <span
+                        className="mono"
+                        title="One or more values on this chart are not on the metric's normal ('raw') scale — do not compare them to a raw-basis run."
+                        style={{
+                          marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                          background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
+                        }}
+                      >
+                        basis: {bases.join(', ')}
+                      </span>
+                    )}
                   </div>
                   <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
                     <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
@@ -177,7 +266,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-              ))}
+              )})}
             </div>
           ) : (
             <EmptyState>No metric data yet — waiting for job to start reporting.</EmptyState>
@@ -213,6 +302,28 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           </PodContent>
         </Pod>
       )}
-    </div>
+    
+      {/* The job's own output. For a failed job the traceback usually lives only here — the
+          record carries a reason code, not the error. Includes the crashed instance's output
+          when a container restarted, which is otherwise unreachable. */}
+      <Pod style={{ marginBottom: 12 }}>
+        <PodHeader>Logs</PodHeader>
+        <PodContent>
+          {logs && logs.length > 0 ? (
+            <pre
+              className="mono"
+              style={{
+                margin: 0, fontSize: 12, lineHeight: 1.5, maxHeight: 420,
+                overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            >
+              {logs.join('\n')}
+            </pre>
+          ) : (
+            <EmptyState>No log output reported yet.</EmptyState>
+          )}
+        </PodContent>
+      </Pod>
+</div>
   )
 }

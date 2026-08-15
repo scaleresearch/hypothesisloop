@@ -5,7 +5,7 @@
 // Environment variables:
 //
 //	CLUSTER_NAME        — this cluster's stable identity
-//	CONTROLPLANE_URL    — base URL of scheduler-service
+//	API_URL             — base URL of the control-plane API
 //	HYPOTHESISLOOP_CONFIG — path to hypothesisloop.yaml
 package main
 
@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
@@ -29,18 +30,19 @@ const (
 
 func main() {
 	clusterName := agentloop.RequiredEnv(binaryName, "CLUSTER_NAME")
-	controlPlaneURL := agentloop.RequiredEnv(binaryName, "CONTROLPLANE_URL")
-	// Passed to every Job this agent creates as HYPOTHESISLOOP_REGISTRY_URL — must be reachable
-	// from *inside* the training pod, not from the agent itself, so it can't just default to
-	// registry-service's in-cluster DNS name the way CONTROLPLANE_URL does for this process;
-	// there is no such Service unless this cluster also runs the control plane's own compose
-	// stack reachable under that name. Must be set explicitly for local/dev clusters where the
-	// control plane lives outside the cluster (e.g. http://host.docker.internal:8083).
-	registryURL := agentloop.RequiredEnv(binaryName, "REGISTRY_URL")
+	// One URL for both jobs of this process: polling the control plane, and the value passed to
+	// every Job it creates as HYPOTHESISLOOP_API_URL. It must therefore be reachable from
+	// *inside* a training pod as well as from the agent, so set it explicitly on local/dev
+	// clusters where the control plane lives outside the cluster
+	// (e.g. http://host.docker.internal:8081).
+	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
 	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
+	// Optional: how many trailing log lines to report per job per status push. Not required —
+	// agentloop.DefaultLogTailLines (100) applies when unset.
+	logTailLines, _ := strconv.Atoi(os.Getenv("LOG_TAIL_LINES"))
 
 	jwc, err := k8sexec.New(k8sexec.Config{
-		RegistryURL:                          registryURL,
+		APIURL:                               apiURL,
 		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
 		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
 		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
@@ -57,7 +59,7 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
-	log("starting: cluster=%s control_plane=%s", clusterName, controlPlaneURL)
+	log("starting: cluster=%s control_plane=%s", clusterName, apiURL)
 
 	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := jwc.SetupCluster(setupCtx); err != nil {
@@ -67,11 +69,13 @@ func main() {
 
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
-		ControlPlaneURL:   controlPlaneURL,
+		APIURL:            apiURL,
 		Executor:          jwc,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
+		LogTailLines:      logTailLines,
+		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
 		Log:               log,
 	}
 	a.Run(ctx)
