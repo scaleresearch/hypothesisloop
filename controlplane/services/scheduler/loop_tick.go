@@ -248,6 +248,10 @@ func (l *Loop) tick(ctx context.Context) error {
 		return err
 	}
 	sortBurst(burst, quotaMap, completion)
+	// Interleave by agent so one agent's queue depth can't claim every unit of burst capacity
+	// that frees up this tick ahead of another agent with fewer jobs waiting — see
+	// interleaveByAgent's doc comment.
+	burst = interleaveByAgent(burst)
 	bAvailInitial := cloneAvail(bAvail)
 
 	for _, exp := range burst {
