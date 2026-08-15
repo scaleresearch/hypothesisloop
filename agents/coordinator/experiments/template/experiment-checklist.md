@@ -61,20 +61,23 @@ check to post a better number — indistinguishable from a real win unless the g
 external. Reuse the ground truth's own validation code directly rather than a hand-rolled copy of
 it, for the same reason.
 
-## 3. Cheap sweep vs. expensive change are two different costs — keep them two different paths
+## 3. Pre-bake a ready-to-submit starting point for each kind of change an agent will make
 
-Collapsing these into one path means every job pays the slower cost:
+Most hypotheses an agent tries are "same code, different setting" (learning rate, batch size,
+masking ratio, an env var/config field). Some are "the code itself needs to change" (a new kernel,
+a different algorithm, a new dependency). These need two different pre-built starting points
+prepared up front, not one:
 
-- **Cheap/config-only** path: zero build, a parameter sweep is a change to env vars or a config
-  file, never to code. This is what makes high-scale iteration possible — most of the fleet
-  should live here.
-- **Expensive/structural** path (source edits, rebuilds, new dependencies): real, possibly
-  multi-minute cost even incrementally. Give it its own pre-baked starting point (source
-  pre-cloned, pre-built, with a warm cache) or every such job pays a full cold build — long enough
-  that this class of hypothesis dies before it ever produces a result.
+- **Config-only jobs**: submittable straight from the base runtime image, no build step, no
+  source checkout — the agent only ever touches env vars/a config file.
+- **Structural/code-change jobs**: their own pre-cloned, pre-built starting point with a warm
+  cache, so editing code and resubmitting is an incremental build, not a cold one.
 
-An agent should never be forced through the slow path for a config change, and never silently
-stuck on the fast path when it actually needs to touch the thing that path can't reach.
+If only the second exists, every job — even a one-line config tweak — pays a multi-minute clone +
+build, and a fleet spends most of its time compiling instead of iterating. Set both up as part of
+this experiment definition, before any agent is spawned, the same way you'd pre-build the job
+image or pre-fetch a dataset — this is exactly that same category of "make it a checklist item
+here, not something 100 agents each redo for themselves."
 
 ## 4. No agent can silently run against a different environment than it thinks it's running against
 
@@ -110,21 +113,14 @@ never re-fetched once read — context is not durable storage), and a rolling lo
 coordinator or the agent's next session can read without needing the original process to still be
 alive.
 
-## 8. Don't let a fleet of agents discover and chase the same idea independently
-
-Before registering a new hypothesis/direction, an agent should dedupe against what the shared
-pool has already tried (same lever, same expected direction = the same idea, however worded), and
-reuse an existing thread rather than opening a parallel one. Without this, N agents converge on
-the same first idea and burn N times the compute to learn it once.
-
-## 9. Smoke-test on the real target, at the same layer agents will hit, before spawning any agent
+## 8. Smoke-test on the real target, at the same layer agents will hit, before spawning any agent
 
 A build succeeding is not proof a job works. Test the actual job-submission path end to end
 (the same runtime, mounts, and device access a real job gets), not just that an image builds —
 otherwise an environment gap (a missing mount, a missing capability) reads exactly like a broken
 image, and 100 agents inherit the same false negative until someone debugs it by hand.
 
-## 10. Immutable, capacity-aware images
+## 9. Immutable, capacity-aware images
 
 `latest`/`:src`-style mutable tags let two agents (or two waves) silently run different binaries
 of "the same" image — pin by digest, or at minimum re-verify the pin didn't move before trusting
@@ -133,7 +129,7 @@ a comparison across jobs. Separately, a heavy pre-built image (full source tree 
 job reaches hardware — plan for pre-pull/staggered start or an admission throttle, not just image
 size on its own.
 
-## 11. Storage and retry costs must be bounded, not just requested
+## 10. Storage and retry costs must be bounded, not just requested
 
 - Size ephemeral storage for the actual worst case (build output + cache + traces + dumps), and
   clean up after a run, not just request a number that happens to work today.
@@ -144,7 +140,7 @@ size on its own.
   run — use `JobSpec.host_mounts` to bind-mount an already-fetched, node-local copy instead of
   defaulting every job to fetch-on-start.
 
-## 12. Reporting must scale sublinearly and never lose the final result silently
+## 11. Reporting must scale sublinearly and never lose the final result silently
 
 Per-iteration metric/log POSTs that are fine for one job become real registry load at fleet scale
 (iterations × jobs × endpoints) — batch or throttle instead of one request per iteration per job.
@@ -152,7 +148,7 @@ And "never raise on a reporting failure" (item 5) must not mean "silently lose t
 final metric POST fails, the run's outcome should still be recoverable (a durable artifact, a
 final retry) rather than a job that finished correctly but reported nothing.
 
-## 13. The gate must actually gate, and the metric must resist being gamed by noise
+## 12. The gate must actually gate, and the metric must resist being gamed by noise
 
 - Reporting a constraint (PCC, cache count) is not the same as *enforcing* it — a harness that logs
   a value but exits 0 regardless lets a run that would fail the gate quietly enter the ranking
@@ -163,7 +159,7 @@ final retry) rather than a job that finished correctly but reported nothing.
   real improvement — require the winning config to reproduce (rerun and confirm) before it's
   trusted, not just report the running minimum.
 
-## 14. Record enough environment fingerprint to trust a cross-node comparison
+## 13. Record enough environment fingerprint to trust a cross-node comparison
 
 If the fleet runs across more than one physical node/device, selecting an accelerator *type* isn't
 enough to make results comparable — record which physical device, firmware/runtime version, and
@@ -197,7 +193,7 @@ genuine improvement (or vice versa).
 
 ## Using this checklist
 
-When starting a new experiment definition, work through items 1-14 against its own `experiment.md`,
+When starting a new experiment definition, work through items 1-13 against its own `experiment.md`,
 `seed/` and `Dockerfile.experimentator` — each item should have a concrete answer, not just "not
 applicable." If a new problem
 shows up in a live run that this checklist doesn't already cover, add it here as a new item (with

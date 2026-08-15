@@ -42,31 +42,52 @@ run_services() {
 
 case "$ACTION" in
   up)
-    # --ignore: `up` must be re-runnable against surviving volumes (down keeps them unless asked
-    # to purge), otherwise the second `up` on any machine that already has data aborts here.
-    podman volume create --ignore "$POSTGRES_VOLUME" >/dev/null
-    podman volume create --ignore "$GREPTIME_VOLUME" >/dev/null
-    podman pod create --name "$POD" \
-      --add-host greptimedb:127.0.0.1 \
-      -p 5433:5432 -p 8081:8081 -p 8084:8084 \
-      -p 4010:4000 -p 4001:4001 >/dev/null
+    # If the pod already exists (e.g. after a reboot, since `--restart=unless-stopped` doesn't
+    # survive the host going down), it and its containers are still there — start them instead of
+    # failing on `pod create`. A pod that exists but won't start is a genuinely broken one and
+    # `podman pod start` still errors out, so this stays fail-fast.
+    if podman pod exists "$POD"; then
+      for c in hypothesisloop-postgres hypothesisloop-greptimedb hypothesisloop-control-service hypothesisloop-metrics-service; do
+        podman container exists "$c" || {
+          echo "pod \"$POD\" exists but container $c doesn't — a half-created pod. Run 'podman.sh down && podman.sh up' to rebuild it." >&2
+          exit 1
+        }
+      done
+      podman pod start "$POD" >/dev/null
+      pod_existed=1
+    else
+      pod_existed=0
+      # --ignore: `up` must be re-runnable against surviving volumes (down keeps them unless asked
+      # to purge), otherwise the second `up` on any machine that already has data aborts here.
+      podman volume create --ignore "$POSTGRES_VOLUME" >/dev/null
+      podman volume create --ignore "$GREPTIME_VOLUME" >/dev/null
+      podman pod create --name "$POD" \
+        --add-host greptimedb:127.0.0.1 \
+        -p 5433:5432 -p 8081:8081 -p 8084:8084 \
+        -p 4010:4000 -p 4001:4001 >/dev/null
 
-    podman run -d --pod "$POD" --name hypothesisloop-postgres \
-      --restart=unless-stopped \
-      -e POSTGRES_DB=hypothesisloop -e POSTGRES_USER=hypothesisloop -e POSTGRES_PASSWORD=hypothesisloop \
-      -v "$POSTGRES_VOLUME:/var/lib/postgresql/data" \
-      -v "$ROOT/controlplane/infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
-      -v "$ROOT/controlplane/shared/db/schema.sql:/schema/schema.sql:ro" \
-      docker.io/library/postgres:16-alpine >/dev/null
+      podman run -d --pod "$POD" --name hypothesisloop-postgres \
+        --restart=unless-stopped \
+        -e POSTGRES_DB=hypothesisloop -e POSTGRES_USER=hypothesisloop -e POSTGRES_PASSWORD=hypothesisloop \
+        -v "$POSTGRES_VOLUME:/var/lib/postgresql/data" \
+        -v "$ROOT/controlplane/infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
+        -v "$ROOT/controlplane/shared/db/schema.sql:/schema/schema.sql:ro" \
+        docker.io/library/postgres:16-alpine >/dev/null
 
-    podman run -d --pod "$POD" --name hypothesisloop-greptimedb \
-      --restart=unless-stopped \
-      -v "$GREPTIME_VOLUME:/tmp/greptimedb-data" \
-      docker.io/greptime/greptimedb:latest standalone start \
-      --http-addr=0.0.0.0:4000 --rpc-bind-addr=0.0.0.0:4001 >/dev/null
+      podman run -d --pod "$POD" --name hypothesisloop-greptimedb \
+        --restart=unless-stopped \
+        -v "$GREPTIME_VOLUME:/tmp/greptimedb-data" \
+        docker.io/greptime/greptimedb:latest standalone start \
+        --http-addr=0.0.0.0:4000 --rpc-bind-addr=0.0.0.0:4001 >/dev/null
+    fi
 
     wait_for_postgres
-    run_services
+    if (( pod_existed )); then
+      wait_for_http http://localhost:8081/health
+      wait_for_http http://localhost:8084/health
+    else
+      run_services
+    fi
     ;;
   down)
     # Removes the pod and every container, and KEEPS the volumes: a finished run's experiments,

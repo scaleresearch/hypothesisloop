@@ -58,6 +58,21 @@ export function fetchAgentBalances(): Promise<AgentBalance[]> {
   return apiFetch<AgentBalance[]>(`${API_URL}/balances`)
 }
 
+export interface AgentBalancesParams {
+  limit?: number
+  offset?: number
+}
+
+export function fetchAgentBalancesPage(params?: AgentBalancesParams): Promise<Page<AgentBalance>> {
+  const url = new URL(`${API_URL}/balances`)
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined) url.searchParams.set(k, String(v))
+    }
+  }
+  return apiFetchPage<AgentBalance>(url.toString())
+}
+
 export function fetchAgents(): Promise<Agent[]> {
   return apiFetch<Agent[]>(`${API_URL}/agents`)
 }
@@ -132,33 +147,32 @@ export function fetchPlatformExperimentTimeseries(
 // Hypotheses
 // ---------------------------------------------------------------------------
 
-// Hypotheses are scoped to a single platform experiment's shared idea pool — there is no
-// unscoped/global listing on the backend. Callers that want hypotheses across every platform
-// experiment (e.g. the /hypotheses page) should fetch platform experiments first and call
-// this once per ID; see fetchAllHypotheses below for that aggregation.
+// A hypothesis is scoped to a single platform experiment's shared idea pool, but GET
+// /hypotheses also supports omitting platform_experiment_id for the operator-facing global
+// view across every pool — see fetchHypothesesPage below, which every list caller should use.
 export function fetchHypotheses(platformExperimentID: string): Promise<Hypothesis[]> {
   return apiFetch<Hypothesis[]>(
     `${API_URL}/hypotheses?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
   )
 }
 
-// Fetches the hypothesis pool for every given platform experiment and merges them into one
-// list, most recent first — powers the unscoped /hypotheses view (filterable by platform
-// experiment client-side) without requiring the backend to support a global listing.
-export async function fetchAllHypotheses(platformExperimentIDs: string[]): Promise<Hypothesis[]> {
-  // allSettled, not all: one stale/unreachable platform experiment (e.g. deleted after this
-  // list was fetched) must not blank out every other experiment's hypotheses with a single
-  // failed-fetch error.
-  const results = await Promise.allSettled(platformExperimentIDs.map(id => fetchHypotheses(id)))
-  const lists: Hypothesis[][] = []
-  for (const r of results) {
-    if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-      lists.push(r.value)
-    } else if (r.status === 'rejected') {
-      console.error('fetchAllHypotheses: failed to fetch one platform experiment\'s hypotheses', r.reason)
+export interface HypothesesParams {
+  /** Omit for the global, cross-platform-experiment view. */
+  platform_experiment_id?: string
+  agent?: string
+  status?: string
+  limit?: number
+  offset?: number
+}
+
+export function fetchHypothesesPage(params?: HypothesesParams): Promise<Page<Hypothesis>> {
+  const url = new URL(`${API_URL}/hypotheses`)
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
     }
   }
-  return lists.flat().sort((a, b) => b.created_at.localeCompare(a.created_at))
+  return apiFetchPage<Hypothesis>(url.toString())
 }
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {

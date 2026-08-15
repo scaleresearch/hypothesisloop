@@ -12,7 +12,7 @@ import (
 // ExperimentMeta.HypothesisID is required and must reference a row here whose
 // PlatformExperimentID matches the job's own PlatformExperimentID. This is the real
 // uniqueness check: a DB-level UNIQUE index on (platform_experiment_id, normalized_text)
-// (see schema.sql) rejects a second registration of the same claim within the same platform
+// (see shared/db/schema.sql) rejects a second registration of the same claim within the same platform
 // experiment, replacing the old always-novel dedup stub. The same claim registered under a
 // different platform experiment is a distinct hypothesis — different research programs don't
 // share an idea pool.

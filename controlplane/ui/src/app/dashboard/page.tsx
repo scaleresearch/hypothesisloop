@@ -87,6 +87,14 @@ export default function DashboardPage() {
   const clusterList = clusters?.clusters ?? []
   const connectedCount = clusterList.filter(c => c.connected).length
 
+  // Real hardware occupancy — busy vs. total accelerators from each connected cluster's most
+  // recent reconcile snapshot — as opposed to a platform experiment's budget-consumption ratio
+  // (used/allocated AccH), which measures spend, not whether chips are actually idle or running
+  // a job.
+  const acceleratorBusy = clusterList.reduce((s, c) => s + c.accelerator_busy, 0)
+  const acceleratorTotal = clusterList.reduce((s, c) => s + c.accelerator_total, 0)
+  const occupancyPct = acceleratorTotal > 0 ? Math.round((acceleratorBusy / acceleratorTotal) * 100) : null
+
   // Recent evictions (last 10)
   const recentEvictions = evictedJobs
     .sort((a, b) => new Date((b as any).updated_at ?? b.created_at).getTime() - new Date((a as any).updated_at ?? a.created_at).getTime())
@@ -129,6 +137,14 @@ export default function DashboardPage() {
           value={`${connectedCount}/${clusterList.length}`}
           color={connectedCount === clusterList.length && clusterList.length > 0 ? semantic.success : semantic.danger}
           sub="connected / registered"
+        />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+        <StatTile
+          label="Accelerator Occupancy"
+          value={occupancyPct != null ? `${occupancyPct}%` : '—'}
+          color={semantic.accent}
+          sub={acceleratorTotal > 0 ? `${acceleratorBusy}/${acceleratorTotal} chips busy, live across connected clusters` : 'no live capacity reported'}
         />
       </div>
 

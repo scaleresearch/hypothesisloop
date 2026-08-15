@@ -88,6 +88,13 @@ const (
 	// StuckPendingTimeout elapsed — evicted early with a full refund rather than left to occupy
 	// a reservation until the generic timeout catches it.
 	EvictionUnschedulable EvictionReason = "unschedulable"
+	// EvictionWorkloadGone marks a RUNNING job whose cluster reported a complete, fresh status
+	// snapshot that no longer mentions it at all (metricsdb.LatestJobPhase's JobPhaseGone) —
+	// the runtime's own confirmation that no live pod/container exists for it, sustained across
+	// a full silence window. Distinct from EvictionSilent: that's a live pod that stopped
+	// reporting; this is no pod at all (e.g. an orphaned pod lost across a host reboot). Without
+	// this, such a job stays RUNNING forever and its quota is never released — see checks.go.
+	EvictionWorkloadGone EvictionReason = "workload_gone"
 )
 
 // PhaseDetail is what a runtime observed about why a job's container hasn't started (or

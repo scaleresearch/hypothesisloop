@@ -137,13 +137,9 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: available CPU capacity: %w", err)
 	}
-	acceleratorTotal, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	acceleratorAvailable, acceleratorTotal, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: total accelerator capacity: %w", err)
-	}
-	acceleratorAvailable, err := metricsdb.LiveClusterAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
-	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: available accelerator capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: accelerator capacity: %w", err)
 	}
 	// RAM/ephemeral-storage are hard physical-fit dimensions (not billing dimensions).
 	ramTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)

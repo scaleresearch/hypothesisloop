@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { fetchExperimentsPage, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
 import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -47,10 +47,19 @@ function SortHeader({ label, sortKey, active, dir, onClick, align }: {
 }
 
 export default function JobsPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <JobsPageContent />
+    </Suspense>
+  )
+}
+
+function JobsPageContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [agentFilter, setAgentFilter] = useState('')
-  const [peFilter, setPEFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [peFilter, setPEFilter] = useState(() => searchParams.get('platform_experiment_id') ?? '')
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') ?? '')
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [sortKey, setSortKey] = useState<SortKey>('created_at')

@@ -77,3 +77,68 @@ func GetLatestPhaseDetail(ctx context.Context, dbURL, experimentID string) (reas
 	}
 	return reasonVal, messageVal, restartCountVal, true, nil
 }
+
+// PhaseDetailRow is one experiment's latest reported phase detail, as returned by
+// GetLatestPhaseDetailBatch.
+type PhaseDetailRow struct {
+	Reason       string
+	Message      string
+	RestartCount int32
+}
+
+// GetLatestPhaseDetailBatch returns the latest phase detail for every experiment ID in ids that
+// has ever reported one, in a single query — the list-experiments endpoint's equivalent of
+// GetLatestPhaseDetail, batched so watching many jobs doesn't cost one query per job. IDs with no
+// reported phase detail are simply absent from the result, same as found=false from the
+// single-ID lookup.
+func GetLatestPhaseDetailBatch(ctx context.Context, dbURL string, ids []string) (map[string]PhaseDetailRow, error) {
+	out := make(map[string]PhaseDetailRow)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		if id == "" {
+			return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: experiment_id is required")
+		}
+		quoted[i] = sqlQuote(id)
+	}
+	querySQL := fmt.Sprintf(
+		`SELECT experiment_id, reason, phase_message, restart_count FROM job_phase_detail WHERE experiment_id IN (%s) ORDER BY ts DESC`,
+		strings.Join(quoted, ", "),
+	)
+	rows, err := querySQLRows(ctx, dbURL, querySQL)
+	if err != nil {
+		// The table not existing yet (nothing has ever been reported for any job) is not an
+		// error from the caller's point of view -- same as no rows.
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist") {
+			return out, nil
+		}
+		return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: %w", err)
+	}
+	// Rows are ordered newest-first across all requested IDs; the first row seen for a given
+	// experiment_id is therefore its latest — later rows for the same ID are older and skipped.
+	for _, row := range rows {
+		if len(row) != 4 {
+			return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: unexpected row shape")
+		}
+		id, ok := row[0].(string)
+		if !ok || id == "" {
+			return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: row missing experiment_id")
+		}
+		if _, seen := out[id]; seen {
+			continue
+		}
+		reasonVal, _ := row[1].(string)
+		messageVal, _ := row[2].(string)
+		var restartCountVal int32
+		switch v := row[3].(type) {
+		case float64:
+			restartCountVal = int32(v)
+		case int64:
+			restartCountVal = int32(v)
+		}
+		out[id] = PhaseDetailRow{Reason: reasonVal, Message: messageVal, RestartCount: restartCountVal}
+	}
+	return out, nil
+}

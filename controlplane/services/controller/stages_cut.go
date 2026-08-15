@@ -22,7 +22,7 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	}
 	// Cut agents' *unspent* quota is what returns to the pool, so their usage must be current
 	// before the ops are computed.
-	if err := metricsdb.PopulateUsage(ctx, c.metricsDBURL, pe.ID, quotas); err != nil {
+	if err := metricsdb.PopulateUsage(ctx, c.metricsDBURL, pe.CreatedAt, pe.ID, quotas); err != nil {
 		return fmt.Errorf("stages: populate usage: %w", err)
 	}
 	if err := c.stagesStore.AddDesiredQuotaUsage(ctx, pe.ID, quotas); err != nil {

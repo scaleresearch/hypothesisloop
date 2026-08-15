@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -17,6 +18,9 @@ type AgentStanding struct {
 	Rank         int     `json:"rank"`
 	AgentID      string  `json:"agent_id"`
 	Best         float64 `json:"best"`
+	// Basis is always "raw": only raw-basis values are ever ranked here. Present so the UI can
+	// show it next to the value without a second lookup.
+	Basis        string  `json:"basis"`
 	ExperimentID string  `json:"experiment_id,omitempty"`
 	CodeRef      string  `json:"code_ref,omitempty"`
 }
@@ -26,6 +30,11 @@ type MetricStandings struct {
 	Metric    string          `json:"metric"`
 	Direction string          `json:"direction"`
 	Standings []AgentStanding `json:"standings"`
+	// NonRawBasisAgents lists agents that reported at least one non-"raw"-basis value for this
+	// metric (e.g. a rescaled loss target). That value is never blended into Standings — if the
+	// same agent also reported a "raw" value it is ranked on that alone. Surfaced so the UI can
+	// flag it rather than the discrepancy staying invisible.
+	NonRawBasisAgents []string `json:"non_raw_basis_agents,omitempty"`
 }
 
 // PlatformExperimentResults is what a finished run amounts to: the operator's narrative plus the
@@ -66,7 +75,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
-		standings, err := s.standingsOnMetric(ctx, pe.ID, metric)
+		standings, nonRawAgents, err := s.standingsOnMetric(ctx, pe.ID, metric)
 		if err != nil {
 			return nil, err
 		}
@@ -81,9 +90,10 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 			eligible[i].Rank = i + 1
 		}
 		out.Metrics = append(out.Metrics, MetricStandings{
-			Metric:    metric.Key,
-			Direction: metric.Direction,
-			Standings: eligible,
+			Metric:            metric.Key,
+			Direction:         metric.Direction,
+			Standings:         eligible,
+			NonRawBasisAgents: nonRawAgents,
 		})
 	}
 	return out, nil
@@ -99,7 +109,7 @@ func (s *PlatformExperimentsService) constraintIneligibleAgents(ctx context.Cont
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
 		}
-		standings, err := s.standingsOnMetric(ctx, platformExpID, metric)
+		standings, _, err := s.standingsOnMetric(ctx, platformExpID, metric)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +157,7 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if primary == nil {
 		return nil, nil
 	}
-	standings, err := s.standingsOnMetric(ctx, pe.ID, *primary)
+	standings, _, err := s.standingsOnMetric(ctx, pe.ID, *primary)
 	if err != nil {
 		return nil, err
 	}
@@ -158,24 +168,57 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	return out, nil
 }
 
-// standingsOnMetric ranks every agent by its best value on one metric, best-first. Same
-// direction-aware best-per-agent query the stage ladder ranks cuts with, so a run's final
+// standingsOnMetric ranks every agent by its best "raw"-basis value on one metric, best-first.
+// Same direction-aware best-per-agent query the stage ladder ranks cuts with, so a run's final
 // standings and its mid-run cuts can never disagree about who is ahead.
-func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, platformExpID string, metric domain.MetricDefinition) ([]AgentStanding, error) {
+//
+// Grouping by (agent_id, metric_basis) rather than agent_id alone matters: collapsing basis
+// out of the query would let a rescaled/non-"raw" value silently win or lose a min/max_over_time
+// aggregation against a raw one — exactly the scale mismatch that made a ~20% "win" look real
+// when it was actually ~2x worse. An agent that only ever reported this metric on a non-"raw"
+// basis is returned separately, flagged, never blended into the ranked list.
+func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, platformExpID string, metric domain.MetricDefinition) ([]AgentStanding, []string, error) {
 	agg := "max"
 	if metric.Direction == "minimize" {
 		agg = "min"
 	}
-	promQL := fmt.Sprintf(`%s by (agent_id) (%s_over_time(experiment_metric_value{platform_experiment_id=%q, metric_name=%q}[30d]))`,
+	promQL := fmt.Sprintf(`%s by (agent_id, metric_basis) (%s_over_time(experiment_metric_value{platform_experiment_id=%q, metric_name=%q}[30d]))`,
 		agg, agg, platformExpID, metric.Key)
-	best, err := metricsdb.QueryAgentValues(ctx, s.metricsDBURL, promQL)
+	samples, err := metricsdb.QueryVector(ctx, s.metricsDBURL, promQL)
 	if err != nil {
-		return nil, fmt.Errorf("results: query %s: %w", metric.Key, err)
+		return nil, nil, fmt.Errorf("results: query %s: %w", metric.Key, err)
+	}
+
+	best := make(map[string]float64)
+	nonRaw := make(map[string]bool)
+	for _, sm := range samples {
+		agentID := sm.Labels["agent_id"]
+		if agentID == "" {
+			return nil, nil, fmt.Errorf("results: query %s: result missing agent_id", metric.Key)
+		}
+		basis := sm.Labels["metric_basis"]
+		if basis != "" && basis != "raw" {
+			nonRaw[agentID] = true
+			continue
+		}
+		// Two label-distinct series can both mean "raw": samples written before this label
+		// existed carry no metric_basis at all ("") alongside samples written after that
+		// explicitly say "raw". Both are eligible and must be merged with the same
+		// direction-aware aggregation as everything else here, not treated as a conflict.
+		if cur, exists := best[agentID]; exists {
+			if metric.Direction == "minimize" {
+				best[agentID] = math.Min(cur, sm.Value)
+			} else {
+				best[agentID] = math.Max(cur, sm.Value)
+			}
+			continue
+		}
+		best[agentID] = sm.Value
 	}
 
 	standings := make([]AgentStanding, 0, len(best))
 	for agentID, value := range best {
-		standings = append(standings, AgentStanding{AgentID: agentID, Best: value})
+		standings = append(standings, AgentStanding{AgentID: agentID, Best: value, Basis: "raw"})
 	}
 	sort.Slice(standings, func(i, j int) bool {
 		if standings[i].Best != standings[j].Best {
@@ -189,5 +232,11 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, plat
 	for i := range standings {
 		standings[i].Rank = i + 1
 	}
-	return standings, nil
+
+	nonRawAgents := make([]string, 0, len(nonRaw))
+	for agentID := range nonRaw {
+		nonRawAgents = append(nonRawAgents, agentID)
+	}
+	sort.Strings(nonRawAgents)
+	return standings, nonRawAgents, nil
 }

@@ -65,14 +65,42 @@ func (t *UsageTracker) SetObservedBatch(ctx context.Context, agentID, platformEx
 	return WriteGaugesAt(ctx, t.dbURL, samples)
 }
 
+// minObservedLookback floors the last_over_time window so a platform experiment queried the
+// instant it's created (start == now, or clock skew puts start a hair in the future) still gets
+// a non-degenerate window instead of `[0s]`/a negative duration, which PromQL would reject or
+// which would spuriously hide a sample written in the same second.
+const minObservedLookback = time.Hour
+
+// observedLookback turns a platform experiment's own start time into a last_over_time window
+// long enough to see every sample it could possibly have produced — never a fixed constant.
+// Each settled job writes its cost exactly once, as an absolute set against its own series (see
+// SetObservedBatch), so a bare instant-vector selector loses it the moment it falls outside
+// Prometheus's 5-minute default staleness window: last_over_time keeps it visible, but only for
+// however long the window covers. A fixed window (e.g. 30 days) just moves the cliff edge —
+// platform experiments legitimately run for weeks, so any hardcoded duration eventually hides a
+// real, already-settled cost from budgets and stage accounting again (see important.md: never
+// bake a decision/threshold into desired state). Sizing the window to the experiment's own
+// lifetime instead means it always covers every sample the experiment could have written.
+func observedLookback(start time.Time) string {
+	d := time.Since(start)
+	if d < minObservedLookback {
+		d = minObservedLookback
+	}
+	return fmt.Sprintf("%ds", int64(d.Seconds()))
+}
+
 // PopulateUsage fills every quotas[i].Used* field from the metrics DB with a single query for
 // the whole platform experiment (summed across every settled job, grouped by
-// agent/resource/tier) instead of one query per bucket per agent.
-func PopulateUsage(ctx context.Context, dbURL, platformExpID string, quotas []*domain.AgentQuota) error {
+// agent/resource/tier) instead of one query per bucket per agent. platformExpStart is the
+// platform experiment's own creation time (see observedLookback) — callers that already hold the
+// domain.PlatformExperiment pass its CreatedAt; others fetch it once via their store, the same
+// pattern registry.GetTimeseries uses to size its own query window off the real experiment.
+func PopulateUsage(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {
 	if len(quotas) == 0 {
 		return nil
 	}
-	promQL := fmt.Sprintf(`sum by (agent_id, resource_type, tier) (%s{platform_experiment_id=%q, kind=%q})`, usedHoursMetric, platformExpID, kindObserved)
+	promQL := fmt.Sprintf(`sum by (agent_id, resource_type, tier) (last_over_time(%s{platform_experiment_id=%q, kind=%q}[%s]))`,
+		usedHoursMetric, platformExpID, kindObserved, observedLookback(platformExpStart))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return fmt.Errorf("metricsdb.PopulateUsage: %w", err)
@@ -94,12 +122,13 @@ func PopulateUsage(ctx context.Context, dbURL, platformExpID string, quotas []*d
 }
 
 // PopulateUsageOne fills a single quota's Used* fields from the metrics DB, summed across every
-// job the agent has run in this platform experiment.
-func PopulateUsageOne(ctx context.Context, dbURL string, q *domain.AgentQuota) error {
+// job the agent has run in this platform experiment. See PopulateUsage for platformExpStart.
+func PopulateUsageOne(ctx context.Context, dbURL string, platformExpStart time.Time, q *domain.AgentQuota) error {
 	if q == nil {
 		return nil
 	}
-	promQL := fmt.Sprintf(`sum by (resource_type, tier) (%s{agent_id=%q, platform_experiment_id=%q, kind=%q})`, usedHoursMetric, q.AgentID, q.PlatformExperimentID, kindObserved)
+	promQL := fmt.Sprintf(`sum by (resource_type, tier) (last_over_time(%s{agent_id=%q, platform_experiment_id=%q, kind=%q}[%s]))`,
+		usedHoursMetric, q.AgentID, q.PlatformExperimentID, kindObserved, observedLookback(platformExpStart))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return fmt.Errorf("metricsdb.PopulateUsageOne: %w", err)
@@ -145,8 +174,11 @@ func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tie
 // reservation. This is the "committed" half of stage-boundary progress; the caller adds live
 // usage of running attempts on top (see controller.stageProgress). Reading reservations
 // here would let a large queued job prematurely trip a stage boundary and cancel work.
-func TotalObservedAccH(ctx context.Context, dbURL, platformExpID string) (float64, error) {
-	promQL := fmt.Sprintf(`sum(%s{platform_experiment_id=%q, resource_type=%q, kind=%q})`, usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved)
+func TotalObservedAccH(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string) (float64, error) {
+	// See PopulateUsage for why the lookback is sized off the platform experiment's own start
+	// time rather than a fixed constant.
+	promQL := fmt.Sprintf(`sum(last_over_time(%s{platform_experiment_id=%q, resource_type=%q, kind=%q}[%s]))`,
+		usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved, observedLookback(platformExpStart))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return 0, fmt.Errorf("metricsdb.TotalObservedAccH: %w", err)

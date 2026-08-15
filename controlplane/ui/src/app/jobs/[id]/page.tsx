@@ -55,14 +55,28 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
   // own chart instead of interleaving unrelated scales on a single line.
   const primaryMetricName = j.objective ? String(j.objective).split(/\s+/).pop() : undefined
+  // The API appends one contiguous block per underlying series (metric_name, or per retry
+  // attempt if a retry changed agent_id) rather than a single time-ordered stream, so a job
+  // with a retry has two blocks for the same metric_name back to back. Sort each metric's
+  // points by when they were recorded before charting, or the connected line jumps backward
+  // in time at the block boundary and renders as several crossing lines instead of one.
+  const sortedMetrics = [...((metrics ?? []) as MetricDataPoint[])].sort(
+    (a, b) => new Date(a.recorded_at as any).getTime() - new Date(b.recorded_at as any).getTime(),
+  )
   const seriesByMetric = new Map<string, { frac: number; value: number }[]>()
-  for (const p of (metrics ?? []) as MetricDataPoint[]) {
+  // metric_basis defaults to "raw" server-side; a metric whose points carry more than one
+  // basis (or any non-"raw" basis) changed what its value means mid-run, and that must be
+  // visible next to the chart, not silently plotted as one uniform line.
+  const basesByMetric = new Map<string, Set<string>>()
+  for (const p of sortedMetrics) {
     const name = p.metric_name ?? primaryMetricName ?? 'metric'
     if (!seriesByMetric.has(name)) seriesByMetric.set(name, [])
     seriesByMetric.get(name)!.push({
       frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
       value: p.metric_value ?? (p as any).value,
     })
+    if (!basesByMetric.has(name)) basesByMetric.set(name, new Set())
+    basesByMetric.get(name)!.add(p.metric_basis || 'raw')
   }
   const metricNames = Array.from(seriesByMetric.keys()).sort((a, b) => {
     if (a === primaryMetricName) return -1
@@ -86,9 +100,15 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             <TierBadge tier={j.capacity_tier} />
           </h1>
           <p style={{ fontStyle: 'italic' }}>
-            {j.hypothesis_id ? (
-              <Link href={`/hypotheses/${j.hypothesis_id}`} className="text-link">{j.hypothesis}</Link>
-            ) : j.hypothesis}
+            {j.hypothesis}
+            {j.hypothesis_id && (
+              <>
+                {' '}
+                <Link href={`/hypotheses/${j.hypothesis_id}`} className="text-link" style={{ fontStyle: 'normal', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  View hypothesis →
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <Link href="/jobs" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All jobs</Link>
@@ -196,10 +216,25 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         <PodContent>
           {metricNames.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: metricNames.length > 1 ? '1fr 1fr' : '1fr', gap: 16 }}>
-              {metricNames.map((name, i) => (
+              {metricNames.map((name, i) => {
+                const bases = Array.from(basesByMetric.get(name) ?? [])
+                const nonRaw = bases.filter(b => b !== 'raw')
+                return (
                 <div key={name}>
                   <div className="mono text-muted" style={{ fontSize: 11, marginBottom: 4 }}>
                     {name}{name === primaryMetricName ? ' (objective)' : ''}
+                    {nonRaw.length > 0 && (
+                      <span
+                        className="mono"
+                        title="One or more values on this chart are not on the metric's normal ('raw') scale — do not compare them to a raw-basis run."
+                        style={{
+                          marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                          background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
+                        }}
+                      >
+                        basis: {bases.join(', ')}
+                      </span>
+                    )}
                   </div>
                   <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
                     <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
@@ -231,7 +266,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-              ))}
+              )})}
             </div>
           ) : (
             <EmptyState>No metric data yet — waiting for job to start reporting.</EmptyState>

@@ -69,6 +69,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, h.metricsDBURL, h.connectedWithin)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		names := make([]string, 0, len(heartbeats))
 		for name := range heartbeats {
 			names = append(names, name)
@@ -82,10 +86,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if connected {
 				lastSeen = now
 			}
+			var busySum, totalSum int64
+			for flavor, t := range total[name] {
+				totalSum += t
+				busySum += t - available[name][flavor]
+			}
 			out[i] = clusterInfo{
-				ClusterName: name,
-				LastSeenAt:  lastSeen,
-				Connected:   connected,
+				ClusterName:      name,
+				LastSeenAt:       lastSeen,
+				Connected:        connected,
+				AcceleratorBusy:  busySum,
+				AcceleratorTotal: totalSum,
 			}
 		}
 		resp := &struct {
@@ -264,6 +275,12 @@ type clusterInfo struct {
 	ClusterName string    `json:"cluster_name"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	Connected   bool      `json:"connected"`
+	// AcceleratorBusy/AcceleratorTotal are the cluster's most recently reported occupancy,
+	// summed across every accelerator flavor — actual busy-vs-idle chip counts from the last
+	// reconcile snapshot, not a budget-consumption ratio. Zero/absent when no live snapshot is
+	// within the connectedWithin freshness window (e.g. a disconnected cluster).
+	AcceleratorBusy  int64 `json:"accelerator_busy"`
+	AcceleratorTotal int64 `json:"accelerator_total"`
 }
 
 // statusReport is one job-status push from a cluster-agent. Reason/Message/RestartCount are the

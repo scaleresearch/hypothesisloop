@@ -98,7 +98,7 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 // Reservations never contribute — see shared/metricsdb/usage.go for why a large queued job
 // must not be able to trip a boundary.
 func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) (float64, error) {
-	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.ID)
+	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return 0, fmt.Errorf("stages: TotalObservedAccH: %w", err)
 	}

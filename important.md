@@ -14,3 +14,4 @@
 - auth and security are not a priority at the moment
 - do not add comments at the top of files unless they capture a hard-learned lesson. the code should be self-explanatory
 - job processes may only push metrics to the platform — logs and debug comments must be collected and relayed by the supervising runtime/experimentator agent, never self-reported by the job.
+- documentation (guidance md files) shall not be treated as working log and shall be generalizable across different types of experiments
