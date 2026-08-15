@@ -13,6 +13,19 @@ change is everything around it: how a volume is turned into an input, which of t
 outputs you keep, how you pool them into a feature vector, and what classifier head you fit on
 those features. That is where the entire signal is.
 
+**This backbone is one shared, frozen checkpoint used across all 5 FOMO26 tasks** (this
+experiment covers task 5 only; tasks 1/2/3/6/7 are separate future experiments reusing the exact
+same encoder). Because of that sharing, the boundary of what you touch matters beyond this one
+run: your hypothesis is the *task method* -- which encoder output you read, how you pool/fuse it,
+what classifier head you fit -- analogous to upstream's per-task `Task5Method` class, never the
+encoder's weights or its forward-pass numerics. `tenstorrent/src/fomo_tune_tt/encoder_tt.py` and
+`backbone_tt.py` already expose everything a method-level hypothesis needs (`forward`,
+`forward_with_cls`, `forward_until`, `forward_multi` -- different readout points from one frozen
+forward pass, not different weights); reuse those rather than adding new ones. If a hypothesis
+seems to require changing what the encoder itself computes (not just which of its existing
+outputs you read), it is out of scope here -- flag it as a comment, do not implement it, since it
+would silently change the shared backbone every other task's future experiment inherits.
+
 The accelerator underneath (a Tenstorrent Blackhole card running a hand-written TT-NN port of the
 encoder) is a **solved black box.** It is already built, already validated against the PyTorch
 reference, and already wired into the runner. You configure it through env vars; you never need
@@ -138,3 +151,31 @@ CONSTRAINTS
     mechanistic reason to help (better mask, cortex-weighted pooling, stronger regularization at
     n=48) over blind hyperparameter scans, and treat a clean, properly-reported null as a real
     result rather than something to hide.
+  - **The fleet as a whole overfits the fixed split even when every individual job's CV is
+    honest -- run 1 hit this for real.** Run 1 tried ~150 configs against the identical frozen
+    48-subject/20-fold split, converged on AUROC 1.0 (RBF-SVM head, block-17+final fused feature),
+    and it did not hold: a hidden validation set scored ~0.6, near chance. Rerunning the *same*
+    config on the *same* frozen split only proves the number is deterministic, not that it
+    generalizes -- with 48 fixed subjects and enough configs tried, some will fit that specific
+    sample's noise by chance no matter how correctly each one's own 20-fold CV is done (this is
+    leaderboard overfitting: searching many submissions against one small public scoreboard).
+    Two changes that follow from that, for this run:
+      - **Treat AUROC approaching 1.0 as a red flag, not an achievement.** A genuinely
+        generalizable classifier essentially never reaches the literal ceiling on a hard
+        structural-anomaly task from a hand-built feature; landing there is what overfitting a
+        48-subject sample with a high-capacity non-linear head (RBF-SVM especially) looks like.
+        Do not confirm a hypothesis on this alone -- investigate why it's that high before
+        trusting it, the way run 1 eventually did for its seed-instability finding.
+      - **Before confirming a hypothesis that raises the pool's best score, rerun the same feature
+        and head with an alternate KFold seed** (e.g. `random_state=1`) as a *diagnostic-only*
+        check -- never for ranking or comparison to the baseline, since that would need protocol
+        changes above. If the improvement collapses under a different fold arrangement, that is
+        real evidence of overfitting to this particular split's composition, not proof the
+        hypothesis is wrong; report it as such rather than silently dropping the diagnostic run.
+      - **Favor the simplest config within the confirmed pool's noise band over the pool's
+        historical maximum.** A linear head with a well-motivated feature (e.g. an intermediate
+        block replacing the final layer) that lands at 0.994-0.997 is more likely to generalize
+        than an RBF-SVM ensemble that reaches 0.998-1.0 by searching many feature/head/seed
+        combinations against the same 48 subjects. When reporting a "best" result, report the
+        search breadth that produced it (how many configs were tried on this axis) alongside the
+        number, so a reader can judge how much of the gain is signal versus search.
