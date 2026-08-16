@@ -140,6 +140,22 @@ LEVERS THAT PLAUSIBLY MOVE AUROC (all Python, all zero-build)
   `scratch_ppmr_validation/confound_direct_diagnostic_frofa_stability_enet.py` /
   `_result.json`).
 
+  **2026-08-16 coordinator update, RESOLVED (supersedes the two paragraphs above for
+  `hetero_ensemble_frofa` specifically):** the strict score-level partial-correlation finding
+  above (r=-0.669) is not wrong, but it answers a narrower statistical-orthogonality question,
+  not the practical one. Two newly-powered checks against the exact production OOF ensemble score
+  (full n=48, no subjects dropped) show the AUROC does NOT ride on the AP-extent/label
+  association: inverse-propensity-weighted AUROC = 0.9245 (95% CI [0.839, 0.979], up from
+  unweighted 0.870), and stratified-by-AP-extent-tercile/quartile AUROC = 1.0 in every testable
+  stratum. See `FINAL_RESULT.md`'s UPDATE 4 for full detail
+  (`scratch_ppmr_validation/confound_ipw_stratified.py` / `_result.json`). **Do not keep
+  re-deriving this with more device-init retries -- it's settled: `hetero_ensemble_frofa` is this
+  round's validated headline (0.866-0.885 local, IPW 0.9245, perfect within-stratum separation,
+  0.883 external FCD).** `frofa_stability_enet`'s status above is UNCHANGED by this update (it was
+  not re-tested under IPW/stratification) -- treat only `hetero_ensemble_frofa` as cleared.
+  Redirect further confound-lever effort to the untried items below (orthogonal-noise FroFA
+  redesign, etc.) or to stacking already-confirmed pieces, not to re-verifying this.
+
   **New lever tried and found NOT to fix the leak by itself: capacity reduction / rank-based,
   non-covariance heads.** Coordinator tested a purely rank-based head (per-feature Mann-Whitney/
   rank-biserial selection + rank-position scoring -- no covariance matrix, no variance estimation
