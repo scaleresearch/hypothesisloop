@@ -17,13 +17,18 @@
 # since the whole suite runs concurrently and contends for the same chips.
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Mutate shared cluster/node/daemonset state — run sequentially, not concurrently. Structurally
-# slow (real node/daemonset kill+recovery, real disconnect/reconnect wait windows).
+# Mutate shared cluster/node/daemonset state, or need every fake-accelerator unit of a type
+# accounted for with no other scenario touching it concurrently — run sequentially, not
+# concurrently. The first group is structurally slow (real node/daemonset kill+recovery, real
+# disconnect/reconnect wait windows); burst-fair-round-robin only needs exclusivity because it
+# pins an accelerator type's whole capacity to make admission ORDER externally observable, which
+# any other concurrent user of that type (however small) would silently invalidate.
 CLUSTER_EXCLUSIVE=(
   acceptable-accelerator-types
   concurrent-admission-race
   node-and-daemonset-faults
   connectivity-loss
+  burst-fair-round-robin
 )
 
 # Capacity/preemption scenarios deliberately hold real resources across multiple scheduler ticks.
@@ -31,6 +36,7 @@ SLOW_TESTS=(
   capacity-safety
   mixed-admission
   preemption-requeue
+  running-cost-live
 )
 
 # Needs real accelerator hardware — excluded unless explicitly requested.
