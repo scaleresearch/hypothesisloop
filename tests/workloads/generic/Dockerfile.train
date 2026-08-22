@@ -3,5 +3,13 @@ FROM python:3.13-slim
 WORKDIR /app
 
 COPY train.py .
+# The distributed fixture. One file, not two: the failing variant is the same workload with
+# FAIL_RANK set, so the gang-failure scenarios exercise the code path that provably formed the
+# process group rather than a near-copy that might diverge from it.
+COPY train_distributed.py .
+# The durable-data fixture (tests/scenarios/multi-stage-chain.sh). It speaks S3 over stdlib HTTP
+# with its own SigV4 signer because this image has no SDK and no aws/mc binary — and adding one
+# would mean the chain scenario proved a client library rather than the platform's scoping.
+COPY data_stage.py .
 
 ENTRYPOINT ["python", "train.py"]

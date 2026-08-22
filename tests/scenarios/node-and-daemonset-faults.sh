@@ -166,5 +166,51 @@ else
   fi
 fi
 
+echo ""
+echo "=========================================================="
+echo "Fault attribution: a dead node is not the agent's fault"
+echo "=========================================================="
+# The job above survived a DaemonSet redeploy, two external mutations of its workload and the
+# outright death of its node. None of that was the agent's doing, and its record must not read as
+# if it were.
+#
+# Deliberately NOT asserted here: the free requeue itself and the refund at its ceiling. Both need
+# the control plane to actually raise an infrastructure-class eviction, and the two this scenario's
+# faults can produce (workload_gone, cluster_unreachable) are only concluded after
+# min_silence_window_seconds (300) of silence — longer than this scenario's whole ceiling, and
+# lengthening it would buy one requeue where the ceiling needs three
+# (scheduler.max_infrastructure_requeues). Those are pinned by the scheduler and settlement unit
+# tests. What is observable here is the accounting that makes the requeue free, and the class
+# breakdown the agent reads.
+ATTEMPTS=$(get_field "$JOB" attempt_count)
+INFRA_REQUEUES=$(get_field "$JOB" infra_requeue_count)
+echo "  $JOB: attempt_count=${ATTEMPTS} infra_requeue_count=${INFRA_REQUEUES}"
+if [[ -z "$ATTEMPTS" || -z "$INFRA_REQUEUES" ]]; then
+  # An empty field is not a zero: a control plane serving only one counter cannot be charging the
+  # agent for its own attempts alone, whatever that counter reads.
+  fail "$JOB does not report attempt_count/infra_requeue_count — the retry budget and the generation counter are not tracked apart"
+else
+  # The agent's allowance is the difference of the two (domain.Experiment.RetriesUsed): every
+  # requeue advances attempt_count, and an infrastructure one advances infra_requeue_count with
+  # it. A job that lost its node must therefore show a difference of zero.
+  [[ $(( ATTEMPTS - INFRA_REQUEUES )) -eq 0 ]] \
+    && pass "losing its node cost the job none of the agent's retry allowance (retries_used=0)" \
+    || fail "$JOB used $(( ATTEMPTS - INFRA_REQUEUES )) of the agent's retry allowance (attempt_count=$ATTEMPTS infra_requeue_count=$INFRA_REQUEUES) — a node death was charged to the agent"
+fi
+
+# Every job this agent submitted here either completed or is still running: not one of them failed
+# by its own fault, so its workload-class count must be exactly zero — and it must be a zero the
+# platform computed, not a missing field.
+WORKLOAD_N=$(eviction_class_count "$PE_ID" "$AGENT" workload)
+echo "  evictions by class: workload=${WORKLOAD_N} infrastructure=$(eviction_class_count "$PE_ID" "$AGENT" infrastructure) policy=$(eviction_class_count "$PE_ID" "$AGENT" policy)"
+[[ "$WORKLOAD_N" == "0" ]] \
+  && pass "no infrastructure fault landed in the agent's own failure count (workload=0)" \
+  || fail "evictions_by_class.workload is '$WORKLOAD_N', expected a computed 0 — node and DaemonSet faults are the environment's, and a missing field is not a zero"
+
+read -r CLASS_TOTAL REASON_TOTAL UNCLASSIFIED <<< "$(eviction_class_coverage "$PE_ID" "$AGENT")" || true
+[[ "$CLASS_TOTAL" == "$REASON_TOTAL" && "$UNCLASSIFIED" == "0" ]] \
+  && pass "every evicted job is accounted for by exactly one class ($CLASS_TOTAL of $REASON_TOTAL, none unclassified)" \
+  || fail "class breakdown does not account for the evictions: by_class=$CLASS_TOTAL by_reason=$REASON_TOTAL unclassified=$UNCLASSIFIED"
+
 close_platform_experiment "$PE_ID"
 finish

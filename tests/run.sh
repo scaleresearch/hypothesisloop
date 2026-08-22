@@ -56,6 +56,11 @@ SLOW_TESTS=(
   running-cost-live
   quota-exhaustion
   distributed-jobs
+  # A chain is serial by definition: stage B cannot be submitted until stage A has completed and
+  # left its checkpoint behind, so the scenario's length is two full admit-run-settle cycles plus
+  # a third job running alongside them. That is longer than the shared ceiling by construction,
+  # not by accident.
+  multi-stage-chain
 )
 
 # Needs real accelerator hardware — excluded unless explicitly requested.
@@ -165,6 +170,12 @@ scenario_timeout() {
     # freshness, capacity staleness, then reconvergence after reconnect. Shortening any of them
     # would not make the scenario faster, it would stop it testing the window it exists for.
     connectivity-loss) echo 480 ;;
+    # Seven real gangs, one after another, each of which must be admitted, run and settle before
+    # the next is submitted: two-rank placement and Service repair, three gang guarantees, a gang
+    # retry, and a heterogeneous two-group job. They are sequential because each asserts on the
+    # cost or the teardown of the one gang it submitted, so none of them can share a window with
+    # another — and dropping one would drop the guarantee it covers.
+    distributed-jobs) echo 900 ;;
     *) if is_slow "$1"; then echo "$SLOW_SCENARIO_TIMEOUT_SECONDS"; else echo "$SCENARIO_TIMEOUT_SECONDS"; fi ;;
   esac
 }

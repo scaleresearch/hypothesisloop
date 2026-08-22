@@ -1,12 +1,18 @@
 """Body builders shared by tests/lib/api.sh. Invoked as:
-  python3 mk_body.py hyp AGENT PE_ID
+  python3 mk_body.py hyp AGENT PE_ID [TEXT] [AUTHOR]
   python3 mk_body.py submit JOB_ID AGENT PE_ID HOURS JOB_FILE HYP_ID TIER [ACCELERATOR_TYPE] [ACCELERATOR_COUNT] \\
                             [NUM_NODES] [ENV_JSON] [PROJECT_ID] [THEORY] [OBJECTIVE] [HYP_TEXT] \\
-                            [JOB_OVERRIDE_JSON]
+                            [JOB_OVERRIDE_JSON] [METADATA_OVERRIDE_JSON]
 
 JOB_OVERRIDE_JSON is a JSON object merged over the loaded job.yaml (after the
 accelerator_type/accelerator_count/num_nodes overrides above) — an escape hatch for fields
-job.yaml has no dedicated CLI arg for.
+job.yaml has no dedicated CLI arg for. A null value DELETES the key, which is how a grouped
+submission drops the per-node fields job.yaml carries (job.groups and job.cpu/accelerator_count
+are mutually exclusive — see domain.JobSpec.ValidateGroups).
+
+METADATA_OVERRIDE_JSON is the same escape hatch for the request's `metadata` object rather than
+its `job` — parent_id, for one, which is metadata about how a result was derived and never part
+of how it executes.
 """
 import json
 import sys
@@ -16,17 +22,21 @@ import yaml
 kind = sys.argv[1]
 
 if kind == "hyp":
-    agent, pe_id, text = (sys.argv[2:5] + [""] * 3)[:3]
+    agent, pe_id, text, author = (sys.argv[2:6] + [""] * 4)[:4]
+    # Both fields are always sent, empty where they don't apply: the API's exactly-one-of rule
+    # keys on emptiness, not on the key being absent, so a scenario can probe both-set and
+    # neither-set through the same builder.
     print(json.dumps({
         "agent_id": agent,
+        "author": author,
         "platform_experiment_id": pe_id,
-        "text": text or f"e2e run for {agent}",
+        "text": text or f"e2e run for {agent or author}",
     }))
 
 elif kind == "submit":
     (job_id, agent, pe_id, hours, job_file, hyp_id, tier,
      accelerator_type, accelerator_count, num_nodes, env_json, project_id, theory, objective,
-     job_override_json) = (sys.argv[2:17] + [""] * 15)[:15]
+     job_override_json, metadata_override_json) = (sys.argv[2:18] + [""] * 16)[:16]
 
     with open(job_file) as f:
         job = yaml.safe_load(f)
@@ -69,6 +79,8 @@ elif kind == "submit":
     }
     if tier:
         metadata["capacity_tier"] = tier
+    if metadata_override_json:
+        metadata.update(json.loads(metadata_override_json))
     print(json.dumps({"id": job_id, "metadata": metadata, "job": job}))
 
 else:

@@ -130,5 +130,47 @@ else
   fail "unpullable job is '$BS' after ${UNSCHEDULABLE_BUDGET}s — nothing terminated it"
 fi
 
+echo "  -- the agent's own failure is attributed to the agent --"
+# A bad image reference is the submission's own doing (domain.EvictionUnschedulable is
+# FaultWorkload), so none of the infrastructure-class consequences may apply to it: no free
+# requeue, and it must not read as the environment's fault in the agent's record.
+#
+# No wait is needed for the "not requeued" half. infra_requeue_count only ever increments (see
+# ExperimentsStore.RequeueInfrastructureFault), so reading 0 proves no free requeue has happened
+# rather than that one has not happened yet — polling for a requeue that must never come would
+# only spend budget to prove the same thing later.
+if [[ "$BS" == "EVICTED" ]]; then
+  BAD_ATTEMPTS=$(get_field "$BAD_JOB" attempt_count)
+  BAD_INFRA=$(get_field "$BAD_JOB" infra_requeue_count)
+  echo "  bad-image accounting: attempt_count=${BAD_ATTEMPTS} infra_requeue_count=${BAD_INFRA}"
+  [[ "$BAD_INFRA" == "0" ]] \
+    && pass "workload failure was not requeued for free (infra_requeue_count=0)" \
+    || fail "unschedulable job has infra_requeue_count='$BAD_INFRA', expected 0 — its own bad image was treated as the environment's fault"
+  # attempt_count is the generation counter every requeue advances, free or not; the agent's own
+  # allowance is the difference (domain.Experiment.RetriesUsed). max_retries=0 here, so the job
+  # ended on its first attempt and both counters must still be at zero.
+  [[ "$BAD_ATTEMPTS" == "0" ]] \
+    && pass "workload failure ended on its first attempt, as max_retries=0 requires" \
+    || fail "unschedulable job has attempt_count='$BAD_ATTEMPTS', expected 0 — it was retried despite max_retries=0"
+fi
+
+# The breakdown an agent actually reads. `unschedulable` must land under workload, and nothing
+# this scenario produced may land under infrastructure — if the classification were reverted or
+# this reason moved class, these two flip together.
+WORKLOAD_N=$(eviction_class_count "$PE_ID" "$AGENT" workload)
+INFRA_N=$(eviction_class_count "$PE_ID" "$AGENT" infrastructure)
+echo "  evictions by class: workload=${WORKLOAD_N} infrastructure=${INFRA_N}"
+[[ "$WORKLOAD_N" != "-" && "$WORKLOAD_N" -ge 1 ]] \
+  && pass "the agent's own failure is reported under the workload class" \
+  || fail "evictions_by_class.workload is '$WORKLOAD_N' — a bad image reference is the agent's own fault and must be counted as one"
+[[ "$INFRA_N" == "0" ]] \
+  && pass "nothing this agent did was charged to the environment (infrastructure=0)" \
+  || fail "evictions_by_class.infrastructure is '$INFRA_N', expected 0 — the agent's own failure was blamed on the environment"
+
+read -r CLASS_TOTAL REASON_TOTAL UNCLASSIFIED <<< "$(eviction_class_coverage "$PE_ID" "$AGENT")" || true
+[[ "$CLASS_TOTAL" == "$REASON_TOTAL" && "$UNCLASSIFIED" == "0" ]] \
+  && pass "every evicted job is accounted for by exactly one class ($CLASS_TOTAL of $REASON_TOTAL, none unclassified)" \
+  || fail "class breakdown does not account for the evictions: by_class=$CLASS_TOTAL by_reason=$REASON_TOTAL unclassified=$UNCLASSIFIED"
+
 close_platform_experiment "$PE_ID"
 finish

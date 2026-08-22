@@ -160,5 +160,65 @@ else
     || fail "actual Job remained after PostgreSQL no longer desired it"
 fi
 
+echo ""
+echo "=========================================================="
+echo "Fault attribution: an outage costs the agent nothing"
+echo "=========================================================="
+# What a connectivity outage must NOT do to the agent's record. Three jobs here lived through a
+# cluster-agent outage; not one of them was the agent's fault, and its record must say so.
+#
+# Deliberately NOT asserted here: the refund at the ceiling. A refund lands only when a job ENDS
+# evicted on an infrastructure fault (settlement.Settle), and the only reason this outage can
+# raise is cluster_unreachable — which controller.checkSilence will not conclude until a job has
+# been silent for min_silence_window_seconds (300) with the cluster's last snapshot older than
+# cluster_status_silence_ceiling_seconds (900). Both are far past this scenario's ceiling, so
+# driving one requeue, let alone the three that reach max_infrastructure_requeues, is not possible
+# here at any budget worth spending. That path is pinned by the scheduler and settlement unit
+# tests; what this scenario can prove is that the outage cost the agent no retry budget and left
+# no workload-class mark on its record.
+attribution_counters() {
+  local job="$1" attempts infra
+  attempts=$(get_field "$job" attempt_count)
+  infra=$(get_field "$job" infra_requeue_count)
+  echo "  $job: attempt_count=${attempts} infra_requeue_count=${infra}"
+  # Empty means the field is not served at all — a control plane that does not separate the two
+  # counters cannot be charging the agent only for its own attempts, whatever the numbers say.
+  if [[ -z "$attempts" || -z "$infra" ]]; then
+    fail "$job does not report attempt_count/infra_requeue_count — the retry budget and the generation counter are not tracked apart"
+    return
+  fi
+  # RetriesUsed is the difference of the two (domain.Experiment.RetriesUsed). Every requeue
+  # advances attempt_count, and an infrastructure one advances infra_requeue_count with it, so a
+  # job the environment disturbed must show a difference of zero: it spent none of the agent's
+  # max_retries allowance.
+  [[ $(( attempts - infra )) -eq 0 ]] \
+    && pass "$job spent none of the agent's retry allowance across the outage (retries_used=0)" \
+    || fail "$job used $(( attempts - infra )) of the agent's retry allowance (attempt_count=$attempts infra_requeue_count=$infra) — an outage it did not cause was charged to it"
+}
+attribution_counters "$RUNNING_JOB"
+attribution_counters "$RUNNING_JOB2"
+attribution_counters "$DELETE_JOB"
+
+# The cancelled job in phase 3 is EVICTED with reason `cancelled`, which is FaultPolicy: the
+# platform decided and the job was fine. So this agent must have a policy eviction and no
+# workload one — nothing it submitted was ever its own fault in this scenario.
+POLICY_N=$(eviction_class_count "$PE_ID" "$AGENT" policy)
+WORKLOAD_N=$(eviction_class_count "$PE_ID" "$AGENT" workload)
+echo "  evictions by class: policy=${POLICY_N} workload=${WORKLOAD_N}"
+[[ "$POLICY_N" != "-" && "$POLICY_N" -ge 1 ]] \
+  && pass "the cancelled job is reported under the policy class, not as a failure" \
+  || fail "evictions_by_class.policy is '$POLICY_N' — a cancellation is the platform's own decision and must be reported as one"
+[[ "$WORKLOAD_N" == "0" ]] \
+  && pass "nothing the agent did during the outage is counted among its own failures" \
+  || fail "evictions_by_class.workload is '$WORKLOAD_N', expected 0 — an outage the agent did not cause landed on its record"
+# infrastructure is deliberately not asserted to be 0: it is legitimately reachable here if the
+# suite runs long enough for a silence window to elapse, and pinning it would make this scenario
+# fail for being slow rather than for being wrong.
+
+read -r CLASS_TOTAL REASON_TOTAL UNCLASSIFIED <<< "$(eviction_class_coverage "$PE_ID" "$AGENT")" || true
+[[ "$CLASS_TOTAL" == "$REASON_TOTAL" && "$UNCLASSIFIED" == "0" ]] \
+  && pass "every evicted job is accounted for by exactly one class ($CLASS_TOTAL of $REASON_TOTAL, none unclassified)" \
+  || fail "class breakdown does not account for the evictions: by_class=$CLASS_TOTAL by_reason=$REASON_TOTAL unclassified=$UNCLASSIFIED"
+
 close_platform_experiment "$PE_ID"
 finish

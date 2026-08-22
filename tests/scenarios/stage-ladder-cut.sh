@@ -130,6 +130,65 @@ if [[ "$CUT_N" -gt 0 ]]; then
   py "import sys; sys.exit(0 if $SURVIVOR_Q > $FIRST_ALLOC else 1)" \
     && pass "survivor's guaranteed quota grew at the boundary" \
     || fail "survivor's quota did not grow: ${SURVIVOR_Q} <= ${FIRST_ALLOC}"
+
+  # A cut job did nothing wrong: the platform decided. It must be reported as `policy`, never as
+  # one of the agent's failures (domain.EvictionStageCut is FaultPolicy).
+  #
+  # Which cut agent still had a running job at the boundary is not fixed — an agent whose job had
+  # already completed is cut without anything to stop — so find one that really was evicted rather
+  # than assuming the first cut agent was. Cutting and evicting its jobs are separate writes, so
+  # give the eviction a few passes to land before concluding there was none.
+  # Sets CUT_JOB_LINE ("agent job") rather than printing it: wait_until runs its check in this
+  # shell, so a global survives the poll — and going through wait_until is what keeps this wait
+  # clamped to the scenario's remaining ceiling instead of a raw sleep loop that can outlive it.
+  CUT_JOB_LINE=""
+  cut_evicted_job() {
+    local a i j
+    for a in $CUT_AGENTS; do
+      for i in "${!AGENTS[@]}"; do
+        [[ "${AGENTS[$i]}" == "$a" ]] || continue
+        j="${JOBS[$i]}"
+        if [[ "$(get_status "$j")" == "EVICTED" && "$(get_field "$j" eviction_reason)" == stage_cut* ]]; then
+          CUT_JOB_LINE="$a $j"
+          return 0
+        fi
+      done
+    done
+    return 1
+  }
+  wait_until "a cut agent's job to reach its stage_cut eviction" 15 1 cut_evicted_job || true
+  if [[ -z "$CUT_JOB_LINE" ]]; then
+    echo "  every cut agent's job had already finished before the boundary — nothing was stopped by the cut, so its attribution is not observable here"
+  else
+    read -r CUT_JOB_AGENT CUT_JOB <<< "$CUT_JOB_LINE"
+    echo "  stage-cut job: ${CUT_JOB} (${CUT_JOB_AGENT})"
+    POLICY_N=$(eviction_class_count "$PE_ID" "$CUT_JOB_AGENT" policy)
+    WORKLOAD_N=$(eviction_class_count "$PE_ID" "$CUT_JOB_AGENT" workload)
+    INFRA_N=$(eviction_class_count "$PE_ID" "$CUT_JOB_AGENT" infrastructure)
+    echo "  ${CUT_JOB_AGENT} evictions by class: policy=${POLICY_N} workload=${WORKLOAD_N} infrastructure=${INFRA_N}"
+    [[ "$POLICY_N" != "-" && "$POLICY_N" -ge 1 ]] \
+      && pass "the stage-cut job is reported under the policy class" \
+      || fail "evictions_by_class.policy is '$POLICY_N' — a stage cut is the platform's own decision and must be reported as one"
+    # The point of the class: a cut agent's record must not read as if it failed. Both of these
+    # flip if stage_cut is classified as anything but policy.
+    [[ "$WORKLOAD_N" == "0" ]] \
+      && pass "the stage-cut job is not counted among the agent's own failures" \
+      || fail "evictions_by_class.workload is '$WORKLOAD_N' for a cut agent, expected 0 — a cut reads as a failure"
+    [[ "$INFRA_N" == "0" ]] \
+      && pass "the stage-cut job is not counted as an infrastructure fault either" \
+      || fail "evictions_by_class.infrastructure is '$INFRA_N' for a cut agent, expected 0"
+    # A stage cut is terminal by policy, so it must not have bought the job a free infrastructure
+    # requeue: infra_requeue_count only increments, so 0 proves it never took one.
+    CUT_INFRA=$(get_field "$CUT_JOB" infra_requeue_count)
+    [[ "$CUT_INFRA" == "0" ]] \
+      && pass "the cut job was not requeued for free (infra_requeue_count=0)" \
+      || fail "cut job has infra_requeue_count='$CUT_INFRA', expected 0 — a policy decision was treated as an infrastructure fault"
+
+    read -r CLASS_TOTAL REASON_TOTAL UNCLASSIFIED <<< "$(eviction_class_coverage "$PE_ID" "$CUT_JOB_AGENT")" || true
+    [[ "$CLASS_TOTAL" == "$REASON_TOTAL" && "$UNCLASSIFIED" == "0" ]] \
+      && pass "every evicted job is accounted for by exactly one class ($CLASS_TOTAL of $REASON_TOTAL, none unclassified)" \
+      || fail "class breakdown does not account for the evictions: by_class=$CLASS_TOTAL by_reason=$REASON_TOTAL unclassified=$UNCLASSIFIED"
+  fi
 else
   echo "  no agent was cut (a tie group straddled the line) — cut-specific assertions skipped"
 fi
