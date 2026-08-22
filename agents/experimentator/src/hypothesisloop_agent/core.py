@@ -22,8 +22,16 @@ log = logging.getLogger("llm_agent")
 # method or query parameter appears, so an endpoint that is renamed, split or added reaches every
 # agent the moment the service serves it. Every path written here instead would be a second,
 # silently-drifting copy of a contract this file cannot see.
-_PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.md"
-SYSTEM_PROMPT_TEMPLATE = _PROMPT_PATH.read_text()
+#
+# One briefing per role, and the role is the only thing that selects it. The differentiation that
+# matters between a competitor, a baseline and a reviewer is what each is asked to do, not what
+# the platform lets it do — every role's jobs are admitted, billed and settled identically.
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+_PROMPT_FILES = {
+    "competitor": "system_prompt.md",
+    "baseline": "system_prompt_baseline.md",
+    "reviewer": "system_prompt_reviewer.md",
+}
 
 
 
@@ -71,12 +79,13 @@ def prepare() -> RunSetup:
     client = api_client.PlatformClient(cfg.api_url)
 
     # The API contract, fetched live from the running services rather than checked in anywhere:
-    # this is the prompt's only source of endpoints (see SYSTEM_PROMPT_TEMPLATE), so it is
+    # this is the prompt's only source of endpoints (see the role prompts), so it is
     # required, not decorative — fetch_api_guide raises rather than briefing an agent without it.
     api_guide = client.fetch_api_guide()
 
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        api_guide=api_guide, agent_id=cfg.agent_id,
+    template = (_PROMPTS_DIR / _PROMPT_FILES[cfg.role]).read_text()
+    system_prompt = template.format(
+        api_guide=api_guide, agent_id=cfg.agent_id, role=cfg.role,
         platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,
     )
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt,

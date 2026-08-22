@@ -150,8 +150,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 	return pe, nil
 }
 
-// Signup registers an agent for a platform experiment.
-func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, agentID string) error {
+// Signup registers an agent for a platform experiment in a fixed role.
+func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return err
@@ -163,15 +163,19 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 		return fmt.Errorf("signup_closed: experiment is %s", pe.Status)
 	}
 
-	count, err := s.store.CountSignups(ctx, platformExpID)
-	if err != nil {
-		return err
-	}
-	if count >= pe.MaxAgents {
-		return fmt.Errorf("max_agents_reached: limit is %d", pe.MaxAgents)
+	// max_agents sizes the field being ranked, so it counts competitors only: adding a baseline
+	// or a reviewer must not shrink the competition it exists to measure.
+	if role == domain.SignupRoleCompetitor {
+		count, err := s.store.CountSignupsByRole(ctx, platformExpID, domain.SignupRoleCompetitor)
+		if err != nil {
+			return err
+		}
+		if count >= pe.MaxAgents {
+			return fmt.Errorf("max_agents_reached: limit is %d", pe.MaxAgents)
+		}
 	}
 
-	inserted, err := s.store.Signup(ctx, platformExpID, agentID)
+	inserted, err := s.store.Signup(ctx, platformExpID, agentID, role)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
 	}
@@ -186,7 +190,8 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 			return fmt.Errorf("signup_closed: experiment started")
 		}
 	}
-	s.logger.Info("agent signed up", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID))
+	s.logger.Info("agent signed up", zap.String("platformExpID", platformExpID),
+		zap.String("agentID", agentID), zap.String("role", string(role)))
 	return nil
 }
 

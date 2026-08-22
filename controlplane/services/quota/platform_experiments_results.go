@@ -177,8 +177,24 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *
 		return nil, nil, fmt.Errorf("results: %w", err)
 	}
 
+	// Only competitors are ranked. The metrics store answers for every agent that reported —
+	// which is the point, a baseline's numbers stay fully readable — so the roles are applied
+	// here rather than to the query, and every caller of this function (Results,
+	// derivedTopResults and through it the top-3 bonus, constraintIneligibleAgents) inherits it.
+	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	if err != nil {
+		return nil, nil, fmt.Errorf("results: %w", err)
+	}
+	isCompetitor := make(map[string]bool, len(competitors))
+	for _, agentID := range competitors {
+		isCompetitor[agentID] = true
+	}
+
 	standings := make([]AgentStanding, 0, len(best))
 	for agentID, b := range best {
+		if !isCompetitor[agentID] {
+			continue
+		}
 		st := AgentStanding{AgentID: agentID, Best: b.Value, Basis: "raw", ExperimentID: b.ExperimentID}
 		if b.ExperimentID != "" {
 			exp, err := s.store.GetExperiment(ctx, b.ExperimentID)

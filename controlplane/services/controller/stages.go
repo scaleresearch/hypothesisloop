@@ -24,6 +24,10 @@ type StagesStore interface {
 	// committed by an earlier call.
 	AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs, survivorIDs []string, dims []db.StageRedistribution) (bool, error)
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
+	// ListSignupsByRole is how the ladder learns who is being ranked at all. A baseline or a
+	// reviewer holds quota and runs jobs like anyone else; it is simply not one of the things
+	// the ladder is comparing.
+	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 
 	// Quota. Accelerator-hours drives progress itself (GetTotalConsumedAccH); CPU/RAM/storage

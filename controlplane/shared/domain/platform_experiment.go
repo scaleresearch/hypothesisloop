@@ -162,3 +162,36 @@ type PlatformExperiment struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
+
+// SignupRole is what an agent was signed up to do in one platform experiment. It lives on the
+// signup rather than on the agent — the same agent may compete in one platform experiment and
+// hold the baseline in another — and is fixed at signup: changing it mid-run would retroactively
+// rewrite who a completed cut applied to.
+//
+// Only ranking reads it. A non-competitor's jobs are admitted, billed, evicted and settled by
+// identical code, and its metrics are recorded and readable in full.
+type SignupRole string
+
+const (
+	// SignupRoleCompetitor is ranked, cut-eligible, takes a quota share and earns the top-3 bonus.
+	SignupRoleCompetitor SignupRole = "competitor"
+	// SignupRoleBaseline runs the experiment's declared control. Never ranked, never cut — the
+	// point of a baseline is that its numbers are visible and comparable, not that it wins.
+	SignupRoleBaseline SignupRole = "baseline"
+	// SignupRoleReviewer re-checks other agents' claims and records agreement or dispute. Never
+	// ranked, never cut.
+	SignupRoleReviewer SignupRole = "reviewer"
+)
+
+// ParseSignupRole resolves a requested role. An empty string is the competitor default, so every
+// caller written before roles existed keeps meaning what it meant. Anything else unrecognized is
+// an error: defaulting a typo to competitor would silently rank an agent nobody meant to rank.
+func ParseSignupRole(s string) (SignupRole, error) {
+	switch SignupRole(s) {
+	case "":
+		return SignupRoleCompetitor, nil
+	case SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer:
+		return SignupRole(s), nil
+	}
+	return "", fmt.Errorf("unknown role %q: must be one of competitor, baseline, reviewer", s)
+}

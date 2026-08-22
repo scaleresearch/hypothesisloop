@@ -81,8 +81,12 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	return kept, cut, nil
 }
 
-// currentSurvivors lists the agents still standing in a platform experiment: everyone with a
-// quota, minus everyone cut at an earlier boundary. Sorted for deterministic ranking.
+// currentSurvivors lists the agents still standing in a platform experiment: every competitor
+// with a quota, minus everyone cut at an earlier boundary. Sorted for deterministic ranking.
+//
+// Roles enter the ladder here and nowhere else. Baselines and reviewers hold quota and run jobs
+// exactly like competitors, so filtering them out of this one list is what keeps them out of the
+// cut, out of the guardrail counts and out of every ranking derived from it.
 func (c *Controller) currentSurvivors(ctx context.Context, pe *domain.PlatformExperiment) ([]string, error) {
 	quotas, err := c.stagesStore.ListAgentQuotas(ctx, pe.ID)
 	if err != nil {
@@ -92,13 +96,21 @@ func (c *Controller) currentSurvivors(ctx context.Context, pe *domain.PlatformEx
 	if err != nil {
 		return nil, fmt.Errorf("stages: list cut agents: %w", err)
 	}
+	competitors, err := c.stagesStore.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	if err != nil {
+		return nil, fmt.Errorf("stages: list competitors: %w", err)
+	}
+	isCompetitor := make(map[string]bool, len(competitors))
+	for _, agentID := range competitors {
+		isCompetitor[agentID] = true
+	}
 	isCut := make(map[string]bool, len(cuts))
 	for _, cut := range cuts {
 		isCut[cut.AgentID] = true
 	}
 	survivors := make([]string, 0, len(quotas))
 	for _, q := range quotas {
-		if !isCut[q.AgentID] {
+		if isCompetitor[q.AgentID] && !isCut[q.AgentID] {
 			survivors = append(survivors, q.AgentID)
 		}
 	}

@@ -227,29 +227,73 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "signup-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/signup",
 		Summary: "Sign up an agent to a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Join before submitting jobs. Every job's metadata.platform_experiment_id must be one you are signed up to.",
+		Description: "Join before submitting jobs. Every job's metadata.platform_experiment_id must be one you are signed up to. " +
+			"`role` is fixed at signup and there is no path to change it: `competitor` (default) is ranked, cut-eligible and " +
+			"earns the top-3 bonus; `baseline` runs the experiment's declared control and `reviewer` re-checks other agents' " +
+			"claims — neither is ranked or cut, and neither counts against `max_agents`. Every role's jobs are admitted, " +
+			"billed, evicted and settled identically, and every role must file its findings.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string `json:"agent_id"`
+			Role    string `json:"role" doc:"competitor (default), baseline or reviewer. Fixed at signup."`
 		}
 	}) (*struct {
 		Body struct {
 			Status string `json:"status"`
+			Role   string `json:"role"`
 		}
 	}, error) {
 		if in.Body.AgentID == "" {
 			return nil, huma.Error400BadRequest("agent_id is required")
 		}
-		if err := peh.svc.Signup(ctx, in.ID, in.Body.AgentID); err != nil {
+		role, err := domain.ParseSignupRole(in.Body.Role)
+		if err != nil {
+			return nil, &reasonError{status: 400, Reason: "unknown_role", Message: err.Error()}
+		}
+		if err := peh.svc.Signup(ctx, in.ID, in.Body.AgentID, role); err != nil {
 			return nil, &reasonError{status: 400, Reason: err.Error(), Message: err.Error()}
 		}
 		out := &struct {
 			Body struct {
 				Status string `json:"status"`
+				Role   string `json:"role"`
 			}
 		}{}
 		out.Body.Status = "signed_up"
+		out.Body.Role = string(role)
+		return out, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-platform-experiment-signup", Method: "GET", Path: "/platform-experiments/{id}/signups/{agent_id}",
+		Summary: "Read an agent's signup role", Tags: []string{"platform-experiments"},
+		Description: "The role an agent was signed up under, which is what decides whether it is ranked and cut. " +
+			"404 if that agent is not signed up to this platform experiment — not signed up is not a role.",
+	}, func(ctx context.Context, in *struct {
+		ID      string `path:"id"`
+		AgentID string `path:"agent_id"`
+	}) (*struct {
+		Body struct {
+			AgentID string `json:"agent_id"`
+			Role    string `json:"role"`
+		}
+	}, error) {
+		role, found, err := peh.svc.store.GetSignupRole(ctx, in.ID, in.AgentID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if !found {
+			return nil, huma.Error404NotFound("agent is not signed up to this platform experiment")
+		}
+		out := &struct {
+			Body struct {
+				AgentID string `json:"agent_id"`
+				Role    string `json:"role"`
+			}
+		}{}
+		out.Body.AgentID = in.AgentID
+		out.Body.Role = string(role)
 		return out, nil
 	})
 
