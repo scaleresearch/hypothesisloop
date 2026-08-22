@@ -179,13 +179,19 @@ func interleaveByAgent(exps []*domain.Experiment) []*domain.Experiment {
 		}
 		byAgent[e.AgentID] = append(byAgent[e.AgentID], e)
 	}
+	// Exhausted agents leave the rotation instead of being re-scanned every round: with one
+	// agent holding a deep queue and many holding one job each, keeping them all in made this
+	// O(agents x longest-queue) for a result of length len(exps).
 	out := make([]*domain.Experiment, 0, len(exps))
 	for round := 0; len(out) < len(exps); round++ {
+		remaining := agentOrder[:0]
 		for _, agentID := range agentOrder {
-			if round < len(byAgent[agentID]) {
-				out = append(out, byAgent[agentID][round])
+			out = append(out, byAgent[agentID][round])
+			if round+1 < len(byAgent[agentID]) {
+				remaining = append(remaining, agentID)
 			}
 		}
+		agentOrder = remaining
 	}
 	return out
 }

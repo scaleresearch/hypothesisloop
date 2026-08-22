@@ -186,7 +186,11 @@ func (l *Loop) tick(ctx context.Context) error {
 		return err
 	}
 	sortGuaranteed(guaranteed, guaranteedQuotas, completion, l.guaranteedFairnessWindow)
+	// Both snapshots are taken here, before either pass claims anything. Taking the burst one
+	// after the guaranteed pass told a burst job displaced by a guaranteed one that the cluster
+	// had no room for it, when what happened is that a higher tier outranked it.
 	gAvailInitial := cloneAvail(gAvail)
+	bAvailInitial := cloneAvail(bAvail)
 
 	// Preemption candidates are read once per tick rather than once per job that fails to fit —
 	// a saturated cluster with a deep guaranteed queue otherwise issues one full scan per queued
@@ -248,7 +252,12 @@ func (l *Loop) tick(ctx context.Context) error {
 			if err != nil {
 				l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 			}
-			runningLoaded = false
+			// Only a preempt that actually requeued victims makes the running set stale. Marking
+			// it stale unconditionally cost a full re-read for every blocked job behind it on a
+			// saturated cluster, where preempt most often finds nothing to take.
+			if committed {
+				runningLoaded = false
+			}
 			// Three reasons this tick's disbalance pass may not run for this job, all of them
 			// "the evidence for terminating live work is not there":
 			//   - preempt already committed a plan covering the whole shortage: the capacity is
@@ -315,7 +324,6 @@ func (l *Loop) tick(ctx context.Context) error {
 	// that frees up this tick ahead of another agent with fewer jobs waiting — see
 	// interleaveByAgent's doc comment.
 	burst = interleaveByAgent(burst)
-	bAvailInitial := cloneAvail(bAvail)
 
 	for _, exp := range burst {
 		persistedFlavor := exp.AcceleratorType
