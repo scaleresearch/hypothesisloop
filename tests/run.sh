@@ -122,14 +122,23 @@ for f in "$DIR"/scenarios/*.sh; do
   fi
 done
 
-# connectivity-loss runs last: disconnects cluster-agent, so nothing else should run alongside it.
+# Two scenarios leave the cluster in a state the next one has to recover from, so they run at the
+# end and in this order: node-and-daemonset-faults kills and readmits nodes, whose pods are still
+# rescheduling after the idle barrier reads the cluster as quiet; connectivity-loss disconnects
+# the cluster-agent outright. Anything that needs a settled cluster -- resource-disbalance-evict
+# reads a once-per-cluster-per-tick eviction verdict -- must not sit behind them.
+LAST_EXCLUSIVE=(node-and-daemonset-faults connectivity-loss)
 reordered=()
-has_connectivity_loss=0
 for name in ${exclusive_set[@]+"${exclusive_set[@]}"}; do
-  if [[ "$name" == "connectivity-loss" ]]; then has_connectivity_loss=1; continue; fi
-  reordered+=("$name")
+  skip=0
+  for late in "${LAST_EXCLUSIVE[@]}"; do [[ "$name" == "$late" ]] && skip=1; done
+  [[ "$skip" -eq 1 ]] || reordered+=("$name")
 done
-[[ "$has_connectivity_loss" -eq 1 ]] && reordered+=(connectivity-loss)
+for late in "${LAST_EXCLUSIVE[@]}"; do
+  for name in ${exclusive_set[@]+"${exclusive_set[@]}"}; do
+    [[ "$name" == "$late" ]] && reordered+=("$late")
+  done
+done
 exclusive_set=(${reordered[@]+"${reordered[@]}"})
 
 # One deterministic ceiling for every scenario. A scenario that needs a larger special case is
