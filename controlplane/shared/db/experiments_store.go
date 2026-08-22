@@ -54,7 +54,7 @@ const experimentColumns = `
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
-	artifacts, quota_settled_at,
+	artifacts, quota_settled_at, attempt_count,
 	created_at, updated_at
 `
 

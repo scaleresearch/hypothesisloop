@@ -43,6 +43,11 @@ type JobStatusStore interface {
 	// change with its reason lost (e.g. a crash between the two separate writes).
 	TransitionTerminal(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
+	// RequeueForRetry returns a FAILED gang to QUEUED for a fresh whole-gang attempt and spends
+	// one of its max_retries, both in one guarded UPDATE. Returns false when the budget is
+	// exhausted or another writer got there first — see retryGang for why gangs are the only
+	// jobs whose retry the control plane decides.
+	RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error)
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error

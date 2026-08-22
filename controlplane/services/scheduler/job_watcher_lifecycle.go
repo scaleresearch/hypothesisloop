@@ -211,8 +211,50 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 		}
 	}
 
+	if !succeeded && w.retryGang(ctx, exp) {
+		return nil
+	}
+
 	// Durably settle each resource dimension's observed cost. See settleQuota's doc comment for
 	// the crash/outage retry story.
 	w.settleQuota(ctx, exp)
 	return nil
+}
+
+// retryGang returns a failed multi-node job to QUEUED for another whole-gang attempt while its
+// max_retries budget lasts, reporting whether it did.
+//
+// Only gangs. For a single-pod job the runtime already expresses "restart the failed unit" as
+// BackoffLimit, and by the time the job watcher sees JobPhaseFailed that budget is spent — so a
+// control-plane retry there would be a second retry authority stacked on the first. A gang is the
+// case the runtime cannot express: k8s can recreate a failed index, which strands the survivors,
+// or fail the whole Job, which is terminal. Neither is "restart the gang", so the decision moves
+// to the only layer that can make it, and is written as desired state like every other.
+func (w *JobWatcher) retryGang(ctx context.Context, exp *domain.Experiment) bool {
+	if exp.Job.Nodes() < 2 || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 1 {
+		return false
+	}
+	// Bill what this attempt burned before it goes back in the queue, so a job retrying for
+	// minutes is not invisible to running-cost and quota exhaustion in the meantime. Deliberately
+	// not MarkQuotaSettled: the row stops being terminal, and the final attempt settles for real.
+	if err := w.settler.Settle(ctx, exp); err != nil {
+		w.logger.Warn("job_watcher: settle before gang retry", zap.String("id", exp.ID), zap.Error(err))
+	}
+	requeued, err := w.store.RequeueForRetry(ctx, exp.ID, *exp.Job.MaxRetries)
+	if err != nil {
+		w.logger.Error("job_watcher: requeue gang for retry", zap.String("id", exp.ID), zap.Error(err))
+		return false
+	}
+	if !requeued {
+		// Budget exhausted, or another watcher requeued it first. Either way this call has
+		// nothing left to do; when the budget is what ran out, the row stays FAILED and the
+		// caller settles it.
+		return false
+	}
+	w.logger.Info("job_watcher: gang failed, requeued for a fresh attempt",
+		zap.String("id", exp.ID),
+		zap.Int("attempts_used", exp.AttemptCount+1),
+		zap.Int("max_retries", *exp.Job.MaxRetries),
+	)
+	return true
 }

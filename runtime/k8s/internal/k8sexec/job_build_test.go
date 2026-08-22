@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -186,5 +187,129 @@ func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 	// The built Job still carries the new resolution — only the identity ignores it.
 	if _, ok := second.Spec.Template.Spec.Containers[0].Resources.Requests["nvidia.com/gpu-v2"]; !ok {
 		t.Fatal("built Job did not use the resolved placement")
+	}
+}
+
+// A pod holds job.accelerator_count devices, never the job total. Injecting the total told
+// every pod of an accelerator_count=4, num_nodes=2 job that it had 8, and anything sizing
+// --nproc_per_node from it launched four times the processes it had hardware for. The total
+// stays on the experiment, which is what admission and billing read.
+func TestBuildJobInjectsPerNodeAcceleratorCountNotTheJobTotal(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+		// The job total: 4 per node across 2 nodes, exactly as submission stores it.
+		AcceleratorCount:       8,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			AcceleratorCount: 4, NumNodes: 2,
+			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+		},
+	}
+
+	job, err := c.BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envValue(job, "HYPOTHESISLOOP_ACCELERATOR_COUNT"); got != "4" {
+		t.Fatalf("HYPOTHESISLOOP_ACCELERATOR_COUNT = %q, want %q (per node, not the 8-device job total)", got, "4")
+	}
+	// The pod's own resource request is the same per-node figure — the env var is only true
+	// of its pod if it agrees with what the pod was actually given.
+	want := resource.MustParse("4")
+	if got := job.Spec.Template.Spec.Containers[0].Resources.Limits["nvidia.com/gpu"]; got.Cmp(want) != 0 {
+		t.Fatalf("accelerator limit = %s, want %s", got.String(), want.String())
+	}
+	// The experiment still carries the total, untouched by the build.
+	if exp.AcceleratorCount != 8 {
+		t.Fatalf("experiment accelerator count = %d, want 8 — the job total must survive the build", exp.AcceleratorCount)
+	}
+}
+
+func envValue(job *batchv1.Job, name string) string {
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
+
+// distributedExperiment is a gang of nodes with a retry budget the runtime must NOT try to spend.
+func distributedExperiment(nodes, maxRetries int) *domain.Experiment {
+	return &domain.Experiment{
+		ID: "gang", AgentID: "agent", ProjectID: "project",
+		AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+		AcceleratorCount:       nodes,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			MaxRetries: intPtr(maxRetries), AcceleratorCount: 1, NumNodes: nodes,
+			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+		},
+	}
+}
+
+// G4: a rank failing stops the gang. BackoffLimitPerIndex did the opposite — rank 3 died, k8s
+// restarted that index alone, and ranks 0-2 sat blocked in a collective holding their
+// accelerators until the gloo/NCCL timeout while the replacement rejoined a rendezvous the
+// others had already left. FailJob on any non-zero exit is what tears the survivors down.
+func TestDistributedJobFailsTheWholeGangOnAnyRankFailure(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	job, err := c.BuildJob(distributedExperiment(3, 2), nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if job.Spec.BackoffLimitPerIndex != nil {
+		t.Fatalf("BackoffLimitPerIndex = %d, want unset — per-index retry strands the surviving ranks",
+			*job.Spec.BackoffLimitPerIndex)
+	}
+	if job.Spec.PodFailurePolicy == nil || len(job.Spec.PodFailurePolicy.Rules) != 1 {
+		t.Fatal("distributed job has no single pod failure policy rule")
+	}
+	rule := job.Spec.PodFailurePolicy.Rules[0]
+	if rule.Action != batchv1.PodFailurePolicyActionFailJob {
+		t.Errorf("pod failure policy action = %q, want %q", rule.Action, batchv1.PodFailurePolicyActionFailJob)
+	}
+	// NotIn{0} rather than In{137}: an OOM is one non-zero exit among many, and every one of
+	// them has to stop the gang, not just the OOM.
+	if rule.OnExitCodes == nil || rule.OnExitCodes.Operator != batchv1.PodFailurePolicyOnExitCodesOpNotIn {
+		t.Fatalf("exit-code rule = %+v, want operator NotIn", rule.OnExitCodes)
+	}
+	if len(rule.OnExitCodes.Values) != 1 || rule.OnExitCodes.Values[0] != 0 {
+		t.Errorf("exit-code values = %v, want [0] under NotIn (any non-zero exit, 137 included)", rule.OnExitCodes.Values)
+	}
+	// FailJob is terminal in Kubernetes, so a non-zero BackoffLimit here would be dead machinery
+	// implying a retry authority the runtime does not have. Gang retry is the control plane's.
+	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
+		t.Errorf("BackoffLimit = %v, want 0 — the runtime must not claim a retry budget it cannot honour", job.Spec.BackoffLimit)
+	}
+	if job.Spec.CompletionMode == nil || *job.Spec.CompletionMode != batchv1.IndexedCompletion {
+		t.Error("distributed job is not an Indexed Job")
+	}
+	if job.Spec.SuccessPolicy != nil {
+		t.Error("a SuccessPolicy would let a lone rank-0 success declare the gang complete")
+	}
+}
+
+// Single-node jobs keep the runtime's own retry budget: for a one-pod job BackoffLimit really
+// does restart the failed unit, so there is nothing for the control plane to take over.
+func TestSingleNodeJobKeepsRuntimeRetryBudget(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	job, err := c.BuildJob(distributedExperiment(1, 2), nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 2 {
+		t.Errorf("BackoffLimit = %v, want 2 (max_retries) — single-node retry is unchanged", job.Spec.BackoffLimit)
+	}
+	if job.Spec.PodFailurePolicy != nil {
+		t.Error("single-node job gained a pod failure policy it never had")
+	}
+	if job.Spec.CompletionMode != nil {
+		t.Error("single-node job was built as an Indexed Job")
 	}
 }

@@ -31,7 +31,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
-		&artifacts, &exp.QuotaSettledAt,
+		&artifacts, &exp.QuotaSettledAt, &exp.AttemptCount,
 		&exp.CreatedAt, &exp.UpdatedAt,
 	); err != nil {
 		return nil, err

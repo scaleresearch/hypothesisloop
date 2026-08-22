@@ -180,7 +180,12 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		{Name: "HYPOTHESISLOOP_DATA_REF", Value: exp.DataRef},
 		{Name: "HYPOTHESISLOOP_API_URL", Value: c.apiURL},
 		{Name: "HYPOTHESISLOOP_ACCELERATOR_TYPE", Value: string(exp.AcceleratorType)},
-		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", exp.AcceleratorCount)},
+		// spec.AcceleratorCount (per node), not exp.AcceleratorCount (the job total across
+		// nodes). A pod only ever holds the per-node count, so at accelerator_count 4 /
+		// num_nodes 2 the total told every pod it had 8 devices, and anything sizing
+		// --nproc_per_node from it launched four times the processes it had hardware for.
+		// The total stays on the experiment, where billing and admission read it.
+		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", spec.AcceleratorCount)},
 		{Name: "HYPOTHESISLOOP_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
 		{Name: "TRACEPARENT", Value: traceparentFromID(exp.ID)},
 	}
@@ -344,26 +349,45 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		// Job (same name) — that's what makes HYPOTHESISLOOP_MASTER_ADDR above resolve.
 		job.Spec.Template.Spec.Subdomain = job.Name
 
-		// Each rank gets its own retry budget: a flaky worker doesn't burn the whole job's
-		// shared backoff budget, and one exhausting its retries fails only that index.
 		completionMode := batchv1.IndexedCompletion
 		job.Spec.CompletionMode = &completionMode
 		job.Spec.Completions = &parallelism
 		job.Spec.Parallelism = &parallelism
-		job.Spec.BackoffLimitPerIndex = &backoff
+
+		// A gang is one unit, so any rank exiting non-zero fails the whole Job and k8s tears
+		// the survivors down with it.
+		//
+		// This replaced BackoffLimitPerIndex, whose stated intent — a flaky worker not burning
+		// the shared backoff budget — is right for embarrassingly parallel work and wrong for
+		// every synchronous one. When rank 3 died mid-run, ranks 0-2 sat blocked in a collective
+		// until the NCCL or gloo timeout holding their accelerators the whole time, while the
+		// replacement rank 3 started a fresh process and rejoined a rendezvous the others had
+		// already left. The gang burned its full allocation and then failed anyway — the exact
+		// cost the per-index budget was meant to avoid.
+		//
+		// Note the retry budget is NOT expressed here. BackoffLimit cannot restart a gang: on an
+		// Indexed Job it recreates the failed *index* and leaves the survivors blocked, which is
+		// the behaviour above under another name, and FailJob is terminal so it bypasses
+		// BackoffLimit entirely. Gang retry is therefore a control-plane decision written as
+		// desired state (see the scheduler's job watcher), and BackoffLimit is pinned to 0 so
+		// there is exactly one retry authority rather than two disagreeing ones.
+		zero := int32(0)
+		job.Spec.BackoffLimit = &zero
+
 		// No custom SuccessPolicy: every distributed job uses k8s's default Indexed Job
 		// semantics — Complete only once *all* indexes succeed. A policy keyed on index 0
 		// would let k8s declare success and terminate other ranks on a lone rank-0 success,
 		// hiding a real failure elsewhere.
-		// Exit code 137 (SIGKILL, typically OOM) is a hard per-index failure rather than
-		// counted toward BackoffLimitPerIndex retries — retrying an OOM just wastes
-		// accelerator-hours on a guaranteed repeat failure.
+		//
+		// Exit code 137 (SIGKILL, typically OOM) needs no rule of its own: it is non-zero, so
+		// the rule below already fails the job outright rather than retrying it, which is what
+		// the old dedicated 137 rule existed to achieve at index scope.
 		job.Spec.PodFailurePolicy = &batchv1.PodFailurePolicy{
 			Rules: []batchv1.PodFailurePolicyRule{{
-				Action: batchv1.PodFailurePolicyActionFailIndex,
+				Action: batchv1.PodFailurePolicyActionFailJob,
 				OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
-					Operator: batchv1.PodFailurePolicyOnExitCodesOpIn,
-					Values:   []int32{137},
+					Operator: batchv1.PodFailurePolicyOnExitCodesOpNotIn,
+					Values:   []int32{0},
 				},
 			}},
 		}

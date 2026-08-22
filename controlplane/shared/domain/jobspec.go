@@ -55,11 +55,27 @@ type JobSpec struct {
 	AcceleratorPodResources map[string]string `json:"accelerator_pod_resources,omitempty" yaml:"accelerator_pod_resources,omitempty"`
 
 	// NumNodes is how many identical nodes this job spans. 1 (default) is a single-node job;
-	// >1 requests a distributed run — the backend handles rank assignment and per-node retry
-	// isolation automatically. Every container gets both HYPOTHESISLOOP_{RANK,WORLD_SIZE,
-	// MASTER_ADDR,MASTER_PORT} and the standard unprefixed PyTorch/torchrun equivalents, so an
-	// ordinary torch.distributed.init_process_group(env://) script works with no glue code. The
-	// Job completes only once every rank succeeds — no coordinator-only completion mode.
+	// >1 requests a distributed run, and the backend assigns ranks and publishes the rendezvous.
+	// Every container gets both HYPOTHESISLOOP_{RANK,WORLD_SIZE,MASTER_ADDR,MASTER_PORT} and the
+	// standard unprefixed PyTorch equivalents. The Job completes only once every rank succeeds —
+	// no coordinator-only completion mode — and any rank failing fails the whole job, because a
+	// gang is one unit (see MaxRetries).
+	//
+	// RANK and WORLD_SIZE are the NODE index and NODE count, and LOCAL_RANK is hardcoded 0 under
+	// this code's assumption of one process per pod. At one accelerator per node that is exactly
+	// what torch.distributed.init_process_group(env://) wants, and such a script runs with no glue
+	// code. At several accelerators per node it is NOT: the workload must start the per-device
+	// processes itself, which is what HYPOTHESISLOOP_ACCELERATOR_COUNT (per node, never the job
+	// total) is for:
+	//
+	//	torchrun --nnodes=$WORLD_SIZE --node_rank=$RANK \
+	//	         --nproc_per_node=$HYPOTHESISLOOP_ACCELERATOR_COUNT \
+	//	         --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT train.py
+	//
+	// torchrun then overrides the inherited node-level values with each process's real ones. This
+	// is worth stating because getting it wrong is silent: an agent reading only the variable
+	// names concludes WORLD_SIZE is its process count, builds a job that uses one device per node
+	// out of several, and still trains and still reports metrics — just under-parallelised.
 	NumNodes int `json:"num_nodes,omitempty" yaml:"num_nodes,omitempty"`
 	// MaxRetries is how many times a failing node is RETRIED, not how many attempts run: N
 	// means up to N+1 attempts, so max_retries 2 gives 3 runs before the job is marked failed
@@ -73,6 +89,18 @@ type JobSpec struct {
 	// with in-place restarts disabled too, to make "no retries" mean one attempt rather than
 	// one pod. For N > 0 the two layers still compose: up to N+1 pods, each of which the
 	// kubelet may also restart.
+	//
+	// The retried unit is the whole job, which for num_nodes > 1 means the whole gang: every
+	// rank is torn down and all N nodes start again together. It is deliberately not per-rank.
+	// Restarting one rank of a synchronous job leaves the survivors blocked in a collective
+	// holding their accelerators until the backend's timeout, while the replacement rejoins a
+	// rendezvous the others have already left — the gang burns its full allocation and fails
+	// anyway. An agent whose ranks really are independent should submit independent jobs.
+	//
+	// Where the budget is enforced differs by shape, because only one layer can enforce it in
+	// each case: a single-pod job's retries are the runtime's (k8s BackoffLimit), and a gang's
+	// are the control plane's, since Kubernetes can recreate a failed index — stranding the
+	// survivors — or fail the Job outright, but has no way to restart a gang.
 	MaxRetries *int `json:"max_retries" yaml:"max_retries"`
 
 	// TerminationGracePeriodSeconds overrides the cluster's default pod shutdown grace period.

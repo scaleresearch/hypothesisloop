@@ -178,6 +178,43 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 	return tag.RowsAffected() > 0, nil
 }
 
+// RequeueForRetry returns a failed gang to QUEUED for a fresh whole-gang attempt, incrementing
+// attempt_count in the same statement so the budget is spent exactly once even if two watchers
+// observe the same failure.
+//
+// maxAttemptsBefore is the number of failed attempts after which the job stays FAILED — i.e.
+// job.max_retries. The comparison is in the WHERE clause rather than in the caller so the read
+// and the write cannot disagree under concurrency; requeued=false therefore means either "budget
+// exhausted" or "another writer got there first", and both mean the same thing to the caller: do
+// nothing more.
+//
+// Unlike RequeuePreempted this does NOT rescale the estimate. A preempted job is assumed to
+// resume where it stopped, so only its remaining hours are re-reserved; a retried gang starts
+// from step zero, so the full original estimate is exactly what the next attempt needs.
+//
+// quota_settled_at is cleared because the row is no longer terminal and the next attempt owes a
+// settlement of its own. Nothing is lost by that: settlement.Settle recomputes cumulative
+// observed hours over the whole experiment and writes an absolute value, so the final settle
+// bills every attempt.
+func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
+	const q = `UPDATE experiments SET
+		status = 'QUEUED',
+		attempt_count = attempt_count + 1,
+		submitted_at = NULL,
+		-- clear cluster_name: the failed attempt holds no capacity, so the next admission tick
+		-- can place this anywhere, exactly as a preemption requeue does.
+		cluster_name = '',
+		not_admitted_reason = 'capacity_unavailable',
+		quota_settled_at = NULL,
+		updated_at = NOW()
+	WHERE id = $1 AND status = 'FAILED' AND attempt_count < $2`
+	tag, err := s.pool.pool.Exec(ctx, q, id, maxAttemptsBefore)
+	if err != nil {
+		return false, fmt.Errorf("experiments_store.RequeueForRetry: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // MarkQuotaSettled records that exp's final usage was durably written to the metrics DB, so the
 // settlement reconciler stops retrying it. Only called after that write succeeds.
 func (s *ExperimentsStore) MarkQuotaSettled(ctx context.Context, id string) error {

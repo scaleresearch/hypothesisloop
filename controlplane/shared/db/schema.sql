@@ -181,9 +181,17 @@ CREATE TABLE experiments (
     -- or attempted and failed) — the durable signal a background reconciler scans for to retry
     -- writing it, surviving any crash/restart between the status transition and that write.
     quota_settled_at         TIMESTAMPTZ,
+    -- attempt_count: how many attempts of this experiment have already run and failed. 0 on the
+    -- first attempt. Only the control plane's gang retry writes it (see RequeueForRetry): a
+    -- single-pod job's retries are the runtime's BackoffLimit and never reach here.
+    attempt_count            INTEGER           NOT NULL DEFAULT 0,
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
+
+-- No migration history: a fresh apply gets this from the column definition above, an existing
+-- database from the ALTER, and both land on the same 0 backfill from the one DEFAULT clause.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS not_admitted_reason TEXT;
 UPDATE experiments

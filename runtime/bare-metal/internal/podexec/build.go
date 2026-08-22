@@ -155,7 +155,11 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		"HYPOTHESISLOOP_DATA_REF":          exp.DataRef,
 		"HYPOTHESISLOOP_API_URL":           e.apiURL,
 		"HYPOTHESISLOOP_ACCELERATOR_TYPE":  string(exp.AcceleratorType),
-		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", exp.AcceleratorCount),
+		// Per node (spec), never the job total (exp) — see the same variable in the k8s
+		// runtime's job_build.go for the failure this caused. Single-node-only today makes the
+		// two equal in practice; taking it from the spec is what keeps that an accident rather
+		// than something the next multi-node change has to remember.
+		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", spec.AcceleratorCount),
 		"HYPOTHESISLOOP_DURATION_SECONDS":  fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600)),
 		"TRACEPARENT":                      traceparentFromID(exp.ID),
 	}

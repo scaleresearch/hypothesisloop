@@ -61,6 +61,13 @@ type Experiment struct {
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
+	// AttemptCount is how many attempts of this experiment have already run and failed; 0 on
+	// the first. Only a gang retry writes it. A single-pod job's retries are the runtime's
+	// BackoffLimit and are invisible here, because for a one-pod job the runtime can express
+	// "restart the failed unit" itself — for an N-pod gang it cannot, so the control plane
+	// makes that decision and writes it as desired state.
+	AttemptCount int `json:"attempt_count"`
+
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`

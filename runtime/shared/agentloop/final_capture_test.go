@@ -30,8 +30,20 @@ type captureExecutor struct {
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
+
+// The same set as ListManagedJobs here: these tests never exercise the delete-and-recreate window
+// the two lists exist to differ across, and leaving it on the embedded nil Executor made every
+// reconcile pass nil-panic before it reached the behaviour under test.
+func (e *captureExecutor) ListManagedJobsForStatus(context.Context) ([]string, error) {
+	return e.managed, nil
+}
 func (e *captureExecutor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, error) {
 	return nil, nil
+}
+
+// Nothing to prune is a valid implementation, not a missing one — see agentexec.Executor.
+func (e *captureExecutor) ReapTerminal(context.Context, map[string]*domain.Experiment) error {
+	return nil
 }
 func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *domain.Experiment) (bool, error) {
 	return true, nil

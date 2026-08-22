@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func TestResolveHostMounts(t *testing.T) {
@@ -73,5 +75,40 @@ func TestHashContainerSpecDetectsReadOnlyMountsDrift(t *testing.T) {
 	}
 	if baseHash == changedHash {
 		t.Fatal("hashContainerSpec: hash unchanged when ReadOnlyMounts changed — reconcile will never detect this drift")
+	}
+}
+
+func maxRetriesPtr(v int) *int { return &v }
+
+// The same fact the k8s runtime gets wrong when it reads the experiment total: a container is
+// handed job.accelerator_count devices, so that is the only number HYPOTHESISLOOP_ACCELERATOR_COUNT
+// can truthfully carry. This runtime is single-node today, which makes per-node and total equal
+// by accident -- the assertion pins the source, so the next multi-node change cannot silently
+// inherit the k8s bug.
+func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
+	e := &Executor{
+		apiURL:                               "http://example.invalid:8083",
+		defaultTerminationGracePeriodSeconds: 5,
+		maxTerminationGracePeriodSeconds:     30,
+	}
+	exp := &domain.Experiment{
+		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		// Deliberately disagreeing with the spec: only reading the spec produces "2".
+		AcceleratorCount:       8,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			MaxRetries: maxRetriesPtr(0), AcceleratorCount: 2,
+			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+
+	cs, err := e.BuildContainerSpec(exp, Placement{DevicePaths: []string{"/dev/tenstorrent/0", "/dev/tenstorrent/1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cs.Env["HYPOTHESISLOOP_ACCELERATOR_COUNT"]; got != "2" {
+		t.Fatalf("HYPOTHESISLOOP_ACCELERATOR_COUNT = %q, want %q (per node, not the 8-device job total)", got, "2")
 	}
 }
