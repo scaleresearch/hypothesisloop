@@ -92,16 +92,25 @@ BAD_IMAGE_OVERRIDE='{"image": "localhost/hypothesisloop-image-that-does-not-exis
 BAD_JOB=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "" "" "" "" "$BAD_IMAGE_OVERRIDE")
 echo "  ==> $BAD_JOB submitted with an image that cannot be pulled"
 
-BS=$(wait_for_status "$BAD_JOB" "EVICTED,FAILED,REJECTED" "$ADMISSION_BUDGET_SECONDS" || true)
+# Two waits, not one. A job that cannot pull its image is only *detectable* as unschedulable
+# once it has actually been placed on a node -- before that it is an ordinary job waiting for
+# capacity, and the fast group's other scenarios can hold the accelerators for the whole
+# admission budget. So the budget here is admission plus detection, not admission alone.
+# Detection itself takes seconds (the runtime reports image_pull_failed on its first status
+# push); the margin is generous so the assertion never turns into a measurement of cluster load.
+# It stays far below the 300s generic stuck-pending timeout (scheduler.stuck_pending_timeout_
+# seconds), which is what makes a terminal state here proof of the early, image-specific verdict
+# rather than of waiting the job out.
+UNSCHEDULABLE_BUDGET=$(( ADMISSION_BUDGET_SECONDS + 60 ))
+BS=$(wait_for_status "$BAD_JOB" "EVICTED,FAILED,REJECTED" "$UNSCHEDULABLE_BUDGET" || true)
 if [[ "$BS" == "EVICTED" || "$BS" == "FAILED" ]]; then
   pass "unpullable job was terminated rather than left pending ($BS)"
   BAD_REASON=$(get_field "$BAD_JOB" eviction_reason)
   echo "  bad-image phase_detail: reason='$(phase_detail_field "$BAD_JOB" reason)' message='$(phase_detail_field "$BAD_JOB" message)'"
-  # unschedulable specifically. The generic stuck-pending timeout is 300s (see
-  # scheduler.stuck_pending_timeout_seconds) and this scenario only waits the 60s admission budget,
-  # so reaching a terminal state this fast can only be the early image-specific verdict — which is
-  # the behaviour being tested: believe the runtime's phase detail instead of waiting out a job
-  # that can never start.
+  # unschedulable specifically: reaching a terminal state inside UNSCHEDULABLE_BUDGET, well
+  # under the 300s generic stuck-pending timeout, can only be the early image-specific verdict —
+  # which is the behaviour being tested: believe the runtime's phase detail instead of waiting
+  # out a job that can never start.
   [[ "$BAD_REASON" == "unschedulable" ]] \
     && pass "evicted as unschedulable — the runtime's phase detail was believed, not waited out" \
     || fail "unpullable job ended with eviction_reason='$BAD_REASON', expected unschedulable"
@@ -118,7 +127,7 @@ if [[ "$BS" == "EVICTED" || "$BS" == "FAILED" ]]; then
     fail "used_guaranteed_acch is $(quota_used_guaranteed "$PE_ID" "$AGENT"), was $USED_BEFORE — an unschedulable job kept part of its reservation"
   fi
 else
-  fail "unpullable job is '$BS' after ${ADMISSION_BUDGET_SECONDS}s — nothing terminated it"
+  fail "unpullable job is '$BS' after ${UNSCHEDULABLE_BUDGET}s — nothing terminated it"
 fi
 
 close_platform_experiment "$PE_ID"
