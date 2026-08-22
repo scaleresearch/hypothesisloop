@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -127,11 +128,10 @@ type AgentResult struct {
 // stageProgress is the read-only value served by GET /platform-experiments/{id}/stages. It omits
 // the in-flight cost of running jobs that the controller's authoritative value includes, so it
 // can trail the boundary the controller acts on.
-func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *domain.PlatformExperiment) float64 {
+func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	consumed, err := metricsdb.TotalObservedAccH(ctx, s.usage.URL(), pe.CreatedAt, pe.ID)
 	if err != nil {
-		s.logger.Warn("stages: observed usage unavailable, reporting wall-clock progress only",
-			zap.String("platformExpID", pe.ID), zap.Error(err))
+		return 0, fmt.Errorf("stages: observed usage for %s: %w", pe.ID, err)
 	}
-	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, time.Now().UTC())
+	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, time.Now().UTC()), nil
 }

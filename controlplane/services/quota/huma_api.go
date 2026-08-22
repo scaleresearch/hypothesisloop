@@ -469,10 +469,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 				activeAgents = append(activeAgents, a)
 			}
 		}
+		progress, err := peh.svc.stageProgress(ctx, pe)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		return &struct{ Body StagesStatusResponse }{Body: StagesStatusResponse{
 			Stages:               pe.Stages,
 			CurrentStage:         pe.CurrentStage,
-			Progress:             peh.svc.stageProgress(ctx, pe),
+			Progress:             progress,
 			NextBoundaryProgress: domain.BoundaryProgress(pe.Stages, pe.CurrentStage),
 			Advances:             advances,
 			ActiveAgents:         activeAgents,

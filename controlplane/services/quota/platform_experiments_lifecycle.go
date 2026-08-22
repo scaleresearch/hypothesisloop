@@ -302,21 +302,21 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 	}
 
 	if len(topResults) == 0 {
+		// Standings are what closing produces. Closing is irreversible, so deriving them failing
+		// has to stop the close and be retried, not quietly close an experiment with no result.
 		derived, err := s.derivedTopResults(ctx, id)
 		if err != nil {
-			s.logger.Warn("close: deriving standings failed, closing without placements",
-				zap.String("platformExpID", id), zap.Error(err))
+			return fmt.Errorf("close: derive standings for %s: %w", id, err)
 		}
 		topResults = derived
 	}
 
-	// Record top-3 placements and increment periods_active.
 	for i, r := range topResults {
 		if i >= 3 {
 			break
 		}
 		if err := s.store.RecordTop3(ctx, id, r.AgentID, r.FinalMetric); err != nil {
-			s.logger.Warn("close: record top3 failed", zap.String("agentID", r.AgentID), zap.Error(err))
+			return fmt.Errorf("close: record placement for %s: %w", r.AgentID, err)
 		}
 	}
 

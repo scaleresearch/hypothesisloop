@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"go.uber.org/zap"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -52,11 +50,13 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	cutCount := make(map[string]int, len(survivors))
 	healthyMetrics := 0
 	for _, metric := range rankingMetrics {
+		// A cut is irreversible and is decided on every healthy metric at once, so a metric that
+		// failed to read is not a metric with no data — dropping it would cut agents on evidence
+		// the boundary was never supposed to be judged by. Postpone instead; the next reconcile
+		// tick re-reads.
 		cutOnMetric, hadData, err := c.cutOnMetric(ctx, pe, metric, stage, survivors)
 		if err != nil {
-			c.logger.Warn("stages: metric ranking query failed, skipping metric",
-				zap.String("metric", metric.Key), zap.Error(err))
-			continue
+			return nil, nil, fmt.Errorf("stages: ranking metric %q: %w", metric.Key, err)
 		}
 		if !hadData {
 			continue
