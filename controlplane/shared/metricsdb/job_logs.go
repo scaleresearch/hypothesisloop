@@ -26,7 +26,7 @@ const ensureJobLogsTableSQL = `CREATE TABLE IF NOT EXISTS job_logs (
 	lines_json STRING,
 	ts TIMESTAMP TIME INDEX,
 	PRIMARY KEY(experiment_id)
-)`
+) WITH(ttl='30d')`
 
 // RecordLogTail stores lines as the current log tail for experimentID, reported by a
 // cluster-agent for clusterName at time at. Replaces whatever was previously stored for this

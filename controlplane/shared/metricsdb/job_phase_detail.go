@@ -22,7 +22,7 @@ const ensureJobPhaseDetailTableSQL = `CREATE TABLE IF NOT EXISTS job_phase_detai
 	restart_count BIGINT,
 	ts TIMESTAMP TIME INDEX,
 	PRIMARY KEY(experiment_id)
-)`
+) WITH(ttl='30d')`
 
 // RecordPhaseDetail stores the runtime's current explanation for experimentID's phase — why its
 // container hasn't started, or why it has been restarting. Replaces whatever was previously
@@ -103,8 +103,15 @@ func GetLatestPhaseDetailBatch(ctx context.Context, dbURL string, ids []string) 
 		}
 		quoted[i] = sqlQuote(id)
 	}
+	// One row per experiment, chosen in the database. Ordering everything newest-first and taking
+	// the first row per id in Go read every sample ever recorded for every job on the page — a
+	// list endpoint that got slower the longer the platform had been running, to answer a question
+	// whose answer is one row each.
 	querySQL := fmt.Sprintf(
-		`SELECT experiment_id, reason, phase_message, restart_count FROM job_phase_detail WHERE experiment_id IN (%s) ORDER BY ts DESC`,
+		`SELECT experiment_id, reason, phase_message, restart_count FROM (`+
+			`SELECT experiment_id, reason, phase_message, restart_count, `+
+			`ROW_NUMBER() OVER (PARTITION BY experiment_id ORDER BY ts DESC) AS rn `+
+			`FROM job_phase_detail WHERE experiment_id IN (%s)) WHERE rn = 1`,
 		strings.Join(quoted, ", "),
 	)
 	rows, err := querySQLRows(ctx, dbURL, querySQL)
@@ -116,8 +123,6 @@ func GetLatestPhaseDetailBatch(ctx context.Context, dbURL string, ids []string) 
 		}
 		return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: %w", err)
 	}
-	// Rows are ordered newest-first across all requested IDs; the first row seen for a given
-	// experiment_id is therefore its latest — later rows for the same ID are older and skipped.
 	for _, row := range rows {
 		if len(row) != 4 {
 			return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: unexpected row shape")
