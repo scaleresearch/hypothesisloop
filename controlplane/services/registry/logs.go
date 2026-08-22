@@ -17,7 +17,7 @@ func (s *Service) GetLogTail(ctx context.Context, experimentID string, n int) ([
 		return nil, fmt.Errorf("registry.GetLogTail: get experiment: %w", err)
 	}
 	if exp == nil {
-		return nil, fmt.Errorf("%w: experiment %s not found", ErrInvalidMetric, experimentID)
+		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, experimentID)
 	}
 	lines, err := metricsdb.GetLatestLogTail(ctx, s.metricsDBURL, experimentID, n)
 	if err != nil {

@@ -20,6 +20,11 @@ import (
 // poison stage-boundary rankings and silence/decline detection.
 var ErrInvalidMetric = errors.New("invalid metric")
 
+// ErrExperimentNotFound is returned when an operation names an experiment that does not exist.
+// A distinct sentinel from ErrInvalidMetric so the handlers can answer 404 rather than
+// reporting a caller's typo as a server fault or as a malformed metric.
+var ErrExperimentNotFound = errors.New("experiment not found")
+
 // RecordMetric pushes a metric datapoint directly to GreptimeDB via Prometheus remote write.
 // Labels: job_id, platform_experiment_id, agent_id, metric_name, metric_basis.
 // These labels enable stage-boundary ranking queries to filter and group by experiment/agent.
@@ -61,7 +66,7 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 		return fmt.Errorf("registry.RecordMetric: get experiment: %w", err)
 	}
 	if exp == nil {
-		return fmt.Errorf("%w: experiment %s not found", ErrInvalidMetric, experimentID)
+		return fmt.Errorf("%w: %s", ErrExperimentNotFound, experimentID)
 	}
 	if exp.Status.IsTerminal() {
 		return fmt.Errorf("%w: experiment %s is %s (terminal); progress metrics are not accepted", ErrInvalidMetric, experimentID, exp.Status)
@@ -166,7 +171,7 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}
 	if exp == nil {
-		return nil, fmt.Errorf("registry.GetTimeseries: experiment %s not found", experimentID)
+		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, experimentID)
 	}
 	end := time.Now().UTC()
 	start := exp.CreatedAt

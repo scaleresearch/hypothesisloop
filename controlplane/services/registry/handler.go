@@ -67,6 +67,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct{ Body []*domain.Experiment }, error) {
 		chain, err := h.svc.GetLineage(ctx, in.ID)
 		if err != nil {
+			if errors.Is(err, ErrExperimentNotFound) {
+				return nil, huma.Error404NotFound(err.Error())
+			}
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct{ Body []*domain.Experiment }{Body: chain}, nil
@@ -83,6 +86,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct{ Body []*domain.MetricDataPoint }, error) {
 		ts, err := h.svc.GetTimeseries(ctx, in.ID)
 		if err != nil {
+			if errors.Is(err, ErrExperimentNotFound) {
+				return nil, huma.Error404NotFound(err.Error())
+			}
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct{ Body []*domain.MetricDataPoint }{Body: ts}, nil
@@ -109,6 +115,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			name = "default"
 		}
 		if err := h.svc.RecordMetric(ctx, in.ID, name, in.Body.MetricBasis, in.Body.FractionComplete, in.Body.MetricValue); err != nil {
+			if errors.Is(err, ErrExperimentNotFound) {
+				return nil, huma.Error404NotFound(err.Error())
+			}
 			if errors.Is(err, ErrInvalidMetric) {
 				return nil, huma.Error422UnprocessableEntity(err.Error())
 			}
@@ -133,7 +142,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct{ Body []string }, error) {
 		lines, err := h.svc.GetLogTail(ctx, in.ID, in.N)
 		if err != nil {
-			if errors.Is(err, ErrInvalidMetric) {
+			if errors.Is(err, ErrExperimentNotFound) {
 				return nil, huma.Error404NotFound(err.Error())
 			}
 			h.logger.Error("get log tail", zap.String("id", in.ID), zap.Error(err))
