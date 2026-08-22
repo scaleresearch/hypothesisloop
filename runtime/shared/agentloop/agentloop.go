@@ -336,18 +336,24 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		a.Log("poll job phase %s: %v", id, err)
 		return statusReportWire{}, false
 	}
+	// Attribution is reported when it can be resolved and left empty when it cannot. It says
+	// which accelerator the job landed on, not whether the job exists, so failing to read it is
+	// not grounds to withhold the phase — and withholding the phase costs the whole cluster's
+	// snapshot. A job between pods during a delete-and-recreate has a phase but no attribution
+	// yet, which used to blank out status for every other job in the cluster until it settled.
+	// The control plane bounds an unattributable job on its own (see job_watcher's
+	// runningTypeUnobservable), which it can only do if it keeps hearing the phase.
 	var admittedAcceleratorType, admittedNode string
 	if phase != workload.JobPhaseGone {
 		t, node, consistent, err := a.Executor.ResolveAdmittedAcceleratorType(ctx, id)
-		if err != nil {
+		switch {
+		case err != nil:
 			a.Log("resolve admitted accelerator type %s: %v", id, err)
-			return statusReportWire{}, false
-		}
-		admittedAcceleratorType = string(t)
-		admittedNode = node
-		if !consistent {
+		case !consistent:
 			a.Log("experiment %s: scheduled ranks landed on inconsistent accelerator types", id)
-			return statusReportWire{}, false
+		default:
+			admittedAcceleratorType = string(t)
+			admittedNode = node
 		}
 	}
 
