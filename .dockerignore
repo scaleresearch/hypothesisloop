@@ -55,9 +55,16 @@ logs/
 # huge (tens of GB for smri-fm) and never needed baked into an image: agents/experimentator's
 # Dockerfile.base only needs experiment.md/seed/ text+scripts, and each experiment's own
 # Dockerfile.experimentator clones tt-metal fresh at its own pin rather than reusing this copy.
-agents/coordinator/experiments/*/datasets/
-agents/coordinator/experiments/*/tenstorrent/tt-metal/
-agents/coordinator/experiments/*/checkpoints/
+# ** rather than a fixed depth: an experiment's heavy state is not all at one level -- smri-fm
+# keeps 16GB of checkpoints and 2.3GB of generated kernels under tenstorrent/, which a
+# single-star pattern walks straight past. Together with the run scratch below this is ~50GB
+# that no image needs and every build context was streaming.
+agents/coordinator/experiments/**/datasets/
+agents/coordinator/experiments/**/tt-metal/
+agents/coordinator/experiments/**/checkpoints/
+agents/coordinator/experiments/**/generated/
+agents/coordinator/experiments/**/wandb/
+agents/coordinator/experiments/**/__pycache__/
 # Per-run validation/reproduction output, gitignored the same way (see each experiment's own
-# .gitignore: scratch_*/). ~7GB today, streamed into the context of every Go service build.
+# .gitignore: scratch_*/).
 agents/coordinator/experiments/*/scratch_*/
