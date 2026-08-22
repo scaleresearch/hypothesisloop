@@ -58,3 +58,6 @@ logs/
 agents/coordinator/experiments/*/datasets/
 agents/coordinator/experiments/*/tenstorrent/tt-metal/
 agents/coordinator/experiments/*/checkpoints/
+# Per-run validation/reproduction output, gitignored the same way (see each experiment's own
+# .gitignore: scratch_*/). ~7GB today, streamed into the context of every Go service build.
+agents/coordinator/experiments/*/scratch_*/
