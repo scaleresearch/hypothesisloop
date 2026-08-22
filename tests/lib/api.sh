@@ -121,16 +121,18 @@ submit_job_ext() {
 
 _mk_job_id() { echo "job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN_ID}"; }
 
-# submit_job_with_id ID PE_ID AGENT TIER [HOURS] -> prints the HTTP status code.
-# For scenarios that must control the experiment id -- e.g. to submit the same id twice and
-# assert the platform keeps exactly one of them.
-submit_job_with_id() {
+# mk_submit_body_for_id ID PE_ID AGENT TIER [HOURS] -> prints the request body for POST
+# /experiments. For scenarios that must control the experiment id, or fire one prepared body
+# several times over -- e.g. to submit the same id concurrently and assert the platform keeps
+# exactly one of them.
+mk_submit_body_for_id() {
   local job_id="$1" pe_id="$2" agent="$3" tier="$4" hours="${5:-0.02}"
-  local body resp code
-  if ! body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$JOB_FILE" "$tier"); then
-    echo "submit_job_with_id: failed to build request body for $job_id" >&2
-    return 1
-  fi
+  _mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$JOB_FILE" "$tier" "" "" "" "" "" "" "" "" ""
+}
+
+# post_experiment_body BODY -> prints the HTTP status code.
+post_experiment_body() {
+  local body="$1" resp code
   resp=$(mktemp)
   code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$API_URL/experiments" \
     -H 'Content-Type: application/json' -d "$body")

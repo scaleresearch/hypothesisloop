@@ -23,10 +23,15 @@ JOB_ID="job-dup-${RUN_ID}"
 OUT_DIR="$TMPDIR_T/dup"
 mkdir -p "$OUT_DIR"
 
+# Built once and reused: the race under test is N POSTs of one identical request, not N
+# racing body constructions (each of which would register its own hypothesis first).
+BODY=$(mk_submit_body_for_id "$JOB_ID" "$PE_ID" "$AGENT" "guaranteed") \
+  || { fail "could not build the submission body"; finish; }
+
 echo "  ==> firing ${N} submissions of the same id (${JOB_ID}) at the same instant..."
 PIDS=()
 for i in $(seq 1 "$N"); do
-  ( submit_job_with_id "$JOB_ID" "$PE_ID" "$AGENT" "guaranteed" > "$OUT_DIR/code_$i" ) &
+  ( post_experiment_body "$BODY" > "$OUT_DIR/code_$i" ) &
   PIDS+=("$!")
 done
 for p in "${PIDS[@]}"; do wait "$p" || true; done
@@ -35,8 +40,8 @@ ACCEPTED=0
 CONFLICT=0
 OTHER=""
 for i in $(seq 1 "$N"); do
-  CODE=$(cat "$OUT_DIR/code_$i" 2>/dev/null || echo "000")
-  if [[ "$CODE" -lt 400 ]]; then
+  CODE=$(cat "$OUT_DIR/code_$i" 2>/dev/null || echo "")
+  if [[ "$CODE" =~ ^2 ]]; then
     ACCEPTED=$((ACCEPTED + 1))
   elif [[ "$CODE" == "409" ]]; then
     CONFLICT=$((CONFLICT + 1))
