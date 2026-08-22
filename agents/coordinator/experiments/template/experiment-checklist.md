@@ -33,9 +33,25 @@ it's re-deriving what every prior agent already derived. An experiment definitio
   never in the shared base, or one experiment's pin bump silently changes what every other
   experiment's agent reads. An experiment with nothing extra to read can skip this file entirely
   and run straight off the base image; it doesn't need an overlay just to exist.
-- Pre-validated baseline numbers in `experiment.md`, so an agent's first job is a confirmation, not a
-  fresh discovery — but stamped with what they're pinned against (a source ref, a dataset
-  version), because an unstamped baseline silently rots the moment that pin moves.
+- A `BASELINE` block inside the `EXPERIMENT DESCRIPTION`, so an agent's first job is a
+  confirmation and not a fresh discovery. The control an experiment measures against is a
+  property of the program, not an object the platform owns — nothing in the domain encodes it,
+  and nothing should, because deciding what counts as a control is the judgment this file and
+  the coordinator exist to make. What makes it real instead is that it reaches every agent
+  verbatim, through the same description-sync rule as the rest of the block:
+
+      BASELINE
+        config:    <the exact configuration>
+        code_ref:  <repo>@<40-char-sha>
+        metric:    <declared ranking metric> = <value>
+        measured:  <experiment id that produced it, or "not yet established">
+
+  All four lines are required. `code_ref` is what stops the number rotting silently the moment
+  its pin moves, and `measured` is what separates a figure someone ran from one someone
+  remembers. A baseline nobody has measured yet says `not yet established` and names
+  establishing it as the first task in the description — silence is not an acceptable third
+  option, because an agent reading no baseline invents its own and every ranking that follows
+  compares against a different one.
 - Each ranking metric needs to earn its place, not just be named: pick it (or them) by what the
   experiment's task and objective actually reward, and say why in `experiment.md`, not only what
   it is and how to report it. It must directly track the objective, not just be convenient to

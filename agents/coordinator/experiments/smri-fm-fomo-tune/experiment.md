@@ -216,6 +216,23 @@ BASELINE (the number to beat, and what it is stamped against)
   production code path in `scratch_task5_repro/validate_production_confound.py`
   (`seed0_auroc_matches`/`mean_auroc_matches`/`leak_r2_matches` all `true`).
 
+  In the four-line form (the 0.795 debiased row directly above is the control; the 0.995
+  confound-inflated one is provenance only):
+    config:    frozen `walnut-v0-1/vitl/sub-52k` encoder, mean-pooled final-layer tokens,
+               fold-safe AP-extent OLS residualization (`fomo_tune_tt/confound.py`) +
+               `StandardScaler` + `LogisticRegressionCV(Cs=10, class_weight="balanced",
+               scoring="roc_auc")`, `KFold(n_splits=20, shuffle=True, random_state=0)` over
+               sub_01..sub_48, OOF-pooled AUROC, seed=0 -- the default path of
+               `fomo_tune_tt/run_task.py` as run by `seed/job.task5.yaml`
+    code_ref:  `MedARC-AI/smri-fm` @ `11e53ab1d4bf29d3b44e3b59c7e6166233d414e1` (the commit
+               `src/fomo_tune`/`src/smri_mae` are vendored from), checkpoint
+               `medarc/walnut/checkpoints/walnut-v0-1/vitl/sub-52k/checkpoint-last.pth`
+    metric:    auroc = 0.795, 95% CI [0.652, 0.912] (seed 0; seed-sweep mean over seeds 0/1/2
+               ~0.777)
+    measured:  not yet established as a platform experiment id -- the number comes from
+               `scratch_task5_repro/featurelevel_debias_full_protocol.json`, reproduced by the
+               production code path in `scratch_task5_repro/validate_production_confound.py`
+
   **New best-known result, `pe-1b62dccc`, 2026-08-16: AUROC 0.8663194444444445, 95% CI
   [0.751, 0.953]** (seed=0; 4-seed sweep range 0.865-0.885, mean ~0.872) -- `HEAD=hetero_ensemble_frofa`,
   FroFA-lite train-time feature augmentation stacked under a prespecified 3-member heterogeneous

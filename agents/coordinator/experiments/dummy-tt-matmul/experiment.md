@@ -27,6 +27,16 @@ CONSTRAINTS
 FACTS ABOUT THE PROBLEM
   - The measured baseline on this QuietBox's Blackhole is ~180 TFLOPS bf16.
   - Kernel/matmul timing is noisy; a gain inside run-to-run variance is not a gain.
+
+BASELINE
+  config:    the seeded bf16 matmul benchmark run at its shipped defaults (matmul sizes,
+             warmup/timed iters, dtype, tiling as seeded), one Blackhole ASIC per pod
+             (chipArch=blackhole, accelerator_count 1)
+  code_ref:  the seeded repo's `main` branch, seeded from this experiment's own seed/
+             directory -- no 40-char SHA is recorded for this baseline
+  metric:    tflops_measured = ~180 TFLOPS bf16 (this QuietBox's Blackhole)
+  measured:  not yet established -- confirming ~180 TFLOPS with an unmodified seed run is
+             the first task
 ```
 
 ---

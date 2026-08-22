@@ -9,6 +9,22 @@ external (ABIDE), mae=9.44 local/3.79 external. That's a ~50% external MAE reduc
 original Stage 1 number (7.63 -> 3.79). Full lineage, every rejected candidate with its mechanism,
 and the draft close-out summary are all in `FINAL_RESULT.md` -- READ IT before starting.
 
+BASELINE (the current headline, i.e. the number Stage 3 has to beat)
+  config:    concat(STOP_BLOCK=17, STOP_BLOCK=23) mean-pool features + Cole-style fold-safe CUBIC
+             age-bias-corrected `RidgeCV`, `ORDER_RESIDUALIZE=1` (linear order-index
+             residualization), `KFold(n_splits=20, shuffle=True, random_state=0)` over the 494
+             Task_3 subjects, OOF-pooled, scored by `run_task.py`'s `score_task3`
+  code_ref:  the shared code repo at `$CODE_REPO_URL` -- the 40-char SHA of the commit that
+             produced this headline is not recorded in this file (see `FINAL_RESULT.md` for
+             lineage); the accelerator pin is
+             tt-metal @ `d9a68815f5fcf08a5bfbffb6f1f811823fba8edd` (`TT_METAL_REF`, shared with
+             Task 5 and not to be bumped independently)
+  metric:    pearson_r = 0.7609 local (mae 9.44 local); external ABIDE age-matched subset
+             pearson_r = 0.3355, mae 3.79
+  measured:  not yet established -- no experiment id is recorded here for this headline; it is
+             attributed to Stage 2's three successive validated promotions, written up in
+             `FINAL_RESULT.md`
+
 **STAGE 3 OBJECTIVE: the round has been extended 24h (new deadline 2026-08-20T20:40Z) specifically
 to see if there's more headroom.** No prescribed technique -- same freedom as Stage 2. One
 observation worth knowing before you start: local pearson_r gains have been flattening across the

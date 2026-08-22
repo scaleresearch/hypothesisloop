@@ -71,6 +71,19 @@ INFO ABOUT THE PROBLEM
   - seed/job.yaml's cpu/memory/storage are a generous starting point, not a cap — raise them in
     your own submissions when you need to, especially for a from-source build.
   - One Tenstorrent ASIC per pod; only that device node is visible in the container.
+
+BASELINE
+  config:    seed/harness.py at its shipped defaults on the "prod-sparse" shape -- S=640, T=56320,
+             TOPK=2048, k_chunk_size=256, H=32, K_DIM=576, V_DIM=512, nv="sparse", bf16 K/V
+  code_ref:  tt-metal @ $TT_METAL_REF (the pin baked into the container at $TT_METAL_SRC) -- the
+             40-char SHA is not recorded in this file; read it from the container and re-validate
+             the numbers below whenever it moves
+  metric:    kernel_duration_ns = ~583us bf16, measured on this cluster against the official
+             0.576ms upstream reference (the lower-precision fp8-KV config measures ~436us and is
+             a separate, lesser category of result -- not this baseline)
+  measured:  not yet established -- no experiment id is recorded for the ~583us figure; it comes
+             from the hardware validation described under USE seed/harness.py above, and a
+             confirmation run of the unmodified defaults is the first task
 ```
 
 ---

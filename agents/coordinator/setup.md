@@ -124,6 +124,15 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   question the coordinator had already resolved locally, because the live description hadn't
   caught up) — a posted comment redirecting the agent is not a substitute for this and does not
   reliably stop an in-flight retry loop by itself.
+- **The `BASELINE` block must be present and answered before any agent is spawned.** It lives
+  inside the `EXPERIMENT DESCRIPTION` block you just posted, so it reaches agents verbatim through
+  the sync rule above — see `experiment-checklist.md` item 1 for the four required lines. Check
+  the posted `description`, not just the file. Either `metric:` is a real number with an
+  experiment id on `measured:`, or `measured:` says `not yet established` **and** the description
+  names establishing it as the first task. A block that is absent, or present with all four lines
+  blank, is a blocker — fix `experiment.md`, re-`PUT`, and only then spawn. An agent that reads no
+  baseline invents one, and every result it ranks is measured against a different control than its
+  neighbour's.
 - `starts_at` must be several minutes in the future, never "now" — signup only succeeds while
   status is `Open`, and it auto-flips to `Running` the instant `starts_at` passes (`SweepAutoStart`
   in `controlplane/services/quota/platform_experiments_lifecycle.go`). An agent container takes
