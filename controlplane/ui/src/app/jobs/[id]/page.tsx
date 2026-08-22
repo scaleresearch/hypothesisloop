@@ -9,7 +9,7 @@ import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/
 import type { MetricDataPoint } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
-import { Loading, EmptyState } from '@/components/ui/status-message'
+import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 import { evictionLabel } from '@/lib/eviction'
@@ -27,12 +27,12 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
 
   const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
-  const { data: logs } = useSWR(
+  const { data: logs, error: logsError } = useSWR(
     job ? `logs-${id}` : null,
     () => fetchExperimentLogs(id),
     { refreshInterval: 10_000 },
   )
-  const { data: metrics } = useSWR(
+  const { data: metrics, error: metricsError } = useSWR(
     job ? `metrics-${id}` : null,
     () => fetchExperimentMetrics(id),
     { refreshInterval: 10_000 },
@@ -213,7 +213,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       <Pod style={{ marginBottom: 12 }}>
         <PodHeader>Metric Trajectories{j.objective ? ` — ${j.objective}` : ''}</PodHeader>
         <PodContent>
-          {metricNames.length > 0 ? (
+          {metricsError ? (
+            <ErrorMessage>Could not read this job&apos;s metrics.</ErrorMessage>
+          ) : metricNames.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: metricNames.length > 1 ? '1fr 1fr' : '1fr', gap: 16 }}>
               {metricNames.map((name, i) => {
                 const bases = Array.from(basesByMetric.get(name) ?? [])
@@ -313,7 +315,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       <Pod style={{ marginBottom: 12 }}>
         <PodHeader>Logs</PodHeader>
         <PodContent>
-          {logs && logs.length > 0 ? (
+          {logsError ? (
+            <ErrorMessage>Could not read this job&apos;s log tail.</ErrorMessage>
+          ) : logs && logs.length > 0 ? (
             <pre
               className="mono"
               style={{

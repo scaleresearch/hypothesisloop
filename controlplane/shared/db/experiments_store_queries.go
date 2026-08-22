@@ -8,18 +8,25 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
+// maxLineageDepth bounds the ancestor walk GetLineage performs.
+const maxLineageDepth = 200
+
 // GetLineage returns the ancestor chain of an experiment (oldest first).
 func (s *ExperimentsStore) GetLineage(ctx context.Context, id string) ([]*domain.Experiment, error) {
+	// The depth column bounds the walk. parent_id is a plain self-reference with nothing
+	// enforcing acyclicity, so an unbounded recursive CTE would spin forever on a cycle rather
+	// than answering; it also caps how much this returns for a very long derivation chain.
 	q := `
 WITH RECURSIVE lineage AS (
-	SELECT` + experimentColumns + `FROM experiments WHERE id = $1
+	SELECT 1 AS depth,` + experimentColumns + `FROM experiments WHERE id = $1
 	UNION ALL
-	SELECT` + experimentColumnsQualified + `FROM experiments e
+	SELECT l.depth + 1,` + experimentColumnsQualified + `FROM experiments e
 	INNER JOIN lineage l ON e.id = l.parent_id
+	WHERE l.depth < $2
 )
 SELECT` + experimentColumns + `FROM lineage ORDER BY created_at ASC`
 
-	rows, err := s.pool.pool.Query(ctx, q, id)
+	rows, err := s.pool.pool.Query(ctx, q, id, maxLineageDepth)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.GetLineage: %w", err)
 	}

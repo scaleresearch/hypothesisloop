@@ -466,13 +466,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const [selectedMetricKeys, setSelectedMetricKeys] = useState<Set<string> | null>(null)
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null)
 
-  const { data: pe, isLoading: peLoading } = useSWR<PlatformExperiment>(
+  const { data: pe, error: peError, isLoading: peLoading } = useSWR<PlatformExperiment>(
     ['pe', id],
     () => fetchPlatformExperiment(id),
     { refreshInterval: 15_000 },
   )
 
-  const { data: quotas } = useSWR<AgentQuota[]>(
+  const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
     ['pe-quotas', id],
     () => fetchPlatformExperimentQuotas(id),
     { refreshInterval: 15_000 },
@@ -480,7 +480,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
   // One explicitly bounded page: every list endpoint caps a read, so asking without a limit
   // would only hide where the cut fell.
-  const { data: experimentsPage } = useSWR(
+  const { data: experimentsPage, error: experimentsError } = useSWR(
     ['pe-experiments', id],
     () => fetchExperimentsPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
@@ -493,13 +493,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  const { data: stagesStatus } = useSWR<StagesStatus>(
+  const { data: stagesStatus, error: stagesError } = useSWR<StagesStatus>(
     ['pe-stages', id],
     () => fetchStages(id),
     { refreshInterval: 15_000 },
   )
 
-  const { data: hypothesesPage } = useSWR(
+  const { data: hypothesesPage, error: hypothesesError } = useSWR(
     ['pe-hypotheses', id],
     () => fetchHypothesesPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
@@ -513,7 +513,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // cheap fetches above: a 48h-scale run doesn't meaningfully change within any 10s window,
   // and re-fetching/re-sorting the full history that often is pure waste.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
-  const { data: allMetricSeries } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
+  const { data: allMetricSeries, error: metricSeriesError } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
     pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(',')] : null,
     () => Promise.all(peMetricKeys.map(k =>
       fetchPlatformExperimentTimeseries(id, k).then(r => ({ key: k, series: r.series })),
@@ -531,7 +531,20 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const colorMap = useAgentColorMap(knownAgentIds)
   const colorFor = (agentId: string) => colorMap.get(agentId) ?? semantic.neutral
 
+  // Every number below is derived by joining these reads together, so a failed one must not
+  // pass through as an empty array: an unreachable quota service would render as "no agents
+  // signed up", which is a different answer, not a missing one.
+  const failed = [
+    peError && 'the experiment',
+    quotasError && 'quotas',
+    experimentsError && 'jobs',
+    stagesError && 'stage status',
+    hypothesesError && 'hypotheses',
+    metricSeriesError && 'metric history',
+  ].filter(Boolean) as string[]
+
   if (peLoading) return <Loading />
+  if (failed.length > 0) return <ErrorMessage>Could not load {failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>
 
   const primaryMetric = pe.metrics?.[0]
