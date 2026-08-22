@@ -25,7 +25,7 @@ type PlatformExperimentsStore interface {
 	// or the agent was already signed up.
 	Signup(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
-	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(signups []string) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error)
+	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	CountSignups(ctx context.Context, platformExpID string) (int, error)

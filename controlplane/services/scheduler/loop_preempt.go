@@ -33,15 +33,27 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 
 	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job stuck in a
 	// reschedule/node-death gap hasn't made more progress than one admitted more recently.
-	// Computed once up front since it's a GreptimeDB query per job; an error aborts the pass
-	// rather than inventing zero progress.
+	// One GreptimeDB query per candidate.
+	//
+	// A candidate whose query fails is dropped from consideration rather than failing the pass:
+	// it cannot be ranked, and ranking it as zero progress would make an unmeasurable job the
+	// first thing preempted. Aborting instead meant one broken series blocked every
+	// guaranteed-tier preemption on the platform (important.md #19).
 	elapsed := make(map[string]float64, len(burstRunning))
+	rankable := burstRunning[:0]
 	for _, exp := range burstRunning {
 		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback, l.observedGapCap, l.observedStep)
 		if err != nil {
-			return false, fmt.Errorf("preempt: observed elapsed hours for %s: %w", exp.ID, err)
+			l.logger.Warn("preempt: cannot rank candidate, skipping it",
+				zap.String("candidate", exp.ID), zap.Error(err))
+			continue
 		}
 		elapsed[exp.ID] = hours
+		rankable = append(rankable, exp)
+	}
+	burstRunning = rankable
+	if len(burstRunning) == 0 {
+		return false, nil
 	}
 
 	contributions := make(map[string]domain.Footprint, len(burstRunning))

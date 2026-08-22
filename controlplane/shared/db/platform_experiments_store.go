@@ -7,11 +7,19 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
+
+// InTxObservationTimeout bounds every metrics-store read taken while a quota transaction holds
+// its advisory lock. Those reads are HTTP calls to a separate service, and an unbounded one stalls
+// admission for the whole cluster behind the lock while its connection stays checked out of a
+// small pool. Failing the transaction is recoverable — the caller retries on the next tick —
+// where hanging on the lock is not.
+const InTxObservationTimeout = 5 * time.Second
 
 // ErrDonorInsufficientQuota is returned by FulfillDonationTx when, at commit time under row
 // locks, the donor's guaranteed allocation minus its already-reserved usage cannot cover the
@@ -315,6 +323,14 @@ type StageRedistribution struct {
 	UsedByAgent  map[string]float64
 }
 
+// StartParticipant is one signed-up agent and everything the allocation needs to know about it,
+// resolved inside the start transaction.
+type StartParticipant struct {
+	AgentID     string
+	AgentExists bool
+	HasTop3     bool
+}
+
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
 // participating agent's quota in one transaction. quotasFor is called with the signup set read
 // inside that transaction; returning an error rolls the whole thing back, leaving the experiment
@@ -328,7 +344,7 @@ type StageRedistribution struct {
 // or fails.
 //
 // Returns started=false when the experiment was not open.
-func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(signups []string) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
+func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: begin tx: %w", err)
@@ -343,25 +359,34 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 		return false, nil, nil
 	}
 
-	rows, err := tx.Query(ctx, `SELECT agent_id FROM experiment_signups WHERE platform_experiment_id=$1 ORDER BY agent_id`, id)
+	// Signups joined against the agents they name and their top-3 history, all on this
+	// transaction's own connection. The caller must not issue its own queries while this
+	// transaction is open: several concurrent starts would each hold a connection and wait for
+	// another from the same pool, which is a deadlock rather than a slow path.
+	rows, err := tx.Query(ctx, `
+SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id)
+FROM experiment_signups s
+LEFT JOIN agents a ON a.id = s.agent_id
+WHERE s.platform_experiment_id = $1
+ORDER BY s.agent_id`, id)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
 	}
-	var signups []string
+	var participants []StartParticipant
 	for rows.Next() {
-		var agentID string
-		if err := rows.Scan(&agentID); err != nil {
+		var p StartParticipant
+		if err := rows.Scan(&p.AgentID, &p.AgentExists, &p.HasTop3); err != nil {
 			rows.Close()
 			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
 		}
-		signups = append(signups, agentID)
+		participants = append(participants, p)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
 	}
 
-	quotas, err := quotasFor(signups)
+	quotas, err := quotasFor(participants)
 	if err != nil {
 		return false, nil, err
 	}
@@ -624,7 +649,9 @@ func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donati
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: donor or recipient has no quota row in %s", platformExpID)
 	}
 
-	observed, err := observe(ctx)
+	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
+	observed, err := observe(observedCtx)
+	cancelObserved()
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: observed usage: %w", err)
 	}

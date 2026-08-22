@@ -2,28 +2,52 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ---- experiment_signups ----
 
-// Signup records an agent's intent to participate in a platform experiment. The insert is
-// conditional on the experiment still being open so it cannot land after StartPlatformExperimentTx
-// has decided who participates — such a row would be a durable signup with no quota row and no
-// path to ever get one. inserted=false means the experiment is no longer open, or the agent was
-// already signed up.
+// Signup records an agent's intent to participate in a platform experiment. inserted=false means
+// the experiment is no longer open, or the agent was already signed up.
+//
+// The experiment row is locked FOR SHARE before its status is tested, which is what actually
+// serializes this against StartPlatformExperimentTx: that transaction's status UPDATE takes a
+// conflicting row lock, so a signup either completes before the start and is seen by it, or
+// blocks until the start commits and then observes 'running' and refuses. A bare
+// `WHERE EXISTS (... status='open')` predicate takes no lock at all, so it could read 'open'
+// under its own snapshot and still commit after the start had chosen the participants — landing
+// a durable signup with no quota row and no path to ever get one.
 func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string) (bool, error) {
-	const q = `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at)
-SELECT $1, $2, NOW()
-WHERE EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1 AND status = 'open')
-ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
 
-	tag, err := s.pool.pool.Exec(ctx, q, platformExpID, agentID)
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id=$1 FOR SHARE`, platformExpID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
+	}
+	if status != string(domain.PlatformExpOpen) {
+		return false, nil
+	}
+	tag, err := tx.Exec(ctx, `
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, agentID)
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.Signup: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }

@@ -63,6 +63,10 @@ type pendingEviction struct {
 	acceleratorType  string // lowercase, as looked up via foldMatchingKey against nodeAvail
 	acceleratorCount int64
 	evictedAt        time.Time
+	// nodeFreeAtEviction is what the victim's node reported free of its flavor at the moment it
+	// was condemned. Once a fresh read exceeds this, the node has reported the victim's
+	// accelerators back and the credit below would be counting them a second time.
+	nodeFreeAtEviction int64
 }
 
 // applyPendingEvictions credits every still-fresh pendingEviction's footprint back into gAvail,
@@ -77,6 +81,21 @@ func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]do
 		if now.Sub(pe.evictedAt) > l.evictionTTL {
 			delete(l.pendingEvictions, id)
 			continue
+		}
+		// The TTL is the backstop, not the signal. The real signal is the node reporting the
+		// accelerators free — which typically happens within a few seconds, leaving the rest of
+		// the TTL crediting capacity that the fresh read already contains. That phantom capacity
+		// suppressed preemption and disbalance eviction for jobs that genuinely needed them, and
+		// flapped admissions that were decided against it.
+		if pe.acceleratorCount > 0 && pe.acceleratorType != "" {
+			if byNode, ok := nodeAvail[pe.cluster]; ok {
+				if capacity, ok := byNode[pe.node]; ok {
+					if capacity[foldMatchingKey(capacity, pe.acceleratorType)] > pe.nodeFreeAtEviction {
+						delete(l.pendingEvictions, id)
+						continue
+					}
+				}
+			}
 		}
 		if g, ok := gAvail[pe.cluster]; ok {
 			g.AddFootprint(pe.footprint)
@@ -223,13 +242,19 @@ func (l *Loop) evictDisbalanced(
 		// Record the freed capacity as pending so the next tick(s) — until evictionTTL or a
 		// capacity read catches up, whichever first — credit it back rather than evicting a fresh
 		// victim to cover the same shortage again. See applyPendingEvictions.
+		acceleratorType := strings.ToLower(string(victim.experiment.AcceleratorType))
+		var nodeFree int64
+		if capacity, ok := nodeAvail[victim.node]; ok {
+			nodeFree = capacity[foldMatchingKey(capacity, acceleratorType)]
+		}
 		l.pendingEvictions[victim.experiment.ID] = pendingEviction{
-			cluster:          cluster,
-			node:             victim.node,
-			footprint:        victim.experiment.Footprint(),
-			acceleratorType:  strings.ToLower(string(victim.experiment.AcceleratorType)),
-			acceleratorCount: int64(victim.experiment.AcceleratorCount),
-			evictedAt:        now,
+			cluster:            cluster,
+			node:               victim.node,
+			footprint:          victim.experiment.Footprint(),
+			acceleratorType:    acceleratorType,
+			acceleratorCount:   int64(victim.experiment.AcceleratorCount),
+			evictedAt:          now,
+			nodeFreeAtEviction: nodeFree,
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionResourceDisbalance)).Inc()
 	}

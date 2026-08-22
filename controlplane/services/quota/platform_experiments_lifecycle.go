@@ -212,46 +212,39 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	exploreFrac := pe.Stages[0].LengthPct / 100.0
 	now := time.Now().UTC()
 
-	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, id, func(signups []string) ([]*domain.AgentQuota, error) {
-		if len(signups) == 0 {
+	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, id, func(participants []db.StartParticipant) ([]*domain.AgentQuota, error) {
+		if len(participants) == 0 {
 			return nil, fmt.Errorf("no_agents: cannot start with zero sign-ups")
 		}
 		// Every signed-up agent participates or the start fails. Skipping the ones that could not
 		// be resolved used to mean a transient database error permanently disinherited an agent:
 		// the experiment started without it, and there is no second allocation pass.
-		bonuses := make([]float64, len(signups))
+		bonuses := make([]float64, len(participants))
 		totalBonusFraction := 0.0
-		for i, agentID := range signups {
-			agent, err := s.store.GetAgent(ctx, agentID)
-			if err != nil {
-				return nil, fmt.Errorf("platform_experiments.Start: resolve agent %s: %w", agentID, err)
+		for i, p := range participants {
+			if !p.AgentExists {
+				return nil, fmt.Errorf("platform_experiments.Start: agent %s is signed up but does not exist", p.AgentID)
 			}
-			if agent == nil {
-				return nil, fmt.Errorf("platform_experiments.Start: agent %s is signed up but does not exist", agentID)
-			}
-			hasTop3, err := s.store.HasTop3History(ctx, agentID)
-			if err != nil {
-				return nil, fmt.Errorf("platform_experiments.Start: top3 history for %s: %w", agentID, err)
-			}
-			if hasTop3 {
+			if p.HasTop3 {
 				bonuses[i] = s.cfg.Top3BonusFraction
 				totalBonusFraction += s.cfg.Top3BonusFraction
 			}
 		}
 
-		allocated := make([]*domain.AgentQuota, 0, len(signups))
-		for i, agentID := range signups {
+		allocated := make([]*domain.AgentQuota, 0, len(participants))
+		for i, p := range participants {
+			agentID := p.AgentID
 			acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
-				pe.BudgetAcceleratorHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+				pe.BudgetAcceleratorHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
 			cpuGuaranteed, cpuBurst := domain.AllocateQuota(
-				pe.BudgetCPUCoreHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+				pe.BudgetCPUCoreHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
 			ramGuaranteed, ramBurst := domain.AllocateQuota(
-				pe.BudgetRAMGBHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+				pe.BudgetRAMGBHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
 			storageGuaranteed, storageBurst := domain.AllocateQuota(
-				pe.BudgetStorageGBHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+				pe.BudgetStorageGBHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
 			allocated = append(allocated, &domain.AgentQuota{
 				ID:                         uuid.New().String(),

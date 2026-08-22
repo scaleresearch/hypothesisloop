@@ -56,6 +56,33 @@ done
 
 if [[ -n "$PREEMPTED" ]]; then
   pass "burst job $PREEMPTED was preempted back to QUEUED by guaranteed job $JOB4"
+
+  # A preempted job is requeued with its estimate rescaled down to the work that remains, so the
+  # hours it already burned live in neither figure unless they are settled as observed usage at
+  # requeue time. Left uncounted, its agent can re-admit against budget it has already spent —
+  # and the gap lasts until the job finally terminates, which may be days.
+  VICTIM_AGENT=$(get_field "$PREEMPTED" agent_id)
+  # Burst-tier consumption lands in the burst bucket; sum both so the check does not depend
+  # on which tier the victim was admitted under.
+  victim_used_any() {
+    curl -sf "$API_URL/platform-experiments/${PE_ID}/quotas/${VICTIM_AGENT}" \
+      | py "import sys,json; d=json.load(sys.stdin); print((d.get('used_guaranteed_acch') or 0) + (d.get('used_burst_acch') or 0))"
+  }
+  victim_consumption_counted() { py "import sys; sys.exit(0 if $(victim_used_any) > 0 else 1)"; }
+  # Settlement is written right after the requeue commits, but both the metrics write and the
+  # read back through GreptimeDB are asynchronous enough to need a short window.
+  if wait_until "preempted job's burned hours appear as observed usage" 30 2 victim_consumption_counted; then
+    pass "the stint $PREEMPTED already ran is counted while it sits QUEUED ($(victim_used_any) AccH)"
+  else
+    fail "$PREEMPTED was requeued but its consumed hours are in no consumption figure — its agent can re-admit against budget it has already spent"
+  fi
+
+  # Settlement bills lifetime observed hours at the rate the row carries, so re-admitting a
+  # job that has already run onto a different flavor retroactively re-prices the stint it ran.
+  VICTIM_TYPE=$(get_field "$PREEMPTED" accelerator_type)
+  [[ "$VICTIM_TYPE" == "$ACCELERATOR_TYPE" ]] \
+    && pass "$PREEMPTED kept the flavor it ran on across the requeue" \
+    || fail "$PREEMPTED was requeued onto $VICTIM_TYPE, not the $ACCELERATOR_TYPE it already ran on — its first stint would be re-priced"
   READMISSION_BUDGET=$((ADMISSION_BUDGET_SECONDS + $(completion_wait_tries 0.017)))
   VFINAL=$(wait_for_status "$PREEMPTED" "RUNNING,COMPLETED,FAILED,EVICTED" "$READMISSION_BUDGET" || true)
   if [[ "$VFINAL" == "RUNNING" || "$VFINAL" == "COMPLETED" ]]; then

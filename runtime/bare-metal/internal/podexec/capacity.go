@@ -3,6 +3,7 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -265,6 +266,12 @@ func (e *Executor) devicesInUseExcluding(ctx context.Context, excludeExperimentI
 		// job while the rest of the node sat idle.
 		for _, req := range resp.Container.HostConfig.DeviceRequests {
 			if req.Driver != "nvidia" {
+				continue
+			}
+			if len(req.DeviceIDs) == 0 {
+				// startContainer always names the exact devices. A count-only request would let
+				// the runtime pick GPUs we cannot identify, so we could not tell which are taken.
+				log.Printf("podexec: container %s requests %d nvidia devices without naming them; occupancy is unreliable", c.name(), req.Count)
 				continue
 			}
 			for _, id := range req.DeviceIDs {

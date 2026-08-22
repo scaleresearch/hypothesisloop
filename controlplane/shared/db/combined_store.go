@@ -101,7 +101,9 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
 		return "", fmt.Errorf("admit experiment: lock: %w", err)
 	}
-	observed, err := observe(ctx)
+	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
+	observed, err := observe(observedCtx)
+	cancelObserved()
 	if err != nil {
 		return "", fmt.Errorf("admit experiment: observed usage: %w", err)
 	}
@@ -198,7 +200,9 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: lock: %w", err)
 	}
-	observed, err := observe(ctx, agentID, platformExpID)
+	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
+	observed, err := observe(observedCtx, agentID, platformExpID)
+	cancelObserved()
 	if err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: observed usage: %w", err)
 	}
