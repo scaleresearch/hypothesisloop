@@ -80,7 +80,11 @@ else
   if [[ "$(get_status "$JOB")" == "RUNNING" ]]; then
     OLD_UID=$(job_uid "$JOB")
     corrupt_service_desired_hash "$JOB"
-    wait_until "cluster-agent repairs drifted distributed-job Service" 30 1 job_recreated_with_new_uid "$JOB" "$OLD_UID" \
+    # Repairing this means deleting the Job, waiting out its pods' termination, and recreating —
+    # a delete/recreate cycle, not a single reconcile pass. On a contended cluster pod termination
+    # alone can outlast the 30s this used to allow, which read as "the reconciler does not repair
+    # drift" when it was still in the middle of doing exactly that.
+    wait_until "cluster-agent repairs drifted distributed-job Service" 120 1 job_recreated_with_new_uid "$JOB" "$OLD_UID" \
       && pass "drifted companion Service caused deterministic full-workload reconciliation" \
       || fail "cluster-agent did not repair a drifted distributed-job Service"
   fi

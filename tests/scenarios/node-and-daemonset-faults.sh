@@ -109,7 +109,15 @@ else
   # kill_node_running_job returns 1 when the job has no Running pod to kill. Without the `|| true`
   # `set -e` aborts the whole scenario on that path, so the guard below never runs and the failure
   # surfaces as a silent mid-run exit with no diagnostic at all.
-  NODE=$(kill_node_running_job "$JOB" || true)
+  # The experiment is RUNNING, but that is the control plane's view: the pod behind it can be
+  # mid-restart or mid-reschedule at this instant, and this fault needs a live one to kill. Retry
+  # briefly for a pod rather than reporting the absence of one as an inability to run the test.
+  NODE=""
+  for _ in $(seq 1 30); do
+    NODE=$(kill_node_running_job "$JOB" || true)
+    [[ -n "$NODE" ]] && break
+    sleep 2
+  done
   if [[ -z "$NODE" ]]; then
     fail "could not locate job's pod/node to kill"
   else
