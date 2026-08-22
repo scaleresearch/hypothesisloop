@@ -16,22 +16,20 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// aliveServer answers every metrics query with a sample every step from `ago` ago up to now, on
-// both the heartbeat and training-metric series — enough to give a job a definite, nonzero
-// observed-elapsed time without needing to model gap caps or the alive-grid mechanics exactly
-// (those are already pinned by metricsdb's own tests). `ago` must exceed step so at least one
-// full interval elapses.
+// aliveServer answers ObserveSpan with a job observed continuously from `ago` ago until now —
+// enough to give a job a definite, nonzero observed-elapsed time. Other metrics queries (the
+// settled-usage lookup) come back empty.
 func aliveServer(t *testing.T, now time.Time, step, ago time.Duration) *httptest.Server {
 	t.Helper()
-	var points []string
-	for d := ago; d >= 0; d -= step {
-		points = append(points, fmt.Sprintf(`[%d,"1"]`, now.Add(-d).Unix()))
-	}
-	matrix := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[%s]}]}}`,
-		strings.Join(points, ","))
+	body := fmt.Sprintf(`{"output":[{"records":{"rows":[[%d,%d,%d,%d]]}}]}`,
+		now.Add(-ago).UnixMilli(), now.UnixMilli(), ago.Milliseconds(), ago.Milliseconds())
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(matrix))
+		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 }
 
@@ -163,7 +161,11 @@ func TestCorrectRunningCostsNeverObservedIsNotTreatedAsRetiredRate(t *testing.T)
 	// No samples at all: the job has never reported.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
+			_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null,null,null,null]]}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	defer server.Close()
 

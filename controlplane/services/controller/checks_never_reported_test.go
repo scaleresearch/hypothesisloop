@@ -36,9 +36,24 @@ func (f *fakeMetricsStore) start(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/v1/sql"):
-			// LatestJobPhase: one row of {snapshot, phase, observed_at}. Phase and observed_at
-			// must agree with the snapshot timestamp or the reader rejects it.
-			fmt.Fprintf(w, `{"output":[{"records":{"rows":[[1000,%d,1000]]}}]}`, f.phase)
+			sql := r.URL.Query().Get("sql")
+			switch {
+			case strings.Contains(sql, "LAG(ts)"):
+				// ObserveSpan: {first, last, total ms, stint ms}. A job observed across the
+				// whole silence window, which is what a live job looks like.
+				observedFor := time.Since(f.aliveSince)
+				fmt.Fprintf(w, `{"output":[{"records":{"rows":[[%d,%d,%d,%d]]}}]}`,
+					f.aliveSince.UnixMilli(), time.Now().UTC().UnixMilli(),
+					observedFor.Milliseconds(), observedFor.Milliseconds())
+			case strings.Contains(sql, "CROSS JOIN present"):
+				// ClusterSnapshotPresence: {newest snapshot, last present, absent count}.
+				now := float64(time.Now().UnixMilli()) / 1000
+				fmt.Fprintf(w, `{"output":[{"records":{"rows":[[%v,%v,0]]}}]}`, now, now)
+			default:
+				// LatestJobPhase: one row of {snapshot, phase, observed_at}. Phase and observed_at
+				// must agree with the snapshot timestamp or the reader rejects it.
+				fmt.Fprintf(w, `{"output":[{"records":{"rows":[[1000,%d,1000]]}}]}`, f.phase)
+			}
 			return
 		case strings.Contains(r.URL.Query().Get("query"), "count_over_time"):
 			// declaredMetricSpread's first query. The lifetime lookback is much longer than the

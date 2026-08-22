@@ -2,7 +2,7 @@ package metricsdb
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,47 +10,69 @@ import (
 	"time"
 )
 
-// gridServer answers every range query with samples at the given offsets before `now`, and every
-// instant query with an empty vector. Offsets are in units of `step`, newest last.
-//
-// The gap cap is applied by GreptimeDB in production (last_over_time's range window), so a test
-// server that replays exactly the samples it was given is modelling the *raw* series. To model
-// the carry-forward too, callers pass the offsets they expect the query to see.
-func gridServer(t *testing.T, now time.Time, step time.Duration, rangeOffsets, sampleOffsets []int) *httptest.Server {
+// spanServer replays a raw observation series through the same SQL ObserveSpan issues, so these
+// tests pin the interval arithmetic itself rather than a hand-computed expectation of it.
+// Timestamps are given as durations before `now`, and may repeat: the two observation series
+// routinely carry the same instant, and de-duplication is part of what is being tested.
+func spanServer(t *testing.T, now time.Time, gapCap time.Duration, agos []time.Duration) *httptest.Server {
 	t.Helper()
-	matrix := func(offsets []int) string {
-		var values []string
-		for _, o := range offsets {
-			values = append(values, fmt.Sprintf(`[%d,"1"]`, now.Add(-time.Duration(o)*step).Unix()))
-		}
-		if len(values) == 0 {
-			return `{"status":"success","data":{"resultType":"matrix","result":[]}}`
-		}
-		return fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[%s]}]}}`,
-			strings.Join(values, ","))
-	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
 		w.Header().Set("Content-Type", "application/json")
-		// sampleBounds asks with a range equal to step; the alive grid asks with gapCap.
-		// Telling them apart by the query string is what lets one server model both.
-		if strings.Contains(r.Form.Get("query"), fmt.Sprintf("[%ds]", int(step.Seconds()))) {
-			_, _ = w.Write([]byte(matrix(sampleOffsets)))
+		if !strings.HasSuffix(r.URL.Path, "/v1/sql") {
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 			return
 		}
-		_, _ = w.Write([]byte(matrix(rangeOffsets)))
+		// Distinct, ordered — exactly what the SQL's DISTINCT + ORDER BY produce.
+		seen := map[int64]bool{}
+		var ts []int64
+		for _, ago := range agos {
+			ms := now.Add(-ago).UnixMilli()
+			if !seen[ms] {
+				seen[ms] = true
+				ts = append(ts, ms)
+			}
+		}
+		for i := 1; i < len(ts); i++ {
+			for j := i; j > 0 && ts[j] < ts[j-1]; j-- {
+				ts[j], ts[j-1] = ts[j-1], ts[j]
+			}
+		}
+		if len(ts) == 0 {
+			_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null,null,null,null]]}}]}`))
+			return
+		}
+		var total, stint, stintStart int64
+		for i := 1; i < len(ts); i++ {
+			if gap := ts[i] - ts[i-1]; gap > gapCap.Milliseconds() {
+				stintStart = ts[i]
+			}
+		}
+		for i := 1; i < len(ts); i++ {
+			gap := ts[i] - ts[i-1]
+			if gap > gapCap.Milliseconds() {
+				continue
+			}
+			total += gap
+			if ts[i] >= stintStart {
+				stint += gap
+			}
+		}
+		body, _ := json.Marshal(map[string]any{"output": []any{map[string]any{
+			"records": map[string]any{"rows": [][]int64{{ts[0], ts[len(ts)-1], total, stint}}}}}})
+		_, _ = w.Write(body)
 	}))
 }
 
-// Samples are boundaries, not durations. A job seen at exactly one instant has been confirmed
-// alive for no measurable time, and must not be billed a full reporting interval for it.
+// A job seen at exactly one instant has been confirmed alive for no measurable time. Duration is
+// measured between observations, so one observation yields none — and inventing a reporting
+// interval for it would bill time nobody observed.
 func TestObservedElapsedChargesNothingForASingleObservation(t *testing.T) {
-	step := time.Minute
+	step, gapCap := time.Minute, 3*time.Minute
 	now := time.Now().UTC()
-	server := gridServer(t, now, step, []int{10}, []int{10})
+	server := spanServer(t, now, gapCap, []time.Duration{10 * time.Minute})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, 3*step, step)
+	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
 	if err != nil {
 		t.Fatalf("ObservedElapsedHoursSince: %v", err)
 	}
@@ -59,79 +81,144 @@ func TestObservedElapsedChargesNothingForASingleObservation(t *testing.T) {
 	}
 }
 
-// n boundaries delimit n-1 intervals. Eleven samples one minute apart is ten minutes of
-// confirmed-alive time, not eleven.
-func TestObservedElapsedCountsIntervalsNotPoints(t *testing.T) {
-	step := time.Minute
+// The measurement is the observed span, not a count of grid cells: a job observed across ten
+// minutes bills ten minutes whatever the reporting step happens to be.
+func TestObservedElapsedSumsTheObservedSpan(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
 	now := time.Now().UTC()
-	offsets := []int{20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10}
-	server := gridServer(t, now, step, offsets, offsets)
+	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 17 * time.Minute, 16 * time.Minute, 15 * time.Minute, 14 * time.Minute, 13 * time.Minute, 12 * time.Minute, 11 * time.Minute, 10 * time.Minute})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, 3*step, step)
+	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
 	if err != nil {
 		t.Fatalf("ObservedElapsedHoursSince: %v", err)
 	}
 	if want := 10 * step.Hours(); !approxHours(hours, want) {
-		t.Fatalf("billed %v hours, want %v (11 boundaries = 10 intervals)", hours, want)
+		t.Fatalf("billed %v hours, want %v", hours, want)
 	}
 }
 
-// The bill must not depend on how long after the job died the query happens to run. The gap cap
-// keeps producing grid points after the last real sample — right for a mid-run blip, but past the
-// end there is nothing to bridge to, so those points are time nobody observed.
-func TestObservedElapsedDoesNotBillTheGapCapPastTheLastSample(t *testing.T) {
-	step := time.Minute
+// The whole reason the old grid was replaced: a job that ran for less than one reporting step
+// quantised to zero and was billed nothing at all.
+func TestObservedElapsedBillsAJobShorterThanOneStep(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
 	now := time.Now().UTC()
-	// Real samples stop at t-10. last_over_time carries them forward for gapCap (3 steps).
-	realSamples := []int{20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10}
-	carriedForward := append(append([]int{}, realSamples...), 9, 8, 7)
-	server := gridServer(t, now, step, carriedForward, realSamples)
+	// Observed from t-30s to t-5s: 25 seconds, well under the 60s step.
+	server := spanServer(t, now, gapCap, []time.Duration{30 * time.Second, 20 * time.Second, 12 * time.Second, 5 * time.Second})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, 3*step, step)
+	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
 	if err != nil {
 		t.Fatalf("ObservedElapsedHoursSince: %v", err)
 	}
-	// Same answer as the run without carry-forward: the extrapolated tail is not billable.
-	if want := 10 * step.Hours(); !approxHours(hours, want) {
-		t.Fatalf("billed %v hours, want %v — the gap-cap tail past the last real sample was billed", hours, want)
+	if want := 25 * time.Second.Hours(); !approxHours(hours, want) {
+		t.Fatalf("billed %v hours for a 25s job, want %v", hours, want)
 	}
 }
 
-// A window containing no real sample at all — only points last_over_time carried forward from a
-// sample that landed before the window opened — is billed as zero. Every point in it is
-// extrapolation, and the rule that trailing carry-forward is not billable does not stop applying
-// just because the last real sample fell outside the range being asked about. Counting the union
-// here instead would make a job that died before `since` bill up to a full gapCap, and bill it
-// differently depending on when the query ran.
-func TestObservedElapsedBillsNothingWhenTheWindowHoldsOnlyCarryForward(t *testing.T) {
-	step := time.Minute
+// A gap longer than the cap is time the job was genuinely not running (preempted, between pods,
+// node dead) and contributes nothing — while a gap at exactly the cap is still ordinary jitter.
+func TestObservedElapsedSkipsGapsPastTheCapButNotAtIt(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
 	now := time.Now().UTC()
-	// The alive grid has points (carried forward); the real-sample grid has none.
-	server := gridServer(t, now, step, []int{5, 4, 3}, nil)
-	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-10*step), now, 3*step, step)
+	// Two stints of 2 minutes each, separated by a 5-minute gap.
+	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 13 * time.Minute, 12 * time.Minute, 11 * time.Minute})
+	defer server.Close()
+	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
 	if err != nil {
 		t.Fatalf("ObservedElapsedHoursSince: %v", err)
 	}
-	if hours != 0 {
-		t.Fatalf("billed %v hours for a window of pure carry-forward, want 0", hours)
+	if want := 4 * step.Hours(); !approxHours(hours, want) {
+		t.Fatalf("billed %v hours across a 5-minute outage, want %v (the gap itself is not billable)", hours, want)
+	}
+
+	// The same shape with the gap exactly at the cap counts in full: 3 minutes is jitter, not an outage.
+	atCap := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 15 * time.Minute, 14 * time.Minute, 13 * time.Minute})
+	defer atCap.Close()
+	hours, err = ObservedElapsedHoursSince(context.Background(), atCap.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	if err != nil {
+		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+	}
+	if want := 7 * step.Hours(); !approxHours(hours, want) {
+		t.Fatalf("billed %v hours with a gap exactly at the cap, want %v", hours, want)
 	}
 }
 
-// The billing measurement runs per running job on every quota read, so its round-trip count is a
-// property worth pinning, not an incidental. Two series (heartbeat, training metric) times two
-// distinct range selectors (step for real samples, gapCap for the alive grid) is four — anything
-// more means the same series is being fetched twice with the same parameters.
-func TestObservedElapsedMakesFourRoundTrips(t *testing.T) {
-	step := time.Minute
+// The two observation series routinely record the same instant. Counting it twice would make
+// multiplicity part of the bill.
+func TestObservedElapsedIgnoresDuplicateTimestamps(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
 	now := time.Now().UTC()
-	offsets := []int{20, 15, 10}
+	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 20 * time.Minute, 19 * time.Minute, 19 * time.Minute, 18 * time.Minute, 18 * time.Minute})
+	defer server.Close()
+
+	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	if err != nil {
+		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+	}
+	if want := 2 * step.Hours(); !approxHours(hours, want) {
+		t.Fatalf("billed %v hours, want %v", hours, want)
+	}
+}
+
+// A preemption rescale must subtract only what the job has accrued since it last resumed, or an
+// earlier stint is charged against the shortened estimate a second time.
+func TestObservedStintCountsOnlyTheRunSinceTheLastOutage(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
+	now := time.Now().UTC()
+	// 2 minutes, a 5-minute outage, then 3 minutes.
+	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 13 * time.Minute, 12 * time.Minute, 11 * time.Minute, 10 * time.Minute})
+	defer server.Close()
+
+	hours, err := ObservedStintElapsedHours(context.Background(), server.URL, "exp-1", now, 30*step, gapCap, step)
+	if err != nil {
+		t.Fatalf("ObservedStintElapsedHours: %v", err)
+	}
+	if want := 3 * step.Hours(); !approxHours(hours, want) {
+		t.Fatalf("stint billed %v hours, want %v (only the run since the outage)", hours, want)
+	}
+}
+
+// Settling promptly and settling long afterwards have to produce the same number: the samples are
+// immutable, and nothing about the answer may depend on when it is asked.
+func TestObservedElapsedIsStableHoweverLateItIsAsked(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
+	now := time.Now().UTC()
+	offsets := []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 17 * time.Minute, 16 * time.Minute}
+
+	prompt := spanServer(t, now, gapCap, offsets)
+	defer prompt.Close()
+	early, err := ObservedElapsedHoursSince(context.Background(), prompt.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	if err != nil {
+		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+	}
+
+	// The same series read an hour later: every offset is one hour further back.
+	later := now.Add(time.Hour)
+	shifted := make([]time.Duration, len(offsets))
+	for i, o := range offsets {
+		shifted[i] = o + time.Hour
+	}
+	lateSrv := spanServer(t, later, gapCap, shifted)
+	defer lateSrv.Close()
+	late, err := ObservedElapsedHoursSince(context.Background(), lateSrv.URL, "exp-1", later.Add(-90*step), later, gapCap, step)
+	if err != nil {
+		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+	}
+	if !approxHours(early, late) {
+		t.Fatalf("same job measured %v hours promptly and %v hours an hour later", early, late)
+	}
+}
+
+// The measurement runs per running job on every quota read, so its round-trip count is a property
+// worth pinning. One query answers first-observation, total elapsed and current stint together.
+func TestObservedElapsedMakesOneRoundTrip(t *testing.T) {
+	step, gapCap := time.Minute, 3*time.Minute
+	now := time.Now().UTC()
 
 	var queries int
-	inner := gridServer(t, now, step, offsets, offsets)
+	inner := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 15 * time.Minute, 10 * time.Minute})
 	defer inner.Close()
 	counting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queries++
@@ -139,11 +226,11 @@ func TestObservedElapsedMakesFourRoundTrips(t *testing.T) {
 	}))
 	defer counting.Close()
 
-	if _, _, err := ObservedElapsed(context.Background(), counting.URL, "exp-1", now, 30*step, 3*step, step); err != nil {
+	if _, _, err := ObservedElapsed(context.Background(), counting.URL, "exp-1", now, 30*step, gapCap, step); err != nil {
 		t.Fatalf("ObservedElapsed: %v", err)
 	}
-	if queries != 4 {
-		t.Fatalf("made %d metrics queries, want 4", queries)
+	if queries != 1 {
+		t.Fatalf("made %d metrics queries, want 1", queries)
 	}
 }
 

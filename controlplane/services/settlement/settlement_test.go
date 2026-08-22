@@ -12,21 +12,18 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// aliveServer answers every PromQL range query with the same matrix: `points` alive samples,
-// one per `step`, ending at now. Both alive metrics (heartbeat and experiment_metric_value)
-// resolve to the same grid, which is what a healthy running job looks like.
-//
-// Note what `points` buys: samples are boundaries, so n of them delimit n-1 intervals of `step`.
-// A fixture meant to represent H hours of running therefore needs H/step + 1 points.
+// aliveServer answers ObserveSpan with a job observed continuously for (points-1) x step,
+// ending at now — what a healthy running job looks like. Kept in "boundary points" rather than a
+// bare duration so the fixtures below still read as "n samples, one per step".
 func aliveServer(t *testing.T, points int, step time.Duration, now time.Time) *httptest.Server {
 	t.Helper()
-	var values []string
-	for i := points; i > 0; i-- {
-		ts := now.Add(-time.Duration(i) * step).Unix()
-		values = append(values, fmt.Sprintf(`[%d,"1"]`, ts))
+	observed := time.Duration(points-1) * step
+	if points < 1 {
+		observed = 0
 	}
-	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[%s]}]}}`,
-		strings.Join(values, ","))
+	first := now.Add(-observed)
+	body := fmt.Sprintf(`{"output":[{"records":{"rows":[[%d,%d,%d,%d]]}}]}`,
+		first.UnixMilli(), now.UnixMilli(), observed.Milliseconds(), observed.Milliseconds())
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
@@ -131,17 +128,16 @@ func TestSettleDoesNotRefundAnAlreadyBilledJobOnceItsSamplesAgeOut(t *testing.T)
 	}
 }
 
-// emptyObservationsHandler serves a metrics store holding no observations for the experiment.
-// instantResult is what instant (vector) queries return — the already-settled usage lookup — while
-// range queries always come back empty, which is what an aged-out or never-written series looks like.
+// emptyObservationsHandler serves a metrics store holding no observations for the experiment:
+// ObserveSpan finds nothing. instantResult is what the already-settled usage lookup returns.
 func emptyObservationsHandler(instantResult string) http.HandlerFunc {
 	if instantResult == "" {
 		instantResult = `{"status":"success","data":{"resultType":"vector","result":[]}}`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(r.URL.Path, "query_range") {
-			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
+			_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null,null,null,null]]}}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(instantResult))
