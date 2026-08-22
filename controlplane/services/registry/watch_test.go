@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -321,12 +322,10 @@ func TestSubscribingByExperimentIDAloneResolvesItsPlatformExperiment(t *testing.
 	}
 }
 
-// hl-watch is the whole point of the transport: a model cannot hold a socket across tool calls,
-// so a process holds it instead and exits on the condition. This runs the real script against the
-// real server — the handshake, the framing and the --until contract in one — because those three
-// agreeing separately is not the same as them agreeing with each other, and the failure mode if
-// they do not is a wait that always ends at the timeout and never at the answer.
-func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
+// runHLWatch runs the real script against the real server and returns its exit code and what it
+// wrote to stderr — the two things an agent branching on this tool actually sees.
+func runHLWatch(t *testing.T, serverURL string, args ...string) (int, string, string) {
+	t.Helper()
 	script, err := filepath.Abs(filepath.Join("..", "..", "..", "agents", "coordinator", "experiments", "hl-watch"))
 	if err != nil {
 		t.Fatalf("locate hl-watch: got = %v, want = nil", err)
@@ -335,7 +334,29 @@ func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
 	if err != nil {
 		t.Skipf("no python3 to run hl-watch: %v", err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, append([]string{script, "--url", serverURL}, args...)...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	var exitErr *exec.ExitError
+	switch {
+	case runErr == nil:
+	case errors.As(runErr, &exitErr):
+	default:
+		t.Fatalf("run hl-watch: got = %v, want = nil or an exit status", runErr)
+	}
+	return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
+}
 
+// hl-watch is the whole point of the transport: a model cannot hold a socket across tool calls,
+// so a process holds it instead and exits on the condition. This runs the real script against the
+// real server — the handshake, the framing and the --until contract in one — because those three
+// agreeing separately is not the same as them agreeing with each other, and the failure mode if
+// they do not is a wait that always ends at the timeout and never at the answer.
+func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
 	source := newFakeEvents()
 	server := watchServer(t, source)
 
@@ -355,16 +376,66 @@ func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, python, script,
-		"--url", server.URL, "--experiment", "exp-1",
+	code, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
 		"--until", "status in COMPLETED,FAILED,EVICTED", "--timeout", "20")
-	output, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("hl-watch exit: got = %v, want = nil (exit 0)", err)
+	if code != 0 {
+		t.Fatalf("hl-watch exit code: got = %v, want = %v (stderr: %s)", code, 0, stderr)
 	}
-	if !strings.Contains(string(output), `"value":"COMPLETED"`) {
-		t.Errorf("hl-watch output: got = %v, want = a line carrying COMPLETED", string(output))
+	if !strings.Contains(output, `"value":"COMPLETED"`) {
+		t.Errorf("hl-watch output: got = %v, want = a line carrying COMPLETED", output)
+	}
+}
+
+// A 4xx says the request is wrong, and it will be exactly as wrong on the next attempt. Retrying
+// it to the timeout and then exiting 0 is the worst of both: the agent blocks for its whole
+// window and then reads success, which is the silent wait hl-watch exists to remove. It has to
+// fail immediately and say so in the exit code.
+func TestHLWatchFailsImmediatelyWhenThePlatformRefusesTheSubscription(t *testing.T) {
+	server := watchServer(t, newFakeEvents())
+
+	started := time.Now()
+	code, _, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
+		"--kinds", "not.a.real.kind", "--timeout", "30")
+
+	if code != 2 {
+		t.Errorf("hl-watch exit code for a refused subscription: got = %v, want = %v (stderr: %s)", code, 2, stderr)
+	}
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Errorf("time spent before giving up: got = %v, want = well under the 30s timeout", elapsed)
+	}
+}
+
+// The status line alone says a request was refused; only the body says which part of it was
+// wrong. An agent that mistypes a kind and is told nothing but "400" has to guess between the
+// kind, the id and the agent name — so the refusal's own message has to reach the caller.
+func TestHLWatchPrintsThePlatformsReasonForRefusingRatherThanABare400(t *testing.T) {
+	server := watchServer(t, newFakeEvents())
+
+	_, _, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
+		"--kinds", "not.a.real.kind", "--timeout", "30")
+
+	if !strings.Contains(stderr, "not.a.real.kind") {
+		t.Errorf("hl-watch refusal message: got = %v, want = one naming the offending kind", stderr)
+	}
+}
+
+// The other half of the same rule: a server that is momentarily unreachable is not a wrong
+// request, and giving up on it would throw away the reconnect-and-replay behaviour that makes a
+// dropped connection cost a delay instead of a fact.
+func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
+	// A port nothing is listening on: every attempt is refused at the TCP level, which is the
+	// transient case.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: got = %v, want = nil", err)
+	}
+	address := listener.Addr().String()
+	listener.Close()
+
+	code, _, stderr := runHLWatch(t, "http://"+address, "--experiment", "exp-1",
+		"--until", "status in COMPLETED", "--timeout", "5")
+
+	if code != 124 {
+		t.Errorf("hl-watch exit code after retrying an unreachable server: got = %v, want = %v (stderr: %s)", code, 124, stderr)
 	}
 }

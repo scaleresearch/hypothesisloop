@@ -7,9 +7,19 @@ This process holds the socket on its behalf. One call replaces a hundred polling
 
     hl-watch --experiment $ID --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
 
-Exit 0 when --until became true (or the stream ended and no condition was asked for), 124 on the
-timeout — the same code /usr/bin/timeout uses — and 2 on a usage error. Every event is printed as
-one JSON line as it arrives, so the transcript shows what happened and not merely that it did.
+Every event is printed as one JSON line as it arrives, so the transcript shows what happened and
+not merely that it did. The exit code says which way the wait ended, and is meant to be branched
+on:
+
+    0    --until became true. Without --until, the watch window simply elapsed.
+    124  the timeout expired with --until still unmet — the same code /usr/bin/timeout uses.
+    2    the request was wrong and would stay wrong: bad flags, or the platform refused the
+         subscription (an unknown kind, an experiment that does not exist). Not retried, because
+         a 4xx two seconds later is the same 4xx, and waiting on it is the silent block this
+         tool exists to remove. The refusal's own message is printed.
+
+Everything genuinely transient — a refused connection, a 5xx, a socket dropped mid-stream — is
+retried until the timeout instead, because that retry is the feature.
 
 A dropped connection is a delay, never a gap: this reconnects with the cursor of the last event it
 saw, and the server replays what was missed before going live again.
@@ -45,7 +55,11 @@ RECONNECT_DELAY_S = 2.0
 
 
 class Closed(Exception):
-    """The connection ended. Not an error on its own — reconnect and replay."""
+    """The connection ended, or the server was momentarily unable. Reconnect and replay."""
+
+
+class Refused(Exception):
+    """The platform rejected this subscription. The request is wrong and will stay wrong."""
 
 
 class WebSocket:
@@ -53,7 +67,7 @@ class WebSocket:
         self.sock = sock
         self.buffer = b""
 
-    def _read(self, n: int) -> bytes:
+    def read_exactly(self, n: int) -> bytes:
         while len(self.buffer) < n:
             chunk = self.sock.recv(65536)
             if not chunk:
@@ -79,18 +93,18 @@ class WebSocket:
     def next_text(self) -> str:
         """Returns the next text frame, answering pings and skipping everything else."""
         while True:
-            head = self._read(2)
+            head = self.read_exactly(2)
             opcode = head[0] & 0x0F
             length = head[1] & 0x7F
             if length == 126:
-                length = struct.unpack("!H", self._read(2))[0]
+                length = struct.unpack("!H", self.read_exactly(2))[0]
             elif length == 127:
-                length = struct.unpack("!Q", self._read(8))[0]
+                length = struct.unpack("!Q", self.read_exactly(8))[0]
             if head[1] & 0x80:
-                mask = self._read(4)
-                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self._read(length)))
+                mask = self.read_exactly(4)
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self.read_exactly(length)))
             else:
-                payload = self._read(length)
+                payload = self.read_exactly(length)
             if opcode == 0x8:
                 raise Closed("server closed the stream")
             if opcode == 0x9:
@@ -132,9 +146,57 @@ def connect(url: str, path: str) -> WebSocket:
         ws.buffer += chunk
     head, ws.buffer = ws.buffer.split(b"\r\n\r\n", 1)
     status = head.split(b"\r\n", 1)[0].decode()
-    if " 101 " not in status:
-        raise Closed(f"handshake refused: {status} {head.decode(errors='replace')}")
-    return ws
+    if " 101 " in status:
+        return ws
+    code = status_code(status)
+    detail = read_body(ws, head)
+    sock.close()
+    # A 4xx says the request is wrong, and it will be just as wrong two seconds from now: a
+    # mistyped kind or an experiment that does not exist never becomes retryable. Retrying it to
+    # the timeout is the silent wait this tool exists to remove, so it is raised as fatal. A 5xx
+    # or a refused connection is the opposite — the server is momentarily unable, not the request
+    # invalid — and stays in the retry loop.
+    if 400 <= code < 500:
+        raise Refused(f"the platform refused this subscription: {status.strip()}{detail}")
+    raise Closed(f"handshake failed: {status.strip()}{detail}")
+
+
+def status_code(status_line: str) -> int:
+    parts = status_line.split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        return 0
+    return int(parts[1])
+
+
+def read_body(ws: WebSocket, head: bytes) -> str:
+    """Returns the refusal's body, which is the only thing that says WHICH part was wrong.
+
+    The platform answers every error in one {"error": "..."} envelope, so the body carries the
+    name of the offending kind or id. A status line alone leaves the caller guessing.
+    """
+    length = 0
+    for line in head.decode(errors="replace").split("\r\n")[1:]:
+        name, _, value = line.partition(":")
+        if name.strip().lower() == "content-length" and value.strip().isdigit():
+            length = int(value.strip())
+    try:
+        if length:
+            body = ws.read_exactly(length)
+        else:
+            body = ws.buffer
+            while True:
+                chunk = ws.sock.recv(65536)
+                if not chunk:
+                    break
+                body += chunk
+    except (OSError, Closed):
+        body = ws.buffer
+    text = body.decode(errors="replace").strip()
+    try:
+        message = json.loads(text).get("error", "")
+    except (json.JSONDecodeError, AttributeError):
+        message = text
+    return f" — {message}" if message else ""
 
 
 def parse_until(expression: str):
@@ -158,13 +220,22 @@ def parse_until(expression: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Wait on platform events instead of polling for them.")
+    parser = argparse.ArgumentParser(
+        description="Wait on platform events instead of polling for them.",
+        epilog="exit codes:\n"
+               "  0    --until became true, or (without --until) the watch window elapsed\n"
+               "  124  the timeout expired with --until still unmet\n"
+               "  2    the request was wrong and would stay wrong: bad flags, or the platform\n"
+               "       refused the subscription (unknown kind, unknown experiment). Never\n"
+               "       retried; a connection failure or a 5xx is retried until the timeout.\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--experiment", default=os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", ""),
                         help="watch one job (defaults to $HYPOTHESISLOOP_EXPERIMENT_ID)")
     parser.add_argument("--platform-experiment", default="", help="watch a whole platform experiment")
     parser.add_argument("--agent", default="", help="narrow job and quota events to this agent")
     parser.add_argument("--kinds", default="", help="comma-separated event kinds; default is all of them")
-    parser.add_argument("--until", default="", help="stop when true, e.g. 'status in COMPLETED,FAILED,EVICTED'")
+    parser.add_argument("--until", default="",
+                        help="stop when true; one form only: 'status in COMPLETED,FAILED,EVICTED'")
     parser.add_argument("--timeout", type=float, default=900.0, help="give up after this many seconds")
     parser.add_argument("--since", type=int, default=0, help="replay from this cursor before going live")
     parser.add_argument("--url", default=os.environ.get("HYPOTHESISLOOP_API_URL") or os.environ.get("API_URL", ""),
@@ -202,6 +273,9 @@ def main() -> int:
         path = "/watch?" + urllib.parse.urlencode({k: v for k, v in query.items() if v})
         try:
             ws = connect(args.url, path)
+        except Refused as err:
+            print(f"hl-watch: {err}", file=sys.stderr)
+            return USAGE_EXIT_CODE
         except (OSError, Closed) as err:
             print(f"hl-watch: connect: {err}", file=sys.stderr)
             time.sleep(RECONNECT_DELAY_S)
