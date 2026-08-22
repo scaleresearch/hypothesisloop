@@ -190,7 +190,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"total that is not the page's own length -- ask this before listing anything. " +
 			"evictions_by_reason is the cheapest diagnosis you have: several jobs evicted " +
 			"'silent' or 'never_reported_metrics' means your reporting path is broken, not that " +
-			"training is slow, and resubmitting unchanged fails the same way.",
+			"training is slow, and resubmitting unchanged fails the same way. " +
+			"evictions_by_class folds the same tally into whose fault it was: 'workload' is " +
+			"yours, 'infrastructure' is the environment's (those cost you no quota and no retry " +
+			"attempt -- stop debugging code that was correct), and 'policy' is the platform's " +
+			"own decision, such as a stage cut, which is not a failure at all.",
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent" doc:"Only this agent's experiments."`
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`

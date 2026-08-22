@@ -3,6 +3,7 @@ package podexec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -227,5 +228,73 @@ func TestHashContainerSpecDetectsDurableDataPrefixDrift(t *testing.T) {
 	}
 	if baseHash == movedHash {
 		t.Fatal("hashContainerSpec: hash unchanged when the job's data prefix changed — reconcile will never repoint it")
+	}
+}
+
+// This runtime executes a job on the one bare node it runs on. Groups are a second way to write
+// a multi-node job, so they must meet the same refusal by the same rule — a two-group job that
+// slipped through here would run one group's process and silently drop the other, producing a
+// learner with no actors that hangs in its rendezvous rather than a rejection anyone can read.
+func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T) {
+	e := &Executor{
+		apiURL:                               "http://example.invalid:8083",
+		defaultTerminationGracePeriodSeconds: 5,
+		maxTerminationGracePeriodSeconds:     30,
+	}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "grouped", AgentID: "agent", ProjectID: "project",
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0),
+			Groups: []domain.JobGroup{
+				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi"},
+				{Name: "actor", Replicas: 3, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+			},
+		},
+	}
+
+	_, err := e.BuildContainerSpec(exp, Placement{})
+	if err == nil {
+		t.Fatal("BuildContainerSpec accepted a two-group job on a single-node runtime — it would run one group and drop the rest")
+	}
+	if !strings.Contains(err.Error(), "num_nodes=4") || !strings.Contains(err.Error(), "single-node jobs only") {
+		t.Fatalf("rejection was %q, want the existing single-node error naming 4 nodes — groups do not make this runtime multi-node, they make its refusal consistent, so they must not invent a second error for the same condition", err)
+	}
+}
+
+// The other half of that rule: a grouped job that really does total one node is a single-node job
+// however it was written, and this runtime must run it — reading its shape and its command off
+// the group, since a grouped spec states them nowhere else.
+func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
+	e := &Executor{
+		apiURL:                               "http://example.invalid:8083",
+		defaultTerminationGracePeriodSeconds: 5,
+		maxTerminationGracePeriodSeconds:     30,
+	}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "one-group", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 2,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0),
+			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+			Groups: []domain.JobGroup{
+				{Name: "solo", Replicas: 1, AcceleratorCount: 2, CPU: "2", Memory: "8Gi", Storage: "5Gi",
+					Command: []string{"python", "solo.py"}},
+			},
+		},
+	}
+
+	cs, err := e.BuildContainerSpec(exp, Placement{DevicePaths: []string{"/dev/tenstorrent/0", "/dev/tenstorrent/1"}})
+	if err != nil {
+		t.Fatalf("BuildContainerSpec rejected a one-node grouped job: %v — its node count is 1, which is exactly what this runtime executes", err)
+	}
+	if got := cs.Env["HYPOTHESISLOOP_ACCELERATOR_COUNT"]; got != "2" {
+		t.Fatalf("HYPOTHESISLOOP_ACCELERATOR_COUNT = %q, want 2 — the group's own per-replica count, since a grouped job states it nowhere else", got)
+	}
+	if len(cs.Command) != 2 || cs.Command[1] != "solo.py" {
+		t.Fatalf("command = %v, want the group's own — a grouped job's process is stated per group", cs.Command)
 	}
 }

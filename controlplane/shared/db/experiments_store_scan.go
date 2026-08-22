@@ -30,7 +30,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
-		&exp.QuotaSettledAt, &exp.AttemptCount,
+		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount,
 		&exp.CreatedAt, &exp.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -42,11 +42,17 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		}
 	}
 	exp.AcceleratorType = domain.AcceleratorType(acceleratorType)
-	nodes := exp.Job.Nodes()
-	if nodes <= 0 || exp.AcceleratorCount%nodes != 0 {
-		return nil, fmt.Errorf("scan experiment %s: total accelerator_count %d is not divisible by num_nodes %d", exp.ID, exp.AcceleratorCount, nodes)
+	// Recovering the per-node count by dividing the stored total works only because an ungrouped
+	// job's nodes are identical by construction. A grouped job's per-replica counts are stored
+	// on the groups exactly as written, so there is nothing to recover — and dividing its total
+	// by its node count would invent an average shape no node actually has.
+	if len(exp.Job.Groups) == 0 {
+		nodes := exp.Job.Nodes()
+		if nodes <= 0 || exp.AcceleratorCount%nodes != 0 {
+			return nil, fmt.Errorf("scan experiment %s: total accelerator_count %d is not divisible by num_nodes %d", exp.ID, exp.AcceleratorCount, nodes)
+		}
+		exp.Job.AcceleratorCount = exp.AcceleratorCount / nodes
 	}
-	exp.Job.AcceleratorCount = exp.AcceleratorCount / nodes
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
 	// exp.Job.AcceleratorType stays the type the agent originally asked for while

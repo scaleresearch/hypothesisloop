@@ -54,21 +54,42 @@ func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment
 	w.evictNotYetRunning(ctx, exp, domain.EvictionUnschedulable)
 }
 
-// evictNotYetRunning evicts a job the lifecycle never advanced to RUNNING, whatever prevented it.
+// evictNotYetRunning ends a job the lifecycle never advanced to RUNNING, whatever prevented it.
 // Settle computes observed usage from real metrics, so this zeroes out to a full refund when
-// nothing genuinely ran and still bills a job whose pod was up (flavor mismatch, unreadable
-// accelerator type) for exactly what it burned.
+// nothing genuinely ran and still bills a job whose pod was up (unreadable accelerator type) for
+// exactly what it burned — except when the environment is what failed it, which the store
+// resolves into a free requeue while the allowance lasts and, once it runs out, into an EVICTED
+// row that Settle refunds in full. The decision is not repeated here: this function reports
+// whichever outcome ResolveTermination produced.
 func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
-	updated, err := w.store.TransitionTerminal(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
+	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
 		return
 	}
-	if !updated {
+	// Settle reads the reason off the experiment, so it has to be the one just persisted rather
+	// than whatever the row carried from a previous attempt.
+	exp.EvictionReason = string(reason)
+	switch outcome {
+	case domain.TerminationSkipped:
 		// Already moved on (e.g. finished right before this check) — nothing to do.
+		return
+	case domain.TerminationRequeued:
+		// Bill what this attempt burned before it goes back in the queue, so a job cycling
+		// through requeues is not invisible to running-cost and quota exhaustion meanwhile. Not
+		// the refund: that lands only if the job ends in an infrastructure fault once its
+		// requeue allowance runs out — see settlement.Settle. Deliberately not MarkQuotaSettled,
+		// since the row is QUEUED again rather than terminal.
+		exp.Status = domain.StatusQueued
+		if err := w.settler.Settle(ctx, exp); err != nil {
+			w.logger.Warn("job_watcher: settle before infrastructure requeue", zap.String("id", exp.ID), zap.Error(err))
+		}
+		w.logger.Info("job_watcher: infrastructure fault, requeued at no cost",
+			zap.String("id", exp.ID), zap.String("reason", string(reason)))
 		return
 	}
 	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
+	exp.Status = domain.StatusEvicted
 	w.settleQuota(ctx, exp)
 }
 
@@ -253,7 +274,7 @@ func (w *JobWatcher) retryGang(ctx context.Context, exp *domain.Experiment) bool
 	}
 	w.logger.Info("job_watcher: gang failed, requeued for a fresh attempt",
 		zap.String("id", exp.ID),
-		zap.Int("attempts_used", exp.AttemptCount+1),
+		zap.Int("attempts_used", exp.RetriesUsed()+1),
 		zap.Int("max_retries", *exp.Job.MaxRetries),
 	)
 	return true

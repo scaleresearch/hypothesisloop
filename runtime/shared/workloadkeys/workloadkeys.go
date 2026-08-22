@@ -18,6 +18,9 @@ const (
 	MemoryBytes      = "hypothesisloop.io/memory-bytes"
 	StorageBytes     = "hypothesisloop.io/storage-bytes"
 	GraceSeconds     = "hypothesisloop.io/grace-seconds"
+	// JobGroup names which group of a heterogeneous job a workload belongs to (see
+	// domain.JobSpec.Groups). Absent on an ungrouped job, whose nodes are all the same thing.
+	JobGroup = "hypothesisloop.io/job-group"
 
 	// ManagedByValue is the constant value ManagedBy is set to, identifying this system as the
 	// writer (as opposed to which key is being written).

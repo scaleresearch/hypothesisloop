@@ -246,6 +246,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 		"accelerator_available_by_node": acceleratorByNode,
 		"node_resources_by_node":        nodeResources,
 		"node_labels_by_node":           nodeLabels,
+		"multi_node_capable":            a.Executor.SupportsMultiNodeJobs(),
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
 		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,
 	})

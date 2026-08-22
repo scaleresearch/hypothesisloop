@@ -28,8 +28,13 @@ type ClusterCapacitySnapshot struct {
 	AcceleratorAvailableByNode             map[string]map[string]int64
 	// NodeResourcesByNode carries the fungible dimensions per node — node -> resource -> free
 	// amount, keyed by domain.NodeResource*.
-	NodeResourcesByNode            map[string]map[string]int64
-	NodeLabelsByNode               map[string]map[string]string
+	NodeResourcesByNode map[string]map[string]int64
+	NodeLabelsByNode    map[string]map[string]string
+	// MultiNodeCapable is the cluster's own report of whether its runtime can execute a job
+	// spanning more than one node. A capability, not a capacity, but reported and read on the
+	// same snapshot for the same reason: it is a live fact about the cluster that goes stale the
+	// moment the cluster stops reporting.
+	MultiNodeCapable               bool
 	RAMAvailable, RAMTotal         int64
 	StorageAvailable, StorageTotal int64
 }
@@ -44,6 +49,7 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 		{MetricName: clusterRAMTotalMetric, Labels: labels, Value: float64(snapshot.RAMTotal), At: snapshot.At},
 		{MetricName: clusterStorageAvailableMetric, Labels: labels, Value: float64(snapshot.StorageAvailable), At: snapshot.At},
 		{MetricName: clusterStorageTotalMetric, Labels: labels, Value: float64(snapshot.StorageTotal), At: snapshot.At},
+		{MetricName: clusterMultiNodeCapableMetric, Labels: labels, Value: boolGauge(snapshot.MultiNodeCapable), At: snapshot.At},
 	}
 	for acceleratorType, available := range snapshot.AcceleratorAvailable {
 		samples = append(samples, GaugeSample{MetricName: clusterAcceleratorAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "accelerator_type": acceleratorType}, Value: float64(available), At: snapshot.At})
@@ -70,6 +76,35 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 		return fmt.Errorf("metricsdb.RecordClusterCapacitySnapshot: %w", err)
 	}
 	return nil
+}
+
+// clusterMultiNodeCapableMetric is a cluster's self-reported ability to run a job spanning more
+// than one node: 1 yes, 0 no. Written on every reconcile exchange like the capacities beside it,
+// so it ages out with the same freshness window — a cluster that stopped reporting is not
+// credited with a capability it can no longer be asked about.
+const clusterMultiNodeCapableMetric = "cluster_multi_node_capable"
+
+func boolGauge(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+// LiveClusterMultiNodeCapability returns, per cluster with a fresh report, whether its runtime can
+// execute a multi-node job. A cluster absent from the map has not reported recently and must be
+// treated as incapable by the caller — never assumed capable, since the cost of the assumption is
+// a distributed job admitted onto a runtime that will refuse it at creation time.
+func LiveClusterMultiNodeCapability(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
+	values, err := lastValuePerCluster(ctx, dbURL, clusterMultiNodeCapableMetric, window)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LiveClusterMultiNodeCapability: %w", err)
+	}
+	out := make(map[string]bool, len(values))
+	for cluster, value := range values {
+		out[cluster] = value != 0
+	}
+	return out, nil
 }
 
 func RecordClusterHeartbeat(ctx context.Context, dbURL, clusterName string, at time.Time) error {

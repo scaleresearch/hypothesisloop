@@ -37,11 +37,11 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 
 		switch exp.Status {
 		case domain.StatusQueued, domain.StatusSubmitted:
-			updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
+			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
 			if err != nil {
 				return fmt.Errorf("cancel: update status: %w", err)
 			}
-			if !updated {
+			if outcome != domain.TerminationWritten {
 				// Lost the CAS: either a concurrent cancel already terminalized it, or admission
 				// moved it forward (e.g. QUEUED->SUBMITTED) between our read and this write.
 				// Re-read and retry rather than assuming the former — otherwise a cancel racing
@@ -53,11 +53,11 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			return nil
 
 		case domain.StatusAdmitted, domain.StatusRunning:
-			updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
+			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
 			if err != nil {
 				return fmt.Errorf("cancel: update status: %w", err)
 			}
-			if !updated {
+			if outcome != domain.TerminationWritten {
 				continue
 			}
 			exp.Status = domain.StatusEvicted
@@ -93,11 +93,11 @@ func (s *Service) EvictExperiment(ctx context.Context, id string, reason domain.
 	default:
 		return nil
 	}
-	updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusEvicted, string(reason))
+	outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
 		return fmt.Errorf("evict: update status: %w", err)
 	}
-	if !updated {
+	if outcome != domain.TerminationWritten {
 		return nil
 	}
 	exp.Status = domain.StatusEvicted

@@ -58,5 +58,16 @@ type Executor interface {
 	GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error)
 	GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error)
 
+	// SupportsMultiNodeJobs reports whether this runtime can execute a job spanning more than one
+	// node — a fact about the runtime, reported to the control plane alongside capacity so
+	// admission never places a distributed job somewhere it cannot run. It is deliberately a
+	// reported FACT and not a rule handed over for the runtime to evaluate: the control plane
+	// still makes the placement decision, it just gets to know this one thing about the cluster.
+	//
+	// Before this existed, a distributed job placed on a single-node runtime was admitted, held a
+	// reservation, and failed at workload creation — an admission-time question answered at
+	// execution time.
+	SupportsMultiNodeJobs() bool
+
 	ProvisionAgent(ctx context.Context, agentID string) error
 }

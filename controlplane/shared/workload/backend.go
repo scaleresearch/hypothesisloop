@@ -51,6 +51,13 @@ type Backend interface {
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 
+	// GetMultiNodeCapability reports, per cluster, whether its runtime can execute a job spanning
+	// more than one node — a capability each cluster reports about itself alongside its capacity,
+	// not a rule the control plane hands out. Admission filters on it, so a distributed job is
+	// never placed on a single-node runtime. A cluster absent from the map has no fresh report and
+	// is treated as incapable.
+	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
+
 	// GetTotalCapacity reports each cluster's installed (not free) capacity as a canonical
 	// domain.Footprint — the denominator for "how much CPU/memory does one accelerator on this
 	// cluster come with", which GetFlavorCapacity's availability numbers cannot answer. A

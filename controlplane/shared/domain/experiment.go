@@ -63,16 +63,35 @@ type Experiment struct {
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
-	// AttemptCount is how many attempts of this experiment have already run and failed; 0 on
-	// the first. Only a gang retry writes it. A single-pod job's retries are the runtime's
-	// BackoffLimit and are invisible here, because for a one-pod job the runtime can express
-	// "restart the failed unit" itself — for an N-pod gang it cannot, so the control plane
-	// makes that decision and writes it as desired state.
+	// AttemptCount is how many attempts of this experiment have already run and ended; 0 on
+	// the first. A gang retry and an infrastructure requeue both write it. A single-pod job's
+	// own-failure retries are the runtime's BackoffLimit and are invisible here, because for a
+	// one-pod job the runtime can express "restart the failed unit" itself — for an N-pod gang
+	// it cannot, so the control plane makes that decision and writes it as desired state.
+	//
+	// It is load-bearing beyond counting: a requeue reuses the experiment id, so the rebuilt
+	// workload is byte-identical to the terminal one still sitting in the cluster unless
+	// something in desired state changes. The runtimes put this number in the job's environment
+	// (HYPOTHESISLOOP_ATTEMPT) for exactly that reason, which is why every requeue advances it
+	// and only the agent's own failures are charged against its budget.
 	AttemptCount int `json:"attempt_count"`
+	// InfraRequeueCount is how many of AttemptCount's attempts ended in an infrastructure fault
+	// and were requeued for free. The agent's retry allowance is the difference of the two
+	// (RetriesUsed): AttemptCount is the generation counter that makes each attempt a distinct
+	// desired state, so it must advance on every requeue, while the budget must not.
+	InfraRequeueCount int `json:"infra_requeue_count"`
 
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// RetriesUsed is how much of the agent's max_retries allowance this experiment has spent: every
+// attempt so far minus the ones the environment, not the agent, ended. This is the figure
+// RequeueForRetry compares against max_retries, computed the same way in SQL so the read and the
+// write cannot disagree.
+func (e *Experiment) RetriesUsed() int {
+	return e.AttemptCount - e.InfraRequeueCount
 }
 
 // RequestedCPUCores returns CPU cores requested, derived from estimated_cpu_core_hours /
@@ -118,27 +137,34 @@ func (e *Experiment) RatedCost(estimated, hours float64) float64 {
 // erroring, since every caller treats Footprint() as unconditional (not (Footprint, error)).
 func (e *Experiment) Footprint() Footprint {
 	fp := NewFootprint()
-	if e.Job.CPU != "" {
-		if q, err := resource.ParseQuantity(e.Job.CPU); err == nil {
-			fp.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
+	// Summed over the job's node groups, exactly as JobSpec.Footprint does. An ungrouped job has
+	// one group of Nodes() identical replicas, so this is the per-node shape x Nodes() it has
+	// always been; a grouped job's true demand is the sum of its groups, never a multiple of any
+	// one of them.
+	for _, group := range e.Job.NodeGroups() {
+		perNode := NewFootprint()
+		if group.CPU != "" {
+			if q, err := resource.ParseQuantity(group.CPU); err == nil {
+				perNode.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
+			}
 		}
-	}
-	if e.Job.Memory != "" {
-		if q, err := resource.ParseQuantity(e.Job.Memory); err == nil {
-			fp.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
+		if group.Memory != "" {
+			if q, err := resource.ParseQuantity(group.Memory); err == nil {
+				perNode.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
+			}
 		}
-	}
-	if e.Job.Storage != "" {
-		if q, err := resource.ParseQuantity(e.Job.Storage); err == nil {
-			fp.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
+		if group.Storage != "" {
+			if q, err := resource.ParseQuantity(group.Storage); err == nil {
+				perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
+			}
 		}
-	}
-	for name, qty := range e.Job.ExtraResources {
-		if q, err := resource.ParseQuantity(qty); err == nil {
-			fp.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
+		for name, qty := range e.Job.ExtraResources {
+			if q, err := resource.ParseQuantity(qty); err == nil {
+				perNode.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
+			}
 		}
+		fp.AddFootprint(perNode.Scale(int64(group.Replicas)))
 	}
-	fp = fp.Scale(int64(e.Job.Nodes()))
 	if e.AcceleratorCount > 0 && e.AcceleratorType != "" {
 		// Lowercased so Fits()'s exact-match join works regardless of casing (see
 		// AcceleratorType.MatchesLabels and JobSpec.Footprint, which does the same).
@@ -197,6 +223,11 @@ type ExperimentStats struct {
 	// EvictionsByReason is keyed by the reason *code* — the part before any ": detail"
 	// explanation — so a reason carrying per-job detail stays one category.
 	EvictionsByReason map[string]int `json:"evictions_by_reason"`
+	// EvictionsByClass folds EvictionsByReason into whose fault each was (see FaultClass), so a
+	// reader can tell an agent's own failures from a bad node and from the platform's own
+	// decisions without knowing the fifteen reason codes. Derived here at read time from the
+	// same tally, never stored: a class is a pure function of a reason.
+	EvictionsByClass map[string]int `json:"evictions_by_class"`
 }
 
 // ValidSortField reports whether sort names a field in allowed, ignoring a leading "-" for

@@ -75,7 +75,10 @@ func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string,
 // physically holds no key that can write anywhere else.
 func (h *Handler) attachDataAccess(ctx context.Context, exps []*domain.Experiment) error {
 	for _, exp := range exps {
-		policy := objectstore.SessionPolicy(h.dataStore.Bucket, exp.PlatformExperimentID, exp.AgentID, exp.ID)
+		policy, err := objectstore.SessionPolicy(h.dataStore.Bucket, exp.PlatformExperimentID, exp.AgentID, exp.ID)
+		if err != nil {
+			return fmt.Errorf("durable-data credentials for %s: %w", exp.ID, err)
+		}
 		creds, err := h.dataStore.AssumeRole(ctx, policy, h.dataSessionDuration)
 		if err != nil {
 			return fmt.Errorf("durable-data credentials for %s: %w", exp.ID, err)
@@ -230,6 +233,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
 			NodeResourcesByNode:        report.NodeResourcesByNode,
 			NodeLabelsByNode:           report.NodeLabelsByNode,
+			MultiNodeCapable:           report.MultiNodeCapable,
 			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
 			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
 		}); err != nil {
@@ -366,12 +370,18 @@ type capacityReport struct {
 	// NodeResourcesByNode is free CPU/memory/storage per node, keyed by domain.NodeResource*.
 	// Required: a job runs on one node and must fit that node in every dimension, and a
 	// cluster-wide total cannot answer that — see scheduler.reservePlacement.
-	NodeResourcesByNode   map[string]map[string]int64  `json:"node_resources_by_node"`
-	NodeLabelsByNode      map[string]map[string]string `json:"node_labels_by_node"`
-	RAMAvailableBytes     int64                        `json:"ram_available_bytes"`
-	RAMTotalBytes         int64                        `json:"ram_total_bytes"`
-	StorageAvailableBytes int64                        `json:"storage_available_bytes"`
-	StorageTotalBytes     int64                        `json:"storage_total_bytes"`
+	NodeResourcesByNode map[string]map[string]int64  `json:"node_resources_by_node"`
+	NodeLabelsByNode    map[string]map[string]string `json:"node_labels_by_node"`
+	// MultiNodeCapable is whether this cluster's runtime can execute a job spanning more than one
+	// node. A capability of the cluster, reported alongside its capacity and read by admission —
+	// see agentexec.Executor.SupportsMultiNodeJobs. Absent (false) means single-node only, which
+	// is the safe reading: a cluster that has not said it can run distributed work does not get
+	// distributed work.
+	MultiNodeCapable      bool  `json:"multi_node_capable"`
+	RAMAvailableBytes     int64 `json:"ram_available_bytes"`
+	RAMTotalBytes         int64 `json:"ram_total_bytes"`
+	StorageAvailableBytes int64 `json:"storage_available_bytes"`
+	StorageTotalBytes     int64 `json:"storage_total_bytes"`
 }
 
 // clusterInfo is one row of GET /internal/clusters.

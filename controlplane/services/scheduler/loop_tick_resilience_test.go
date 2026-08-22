@@ -82,6 +82,10 @@ func (resilienceWorkload) GetNodeLabels(context.Context) (map[string]map[string]
 	return map[string]map[string]map[string]string{"c1": {}}, nil
 }
 
+func (resilienceWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{"c1": true}, nil
+}
+
 func (resilienceWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
 	return map[string]domain.Footprint{}, nil
 }

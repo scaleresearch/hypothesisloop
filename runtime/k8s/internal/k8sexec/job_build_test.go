@@ -457,3 +457,262 @@ func TestBuildJobRefusesAnExperimentWithNoDurableDataAccess(t *testing.T) {
 		t.Fatal("BuildJob: expected an error for an experiment carrying no durable-data access, got nil")
 	}
 }
+
+// groupedExperiment is the canonical heterogeneous job these tests reason about: one learner on
+// eight accelerators alongside three CPU-only actors, as one experiment.
+func groupedExperiment() *domain.Experiment {
+	return &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "grouped", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 8,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", MaxRetries: intPtr(2),
+			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+			Groups: []domain.JobGroup{
+				{Name: "learner", Replicas: 1, AcceleratorCount: 8, CPU: "16", Memory: "128Gi", Storage: "10Gi",
+					Command: []string{"python", "learner.py"}},
+				{Name: "actor", Replicas: 3, CPU: "1", Memory: "4Gi", Storage: "1Gi",
+					Command: []string{"python", "actor.py"}},
+			},
+		},
+	}
+}
+
+// Kubernetes has no single object for "one pod of shape A plus three of shape B", so a grouped
+// job compiles to one Indexed Job per group — each sized to its OWN group, never to the job. A
+// group Job sized to the whole node count would start three extra learners on hardware the job
+// never asked for and never paid for.
+func TestGroupedJobCompilesToOneIndexedJobPerGroupSizedToThatGroup(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+
+	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("BuildJobs returned %d Jobs for a two-group experiment, want 2 — one per group, since a single Job's pods all share one template", len(jobs))
+	}
+	if jobs[0].Name != "exp-grouped-learner" || jobs[1].Name != "exp-grouped-actor" {
+		t.Fatalf("Job names = %q, %q, want exp-grouped-learner and exp-grouped-actor — the name is the reconciliation identity, so it has to name the group it belongs to", jobs[0].Name, jobs[1].Name)
+	}
+	if got := *jobs[0].Spec.Completions; got != 1 {
+		t.Fatalf("learner Job completions = %d, want 1 (its own replica count, not the job's 4 nodes)", got)
+	}
+	if got := *jobs[1].Spec.Completions; got != 3 {
+		t.Fatalf("actor Job completions = %d, want 3 (its own replica count)", got)
+	}
+	if got := jobs[0].Spec.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU]; got.String() != "16" {
+		t.Fatalf("learner CPU request = %s, want 16 — each group's pods take that group's shape", got.String())
+	}
+	if got := jobs[1].Spec.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU]; got.String() != "1" {
+		t.Fatalf("actor CPU request = %s, want 1 — an actor sized like the learner is the 520-accelerator bill groups exist to avoid", got.String())
+	}
+	if got := jobs[1].Spec.Template.Spec.Containers[0].Command; len(got) != 2 || got[1] != "actor.py" {
+		t.Fatalf("actor command = %v, want the actor group's own — a group with the learner's command is not an actor", got)
+	}
+	for _, job := range jobs {
+		if job.Spec.CompletionMode == nil || *job.Spec.CompletionMode != batchv1.IndexedCompletion {
+			t.Fatalf("Job %s is not Indexed — without a completion index a pod has no identity and no resolvable name to be met at", job.Name)
+		}
+	}
+}
+
+// Every node of every group must resolve every other by name, which is what makes a grouped job
+// one gang rather than two jobs that happen to run together. That takes ONE headless Service,
+// selecting on experiment id alone: a Service per group, or a selector carrying the group label,
+// would give each group its own DNS domain and leave the actors unable to find the learner.
+func TestGroupedJobPodsShareOneHeadlessServiceAcrossEveryGroup(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+
+	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobs {
+		if got := job.Spec.Template.Spec.Subdomain; got != "exp-grouped" {
+			t.Fatalf("Job %s subdomain = %q, want exp-grouped — the subdomain IS the shared Service, and a per-group one splits the rendezvous", job.Name, got)
+		}
+		if got := job.Spec.Template.Labels["hypothesisloop.io/job-group"]; got != "" {
+			t.Fatalf("Job %s pod template carries a group label (%q) — the Service selects this experiment's pods by experiment id, so a group label on the pods would exclude every other group", job.Name, got)
+		}
+		if got := job.Spec.Template.Labels["hypothesisloop.io/experiment-id"]; got != "grouped" {
+			t.Fatalf("Job %s pod experiment-id label = %q, want grouped — it is the only thing the shared Service selects on", job.Name, got)
+		}
+	}
+}
+
+// One rendezvous for the whole job. MASTER_ADDR is node 0 of the FIRST group and every container
+// of every group is told the same address — if each group pointed at its own node 0, the groups
+// would form separate process groups and a collective spanning them would hang until the backend
+// timeout with no error anyone can read.
+func TestEveryGroupsPodsAreGivenTheFirstGroupsNodeZeroAsMasterAddr(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+
+	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "exp-grouped-learner-0.exp-grouped." + HypothesisLoopNamespace + ".svc.cluster.local"
+	for _, job := range jobs {
+		env := envOf(job)
+		if got := env["MASTER_ADDR"]; got != want {
+			t.Fatalf("Job %s MASTER_ADDR = %q, want %q — every node of every group meets at the first group's node 0", job.Name, got, want)
+		}
+		if got := env["HYPOTHESISLOOP_MASTER_ADDR"]; got != want {
+			t.Fatalf("Job %s HYPOTHESISLOOP_MASTER_ADDR = %q, want %q", job.Name, got, want)
+		}
+	}
+}
+
+// A pod needs two identities: where it sits in its own group (which shard of the actors am I)
+// and where it sits in the whole job (my rank among all 4 nodes). WORLD_SIZE spans every node of
+// every group, and the global rank is the group's offset plus the pod's index within the group —
+// published as two terms because Kubernetes can hand a pod its completion index but cannot add a
+// constant to it. A group whose offset was wrong would put two pods at the same global rank,
+// which is a silent hang or a corrupt all-reduce rather than an error.
+func TestGroupedJobPublishesBothGroupLocalAndJobGlobalRankFacts(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+
+	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	learner, actor := envOf(jobs[0]), envOf(jobs[1])
+	if learner["HYPOTHESISLOOP_GROUP"] != "learner" || actor["HYPOTHESISLOOP_GROUP"] != "actor" {
+		t.Fatalf("HYPOTHESISLOOP_GROUP = %q / %q, want learner / actor — a pod that cannot name its own role cannot pick its own code path", learner["HYPOTHESISLOOP_GROUP"], actor["HYPOTHESISLOOP_GROUP"])
+	}
+	if learner["HYPOTHESISLOOP_GROUP_REPLICAS"] != "1" || actor["HYPOTHESISLOOP_GROUP_REPLICAS"] != "3" {
+		t.Fatalf("HYPOTHESISLOOP_GROUP_REPLICAS = %q / %q, want 1 / 3 — each group's own size, which is how an actor knows how many shards to split over", learner["HYPOTHESISLOOP_GROUP_REPLICAS"], actor["HYPOTHESISLOOP_GROUP_REPLICAS"])
+	}
+	if learner["HYPOTHESISLOOP_RANK_OFFSET"] != "0" || actor["HYPOTHESISLOOP_RANK_OFFSET"] != "1" {
+		t.Fatalf("HYPOTHESISLOOP_RANK_OFFSET = %q / %q, want 0 / 1 — the actors' global ranks start after the single learner, and any other offset collides two nodes on one rank", learner["HYPOTHESISLOOP_RANK_OFFSET"], actor["HYPOTHESISLOOP_RANK_OFFSET"])
+	}
+	if learner["WORLD_SIZE"] != "4" || actor["WORLD_SIZE"] != "4" {
+		t.Fatalf("WORLD_SIZE = %q / %q, want 4 in both — the world is the whole job, not the group; a group-sized world builds a process group missing the other group", learner["WORLD_SIZE"], actor["WORLD_SIZE"])
+	}
+	for _, job := range jobs {
+		ref := envSourceOf(job, "HYPOTHESISLOOP_GROUP_RANK")
+		if ref == nil || ref.FieldRef == nil || ref.FieldRef.FieldPath != "metadata.annotations['batch.kubernetes.io/job-completion-index']" {
+			t.Fatalf("Job %s HYPOTHESISLOOP_GROUP_RANK is not read from the pod's completion index — a group-local rank baked into the template is the same value in every pod of the group", job.Name)
+		}
+		if _, present := envOf(job)["RANK"]; present {
+			t.Fatalf("Job %s sets RANK, which Kubernetes cannot compute for a grouped job (offset + index is arithmetic, and env expansion only concatenates) — the group-local index published under that name would silently be wrong for every group after the first", job.Name)
+		}
+	}
+}
+
+// A gang is one unit: any pod failing must stop the whole set. Each group Job carries the same
+// FailJob-on-any-non-zero-exit policy a distributed Job has carried since gangs were fixed, and
+// BackoffLimit stays pinned to 0 so the control plane's retry remains the single retry authority —
+// a group Job left with a positive BackoffLimit would restart its own index while the other
+// group's pods sat blocked in a collective, burning the whole allocation to fail anyway.
+func TestAFailureInEitherGroupIsSetToFailThatGroupsJobOutright(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+
+	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobs {
+		if job.Spec.PodFailurePolicy == nil || len(job.Spec.PodFailurePolicy.Rules) != 1 {
+			t.Fatalf("Job %s has no pod failure policy — a pod of one group could die while the other group kept running and holding accelerators", job.Name)
+		}
+		rule := job.Spec.PodFailurePolicy.Rules[0]
+		if rule.Action != batchv1.PodFailurePolicyActionFailJob || rule.OnExitCodes == nil ||
+			rule.OnExitCodes.Operator != batchv1.PodFailurePolicyOnExitCodesOpNotIn || len(rule.OnExitCodes.Values) != 1 || rule.OnExitCodes.Values[0] != 0 {
+			t.Fatalf("Job %s pod failure policy is %+v, want FailJob on any non-zero exit — a gang succeeds or fails as one", job.Name, rule)
+		}
+		if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
+			t.Fatalf("Job %s BackoffLimit is not 0 — Kubernetes cannot restart a gang, so max_retries is the control plane's decision and two retry authorities would disagree", job.Name)
+		}
+		if job.Spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
+			t.Fatalf("Job %s restart policy = %q, want Never — the failure policy acts on failed pods, and a container restarted in place never becomes one", job.Name, job.Spec.Template.Spec.RestartPolicy)
+		}
+	}
+}
+
+// The backward-compatibility claim for this backend, asserted rather than assumed: adding groups
+// must not have moved anything about a job that declares none. Same single Job, same name, same
+// per-node shape, same rank vars, same Service — because the ungrouped path now runs through the
+// same group machinery, and any divergence would rewrite every job already running in a cluster.
+func TestAnUngroupedJobStillCompilesToExactlyTheJobItAlwaysDid(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "ungrouped", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 4,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(2),
+			AcceleratorCount: 2, AcceleratorType: "tenstorrent.com/chipArch=blackhole", NumNodes: 2,
+			Command: []string{"python", "train.py"},
+		},
+	}
+
+	jobs, err := c.BuildJobs(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("BuildJobs returned %d Jobs for an ungrouped experiment, want 1 — more than one would orphan the Job already running under the old name", len(jobs))
+	}
+	job := jobs[0]
+	if job.Name != "exp-ungrouped" {
+		t.Fatalf("Job name = %q, want exp-ungrouped — the name is the reconciliation identity of every job that already exists", job.Name)
+	}
+	if job.Labels["hypothesisloop.io/job-group"] != "" {
+		t.Fatalf("an ungrouped Job carries a group label — it has no groups, and the label would change its identity for anything that reads it")
+	}
+	if got := job.Spec.Template.Spec.Subdomain; got != "exp-ungrouped" {
+		t.Fatalf("subdomain = %q, want exp-ungrouped", got)
+	}
+	env := envOf(job)
+	want := "exp-ungrouped-0.exp-ungrouped." + HypothesisLoopNamespace + ".svc.cluster.local"
+	if env["MASTER_ADDR"] != want {
+		t.Fatalf("MASTER_ADDR = %q, want %q — the rendezvous name of an existing distributed job must not move", env["MASTER_ADDR"], want)
+	}
+	if env["WORLD_SIZE"] != "2" || env["LOCAL_RANK"] != "0" {
+		t.Fatalf("WORLD_SIZE/LOCAL_RANK = %q/%q, want 2/0", env["WORLD_SIZE"], env["LOCAL_RANK"])
+	}
+	if env["HYPOTHESISLOOP_ACCELERATOR_COUNT"] != "2" {
+		t.Fatalf("HYPOTHESISLOOP_ACCELERATOR_COUNT = %q, want 2 — the PER-NODE count, never the job's total of 4", env["HYPOTHESISLOOP_ACCELERATOR_COUNT"])
+	}
+	if _, present := env["HYPOTHESISLOOP_GROUP"]; present {
+		t.Fatalf("an ungrouped job was told a group name — it has no groups, and a workload branching on that variable would take the wrong path")
+	}
+	if ref := envSourceOf(job, "RANK"); ref == nil || ref.FieldRef == nil {
+		t.Fatalf("RANK is no longer read from the pod's completion index — an ungrouped distributed job's ranks are exactly its node indexes and every existing workload reads them that way")
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Command; len(got) != 2 || got[1] != "train.py" {
+		t.Fatalf("command = %v, want the job's own — an ungrouped job has no group to take one from", got)
+	}
+	if got := *job.Spec.Completions; got != 2 {
+		t.Fatalf("completions = %d, want 2 (num_nodes)", got)
+	}
+	if single, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"}); err != nil || single.Name != job.Name {
+		t.Fatalf("BuildJob no longer returns the single compiled Job for an ungrouped experiment (%v) — every existing caller reads exactly one", err)
+	}
+}
+
+// envOf/envSourceOf read a compiled Job's container environment the way a pod would see it.
+func envOf(job *batchv1.Job) map[string]string {
+	out := map[string]string{}
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.ValueFrom == nil {
+			out[e.Name] = e.Value
+		} else {
+			out[e.Name] = ""
+		}
+	}
+	return out
+}
+
+func envSourceOf(job *batchv1.Job, name string) *corev1.EnvVarSource {
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == name {
+			return e.ValueFrom
+		}
+	}
+	return nil
+}

@@ -282,6 +282,13 @@ func (b *Backend) GetTotalCapacity(ctx context.Context) (map[string]domain.Footp
 	return out, nil
 }
 
+// GetMultiNodeCapability reports which clusters say their runtime can execute a job spanning more
+// than one node. A cluster with no fresh report is absent, and admission reads absence as "cannot"
+// — the same fail-closed rule every other capacity read here follows.
+func (b *Backend) GetMultiNodeCapability(ctx context.Context) (map[string]bool, error) {
+	return metricsdb.LiveClusterMultiNodeCapability(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
 func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
 	return metricsdb.LiveClusterNodeLabels(ctx, b.metricsDBURL, b.connectedWithin)
 }

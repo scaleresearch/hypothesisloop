@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,15 +30,30 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 	if err != nil {
 		return err
 	}
-	job, err := c.BuildJob(exp, placement)
+	jobs, err := c.BuildJobs(exp, placement)
 	if err != nil {
 		return err
 	}
-	if job.Spec.Template.Spec.Subdomain != "" {
-		if err := c.ensureHeadlessService(ctx, job); err != nil {
+	// The Service first, and once for the whole experiment however many groups it has: a pod
+	// that starts before the name its peers are told to dial exists resolves nothing and dies in
+	// the rendezvous.
+	if jobs[0].Spec.Template.Spec.Subdomain != "" {
+		if err := c.ensureHeadlessService(ctx, exp, jobs[0]); err != nil {
 			return fmt.Errorf("workload: ensure headless service: %w", err)
 		}
 	}
+	for _, job := range jobs {
+		if err := c.createJob(ctx, exp, job); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// createJob creates one compiled Job, resolving a collision with a previous generation of the
+// same name. Split out because a grouped experiment creates several and each one meets the same
+// stale-object question independently.
+func (c *JobWorkloadClient) createJob(ctx context.Context, exp *domain.Experiment, job *batchv1.Job) error {
 	if len(job.Spec.Template.Spec.ResourceClaims) > 0 {
 		// Must exist before the Job's pod is created (async, via the Job controller) or the
 		// pod fails to schedule — same reason ensureHeadlessService runs before Job Create.
@@ -45,7 +61,7 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 			return fmt.Errorf("workload: ensure resource claim template: %w", err)
 		}
 	}
-	_, err = c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Create(ctx, job, metav1.CreateOptions{})
+	_, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		// Job names are deterministic per experiment ID, so re-admission after preemption
 		// collides with the prior Job object if WaitForJobDeletion's background-propagation
@@ -70,6 +86,22 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 	return err
 }
 
+// managedJobsFor lists every Job this client manages for one experiment — one for an ungrouped
+// job, one per group otherwise. Every read of an experiment's workload goes through this rather
+// than a Get on a computed name, because the name of a group's Job is not derivable from the
+// experiment id alone, and a lifecycle that could only see the first group would report a job as
+// healthy while another group of it was failing.
+func (c *JobWorkloadClient) managedJobsFor(ctx context.Context, experimentID string) ([]batchv1.Job, error) {
+	list, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s", workloadkeys.ManagedBy, workloadkeys.ManagedByValue, workloadkeys.ExperimentID, experimentID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("workload: list jobs for %s: %w", experimentID, err)
+	}
+	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+	return list.Items, nil
+}
+
 func existingJobMatchesDesired(existing, desired *batchv1.Job, experimentID string) bool {
 	return existing != nil && desired != nil && existing.DeletionTimestamp == nil &&
 		existing.Annotations[DesiredSpecHashAnnotation] == desired.Annotations[DesiredSpecHashAnnotation] &&
@@ -78,21 +110,28 @@ func existingJobMatchesDesired(existing, desired *batchv1.Job, experimentID stri
 }
 
 // ensureHeadlessService creates the headless (ClusterIP: None) Service a distributed job's
-// pods need for rank 0's stable DNS name (see HYPOTHESISLOOP_MASTER_ADDR in BuildJob) — named
-// identically to the Job and selecting its pods by experiment-id label.
-func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, job *batchv1.Job) error {
+// pods need for the rendezvous name (see HYPOTHESISLOOP_MASTER_ADDR in BuildJob) — named after
+// the experiment and selecting its pods by experiment-id label alone, so ONE Service covers every
+// node of every group and any node can resolve any other.
+func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *domain.Experiment, job *batchv1.Job) error {
+	labels := map[string]string{
+		workloadkeys.ManagedBy:    workloadkeys.ManagedByValue,
+		workloadkeys.ExperimentID: exp.ID,
+		workloadkeys.AgentID:      sanitizeLabel(exp.AgentID),
+		workloadkeys.CapacityTier: string(exp.CapacityTier),
+	}
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      job.Name,
+			Name:      job.Spec.Template.Spec.Subdomain,
 			Namespace: HypothesisLoopNamespace,
-			Labels:    job.Labels,
+			Labels:    labels,
 			Annotations: map[string]string{
 				DesiredSpecHashAnnotation: job.Annotations[DesiredSpecHashAnnotation],
 			},
 		},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: corev1.ClusterIPNone,
-			Selector:  job.Spec.Template.Labels,
+			Selector:  map[string]string{workloadkeys.ExperimentID: exp.ID},
 		},
 	}
 	_, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).Create(ctx, svc, metav1.CreateOptions{})
@@ -102,7 +141,7 @@ func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, job *batc
 			return getErr
 		}
 		if existing.Annotations[DesiredSpecHashAnnotation] == job.Annotations[DesiredSpecHashAnnotation] && existing.DeletionTimestamp == nil &&
-			existing.Labels[workloadkeys.ManagedBy] == workloadkeys.ManagedByValue && existing.Labels[workloadkeys.ExperimentID] == job.Labels[workloadkeys.ExperimentID] {
+			existing.Labels[workloadkeys.ManagedBy] == workloadkeys.ManagedByValue && existing.Labels[workloadkeys.ExperimentID] == exp.ID {
 			return nil
 		}
 		if deleteErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); deleteErr != nil && !errors.IsNotFound(deleteErr) {
@@ -122,7 +161,10 @@ func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, erro
 	if err != nil {
 		return nil, fmt.Errorf("workload: list managed jobs: %w", err)
 	}
+	// Deduplicated: a grouped experiment has one Job per group and this reports experiments, not
+	// Jobs. A repeated id would make reconcile consider the same experiment several times per pass.
 	ids := make([]string, 0, len(jobs.Items))
+	seen := make(map[string]bool, len(jobs.Items))
 	for _, j := range jobs.Items {
 		// A Job with a DeletionTimestamp is mid-teardown (Background propagation leaves it
 		// listable while pods are still removed) — the dying generation of a
@@ -136,6 +178,10 @@ func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, erro
 			log.Printf("workload: skipping managed job %q with no experiment identity", j.Name)
 			continue
 		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		ids = append(ids, id)
 	}
 	return ids, nil
@@ -157,7 +203,10 @@ func (c *JobWorkloadClient) ListManagedJobsForStatus(ctx context.Context) ([]str
 	if err != nil {
 		return nil, fmt.Errorf("workload: list managed jobs for status: %w", err)
 	}
+	// Deduplicated for the same reason as ListManagedJobs: one grouped experiment is several
+	// Jobs and exactly one status.
 	ids := make([]string, 0, len(jobs.Items))
+	seen := make(map[string]bool, len(jobs.Items))
 	for _, j := range jobs.Items {
 		id := j.Labels[workloadkeys.ExperimentID]
 		if id == "" {
@@ -167,51 +216,71 @@ func (c *JobWorkloadClient) ListManagedJobsForStatus(ctx context.Context) ([]str
 			log.Printf("workload: skipping managed job %q with no experiment identity", j.Name)
 			continue
 		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		ids = append(ids, id)
 	}
 	return ids, nil
 }
 
-// WorkloadMatchesDesired compares the current Job with a fresh compilation of desired state.
-// Kubernetes-defaulted fields never enter the comparison since the pre-create desired hash is
-// stored as an annotation.
+// WorkloadMatchesDesired compares what is actually in the cluster with a fresh compilation of
+// desired state. Kubernetes-defaulted fields never enter the comparison since the pre-create
+// desired hash is stored as an annotation.
+//
+// For a grouped experiment every group's Job must match, and the set of Jobs present must be
+// exactly the set desired: an extra Job left behind by a spec that used to have three groups is
+// as much a drift as a changed resource request, and reconcile has to delete and rebuild.
 func (c *JobWorkloadClient) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
 	placement, err := c.resolvePlacementFor(ctx, exp)
 	if err != nil {
 		return false, err
 	}
-	desired, err := c.BuildJob(exp, placement)
+	desired, err := c.BuildJobs(exp, placement)
 	if err != nil {
 		return false, err
 	}
-	actual, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, desired.Name, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		return false, nil
-	}
+	actual, err := c.managedJobsFor(ctx, exp.ID)
 	if err != nil {
-		return false, fmt.Errorf("workload: get desired-hash Job: %w", err)
+		return false, err
 	}
-	if actual.Annotations[DesiredSpecHashAnnotation] != desired.Annotations[DesiredSpecHashAnnotation] ||
-		actual.Labels[workloadkeys.ManagedBy] != workloadkeys.ManagedByValue || actual.Labels[workloadkeys.ExperimentID] != exp.ID {
+	byName := make(map[string]*batchv1.Job, len(actual))
+	for i := range actual {
+		byName[actual[i].Name] = &actual[i]
+	}
+	if len(byName) != len(desired) {
 		return false, nil
 	}
-	desiredHash := desired.Annotations[DesiredSpecHashAnnotation]
-	service, serviceErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Get(ctx, desired.Name, metav1.GetOptions{})
-	wantsService := desired.Spec.Template.Spec.Subdomain != ""
+	for _, want := range desired {
+		got, present := byName[want.Name]
+		if !present {
+			return false, nil
+		}
+		if got.Annotations[DesiredSpecHashAnnotation] != want.Annotations[DesiredSpecHashAnnotation] ||
+			got.Labels[workloadkeys.ManagedBy] != workloadkeys.ManagedByValue || got.Labels[workloadkeys.ExperimentID] != exp.ID {
+			return false, nil
+		}
+		wantsTemplate := len(want.Spec.Template.Spec.ResourceClaims) > 0
+		draMatches, err := c.draTemplateMatches(ctx, want.Name, exp.ID, wantsTemplate, want.Annotations[DesiredSpecHashAnnotation])
+		if err != nil {
+			return false, fmt.Errorf("workload: compare auxiliary ResourceClaimTemplate: %w", err)
+		}
+		if !draMatches {
+			return false, nil
+		}
+	}
+
+	// One Service for the whole experiment, hashed against the first group's Job — the same one
+	// ensureHeadlessService stamped it with.
+	desiredHash := desired[0].Annotations[DesiredSpecHashAnnotation]
+	wantsService := desired[0].Spec.Template.Spec.Subdomain != ""
+	service, serviceErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Get(ctx, jobName(exp.ID), metav1.GetOptions{})
 	if serviceErr != nil && !errors.IsNotFound(serviceErr) {
 		return false, fmt.Errorf("workload: get auxiliary Service: %w", serviceErr)
 	}
 	if wantsService != (serviceErr == nil) || (serviceErr == nil && (service.Annotations[DesiredSpecHashAnnotation] != desiredHash ||
 		service.Labels[workloadkeys.ManagedBy] != workloadkeys.ManagedByValue || service.Labels[workloadkeys.ExperimentID] != exp.ID)) {
-		return false, nil
-	}
-
-	wantsTemplate := len(desired.Spec.Template.Spec.ResourceClaims) > 0
-	draMatches, err := c.draTemplateMatches(ctx, desired.Name, exp.ID, wantsTemplate, desiredHash)
-	if err != nil {
-		return false, fmt.Errorf("workload: compare auxiliary ResourceClaimTemplate: %w", err)
-	}
-	if !draMatches {
 		return false, nil
 	}
 	return true, nil
@@ -520,11 +589,20 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 
 func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID string) error {
 	prop := metav1.DeletePropagationBackground
-	jobErr := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Delete(ctx, jobName(experimentID), metav1.DeleteOptions{
-		PropagationPolicy: &prop,
-	})
-	if errors.IsNotFound(jobErr) {
-		jobErr = nil
+	// Every Job carrying this experiment's identity, not one computed name: a grouped experiment
+	// has one Job per group, and deleting only the one whose name happens to be derivable would
+	// leave the rest of the gang running while the control plane believed the workload was gone.
+	jobs, listErr := c.managedJobsFor(ctx, experimentID)
+	var jobErrs []error
+	for _, job := range jobs {
+		err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{
+			PropagationPolicy: &prop,
+		})
+		if err != nil && !errors.IsNotFound(err) {
+			// One group failing to delete must not leave the others running: keep going and
+			// report at the end (important.md #19).
+			jobErrs = append(jobErrs, err)
+		}
 	}
 	// The headless Service (see ensureHeadlessService) is only created for distributed jobs,
 	// but deleting it unconditionally is harmless (NotFound swallowed) and avoids needing to
@@ -538,15 +616,16 @@ func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID str
 	// allocation_mode here. The kubelet-derived ResourceClaim(s) are owned by the pod and
 	// cleaned up natively by k8s; this only removes the template object itself.
 	claimErr := c.deleteDRAResource(ctx, experimentID)
-	return stderrors.Join(jobErr, svcErr, claimErr)
+	return stderrors.Join(append(jobErrs, listErr, svcErr, claimErr)...)
 }
 
 func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	name := jobName(experimentID)
 	for time.Now().Before(deadline) {
-		_, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, name, metav1.GetOptions{})
-		if errors.IsNotFound(err) {
+		// Every group has to be gone, not just the first: recreating the experiment while one
+		// group's Job still exists collides on that name and wedges the new generation.
+		jobs, err := c.managedJobsFor(ctx, experimentID)
+		if err == nil && len(jobs) == 0 {
 			return nil
 		}
 		select {
@@ -555,7 +634,7 @@ func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("workload: timed out waiting for job %s deletion", name)
+	return fmt.Errorf("workload: timed out waiting for job %s deletion", jobName(experimentID))
 }
 
 func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error) {
@@ -563,35 +642,81 @@ func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID strin
 	return phase, err
 }
 
-// PollJobPhaseAndUID fetches the k8s Job once and returns both its phase and UID ("" if the
-// Job doesn't exist) — one API call instead of two separate Get()s. This isn't just an
-// efficiency cleanup: two polls a few hundred ms apart could each observe "Active>0" across a
-// preempt-then-recreate cycle, making an old Job's disappearance and a new Job's appearance
-// look like "no change" to a phase-only comparison. Comparing UID alongside phase (see
-// cluster-agent's reportChangedStatuses) catches that, since UID always changes on delete+recreate.
+// PollJobPhaseAndUID reports the phase of the experiment's whole workload and a UID that changes
+// whenever any part of it is recreated ("" if nothing exists). One List instead of a Get per
+// group: two polls a few hundred ms apart could each observe "Active>0" across a
+// preempt-then-recreate cycle, making an old Job's disappearance and a new Job's appearance look
+// like "no change" to a phase-only comparison. Comparing UID alongside phase (see cluster-agent's
+// reportChangedStatuses) catches that, since UID always changes on delete+recreate.
+//
+// A grouped experiment has one Job per group, and this is where they are read as ONE thing. The
+// group Jobs can and will disagree, so the aggregation is stated as a precedence, worst first:
+//
+//   - nothing present at all -> Gone. A partial set is NOT Gone: some of the gang is still there.
+//   - any group Failed -> Failed. A gang is one unit, so one group failing has already ended the
+//     experiment, whatever the others are doing. Kubernetes tears down the failed group's own
+//     pods; the survivors go when the control plane moves the experiment out of RUNNING and
+//     reconcile deletes what is no longer desired — the same one-way path every other termination
+//     takes, with no cross-Job kill command invented for this case.
+//   - every group Succeeded -> Succeeded. COMPLETED means every pod of every group exited 0, so
+//     one group finishing early is not the job finishing.
+//   - any group Running -> Running. Some of the job is executing, so it is executing (and
+//     billable) even while another group is still pulling its image.
+//   - otherwise Pending.
 func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID string) (workload.JobPhase, string, error) {
-	job, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, jobName(experimentID), metav1.GetOptions{})
+	jobs, err := c.managedJobsFor(ctx, experimentID)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return workload.JobPhaseGone, "", nil
-		}
 		return workload.JobPhasePending, "", err
 	}
-	uid := string(job.UID)
+	if len(jobs) == 0 {
+		return workload.JobPhaseGone, "", nil
+	}
+	// Sorted by name (managedJobsFor), so the composite is stable across polls and changes as
+	// soon as any one group's Job is replaced.
+	uids := make([]string, 0, len(jobs))
+	for i := range jobs {
+		uids = append(uids, string(jobs[i].UID))
+	}
+	uid := strings.Join(uids, ",")
+
+	succeeded, running := 0, 0
+	for i := range jobs {
+		switch jobPhase(&jobs[i]) {
+		case workload.JobPhaseFailed:
+			return workload.JobPhaseFailed, uid, nil
+		case workload.JobPhaseSucceeded:
+			succeeded++
+		case workload.JobPhaseRunning:
+			running++
+		}
+	}
+	switch {
+	case succeeded == len(jobs):
+		return workload.JobPhaseSucceeded, uid, nil
+	case running > 0:
+		return workload.JobPhaseRunning, uid, nil
+	default:
+		return workload.JobPhasePending, uid, nil
+	}
+}
+
+// jobPhase maps one native Job to a platform phase. Never Gone — a Job that was handed to this
+// function exists; absence is the caller's question, not this one's.
+func jobPhase(job *batchv1.Job) workload.JobPhase {
 	// Check the native JobComplete condition before falling back to a raw Succeeded count:
 	// for Indexed jobs with a SuccessPolicy, a non-master worker finishing first bumps
 	// Status.Succeeded without the job actually being done.
 	for _, cond := range job.Status.Conditions {
 		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-			return workload.JobPhaseSucceeded, uid, nil
+			return workload.JobPhaseSucceeded
 		}
 		if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
-			return workload.JobPhaseFailed, uid, nil
+			return workload.JobPhaseFailed
 		}
 	}
 	if job.Spec.CompletionMode == nil || *job.Spec.CompletionMode != batchv1.IndexedCompletion {
 		if job.Status.Succeeded > 0 {
-			return workload.JobPhaseSucceeded, uid, nil
+			return workload.JobPhaseSucceeded
 		}
 	}
 	// Ready, not Active. Active counts a pod from the moment it exists, so a pod sitting in
@@ -606,9 +731,9 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 	// A nil Ready is a cluster that does not populate the field at all: no evidence of execution,
 	// so the job is reported as not yet running rather than assumed to be.
 	if job.Status.Ready != nil && *job.Status.Ready > 0 {
-		return workload.JobPhaseRunning, uid, nil
+		return workload.JobPhaseRunning
 	}
-	return workload.JobPhasePending, uid, nil
+	return workload.JobPhasePending
 }
 
 // GetAdmittedAcceleratorType reports which accelerator type this experiment's Job actually landed on. When
@@ -693,6 +818,12 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 // type — the inverse of acceleratorNodeAffinity's type-to-label translation. Returns "" if no
 // configured type matches.
 func (c *JobWorkloadClient) ProvisionAgent(_ context.Context, _ string) error { return nil }
+
+// SupportsMultiNodeJobs is true: Kubernetes runs a job's nodes as an Indexed Job (or one per
+// group), with a headless Service giving every node a resolvable name. Reported to the control
+// plane on every reconcile so admission places distributed work here and not on a single-node
+// runtime.
+func (c *JobWorkloadClient) SupportsMultiNodeJobs() bool { return true }
 
 // ReapTerminal has nothing to do here. A finished k8s Job is removed by the reconcile pass that
 // finds it undesired; unlike a container engine, k8s keeps no separate terminal record behind it.

@@ -12,16 +12,31 @@ import (
 )
 
 func jobName(experimentID string) string {
-	name := "exp-" + experimentID
-	if len(name) > 63 {
-		// Two IDs sharing a >59-char prefix would collide on a plain truncation, and the job name
-		// is the reconciliation identity — one experiment would silently adopt another's Job.
-		// Suffix a short hash of the full ID so truncated names stay unique and deterministic.
-		h := sha256.Sum256([]byte(experimentID))
-		suffix := fmt.Sprintf("-%x", h[:4]) // 9 chars: '-' + 8 hex
-		name = name[:63-len(suffix)] + suffix
+	return boundedName("exp-"+experimentID, experimentID)
+}
+
+// groupJobName names the Job compiled from one group of a heterogeneous experiment (see
+// domain.JobSpec.Groups). An empty group is an ungrouped job and keeps the plain jobName, so
+// nothing about an existing job's identity moves.
+func groupJobName(experimentID, group string) string {
+	if group == "" {
+		return jobName(experimentID)
 	}
-	return name
+	return boundedName("exp-"+experimentID+"-"+group, experimentID+"/"+group)
+}
+
+// boundedName keeps name inside Kubernetes' 63-character limit. identity is what makes a
+// truncated name unique: two identities sharing a long prefix would collide on a plain
+// truncation, and the name is the reconciliation identity — one workload would silently adopt
+// another's Job. Suffixing a short hash of the full identity keeps truncated names unique and
+// deterministic.
+func boundedName(name, identity string) string {
+	if len(name) <= 63 {
+		return name
+	}
+	h := sha256.Sum256([]byte(identity))
+	suffix := fmt.Sprintf("-%x", h[:4]) // 9 chars: '-' + 8 hex
+	return name[:63-len(suffix)] + suffix
 }
 
 func sanitizeLabel(s string) string {

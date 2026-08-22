@@ -6,8 +6,10 @@ package k8sexec
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -301,8 +303,13 @@ func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job
 	if deviceClassName == "" {
 		return fmt.Errorf("accelerator type %q is not DRA-backed on this cluster", exp.AcceleratorType)
 	}
-	if exp.AcceleratorCount < 1 {
-		return fmt.Errorf("accelerator type %q has invalid count %d", exp.AcceleratorType, exp.AcceleratorCount)
+	// The count one POD claims, read off the pod template this Job was compiled with — the group's
+	// per-replica count for a grouped job, the per-node count otherwise. Never exp.AcceleratorCount,
+	// which is the whole job's total across every node: claiming that per pod asks each node for
+	// the entire job's hardware.
+	perPod, convErr := strconv.Atoi(job.Spec.Template.Annotations[AcceleratorCountAnnotation])
+	if convErr != nil || perPod < 1 {
+		return fmt.Errorf("accelerator type %q has invalid per-pod count %q", exp.AcceleratorType, job.Spec.Template.Annotations[AcceleratorCountAnnotation])
 	}
 
 	obj := &unstructured.Unstructured{Object: map[string]interface{}{
@@ -317,7 +324,7 @@ func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job
 			"metadata": map[string]interface{}{"labels": job.Labels},
 			"spec": map[string]interface{}{"devices": map[string]interface{}{"requests": []interface{}{
 				map[string]interface{}{"name": draClaimName, "exactly": map[string]interface{}{
-					"deviceClassName": deviceClassName, "allocationMode": "ExactCount", "count": int64(exp.AcceleratorCount),
+					"deviceClassName": deviceClassName, "allocationMode": "ExactCount", "count": int64(perPod),
 				}},
 			}}},
 		},
@@ -368,11 +375,25 @@ func (c *JobWorkloadClient) addManagedDRAIDs(ctx context.Context, ids map[string
 	return nil
 }
 
+// deleteDRAResource removes every ResourceClaimTemplate belonging to experimentID. Listed by
+// label rather than deleted by a computed name because a grouped experiment has one template per
+// accelerator-holding group, and a name derived from the experiment id alone would only ever
+// reach one of them.
 func (c *JobWorkloadClient) deleteDRAResource(ctx context.Context, experimentID string) error {
-	err := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(HypothesisLoopNamespace).
-		Delete(ctx, resourceClaimTemplateName(jobName(experimentID)), metav1.DeleteOptions{})
-	if errors.IsNotFound(err) {
-		return nil
+	templates, err := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s", workloadkeys.ManagedBy, workloadkeys.ManagedByValue, workloadkeys.ExperimentID, experimentID),
+	})
+	if err != nil {
+		return err
 	}
-	return err
+	var errs []error
+	for _, template := range templates.Items {
+		delErr := c.dyn.Resource(resourceClaimTemplateGVR).Namespace(HypothesisLoopNamespace).
+			Delete(ctx, template.GetName(), metav1.DeleteOptions{})
+		if delErr != nil && !errors.IsNotFound(delErr) {
+			// One template failing must not strand the others (important.md #19).
+			errs = append(errs, delErr)
+		}
+	}
+	return stderrors.Join(errs...)
 }

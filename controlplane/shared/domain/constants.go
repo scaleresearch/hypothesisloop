@@ -39,6 +39,11 @@ const (
 	NotAdmittedStageCut            = "stage_cut"
 	NotAdmittedJobTooLong          = "job_too_long"
 	NotAdmittedWorkloadCreation    = "workload_creation_failed"
+	// NotAdmittedNoMultiNodeCluster means the job spans more than one node and no connected
+	// cluster reports being able to run multi-node work. Distinct from capacity_unavailable
+	// because waiting will not fix it: this is not a busy platform, it is a platform with no
+	// runtime for this shape of job.
+	NotAdmittedNoMultiNodeCluster = "no_multi_node_cluster"
 )
 
 // IsTerminal reports whether the status is a final lifecycle state that no further execution
@@ -51,6 +56,24 @@ func (s ExperimentStatus) IsTerminal() bool {
 		return false
 	}
 }
+
+// Termination is what a requested terminal transition actually resolved to. A caller asks for
+// EVICTED/REJECTED with a reason; the store decides, because an infrastructure fault under its
+// ceiling resolves to a free requeue instead — and that decision belongs in the one guarded
+// UPDATE that also spends the requeue budget, not in each of the call sites that can raise one.
+type Termination int
+
+const (
+	// TerminationSkipped: the row had already left the `from` status, so nothing was written.
+	// The caller must do nothing further — whoever moved it owns the outcome.
+	TerminationSkipped Termination = iota
+	// TerminationWritten: the terminal status and reason are persisted. Settle, then mark settled.
+	TerminationWritten
+	// TerminationRequeued: an infrastructure fault with requeue budget left, so the row is back
+	// in QUEUED rather than terminal. Settle (which refunds it to zero) but never mark it
+	// settled — the row is not terminal and the next attempt owes a settlement of its own.
+	TerminationRequeued
+)
 
 // EvictionReason classifies why a job was terminated early.
 type EvictionReason string

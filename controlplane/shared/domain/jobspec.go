@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"fmt"
+	"regexp"
+)
+
 // JobSpec is the platform's own execution DSL — the only thing an agent ever writes to describe
 // how a workload runs. It deliberately exposes no execution-engine concepts (no manifests, pod
 // templates, or CRDs): whatever backend is configured (k8s today; conceivably Slurm/Ray tomorrow)
@@ -53,6 +58,27 @@ type JobSpec struct {
 	// AcceleratorPodResources are extra per-node resource requests an accelerator needs
 	// alongside the device itself (e.g. {"hugepages-1Gi": "4Gi"}).
 	AcceleratorPodResources map[string]string `json:"accelerator_pod_resources,omitempty" yaml:"accelerator_pod_resources,omitempty"`
+
+	// Groups expresses a job whose nodes are NOT identical — a learner alongside a fleet of
+	// actors, a parameter server alongside workers. Each group carries its own per-replica
+	// resources, command, args and env; everything that describes the JOB rather than a node
+	// within it (image, accelerator type, tolerations, node selector, topology, max_retries)
+	// stays at the top level and is shared by every group.
+	//
+	// Optional. Absent, the job is the identical-nodes shape described by NumNodes and the
+	// top-level resource fields, and nothing about it changes. Present, the top-level per-node
+	// resource fields (cpu/memory/storage/accelerator_count) and num_nodes are REJECTED at
+	// submission: there is one way to say a thing and no merge rules. See ValidateGroups.
+	//
+	// A grouped job is still ONE experiment — one quota holder, one admission decision, one
+	// eviction, one lineage entry — which is exactly what submitting the groups as separate jobs
+	// cannot give. Nodes(), TotalAccelerators() and Footprint() therefore SUM the groups where
+	// their ungrouped counterparts multiply one shape by NumNodes.
+	//
+	// One accelerator type per job: a group may name AcceleratorType, but every group that does
+	// must name the same one, because a single AcceleratorType on the experiment is what
+	// admission, flavor substitution and billing all key on.
+	Groups []JobGroup `json:"groups,omitempty" yaml:"groups,omitempty"`
 
 	// NumNodes is how many identical nodes this job spans. 1 (default) is a single-node job;
 	// >1 requests a distributed run, and the backend assigns ranks and publishes the rendezvous.
@@ -151,19 +177,164 @@ type TopologySpec struct {
 	SameZone bool `json:"same_zone,omitempty" yaml:"same_zone,omitempty"`
 }
 
-// TotalAccelerators returns the job's total accelerator footprint across all nodes (AcceleratorCount × NumNodes),
-// which is what admission/quota/eviction actually reserve and bill against.
-func (j JobSpec) TotalAccelerators() int {
-	return j.AcceleratorCount * j.Nodes()
+// JobGroup is one homogeneous slice of a heterogeneous job: Replicas identical nodes with their
+// own resources and their own process to run. See JobSpec.Groups.
+type JobGroup struct {
+	// Name identifies the group to the workload (HYPOTHESISLOOP_GROUP) and names the native
+	// resource each backend compiles it into, so it must be a DNS-label-safe token. Required and
+	// unique within a job.
+	Name string `json:"name" yaml:"name"`
+	// Replicas is how many nodes this group spans. Required and at least 1 — a group of zero
+	// replicas is a group that should not have been written down.
+	Replicas int `json:"replicas" yaml:"replicas"`
+
+	// CPU/Memory/Storage are this group's PER-REPLICA resource-quantity strings, identical in
+	// meaning to JobSpec's own. All three required.
+	CPU     string `json:"cpu" yaml:"cpu"`
+	Memory  string `json:"memory" yaml:"memory"`
+	Storage string `json:"storage" yaml:"storage"`
+
+	// AcceleratorCount is accelerators per replica of this group. Zero is legitimate and is the
+	// point of the feature: 64 CPU-only actors alongside one 8-accelerator learner.
+	AcceleratorCount int `json:"accelerator_count,omitempty" yaml:"accelerator_count,omitempty"`
+	// AcceleratorType is optional and, when set, must equal every other group's and the job's.
+	// It exists so a spec can be explicit, never so groups can differ — see JobSpec.Groups.
+	AcceleratorType AcceleratorType `json:"accelerator_type,omitempty" yaml:"accelerator_type,omitempty"`
+
+	// Command/Args/Env are this group's own process. Env is merged over the job-level Env,
+	// which is the one place a group value shadows a job value — the job-level map is the
+	// job's shared environment and the group's is the part specific to its role.
+	Command []string          `json:"command,omitempty" yaml:"command,omitempty"`
+	Args    []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
-// Nodes returns NumNodes, floored at 1 (0/unset means a plain single-node job).
+// NodeGroups is the single definition of "what shapes does this job consist of", used by every
+// backend and by admission alike. A grouped job returns its groups verbatim; an ungrouped job
+// returns exactly one synthetic group carrying the top-level shape repeated Nodes() times.
+//
+// Having one definition is the whole point: the alternative is every caller writing "if grouped
+// … else …", and those branches drifting apart is precisely how an ungrouped job would stop
+// behaving the way it does today.
+func (j JobSpec) NodeGroups() []JobGroup {
+	if len(j.Groups) > 0 {
+		return j.Groups
+	}
+	return []JobGroup{{
+		Replicas:         j.Nodes(),
+		CPU:              j.CPU,
+		Memory:           j.Memory,
+		Storage:          j.Storage,
+		AcceleratorCount: j.AcceleratorCount,
+		AcceleratorType:  j.AcceleratorType,
+		Command:          j.Command,
+		Args:             j.Args,
+		Env:              j.Env,
+	}}
+}
+
+// TotalAccelerators returns the job's total accelerator footprint across all nodes — what
+// admission/quota/eviction actually reserve and bill against. Σ replicas × per-replica count
+// over the groups, which for an ungrouped job is exactly AcceleratorCount × NumNodes.
+func (j JobSpec) TotalAccelerators() int {
+	total := 0
+	for _, g := range j.NodeGroups() {
+		total += g.AcceleratorCount * g.Replicas
+	}
+	return total
+}
+
+// Nodes returns how many nodes the job spans: Σ group replicas when grouped, otherwise NumNodes
+// floored at 1 (0/unset means a plain single-node job).
 func (j JobSpec) Nodes() int {
+	if len(j.Groups) > 0 {
+		total := 0
+		for _, g := range j.Groups {
+			total += g.Replicas
+		}
+		return total
+	}
 	if j.NumNodes < 1 {
 		return 1
 	}
 	return j.NumNodes
 }
+
+// GroupAcceleratorType is the one accelerator type a grouped job runs on, or "" if no group
+// names one. ValidateGroups has already established that at most one distinct type is named.
+func (j JobSpec) GroupAcceleratorType() AcceleratorType {
+	for _, g := range j.Groups {
+		if g.AcceleratorType != "" {
+			return g.AcceleratorType
+		}
+	}
+	return ""
+}
+
+// ValidateGroups enforces everything structural about Groups. It is a no-op for an ungrouped
+// job, which is what keeps every existing submission behaving exactly as before.
+//
+// Returns a plain error; the admission layer wraps it in its own typed rejection.
+func (j JobSpec) ValidateGroups() error {
+	if len(j.Groups) == 0 {
+		return nil
+	}
+	// One way to say a thing. Accepting both forms would mean inventing merge rules — does
+	// num_nodes multiply the groups? does a top-level cpu apply to a group that omitted one? —
+	// and every answer is a rule someone has to remember.
+	if j.NumNodes != 0 {
+		return fmt.Errorf("job.num_nodes cannot be combined with job.groups: a grouped job's node count is the sum of its groups' replicas")
+	}
+	if j.CPU != "" || j.Memory != "" || j.Storage != "" || j.AcceleratorCount != 0 {
+		return fmt.Errorf("job.cpu/memory/storage/accelerator_count are per-node fields and cannot be combined with job.groups: state them on each group instead")
+	}
+	names := make(map[string]bool, len(j.Groups))
+	acceleratorType := j.AcceleratorType
+	for _, g := range j.Groups {
+		if g.Name == "" {
+			return fmt.Errorf("every job.groups entry needs a name")
+		}
+		if !groupNamePattern.MatchString(g.Name) {
+			return fmt.Errorf("job.groups[%q].name must be lowercase alphanumeric with '-', starting and ending alphanumeric (it names a resource in the execution cluster)", g.Name)
+		}
+		if names[g.Name] {
+			return fmt.Errorf("job.groups contains %q more than once", g.Name)
+		}
+		names[g.Name] = true
+		if g.Replicas < 1 {
+			return fmt.Errorf("job.groups[%q].replicas must be at least 1", g.Name)
+		}
+		if g.CPU == "" || g.Memory == "" || g.Storage == "" {
+			return fmt.Errorf("job.groups[%q] must state cpu, memory and storage (explicit resource requests must be set at submission, not left to a cluster-side default)", g.Name)
+		}
+		if g.AcceleratorCount < 0 {
+			return fmt.Errorf("job.groups[%q].accelerator_count must not be negative", g.Name)
+		}
+		if g.AcceleratorType == "" {
+			continue
+		}
+		// Groups may differ in accelerator COUNT, including zero, but never in TYPE: the
+		// experiment carries a single AcceleratorType that admission, flavor substitution and
+		// billing all key on, and a per-group set would have to be threaded through every one
+		// of those paths for a case nothing has asked for.
+		if acceleratorType == "" {
+			acceleratorType = g.AcceleratorType
+			continue
+		}
+		if g.AcceleratorType != acceleratorType {
+			return fmt.Errorf("job.groups[%q] wants accelerator type %q but the job already runs on %q — a job runs on exactly one accelerator type", g.Name, g.AcceleratorType, acceleratorType)
+		}
+	}
+	if acceleratorType == "" && j.TotalAccelerators() > 0 {
+		return fmt.Errorf("job.accelerator_type is required when any group requests accelerators")
+	}
+	return nil
+}
+
+// groupNamePattern is the RFC 1123 DNS label rule: a group name is appended to the experiment id
+// to name the native resource each backend creates for that group, so a name k8s would reject
+// has to be rejected here rather than left to fail forever in a reconcile loop.
+var groupNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // ExperimentMeta holds the fields a submission needs to describe research intent and
 // bookkeeping around a run — never how it executes (that's JobSpec).

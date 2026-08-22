@@ -101,11 +101,19 @@ type Placement struct {
 // partially.
 func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placement) (containerSpec, error) {
 	spec := exp.Job
-	if spec.CPU == "" || spec.Memory == "" || spec.Storage == "" || spec.MaxRetries == nil || *spec.MaxRetries < 0 {
-		return containerSpec{}, fmt.Errorf("podexec: CPU, memory, storage, and non-negative max_retries are required desired state")
-	}
+	// Nodes() sums a grouped job's replicas, so a heterogeneous job is refused here by exactly the
+	// same rule and the same error a num_nodes > 1 job already gets. Groups do not make this
+	// runtime multi-node; they make its refusal consistent — a job it cannot run is rejected for
+	// the reason it cannot run it, not for the syntax it happened to be written in.
 	if spec.Nodes() > 1 {
 		return containerSpec{}, fmt.Errorf("podexec: num_nodes=%d requested but this bare-node runtime executes single-node jobs only", spec.Nodes())
+	}
+	// A single-node job is one node group of one replica, whose shape is the top-level one for an
+	// ungrouped job and the sole group's for a grouped one. Read through NodeGroups so this
+	// runtime never has to know which form it was handed.
+	group := spec.NodeGroups()[0]
+	if group.CPU == "" || group.Memory == "" || group.Storage == "" || spec.MaxRetries == nil || *spec.MaxRetries < 0 {
+		return containerSpec{}, fmt.Errorf("podexec: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
 	if len(spec.AcceleratorTolerations) > 0 {
 		log.Printf("podexec: experiment %s requests accelerator_tolerations, which has no meaning on a bare node — ignoring", exp.ID)
@@ -118,21 +126,21 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	if err != nil {
 		return containerSpec{}, err
 	}
-	if spec.AcceleratorCount > 0 && len(placement.DevicePaths) != spec.AcceleratorCount {
-		return containerSpec{}, fmt.Errorf("podexec: accelerator %q requested %d device(s) but placement resolved %d", exp.AcceleratorType, spec.AcceleratorCount, len(placement.DevicePaths))
+	if group.AcceleratorCount > 0 && len(placement.DevicePaths) != group.AcceleratorCount {
+		return containerSpec{}, fmt.Errorf("podexec: accelerator %q requested %d device(s) but placement resolved %d", exp.AcceleratorType, group.AcceleratorCount, len(placement.DevicePaths))
 	}
 
-	cpuQty, err := resource.ParseQuantity(spec.CPU)
+	cpuQty, err := resource.ParseQuantity(group.CPU)
 	if err != nil {
-		return containerSpec{}, fmt.Errorf("podexec: parse cpu %q: %w", spec.CPU, err)
+		return containerSpec{}, fmt.Errorf("podexec: parse cpu %q: %w", group.CPU, err)
 	}
-	memQty, err := resource.ParseQuantity(spec.Memory)
+	memQty, err := resource.ParseQuantity(group.Memory)
 	if err != nil {
-		return containerSpec{}, fmt.Errorf("podexec: parse memory %q: %w", spec.Memory, err)
+		return containerSpec{}, fmt.Errorf("podexec: parse memory %q: %w", group.Memory, err)
 	}
-	storageQty, err := resource.ParseQuantity(spec.Storage)
+	storageQty, err := resource.ParseQuantity(group.Storage)
 	if err != nil {
-		return containerSpec{}, fmt.Errorf("podexec: parse storage %q: %w", spec.Storage, err)
+		return containerSpec{}, fmt.Errorf("podexec: parse storage %q: %w", group.Storage, err)
 	}
 	// The Engine API's NanoCPUs is CPU quota in units of 1e-9 cores; MilliValue is 1e-3 cores,
 	// so scale by 1e6 to convert one to the other without losing fractional-core precision.
@@ -172,7 +180,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		// runtime's job_build.go for the failure this caused. Single-node-only today makes the
 		// two equal in practice; taking it from the spec is what keeps that an accident rather
 		// than something the next multi-node change has to remember.
-		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", spec.AcceleratorCount),
+		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", group.AcceleratorCount),
 		"HYPOTHESISLOOP_DURATION_SECONDS":  fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600)),
 		// Always 0 here: this runtime is single-node, and a single-pod job's retries never reach
 		// the control-plane gang retry that increments it. Injected anyway so both runtimes hand a
@@ -181,15 +189,27 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		"HYPOTHESISLOOP_ATTEMPT": fmt.Sprintf("%d", exp.AttemptCount),
 		"TRACEPARENT":            traceparentFromID(exp.ID),
 	}
+	// Job-level environment first, then the group's own over it — the same layering the k8s
+	// runtime applies. An ungrouped job's synthetic group carries the job-level map, so this is
+	// spec.Env exactly as before.
 	for k, v := range spec.Env {
 		env[k] = v
 	}
+	for k, v := range group.Env {
+		env[k] = v
+	}
 
+	// The group's own process when it names one, the job's shared entrypoint otherwise — same
+	// rule as the k8s runtime.
+	command, args := group.Command, group.Args
+	if len(command) == 0 {
+		command, args = spec.Command, spec.Args
+	}
 	cs := containerSpec{
 		Name:           containerName(exp.ID),
 		Image:          spec.Image,
-		Command:        spec.Command,
-		Args:           spec.Args,
+		Command:        command,
+		Args:           args,
 		Env:            env,
 		NanoCPUs:       nanoCPUs,
 		MemoryBytes:    memQty.Value(),
@@ -203,7 +223,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 			LabelAgentID:         exp.AgentID,
 			LabelCapacityTier:    string(exp.CapacityTier),
 			LabelAcceleratorType: string(exp.AcceleratorType),
-			LabelAcceleratorCnt:  fmt.Sprintf("%d", spec.AcceleratorCount),
+			LabelAcceleratorCnt:  fmt.Sprintf("%d", group.AcceleratorCount),
 			LabelCPUCores:        fmt.Sprintf("%d", cpuQty.MilliValue()),
 			LabelMemoryBytes:     fmt.Sprintf("%d", memQty.Value()),
 			LabelStorageBytes:    fmt.Sprintf("%d", storageQty.Value()),
@@ -211,7 +231,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	}
 
 	if e.storageQuotaEnforced {
-		cs.StorageOptSize = spec.Storage
+		cs.StorageOptSize = group.Storage
 	}
 
 	grace := e.defaultTerminationGracePeriodSeconds
@@ -278,3 +298,9 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 	sum := sha256.Sum256(buf)
 	return hex.EncodeToString(sum[:]), nil
 }
+
+// SupportsMultiNodeJobs is false: this runtime executes a job on the one bare node it runs on.
+// Reported to the control plane alongside capacity so a job spanning several nodes is never
+// placed here — before, such a job was admitted, held a reservation, and only then failed at
+// BuildContainerSpec, which is an admission-time answer given at execution time.
+func (e *Executor) SupportsMultiNodeJobs() bool { return false }

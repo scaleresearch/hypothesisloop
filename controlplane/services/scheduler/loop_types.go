@@ -69,6 +69,9 @@ type LoopWorkloadClient interface {
 	// reservePlacement, which must prove a job fits one node in every dimension.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
+	// GetMultiNodeCapability reports which clusters can run a job spanning more than one node.
+	// A cluster absent from the map is treated as single-node only.
+	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
 	// GetTotalCapacity reports each cluster's installed capacity — the per-accelerator
 	// CPU/memory share the disbalance evictor measures requests against. Clusters without a
 	// fresh report are absent, never zero-filled. Only read when that evictor is enabled.

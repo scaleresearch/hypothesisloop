@@ -50,53 +50,115 @@ const DesiredSpecHashAnnotation = workloadkeys.DesiredSpecHash
 // cluster reads of its own — callers resolve placement once (see ResolveAcceleratorPlacement) and
 // pass it in.
 func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement AcceleratorPlacement) (*batchv1.Job, error) {
+	jobs, err := c.BuildJobs(exp, placement)
+	if err != nil {
+		return nil, err
+	}
+	if len(jobs) != 1 {
+		return nil, fmt.Errorf("workload: experiment %s compiles to %d Jobs; use BuildJobs", exp.ID, len(jobs))
+	}
+	return jobs[0], nil
+}
+
+// BuildJobs compiles exp into the complete set of native Jobs it runs as: exactly one for an
+// ungrouped job, and one Indexed Job per group for a heterogeneous one (see domain.JobSpec.Groups).
+// The group Jobs share one headless Service (CreateWorkload creates it before any of them), so
+// every node of every group resolves every other by name and the whole set has one rendezvous.
+//
+// They are separate Jobs only because Kubernetes has no single object for "N pods of shape A plus
+// M pods of shape B". They remain one gang: each carries the same FailJob-on-any-non-zero-exit
+// policy §1 established, and PollJobPhaseAndUID reports the SET's phase, so a failure anywhere
+// ends the experiment and takes every group's pods with it.
+func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement AcceleratorPlacement) ([]*batchv1.Job, error) {
 	spec := exp.Job
-	if spec.CPU == "" || spec.Memory == "" || spec.Storage == "" || spec.MaxRetries == nil || *spec.MaxRetries < 0 {
+	if spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
-	if spec.AcceleratorCount > 0 && placement.ResourceName == "" && placement.DeviceClassName == "" {
+	if spec.TotalAccelerators() > 0 && placement.ResourceName == "" && placement.DeviceClassName == "" {
 		return nil, fmt.Errorf("workload: accelerator %q has no resolved placement", exp.AcceleratorType)
 	}
-	job, err := c.compileJob(exp, placement)
-	if err != nil {
-		return nil, err
+	groups := spec.NodeGroups()
+	for _, group := range groups {
+		if group.CPU == "" || group.Memory == "" || group.Storage == "" {
+			return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
+		}
 	}
-	// The identity a drift check compares is the control-plane's desired state, never this
-	// runtime's translation of it into local inventory. Placement is resolved from live
-	// DeviceClasses and node labels, so hashing it made a DeviceClass rename or a driver upgrade
-	// re-hash every running job of that type and drift-delete it mid-training — the cluster
-	// changing around a job is not the control plane asking for a different job.
-	// The same rule applies to the durable-data session: the control plane mints a fresh one on
-	// every reconcile pass, so hashing it would re-hash every running job every few seconds and
-	// drift-delete it mid-training. The addressing it carries is desired state and stays hashed;
-	// only the rotating credentials are dropped.
-	identityExp := *exp
-	identityExp.Data = exp.Data.WithoutCredentials()
-	identity, err := c.compileJob(&identityExp, AcceleratorPlacement{})
-	if err != nil {
-		return nil, err
+	// One rendezvous for the whole job: node 0 of the FIRST group, named through the shared
+	// Service. Every group is told the same address, so groups meet each other exactly the way
+	// ranks of a single Indexed Job already do.
+	plans := make([]groupPlan, 0, len(groups))
+	rankOffset := 0
+	for _, group := range groups {
+		plans = append(plans, groupPlan{
+			group:      group,
+			grouped:    len(spec.Groups) > 0,
+			rankOffset: rankOffset,
+			totalNodes: spec.Nodes(),
+			jobName:    groupJobName(exp.ID, group.Name),
+			service:    jobName(exp.ID),
+		})
+		rankOffset += group.Replicas
 	}
-	specJSON, err := json.Marshal(identity.Spec)
-	if err != nil {
-		return nil, fmt.Errorf("workload: hash desired Job spec: %w", err)
+	masterAddr := fmt.Sprintf("%s-0.%s.%s.svc.cluster.local", plans[0].jobName, plans[0].service, HypothesisLoopNamespace)
+
+	jobs := make([]*batchv1.Job, 0, len(plans))
+	for _, plan := range plans {
+		plan.masterAddr = masterAddr
+		job, err := c.compileJob(exp, placement, plan)
+		if err != nil {
+			return nil, err
+		}
+		// The identity a drift check compares is the control-plane's desired state, never this
+		// runtime's translation of it into local inventory. Placement is resolved from live
+		// DeviceClasses and node labels, so hashing it made a DeviceClass rename or a driver upgrade
+		// re-hash every running job of that type and drift-delete it mid-training — the cluster
+		// changing around a job is not the control plane asking for a different job.
+		// The same rule applies to the durable-data session: the control plane mints a fresh one on
+		// every reconcile pass, so hashing it would re-hash every running job every few seconds and
+		// drift-delete it mid-training. The addressing it carries is desired state and stays hashed;
+		// only the rotating credentials are dropped.
+		identityExp := *exp
+		identityExp.Data = exp.Data.WithoutCredentials()
+		identity, err := c.compileJob(&identityExp, AcceleratorPlacement{}, plan)
+		if err != nil {
+			return nil, err
+		}
+		specJSON, err := json.Marshal(identity.Spec)
+		if err != nil {
+			return nil, fmt.Errorf("workload: hash desired Job spec: %w", err)
+		}
+		hash := sha256.Sum256(specJSON)
+		job.Annotations[DesiredSpecHashAnnotation] = hex.EncodeToString(hash[:])
+		jobs = append(jobs, job)
 	}
-	hash := sha256.Sum256(specJSON)
-	job.Annotations[DesiredSpecHashAnnotation] = hex.EncodeToString(hash[:])
-	return job, nil
+	return jobs, nil
+}
+
+// groupPlan is everything one group needs to know about the job it belongs to. An ungrouped job
+// has exactly one plan whose group carries the top-level shape and whose name is empty, which is
+// what keeps its compiled Job byte-identical to the one this code produced before groups existed.
+type groupPlan struct {
+	group      domain.JobGroup
+	grouped    bool
+	rankOffset int
+	totalNodes int
+	jobName    string
+	service    string
+	masterAddr string
 }
 
 // compileJob assembles the Job. Split from BuildJob so the desired-spec hash can be taken over the
 // same assembly with placement left out, without enumerating (and later forgetting) which fields
 // placement reaches.
-func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement AcceleratorPlacement) (*batchv1.Job, error) {
+func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement AcceleratorPlacement, plan groupPlan) (*batchv1.Job, error) {
 	spec := exp.Job
+	group := plan.group
 
-	nodes := spec.NumNodes
-	if nodes < 1 {
-		nodes = 1
-	}
-	parallelism := int32(nodes)
-	distributed := parallelism > 1
+	// Parallelism is this GROUP's replica count; distributed is a property of the whole job. A
+	// single-replica group inside a multi-node job is still Indexed and still gets a rendezvous:
+	// what makes a pod part of a gang is the job it belongs to, not how many siblings it has.
+	parallelism := int32(group.Replicas)
+	distributed := plan.totalNodes > 1
 
 	backoff := int32(*spec.MaxRetries)
 
@@ -135,24 +197,24 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		Requests: corev1.ResourceList{},
 		Limits:   corev1.ResourceList{},
 	}
-	if spec.CPU != "" {
-		resources.Requests[corev1.ResourceCPU] = resource.MustParse(spec.CPU)
-		resources.Limits[corev1.ResourceCPU] = resource.MustParse(spec.CPU)
+	if group.CPU != "" {
+		resources.Requests[corev1.ResourceCPU] = resource.MustParse(group.CPU)
+		resources.Limits[corev1.ResourceCPU] = resource.MustParse(group.CPU)
 	}
-	if spec.Memory != "" {
-		resources.Requests[corev1.ResourceMemory] = resource.MustParse(spec.Memory)
-		resources.Limits[corev1.ResourceMemory] = resource.MustParse(spec.Memory)
+	if group.Memory != "" {
+		resources.Requests[corev1.ResourceMemory] = resource.MustParse(group.Memory)
+		resources.Limits[corev1.ResourceMemory] = resource.MustParse(group.Memory)
 	}
-	if spec.Storage != "" {
-		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(spec.Storage)
-		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse(spec.Storage)
+	if group.Storage != "" {
+		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(group.Storage)
+		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse(group.Storage)
 	}
 	// jobUsesDRA tracks whether this job needs a ResourceClaimTemplate/PodResourceClaim instead
 	// of a plain extended-resource request. CreateWorkload reads this back off the returned
 	// Job (non-empty Spec.ResourceClaims) to know whether to also create the ResourceClaimTemplate.
-	jobUsesDRA := spec.AcceleratorCount > 0 && placement.UsesDRA()
-	if spec.AcceleratorCount > 0 && !jobUsesDRA {
-		acceleratorQty := resource.MustParse(fmt.Sprintf("%d", spec.AcceleratorCount))
+	jobUsesDRA := group.AcceleratorCount > 0 && placement.UsesDRA()
+	if group.AcceleratorCount > 0 && !jobUsesDRA {
+		acceleratorQty := resource.MustParse(fmt.Sprintf("%d", group.AcceleratorCount))
 		acceleratorResource := corev1.ResourceName(placement.ResourceName)
 		resources.Requests[acceleratorResource] = acceleratorQty
 		resources.Limits[acceleratorResource] = acceleratorQty
@@ -208,7 +270,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		// num_nodes 2 the total told every pod it had 8 devices, and anything sizing
 		// --nproc_per_node from it launched four times the processes it had hardware for.
 		// The total stays on the experiment, where billing and admission read it.
-		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", spec.AcceleratorCount)},
+		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", group.AcceleratorCount)},
 		{Name: "HYPOTHESISLOOP_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
 		// Which attempt this is, 0 on the first. Always 0 for a single-pod job, whose retries are
 		// the runtime's own and never re-enter this path.
@@ -224,46 +286,84 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		{Name: "HYPOTHESISLOOP_ATTEMPT", Value: fmt.Sprintf("%d", exp.AttemptCount)},
 		{Name: "TRACEPARENT", Value: traceparentFromID(exp.ID)},
 	}
-	envNames := make([]string, 0, len(spec.Env))
-	for name := range spec.Env {
+	// The job's shared environment, with this group's own entries layered over it: the job-level
+	// map says what is true of every node, the group's says what is true of its role.
+	merged := make(map[string]string, len(spec.Env)+len(group.Env))
+	for k, v := range spec.Env {
+		merged[k] = v
+	}
+	for k, v := range group.Env {
+		merged[k] = v
+	}
+	envNames := make([]string, 0, len(merged))
+	for name := range merged {
 		envNames = append(envNames, name)
 	}
 	sort.Strings(envNames)
 	for _, k := range envNames {
-		v := spec.Env[k]
-		env = append(env, corev1.EnvVar{Name: k, Value: v})
+		env = append(env, corev1.EnvVar{Name: k, Value: merged[k]})
 	}
 	if distributed {
-		// HYPOTHESISLOOP_MASTER_ADDR is rank 0's stable DNS name — resolvable because BuildJob
-		// sets pod.Spec.Subdomain to the job's own name and CreateWorkload creates a matching
-		// headless Service, so k8s's Indexed Job hostname convention applies
-		// ($job-name-$index.$subdomain.$namespace.svc.cluster.local). This is the rendezvous
-		// endpoint training frameworks need: PyTorch DDP (torchrun --master-addr/--master-port),
-		// Ray (`ray start --head` on rank 0, `ray start --address=...` on the rest), etc.
-		masterAddr := fmt.Sprintf("%s-0.%s.%s.svc.cluster.local", jobName(exp.ID), jobName(exp.ID), HypothesisLoopNamespace)
+		// HYPOTHESISLOOP_MASTER_ADDR is node 0 of the job's FIRST group — its stable DNS name,
+		// resolvable because every group's pods take the shared Service as their Subdomain and
+		// CreateWorkload creates that Service before any Job, so k8s's Indexed Job hostname
+		// convention applies ($job-name-$index.$subdomain.$namespace.svc.cluster.local). This is
+		// the rendezvous endpoint training frameworks need: PyTorch DDP (torchrun
+		// --master-addr/--master-port), Ray (`ray start --head` on node 0, `ray start
+		// --address=...` on the rest), etc. One address for the whole job, groups included: a
+		// learner and its actors meet at exactly the same place two ranks of one Job would.
+		masterAddr := plan.masterAddr
 		rankFieldRef := &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{
 				FieldPath: "metadata.annotations['batch.kubernetes.io/job-completion-index']",
 			},
 		}
-		worldSize := fmt.Sprintf("%d", parallelism)
+		worldSize := fmt.Sprintf("%d", plan.totalNodes)
 		masterPort := fmt.Sprintf("%d", DistributedMasterPort)
 		env = append(env,
-			corev1.EnvVar{Name: "HYPOTHESISLOOP_RANK", ValueFrom: rankFieldRef},
 			corev1.EnvVar{Name: "HYPOTHESISLOOP_WORLD_SIZE", Value: worldSize},
 			corev1.EnvVar{Name: "HYPOTHESISLOOP_MASTER_ADDR", Value: masterAddr},
 			corev1.EnvVar{Name: "HYPOTHESISLOOP_MASTER_PORT", Value: masterPort},
 			// Standard unprefixed names torch.distributed.init_process_group(env://) and
 			// torchrun read directly, alongside the HYPOTHESISLOOP_-prefixed vars above. One
 			// process per pod, so LOCAL_RANK is always 0.
-			corev1.EnvVar{Name: "RANK", ValueFrom: rankFieldRef},
 			corev1.EnvVar{Name: "LOCAL_RANK", Value: "0"},
 			corev1.EnvVar{Name: "WORLD_SIZE", Value: worldSize},
 			corev1.EnvVar{Name: "MASTER_ADDR", Value: masterAddr},
 			corev1.EnvVar{Name: "MASTER_PORT", Value: masterPort},
 		)
+		if plan.grouped {
+			// A grouped job's global rank is this group's offset plus the pod's index within the
+			// group, and Kubernetes cannot express that sum: the downward API can hand a pod its
+			// completion index, and env expansion concatenates strings, but nothing adds. So the
+			// two terms are published separately and the workload adds them
+			// (RANK=$((HYPOTHESISLOOP_RANK_OFFSET + HYPOTHESISLOOP_GROUP_RANK))).
+			//
+			// RANK/HYPOTHESISLOOP_RANK are deliberately NOT set here. Setting them to the
+			// group-local index would be silently wrong for every group after the first — two
+			// pods claiming rank 0 in one process group is a hang or a corrupt all-reduce, not an
+			// error anyone sees — and an absent variable fails loudly at the workload's first read.
+			env = append(env,
+				corev1.EnvVar{Name: "HYPOTHESISLOOP_GROUP", Value: group.Name},
+				corev1.EnvVar{Name: "HYPOTHESISLOOP_GROUP_RANK", ValueFrom: rankFieldRef},
+				corev1.EnvVar{Name: "HYPOTHESISLOOP_GROUP_REPLICAS", Value: fmt.Sprintf("%d", group.Replicas)},
+				corev1.EnvVar{Name: "HYPOTHESISLOOP_RANK_OFFSET", Value: fmt.Sprintf("%d", plan.rankOffset)},
+			)
+		} else {
+			env = append(env,
+				corev1.EnvVar{Name: "HYPOTHESISLOOP_RANK", ValueFrom: rankFieldRef},
+				corev1.EnvVar{Name: "RANK", ValueFrom: rankFieldRef},
+			)
+		}
 	}
 
+	// The group's own process when it names one, the job's shared entrypoint otherwise. An
+	// ungrouped job's synthetic group carries the job-level values, so this is spec.Command/Args
+	// exactly as before.
+	command, args := group.Command, group.Args
+	if len(command) == 0 {
+		command, args = spec.Command, spec.Args
+	}
 	container := corev1.Container{
 		Name:  "experiment",
 		Image: spec.Image,
@@ -271,8 +371,8 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		// a locally-built image is ignored and the kubelet always attempts a registry pull,
 		// which fails on any cluster without a real registry behind the image reference.
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         spec.Command,
-		Args:            spec.Args,
+		Command:         command,
+		Args:            args,
 		Env:             env,
 		Resources:       resources,
 	}
@@ -331,7 +431,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName(exp.ID),
+			Name:      plan.jobName,
 			Namespace: HypothesisLoopNamespace,
 			Labels: map[string]string{
 				workloadkeys.ManagedBy:    workloadkeys.ManagedByValue,
@@ -351,7 +451,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 						workloadkeys.ExperimentID: exp.ID,
 					},
 					Annotations: map[string]string{
-						AcceleratorCountAnnotation: fmt.Sprintf("%d", spec.AcceleratorCount),
+						AcceleratorCountAnnotation: fmt.Sprintf("%d", group.AcceleratorCount),
 						// Also on the pod, not just the Job: ResolveAdmittedAcceleratorType
 						// reads it off the scheduled pod to report what the job really landed on.
 						AcceleratorTypeAnnotation: string(exp.AcceleratorType),
@@ -363,12 +463,19 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 					Containers:                    []corev1.Container{container},
 					Volumes:                       volumes,
 					Affinity:                      c.buildAffinity(exp.ID, spec, placement, distributed),
-					Tolerations:                   acceleratorTolerations(spec.AcceleratorCount, spec.AcceleratorTolerations),
+					Tolerations:                   acceleratorTolerations(group.AcceleratorCount, spec.AcceleratorTolerations),
 					NodeSelector:                  spec.NodeSelector,
 					TerminationGracePeriodSeconds: &terminationGrace,
 				},
 			},
 		},
+	}
+
+	if plan.grouped {
+		// On the Job only, never on the pod template: the headless Service selects this
+		// experiment's pods by experiment id alone, and a group label down there would split one
+		// rendezvous into one Service's worth of pods per group.
+		job.Labels[workloadkeys.JobGroup] = group.Name
 	}
 
 	if jobUsesDRA {
@@ -380,9 +487,11 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	}
 
 	if distributed {
-		// Subdomain must match the headless Service CreateWorkload creates alongside this
-		// Job (same name) — that's what makes HYPOTHESISLOOP_MASTER_ADDR above resolve.
-		job.Spec.Template.Spec.Subdomain = job.Name
+		// Subdomain must match the headless Service CreateWorkload creates for this experiment —
+		// that's what makes HYPOTHESISLOOP_MASTER_ADDR above resolve. One Service for every group,
+		// so a pod of one group resolves a pod of another by exactly the same name it uses for a
+		// sibling.
+		job.Spec.Template.Spec.Subdomain = plan.service
 
 		completionMode := batchv1.IndexedCompletion
 		job.Spec.CompletionMode = &completionMode

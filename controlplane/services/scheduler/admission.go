@@ -42,6 +42,22 @@ func (e *AdmissionError) Error() string {
 	return fmt.Sprintf("admission rejected [%s]: %s", e.Reason, e.Message)
 }
 
+// totalOverGroups sums one per-replica dimension across every node group, each group's value
+// weighted by its replica count. An ungrouped job has a single group of Nodes() identical
+// replicas, so this is the "per-node value x node count" the per-job caps have always compared
+// against; a grouped job's total is the sum of its groups, never a multiple of the largest.
+func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), pick func(domain.JobGroup) string) (float64, error) {
+	var total float64
+	for _, group := range spec.NodeGroups() {
+		value, err := parse(pick(group))
+		if err != nil {
+			return 0, err
+		}
+		total += value * float64(group.Replicas)
+	}
+	return total, nil
+}
+
 // ValidateExperiment checks required fields are populated and no resource dimension exceeds
 // its per-job cap — applied before any quota debit, so one absurd submission can't consume an
 // entire budget in one shot.
@@ -79,17 +95,32 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.Image == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.image is required"}
 	}
+	// A grouped job states its shapes per group and is rejected outright if it also states them
+	// at the top level, so the two blocks below are alternatives, never a merge.
+	if err := exp.Job.ValidateGroups(); err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+	}
+	// A grouped job may name its single accelerator type on the groups rather than at the top
+	// level. Normalize it onto the job here, at the one place a submission is validated, so
+	// everything downstream — footprint, admission, substitution, billing, both backends — keeps
+	// reading exactly one field for the type instead of learning about groups.
+	if exp.Job.AcceleratorType == "" {
+		exp.Job.AcceleratorType = exp.Job.GroupAcceleratorType()
+	}
 	// Resource requests must be explicit at submission time: the footprint used for cluster
 	// selection/admission must be known up front, not resolved later from a per-cluster
 	// JobDefaults ConfigMap the control plane never sees. Reject rather than assume a default.
-	if exp.Job.CPU == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
-	}
-	if exp.Job.Memory == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
-	}
-	if exp.Job.Storage == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+	// ValidateGroups enforces the same requirement per group for a grouped job.
+	if len(exp.Job.Groups) == 0 {
+		if exp.Job.CPU == "" {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+		}
+		if exp.Job.Memory == "" {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+		}
+		if exp.Job.Storage == "" {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
+		}
 	}
 	if exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries is required and must be non-negative"}
@@ -102,7 +133,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	case exp.AcceleratorCount < 0:
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
 	case exp.AcceleratorCount == 0:
-		cores, err := workload.ParseCPUCores(exp.Job.CPU)
+		cores, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 		}
@@ -145,32 +176,32 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if caps.MaxAcceleratorCountPerJob > 0 && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d exceeds per-job max %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
-	nodes := float64(exp.Job.Nodes())
+	nodes := exp.Job.Nodes()
 	if caps.MaxCPUCoresPerJob > 0 {
-		cores, err := workload.ParseCPUCores(exp.Job.CPU)
+		total, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 		}
-		if total := cores * nodes; total > caps.MaxCPUCoresPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %.2f cores (x%d nodes) exceeds per-job max %.2f", cores, exp.Job.Nodes(), caps.MaxCPUCoresPerJob)}
+		if total > caps.MaxCPUCoresPerJob {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %.2f cores (x%d nodes) exceeds per-job max %.2f", total/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
 		}
 	}
 	if caps.MaxRAMGBPerJob > 0 {
-		gb, err := workload.ParseMemoryGB(exp.Job.Memory)
+		total, err := totalOverGroups(exp.Job, workload.ParseMemoryGB, func(g domain.JobGroup) string { return g.Memory })
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory: " + err.Error()}
 		}
-		if total := gb * nodes; total > caps.MaxRAMGBPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", gb, exp.Job.Nodes(), caps.MaxRAMGBPerJob)}
+		if total > caps.MaxRAMGBPerJob {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", total/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
 		}
 	}
 	if caps.MaxStorageGBPerJob > 0 {
-		gb, err := workload.ParseStorageGB(exp.Job.Storage)
+		total, err := totalOverGroups(exp.Job, workload.ParseStorageGB, func(g domain.JobGroup) string { return g.Storage })
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage: " + err.Error()}
 		}
-		if total := gb * nodes; total > caps.MaxStorageGBPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", gb, exp.Job.Nodes(), caps.MaxStorageGBPerJob)}
+		if total > caps.MaxStorageGBPerJob {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", total/float64(nodes), nodes, caps.MaxStorageGBPerJob)}
 		}
 	}
 	// ExtraResources has no billing dimension or per-job cap, but a malformed quantity string

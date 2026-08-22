@@ -12,9 +12,20 @@ import (
 type lifecycleStore struct {
 	transitioned bool
 	// requeueBudget is what the fake pretends the row's remaining retry budget is: RequeueForRetry
-	// succeeds while it is positive, mirroring the real store's "attempt_count < max" WHERE clause.
+	// succeeds while it is positive, mirroring the real store's
+	// "attempt_count - infra_requeue_count < max" WHERE clause.
 	requeueBudget int
 	requeueCalls  []int
+	// infraRequeues counts what the real store does inside ResolveTermination when the reason
+	// names an infrastructure fault, bounded by infraCeiling exactly as the real WHERE clause's
+	// "infra_requeue_count < max" is. attempt_count and the retry budget are tracked separately
+	// so a test can assert the infrastructure path never touches the latter.
+	infraCeiling    int
+	infraRequeues   int
+	attemptCount    int
+	terminalReasons []string
+	requeuedReasons []string
+	markedSettled   int
 }
 
 func (*lifecycleStore) ListExperimentsWithStatus(context.Context, domain.ExperimentStatus) ([]*domain.Experiment, error) {
@@ -32,12 +43,22 @@ func (s *lifecycleStore) TransitionStatusFromNonTerminal(context.Context, string
 	s.transitioned = true
 	return true, nil
 }
-func (s *lifecycleStore) TransitionTerminal(context.Context, string, domain.ExperimentStatus, domain.ExperimentStatus, string) (bool, error) {
+func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ domain.ExperimentStatus, reason string) (domain.Termination, error) {
 	s.transitioned = true
-	return true, nil
+	if domain.IsInfrastructureFault(domain.EvictionReason(reason)) && s.infraRequeues < s.infraCeiling {
+		s.infraRequeues++
+		s.attemptCount++
+		s.requeuedReasons = append(s.requeuedReasons, reason)
+		return domain.TerminationRequeued, nil
+	}
+	s.terminalReasons = append(s.terminalReasons, reason)
+	return domain.TerminationWritten, nil
 }
 func (*lifecycleStore) UpdateEvictionReason(context.Context, string, string) error { return nil }
-func (*lifecycleStore) MarkQuotaSettled(context.Context, string) error             { return nil }
+func (s *lifecycleStore) MarkQuotaSettled(context.Context, string) error {
+	s.markedSettled++
+	return nil
+}
 func (s *lifecycleStore) RequeueForRetry(_ context.Context, _ string, maxAttemptsBefore int) (bool, error) {
 	s.requeueCalls = append(s.requeueCalls, maxAttemptsBefore)
 	if s.requeueBudget <= 0 {
@@ -140,3 +161,102 @@ func TestSucceededGangIsNeverRequeued(t *testing.T) {
 type countingSettler struct{ settles int }
 
 func (s *countingSettler) Settle(context.Context, *domain.Experiment) error { s.settles++; return nil }
+
+// The whole point of fault attribution: the platform's output is a ranking of agents, so an
+// agent must never be charged an attempt of its own max_retries budget for a node that broke.
+// The retry budget and the infrastructure-requeue allowance are separate counters precisely so
+// this path cannot touch the former.
+func TestAnInfrastructureFaultRequeuesWithoutSpendingARetryAttempt(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 3, requeueBudget: 2}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}
+
+	w.evictNotYetRunning(context.Background(), exp, domain.EvictionClusterUnreachable)
+
+	if len(store.requeuedReasons) != 1 {
+		t.Fatalf("infrastructure requeues = %v, want 1 — the environment's failure ended the job for good", len(store.requeuedReasons))
+	}
+	if len(store.terminalReasons) != 0 {
+		t.Errorf("terminal writes = %v, want 0", len(store.terminalReasons))
+	}
+	if store.requeueBudget != 2 {
+		t.Errorf("remaining retry budget got = %v, want %v", store.requeueBudget, 2)
+	}
+	if len(store.requeueCalls) != 0 {
+		t.Errorf("RequeueForRetry calls got = %v, want %v — an infrastructure fault must not spend max_retries", len(store.requeueCalls), 0)
+	}
+	// The attempt generation must still advance: a requeue reuses the experiment id, so without
+	// it the rebuilt workload is byte-identical to the dead one and the runtime never recreates it.
+	if store.attemptCount != 1 {
+		t.Errorf("attempt_count got = %v, want %v", store.attemptCount, 1)
+	}
+}
+
+// A requeued row is not terminal, so marking it settled would tell the settlement reconciler
+// this experiment's final usage is written — and the attempt that follows would never be billed.
+func TestAnInfrastructureRequeueIsNeverMarkedQuotaSettled(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 3}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+
+	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionWorkloadGone)
+
+	if store.markedSettled != 0 {
+		t.Errorf("MarkQuotaSettled calls got = %v, want %v", store.markedSettled, 0)
+	}
+}
+
+// The ceiling exists so a job landing repeatedly on broken hardware stops and says so instead of
+// looping forever. It must bind exactly: one requeue below it still goes back to the queue, and
+// at it the job stays EVICTED carrying the reason that kept ending it.
+func TestInfrastructureRequeuesStopExactlyAtTheConfiguredCeiling(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 2}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		w.evictNotYetRunning(ctx, &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionStuckPending)
+	}
+
+	if len(store.requeuedReasons) != 2 {
+		t.Errorf("free requeues got = %v, want %v", len(store.requeuedReasons), 2)
+	}
+	if len(store.terminalReasons) != 1 {
+		t.Fatalf("terminal writes got = %v, want %v — the job never stopped", len(store.terminalReasons), 1)
+	}
+	if store.terminalReasons[0] != string(domain.EvictionStuckPending) {
+		t.Errorf("terminal reason got = %v, want %v", store.terminalReasons[0], string(domain.EvictionStuckPending))
+	}
+}
+
+// A policy termination is the platform's own decision and the job was fine, but that is a reason
+// to report it separately — not to run it again. Requeuing a stage-cut job would put work back on
+// the cluster the ladder just decided to stop paying for.
+func TestAPolicyTerminationIsNotRequeued(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 3}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+
+	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionStageCut)
+
+	if len(store.requeuedReasons) != 0 {
+		t.Errorf("free requeues got = %v, want %v", len(store.requeuedReasons), 0)
+	}
+	if len(store.terminalReasons) != 1 {
+		t.Errorf("terminal writes got = %v, want %v", len(store.terminalReasons), 1)
+	}
+}
+
+// A workload fault is the agent's own — a bad image reference here. Requeuing it for free would
+// hand the agent unlimited attempts at a spec that cannot work, and hide the bug from its record.
+func TestAWorkloadTerminationIsNotRequeued(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 3}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+
+	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionUnschedulable)
+
+	if len(store.requeuedReasons) != 0 {
+		t.Errorf("free requeues got = %v, want %v", len(store.requeuedReasons), 0)
+	}
+	if store.markedSettled != 1 {
+		t.Errorf("MarkQuotaSettled calls got = %v, want %v — a terminal workload failure must settle", store.markedSettled, 1)
+	}
+}

@@ -124,51 +124,107 @@ func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, r
 	return fp
 }
 
+// NodeShape is what exactly one node of a job takes from the node it lands on: its accelerator
+// count and its fungible resources in canonical units, keyed by NodeResource*. A dimension the
+// node does not ask for is absent rather than zero.
+type NodeShape struct {
+	// Group is the group this node belongs to, "" for an ungrouped job's identical nodes.
+	Group            string
+	AcceleratorCount int64
+	Resources        map[string]int64
+}
+
+// NodeShapes expands a job into one entry per node, in group order. This is the placement view
+// of a job: admission walks it to prove every node has somewhere to land, which for an ungrouped
+// job is Nodes() copies of one shape and for a grouped job is the groups' real, differing shapes.
+//
+// A malformed quantity string yields an absent dimension rather than an error, matching
+// Experiment.Footprint: submission already parsed all three (see ValidateExperiment), and every
+// caller here treats a job's shape as unconditional.
+func (j JobSpec) NodeShapes() []NodeShape {
+	out := make([]NodeShape, 0, j.Nodes())
+	for _, group := range j.NodeGroups() {
+		resources := map[string]int64{}
+		for _, dimension := range []struct {
+			key       string
+			quantity  string
+			canonical func(resource.Quantity) int64
+		}{
+			{NodeResourceCPUMillicores, group.CPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
+			{NodeResourceMemoryBytes, group.Memory, func(q resource.Quantity) int64 { return q.Value() }},
+			{NodeResourceStorageBytes, group.Storage, func(q resource.Quantity) int64 { return q.Value() }},
+		} {
+			if dimension.quantity == "" {
+				continue
+			}
+			q, err := resource.ParseQuantity(dimension.quantity)
+			if err != nil {
+				continue
+			}
+			if value := dimension.canonical(q); value > 0 {
+				resources[dimension.key] = value
+			}
+		}
+		for replica := 0; replica < group.Replicas; replica++ {
+			out = append(out, NodeShape{Group: group.Name, AcceleratorCount: int64(group.AcceleratorCount), Resources: resources})
+		}
+	}
+	return out
+}
+
 // Footprint computes j's total resource footprint in canonical units: millicores for CPU,
 // bytes for memory/storage, whole units for the accelerator type (if any) and every
-// ExtraResources entry. This is the PER-NODE footprint scaled by Nodes() — a distributed
-// (NumNodes > 1) job's true demand is per-node x NumNodes, not per-pod, matching how BuildJob
-// compiles NumNodes into an Indexed Job with one full-sized pod per rank.
+// ExtraResources entry.
+//
+// It is the SUM over j.NodeGroups() of each group's per-replica shape scaled by its replica
+// count. For an ungrouped job that is one group of Nodes() identical replicas, i.e. exactly the
+// per-node footprint x NumNodes it has always been; for a heterogeneous job it is the sum of the
+// groups, which is what makes a learner plus 64 actors cost 8 accelerators rather than 520.
+//
+// ExtraResources stays job-level and is therefore charged once per node of every group, matching
+// how each backend compiles it onto every pod.
 //
 // Returns an error if any quantity string fails to parse — callers must treat that as a
 // rejection, not a zero-footprint dimension.
 func (j JobSpec) Footprint(acceleratorType AcceleratorType) (Footprint, error) {
-	perNode := NewFootprint()
-
-	if j.CPU != "" {
-		q, err := resource.ParseQuantity(j.CPU)
-		if err != nil {
-			return nil, fmt.Errorf("job.cpu: %w", err)
+	total := NewFootprint()
+	for _, group := range j.NodeGroups() {
+		perNode := NewFootprint()
+		if group.CPU != "" {
+			q, err := resource.ParseQuantity(group.CPU)
+			if err != nil {
+				return nil, fmt.Errorf("job.cpu: %w", err)
+			}
+			perNode.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
-	}
-	if j.Memory != "" {
-		q, err := resource.ParseQuantity(j.Memory)
-		if err != nil {
-			return nil, fmt.Errorf("job.memory: %w", err)
+		if group.Memory != "" {
+			q, err := resource.ParseQuantity(group.Memory)
+			if err != nil {
+				return nil, fmt.Errorf("job.memory: %w", err)
+			}
+			perNode.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
-	}
-	if j.Storage != "" {
-		q, err := resource.ParseQuantity(j.Storage)
-		if err != nil {
-			return nil, fmt.Errorf("job.storage: %w", err)
+		if group.Storage != "" {
+			q, err := resource.ParseQuantity(group.Storage)
+			if err != nil {
+				return nil, fmt.Errorf("job.storage: %w", err)
+			}
+			perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
-	}
-	if j.AcceleratorCount > 0 {
-		if acceleratorType == "" {
-			return nil, fmt.Errorf("job.accelerator_type is required when job.accelerator_count > 0")
+		if group.AcceleratorCount > 0 {
+			if acceleratorType == "" {
+				return nil, fmt.Errorf("job.accelerator_type is required when job.accelerator_count > 0")
+			}
+			perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(string(acceleratorType))}, int64(group.AcceleratorCount))
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(string(acceleratorType))}, int64(j.AcceleratorCount))
-	}
-	for name, qty := range j.ExtraResources {
-		q, err := resource.ParseQuantity(qty)
-		if err != nil {
-			return nil, fmt.Errorf("job.extra_resources[%q]: %w", name, err)
+		for name, qty := range j.ExtraResources {
+			q, err := resource.ParseQuantity(qty)
+			if err != nil {
+				return nil, fmt.Errorf("job.extra_resources[%q]: %w", name, err)
+			}
+			perNode.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
 		}
-		perNode.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
+		total.AddFootprint(perNode.Scale(int64(group.Replicas)))
 	}
-
-	return perNode.Scale(int64(j.Nodes())), nil
+	return total, nil
 }

@@ -61,6 +61,14 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("node labels: %w", err)
 	}
+	// Which clusters can run a job that spans more than one node. A capability each cluster
+	// reports about itself, filtered on here so a distributed job is never placed on a runtime
+	// that executes single-node jobs only — that used to be discovered at workload creation,
+	// after the job had already been admitted and had already claimed a reservation.
+	multiNodeCapable, err := l.workload.GetMultiNodeCapability(ctx)
+	if err != nil {
+		return fmt.Errorf("multi-node capability: %w", err)
+	}
 	// Installed (not free) capacity — evidence for one decision, the disbalance eviction, and an
 	// input to nothing else in this tick. Unlike the three reads above it, admission never
 	// consults it.
@@ -211,12 +219,20 @@ func (l *Loop) tick(ctx context.Context) error {
 		// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it
 		// has a new flavor to persist.
 		persistedFlavor := exp.AcceleratorType
+		candidates := eligibleClusters(gAvail, multiNodeCapable, exp)
+		if len(candidates) == 0 {
+			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedNoMultiNodeCluster); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark no multi-node cluster: %w", err))
+			}
+			continue
+		}
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {
 			fp = exp.Footprint()
 		} else {
-			cluster, fp = resolveClusterAndFootprint(gAvail, nodeAvail, nodeResources, nodeLabels, exp)
+			cluster, fp = resolveClusterAndFootprint(candidates, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
 			// Reverting to the requested flavor re-places the job, layout included: picking on
@@ -224,10 +240,10 @@ func (l *Loop) tick(ctx context.Context) error {
 			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
 			fp = exp.Footprint()
-			if placed, ok := placeAtFlavor(gAvail, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			if placed, ok := placeAtFlavor(candidates, nodeAvail, nodeResources, nodeLabels, exp); ok {
 				cluster = placed
 			} else {
-				cluster = clusterWithBestFit(gAvail, fp)
+				cluster = clusterWithBestFit(candidates, fp)
 			}
 		}
 		// Which of the two fit checks failed decides whether preemption can help at all, so they
@@ -356,12 +372,20 @@ func (l *Loop) tick(ctx context.Context) error {
 
 	for _, exp := range burst {
 		persistedFlavor := exp.AcceleratorType
+		candidates := eligibleClusters(bAvail, multiNodeCapable, exp)
+		if len(candidates) == 0 {
+			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedNoMultiNodeCluster); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark no multi-node cluster: %w", err))
+			}
+			continue
+		}
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {
 			fp = exp.Footprint()
 		} else {
-			cluster, fp = resolveClusterAndFootprint(bAvail, nodeAvail, nodeResources, nodeLabels, exp)
+			cluster, fp = resolveClusterAndFootprint(candidates, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
 			// Reverting to the requested flavor re-places the job, layout included: picking on
@@ -369,10 +393,10 @@ func (l *Loop) tick(ctx context.Context) error {
 			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
 			fp = exp.Footprint()
-			if placed, ok := placeAtFlavor(bAvail, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			if placed, ok := placeAtFlavor(candidates, nodeAvail, nodeResources, nodeLabels, exp); ok {
 				cluster = placed
 			} else {
-				cluster = clusterWithBestFit(bAvail, fp)
+				cluster = clusterWithBestFit(candidates, fp)
 			}
 		}
 		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
@@ -443,6 +467,27 @@ func notAdmittedReasonFor(fitAtTickStart bool, footprint domain.Footprint, short
 		return domain.NotAdmittedCapacityUnavailable + ": short " + footprintStr(shortage)
 	}
 	return domain.NotAdmittedCapacityUnavailable
+}
+
+// eligibleClusters narrows the clusters a job may be placed on to the ones that can actually run
+// it. Today that is one capability — multi-node execution — and a single-node job sees every
+// cluster, exactly as before.
+//
+// The returned map shares its Footprint values with avail rather than copying them, so the
+// in-place reservations admission makes against the returned view are the same numbers every
+// later job in this tick reads. A copy here would let a job admitted through the narrowed view
+// be double-booked by one placed through the full one.
+func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[string]bool, exp *domain.Experiment) map[string]domain.Footprint {
+	if exp.Job.Nodes() <= 1 {
+		return avail
+	}
+	out := make(map[string]domain.Footprint, len(avail))
+	for cluster, footprint := range avail {
+		if multiNodeCapable[cluster] {
+			out[cluster] = footprint
+		}
+	}
+	return out
 }
 
 func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
@@ -552,7 +597,7 @@ func preemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources ma
 	// cover and the disbalance evictor with no deficit to explain, exactly when a neighbour's
 	// disproportionate request was the reason nothing fit.
 	addNodeResourceShortfall(out, byNode, nodeResources, labelsByNode, exp)
-	if exp.Job.AcceleratorCount <= 0 {
+	if exp.Job.TotalAccelerators() <= 0 {
 		return out
 	}
 	key := strings.ToLower(string(exp.AcceleratorType))
@@ -564,30 +609,39 @@ func preemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources ma
 	}
 	sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
 
-	perRank := int64(exp.Job.AcceleratorCount)
+	// The job's nodes, hungriest first, matched against the roomiest hosts. For an ungrouped job
+	// every node wants the same count and the order is immaterial; for a grouped one, pairing the
+	// learner with the emptiest host is the assignment that leaves the smallest real shortage.
+	perRank := make([]int64, 0, exp.Job.Nodes())
+	for _, shape := range exp.Job.NodeShapes() {
+		if shape.AcceleratorCount > 0 {
+			perRank = append(perRank, shape.AcceleratorCount)
+		}
+	}
+	sort.Slice(perRank, func(i, j int) bool { return perRank[i] > perRank[j] })
 	var missing int64
 	if requiresDistinctHosts(exp) {
-		for rank := 0; rank < exp.Job.Nodes(); rank++ {
+		for rank, need := range perRank {
 			available := int64(0)
 			if rank < len(capacities) {
 				available = capacities[rank]
 			}
-			if available < perRank {
-				missing += perRank - available
+			if available < need {
+				missing += need - available
 			}
 		}
 	} else {
-		for rank := 0; rank < exp.Job.Nodes(); rank++ {
+		for _, need := range perRank {
 			if len(capacities) == 0 {
-				missing += perRank
+				missing += need
 				continue
 			}
 			sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
-			if capacities[0] < perRank {
-				missing += perRank - capacities[0]
+			if capacities[0] < need {
+				missing += need - capacities[0]
 				capacities[0] = 0
 			} else {
-				capacities[0] -= perRank
+				capacities[0] -= need
 			}
 		}
 	}
@@ -679,7 +733,10 @@ func placeAtFlavor(avail map[string]domain.Footprint, nodeAvail, nodeResources m
 }
 
 func requiresDistinctHosts(exp *domain.Experiment) bool {
-	if exp.Job.Nodes() <= 1 || exp.Job.AcceleratorCount <= 0 {
+	// TotalAccelerators rather than the top-level per-node count: a grouped job states its counts
+	// per group and leaves the top-level field empty, which read literally would say every
+	// heterogeneous job is happy to stack all its ranks on one host.
+	if exp.Job.Nodes() <= 1 || exp.Job.TotalAccelerators() <= 0 {
 		return false
 	}
 	return exp.Job.Topology == nil || exp.Job.Topology.SpreadAcrossHosts == nil || *exp.Job.Topology.SpreadAcrossHosts
@@ -734,36 +791,38 @@ func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string
 //
 // This is resource-vector feasibility, not proof that the runtime will schedule the job: taints,
 // volumes and affinity are the runtime's own concerns and are not modelled here.
+// It walks domain.JobSpec.NodeShapes() — one entry per node, which for a heterogeneous (grouped)
+// job are genuinely different shapes. An averaged shape would be the one thing that must not be
+// used here: no node ever holds the average of a learner and 64 actors, so a job proven to fit
+// against it fits nowhere.
 func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
-	perRank := perRankNodeResources(exp)
-	if exp.Job.AcceleratorCount <= 0 {
-		// No accelerator to anchor it to a node, but it still has to land somewhere with room.
-		return reserveAnyNode(nodeResources, labelsByNode, exp, perRank)
-	}
 	key := string(exp.AcceleratorType)
-	nodes := make([]string, 0, len(byNode))
-	for node := range byNode {
-		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			nodes = append(nodes, node)
-		}
-	}
-	sort.Strings(nodes)
+	// Two candidate sets: a node that reported accelerators, and any node the cluster reported
+	// resources for. A node needing no accelerator must not be confined to accelerator nodes.
+	acceleratorNodes := qualifyingNodes(byNode, labelsByNode, exp)
+	plainNodes := qualifyingNodes(nodeResources, labelsByNode, exp)
 	used := make(map[string]bool)
-	for rank := 0; rank < exp.Job.Nodes(); rank++ {
+	for _, shape := range exp.Job.NodeShapes() {
+		nodes := plainNodes
+		if shape.AcceleratorCount > 0 {
+			nodes = acceleratorNodes
+		}
 		selected := ""
 		var nodeKey string
 		for _, node := range nodes {
 			if requiresDistinctHosts(exp) && used[node] {
 				continue
 			}
-			// byNode retains each device's own raw driver-reported casing (see
-			// domain.AcceleratorType.MatchesLabels re: casing) — find the matching key
-			// case-insensitively rather than assuming it equals key verbatim.
-			nodeKey = foldMatchingKey(byNode[node], key)
-			if byNode[node][nodeKey] < int64(exp.Job.AcceleratorCount) {
-				continue
+			if shape.AcceleratorCount > 0 {
+				// byNode retains each device's own raw driver-reported casing (see
+				// domain.AcceleratorType.MatchesLabels re: casing) — find the matching key
+				// case-insensitively rather than assuming it equals key verbatim.
+				nodeKey = foldMatchingKey(byNode[node], key)
+				if byNode[node][nodeKey] < shape.AcceleratorCount {
+					continue
+				}
 			}
-			if !nodeHasRoom(nodeResources[node], perRank) {
+			if !nodeHasRoom(nodeResources[node], shape.Resources) {
 				continue
 			}
 			selected = node
@@ -772,33 +831,46 @@ func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsB
 		if selected == "" {
 			return false
 		}
-		byNode[selected][nodeKey] -= int64(exp.Job.AcceleratorCount)
-		subtractNodeResources(nodeResources[selected], perRank)
+		if shape.AcceleratorCount > 0 {
+			byNode[selected][nodeKey] -= shape.AcceleratorCount
+		}
+		subtractNodeResources(nodeResources[selected], shape.Resources)
 		used[selected] = true
 	}
 	return true
 }
 
-// perRankNodeResources is what one rank of exp takes from the node it lands on. Experiment
-// footprints are whole-job totals (Footprint scales the per-rank request by the rank count), so
-// they are divided back down here rather than re-parsed — one definition of a job's shape.
-func perRankNodeResources(exp *domain.Experiment) map[string]int64 {
-	ranks := int64(exp.Job.Nodes())
-	if ranks < 1 {
-		ranks = 1
-	}
-	fp := exp.Footprint()
-	out := map[string]int64{}
-	for kind, key := range map[domain.ResourceKind]string{
-		domain.ResourceKindCPU:     domain.NodeResourceCPUMillicores,
-		domain.ResourceKindMemory:  domain.NodeResourceMemoryBytes,
-		domain.ResourceKindStorage: domain.NodeResourceStorageBytes,
-	} {
-		if total := fp[domain.ResourceKey{Kind: kind}]; total > 0 {
-			out[key] = total / ranks
+// qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels.
+func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) []string {
+	nodes := make([]string, 0, len(capacity))
+	for node := range capacity {
+		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			nodes = append(nodes, node)
 		}
 	}
-	return out
+	sort.Strings(nodes)
+	return nodes
+}
+
+// hardestNodeShape is the single node of exp that is hardest to place — most accelerators first,
+// then the largest fungible request. Diagnostics that describe a job by one shape (the shortfall
+// vector, and the preemption plan built from it) use this one, because covering the hardest node
+// is what actually unblocks the job. Every shape is identical for an ungrouped job, so this is
+// that job's per-node shape exactly as before.
+func hardestNodeShape(exp *domain.Experiment) domain.NodeShape {
+	var hardest domain.NodeShape
+	var hardestTotal int64
+	for _, shape := range exp.Job.NodeShapes() {
+		var total int64
+		for _, amount := range shape.Resources {
+			total += amount
+		}
+		if hardest.Resources == nil || shape.AcceleratorCount > hardest.AcceleratorCount ||
+			(shape.AcceleratorCount == hardest.AcceleratorCount && total > hardestTotal) {
+			hardest, hardestTotal = shape, total
+		}
+	}
+	return hardest
 }
 
 func nodeHasRoom(available, needed map[string]int64) bool {
@@ -825,46 +897,17 @@ func subtractNodeResources(available, used map[string]int64) {
 	}
 }
 
-// reserveAnyNode places a job with no accelerator on the first node with room for it.
-func reserveAnyNode(nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment, perRank map[string]int64) bool {
-	nodes := make([]string, 0, len(nodeResources))
-	for node := range nodeResources {
-		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			nodes = append(nodes, node)
-		}
-	}
-	sort.Strings(nodes)
-	used := make(map[string]bool)
-	for rank := 0; rank < exp.Job.Nodes(); rank++ {
-		selected := ""
-		for _, node := range nodes {
-			if requiresDistinctHosts(exp) && used[node] {
-				continue
-			}
-			if nodeHasRoom(nodeResources[node], perRank) {
-				selected = node
-				break
-			}
-		}
-		if selected == "" {
-			return false
-		}
-		subtractNodeResources(nodeResources[selected], perRank)
-		used[selected] = true
-	}
-	return true
-}
-
 // addNodeResourceShortfall folds in what the *least* deficient qualifying node still lacks in the
 // fungible dimensions. Least deficient because covering that node covers the job: the shortage is
 // what has to be freed somewhere, not everywhere.
 func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) {
-	needed := perRankNodeResources(exp)
+	hardest := hardestNodeShape(exp)
+	needed := hardest.Resources
 	if len(needed) == 0 {
 		return
 	}
 	key := strings.ToLower(string(exp.AcceleratorType))
-	perRank := int64(exp.Job.AcceleratorCount)
+	perRank := hardest.AcceleratorCount
 
 	var best map[string]int64
 	var bestTotal int64
