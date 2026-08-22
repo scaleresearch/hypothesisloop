@@ -34,6 +34,11 @@ CLUSTER_EXCLUSIVE=(
   node-and-daemonset-faults
   connectivity-loss
   burst-fair-round-robin
+  # Saturates an entire accelerator type (all 8 A100s) to make a guaranteed job preempt a burst
+  # one. Any other scenario holding a single A100 -- including one the scheduler legitimately
+  # placed there as an acceptable alternate -- means the setup never reaches saturation and the
+  # scenario fails having tested nothing. Also in SLOW_TESTS, so it stays opt-in.
+  preemption-requeue
 )
 
 # Capacity/preemption scenarios deliberately hold real resources across multiple scheduler ticks.
@@ -104,7 +109,11 @@ for f in "$DIR"/scenarios/*.sh; do
   if is_hardware_only "$name"; then
     [[ -n "${RUN_HARDWARE_TESTS:-}" ]] && hardware_set+=("$name")
   elif is_exclusive "$name"; then
-    exclusive_set+=("$name")
+    # The two lists compose: exclusivity says how a scenario must run, SLOW_TESTS says whether
+    # this invocation runs it at all. A scenario in both stays opt-in and still runs alone.
+    if ! is_slow "$name" || [[ -n "${RUN_SLOW:-}" ]]; then
+      exclusive_set+=("$name")
+    fi
   elif is_slow "$name"; then
     [[ -n "${RUN_SLOW:-}" ]] && slow_set+=("$name")
   else
@@ -142,6 +151,10 @@ export SCENARIO_TIMEOUT_SECONDS
 scenario_timeout() {
   case "$1" in
     never-reported-metrics) echo 1500 ;;
+    # Three sequential phases, each of which waits out a real platform window: heartbeat
+    # freshness, capacity staleness, then reconvergence after reconnect. Shortening any of them
+    # would not make the scenario faster, it would stop it testing the window it exists for.
+    connectivity-loss) echo 480 ;;
     *) if is_slow "$1"; then echo "$SLOW_SCENARIO_TIMEOUT_SECONDS"; else echo "$SCENARIO_TIMEOUT_SECONDS"; fi ;;
   esac
 }
