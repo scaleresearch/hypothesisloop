@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -61,6 +62,12 @@ const experimentColumns = `
 func (s *ExperimentsStore) CreateExperiment(ctx context.Context, exp *domain.Experiment) error {
 	return createExperiment(ctx, s.pool.pool, exp)
 }
+
+// pgUniqueViolation is PostgreSQL's SQLSTATE for a unique-constraint violation.
+const pgUniqueViolation = "23505"
+
+// ErrDuplicateExperiment reports that an experiment with this id already exists.
+var ErrDuplicateExperiment = errors.New("experiment already exists")
 
 func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Experiment) error {
 	artifacts := exp.Artifacts
@@ -122,6 +129,14 @@ INSERT INTO experiments (
 		exp.CreatedAt, exp.UpdatedAt,
 	)
 	if err != nil {
+		// The primary key is the only unique constraint here, so a unique violation means this
+		// id already exists — a duplicate submission, not a server fault. Two concurrent
+		// submissions of one id both find nothing in the pre-check; this is where the second
+		// loses, and it must lose as a duplicate.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return fmt.Errorf("%w: %s", ErrDuplicateExperiment, exp.ID)
+		}
 		return fmt.Errorf("experiments_store.CreateExperiment: %w", err)
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -38,8 +39,6 @@ type Store interface {
 	// CreateHypothesisFinding records the agent's post-run write-up, attached to the
 	// hypothesis the completed job tested (see domain.HypothesisFinding).
 	CreateHypothesisFinding(ctx context.Context, hypothesisID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
-	// CountRecentSubmissions enforces hourly submission rate limits.
-	CountRecentSubmissions(ctx context.Context, agentID, platformExpID string, since time.Time) (int, error)
 	// TransitionStatus atomically updates status only when current status matches from.
 	// Returns true if updated, false if already changed by a concurrent request.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
@@ -54,7 +53,7 @@ type QuotaService interface {
 	// GetAgentQuota looks up (agentID, platformExpID)'s quota row — used by computePriority to
 	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
-	AdmitExperiment(ctx context.Context, exp *domain.Experiment) error
+	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) error
 	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64) error
 }
 

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
@@ -87,21 +89,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason:  ReasonSummaryRequired,
 			Message: "agent has completed experiments without summaries — write summaries via POST /experiments/{id}/summary before submitting new jobs",
-		}
-	}
-
-	// 3b. Rate limit: cap submissions per hour to prevent queue flooding.
-	if s.credits.MaxSubmissionsPerHour > 0 {
-		since := time.Now().UTC().Add(-submissionRateLimitWindow)
-		count, err := s.store.CountRecentSubmissions(ctx, exp.AgentID, exp.PlatformExperimentID, since)
-		if err != nil {
-			return fmt.Errorf("scheduler: count recent submissions: %w", err)
-		}
-		if count >= s.credits.MaxSubmissionsPerHour {
-			return &AdmissionError{
-				Reason:  ReasonRateLimited,
-				Message: fmt.Sprintf("agent has submitted %d experiments in the last hour (limit: %d)", count, s.credits.MaxSubmissionsPerHour),
-			}
 		}
 	}
 
@@ -226,13 +213,31 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	exp.PriorityScore = priorityScore
 	// ClusterName is intentionally left unset here: the admission loop assigns it, capacity-aware,
 	// at the moment this job is actually admitted onto a specific cluster (see loop_tick.go).
-	if err := s.quota.AdmitExperiment(ctx, exp); err != nil {
+	// The submission rate limit is enforced inside this transaction rather than before it: the
+	// per-(agent, platform experiment) advisory lock it takes is exactly the scope the limit is
+	// expressed in, so N concurrent submissions can no longer all read the same pre-limit count
+	// and all pass.
+	rateLimit := db.SubmissionRateLimit{
+		MaxPerHour: s.credits.MaxSubmissionsPerHour,
+		Window:     submissionRateLimitWindow,
+	}
+	if err := s.quota.AdmitExperiment(ctx, exp, rateLimit); err != nil {
 		var insufficient interface{ InsufficientQuota() bool }
 		if !errors.As(err, &insufficient) {
+			if errors.Is(err, db.ErrDuplicateExperiment) {
+				return &AdmissionError{
+					Reason:  ReasonDuplicate,
+					Message: fmt.Sprintf("experiment %s already exists", exp.ID),
+				}
+			}
 			return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 		}
+		reason := ReasonInsufficientCredits
+		if strings.HasPrefix(err.Error(), db.RejectionRateLimited) {
+			reason = ReasonRateLimited
+		}
 		return &AdmissionError{
-			Reason:  ReasonInsufficientCredits,
+			Reason:  reason,
 			Message: err.Error(),
 		}
 	}

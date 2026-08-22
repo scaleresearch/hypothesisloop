@@ -1,6 +1,7 @@
 package db
 
 import (
+	"time"
 	"context"
 	"fmt"
 
@@ -89,7 +90,19 @@ func NewPlatformExperimentsFullStore(s *Store) *PlatformExperimentsFullStore {
 // PostgreSQL transaction. observed contains only the metrics-store snapshot taken immediately
 // before this call. An empty rejection reason means success; database failures are returned as
 // errors and must never be presented as quota rejection.
-func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error)) (string, error) {
+// RejectionRateLimited prefixes the rejection reason AdmitExperimentTx returns when the
+// submission rate limit is what refused the experiment, so a caller can tell that apart from a
+// quota rejection without matching on prose.
+const RejectionRateLimited = "rate_limited:"
+
+// SubmissionRateLimit bounds how many experiments one agent may submit into one platform
+// experiment within Window. MaxPerHour <= 0 means unlimited.
+type SubmissionRateLimit struct {
+	MaxPerHour int
+	Window     time.Duration
+}
+
+func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit) (string, error) {
 	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("admit experiment: begin: %w", err)
@@ -104,6 +117,22 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	cancelObserved()
 	if err != nil {
 		return "", fmt.Errorf("admit experiment: observed usage: %w", err)
+	}
+
+	// Counted here rather than before the transaction: the advisory lock above is per
+	// (agent, platform experiment), which is exactly the scope this limit is expressed in, so
+	// inside it the count cannot go stale. Outside it, N concurrent submissions all read the
+	// same pre-limit count and all pass.
+	if rateLimit.MaxPerHour > 0 {
+		var recent int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiments
+			WHERE agent_id = $1 AND platform_experiment_id = $2 AND created_at >= $3`,
+			exp.AgentID, exp.PlatformExperimentID, time.Now().UTC().Add(-rateLimit.Window)).Scan(&recent); err != nil {
+			return "", fmt.Errorf("admit experiment: recent submissions: %w", err)
+		}
+		if recent >= rateLimit.MaxPerHour {
+			return fmt.Sprintf("%s %d experiments submitted in the last hour (limit: %d)", RejectionRateLimited, recent, rateLimit.MaxPerHour), nil
+		}
 	}
 
 	var cut bool

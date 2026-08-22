@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -111,7 +112,7 @@ func (e *insufficientQuotaError) InsufficientQuota() bool { return true }
 // AdmitExperiment atomically validates every quota dimension and inserts the PostgreSQL desired
 // state under one per-agent advisory lock. No provisional row is exposed and no cleanup race is
 // possible: concurrent submissions observe a strict before-or-after ordering.
-func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment) error {
+func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) error {
 	reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
 		pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
@@ -125,7 +126,7 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 			return nil, err
 		}
 		return aq, nil
-	})
+	}, rateLimit)
 	if err != nil {
 		return err
 	}

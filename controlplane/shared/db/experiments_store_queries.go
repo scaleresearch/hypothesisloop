@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -200,18 +199,6 @@ func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID
 	var exists bool
 	err := s.pool.pool.QueryRow(ctx, q, agentID, platformExpID).Scan(&exists)
 	return exists, err
-}
-
-// CountRecentSubmissions counts experiments submitted by the agent within the given
-// platform experiment since the given time. Used to enforce per-agent submission rate limits.
-func (s *ExperimentsStore) CountRecentSubmissions(ctx context.Context, agentID, platformExpID string, since time.Time) (int, error) {
-	const q = `SELECT COUNT(*) FROM experiments
-	WHERE agent_id = $1
-	  AND platform_experiment_id = $2
-	  AND created_at >= $3`
-	var n int
-	err := s.pool.pool.QueryRow(ctx, q, agentID, platformExpID, since).Scan(&n)
-	return n, err
 }
 
 // ListUnsettledTerminalExperiments returns terminal experiments whose final usage has not yet
