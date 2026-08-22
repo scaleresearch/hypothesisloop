@@ -143,6 +143,14 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 	hostConfig := &container.HostConfig{
 		ShmSize: spec.ShmSizeBytes,
 		Binds:   binds,
+		// Without this the engine keeps every byte a training job ever wrote, on the same
+		// filesystem whose free space is reported as storage capacity — a long run fills the node
+		// and takes every other job on it down. Only the tail is ever read (FetchLogTail), so
+		// keeping more than a couple of files serves nothing.
+		LogConfig: container.LogConfig{
+			Type:   "json-file",
+			Config: map[string]string{"max-size": "64m", "max-file": "2"},
+		},
 		// Host networking: this runtime always runs on a single bare node with no orchestrated
 		// service mesh, so "reachable from inside the container" (e.g. API_URL) means
 		// whatever's reachable from the host itself, including localhost — a bridge network

@@ -101,11 +101,18 @@ func (e *Executor) GetLiveStorageCapacity(ctx context.Context) (available, total
 	if err != nil {
 		return 0, 0, err
 	}
-	total, _, err = scratchCapacityBytes(e.scratchDir)
+	total, free, err := scratchCapacityBytes(e.scratchDir)
 	if err != nil {
 		return 0, 0, err
 	}
+	// Two independent limits, so the smaller is what is actually available: what nothing has
+	// reserved yet, and what the filesystem physically still has. Reporting only the first
+	// ignores everything running jobs write — image layers, checkpoints, container logs — so a
+	// node with a full disk kept advertising room and admitted jobs that could not write.
 	available = total - requests.storageBytes
+	if free < available {
+		available = free
+	}
 	if available < 0 {
 		available = 0
 	}

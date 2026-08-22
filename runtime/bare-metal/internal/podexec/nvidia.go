@@ -3,6 +3,7 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -28,18 +29,33 @@ func probeNVIDIA(_ context.Context) ([]acceleratorDevice, error) {
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("podexec: nvml.DeviceGetCount: %v", nvml.ErrorString(ret))
 	}
+	// One sick GPU must not take the node's whole inventory with it (important.md #19): capacity
+	// is probed before desired state is reconciled, so an error here stops deletes as well as
+	// admissions. A skipped device under-reports capacity, which can only cost throughput; a
+	// failed probe reports none at all.
 	devices := make([]acceleratorDevice, 0, count)
 	for i := 0; i < count; i++ {
 		device, ret := nvml.DeviceGetHandleByIndex(i)
 		if ret != nvml.SUCCESS {
-			return nil, fmt.Errorf("podexec: nvml.DeviceGetHandleByIndex(%d): %v", i, nvml.ErrorString(ret))
+			log.Printf("podexec: skipping NVIDIA device %d: DeviceGetHandleByIndex: %v", i, nvml.ErrorString(ret))
+			continue
 		}
 		name, ret := device.GetName()
 		if ret != nvml.SUCCESS {
-			return nil, fmt.Errorf("podexec: nvml device %d GetName: %v", i, nvml.ErrorString(ret))
+			log.Printf("podexec: skipping NVIDIA device %d: GetName: %v", i, nvml.ErrorString(ret))
+			continue
+		}
+		// The device node's minor number, not the NVML enumeration index. The two agree on a
+		// freshly booted node and diverge after a driver reload or a hot-plug, and occupancy is
+		// tracked by /dev path — so booking against the index puts a job's claim on a device it
+		// is not using and leaves the one it is using looking free.
+		minor, ret := device.GetMinorNumber()
+		if ret != nvml.SUCCESS {
+			log.Printf("podexec: skipping NVIDIA device %d: GetMinorNumber: %v", i, nvml.ErrorString(ret))
+			continue
 		}
 		devices = append(devices, acceleratorDevice{
-			DevicePath: fmt.Sprintf("/dev/nvidia%d", i),
+			DevicePath: fmt.Sprintf("/dev/nvidia%d", minor),
 			Labels:     []string{"nvidia.com/gpu.product=" + normalizeGFDProductName(name)},
 		})
 	}

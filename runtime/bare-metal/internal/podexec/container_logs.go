@@ -73,8 +73,17 @@ func demuxLogLines(r io.Reader) ([]string, error) {
 			return lines, err
 		}
 		scanner := bufio.NewScanner(bytes.NewReader(payload))
+		// bufio.Scanner's default 64KB token limit is a silent truncation: a single long line —
+		// a stack trace, a dumped tensor, a progress bar with no newlines — ends the scan with
+		// ErrTooLong and every line after it in this frame is lost, unreported. The agent splits
+		// over-long lines for the wire itself (agentloop.splitLongLines), so the only thing this
+		// buffer has to do is not lose them first.
+		scanner.Buffer(make([]byte, 0, 64*1024), len(payload)+1)
 		for scanner.Scan() {
 			lines = append(lines, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			return lines, fmt.Errorf("podexec: read container log frame: %w", err)
 		}
 	}
 	return lines, nil
