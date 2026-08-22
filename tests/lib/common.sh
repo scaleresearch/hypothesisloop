@@ -132,6 +132,31 @@ PY
   JOB_FILE="$_rendered"
 fi
 
+# pin_job_flavor prints the path to a copy of JOB_FILE with acceptable_accelerator_types dropped,
+# so the job can only ever be admitted at the rate the scenario priced its budget against.
+#
+# Any scenario whose assertions are arithmetic on AccH needs this. The scheduler may legitimately
+# place a job on a pricier acceptable alternate when the requested type is saturated -- correct
+# behaviour, and invisible to the scenario -- at which point a budget sized as "exactly two of
+# these jobs" buys one, and the scenario reports a quota bug that isn't there.
+pin_job_flavor() {
+  local pinned="${TMPDIR_T}/job-pinned.yaml"
+  if [[ ! -s "$pinned" ]]; then
+    python3 - "$JOB_FILE" "$pinned" <<'PIN_PY'
+import sys
+import yaml
+
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    job = yaml.safe_load(f)
+job.pop("acceptable_accelerator_types", None)
+with open(dst, "w") as f:
+    yaml.safe_dump(job, f, sort_keys=False)
+PIN_PY
+  fi
+  echo "$pinned"
+}
+
 # Cluster preconditions (see preflight.sh); sourced last so scenarios run standalone get them too.
 source "${LIB_DIR}/preflight.sh"
 

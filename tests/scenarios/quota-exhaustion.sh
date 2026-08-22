@@ -47,7 +47,11 @@ echo "  budget=${BUDGET} AccH (2 x ${JOB_COST}), agent guaranteed=${GUARANTEED} 
 # around the 2x mark, leaving a full estimate's worth of headroom for a reconcile tick to notice
 # before the job would have ended on its own.
 OVERRUN_SECONDS=$(py "print($ESTIMATE_SECONDS * 3)")
-JOB=$(submit_job_ext "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "$JOB_FILE" \
+# Both jobs are pinned to the requested flavor: every assertion below is arithmetic on a budget
+# sized as exactly two of them, which only holds if both are actually priced at that rate. See
+# pin_job_flavor.
+PINNED_JOB_FILE=$(pin_job_flavor)
+JOB=$(submit_job_ext "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "$PINNED_JOB_FILE" \
   "{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${OVERRUN_SECONDS}\"}")
 echo "  ==> $JOB submitted (reserves ${ESTIMATE_SECONDS}s of budget, workload runs ~${OVERRUN_SECONDS}s)"
 
@@ -60,7 +64,7 @@ echo "  -- half 1: a queued reservation must not evict the running job --"
 # The budget covers two jobs, so this one is admitted as a reservation rather than refused. Its
 # estimate plus the running job's now account for 100% of the quota while the running job has
 # barely consumed anything — the exact state that used to evict the RUNNING job on the next tick.
-read -r QUEUE_CODE QUEUED_JOB <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS")"
+read -r QUEUE_CODE QUEUED_JOB <<< "$(submit_job_expect_code "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "" "$PINNED_JOB_FILE")"
 [[ "$QUEUE_CODE" -lt 400 ]] \
   && pass "second job accepted, so reservations now fill the whole quota (${QUEUED_JOB})" \
   || fail "second job was refused at submission (HTTP $QUEUE_CODE) — no reservation exists, so this half proves nothing; the budget is mis-sized"
