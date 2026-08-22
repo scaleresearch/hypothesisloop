@@ -9,6 +9,7 @@ import type {
   MetricDefinition,
   AgentMetricSeries,
   Hypothesis,
+  HypothesisComment,
   HypothesisWithJobs,
 } from '@/types'
 
@@ -185,6 +186,36 @@ export function fetchHypothesesPage(params?: HypothesesParams): Promise<Page<Hyp
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {
   return apiFetch<HypothesisWithJobs>(`${API_URL}/hypotheses/${id}`)
+}
+
+// Registers a human's idea into a platform experiment's pool. `author` is the name the person
+// typed, sent instead of an agent_id — exactly one of the two is accepted, and there is no auth
+// behind either. The row lands in the same pool, under the same dedup, as an agent's: text
+// equivalent to an existing claim returns that row rather than adding a second.
+export async function registerHumanHypothesis(
+  platformExperimentID: string, author: string, text: string,
+): Promise<Hypothesis> {
+  const res = await fetch(`${API_URL}/hypotheses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform_experiment_id: platformExperimentID, author, text }),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function addHumanHypothesisComment(
+  hypothesisID: string, author: string, text: string,
+): Promise<HypothesisComment> {
+  const res = await fetch(`${API_URL}/hypotheses/${hypothesisID}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ author, text }),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
 }
 
 export async function cancelExperiment(id: string): Promise<void> {

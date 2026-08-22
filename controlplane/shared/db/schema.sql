@@ -122,7 +122,15 @@ CREATE TABLE platform_experiments (
 
 CREATE TABLE hypotheses (
     id                     TEXT              PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    agent_id               TEXT              NOT NULL REFERENCES agents(id),
+    -- The owner column, and the only one anything keys ownership on: a job, quota and the
+    -- standings all read it. NULL on a human-submitted row, which is why such a row can own
+    -- none of those. Exactly one of agent_id/author is set (domain.ClassifyHypothesisOrigin).
+    agent_id               TEXT              REFERENCES agents(id),
+    -- domain.HypothesisSource. Existing rows backfill to 'agent' via this column default.
+    source                 TEXT              NOT NULL DEFAULT 'agent',
+    -- The name a human typed in the UI. There is no auth: it is a claim, not an identity,
+    -- exactly as agent_id is. Empty on an agent row.
+    author                 TEXT              NOT NULL DEFAULT '',
     platform_experiment_id TEXT              NOT NULL REFERENCES platform_experiments(id),
     text                   TEXT              NOT NULL,
     normalized_text        TEXT              NOT NULL,
@@ -133,6 +141,16 @@ CREATE TABLE hypotheses (
     created_at             TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
+-- No migration history: a fresh apply gets these from the column definitions above, an existing
+-- database from the ALTERs, and both land on the same 'agent'/'' backfill from the one DEFAULT
+-- clause each. Dropping NOT NULL on agent_id is what lets a human row exist at all, and is a
+-- no-op on a database that already has it dropped.
+ALTER TABLE hypotheses ALTER COLUMN agent_id DROP NOT NULL;
+ALTER TABLE hypotheses ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'agent';
+ALTER TABLE hypotheses ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
+
+-- The dedup index is deliberately not scoped by source: a human idea and an agent's restatement
+-- of the same claim are the same claim, and collide exactly as two agent rows would.
 CREATE UNIQUE INDEX idx_hypotheses_platform_normalized_text ON hypotheses(platform_experiment_id, normalized_text);
 CREATE INDEX idx_hypotheses_agent    ON hypotheses(agent_id);
 CREATE INDEX idx_hypotheses_platform ON hypotheses(platform_experiment_id);
@@ -170,7 +188,6 @@ CREATE TABLE experiments (
     estimated_cpu_core_hours    DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_ram_gb_hours      DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_storage_gb_hours  DOUBLE PRECISION NOT NULL DEFAULT 0,
-    artifacts                TEXT[]            NOT NULL DEFAULT '{}',
     queued_at                TIMESTAMPTZ,
     submitted_at             TIMESTAMPTZ,
 	eviction_reason          TEXT,
@@ -192,6 +209,11 @@ CREATE TABLE experiments (
 -- No migration history: a fresh apply gets this from the column definition above, an existing
 -- database from the ALTER, and both land on the same 0 backfill from the one DEFAULT clause.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+
+-- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
+-- nothing else, so a job could never report its own files; the real bytes live in the object
+-- store and GET /experiments/{id}/data lists them there. A copy here would only drift.
+ALTER TABLE experiments DROP COLUMN IF EXISTS artifacts;
 
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS not_admitted_reason TEXT;
 UPDATE experiments
@@ -258,10 +280,20 @@ CREATE INDEX idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesi
 CREATE TABLE hypothesis_comments (
     id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
     hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
-    agent_id       TEXT        NOT NULL REFERENCES agents(id),
+    -- NULL on a human comment; author carries the typed name instead. Exactly one of the two is
+    -- set, on the same rule as hypotheses (domain.ClassifyHypothesisOrigin).
+    agent_id       TEXT        REFERENCES agents(id),
+    source         TEXT        NOT NULL DEFAULT 'agent',
+    author         TEXT        NOT NULL DEFAULT '',
     text           TEXT        NOT NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Same no-migration-history pattern as hypotheses above: one DEFAULT clause backfills existing
+-- rows to 'agent'/'' whether the table is created fresh or altered in place.
+ALTER TABLE hypothesis_comments ALTER COLUMN agent_id DROP NOT NULL;
+ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'agent';
+ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
 
@@ -296,8 +328,13 @@ CREATE TABLE experiment_signups (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT        NOT NULL REFERENCES agents(id),
     signed_up_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- domain.SignupRole. Fixed at signup and never updated: a role change mid-run would
+    -- retroactively rewrite who a completed cut applied to. Only ranking reads it.
+    role                   TEXT        NOT NULL DEFAULT 'competitor',
     PRIMARY KEY (platform_experiment_id, agent_id)
 );
+
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'competitor';
 
 CREATE INDEX idx_experiment_signups_platform ON experiment_signups(platform_experiment_id);
 CREATE INDEX idx_experiment_signups_agent    ON experiment_signups(agent_id);

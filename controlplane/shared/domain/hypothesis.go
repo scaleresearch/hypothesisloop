@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -16,13 +18,55 @@ import (
 // experiment, replacing the old always-novel dedup stub. The same claim registered under a
 // different platform experiment is a distinct hypothesis — different research programs don't
 // share an idea pool.
+// The pool is shared with humans: AgentID is set on agent rows and empty on human ones, where
+// Author carries the name the person typed instead. See HypothesisSource.
 type Hypothesis struct {
 	ID                   string           `json:"id"`
 	AgentID              string           `json:"agent_id"`
+	Source               HypothesisSource `json:"source"`
+	Author               string           `json:"author"`
 	PlatformExperimentID string           `json:"platform_experiment_id"`
 	Text                 string           `json:"text"`
 	Status               HypothesisStatus `json:"status"`
 	CreatedAt            time.Time        `json:"created_at"`
+}
+
+// HypothesisSource records who put a row in the pool. A human watching a run adds an idea from
+// the UI under a name they type; there is no auth, so that name is a claim, not an identity —
+// exactly what agent_id already is. Human and agent rows sit in the same pool, behind the same
+// GET /hypotheses, under the same UNIQUE (platform_experiment_id, normalized_text) dedup. What
+// differs is what a row may do, not where it is kept: a human row owns no job, holds no quota,
+// and appears in no standings, because AgentID — the owner column every one of those paths keys
+// on — is empty on it.
+type HypothesisSource string
+
+const (
+	// HypothesisSourceAgent is a row registered by a signed-up agent, identified by AgentID.
+	HypothesisSourceAgent HypothesisSource = "agent"
+	// HypothesisSourceHuman is a row submitted from the UI, attributed to Author.
+	HypothesisSourceHuman HypothesisSource = "human"
+)
+
+// ErrHypothesisOrigin is what a caller sending a bad agent_id/author pair gets — bad input, so
+// the HTTP layer maps it to 400 rather than 500.
+var ErrHypothesisOrigin = errors.New("exactly one of agent_id/author must be set")
+
+// ClassifyHypothesisOrigin derives the source of a new pool row from the two mutually exclusive
+// ways of naming who is behind it. Exactly one of agentID/author must be set: both set would
+// make a row owned and unowned at once, and neither leaves it attributable to nobody. Neither
+// case is coerced into the other — this is the single place the rule is applied, at registration,
+// so no read path ever has to guess what a half-filled row meant.
+func ClassifyHypothesisOrigin(agentID, author string) (HypothesisSource, error) {
+	switch {
+	case agentID != "" && author != "":
+		return "", fmt.Errorf("%w, got both (agent_id=%q, author=%q)", ErrHypothesisOrigin, agentID, author)
+	case agentID != "":
+		return HypothesisSourceAgent, nil
+	case author != "":
+		return HypothesisSourceHuman, nil
+	default:
+		return "", fmt.Errorf("%w, got neither", ErrHypothesisOrigin)
+	}
 }
 
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
@@ -77,12 +121,16 @@ type HypothesisFinding struct {
 // requiring a terminal job. Contrast with HypothesisFinding, which is the measured write-up
 // bound to one finished job: a comment records a thought, a finding records a result. The two
 // must not overlap — recording the same conclusion as both re-pollutes the shared idea pool.
+// A comment carries the same origin pair as its hypothesis: AgentID on an agent's note, Author
+// on a human's, exactly one of the two (see ClassifyHypothesisOrigin).
 type HypothesisComment struct {
-	ID           string    `json:"id"`
-	HypothesisID string    `json:"hypothesis_id"`
-	AgentID      string    `json:"agent_id"`
-	Text         string    `json:"text"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string           `json:"id"`
+	HypothesisID string           `json:"hypothesis_id"`
+	AgentID      string           `json:"agent_id"`
+	Source       HypothesisSource `json:"source"`
+	Author       string           `json:"author"`
+	Text         string           `json:"text"`
+	CreatedAt    time.Time        `json:"created_at"`
 }
 
 // NormalizeHypothesisText collapses a hypothesis statement to a canonical form (lowercased,

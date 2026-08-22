@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Pagination } from '@/components/ui/pagination'
+import { PoolAuthor } from '@/components/human-idea'
 
 const PAGE_SIZE = 25
 
@@ -178,7 +179,9 @@ function HypothesesPageContent() {
                         {pe?.name ?? h.platform_experiment_id.slice(0, 8) + '…'}
                       </Link>
                     </td>
-                    <td className="mono">{h.agent_id}</td>
+                    <td style={{ fontSize: 12 }}>
+                      <PoolAuthor source={h.source} agentID={h.agent_id} author={h.author} />
+                    </td>
                     <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{relTime(h.created_at)}</td>
                   </tr>
                 )

@@ -9,6 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
@@ -67,6 +68,11 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	// 3ab. Durable-data ceiling.
+	if err := s.enforceDataCeiling(ctx, exp); err != nil {
+		return err
+	}
+
 	// 3aa. Stage job-length cap. Rejecting at submit is the honest half of the gate — the agent
 	// learns the limit before spending anything. The controller enforces the other half against
 	// observed runtime, since estimated_duration_hours is a claim, not a guarantee.
@@ -110,6 +116,17 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason:  ReasonMalformed,
 			Message: fmt.Sprintf("hypothesis %s not found — register it first via POST /hypotheses", exp.HypothesisID),
+		}
+	}
+	// A human-submitted idea is in the pool to be read, not to be run: it has no owner, so no
+	// quota to spend and no standing to earn. An agent that wants to test one registers its own
+	// hypothesis naming the original — the same rule that already covers testing another agent's
+	// idea. This is where "a human row cannot own a job" is enforced, because this is the one
+	// place a job is bound to a hypothesis.
+	if hyp.Source == domain.HypothesisSourceHuman {
+		return &AdmissionError{
+			Reason:  ReasonMalformed,
+			Message: fmt.Sprintf("hypothesis %s is a human-submitted idea (author %q) and cannot own a job — register your own hypothesis naming it, and submit against that", exp.HypothesisID, hyp.Author),
 		}
 	}
 	// The hypothesis must belong to the same platform experiment this job is submitted under.
@@ -237,4 +254,30 @@ func estimatedAcceleratorCost(exp *domain.Experiment) float64 {
 		return 0
 	}
 	return exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+}
+
+// enforceDataCeiling refuses a submission from an agent already at or over its durable-data
+// ceiling. The figure is asked of the object store, which is the only thing that knows what an
+// agent actually holds — there is no counter in PostgreSQL to drift from the bytes.
+//
+// This is the only place the ceiling is applied. Enforcing it mid-write would need a gateway in
+// the data path, and a job killed as it saves loses the run it was about to preserve; refusing
+// the next submission instead costs an agent nothing it has already earned.
+func (s *Service) enforceDataCeiling(ctx context.Context, exp *domain.Experiment) error {
+	if s.maxDataBytesPerAgent <= 0 {
+		return nil
+	}
+	held, err := s.dataStore.TotalBytes(ctx, objectstore.AgentPrefix(exp.PlatformExperimentID, exp.AgentID))
+	if err != nil {
+		return fmt.Errorf("scheduler: measure agent durable data: %w", err)
+	}
+	if held < s.maxDataBytesPerAgent {
+		return nil
+	}
+	return &AdmissionError{
+		Reason: ReasonDataQuotaExceeded,
+		Message: fmt.Sprintf(
+			"agent holds %d bytes of durable data in this platform experiment, at or over the %d-byte ceiling — delete what you no longer need under HYPOTHESISLOOP_DATA_URI (list a job's files with GET /experiments/{id}/data) before submitting again",
+			held, s.maxDataBytesPerAgent),
+	}
 }

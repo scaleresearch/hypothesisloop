@@ -24,13 +24,21 @@ var (
 // already registered *in that same platform experiment*. Agents should call this — and
 // retrieve the returned ID — before submitting an experiment, since ExperimentMeta.HypothesisID
 // is required and must belong to the same platform experiment as the job being submitted.
-func (s *Service) RegisterHypothesis(ctx context.Context, agentID, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error) {
-	h, alreadyExisted, err = s.store.FindOrCreateHypothesis(ctx, agentID, platformExperimentID, text)
+//
+// A human submitting from the UI passes author instead of agentID. This is the one place the
+// exactly-one-of rule is applied (domain.ClassifyHypothesisOrigin): an invalid pair is an error
+// here, never a value coerced into a row for some later read to interpret.
+func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error) {
+	source, err := domain.ClassifyHypothesisOrigin(agentID, author)
+	if err != nil {
+		return nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+	}
+	h, alreadyExisted, err = s.store.FindOrCreateHypothesis(ctx, source, agentID, author, platformExperimentID, text)
 	if err != nil {
 		return nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
 	s.logger.Info("hypothesis registered",
-		zap.String("id", h.ID), zap.String("agent", agentID),
+		zap.String("id", h.ID), zap.String("agent", agentID), zap.String("author", author),
 		zap.String("platform_experiment_id", platformExperimentID), zap.Bool("already_existed", alreadyExisted))
 	return h, alreadyExisted, nil
 }
@@ -108,8 +116,14 @@ func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID strin
 
 // AddHypothesisComment records a freeform, job-independent note against a hypothesis — see
 // domain.HypothesisComment for how this differs from a finding.
-func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentID, text string) (*domain.HypothesisComment, error) {
-	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, agentID, text)
+// A human commenting from the UI passes author instead of agentID, under the same exactly-one-of
+// rule registration applies.
+func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentID, author, text string) (*domain.HypothesisComment, error) {
+	source, err := domain.ClassifyHypothesisOrigin(agentID, author)
+	if err != nil {
+		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
+	}
+	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, source, agentID, author, text)
 	if err != nil {
 		if errors.Is(err, db.ErrUnknownAgent) {
 			return nil, fmt.Errorf("registry.AddHypothesisComment: %w", db.ErrUnknownAgent)
@@ -117,7 +131,7 @@ func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentI
 		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
 	}
 	s.logger.Info("hypothesis comment added",
-		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID))
+		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID), zap.String("author", author))
 	return c, nil
 }
 

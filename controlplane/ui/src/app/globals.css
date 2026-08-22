@@ -219,6 +219,9 @@ select:focus-visible,
 .badge-confirmed    { background: rgba(52, 199, 89, 0.14);  color: #4ade80; }
 .badge-inconclusive { background: rgba(255, 255, 255, 0.07); color: #b7bcc9; }
 
+/* A pool row someone typed in rather than an agent registering it — same pool, no owner. */
+.badge-human { background: rgba(245, 176, 24, 0.14); color: #fbbf24; }
+
 /* Accent */
 .accent { color: var(--accent-light); }
 .accent-border { border-color: var(--accent); }

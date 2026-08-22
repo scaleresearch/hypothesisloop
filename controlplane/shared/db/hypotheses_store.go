@@ -57,7 +57,9 @@ func NewHypothesesStore(pool *Pool) *HypothesesStore {
 	return &HypothesesStore{pool: pool}
 }
 
-const hypothesisColumns = `id, agent_id, platform_experiment_id, text, status, created_at`
+// agent_id is NULL on a human-submitted row and read back as the empty string, which is what
+// "no owner" means everywhere above the store — every ownership check compares against it.
+const hypothesisColumns = `id, COALESCE(agent_id, ''), source, author, platform_experiment_id, text, status, created_at`
 
 // newHypothesisID generates a UUIDv7-formatted string, matching the ID scheme used
 // elsewhere for agent-visible entities.
@@ -87,7 +89,11 @@ func newHypothesisID() (string, error) {
 // (platform_experiment_id, normalized_text) (shared/db/schema.sql) rather than any in-process novelty
 // heuristic. The same text registered under a different platform experiment is a distinct
 // hypothesis. Returns (hypothesis, alreadyExisted, error).
-func (s *HypothesesStore) FindOrCreateHypothesis(ctx context.Context, agentID, platformExperimentID, text string) (*domain.Hypothesis, bool, error) {
+//
+// source/agentID/author come already validated from registry.RegisterHypothesis (see
+// domain.ClassifyHypothesisOrigin) — the dedup below is deliberately blind to all three, so a
+// human idea and an agent's restatement of the same claim collide exactly as two agent rows do.
+func (s *HypothesesStore) FindOrCreateHypothesis(ctx context.Context, source domain.HypothesisSource, agentID, author, platformExperimentID, text string) (*domain.Hypothesis, bool, error) {
 	normalized := domain.NormalizeHypothesisText(text)
 	if normalized == "" {
 		return nil, false, fmt.Errorf("hypotheses_store.FindOrCreateHypothesis: text is empty")
@@ -106,6 +112,8 @@ func (s *HypothesesStore) FindOrCreateHypothesis(ctx context.Context, agentID, p
 	h := &domain.Hypothesis{
 		ID:                   id,
 		AgentID:              agentID,
+		Source:               source,
+		Author:               author,
 		PlatformExperimentID: platformExperimentID,
 		Text:                 text,
 		Status:               domain.HypothesisOpen,
@@ -113,10 +121,10 @@ func (s *HypothesesStore) FindOrCreateHypothesis(ctx context.Context, agentID, p
 	}
 
 	const q = `
-INSERT INTO hypotheses (id, agent_id, platform_experiment_id, text, normalized_text, status, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO hypotheses (id, agent_id, source, author, platform_experiment_id, text, normalized_text, status, created_at)
+VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (platform_experiment_id, normalized_text) DO NOTHING`
-	tag, err := s.pool.pool.Exec(ctx, q, h.ID, h.AgentID, h.PlatformExperimentID, h.Text, normalized, h.Status, h.CreatedAt)
+	tag, err := s.pool.pool.Exec(ctx, q, h.ID, h.AgentID, h.Source, h.Author, h.PlatformExperimentID, h.Text, normalized, h.Status, h.CreatedAt)
 	if err != nil {
 		return nil, false, fmt.Errorf("hypotheses_store.FindOrCreateHypothesis: insert: %w", err)
 	}
@@ -186,7 +194,7 @@ func (s *HypothesesStore) ListHypotheses(ctx context.Context, platformExperiment
 	args = append(args, limit)
 
 	q := `
-SELECT h.id, h.agent_id, h.platform_experiment_id, h.text, h.status, h.created_at,
+SELECT h.id, COALESCE(h.agent_id, ''), h.source, h.author, h.platform_experiment_id, h.text, h.status, h.created_at,
        COUNT(DISTINCT f.id) AS finding_count, COUNT(DISTINCT c.id) AS comment_count
 FROM hypotheses h
 LEFT JOIN hypothesis_findings f ON f.hypothesis_id = h.id
@@ -214,7 +222,7 @@ LIMIT $` + fmt.Sprint(len(args))
 	for rows.Next() {
 		h := &domain.Hypothesis{}
 		item := &HypothesisListItem{Hypothesis: h}
-		if err := rows.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.Status, &h.CreatedAt, &item.FindingCount, &item.CommentCount); err != nil {
+		if err := rows.Scan(&h.ID, &h.AgentID, &h.Source, &h.Author, &h.PlatformExperimentID, &h.Text, &h.Status, &h.CreatedAt, &item.FindingCount, &item.CommentCount); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListHypotheses: scan: %w", err)
 		}
 		out = append(out, item)
@@ -275,7 +283,7 @@ FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 
 // CreateHypothesisComment records a freeform, job-independent note against a hypothesis — see
 // domain.HypothesisComment for how this differs from a finding.
-func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesisID, agentID, text string) (*domain.HypothesisComment, error) {
+func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesisID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
 	id, err := newHypothesisID()
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
@@ -284,13 +292,15 @@ func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesi
 		ID:           id,
 		HypothesisID: hypothesisID,
 		AgentID:      agentID,
+		Source:       source,
+		Author:       author,
 		Text:         text,
 		CreatedAt:    time.Now().UTC(),
 	}
 	const q = `
-INSERT INTO hypothesis_comments (id, hypothesis_id, agent_id, text, created_at)
-VALUES ($1, $2, $3, $4, $5)`
-	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.AgentID, c.Text, c.CreatedAt); err != nil {
+INSERT INTO hypothesis_comments (id, hypothesis_id, agent_id, source, author, text, created_at)
+VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7)`
+	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.AgentID, c.Source, c.Author, c.Text, c.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
 			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w: %s", ErrUnknownAgent, agentID)
@@ -304,7 +314,7 @@ VALUES ($1, $2, $3, $4, $5)`
 // first — bounded like ListFindingsByHypothesis, for the same reason.
 func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
 	limit, offset = clampHypothesisPage(limit, offset)
-	const q = `SELECT id, hypothesis_id, agent_id, text, created_at
+	const q = `SELECT id, hypothesis_id, COALESCE(agent_id, ''), source, author, text, created_at
 FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
 	rows, err := s.pool.pool.Query(ctx, q, hypothesisID, limit, offset)
 	if err != nil {
@@ -315,7 +325,7 @@ FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 	out := []*domain.HypothesisComment{} // non-nil: see ListHypotheses for why
 	for rows.Next() {
 		c := &domain.HypothesisComment{}
-		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.AgentID, &c.Text, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.AgentID, &c.Source, &c.Author, &c.Text, &c.CreatedAt); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListCommentsByHypothesis: scan: %w", err)
 		}
 		out = append(out, c)
@@ -325,7 +335,7 @@ FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 
 func scanHypothesis(row rowScanner) (*domain.Hypothesis, error) {
 	h := &domain.Hypothesis{}
-	if err := row.Scan(&h.ID, &h.AgentID, &h.PlatformExperimentID, &h.Text, &h.Status, &h.CreatedAt); err != nil {
+	if err := row.Scan(&h.ID, &h.AgentID, &h.Source, &h.Author, &h.PlatformExperimentID, &h.Text, &h.Status, &h.CreatedAt); err != nil {
 		return nil, err
 	}
 	return h, nil
@@ -341,6 +351,8 @@ var ErrNotOwner = fmt.Errorf("hypotheses_store: caller does not own this hypothe
 // read-then-check) so there's no TOCTOU window. Returns ErrNotOwner if the hypothesis exists but
 // belongs to a different agent, or a "not found" nil/nil if no such hypothesis exists at all —
 // callers distinguish the two with a preceding existence check if they need a different message.
+// A human-submitted row has a NULL agent_id, so no caller ever matches it and its status stays
+// where it was registered — no separate rule, the owner column simply names nobody.
 func (s *HypothesesStore) UpdateHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
 	const q = `UPDATE hypotheses SET status = $3 WHERE id = $1 AND agent_id = $2 RETURNING ` + hypothesisColumns
 	row := s.pool.pool.QueryRow(ctx, q, id, callerAgentID, status)

@@ -33,6 +33,7 @@ import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
+import { AddIdeaForm } from '@/components/human-idea'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -508,7 +509,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  const { data: hypothesesPage, error: hypothesesError } = useSWR(
+  const { data: hypothesesPage, error: hypothesesError, mutate: mutateHypotheses } = useSWR(
     ['pe-hypotheses', id],
     () => fetchHypothesesPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
@@ -823,6 +824,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               href={`/hypotheses?pe=${pe.id}`}
             />
           </div>
+        </PodContent>
+      </Pod>
+
+      {/* Add an idea to the pool */}
+      <Pod>
+        <PodHeader>Add an idea to the hypothesis pool</PodHeader>
+        <PodContent>
+          <AddIdeaForm platformExperimentID={pe.id} onAdded={() => mutateHypotheses()} />
         </PodContent>
       </Pod>
 

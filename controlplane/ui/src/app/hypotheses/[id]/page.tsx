@@ -9,6 +9,7 @@ import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { formatAccH, relTime } from '@/lib/format'
+import { PoolAuthor, AddCommentForm } from '@/components/human-idea'
 
 // The registry's job record has no final_metric_value field at all (confirmed against the live
 // API — it was always undefined, rendering "—" for every job regardless of outcome). The real
@@ -35,7 +36,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const { id } = params
   const router = useRouter()
 
-  const { data, error } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
+  const { data, error, mutate } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
 
   const { data: pe } = useSWR<PlatformExperiment>(
     data ? ['pe', data.platform_experiment_id] : null,
@@ -54,6 +55,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   const jobs = data.jobs ?? []
   const findings = data.findings ?? []
+  const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
   const primaryMetric = pe?.metrics?.[0]
 
@@ -73,7 +75,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
             <Badge status={data.status ?? 'open'}>{data.status ?? 'open'}</Badge>
           </h1>
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
-            Registered by {data.agent_id} · {relTime(data.created_at)}
+            Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
           </p>
         </div>
         <Link href="/hypotheses" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All hypotheses</Link>
@@ -132,6 +134,35 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               })}
             </div>
           )}
+        </PodContent>
+      </Pod>
+
+      <Pod>
+        <PodHeader>
+          Comments
+          {data.comment_count > 0 && (
+            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+              ({data.comment_count}{data.comment_count > comments.length ? `, showing ${comments.length}` : ''})
+            </span>
+          )}
+        </PodHeader>
+        <PodContent>
+          {comments.length === 0 ? (
+            <EmptyState>No comments yet — a note here needs no job behind it.</EmptyState>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {comments.map(c => (
+                <div key={c.id} className="wa-mini-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11 }}>
+                    <PoolAuthor source={c.source} agentID={c.agent_id} author={c.author} />
+                    <span className="text-dim mono">{relTime(c.created_at)}</span>
+                  </div>
+                  <p style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{c.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          <AddCommentForm hypothesisID={data.id} onAdded={() => mutate()} />
         </PodContent>
       </Pod>
 
