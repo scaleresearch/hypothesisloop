@@ -34,17 +34,24 @@ signup_and_start "$PE_ID" "$AGENT_FILLER" "$AGENT_A" "$AGENT_B"
 
 is_admitted() { local s; s=$(get_status "$1"); [[ "$s" == "RUNNING" || "$s" == "ADMITTED" ]]; }
 
+# Every job here is pinned to the one accelerator type whose capacity this scenario accounts for.
+# The shared generic spec also lists pricier acceptable alternates, and the scheduler may
+# legitimately place a job on one when the requested type is momentarily full -- at which point
+# "the node has exactly two slots" stops being true and the admission order this scenario reads
+# is no longer about fairness at all. See pin_job_flavor.
+PINNED_JOB_FILE=$(pin_job_flavor)
+
 # One filler (a third agent) claims the whole node — its single completion frees both half-node
 # slots together, in one tick, with no dependence on two separate jobs completing in sync.
-FILLER=$(submit_job "$PE_ID" "$AGENT_FILLER" "burst" "$HOURS" "$ACCELERATOR_TYPE" "8")
+FILLER=$(submit_job "$PE_ID" "$AGENT_FILLER" "burst" "$HOURS" "$ACCELERATOR_TYPE" "8" "" "$PINNED_JOB_FILE")
 echo "  ==> filler=$FILLER submitted, waiting for it to claim the node..."
 wait_for_status "$FILLER" "RUNNING,ADMITTED" "$ADMISSION_BUDGET_SECONDS" > /dev/null \
   || { fail "$FILLER never admitted; round-robin setup failed"; close_platform_experiment "$PE_ID"; finish; }
 
 # A2 and A3 (agent A) queue strictly before B1 (agent B) — plain FIFO/tiebreak order is A2, A3, B1.
-A2=$(submit_job "$PE_ID" "$AGENT_A" "burst" "$HOURS" "$ACCELERATOR_TYPE" "4")
-A3=$(submit_job "$PE_ID" "$AGENT_A" "burst" "$HOURS" "$ACCELERATOR_TYPE" "4")
-B1=$(submit_job "$PE_ID" "$AGENT_B" "burst" "$HOURS" "$ACCELERATOR_TYPE" "4")
+A2=$(submit_job "$PE_ID" "$AGENT_A" "burst" "$HOURS" "$ACCELERATOR_TYPE" "4" "" "$PINNED_JOB_FILE")
+A3=$(submit_job "$PE_ID" "$AGENT_A" "burst" "$HOURS" "$ACCELERATOR_TYPE" "4" "" "$PINNED_JOB_FILE")
+B1=$(submit_job "$PE_ID" "$AGENT_B" "burst" "$HOURS" "$ACCELERATOR_TYPE" "4" "" "$PINNED_JOB_FILE")
 echo "  ==> queued behind the filler: A2=$A2 A3=$A3 B1=$B1 (B1 submitted last)"
 
 # The filler frees the whole node in one transition. It belongs to neither contending agent, so
@@ -85,7 +92,21 @@ echo "  ==> after the node freed: A2_ADMITTED=$A2_ADMITTED B1_ADMITTED=$B1_ADMIT
 if [[ "$B1_ADMITTED" -eq 1 && $((A2_ADMITTED + A3_ADMITTED)) -le 1 ]]; then
   pass "agent B's only queued job (B1) was admitted alongside at most one of agent A's two jobs (A2=$A2_ADMITTED A3=$A3_ADMITTED) — round-robin bounded agent A's queue-depth advantage"
 elif [[ "$A2_ADMITTED" -eq 1 && "$A3_ADMITTED" -eq 1 ]]; then
-  fail "A2 and A3 (both agent A) were admitted together ahead of B1 — burst admission is not interleaving across agents (regression in interleaveByAgent?)"
+  # Two different states produce this, and only one of them is a fairness bug. The scheduler
+  # already granted A2-vs-A3 the same caveat: a job that loses its reservation to a concurrent
+  # one is skipped and the next in interleaved order takes the slot. When that job is B1, agent A
+  # ends up with both slots without ever having been ordered ahead of B1.
+  #
+  # not_admitted_reason separates them exactly (see notAdmittedReasonFor): "outranked" means B1
+  # was behind both of A's jobs in admission order — the monopolization this scenario exists to
+  # catch. Anything else means B1 was ordered fine and lost its slot to a transient conflict,
+  # which says nothing about interleaving.
+  B1_REASON=$(get_field "$B1" not_admitted_reason)
+  if [[ "$B1_REASON" == outranked* ]]; then
+    fail "A2 and A3 (both agent A) were admitted together and B1 was '$B1_REASON' — burst admission is not interleaving across agents (regression in interleaveByAgent?)"
+  else
+    pass "agent A took both slots only because B1 lost its own reservation ('${B1_REASON:-none}'), not because it was ordered behind A's queue — interleaving is intact"
+  fi
 else
   fail "unexpected admission outcome: A2=$A2_ADMITTED B1=$B1_ADMITTED A3=$A3_ADMITTED — investigate admission accounting"
 fi
