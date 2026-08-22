@@ -187,7 +187,11 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if err != nil {
 		return fmt.Errorf("scheduler: get running and queued: %w", err)
 	}
-	noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, activeExps)
+	// Never against itself. Re-submitting an already-QUEUED job (step 7's `existing` branch)
+	// otherwise finds its own row in the active set, scores itself a duplicate of itself, and
+	// persists the depressed priority that follows — reprioritize excludes it for the same
+	// reason.
+	noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
 	if err != nil {
 		return fmt.Errorf("scheduler: compute novelty: %w", err)
 	}

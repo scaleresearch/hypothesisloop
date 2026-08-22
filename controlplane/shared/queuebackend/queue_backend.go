@@ -61,27 +61,6 @@ func (b *Backend) SetupCluster(_ context.Context) error { return nil }
 // that could disagree with experiments.status.
 func (b *Backend) CreateWorkload(_ context.Context, _ *domain.Experiment) error { return nil }
 
-// WaitForJobDeletion waits until no fresh actual-state phase exists. Callers must first remove
-// the experiment from desired state so the cluster agent deletes it.
-func (b *Backend) WaitForJobDeletion(ctx context.Context, exp *domain.Experiment, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		phase, found, err := metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)
-		if err != nil {
-			return err
-		}
-		if found && phase == workload.JobPhaseGone {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("queuebackend: timed out waiting for job deletion report: %s", exp.ID)
-}
-
 // PollJobPhase reads the latest fresh phase metric pushed by the cluster agent.
 func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error) {
 	phase, found, err := metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)

@@ -2,7 +2,6 @@ package workload
 
 import (
 	"context"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -16,17 +15,14 @@ type Backend interface {
 	// per cluster at control-plane startup.
 	SetupCluster(ctx context.Context) error
 
+	// There is deliberately no DeleteWorkload: the source of truth for "should exp's job exist"
+	// is exp's own status. A caller that needs a job gone (preemption, eviction) moves it out of
+	// SUBMITTED/ADMITTED/RUNNING and the cluster agent reconciles it away.
+	//
 	// CreateWorkload places exp's job onto its target cluster. Called only after the control
 	// plane's own admission decision (services/scheduler) — implementations are not expected
 	// to queue or suspend; if the backend needs to do its own gating, do it here.
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
-
-	// WaitForJobDeletion blocks until exp's job is confirmed gone or timeout elapses. There is
-	// deliberately no separate DeleteWorkload: the source of truth for "should exp's job
-	// exist" is exp's own status, set by the caller before this is invoked. Callers that need
-	// a job gone (preemption, eviction) must update status away from
-	// SUBMITTED/ADMITTED/RUNNING first, then call this to wait for confirmation.
-	WaitForJobDeletion(ctx context.Context, exp *domain.Experiment, timeout time.Duration) error
 
 	// PollJobPhase reports the current lifecycle phase of exp's job.
 	PollJobPhase(ctx context.Context, exp *domain.Experiment) (JobPhase, error)

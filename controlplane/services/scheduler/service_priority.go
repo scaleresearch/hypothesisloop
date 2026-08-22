@@ -28,13 +28,7 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 		// otherwise leave every job after it with a stale score for the rest of this tick. Log
 		// and skip just this job instead, mirroring completionFractions' per-item skip in
 		// loop_preempt.go.
-		othersActive := make([]*domain.Experiment, 0, len(activeExps))
-		for _, other := range activeExps {
-			if other.ID != exp.ID {
-				othersActive = append(othersActive, other)
-			}
-		}
-		noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, othersActive)
+		noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
 		if err != nil {
 			s.logger.Warn("reprioritize: compute novelty failed; leaving stale priority",
 				zap.String("exp", exp.ID), zap.Error(err))
@@ -95,4 +89,16 @@ func (s *Service) computePriority(ctx context.Context, exp *domain.Experiment, n
 		w.W3CostEfficiency*costEfficiency
 
 	return score, nil
+}
+
+// excludeExperiment returns exps without the row for id. Novelty is "how unlike everything else
+// is this?", so a job compared against a set containing itself scores itself a duplicate.
+func excludeExperiment(exps []*domain.Experiment, id string) []*domain.Experiment {
+	out := make([]*domain.Experiment, 0, len(exps))
+	for _, e := range exps {
+		if e.ID != id {
+			out = append(out, e)
+		}
+	}
+	return out
 }
