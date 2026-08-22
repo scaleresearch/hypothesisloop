@@ -24,17 +24,24 @@ source "$DIR/../lib/cluster.sh"
 # without hardcoding a vendor.
 VENDOR="${TEST_ACCELERATOR_TYPE%%/*}"
 
-# Pick the node with the most accelerators of that vendor, and read its allocatable CPU.
-read -r NODE NODE_ACCELERATORS NODE_CPU <<< "$(kubectl get nodes -o json | py "
+# Pick the node carrying the flavor the jobs will actually request — not merely the vendor. The
+# hog's CPU is sized against this node, so choosing a node the jobs cannot land on measures one
+# node's shape while the jobs run on another.
+read -r NODE NODE_ACCELERATORS NODE_CPU FLAVOR_NODES <<< "$(kubectl get nodes -o json | py "
 import json, sys
+key, _, value = '$TEST_ACCELERATOR_TYPE'.partition('=')
 best = ('', 0, 0.0)
+carriers = 0
 for node in json.load(sys.stdin)['items']:
+    if node['metadata'].get('labels', {}).get(key) != value:
+        continue
+    carriers += 1
     alloc = node['status'].get('allocatable', {})
     count = 0
-    for key, value in alloc.items():
-        if key.startswith('$VENDOR/'):
+    for k, v in alloc.items():
+        if k.startswith('$VENDOR/'):
             try:
-                count += int(value)
+                count += int(v)
             except ValueError:
                 pass
     if count <= best[1]:
@@ -42,9 +49,18 @@ for node in json.load(sys.stdin)['items']:
     cpu = alloc.get('cpu', '0')
     cores = float(cpu[:-1]) / 1000.0 if cpu.endswith('m') else float(cpu)
     best = (node['metadata']['name'], count, cores)
-print(best[0] or '-', best[1], best[2])
+print(best[0] or '-', best[1], best[2], carriers)
 ")"
-echo "  node=${NODE} accelerators=${NODE_ACCELERATORS} allocatable_cpu=${NODE_CPU}"
+echo "  node=${NODE} accelerators=${NODE_ACCELERATORS} allocatable_cpu=${NODE_CPU} nodes_with_this_flavor=${FLAVOR_NODES}"
+
+# The blocked job must have nowhere else to go, or it simply runs on another node and the evictor
+# is right not to fire. That is correct platform behaviour, not a failure — but it means this
+# cluster cannot express the shape under test.
+if [[ "${FLAVOR_NODES:-0}" -ne 1 ]]; then
+  echo "  [SKIP] ${FLAVOR_NODES} nodes carry ${TEST_ACCELERATOR_TYPE}; the blocked job would just run on another one"
+  echo "  [SKIP] this scenario asserted nothing — it is not evidence the evictor works"
+  finish
+fi
 
 # The arithmetic that decides whether this cluster can express the shape at all. A job holding one
 # of N accelerators is entitled to node_cpu/N cores; the pass fires above 3x that, i.e. above
@@ -87,7 +103,7 @@ BLOCKED_NOW=$(py "print(float('$BLOCKED_CPU') > float('$NODE_CPU') - float('$HOG
 
 JOB_HOURS="$(scale_budget 0.05)"
 HOG=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "" "" "" "" \
-  "{\"cpu\": \"${HOG_CPU}\", \"accelerator_count\": 1}")
+  "{\"cpu\": \"${HOG_CPU}\", \"accelerator_count\": 1, \"acceptable_accelerator_types\": []}")
 echo "  ==> hog $HOG submitted"
 S=$(wait_for_status "$HOG" "RUNNING" "$ADMISSION_BUDGET_SECONDS" || true)
 [[ "$S" == "RUNNING" ]] \
@@ -95,8 +111,10 @@ S=$(wait_for_status "$HOG" "RUNNING" "$ADMISSION_BUDGET_SECONDS" || true)
   || { fail "hog never reached RUNNING (status=$S) — nothing to strand accelerators"; close_platform_experiment "$PE_ID"; finish; }
 
 # A modest job that fits the idle accelerators perfectly and is blocked only by the hog's CPU.
+# Alternatives are cleared for the same reason the single-carrier check above exists: given one it
+# would land elsewhere, correctly, and prove nothing about disbalance.
 BLOCKED=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "$JOB_HOURS" "" "" "" "" \
-  "{\"cpu\": \"${BLOCKED_CPU}\", \"accelerator_count\": 1}")
+  "{\"cpu\": \"${BLOCKED_CPU}\", \"accelerator_count\": 1, \"acceptable_accelerator_types\": []}")
 echo "  ==> blocked job $BLOCKED submitted (${BLOCKED_CPU} cores, 1 accelerator — fits an idle one only once the hog is gone)"
 
 echo "  -- the disproportionate job is evicted so the idle accelerators become reachable --"

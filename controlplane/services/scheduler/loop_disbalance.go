@@ -162,7 +162,7 @@ func (l *Loop) evictDisbalanced(
 	blocked *domain.Experiment,
 	cluster string,
 	avail, total domain.Footprint,
-	nodeAvail map[string]map[string]int64,
+	nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 	blockedFP domain.Footprint,
 ) error {
@@ -180,7 +180,7 @@ func (l *Loop) evictDisbalanced(
 
 	// The premises that need no I/O are checked first: this runs for every job skipped in a
 	// tick, and the node attribution below costs one metrics query per running job.
-	if !disbalancePremisesHold(blocked, blockedFP, avail, nodeAvail, nodeLabels) {
+	if !disbalancePremisesHold(blocked, blockedFP, avail, nodeAvail, nodeResources, nodeLabels) {
 		return nil
 	}
 
@@ -220,7 +220,7 @@ func (l *Loop) evictDisbalanced(
 		placed = append(placed, placedExperiment{experiment: exp, node: node})
 	}
 
-	victims := selectDisbalanceVictims(blocked, blockedFP, avail, total, nodeAvail, nodeLabels, placed, l.disbalanceTolerance)
+	victims := selectDisbalanceVictims(blocked, blockedFP, avail, total, nodeAvail, nodeResources, nodeLabels, placed, l.disbalanceTolerance)
 	for _, victim := range victims {
 		explanation := victim.explain()
 		l.logger.Info("evicting resource-disbalanced job",
@@ -275,7 +275,7 @@ func (l *Loop) evictDisbalanced(
 func disbalancePremises(
 	blocked *domain.Experiment,
 	blockedFP, clusterAvail domain.Footprint,
-	nodeAvail map[string]map[string]int64,
+	nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 ) (domain.Footprint, map[string]int64, bool) {
 	if blocked.Job.AcceleratorCount <= 0 {
@@ -287,7 +287,7 @@ func disbalancePremises(
 	// placement evidence the trigger used, not a coarser cluster-wide sum that can disagree with
 	// it. shortfall() only records dimensions with a real deficit, so every entry here is
 	// positive.
-	shortage := preemptionShortfall(clusterAvail, nodeAvail, nodeLabels, blocked, blockedFP)
+	shortage := preemptionShortfall(clusterAvail, nodeAvail, nodeResources, nodeLabels, blocked, blockedFP)
 	if len(shortage) == 0 {
 		return nil, nil, false
 	}
@@ -319,10 +319,10 @@ func disbalancePremises(
 func disbalancePremisesHold(
 	blocked *domain.Experiment,
 	blockedFP, clusterAvail domain.Footprint,
-	nodeAvail map[string]map[string]int64,
+	nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 ) bool {
-	_, _, ok := disbalancePremises(blocked, blockedFP, clusterAvail, nodeAvail, nodeLabels)
+	_, _, ok := disbalancePremises(blocked, blockedFP, clusterAvail, nodeAvail, nodeResources, nodeLabels)
 	return ok
 }
 
@@ -343,7 +343,7 @@ func disbalancePremisesHold(
 func selectDisbalanceVictims(
 	blocked *domain.Experiment,
 	blockedFP, clusterAvail, clusterTotal domain.Footprint,
-	nodeAvail map[string]map[string]int64,
+	nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 	placed []placedExperiment,
 	tolerance float64,
@@ -354,7 +354,7 @@ func selectDisbalanceVictims(
 
 	// (1) and (2): a shortage confined to the fungible dimensions, and idle accelerators to be
 	// stranded. Both are pure functions of this tick's capacity numbers.
-	shortage, strandedNodes, ok := disbalancePremises(blocked, blockedFP, clusterAvail, nodeAvail, nodeLabels)
+	shortage, strandedNodes, ok := disbalancePremises(blocked, blockedFP, clusterAvail, nodeAvail, nodeResources, nodeLabels)
 	if !ok {
 		return nil
 	}

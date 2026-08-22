@@ -230,7 +230,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				runningLoaded = true
 			}
 			burstRunning := filterTierCluster(running, domain.CapacityBurst, cluster)
-			shortage := preemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeLabels[cluster], exp, fp)
+			shortage := preemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
 			l.logger.Info("guaranteed job needs preemption",
 				zap.String("exp", exp.ID), zap.String("cluster", cluster),
 				zap.String("avail", footprintStr(gAvail[cluster])), zap.String("need", footprintStr(fp)),
@@ -256,7 +256,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			//     blocked job against unchanged availability evicts a fresh victim each time.
 			if err == nil && !committed && !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
-				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
+				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
 				}
 			}
@@ -328,10 +328,10 @@ func (l *Loop) tick(ctx context.Context) error {
 			// Same shortage vector the guaranteed pass computes, for the same reason: "short
 			// {cpu: 12}" tells an operator which dimension to fix, where a bare
 			// capacity_unavailable tells them only that something, somewhere, did not fit.
-			shortage := preemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeLabels[cluster], exp, fp)
+			shortage := preemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
 			if !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
-				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
+				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
 				}
 			}
@@ -487,8 +487,14 @@ func foldMatchingKey(m map[string]int64, want string) string {
 // job. Cluster-level extended-resource totals combine devices from nodes with different labels,
 // so they cannot answer whether (for example) A100 capacity is available when L40 capacity is
 // idle. CPU, memory, storage, and other resources retain their cluster-level shortfall.
-func preemptionShortfall(clusterAvail domain.Footprint, byNode map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment, footprint domain.Footprint) domain.Footprint {
+func preemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment, footprint domain.Footprint) domain.Footprint {
 	out := shortfall(clusterAvail, footprint)
+	// A job runs on one node, so a deficit can be entirely per-node: every dimension can be
+	// plentiful cluster-wide while no single node has the combination. Reported as an empty
+	// shortage, that job looked like it needed nothing — which left preemption with no vector to
+	// cover and the disbalance evictor with no deficit to explain, exactly when a neighbour's
+	// disproportionate request was the reason nothing fit.
+	addNodeResourceShortfall(out, byNode, nodeResources, labelsByNode, exp)
 	if exp.Job.AcceleratorCount <= 0 {
 		return out
 	}
@@ -779,6 +785,67 @@ func reserveAnyNode(nodeResources map[string]map[string]int64, labelsByNode map[
 		used[selected] = true
 	}
 	return true
+}
+
+// addNodeResourceShortfall folds in what the *least* deficient qualifying node still lacks in the
+// fungible dimensions. Least deficient because covering that node covers the job: the shortage is
+// what has to be freed somewhere, not everywhere.
+func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) {
+	needed := perRankNodeResources(exp)
+	if len(needed) == 0 {
+		return
+	}
+	key := strings.ToLower(string(exp.AcceleratorType))
+	perRank := int64(exp.Job.AcceleratorCount)
+
+	var best map[string]int64
+	var bestTotal int64
+	for node := range nodeResources {
+		if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			continue
+		}
+		// Only nodes that could host a rank's accelerators are candidates; where the accelerators
+		// themselves are missing, the per-node accelerator shortfall below already says so.
+		if perRank > 0 && foldLookup(byNode[node], key) < perRank {
+			continue
+		}
+		deficit := map[string]int64{}
+		var total int64
+		for resource, need := range needed {
+			if short := need - nodeResources[node][resource]; short > 0 {
+				deficit[resource] = short
+				total += short
+			}
+		}
+		if best == nil || total < bestTotal {
+			best, bestTotal = deficit, total
+		}
+		if bestTotal == 0 {
+			return // some qualifying node already has room; nothing is short
+		}
+	}
+	for resource, short := range best {
+		kind, ok := nodeResourceKind(resource)
+		if !ok {
+			continue
+		}
+		if k := (domain.ResourceKey{Kind: kind}); out[k] < short {
+			out[k] = short
+		}
+	}
+}
+
+func nodeResourceKind(resource string) (domain.ResourceKind, bool) {
+	switch resource {
+	case domain.NodeResourceCPUMillicores:
+		return domain.ResourceKindCPU, true
+	case domain.NodeResourceMemoryBytes:
+		return domain.ResourceKindMemory, true
+	case domain.NodeResourceStorageBytes:
+		return domain.ResourceKindStorage, true
+	default:
+		return "", false
+	}
 }
 
 // clusterWithBestFit picks a target cluster for footprint among every configured cluster in

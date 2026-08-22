@@ -32,6 +32,21 @@ for img in "${IMAGES[@]}"; do
   fi
 done
 
+# Each fake worker node runs its own containerd inside its own container, so the server-side
+# import above never reaches them: cluster-agent and node-agent run on those nodes and would keep
+# running whatever image they were created with, however many times this script is run. That is
+# not a cosmetic staleness — the control plane and its agents share a wire contract, so a reload
+# that updates only one side leaves the cluster talking to itself across two versions.
+if [[ -f "${SCRIPT_DIR}/../lib/node.sh" ]]; then
+  source "${SCRIPT_DIR}/../lib/node.sh"
+  export NODE_PODMAN="sudo podman"
+  for node in $(kubectl --context "${CONTEXT_NAME}" get nodes -o name | sed 's|node/||'); do
+    ${NODE_PODMAN} container exists "${node}" 2>/dev/null || continue
+    echo "    -> ${node}"
+    lib_import_images "${node}" "${IMAGES[@]}"
+  done
+fi
+
 echo "==> Recreating control-plane containers..."
 bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" reload >/dev/null
 wait_for 20 1 "control-service to accept connections" \
