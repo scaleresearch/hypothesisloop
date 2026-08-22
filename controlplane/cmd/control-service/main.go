@@ -125,9 +125,9 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 	// One observation cadence for the whole process: the quota service, the settler, the
 	// controller and the scheduler loop must all measure "how long did this run" the same way,
 	// or the same job's cost depends on which of them is asked.
-	observedGapCap, observedStep := pcfg.Scheduler.ObservationCadence()
+	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap, observedStep)
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 	acceleratorTypeInfos := make([]quota.AcceleratorTypeInfo, 0, len(pcfg.AcceleratorTypes))
 	for _, g := range pcfg.AcceleratorTypes {
 		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, AccHRate: g.AccHRate})
@@ -190,8 +190,8 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
 func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
-	observedGapCap, observedStep := pcfg.Scheduler.ObservationCadence()
-	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap, observedStep)
+	observedGapCap := pcfg.Scheduler.ObservationCadence()
+	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
 	// (see workload/backend.go). queuebackend.Backend only reads/writes Postgres.
@@ -205,14 +205,14 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, p
 	// settler is the sole path that durably writes a terminal experiment's final observed usage
 	// (see services/settlement) — used inline by JobWatcher and by the reconciler below to
 	// retry anything a crash or metrics-DB outage left unsettled.
-	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap, observedStep)
+	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
 	watcher := scheduler.NewJobWatcher(store, jwc, logger).
 		WithQuotaSettler(settler).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep)
+		WithObservedTimeConfig(metricsDBURL, observedGapCap)
 
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store).
@@ -224,7 +224,7 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, p
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep).
+		WithObservedTimeConfig(metricsDBURL, observedGapCap).
 		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance).
 		WithQuotaSettler(settler)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)

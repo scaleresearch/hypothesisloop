@@ -14,15 +14,6 @@ func (c *Controller) observedGapCap() time.Duration {
 	return time.Duration(c.silenceMultiplier * float64(c.defaultReportInterval))
 }
 
-// observedStep is the grid resolution for ObservedElapsedHours — fine enough to catch every
-// real report interval, coarse enough to stay cheap over a multi-hour experiment.
-func (c *Controller) observedStep() time.Duration {
-	if c.defaultReportInterval > 0 {
-		return c.defaultReportInterval
-	}
-	return 10 * time.Second
-}
-
 // isAlive reports whether experimentID has a real observation (heartbeat or job-reported
 // metric) within `window` of now — a stateless GreptimeDB query, not an in-memory last-seen
 // map, so every process gets the same answer with no warm-up after a restart.
@@ -30,18 +21,12 @@ func (c *Controller) isAlive(ctx context.Context, experimentID string, window ti
 	return metricsdb.IsAlive(ctx, c.metricsDBURL, experimentID, window)
 }
 
-// observedMaxLookback bounds how far back ObservedElapsedHours/FirstObserved scan for a job's
-// first sample — a search-window ceiling no real job's runtime could exceed, keeping the query cheap.
-func (c *Controller) observedMaxLookback() time.Duration {
-	return 14 * 24 * time.Hour
-}
-
-// observedElapsedHours returns how long experimentID has been confirmed alive, in hours — see
+// observedElapsedHours returns how long exp has been confirmed alive, in hours — see
 // metricsdb.ObservedElapsedHours for the correctness argument (multi-node, clock-skew,
 // gap-capping; no stored StartedAt needed). GreptimeDB is the sole source of truth: a query
 // error is returned so the caller retries next reconcile, never papered over with a guess.
-func (c *Controller) observedElapsedHours(ctx context.Context, experimentID string, now time.Time) (float64, error) {
-	return metricsdb.ObservedElapsedHours(ctx, c.metricsDBURL, experimentID, now, c.observedMaxLookback(), c.observedGapCap(), c.observedStep())
+func (c *Controller) observedElapsedHours(ctx context.Context, exp *domain.Experiment, now time.Time) (float64, error) {
+	return metricsdb.ObservedElapsedHours(ctx, c.metricsDBURL, exp.ID, exp.CreatedAt, now, c.observedGapCap())
 }
 
 // observedAcceleratorCost returns exp's accelerator cost so far: observed elapsed hours ×
@@ -57,7 +42,7 @@ func (c *Controller) observedAcceleratorCost(ctx context.Context, exp *domain.Ex
 	if exp.AcceleratorCount <= 0 || exp.AcceleratorType == "" {
 		return 0, nil
 	}
-	hours, err := c.observedElapsedHours(ctx, exp.ID, now)
+	hours, err := c.observedElapsedHours(ctx, exp, now)
 	if err != nil {
 		return 0, err
 	}

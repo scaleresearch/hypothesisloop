@@ -116,12 +116,11 @@ type Loop struct {
 	// instead of silently double-admitting/double-preempting.
 	ticking atomic.Bool
 
-	// metricsDBURL, observedGapCap, observedStep let preempt() rank victims by real observed
+	// metricsDBURL and observedGapCap let preempt() rank victims by real observed
 	// runtime instead of wall-clock ElapsedHours() — a job stuck in a reschedule/node-death gap
 	// isn't "the one that's made the most progress" just because it was admitted a while ago.
 	metricsDBURL   string
 	observedGapCap time.Duration
-	observedStep   time.Duration
 
 	// evictor and disbalanceTolerance drive the resource-disbalance evictor (see
 	// loop_disbalance.go). Both are required: the pass has one behaviour, not an on and an off
@@ -194,10 +193,9 @@ func (l *Loop) WithHeartbeat(d time.Duration) *Loop {
 // WithObservedTimeConfig wires the GreptimeDB URL and gap-cap/step preempt() uses to rank
 // victims by real observed runtime. Pass the same values every other observed-time consumer in
 // this deployment uses.
-func (l *Loop) WithObservedTimeConfig(metricsDBURL string, gapCap, step time.Duration) *Loop {
+func (l *Loop) WithObservedTimeConfig(metricsDBURL string, gapCap time.Duration) *Loop {
 	l.metricsDBURL = metricsDBURL
 	l.observedGapCap = gapCap
-	l.observedStep = step
 	return l
 }
 

@@ -47,8 +47,14 @@ type ObservedSpan struct {
 // observation, after the last, and across gaps longer than gapCap is deliberately not counted.
 // Billing only what was actually observed is the point (important.md #18).
 func ObserveSpan(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap time.Duration) (ObservedSpan, error) {
-	if !now.After(since) || gapCap <= 0 {
-		return ObservedSpan{}, nil
+	// An inverted window means a corrupt created_at or a caller passing the two the wrong way
+	// round. Returning an empty span would bill that as "never observed" — silently, and as a
+	// full refund. It is not a measurement this package can make.
+	if !now.After(since) {
+		return ObservedSpan{}, fmt.Errorf("metricsdb.ObserveSpan: window for %s ends at or before it starts", experimentID)
+	}
+	if gapCap <= 0 {
+		return ObservedSpan{}, fmt.Errorf("metricsdb.ObserveSpan: gap cap must be positive")
 	}
 	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
 	id := quote(experimentID)

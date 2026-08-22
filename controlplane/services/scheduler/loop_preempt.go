@@ -42,7 +42,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	elapsed := make(map[string]float64, len(burstRunning))
 	rankable := burstRunning[:0]
 	for _, exp := range burstRunning {
-		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback, l.observedGapCap, l.observedStep)
+		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, exp.CreatedAt, time.Now().UTC(), l.observedGapCap)
 		if err != nil {
 			l.logger.Warn("preempt: cannot rank candidate, skipping it",
 				zap.String("candidate", exp.ID), zap.Error(err))
@@ -148,7 +148,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		// the two cancel and the estimate, plus every resource reservation derived from it,
 		// collapses to the floor while most of the work is still ahead. The ranking above keeps
 		// using lifetime elapsed, which is the right measure of "who has done the most work".
-		stintElapsed, err := metricsdb.ObservedStintElapsedHours(ctx, l.metricsDBURL, victim.ID, time.Now().UTC(), ObservedMaxLookback, l.observedGapCap, l.observedStep)
+		stintElapsed, err := metricsdb.ObservedStintElapsedHours(ctx, l.metricsDBURL, victim.ID, victim.CreatedAt, time.Now().UTC(), l.observedGapCap)
 		if err != nil {
 			l.logger.Error("stint elapsed for preemption rescale", zap.String("id", victim.ID), zap.Error(err))
 			continue
@@ -233,7 +233,7 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 		if exp.EstimatedDurationHours <= 0 {
 			continue
 		}
-		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, now, ObservedMaxLookback, l.observedGapCap, l.observedStep)
+		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, exp.CreatedAt, now, l.observedGapCap)
 		if err != nil {
 			// This value is a sort tiebreak and nothing else (see sortGuaranteed). A transient
 			// metrics-store failure on one job must not stop the platform admitting anything

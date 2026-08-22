@@ -93,8 +93,8 @@ func main() {
 }
 
 func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
-	observedGapCap, observedStep := pcfg.Scheduler.ObservationCadence()
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap, observedStep)
+	observedGapCap := pcfg.Scheduler.ObservationCadence()
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (services/controller) — the
@@ -112,9 +112,9 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 	// settler durably writes a terminal experiment's final observed usage (see
 	// services/settlement) — used both inline by the controller for the fast path and by the
 	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
-	// gapCap/step mirror Controller.observedGapCap/observedStep exactly, so every observed-usage
-	// query in this deployment agrees on what "how long did this run" means.
-	settler := settlement.New(peSvc, metricsDBURL, observedGapCap, observedStep)
+	// gapCap mirrors Controller.observedGapCap exactly, so every observed-usage query in this
+	// deployment agrees on what "how long did this run" means.
+	settler := settlement.New(peSvc, metricsDBURL, observedGapCap)
 	ctrl = ctrl.WithSettler(settler)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 

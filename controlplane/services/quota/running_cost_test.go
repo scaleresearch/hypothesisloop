@@ -52,7 +52,7 @@ func newTestService(t *testing.T, metricsURL string, running []*domain.Experimen
 		domain.QuotaConfig{},
 		zap.NewNop(),
 		metricsURL,
-		3*time.Minute, time.Minute,
+		3*time.Minute,
 	)
 }
 
@@ -67,7 +67,7 @@ func newObservedTestService(t *testing.T, metricsURL string, running []*domain.E
 		domain.QuotaConfig{},
 		zap.New(core),
 		metricsURL,
-		3*time.Minute, time.Minute,
+		3*time.Minute,
 	)
 	return svc, logs
 }

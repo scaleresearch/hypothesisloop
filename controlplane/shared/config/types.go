@@ -44,22 +44,15 @@ type QuotaConfig struct {
 }
 
 // SchedulerConfig holds timing and eviction tuning constants.
-// ObservationCadence is the one definition of the grid every observed-usage query in a
-// deployment measures on: step is the resolution samples are counted at, gapCap how long a
-// sample keeps counting as "still alive" before a gap is treated as genuinely down.
+// ObservationCadence is the one definition of how long a sample keeps counting as "still alive"
+// before the gap to the next one is treated as the job genuinely not running.
 //
-// step is the billing resolution, deliberately coarser than the node-agent's own heartbeat
-// (PUSH_INTERVAL_MS, 2s by default). That is the constraint, not a coincidence: the grid must be
-// no finer than the heartbeat, or every grid point between two heartbeats reads as a gap. Coarser
-// is free — a 30s grid over a 2s heartbeat always finds a sample — and 15x cheaper to query.
-//
-// It belongs here, computed once, because these two values only mean anything when the quota
-// service, the settler, the controller and the scheduler all use the same pair. Three copies of
-// the arithmetic is how they drifted apart in the first place, and a drifted pair makes the same
-// job cost different amounts depending on which code path is asked.
-func (c SchedulerConfig) ObservationCadence() (gapCap, step time.Duration) {
-	step = time.Duration(c.DefaultReportIntervalSeconds) * time.Second
-	return time.Duration(c.SilenceMultiplier * float64(step)), step
+// It belongs here, computed once, because the value only means anything when the quota service,
+// the settler, the controller and the scheduler all use the same one. Three copies of the
+// arithmetic is how they drifted apart in the first place, and a drifted value makes the same job
+// cost different amounts depending on which code path is asked.
+func (c SchedulerConfig) ObservationCadence() (gapCap time.Duration) {
+	return time.Duration(c.SilenceMultiplier * float64(c.DefaultReportIntervalSeconds) * float64(time.Second))
 }
 
 type SchedulerConfig struct {

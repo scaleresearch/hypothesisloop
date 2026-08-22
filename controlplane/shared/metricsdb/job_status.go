@@ -123,21 +123,25 @@ const GoneConfirmingSnapshots = 2
 // most recent complete snapshots have omitted one experiment. Both facts come from the snapshot
 // series' own recorded observation times, never from wall-clock arithmetic over sample
 // timestamps, so a cluster outage freezes the absence count instead of growing it.
-func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterName string, now time.Time, searchBack time.Duration) (SnapshotPresence, error) {
-	if searchBack <= 0 {
-		return SnapshotPresence{}, fmt.Errorf("metricsdb.ClusterSnapshotPresence: search window must be positive")
+func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterName string, createdAt, now time.Time) (SnapshotPresence, error) {
+	since := ObservationWindowStart(createdAt)
+	if !now.After(since) {
+		return SnapshotPresence{}, fmt.Errorf("metricsdb.ClusterSnapshotPresence: %s was created after now", experimentID)
 	}
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
-	seconds := int64(math.Ceil(searchBack.Seconds()))
 	// Both series carry the snapshot's own observation time as their value (see RecordJobStatuses),
-	// so comparing values compares snapshots directly — no timestamp encoding assumptions.
+	// so comparing values compares snapshots directly — no timestamp encoding assumptions. Bounded
+	// by absolute timestamps rather than the database's own NOW(), so the window is the one the
+	// caller asked for and does not shift with clock difference or query delay.
+	bounds := fmt.Sprintf(`greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond`,
+		since.UnixMilli(), now.UnixMilli())
 	query := fmt.Sprintf(
-		`WITH snaps AS (SELECT greptime_value AS v FROM %s WHERE cluster_name = %s AND greptime_timestamp >= NOW() - INTERVAL '%d seconds'), `+
-			`present AS (SELECT MAX(greptime_value) AS v FROM %s WHERE experiment_id = %s AND cluster_name = %s AND greptime_timestamp >= NOW() - INTERVAL '%d seconds') `+
+		`WITH snaps AS (SELECT greptime_value AS v FROM %s WHERE cluster_name = %s AND %s), `+
+			`present AS (SELECT MAX(greptime_value) AS v FROM %s WHERE experiment_id = %s AND cluster_name = %s AND %s) `+
 			`SELECT MAX(snaps.v), MAX(present.v), SUM(CASE WHEN present.v IS NULL OR snaps.v > present.v THEN 1 ELSE 0 END) `+
 			`FROM snaps CROSS JOIN present`,
-		clusterJobSnapshotMetric, quote(clusterName), seconds,
-		clusterJobObservedAtMetric, quote(experimentID), quote(clusterName), seconds,
+		clusterJobSnapshotMetric, quote(clusterName), bounds,
+		clusterJobObservedAtMetric, quote(experimentID), quote(clusterName), bounds,
 	)
 	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.ClusterSnapshotPresence", query, 3)
 	if err != nil {

@@ -72,9 +72,9 @@ func TestObservedElapsedChargesNothingForASingleObservation(t *testing.T) {
 	server := spanServer(t, now, gapCap, []time.Duration{10 * time.Minute})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	hours, err := observedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if hours != 0 {
 		t.Fatalf("billed %v hours for a single observation, want 0", hours)
@@ -89,9 +89,9 @@ func TestObservedElapsedSumsTheObservedSpan(t *testing.T) {
 	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 17 * time.Minute, 16 * time.Minute, 15 * time.Minute, 14 * time.Minute, 13 * time.Minute, 12 * time.Minute, 11 * time.Minute, 10 * time.Minute})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	hours, err := observedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if want := 10 * step.Hours(); !approxHours(hours, want) {
 		t.Fatalf("billed %v hours, want %v", hours, want)
@@ -107,9 +107,9 @@ func TestObservedElapsedBillsAJobShorterThanOneStep(t *testing.T) {
 	server := spanServer(t, now, gapCap, []time.Duration{30 * time.Second, 20 * time.Second, 12 * time.Second, 5 * time.Second})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	hours, err := observedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if want := 25 * time.Second.Hours(); !approxHours(hours, want) {
 		t.Fatalf("billed %v hours for a 25s job, want %v", hours, want)
@@ -125,9 +125,9 @@ func TestObservedElapsedSkipsGapsPastTheCapButNotAtIt(t *testing.T) {
 	// Two stints of 2 minutes each, separated by a 5-minute gap.
 	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 13 * time.Minute, 12 * time.Minute, 11 * time.Minute})
 	defer server.Close()
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	hours, err := observedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if want := 4 * step.Hours(); !approxHours(hours, want) {
 		t.Fatalf("billed %v hours across a 5-minute outage, want %v (the gap itself is not billable)", hours, want)
@@ -136,9 +136,9 @@ func TestObservedElapsedSkipsGapsPastTheCapButNotAtIt(t *testing.T) {
 	// The same shape with the gap exactly at the cap counts in full: 3 minutes is jitter, not an outage.
 	atCap := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 15 * time.Minute, 14 * time.Minute, 13 * time.Minute})
 	defer atCap.Close()
-	hours, err = ObservedElapsedHoursSince(context.Background(), atCap.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	hours, err = observedHoursSince(context.Background(), atCap.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if want := 7 * step.Hours(); !approxHours(hours, want) {
 		t.Fatalf("billed %v hours with a gap exactly at the cap, want %v", hours, want)
@@ -153,9 +153,9 @@ func TestObservedElapsedIgnoresDuplicateTimestamps(t *testing.T) {
 	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 20 * time.Minute, 19 * time.Minute, 19 * time.Minute, 18 * time.Minute, 18 * time.Minute})
 	defer server.Close()
 
-	hours, err := ObservedElapsedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	hours, err := observedHoursSince(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if want := 2 * step.Hours(); !approxHours(hours, want) {
 		t.Fatalf("billed %v hours, want %v", hours, want)
@@ -171,7 +171,7 @@ func TestObservedStintCountsOnlyTheRunSinceTheLastOutage(t *testing.T) {
 	server := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 18 * time.Minute, 13 * time.Minute, 12 * time.Minute, 11 * time.Minute, 10 * time.Minute})
 	defer server.Close()
 
-	hours, err := ObservedStintElapsedHours(context.Background(), server.URL, "exp-1", now, 30*step, gapCap, step)
+	hours, err := ObservedStintElapsedHours(context.Background(), server.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
 		t.Fatalf("ObservedStintElapsedHours: %v", err)
 	}
@@ -189,9 +189,9 @@ func TestObservedElapsedIsStableHoweverLateItIsAsked(t *testing.T) {
 
 	prompt := spanServer(t, now, gapCap, offsets)
 	defer prompt.Close()
-	early, err := ObservedElapsedHoursSince(context.Background(), prompt.URL, "exp-1", now.Add(-30*step), now, gapCap, step)
+	early, err := observedHoursSince(context.Background(), prompt.URL, "exp-1", now.Add(-30*step), now, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 
 	// The same series read an hour later: every offset is one hour further back.
@@ -202,9 +202,9 @@ func TestObservedElapsedIsStableHoweverLateItIsAsked(t *testing.T) {
 	}
 	lateSrv := spanServer(t, later, gapCap, shifted)
 	defer lateSrv.Close()
-	late, err := ObservedElapsedHoursSince(context.Background(), lateSrv.URL, "exp-1", later.Add(-90*step), later, gapCap, step)
+	late, err := observedHoursSince(context.Background(), lateSrv.URL, "exp-1", later.Add(-90*step), later, gapCap)
 	if err != nil {
-		t.Fatalf("ObservedElapsedHoursSince: %v", err)
+		t.Fatalf("observedHoursSince: %v", err)
 	}
 	if !approxHours(early, late) {
 		t.Fatalf("same job measured %v hours promptly and %v hours an hour later", early, late)
@@ -226,7 +226,7 @@ func TestObservedElapsedMakesOneRoundTrip(t *testing.T) {
 	}))
 	defer counting.Close()
 
-	if _, _, err := ObservedElapsed(context.Background(), counting.URL, "exp-1", now, 30*step, gapCap, step); err != nil {
+	if _, _, err := ObservedElapsed(context.Background(), counting.URL, "exp-1", now.Add(-30*step), now, gapCap); err != nil {
 		t.Fatalf("ObservedElapsed: %v", err)
 	}
 	if queries != 1 {
@@ -240,4 +240,14 @@ func approxHours(got, want float64) bool {
 		d = -d
 	}
 	return d < 1e-9
+}
+
+// observedHoursSince is ObserveSpan's total, in hours, over an explicit window — the shape these
+// tests exercise, without going through a caller that derives its window from a created_at.
+func observedHoursSince(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap time.Duration) (float64, error) {
+	span, err := ObserveSpan(ctx, dbURL, experimentID, since, now, gapCap)
+	if err != nil {
+		return 0, err
+	}
+	return span.Total.Hours(), nil
 }

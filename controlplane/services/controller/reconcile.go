@@ -278,7 +278,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 // quota exhaustion bounds the damage if it doesn't.
 func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64, declaredMetricKeysByPE map[string][]string) error {
 	if maxHours, ok := maxJobHoursByPE[exp.PlatformExperimentID]; ok {
-		hours, err := c.observedElapsedHours(ctx, exp.ID, now)
+		hours, err := c.observedElapsedHours(ctx, exp, now)
 		if err != nil {
 			return fmt.Errorf("stage job length: %w", err)
 		}

@@ -3,6 +3,7 @@ package metricsdb
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -48,17 +49,26 @@ func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Durati
 }
 
 // HasEverReportedMetric reports whether experimentID has produced even one job-reported metric
-// sample within maxLookback. Deliberately ignores the heartbeat: the heartbeat proves the pod
-// exists, this proves the workload's own reporting path works. A job that never produced a
+// sample since its row was created. Deliberately ignores the heartbeat: the heartbeat proves the
+// pod exists, this proves the workload's own reporting path works. A job that never produced a
 // single sample is not "quiet since it hung" — its metrics path is broken (wrong URL, a stale
 // helper baked into the image, a swallowed exception), which needs a different fix than a hung
 // process and so is worth telling apart at eviction time.
-func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, maxLookback time.Duration) (bool, error) {
-	reported, err := isAliveOn(ctx, dbURL, ExperimentMetricValue, "job_id", experimentID, maxLookback)
-	if err != nil {
-		return false, fmt.Errorf("metricsdb.HasEverReportedMetric: %w", err)
+func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time) (bool, error) {
+	since := ObservationWindowStart(createdAt)
+	if !now.After(since) {
+		return false, fmt.Errorf("metricsdb.HasEverReportedMetric: %s was created after now", experimentID)
 	}
-	return reported, nil
+	// Absolute bounds rather than a relative PromQL range: the window must be the one the caller
+	// asked for, not one anchored to whatever the metrics store thinks the time is.
+	query := fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s WHERE job_id = '%s' AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond`,
+		ExperimentMetricValue, strings.ReplaceAll(experimentID, "'", "''"), since.UnixMilli(), now.UnixMilli())
+	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.HasEverReportedMetric", query, 1)
+	if err != nil {
+		return false, err
+	}
+	return found && row[0] != nil && *row[0] > 0, nil
 }
 
 // declaredMetricSpread reports, for one declared metric key, whether experimentID has posted any
@@ -156,12 +166,12 @@ func AnyDeclaredMetricChanged(ctx context.Context, dbURL, experimentID string, m
 }
 
 // FirstObserved returns the timestamp of the earliest sample (heartbeat or training metric) for
-// experimentID within maxLookback of now — GreptimeDB's own answer to "where did that job
-// start", with no Postgres-stored StartedAt column involved. maxLookback only bounds how far
-// back the query scans; it's a search window, not a clock the accounting trusts. Returns
-// ok=false if no sample exists in that window (job never started, or aged out of retention).
-func FirstObserved(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, step time.Duration) (t time.Time, ok bool, err error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, now.Add(-maxLookback), now, step)
+// experimentID since its row was created — GreptimeDB's own answer to "where did that job
+// start", with no Postgres-stored StartedAt column involved. createdAt only bounds how far back
+// the query scans; it is a search window, not a clock the accounting trusts. Returns ok=false if
+// no sample exists (job never started, or aged out of retention).
+func FirstObserved(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (t time.Time, ok bool, err error) {
+	span, err := ObserveSpan(ctx, dbURL, experimentID, ObservationWindowStart(createdAt), now, gapCap)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("metricsdb.FirstObserved: %w", err)
 	}
@@ -171,10 +181,10 @@ func FirstObserved(ctx context.Context, dbURL, experimentID string, now time.Tim
 // ObservedElapsedHours returns how long experimentID has been confirmed alive, in hours — the
 // sole input to every quota-consumption calculation. A pure function of what is stored in
 // GreptimeDB (see ObserveSpan), so two processes, or the same process before and after a restart,
-// always get the same answer, and no wall-clock start time is needed as input. maxLookback only
-// bounds how far back the query scans. A job with no observations at all reports zero, not an error.
-func ObservedElapsedHours(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (float64, error) {
-	hours, _, err := ObservedElapsed(ctx, dbURL, experimentID, now, maxLookback, gapCap, step)
+// always get the same answer, and no wall-clock start time is needed as input. A job with no
+// observations at all reports zero, not an error.
+func ObservedElapsedHours(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
+	hours, _, err := ObservedElapsed(ctx, dbURL, experimentID, createdAt, now, gapCap)
 	return hours, err
 }
 
@@ -183,24 +193,12 @@ func ObservedElapsedHours(ctx context.Context, dbURL, experimentID string, now t
 // ambiguous on its own: a job seen once and a job never seen both report 0, and callers bill them
 // differently (a never-seen job keeps its admission estimate). Asking FirstObserved separately to
 // tell them apart re-ran a query this already performs.
-func ObservedElapsed(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (float64, bool, error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, now.Add(-maxLookback), now, gapCap)
+func ObservedElapsed(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, bool, error) {
+	span, err := ObserveSpan(ctx, dbURL, experimentID, ObservationWindowStart(createdAt), now, gapCap)
 	if err != nil {
 		return 0, false, fmt.Errorf("metricsdb.ObservedElapsed: %w", err)
 	}
 	return span.Total.Hours(), span.Observed, nil
-}
-
-// ObservedElapsedHoursSince is ObservedElapsedHours over an explicit start boundary, for the one
-// caller that must not measure from the job's first-ever observation: preemption rescales a
-// victim's remaining estimate, and a job on its second stint has already had its estimate reduced
-// once, so charging it again for the hours of its first stint would subtract the same time twice.
-func ObservedElapsedHoursSince(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap, step time.Duration) (float64, error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, since, now, gapCap)
-	if err != nil {
-		return 0, fmt.Errorf("metricsdb.ObservedElapsedHoursSince: %w", err)
-	}
-	return span.Total.Hours(), nil
 }
 
 // ObservedStintElapsedHours returns how long experimentID has been confirmed alive since it last
@@ -215,8 +213,8 @@ func ObservedElapsedHoursSince(ctx context.Context, dbURL, experimentID string, 
 //
 // A job that has never been down reports its full observed elapsed time, which is the same
 // number by definition.
-func ObservedStintElapsedHours(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (float64, error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, now.Add(-maxLookback), now, gapCap)
+func ObservedStintElapsedHours(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
+	span, err := ObserveSpan(ctx, dbURL, experimentID, ObservationWindowStart(createdAt), now, gapCap)
 	if err != nil {
 		return 0, fmt.Errorf("metricsdb.ObservedStintElapsedHours: %w", err)
 	}

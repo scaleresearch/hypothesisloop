@@ -82,12 +82,11 @@ type JobWatcher struct {
 	// RUNNING before it is evicted with reason stuck_pending and fully refunded.
 	stuckPendingTimeout time.Duration
 
-	// metricsDBURL, observedGapCap, observedStep configure onFinished's observed-elapsed query
+	// metricsDBURL and observedGapCap configure onFinished's observed-elapsed query
 	// (metricsdb.ObservedElapsedHours) — the same source of truth every other termination path
 	// uses. GreptimeDB is a required dependency: no fallback if unset or unreachable.
 	metricsDBURL   string
 	observedGapCap time.Duration
-	observedStep   time.Duration
 }
 
 // NewJobWatcher constructs a JobWatcher.
@@ -123,9 +122,8 @@ func (w *JobWatcher) WithQuotaSettler(s QuotaSettler) *JobWatcher {
 // compute observed-elapsed time — see metricsdb.ObservedElapsedHours. Pass the same values the
 // Controller in this deployment uses, so every termination path (automatic eviction, natural
 // completion, user cancel) agrees on what "how long did this run" means.
-func (w *JobWatcher) WithObservedTimeConfig(metricsDBURL string, gapCap, step time.Duration) *JobWatcher {
+func (w *JobWatcher) WithObservedTimeConfig(metricsDBURL string, gapCap time.Duration) *JobWatcher {
 	w.metricsDBURL = metricsDBURL
 	w.observedGapCap = gapCap
-	w.observedStep = step
 	return w
 }

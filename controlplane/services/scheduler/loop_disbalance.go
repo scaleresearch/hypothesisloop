@@ -208,7 +208,7 @@ func (l *Loop) evictDisbalanced(
 		if blocked.CapacityTier == domain.CapacityBurst && exp.CapacityTier != domain.CapacityBurst {
 			continue
 		}
-		node, found, err := metricsdb.LatestExperimentNode(ctx, l.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback)
+		node, found, err := metricsdb.LatestExperimentNode(ctx, l.metricsDBURL, exp.ID, exp.CreatedAt, time.Now().UTC())
 		if err != nil {
 			// A failed attribution lookup is missing data, not an absent placement — abort the
 			// whole pass rather than proceed with a set of candidates we know is incomplete.

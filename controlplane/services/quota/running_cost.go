@@ -34,15 +34,14 @@ type runningCost struct {
 // runningCostCalc computes runningCost for jobs in one platform experiment. Built once per pass so
 // the platform experiment row is read once, not per job.
 //
-// The observation cadence is the deployment's (config.SchedulerConfig.ObservationCadence), never
-// the platform experiment's own report_interval_seconds. What ObservedElapsedHours measures is
-// liveness — dominated by the node-agent heartbeat — not how often a platform experiment asks its
-// jobs to report a metric, so a PE's reporting contract has no business setting the billing
-// quantum. Deriving the grid from it made the same job cost differently here than in settlement,
-// visibly jumping the moment the job completed.
+// The gap cap is the deployment's (config.SchedulerConfig.ObservationCadence), never the platform
+// experiment's own report_interval_seconds. What ObservedElapsedHours measures is liveness —
+// dominated by the node-agent heartbeat — not how often a platform experiment asks its jobs to
+// report a metric, so a PE's reporting contract has no business setting the billing quantum.
+// Deriving it from that made the same job cost differently here than in settlement, visibly
+// jumping the moment the job completed.
 type runningCostCalc struct {
 	svc    *PlatformExperimentsService
-	step   time.Duration
 	gapCap time.Duration
 	now    time.Time
 }
@@ -50,22 +49,13 @@ type runningCostCalc struct {
 func (s *PlatformExperimentsService) newRunningCostCalc() *runningCostCalc {
 	return &runningCostCalc{
 		svc:    s,
-		step:   s.observedStep,
 		gapCap: s.observedGapCap,
 		now:    time.Now().UTC(),
 	}
 }
 
 func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (runningCost, error) {
-	// The lookback is the job's own real lifetime (its CreatedAt), never a fixed constant — the
-	// same reasoning as registry.GetTimeseries using exp.CreatedAt instead of a hardcoded window:
-	// a fixed bound would make an old-but-legitimately-running job's real observations invisible
-	// to this query.
-	lookback := c.now.Sub(exp.CreatedAt)
-	if lookback <= 0 {
-		return runningCost{}, nil
-	}
-	hours, found, err := metricsdb.ObservedElapsed(ctx, c.svc.metricsDBURL, exp.ID, c.now, lookback, c.gapCap, c.step)
+	hours, found, err := metricsdb.ObservedElapsed(ctx, c.svc.metricsDBURL, exp.ID, exp.CreatedAt, c.now, c.gapCap)
 	if err != nil {
 		return runningCost{}, fmt.Errorf("observed elapsed for %s: %w", exp.ID, err)
 	}

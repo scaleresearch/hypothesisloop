@@ -3,7 +3,6 @@ package metricsdb
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 )
@@ -30,12 +29,13 @@ func RecordExperimentNode(ctx context.Context, dbURL, experimentID, node string,
 	return WriteGaugeAt(ctx, dbURL, experimentNodeMetric, labels, 1, at)
 }
 
-// LatestExperimentNode returns the most recently recorded node for experimentID within
-// maxLookback, or ("", false, nil) if nothing was ever recorded — e.g. a job that never got far
-// enough to schedule a pod, or one older than maxLookback.
-func LatestExperimentNode(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback time.Duration) (node string, found bool, err error) {
-	if maxLookback <= 0 {
-		return "", false, nil
+// LatestExperimentNode returns the most recently recorded node for experimentID since its row was
+// created, or ("", false, nil) if nothing was ever recorded — e.g. a job that never got far enough
+// to schedule a pod, or one whose samples have aged out of retention.
+func LatestExperimentNode(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time) (node string, found bool, err error) {
+	since := ObservationWindowStart(createdAt)
+	if !now.After(since) {
+		return "", false, fmt.Errorf("metricsdb.LatestExperimentNode: %s was created after now", experimentID)
 	}
 	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
 	// Ordered by each node's newest *real* sample. The range-query form this replaced asked with
@@ -43,11 +43,15 @@ func LatestExperimentNode(ctx context.Context, dbURL, experimentID string, now t
 	// timestamp — so "which is latest" compared equal for all of them and the winner was whichever
 	// series came back first. After a reschedule that is as likely to name the node the job left
 	// as the one it moved to, and the disbalance evictor attributes jobs to nodes with this.
+	// Columns named as the shared row reader expects (greptime_timestamp/greptime_value); the
+	// value itself is unused here, only the ordering. Bounded by absolute timestamps rather than
+	// the database's own NOW(), so the window is the one the caller asked for and does not shift
+	// with clock difference or query delay.
 	query := fmt.Sprintf(
-		`SELECT node, MAX(greptime_timestamp) AS last_seen FROM %s `+
-			`WHERE experiment_id = %s AND greptime_timestamp >= NOW() - INTERVAL '%d seconds' `+
-			`GROUP BY node ORDER BY last_seen DESC LIMIT 1`,
-		experimentNodeMetric, quote(experimentID), int64(math.Ceil(maxLookback.Seconds())))
+		`SELECT node, MAX(greptime_timestamp) AS greptime_timestamp, 1 AS greptime_value FROM %s `+
+			`WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
+			`GROUP BY node ORDER BY 2 DESC LIMIT 1`,
+		experimentNodeMetric, quote(experimentID), since.UnixMilli(), now.UnixMilli())
 	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
 	if err != nil {
 		return "", false, fmt.Errorf("metricsdb.LatestExperimentNode: %w", err)

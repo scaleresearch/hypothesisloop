@@ -149,7 +149,7 @@ func (w *JobWatcher) backfillStartedFromObservations(ctx context.Context, exp *d
 	if w.metricsDBURL == "" {
 		return false, fmt.Errorf("job_watcher: metrics DB URL is required to resolve terminal lifecycle")
 	}
-	_, observed, err := metricsdb.FirstObserved(ctx, w.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback, w.observedStep)
+	_, observed, err := metricsdb.FirstObserved(ctx, w.metricsDBURL, exp.ID, exp.CreatedAt, time.Now().UTC(), w.observedGapCap)
 	if err != nil {
 		return false, fmt.Errorf("job_watcher: check observations for terminal job %s: %w", exp.ID, err)
 	}

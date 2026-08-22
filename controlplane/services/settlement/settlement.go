@@ -39,13 +39,12 @@ type Settler struct {
 	usage        UsageWriter
 	metricsDBURL string
 	gapCap       time.Duration
-	step         time.Duration
 }
 
-// New constructs a Settler. gapCap/step must match every other observed-usage query in this
+// New constructs a Settler. gapCap must match every other observed-usage query in this
 // deployment, so every termination path agrees on what "how long did this run" means.
-func New(usage UsageWriter, metricsDBURL string, gapCap, step time.Duration) *Settler {
-	return &Settler{usage: usage, metricsDBURL: metricsDBURL, gapCap: gapCap, step: step}
+func New(usage UsageWriter, metricsDBURL string, gapCap time.Duration) *Settler {
+	return &Settler{usage: usage, metricsDBURL: metricsDBURL, gapCap: gapCap}
 }
 
 // Settle writes exp's final observed cost for every resource dimension it was estimated for.
@@ -53,55 +52,35 @@ func New(usage UsageWriter, metricsDBURL string, gapCap, step time.Duration) *Se
 // DB's confirmed-alive record rather than in-memory or caller-supplied state, and every write is
 // an absolute set (never a delta).
 //
-// Special case: exp has no execution observation in metrics storage — it consumed nothing, so
-// every reserved dimension settles to 0 regardless of why it was terminated (e.g. a queued job
-// cancelled by a sibling exhausting budget; it never ran, so it owes nothing).
+// A job with no observation at all consumed nothing, so every reserved dimension settles to 0
+// regardless of why it was terminated (e.g. a queued job cancelled by a sibling exhausting
+// budget; it never ran, so it owes nothing).
 func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 	if exp.PlatformExperimentID == "" {
 		return nil
 	}
 	now := time.Now().UTC()
-	// The lookback is exp's own real lifetime (its CreatedAt), never a fixed constant — the same
-	// window quota.runningCostCalc.costOf uses for live running-cost accounting, and for the same
-	// reason (see that function's doc): a fixed cap would make an old-but-legitimately-running
-	// job's later observations invisible to this query, so a job alive past the cap would settle
-	// for less than live accounting already charged it while it ran. The two must agree on what
-	// "how long did this run" means, or a long-lived job's final bill silently disagrees with the
-	// live number the operator saw and quota exhaustion was evicted against.
-	lookback := now.Sub(exp.CreatedAt)
-	var observed bool
-	if lookback > 0 {
-		var err error
-		_, observed, err = metricsdb.FirstObserved(ctx, s.metricsDBURL, exp.ID, now, lookback, s.step)
-		if err != nil {
-			return fmt.Errorf("settlement: first observed: %w", err)
-		}
-	}
-	neverStarted := !observed
-	if neverStarted {
-		// Sample retention is finite, so "no observation in the window" stops meaning "never ran"
-		// for an old enough job. Settling is idempotent and re-runs long after the fact, and a
-		// prior non-zero figure is the durable record that this job did run — never overwrite it
-		// with a full refund just because the evidence has since aged out.
-		settled, found, err := metricsdb.SettledCostForJob(ctx, s.metricsDBURL, exp.CreatedAt, exp.ID)
-		if err != nil {
-			return fmt.Errorf("settlement: prior settled cost: %w", err)
-		}
-		if found {
-			for _, amount := range settled {
-				if amount > 0 {
-					return nil
-				}
-			}
-		}
-	}
 	var hours float64
-	if !neverStarted && exp.EstimatedDurationHours > 0 {
+	if exp.EstimatedDurationHours > 0 {
 		var err error
-		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, now, lookback, s.gapCap, s.step)
+		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, exp.CreatedAt, now, s.gapCap)
 		if err != nil {
 			return fmt.Errorf("settlement: observed elapsed hours: %w", err)
 		}
+	}
+	// Sample retention is finite, so recomputing later can see fewer observations than an earlier
+	// settlement did — an old job's evidence ages out gradually, not all at once. Settling is
+	// idempotent and re-runs long after the fact, so every dimension is clamped to what was
+	// already settled for it: observed consumption is monotonic in reality, and a smaller recompute
+	// is always the window shrinking, never the job having run less.
+	//
+	// The floor is on money rather than on hours only because the rate is frozen: exp is terminal
+	// here, and a terminal row's estimates never change again (RequeuePreempted, the one path that
+	// rescales them, runs only on RUNNING). Amount and hours therefore move together, and no
+	// legitimate downward correction exists for this to mask.
+	prior, priorFound, err := metricsdb.SettledCostForJob(ctx, s.metricsDBURL, exp.CreatedAt, exp.ID)
+	if err != nil {
+		return fmt.Errorf("settlement: prior settled cost: %w", err)
 	}
 
 	// Every dimension, accelerator included, settles at its estimated per-hour rate (estimate /
@@ -147,7 +126,11 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		if d.estimated <= 0 {
 			continue
 		}
-		amounts[d.resourceType] = d.amount
+		amount := d.amount
+		if priorFound && prior[d.resourceType] > amount {
+			amount = prior[d.resourceType]
+		}
+		amounts[d.resourceType] = amount
 	}
 	if err := s.usage.SetObservedUsage(ctx, exp, amounts); err != nil {
 		return fmt.Errorf("settlement: write observed usage: %w", err)

@@ -12,11 +12,6 @@ import (
 // submission rate-limit window.
 const submissionRateLimitWindow = time.Hour
 
-// ObservedMaxLookback bounds how far back ObservedElapsedHours/FirstObserved scan for a job's
-// first sample — a search-window ceiling no real job's runtime could exceed, keeping the range
-// query cheap. Exported so cmd/*/main.go can pass the same bound to services/settlement.New.
-const ObservedMaxLookback = 14 * 24 * time.Hour
-
 // Store is the persistence interface required by the Scheduler.
 type Store interface {
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)

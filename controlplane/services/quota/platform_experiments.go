@@ -74,19 +74,18 @@ type PlatformExperimentsService struct {
 	metricsDBURL string
 	cfg          domain.QuotaConfig
 	logger       *zap.Logger
-	// observedGapCap/observedStep are the deployment-wide observation cadence, identical to the
+	// observedGapCap is the deployment-wide observation cadence, identical to the
 	// controller's and the settler's. Every observed-usage query in a deployment must agree on
 	// what "how long did this run" means, or the same job's cost changes depending on which code
 	// path is asked — visibly jumping the moment it settles.
 	observedGapCap time.Duration
-	observedStep   time.Duration
 }
 
 // NewPlatformExperimentsService constructs the service. metricsDBURL is the GreptimeDB instance
 // backing observed agent quota consumption. PostgreSQL holds allocations and current desired
 // experiment estimates.
-func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string, observedGapCap, observedStep time.Duration) *PlatformExperimentsService {
-	if observedGapCap <= 0 || observedStep <= 0 {
+func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string, observedGapCap time.Duration) *PlatformExperimentsService {
+	if observedGapCap <= 0 {
 		panic("quota: NewPlatformExperimentsService requires a positive observation cadence — it must match the controller's and the settler's")
 	}
 	return &PlatformExperimentsService{
@@ -96,7 +95,6 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 		cfg:            cfg,
 		logger:         logger,
 		observedGapCap: observedGapCap,
-		observedStep:   observedStep,
 	}
 }
 

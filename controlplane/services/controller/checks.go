@@ -29,7 +29,7 @@ import (
 // silence window, since a legitimately coarse eval cadence (metrics only every few report
 // intervals) must not be mistaken for a stuck process.
 func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, declaredMetricKeys []string) (bool, domain.EvictionReason, error) {
-	startedAt, observed, err := metricsdb.FirstObserved(ctx, c.metricsDBURL, exp.ID, now, c.observedMaxLookback(), c.observedStep())
+	startedAt, observed, err := metricsdb.FirstObserved(ctx, c.metricsDBURL, exp.ID, exp.CreatedAt, now, c.observedGapCap())
 	if err != nil {
 		return false, "", fmt.Errorf("silence first observation: %w", err)
 	}
@@ -56,7 +56,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	// cluster is reporting and this job is not in what it reports. Both branches need the same
 	// snapshot facts, and only these branches do — the common case above never pays for the query.
 	if !found || phase == workload.JobPhaseGone {
-		presence, err := metricsdb.ClusterSnapshotPresence(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, now, c.observedMaxLookback())
+		presence, err := metricsdb.ClusterSnapshotPresence(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, exp.CreatedAt, now)
 		if err != nil {
 			return false, "", fmt.Errorf("silence snapshot presence: %w", err)
 		}
@@ -150,7 +150,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	// warn to stderr, that failure is otherwise completely silent, reaching an operator as
 	// "stuck job" with no hint the metrics path is at fault. Tell them apart here, where the
 	// evidence is, so the eviction reason names the actual problem.
-	reported, err := metricsdb.HasEverReportedMetric(ctx, c.metricsDBURL, exp.ID, c.observedMaxLookback())
+	reported, err := metricsdb.HasEverReportedMetric(ctx, c.metricsDBURL, exp.ID, exp.CreatedAt, now)
 	if err != nil {
 		return false, "", fmt.Errorf("silence ever-reported: %w", err)
 	}
