@@ -172,27 +172,13 @@ run_one() {
 scenario_rc() { [[ -r "$LOG_DIR/$1.rc" ]] && cat "$LOG_DIR/$1.rc" || echo "1"; }
 scenario_elapsed() { [[ -r "$LOG_DIR/$1.elapsed" ]] && cat "$LOG_DIR/$1.elapsed" || echo "?"; }
 
-# How many scenarios may hold cluster capacity at once. Every scenario reserves real
-# accelerators and, since admission proves a job fits a single node in every dimension, real
-# per-node CPU too — so firing the whole suite at once oversubscribes the cluster and scenarios
-# fail on admission timeouts that say nothing about the code. A cap trades some wall-clock for
-# results that mean the same thing every run; raise it on a larger cluster.
-SUITE_CONCURRENCY="${SUITE_CONCURRENCY:-5}"
-
 START=$(date +%s)
 run_parallel_group() {
   local label="$1"; shift
-  local names=(${@+"$@"}) pids=() name pid inflight=0
+  local names=(${@+"$@"}) pids=() name pid
   [[ "${#names[@]}" -gt 0 ]] || return 0
-  echo "==> Running ${#names[@]} ${label} scenario(s), ${SUITE_CONCURRENCY} at a time: ${names[*]}"
-  for name in "${names[@]}"; do
-    run_one "$name" & pids+=("$!")
-    inflight=$(( inflight + 1 ))
-    if [[ "$inflight" -ge "$SUITE_CONCURRENCY" ]]; then
-      wait -n 2>/dev/null || true
-      inflight=$(( inflight - 1 ))
-    fi
-  done
+  echo "==> Running ${#names[@]} ${label} scenario(s) concurrently: ${names[*]}"
+  for name in "${names[@]}"; do run_one "$name" & pids+=("$!"); done
   for pid in ${pids[@]+"${pids[@]}"}; do wait "$pid"; done
 }
 
@@ -206,9 +192,26 @@ cluster_agent_ready() {
   [[ "$(kubectl -n hypothesisloop get deployment/hypothesisloop-cluster-agent -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" == "1" ]]
 }
 
+# A scenario is only cluster-exclusive if the cluster is actually idle when it starts. The groups
+# above finish when their scripts exit, which is before the jobs they left behind have released
+# their accelerators — so an exclusive scenario that needs a whole flavor free (saturation
+# preconditions) was racing the previous group's teardown, and failed on inventory it should have
+# had. Wait for the cluster to report nothing busy before handing it over.
+wait_cluster_idle() {
+  local api="${API_URL:-http://localhost:8081}" deadline=$(( $(date +%s) + 120 )) busy
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    busy=$(curl -sf -m 10 "${api}/internal/clusters" 2>/dev/null \
+      | grep -o '"accelerator_busy":[0-9]\+' | awk -F: '{t += $2} END {print t + 0}')
+    [[ "${busy:-1}" == "0" ]] && return 0
+    sleep 5
+  done
+  echo "  [warn] cluster still reports ${busy:-?} accelerator(s) busy; continuing anyway" >&2
+}
+
 if [[ "${#exclusive_set[@]}" -gt 0 ]]; then
   echo "==> Running ${#exclusive_set[@]} cluster-exclusive scenario(s) sequentially: ${exclusive_set[*]}"
   for name in ${exclusive_set[@]+"${exclusive_set[@]}"}; do
+    wait_cluster_idle
     cluster_agent_ready || {
       echo "  [FAIL] cluster-agent is not ready before ${name}" >&2
       echo "1" > "$LOG_DIR/${name}.rc"

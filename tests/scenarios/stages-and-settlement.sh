@@ -30,18 +30,22 @@ for a in "${AGENTS[@]}"; do
 done
 echo "  submitted: ${JOBS[*]}"
 
+# These jobs have to be admitted before they can run, and the suite runs this scenario alongside
+# a dozen others competing for the same accelerators — so the wait is admission plus the run, not
+# a flat number that happened to be enough on an idle cluster.
+TERMINAL_BUDGET=$(( ADMISSION_BUDGET_SECONDS + RUN_SECONDS + 30 ))
 ALL_TERMINAL=0
-for i in $(seq 1 90); do
+for i in $(seq 1 "$TERMINAL_BUDGET"); do
   n=0
   for J in "${JOBS[@]}"; do
     case "$(get_status "$J")" in COMPLETED|FAILED|EVICTED|REJECTED) n=$((n + 1));; esac
   done
   [[ "$n" -ge "${#JOBS[@]}" ]] && { ALL_TERMINAL=1; break; }
-  [[ "$i" -lt 90 ]] && sleep 1
+  [[ "$i" -lt "$TERMINAL_BUDGET" ]] && sleep 1
 done
 [[ "$ALL_TERMINAL" == "1" ]] \
   && pass "all ${#JOBS[@]} jobs reached a terminal state" \
-  || fail "not all jobs reached a terminal state within 90s"
+  || fail "not all jobs reached a terminal state within ${TERMINAL_BUDGET}s"
 
 stages_json() { curl -sf "$API_URL/platform-experiments/${PE_ID}/stages"; }
 get_current_stage() { stages_json | py "import sys,json; print(json.load(sys.stdin)['current_stage'])"; }

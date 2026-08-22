@@ -5,9 +5,11 @@
 set -euo pipefail
 
 # How long a job's admission (queueing/scheduling delay, not its own runtime) may take before a
-# scenario gives up — scales with concurrent suite load (see tests/run.sh), small fixed default
-# when a scenario is run standalone since there's no contention to budget for.
-ADMISSION_BUDGET_SECONDS="${ADMISSION_BUDGET_SECONDS:-60}"
+# scenario gives up. This bounds a wait; it is not an expectation about admission latency. The
+# suite runs its fast group concurrently against fixed hardware, so a guaranteed job can
+# legitimately queue behind several other scenarios' jobs before capacity frees up — at 60s that
+# read as a lifecycle failure rather than as the queueing it was.
+ADMISSION_BUDGET_SECONDS="${ADMISSION_BUDGET_SECONDS:-120}"
 
 API_URL="${API_URL:-http://localhost:8081}"
 PROM_URL="${PROM_URL:-http://localhost:4000/v1/prometheus}"

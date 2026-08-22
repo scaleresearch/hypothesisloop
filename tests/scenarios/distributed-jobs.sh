@@ -14,6 +14,12 @@ source "$DIR/../lib/api.sh"
 source "$DIR/../lib/cluster.sh"
 
 JOB_HOURS="0.025"
+# The estimate above is what the cost assertions below are about; the job's real runtime is set
+# separately and kept short. Running the full 90s the estimate implies put this scenario at the
+# suite's per-scenario ceiling, so any contention killed it mid-assertion — and a longer run
+# proves nothing extra about distributed placement, replica-count billing or Service repair.
+RUN_SECONDS=30
+RUN_ENV="{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${RUN_SECONDS}\"}"
 # H100, not T4: T4 is every other parallel-set scenario's default accelerator type (job-lifecycle,
 # mixed-admission, stages-and-settlement, cpu-quota-guard's own dimension aside), so
 # num_nodes=2 T4 jobs here would have to out-rank a constant stream of fresh guaranteed-tier
@@ -36,7 +42,7 @@ echo "=========================================================="
 echo "Part 1: single distributed job — gang scheduling + billing depth"
 echo "=========================================================="
 QUOTA_BEFORE=$(quota_used_guaranteed "$PE_ID" "${AGENTS[0]}")
-JOB=$(submit_job "$PE_ID" "${AGENTS[0]}" "guaranteed" "$JOB_HOURS" "$ACCELERATOR_TYPE" "1" "2")
+JOB=$(submit_job_ext "$PE_ID" "${AGENTS[0]}" "guaranteed" "$JOB_HOURS" "$JOB_FILE" "$RUN_ENV" "$ACCELERATOR_TYPE" "1" "2")
 echo "  submitted distributed job (accelerator_count=1, num_nodes=2): $JOB"
 
 S=$(wait_for_status "$JOB" "RUNNING,COMPLETED,FAILED,EVICTED" "$ADMISSION_BUDGET_SECONDS" || true)
@@ -85,10 +91,9 @@ else
   [[ "$COST_OK" == "True" ]] && pass "estimated_cost_acch=$EST_COST bills for both replicas (TotalAccelerators)" \
     || fail "estimated_cost_acch=$EST_COST does not match TotalAccelerators-based expected~$EXPECTED_COST"
 
-  # Budget derived from this job's own HYPOTHESISLOOP_DURATION_SECONDS (JOB_HOURS*3600), timed
-  # fresh from here (already confirmed RUNNING/COMPLETED above) rather than from submission —
-  # see completion_wait_tries in tests/lib/api.sh.
-  S=$(wait_for_status "$JOB" "COMPLETED,FAILED,EVICTED" "$(completion_wait_tries "$JOB_HOURS")" || true)
+  # Budget derived from the job's real runtime (RUN_SECONDS), not from the estimate, and timed
+  # fresh from here (already confirmed RUNNING/COMPLETED above) rather than from submission.
+  S=$(wait_for_status "$JOB" "COMPLETED,FAILED,EVICTED" "$(( RUN_SECONDS + 40 ))" || true)
   [[ "$S" == "COMPLETED" ]] && pass "completed cleanly" || fail "did not complete cleanly (status=$S)"
 
   QUOTA_AFTER=$(quota_used_guaranteed "$PE_ID" "${AGENTS[0]}")
