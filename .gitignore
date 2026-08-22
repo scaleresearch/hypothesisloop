@@ -94,3 +94,4 @@ vendor/
 # own experiment.md/seed/ files under agents/coordinator/experiments/<name>/ are tracked.
 agents/coordinator/experiments/smri-fm/
 agents/coordinator/experiments/smri-fm-notes/
+controlplane/settings/.hypothesisloop.rendered.yaml

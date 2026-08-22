@@ -1,6 +1,20 @@
 -- HypothesisLoop Autonomous Research Platform — canonical schema
 -- Single source of truth; no migration history.
 --
+-- Every statement here is idempotent, and that is a hard requirement rather than a nicety:
+-- "no migration history" only works if applying this file to an existing database is a no-op for
+-- everything already present and adds everything that is not. It is applied on EVERY control-plane
+-- start (controlplane/infra/podman.sh), not just the first — postgres only runs its
+-- docker-entrypoint-initdb.d scripts against an empty data directory, so a stack that keeps its
+-- volume across a redeploy would otherwise never see a single column added after day one, and the
+-- new code would query fields the database does not have.
+--
+-- So: CREATE TABLE/INDEX use IF NOT EXISTS, CREATE TYPE is wrapped in a duplicate_object guard
+-- (enums have no IF NOT EXISTS), functions use CREATE OR REPLACE, triggers are dropped first, and
+-- a column added to a table definition above also gets an ALTER ... ADD COLUMN IF NOT EXISTS
+-- below it, with one DEFAULT clause serving both paths so a fresh apply and an in-place add land
+-- on the same backfill.
+--
 -- Metrics (time-series values emitted during job execution) are never stored here — they
 -- live entirely in GreptimeDB, written via Prometheus remote-write and read back via PromQL
 -- (see controlplane/services/registry). This database holds only relational state: agents,
@@ -15,16 +29,20 @@ BEGIN;
 -- Exactly the set domain.ValidExperimentStatus accepts. It used to also carry DRAFT and
 -- PROMOTED, which no Go constant named and nothing could ever write -- a row could only reach
 -- them by a hand-written UPDATE, and every reader would then treat it as an unknown status.
-CREATE TYPE experiment_status AS ENUM (
-    'SUBMITTED',
-    'QUEUED',
-    'ADMITTED',
-    'RUNNING',
-    'COMPLETED',
-    'FAILED',
-    'EVICTED',
-    'REJECTED'
-);
+DO $$ BEGIN
+    CREATE TYPE experiment_status AS ENUM (
+        'SUBMITTED',
+        'QUEUED',
+        'ADMITTED',
+        'RUNNING',
+        'COMPLETED',
+        'FAILED',
+        'EVICTED',
+        'REJECTED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- accelerator_type is deliberately plain TEXT, not an ENUM: the Accelerator catalog is entirely
 -- operator-defined via hypothesisloop.yaml's accelerator_types (see config.AcceleratorTypeConfig) and any
@@ -32,33 +50,45 @@ CREATE TYPE experiment_status AS ENUM (
 -- would silently reject any Accelerator type the operator adds without a schema change, defeating the
 -- whole point of the config-driven catalog.
 
-CREATE TYPE platform_experiment_status AS ENUM (
-    'draft',
-    'open',
-    'running',
-    'closed'
-);
+DO $$ BEGIN
+    CREATE TYPE platform_experiment_status AS ENUM (
+        'draft',
+        'open',
+        'running',
+        'closed'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE capacity_tier AS ENUM (
-    'guaranteed',
-    'burst'
-);
+DO $$ BEGIN
+    CREATE TYPE capacity_tier AS ENUM (
+        'guaranteed',
+        'burst'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- hypothesis_status is the owning agent's own verdict on its claim (see domain.HypothesisStatus)
 -- — a closed enum is correct here, unlike accelerator_type above: these four values are a fixed
 -- design decision, not an operator-extensible catalog.
-CREATE TYPE hypothesis_status AS ENUM (
-    'open',
-    'confirmed',
-    'refuted',
-    'inconclusive'
-);
+DO $$ BEGIN
+    CREATE TYPE hypothesis_status AS ENUM (
+        'open',
+        'confirmed',
+        'refuted',
+        'inconclusive'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- agents
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
     id                TEXT             PRIMARY KEY,
     name              TEXT             NOT NULL,
     performance_score DOUBLE PRECISION NOT NULL DEFAULT 0.5,
@@ -70,7 +100,7 @@ CREATE TABLE agents (
 -- platform_experiments — operator-defined compute envelopes
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE platform_experiments (
+CREATE TABLE IF NOT EXISTS platform_experiments (
     id                   TEXT                       PRIMARY KEY,
     name                 TEXT                       NOT NULL,
     description          TEXT                       NOT NULL DEFAULT '',
@@ -120,7 +150,7 @@ CREATE TABLE platform_experiments (
 -- advisory and separate from this hard constraint).
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE hypotheses (
+CREATE TABLE IF NOT EXISTS hypotheses (
     id                     TEXT              PRIMARY KEY DEFAULT gen_random_uuid()::text,
     -- The owner column, and the only one anything keys ownership on: a job, quota and the
     -- standings all read it. NULL on a human-submitted row, which is why such a row can own
@@ -151,15 +181,15 @@ ALTER TABLE hypotheses ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 
 -- The dedup index is deliberately not scoped by source: a human idea and an agent's restatement
 -- of the same claim are the same claim, and collide exactly as two agent rows would.
-CREATE UNIQUE INDEX idx_hypotheses_platform_normalized_text ON hypotheses(platform_experiment_id, normalized_text);
-CREATE INDEX idx_hypotheses_agent    ON hypotheses(agent_id);
-CREATE INDEX idx_hypotheses_platform ON hypotheses(platform_experiment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hypotheses_platform_normalized_text ON hypotheses(platform_experiment_id, normalized_text);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_agent    ON hypotheses(agent_id);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_platform ON hypotheses(platform_experiment_id);
 
 -- ---------------------------------------------------------------------------
 -- experiments
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE experiments (
+CREATE TABLE IF NOT EXISTS experiments (
     id                       TEXT              PRIMARY KEY,
     parent_id                TEXT              REFERENCES experiments(id),
     agent_id                 TEXT              NOT NULL REFERENCES agents(id),
@@ -235,24 +265,24 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
-CREATE INDEX idx_experiments_agent_id   ON experiments(agent_id);
-CREATE INDEX idx_experiments_status     ON experiments(status);
+CREATE INDEX IF NOT EXISTS idx_experiments_agent_id   ON experiments(agent_id);
+CREATE INDEX IF NOT EXISTS idx_experiments_status     ON experiments(status);
 -- Partial index backing the settlement reconciler's scan for terminal experiments whose final
 -- usage hasn't been durably written yet — stays tiny since settled rows drop out of it.
-CREATE INDEX idx_experiments_unsettled  ON experiments(updated_at)
+CREATE INDEX IF NOT EXISTS idx_experiments_unsettled  ON experiments(updated_at)
     WHERE quota_settled_at IS NULL AND status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED');
-CREATE INDEX idx_experiments_project    ON experiments(project_id);
-CREATE INDEX idx_experiments_platform   ON experiments(platform_experiment_id);
-CREATE INDEX idx_experiments_hypothesis ON experiments(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_experiments_project    ON experiments(project_id);
+CREATE INDEX IF NOT EXISTS idx_experiments_platform   ON experiments(platform_experiment_id);
+CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis ON experiments(hypothesis_id);
 -- Every cluster-agent polls its desired workload set continuously, and ClaimSubmitted re-reads it
 -- while holding the cross-replica admission lock. Partial on the three desired statuses so the
 -- index stays proportional to what is in flight rather than to everything ever run — without it
 -- both sequential-scan the whole table as it grows, the second one inside the lock.
-CREATE INDEX idx_experiments_desired ON experiments(cluster_name, status)
+CREATE INDEX IF NOT EXISTS idx_experiments_desired ON experiments(cluster_name, status)
     WHERE status IN ('SUBMITTED', 'ADMITTED', 'RUNNING');
 -- Quota and stage sweeps ask per (agent, platform experiment, status) — see
 -- GetAgentRunningExperiments/GetAgentQueuedExperiments, called once per agent per reconcile tick.
-CREATE INDEX idx_experiments_agent_platform_status ON experiments(agent_id, platform_experiment_id, status);
+CREATE INDEX IF NOT EXISTS idx_experiments_agent_platform_status ON experiments(agent_id, platform_experiment_id, status);
 
 -- ---------------------------------------------------------------------------
 -- hypothesis_findings — the post-run write-up an agent files after a job reaches a
@@ -265,7 +295,7 @@ CREATE INDEX idx_experiments_agent_platform_status ON experiments(agent_id, plat
 -- hypothesis accumulates one per job that tested it. See services/scheduler.WriteExperimentSummary.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE hypothesis_findings (
+CREATE TABLE IF NOT EXISTS hypothesis_findings (
     id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
     hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
     experiment_id  TEXT        NOT NULL REFERENCES experiments(id) UNIQUE,
@@ -274,7 +304,7 @@ CREATE TABLE hypothesis_findings (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesis_id);
 
 -- ---------------------------------------------------------------------------
 -- hypothesis_comments — a freeform, job-independent note on a hypothesis (amend, abandon,
@@ -284,7 +314,7 @@ CREATE INDEX idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesi
 -- low-harm noise, not a correctness bug — see plan.md.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE hypothesis_comments (
+CREATE TABLE IF NOT EXISTS hypothesis_comments (
     id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
     hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
     -- NULL on a human comment; author carries the typed name instead. Exactly one of the two is
@@ -302,13 +332,13 @@ ALTER TABLE hypothesis_comments ALTER COLUMN agent_id DROP NOT NULL;
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'agent';
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 
-CREATE INDEX idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
 
 -- ---------------------------------------------------------------------------
 -- donation_requests
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE donation_requests (
+CREATE TABLE IF NOT EXISTS donation_requests (
     id                     TEXT             PRIMARY KEY DEFAULT gen_random_uuid()::text,
     agent_id               TEXT             NOT NULL REFERENCES agents(id),
     platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
@@ -323,15 +353,15 @@ CREATE TABLE donation_requests (
     updated_at             TIMESTAMPTZ      NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_donation_requests_agent_id ON donation_requests(agent_id);
-CREATE INDEX idx_donation_requests_platform ON donation_requests(platform_experiment_id);
-CREATE INDEX idx_donation_requests_status   ON donation_requests(status);
+CREATE INDEX IF NOT EXISTS idx_donation_requests_agent_id ON donation_requests(agent_id);
+CREATE INDEX IF NOT EXISTS idx_donation_requests_platform ON donation_requests(platform_experiment_id);
+CREATE INDEX IF NOT EXISTS idx_donation_requests_status   ON donation_requests(status);
 
 -- ---------------------------------------------------------------------------
 -- experiment_signups — agents enrolled in a platform experiment
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE experiment_signups (
+CREATE TABLE IF NOT EXISTS experiment_signups (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT        NOT NULL REFERENCES agents(id),
     signed_up_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -343,8 +373,8 @@ CREATE TABLE experiment_signups (
 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'competitor';
 
-CREATE INDEX idx_experiment_signups_platform ON experiment_signups(platform_experiment_id);
-CREATE INDEX idx_experiment_signups_agent    ON experiment_signups(agent_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_signups_platform ON experiment_signups(platform_experiment_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_signups_agent    ON experiment_signups(agent_id);
 
 -- ---------------------------------------------------------------------------
 -- agent_quotas — per-agent allocation per platform experiment
@@ -352,7 +382,7 @@ CREATE INDEX idx_experiment_signups_agent    ON experiment_signups(agent_id);
 
 -- Allocation only. Current desired usage is derived from experiment rows in PostgreSQL;
 -- observed terminal consumption lives in the metrics store. No usage total is persisted here.
-CREATE TABLE agent_quotas (
+CREATE TABLE IF NOT EXISTS agent_quotas (
     id                     TEXT             PRIMARY KEY,
     agent_id               TEXT             NOT NULL REFERENCES agents(id),
     platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
@@ -383,14 +413,14 @@ CREATE TABLE agent_quotas (
 -- there is one clock for this column and no write path can forget it.
 ALTER TABLE agent_quotas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
-CREATE INDEX idx_agent_quotas_platform ON agent_quotas(platform_experiment_id);
-CREATE INDEX idx_agent_quotas_agent    ON agent_quotas(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_quotas_platform ON agent_quotas(platform_experiment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_quotas_agent    ON agent_quotas(agent_id);
 
 -- ---------------------------------------------------------------------------
 -- experiment_top3 — top-3 agent placements per platform experiment
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE experiment_top3 (
+CREATE TABLE IF NOT EXISTS experiment_top3 (
     platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT             NOT NULL REFERENCES agents(id),
     final_metric           DOUBLE PRECISION NOT NULL,
@@ -398,14 +428,14 @@ CREATE TABLE experiment_top3 (
     PRIMARY KEY (platform_experiment_id, agent_id)
 );
 
-CREATE INDEX idx_experiment_top3_agent ON experiment_top3(agent_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_top3_agent ON experiment_top3(agent_id);
 
 -- ---------------------------------------------------------------------------
 -- platform_experiment_cuts — agents cut at a stage boundary. Terminal: jobs stopped and
 -- further submissions rejected 422 for the rest of the experiment.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE platform_experiment_cuts (
+CREATE TABLE IF NOT EXISTS platform_experiment_cuts (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT        NOT NULL REFERENCES agents(id),
     stage_index            INTEGER     NOT NULL,
@@ -413,7 +443,7 @@ CREATE TABLE platform_experiment_cuts (
     PRIMARY KEY (platform_experiment_id, agent_id)
 );
 
-CREATE INDEX idx_pe_cuts_platform ON platform_experiment_cuts(platform_experiment_id);
+CREATE INDEX IF NOT EXISTS idx_pe_cuts_platform ON platform_experiment_cuts(platform_experiment_id);
 
 -- ---------------------------------------------------------------------------
 -- platform_experiment_stage_advances — one row per boundary crossed, committed with that
@@ -421,7 +451,7 @@ CREATE INDEX idx_pe_cuts_platform ON platform_experiment_cuts(platform_experimen
 -- retry; this row is what makes a crash mid-advance resume rather than re-run.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE platform_experiment_stage_advances (
+CREATE TABLE IF NOT EXISTS platform_experiment_stage_advances (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     stage_index            INTEGER     NOT NULL,
     advanced_at            TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -16,6 +16,19 @@ wait_for_postgres() {
   done
 }
 
+# Applied on EVERY start, not just the first. Postgres runs docker-entrypoint-initdb.d only
+# against an empty data directory, so a stack that keeps its volume across a redeploy -- which is
+# the normal case, and what `down` deliberately preserves -- would never see a column added after
+# day one, and the freshly deployed code would query fields the database does not have. Every
+# statement in schema.sql is idempotent precisely so this is safe to re-run; ON_ERROR_STOP makes a
+# statement that is not into a visible failure here rather than a silent partial apply.
+apply_schema() {
+  echo "podman.sh: applying canonical schema"
+  podman cp "$ROOT/controlplane/shared/db/schema.sql" hypothesisloop-postgres:/tmp/hypothesisloop-schema.sql
+  podman exec hypothesisloop-postgres \
+    psql -U hypothesisloop -d hypothesisloop -v ON_ERROR_STOP=1 -q -f /tmp/hypothesisloop-schema.sql
+}
+
 wait_for_http() {
   local url="$1" deadline=$((SECONDS + 60))
   until curl -fsS -o /dev/null "$url"; do
@@ -24,17 +37,45 @@ wait_for_http() {
   done
 }
 
+# The tracked settings file carries a REPLACE-WITH-HOST-LAN-IP placeholder for data_store.endpoint
+# rather than an address, because a job pod in k3s has its own network namespace and cannot reach
+# the host's loopback -- so the value that works is specific to whichever machine is running the
+# stack, and baking one host's address into a tracked file breaks it for every other. This renders
+# the real address in at start-up and mounts the rendered copy, exactly as tests/lib/common.sh
+# already renders JOB_FILE for the accelerator type a host actually has.
+#
+# The control plane rejects a loopback endpoint outright, so a machine where this detection picks
+# the wrong interface fails at start-up with a message naming the reason, never hours into a run
+# with nothing saved.
+render_settings() {
+  RENDERED_SETTINGS="$ROOT/controlplane/settings/.hypothesisloop.rendered.yaml"
+  local host_ip
+  host_ip=$(ip -4 addr show 2>/dev/null \
+    | awk '/inet /{print $2}' \
+    | grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' \
+    | head -1 | cut -d/ -f1)
+  if [[ -z "$host_ip" ]]; then
+    echo "podman.sh: could not detect a host LAN address for data_store.endpoint." >&2
+    echo "  Set it by hand in controlplane/settings/hypothesisloop.yaml (see the comment there)." >&2
+    exit 1
+  fi
+  sed "s|REPLACE-WITH-HOST-LAN-IP|${host_ip}|g" \
+    "$ROOT/controlplane/settings/hypothesisloop.yaml" > "$RENDERED_SETTINGS"
+  echo "podman.sh: data_store.endpoint rendered against host address ${host_ip}"
+}
+
 run_services() {
+  render_settings
   podman run -d --pod "$POD" --name hypothesisloop-control-service \
     --restart=unless-stopped \
     -e DATABASE_URL='postgres://hypothesisloop:hypothesisloop@localhost:5432/hypothesisloop?sslmode=disable' \
-    -v "$ROOT/controlplane/settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro" \
+    -v "$RENDERED_SETTINGS:/settings/hypothesisloop.yaml:ro" \
     localhost/hypothesisloop-control-service:latest >/dev/null
 
   podman run -d --pod "$POD" --name hypothesisloop-metrics-service \
     --restart=unless-stopped \
     -e DATABASE_URL='postgres://hypothesisloop:hypothesisloop@localhost:5432/hypothesisloop?sslmode=disable' \
-    -v "$ROOT/controlplane/settings/hypothesisloop.yaml:/settings/hypothesisloop.yaml:ro" \
+    -v "$RENDERED_SETTINGS:/settings/hypothesisloop.yaml:ro" \
     localhost/hypothesisloop-metrics-service:latest >/dev/null
 
   wait_for_http http://localhost:8081/health
@@ -95,6 +136,7 @@ case "$ACTION" in
     fi
 
     wait_for_postgres
+    apply_schema
     if (( pod_existed )); then
       wait_for_http http://localhost:8081/health
       wait_for_http http://localhost:8084/health
