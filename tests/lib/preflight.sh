@@ -28,3 +28,25 @@ print(",".join(bad) if len(bad) == len(nodes) else "")
   fi
   return 0
 }
+
+# The workload image lives only in each node's local containerd — nothing serves it, so a node
+# that lost it fails every job with image_pull_failed and an "unschedulable" eviction, which
+# reads as a scheduler bug. The usual cause is kubelet image GC: it reclaims unreferenced images
+# once the image filesystem passes its high threshold, and this host shares one filesystem across
+# every fake node. Fail the run with that cause instead of scattering it across scenarios.
+preflight_workload_image_present() {
+  command -v kubectl >/dev/null || return 0
+  command -v sudo >/dev/null || return 0
+  local image="${WORKLOAD_IMAGE:-localhost/hypothesisloop-workload:latest}" node missing=""
+  for node in $(kubectl get nodes -o name 2>/dev/null | sed 's|node/||'); do
+    sudo podman container exists "$node" 2>/dev/null || continue
+    sudo podman exec "$node" ctr --address /run/k3s/containerd/containerd.sock -n k8s.io \
+      images ls -q 2>/dev/null | grep -qF "$image" || missing="${missing} ${node}"
+  done
+  [[ -z "$missing" ]] && return 0
+  echo "ERROR: ${image} is missing from each node's containerd:${missing}" >&2
+  echo "       Every job placed there will fail to pull it and be evicted as unschedulable." >&2
+  echo "       Usually kubelet image GC reclaiming it under disk pressure — check \`df -h /\`," >&2
+  echo "       free space (podman image prune), then re-run localdev/<cluster>/reload.sh." >&2
+  return 1
+}

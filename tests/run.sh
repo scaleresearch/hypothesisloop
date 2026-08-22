@@ -98,6 +98,7 @@ trap 'rm -rf "$LOG_DIR"' EXIT
 # unhelpfully, several minutes apart. See preflight_accelerator_schedulable.
 source "$DIR/lib/preflight.sh"
 preflight_accelerator_schedulable || exit 2
+preflight_workload_image_present || exit 2
 
 fast_set=()
 slow_set=()
