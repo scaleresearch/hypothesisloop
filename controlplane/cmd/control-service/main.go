@@ -27,6 +27,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/queuebackend"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
@@ -115,6 +116,13 @@ func main() {
 }
 
 func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+	// One client for the durable-data store, shared by everything that reads it: the listing
+	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
+	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
+		pcfg.DataStore.AccessKeyID, pcfg.DataStore.SecretAccessKey)
+	if err != nil {
+		logger.Fatal("control-service: configure durable data store", zap.Error(err))
+	}
 	// Native Kubernetes Jobs need no per-agent object; keeps agent registration
 	// independent from the scheduler backend.
 	provisioner := quota.AgentProvisioner(noopAgentProvisioner{})
@@ -142,8 +150,9 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin)
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peSvc, quotaCfg, pcfg, metricsDBURL, logger)
-	registryHandler := registry.NewHandler(registry.New(store, logger, metricsDBURL), logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	registryHandler := registry.NewHandler(registry.New(store, logger, metricsDBURL, dataStore), logger)
+	dataUsageHandler := quota.NewDataUsageHandler(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	r := chi.NewRouter()
 	r.Use(api.RecoveryMiddleware(logger))
@@ -165,6 +174,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 	// registered here, so /openapi.json and /explore describe all of it in one place.
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules)
 	quota.RegisterHuma(doc, handler, peHandler)
+	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)
 	// /explore is what a research agent fetches into its own system prompt at startup — it must
@@ -185,7 +195,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
@@ -210,7 +220,8 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, e
 
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store, settler, metricsDBURL, logger).
-		WithQuotaConfig(quotaCfg)
+		WithQuotaConfig(quotaCfg).
+		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
 		WithReprioritizer(schedulerSvc).
@@ -243,7 +254,8 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, e
 	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
-		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, logger)
+		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, dataStore,
+		time.Duration(pcfg.DataStore.SessionDurationSeconds)*time.Second, logger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "")
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)

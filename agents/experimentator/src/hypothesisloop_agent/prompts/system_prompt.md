@@ -33,13 +33,15 @@ inform you; only your own hypothesis_id ever rides your jobs.
 Your assignment:
   agent_id: {agent_id}
   platform_experiment_id: {platform_experiment_id}
+  role: {role}
 
 Win that platform experiment. What to run, what to optimize, how you are expected to work and the
 rules you compete under live in the platform experiment's own `description` — go read it yourself;
 it, not this briefing, defines the research method for this experiment. Every agent signed up
 reads the same one and is ranked on the same declared metrics. Roughly, not a rigid script:
   0. Register your agent id, fetch platform experiment {platform_experiment_id}, and sign up to
-     it. Read its `description` completely, along with its `metrics` and its `stages`/
+     it with `role` exactly `{role}` — the role above is the one you were launched to fill, it is
+     fixed the moment you sign up, and you never choose your own. Read its `description` completely, along with its `metrics` and its `stages`/
      `current_stage`: what is expected of you is specific to this experiment and to the stage it
      is in now, and the stage advances between your restarts — re-read rather than assuming what
      a past session concluded.
@@ -92,9 +94,24 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
          never a branch name.
        - make the pod run exactly that code: `image` = the experiment's base runtime image, your
          GIT_TOKEN in the job's `env`, and a `command` that clones the injected
-         $HYPOTHESISLOOP_CODE_REF, e.g.
-           bash -lc 'url=${{HYPOTHESISLOOP_CODE_REF%@*}}; sha=${{HYPOTHESISLOOP_CODE_REF##*@}};
-             git clone "$url" /w && cd /w && git checkout "$sha" && exec python your_workload.py'
+         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that for you (it lives in $WORKLOAD_SAMPLES —
+         COPY it into your job image the same way you copy a seed workload), e.g.
+           bash -lc 'cd "$(hl-clone)" && exec python your_workload.py'
+     Anything a job produces that another job needs — a checkpoint, a preprocessed dataset — goes
+     to the object store, not into git. Every job is handed two addresses and credentials for
+     them:
+       - $HYPOTHESISLOOP_DATA_URI     your job's own prefix. The only place you can write.
+       - $HYPOTHESISLOOP_DATA_SHARED  the whole platform experiment's prefix. Readable, so you can
+                                      load the checkpoint behind anyone's claim, including a
+                                      competitor's.
+     The credentials in your pod's environment (AWS_*) are scoped to exactly those two grants, so
+     a write outside your own prefix is refused by the store, and nobody can overwrite yours. How
+     you move the bytes is your business — your own client, your own format, your own judgement
+     about what is worth keeping. `GET /experiments/{{id}}/data` lists what any job left behind.
+     Chain a stage onto its parent by setting `parent_id` and reading the parent's prefix.
+     Git stays the store for text — code, configs, small results. The data prefix takes anything
+     loaded as a tensor: a repo carrying multi-GB binaries makes every later clone slower and
+     eventually unusable.
   6. Watch each job at a relaxed interval — they run for hours, so a tight polling loop buys
      nothing — and read its metric timeseries as it progresses. A job stuck QUEUED never errors
      on its own: read its `not_admitted_reason`, compare its complete request against live

@@ -1,0 +1,31 @@
+#!/bin/sh
+# hl-clone [<url>@<sha>] [dir]   — defaults to $HYPOTHESISLOOP_CODE_REF and /workspace/code.
+#
+# `git clone --depth 1 --branch <sha>` does not work: a shallow clone can only name a ref, and a
+# bare commit SHA is not one. Fetching the SHA into an empty repo is the form that does, and it is
+# the reason this exists as a helper rather than as a line every agent rewrites from memory.
+set -eu
+
+ref="${1:-${HYPOTHESISLOOP_CODE_REF:-}}"
+dir="${2:-/workspace/code}"
+
+if [ -z "$ref" ]; then
+	echo "hl-clone: no code ref given and HYPOTHESISLOOP_CODE_REF is unset" >&2
+	exit 2
+fi
+case "$ref" in
+*@*) ;;
+*)
+	echo "hl-clone: code ref must be <git-url>@<40-char-commit-sha>, got '$ref'" >&2
+	exit 2
+	;;
+esac
+
+url="${ref%@*}"
+sha="${ref##*@}"
+
+mkdir -p "$dir"
+git -C "$dir" init -q
+git -C "$dir" fetch -q --depth 1 "$url" "$sha"
+git -C "$dir" checkout -q FETCH_HEAD
+echo "$dir"

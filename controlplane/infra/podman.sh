@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 POD="hypothesisloop-controlplane"
 POSTGRES_VOLUME="hypothesisloop-postgres-data"
 GREPTIME_VOLUME="hypothesisloop-greptimedb-data"
+MINIO_VOLUME="hypothesisloop-minio-data"
 
 wait_for_postgres() {
   local deadline=$((SECONDS + 60))
@@ -47,7 +48,7 @@ case "$ACTION" in
     # failing on `pod create`. A pod that exists but won't start is a genuinely broken one and
     # `podman pod start` still errors out, so this stays fail-fast.
     if podman pod exists "$POD"; then
-      for c in hypothesisloop-postgres hypothesisloop-greptimedb hypothesisloop-control-service hypothesisloop-metrics-service; do
+      for c in hypothesisloop-postgres hypothesisloop-greptimedb hypothesisloop-minio hypothesisloop-control-service hypothesisloop-metrics-service; do
         podman container exists "$c" || {
           echo "pod \"$POD\" exists but container $c doesn't — a half-created pod. Run 'podman.sh down && podman.sh up' to rebuild it." >&2
           exit 1
@@ -61,10 +62,11 @@ case "$ACTION" in
       # to purge), otherwise the second `up` on any machine that already has data aborts here.
       podman volume create --ignore "$POSTGRES_VOLUME" >/dev/null
       podman volume create --ignore "$GREPTIME_VOLUME" >/dev/null
+      podman volume create --ignore "$MINIO_VOLUME" >/dev/null
       podman pod create --name "$POD" \
-        --add-host greptimedb:127.0.0.1 \
+        --add-host greptimedb:127.0.0.1 --add-host minio:127.0.0.1 \
         -p 5433:5432 -p 8081:8081 -p 8084:8084 \
-        -p 4010:4000 -p 4001:4001 >/dev/null
+        -p 4010:4000 -p 4001:4001 -p 9000:9000 >/dev/null
 
       podman run -d --pod "$POD" --name hypothesisloop-postgres \
         --restart=unless-stopped \
@@ -79,6 +81,17 @@ case "$ACTION" in
         -v "$GREPTIME_VOLUME:/tmp/greptimedb-data" \
         docker.io/greptime/greptimedb:latest standalone start \
         --http-addr=0.0.0.0:4000 --rpc-bind-addr=0.0.0.0:4001 >/dev/null
+
+      # Durable data between jobs (hypothesisloop.yaml data_store). Object expiry is a lifecycle
+      # rule on the bucket, never a sweeper in the control plane.
+      podman run -d --pod "$POD" --name hypothesisloop-minio \
+        --restart=unless-stopped \
+        -e MINIO_ROOT_USER=hypothesisloop -e MINIO_ROOT_PASSWORD=hypothesisloop \
+        -v "$MINIO_VOLUME:/data" \
+        docker.io/minio/minio:latest server /data --address 0.0.0.0:9000 >/dev/null
+      wait_for_http http://localhost:9000/minio/health/live
+      podman run --rm --pod "$POD" --entrypoint sh docker.io/minio/mc:latest -c \
+        "mc alias set hl http://localhost:9000 hypothesisloop hypothesisloop >/dev/null && mc mb --ignore-existing hl/hypothesisloop-data >/dev/null" >/dev/null
     fi
 
     wait_for_postgres
@@ -107,7 +120,8 @@ case "$ACTION" in
     if [[ "${2:-}" != "--yes" ]]; then
       cat >&2 <<EOF
 podman.sh destroy: this DELETES ALL control-plane data (volumes $POSTGRES_VOLUME,
-$GREPTIME_VOLUME) — every platform experiment, experiment record, metric and hypothesis.
+$GREPTIME_VOLUME, $MINIO_VOLUME) — every platform experiment, experiment record, metric,
+hypothesis and stored checkpoint.
 There is no backup and no undo.
 
 If you only want to restart the services (including onto a rebuilt image), use:
@@ -124,7 +138,7 @@ EOF
       rc=$?
       (( rc == 1 )) || exit "$rc"
     fi
-    for volume in "$POSTGRES_VOLUME" "$GREPTIME_VOLUME"; do
+    for volume in "$POSTGRES_VOLUME" "$GREPTIME_VOLUME" "$MINIO_VOLUME"; do
       if podman volume exists "$volume"; then
         podman volume rm "$volume"
       else

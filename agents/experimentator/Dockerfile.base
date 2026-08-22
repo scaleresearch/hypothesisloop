@@ -45,6 +45,12 @@ RUN useradd --create-home --shell /bin/bash agent
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
 COPY agents/coordinator/experiments $WORKLOAD_SAMPLES
 
+# hl-clone turns "<url>@<sha>" into a checked-out working copy. Installed here so the agent can
+# run it, and left in $WORKLOAD_SAMPLES so a job image can COPY it in the same way it copies a
+# seed workload -- git stays the store for anything read as text, and every agent was otherwise
+# hand-writing the same clone-and-checkout one-liner.
+RUN install -m 0755 $WORKLOAD_SAMPLES/hl-clone /usr/local/bin/hl-clone
+
 WORKDIR /agent
 COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked

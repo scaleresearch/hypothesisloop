@@ -32,7 +32,7 @@ silently improvise.
 ## 1. Prepare the environment (all six, every time — don't assume from a prior session)
 
 0. **Claude auth.** `set -a; source agents/coordinator/.env 2>/dev/null; set +a` — loads the
-   persistent `CLAUDE_CODE_OAUTH_TOKEN` (gitignored) if present. Missing file → step 3 falls back
+   persistent `CLAUDE_CODE_OAUTH_TOKEN` (gitignored) if present. Missing file → step 4 falls back
    to mounted dotfiles.
 1. **Capacity.** `lib_attach_node $KUBE_CONTEXT $NODE_NAME` (`localdev/lib/node.sh`, not manual
    kubectl). Confirm `GET $API_URL/resource-catalog/capacity` shows `$CHIP_ARCH` with >=
@@ -67,6 +67,13 @@ silently improvise.
    with no useful error beyond "connection refused". Find the LAN IP with `ip -4 addr show`
    (the address on the main interface, not `lo`/`docker0`/`br-*`/`tailscale0`/`flannel.1`/`cni0`).
    Confirm reachability from *inside a real job pod*, not just from the coordinator container.
+   **`data_store.endpoint` in `controlplane/settings/hypothesisloop.yaml` has the same rule and
+   the same reason.** Job pods reach the object store directly to write checkpoints (the platform
+   is not in the data path), so it must be the host LAN address too — the shipped value is the
+   placeholder `http://REPLACE-WITH-HOST-LAN-IP:9000`, and loading a config whose endpoint is
+   loopback is refused outright rather than failing later inside a job. `podman.sh up` publishes
+   MinIO on `:9000` and creates the bucket; the LAN address is reachable from the control-plane
+   containers as well, so one value serves both.
 4. **Job image** built before agents start (e.g. `make sparse-sdpa-workload-image`), smoke-tested
    on real hardware (`podman run --device /dev/tenstorrent/0 -v
    /dev/hugepages-1G:/dev/hugepages-1G ...`) — a missing hugepages mount fails with
@@ -97,7 +104,10 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
 `ends_at` (RFC3339).
 
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
-  number, or quota throttles the fleet mid-run.
+  number, or quota throttles the fleet mid-run. Count every agent you will launch here, including
+  the non-competitors step 3 decides on: they draw real quota from the same budget.
+- `max_agents` is the size of the *ranked* field — it counts competitors only, so a baseline or a
+  reviewer never displaces one.
 - `metrics`: `{key, direction, role?}[]` — `"role":"ranking"` on the metric `experiment.md` calls
   RANKING METRIC, no role on the rest.
 - Every reported metric value has an implicit `metric_basis`, default `"raw"`. If a job's value
@@ -140,14 +150,42 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   leaves a race where a slower agent gets `signup_closed: experiment is running` and never runs a
   single job. A 3-5 min buffer after creation covers it comfortably.
 
-## 3. Spawn agents
+## 3. Decide the roles
 
-`NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)`, not a fixed count. Build once: `make
-experimentator-image EXPERIMENT=$EXPERIMENT`. One container per agent, unique `AGENT_ID`, shared
-`PLATFORM_EXPERIMENT_ID`:
+Every agent signs up in exactly one role, fixed at signup, chosen here and never by the agent
+itself. Decide the mix before spawning anything and write the reason into the run's notes, because
+the mix is what the results mean:
+
+- `competitor` (default) — ranked, cut at stage boundaries, takes a quota share, eligible for the
+  top-3 bonus. An experiment that only wants a competition launches these and nothing else, which
+  is the common case.
+- `baseline` — runs the `BASELINE` block's configuration and publishes the control's number.
+  Never ranked, never cut. Launch one when the experiment's conclusion is a *comparison* ("X% over
+  the reference") rather than an ordering, or when the `BASELINE` block says the control is not
+  yet established: the alternative is every competitor measuring its own control, which makes the
+  results incomparable. Its quota comes out of the same budget as everyone else's, so size the
+  budget for competitors + baselines, not competitors alone.
+- `reviewer` — re-checks the metrics and `code_ref` behind other agents' claims and records
+  agreement or dispute as comments. Never ranked, never cut, small or zero accelerator quota.
+  Launch one when a wrong claim is expensive — a long run where agents build on each other's
+  findings, or one whose output is a recommendation someone will act on.
+
+`max_agents` counts competitors only, so adding a baseline or a reviewer never shrinks the field.
+Nothing else in the platform branches on role: every role's jobs are admitted, billed, evicted and
+settled by identical code, every role's metrics are recorded and readable in full, and every role
+must file its findings before submitting again.
+
+## 4. Spawn agents
+
+`NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)` competitors, not a fixed count, plus
+whatever non-competitors step 3 decided on. Build once: `make experimentator-image
+EXPERIMENT=$EXPERIMENT`. One container per agent, unique `AGENT_ID`, shared
+`PLATFORM_EXPERIMENT_ID`, and `AGENT_ROLE` = that agent's role (omit it and the agent is a
+competitor; an unrecognized value fails the container at startup rather than defaulting):
 
     podman run -d --name agent-<id> --network host --userns=keep-id \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
+      -e AGENT_ROLE=competitor \
       -e API_URL=$API_URL \
       -e CODE_REPO_URL=$CODE_REPO_URL -e GIT_TOKEN=$GIT_TOKEN \
       ${CLAUDE_CODE_OAUTH_TOKEN:+-e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN} \
@@ -164,6 +202,11 @@ One shared private `$CODE_REPO_URL`; each agent works on branch
 `agent-<id>-$PLATFORM_EXPERIMENT_ID` (platform experiment id included so a fresh experiment always
 starts from a fresh branch off current `main` — see the agent's own system prompt for why) so
 `code_ref` (`$CODE_REPO_URL@<sha>`) always resolves to a real commit.
+
+The role reaches the platform through the agent's own signup, so confirm it landed as intended
+before handing off: `GET $API_URL/platform-experiments/{id}/signups/{agent_id}` per agent. A role
+is fixed at signup and there is no path to change it — a wrong one means stopping that container,
+which has not yet signed up under the right role, and relaunching it with a fresh `AGENT_ID`.
 
 Hand off to `supervise.md` once agents are running.
 

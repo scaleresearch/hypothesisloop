@@ -127,9 +127,32 @@ type ServicesConfig struct {
 	MetricsDBURL         string `yaml:"metrics_db_url"`
 }
 
+// DataStoreConfig addresses the S3-compatible object store jobs write checkpoints and datasets
+// to. The control plane hands out the address and the credentials and never sits in the data
+// path: it lists prefixes and measures them, nothing more. Expiring a closed platform
+// experiment's prefix is a lifecycle rule configured on the bucket itself, not a sweeper here.
+type DataStoreConfig struct {
+	Endpoint        string `yaml:"endpoint"`
+	Region          string `yaml:"region"`
+	Bucket          string `yaml:"bucket"`
+	AccessKeyID     string `yaml:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key"`
+	// MaxBytesPerAgent caps how many bytes one agent may hold within one platform experiment,
+	// checked at admission against what the store reports right now. Deliberately not enforced
+	// mid-write: that would need a gateway in the data path, and a job killed as it saves loses
+	// the run it was about to preserve. 0 means unlimited.
+	MaxBytesPerAgent int64 `yaml:"max_bytes_per_agent"`
+	// SessionDurationSeconds is how long a job's scoped credentials stay valid. A job outliving
+	// its session loses write access mid-run and cannot save what it produced, so this must
+	// comfortably exceed the longest job the stage ladder allows — it is not a security dial to
+	// turn down. Bounded by what the store accepts (objectstore.STSMinDuration/STSMaxDuration).
+	SessionDurationSeconds int `yaml:"session_duration_seconds"`
+}
+
 // Config is the top-level parsed config from hypothesisloop.yaml.
 type Config struct {
 	AcceleratorTypes []AcceleratorTypeConfig `yaml:"accelerator_types"`
+	DataStore        DataStoreConfig         `yaml:"data_store"`
 	Quota            QuotaConfig             `yaml:"quota"`
 	Scheduler        SchedulerConfig         `yaml:"scheduler"`
 	Stages           StagesConfig            `yaml:"stages"`

@@ -18,7 +18,6 @@ type rowScanner interface {
 func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
 	var acceleratorType, capacityTier, status string
-	var artifacts []string
 	var evictionReason, notAdmittedReason *string
 	var jobSpec []byte
 
@@ -31,7 +30,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
-		&artifacts, &exp.QuotaSettledAt, &exp.AttemptCount,
+		&exp.QuotaSettledAt, &exp.AttemptCount,
 		&exp.CreatedAt, &exp.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -61,11 +60,6 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	if notAdmittedReason != nil {
 		exp.NotAdmittedReason = *notAdmittedReason
 	}
-	if artifacts == nil {
-		artifacts = []string{}
-	}
-	exp.Artifacts = artifacts
-
 	return exp, nil
 }
 

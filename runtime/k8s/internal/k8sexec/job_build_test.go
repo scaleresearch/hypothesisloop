@@ -12,7 +12,8 @@ import (
 func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: APIURLDefault}
 	exp := &domain.Experiment{
-		ID: "hugepage-test", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(),
+		ID:   "hugepage-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
@@ -40,7 +41,8 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: APIURLDefault}
 	exp := &domain.Experiment{
-		ID: "host-mount-test", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(),
+		ID:   "host-mount-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
@@ -81,7 +83,7 @@ func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 		apiURL:                               "http://registry",
 		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
 	}
-	exp := &domain.Experiment{ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+	exp := &domain.Experiment{Data: testDataAccess(), ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z", "A_FIRST": "a"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
 	first, err := c.BuildJob(exp, nvidiaPlacement)
@@ -113,7 +115,8 @@ func intPtr(v int) *int { return &v }
 
 func jobWithRetries(retries int) *domain.Experiment {
 	return &domain.Experiment{
-		ID: "retry-test", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(),
+		ID:   "retry-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
@@ -166,7 +169,7 @@ func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 		apiURL:                               "http://registry",
 		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
 	}
-	exp := &domain.Experiment{ID: "placement-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+	exp := &domain.Experiment{Data: testDataAccess(), ID: "placement-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
 
@@ -197,7 +200,8 @@ func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 func TestBuildJobInjectsPerNodeAcceleratorCountNotTheJobTotal(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: APIURLDefault}
 	exp := &domain.Experiment{
-		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(),
+		ID:   "per-node-count", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 		// The job total: 4 per node across 2 nodes, exactly as submission stores it.
 		AcceleratorCount:       8,
@@ -240,7 +244,8 @@ func envValue(job *batchv1.Job, name string) string {
 // distributedExperiment is a gang of nodes with a retry budget the runtime must NOT try to spend.
 func distributedExperiment(nodes, maxRetries int) *domain.Experiment {
 	return &domain.Experiment{
-		ID: "gang", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(),
+		ID:   "gang", AgentID: "agent", ProjectID: "project",
 		AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 		AcceleratorCount:       nodes,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
@@ -311,5 +316,144 @@ func TestSingleNodeJobKeepsRuntimeRetryBudget(t *testing.T) {
 	}
 	if job.Spec.CompletionMode != nil {
 		t.Error("single-node job was built as an Indexed Job")
+	}
+}
+
+// Every job in every test gets the same durable-data access the control plane really sends,
+// because BuildJob refuses to build a job without one: a job with nowhere to save is a job whose
+// result cannot outlive it, and that must fail at build time rather than at the end of a run.
+func testDataAccess() *domain.DataAccess {
+	return &domain.DataAccess{
+		URI: "s3://hl-data/pe-1/agent/exp-1/", Shared: "s3://hl-data/pe-1/",
+		Endpoint: "http://store.invalid:9000", Region: "us-east-1",
+		AccessKeyID: "key", SecretAccessKey: "secret", SessionToken: "session-token",
+	}
+}
+
+// Durable data is the only way one job's output reaches the next one, and a job learns where to
+// put it from these two variables alone. They must come from desired state and nothing else: the
+// control plane places jobs across clusters by capacity, so anything the cluster contributed to
+// the address would make a checkpoint's location depend on where the job happened to land — and
+// the eval job reading it back has no way to know where that was.
+func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "data-env", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+
+	job, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{}
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	if got := env["HYPOTHESISLOOP_DATA_URI"]; got != exp.Data.URI {
+		t.Fatalf("HYPOTHESISLOOP_DATA_URI = %q, want %q (the job's own writable prefix, straight from desired state)", got, exp.Data.URI)
+	}
+	if got := env["HYPOTHESISLOOP_DATA_SHARED"]; got != exp.Data.Shared {
+		t.Fatalf("HYPOTHESISLOOP_DATA_SHARED = %q, want %q (the platform experiment's readable prefix, straight from desired state)", got, exp.Data.Shared)
+	}
+	if got := env["AWS_SECRET_ACCESS_KEY"]; got != exp.Data.SecretAccessKey {
+		t.Fatalf("AWS_SECRET_ACCESS_KEY = %q, want %q — an address the job has no credentials for is not an address", got, exp.Data.SecretAccessKey)
+	}
+	if got := env["AWS_SESSION_TOKEN"]; got != exp.Data.SessionToken {
+		t.Fatalf("AWS_SESSION_TOKEN = %q, want %q — without the session token the scoped credentials are unusable, and the job falls back to no access at all", got, exp.Data.SessionToken)
+	}
+}
+
+// The control plane mints a fresh session on every reconcile pass, a few seconds apart. If the
+// session reached the desired-spec hash, reconcile would see drift every pass and delete every
+// running job mid-training — the same failure resolved placement caused, from a different source.
+// Rotating an access grant is not the control plane asking for a different job.
+func TestDesiredSpecHashIgnoresRotatingDurableDataCredentials(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "cred-rotation", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+
+	first, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := *exp
+	rotated.Data = &domain.DataAccess{
+		URI: exp.Data.URI, Shared: exp.Data.Shared, Endpoint: exp.Data.Endpoint, Region: exp.Data.Region,
+		AccessKeyID: "next-key", SecretAccessKey: "next-secret", SessionToken: "next-session-token",
+	}
+	second, err := c.BuildJob(&rotated, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Annotations[DesiredSpecHashAnnotation] != second.Annotations[DesiredSpecHashAnnotation] {
+		t.Fatal("a rotated durable-data session changed the desired-spec hash — reconcile will drift-delete every running job every pass")
+	}
+}
+
+// The addressing half is genuine desired state and must stay in the hash: a job repointed at a
+// different prefix is a different job, and a reconcile that could not see that would leave it
+// writing to the old one forever.
+func TestDesiredSpecHashChangesWithDurableDataPrefix(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "prefix-change", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+
+	first, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := *exp
+	movedData := *exp.Data
+	movedData.URI = "s3://hl-data/pe-1/agent/exp-2/"
+	moved.Data = &movedData
+	second, err := c.BuildJob(&moved, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Annotations[DesiredSpecHashAnnotation] == second.Annotations[DesiredSpecHashAnnotation] {
+		t.Fatal("desired-spec hash unchanged when the job's data prefix changed — reconcile will never repoint it")
+	}
+}
+
+// A job with nowhere durable to save cannot hand anything to the stage after it, and that is a
+// control-plane misconfiguration, not something a runtime may paper over: silently starting the
+// run wastes the whole run to discover it.
+func TestBuildJobRefusesAnExperimentWithNoDurableDataAccess(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		ID: "no-data", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+
+	if _, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"}); err == nil {
+		t.Fatal("BuildJob: expected an error for an experiment carrying no durable-data access, got nil")
 	}
 }

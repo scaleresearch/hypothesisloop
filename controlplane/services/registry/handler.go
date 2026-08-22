@@ -13,6 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
 // Handler wires the registry service to HTTP routes, registered via RegisterHuma.
@@ -77,6 +78,26 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct{ Body []*domain.Experiment }{Body: chain}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "list-experiment-data", Method: "GET", Path: "/experiments/{id}/data",
+		Summary: "List what a job wrote to durable storage", Tags: []string{"experiments"},
+		Description: "Checkpoints and datasets the job left under its own prefix, listed live from the object store. " +
+			"A job that kept nothing lists as an empty array — that is the ordinary case, not an error. " +
+			"Read any of them with the credentials in your own job's environment: HYPOTHESISLOOP_DATA_SHARED spans " +
+			"the whole platform experiment, so any agent can load the bytes behind any claim.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{ Body []objectstore.Object }, error) {
+		objects, err := h.svc.ListData(ctx, in.ID)
+		if err != nil {
+			if errors.Is(err, ErrExperimentNotFound) {
+				return nil, huma.Error404NotFound(err.Error())
+			}
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body []objectstore.Object }{Body: objects}, nil
 	})
 
 	// ---- metrics ----
@@ -198,10 +219,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Idempotent within a platform_experiment_id: text equivalent to an existing hypothesis " +
 			"(modulo case/whitespace) returns that row with 200 and already_existed=true, a new one 201. The " +
 			"returned id is metadata.hypothesis_id for the job testing it; every job must reference a " +
-			"hypothesis from its own platform experiment.",
+			"hypothesis from its own platform experiment. Exactly one of agent_id (an agent's row) " +
+			"or author (a human's, submitted from the UI) must be set; both sit in the same pool " +
+			"under the same dedup, but a human row owns no job, holds no quota and is in no standings.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			AgentID              string `json:"agent_id"`
+			Author               string `json:"author" doc:"The name a human types in the UI. There is no auth: this is a claim, not an identity, exactly as agent_id is. Set this instead of agent_id, never both."`
 			PlatformExperimentID string `json:"platform_experiment_id"`
 			Text                 string `json:"text"`
 		}
@@ -210,17 +234,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Body   hypothesisResponse
 	}, error) {
 		b := in.Body
-		if b.AgentID == "" {
-			return nil, huma.Error400BadRequest("agent_id is required")
-		}
 		if b.PlatformExperimentID == "" {
 			return nil, huma.Error400BadRequest("platform_experiment_id is required")
 		}
 		if b.Text == "" {
 			return nil, huma.Error400BadRequest("text is required")
 		}
-		hyp, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, b.PlatformExperimentID, b.Text)
+		hyp, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, b.Author, b.PlatformExperimentID, b.Text)
 		if err != nil {
+			if errors.Is(err, domain.ErrHypothesisOrigin) {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
 			h.logger.Error("register hypothesis", zap.Error(err))
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -340,20 +364,21 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string `json:"agent_id"`
+			Author  string `json:"author" doc:"The name a human types in the UI. Set this instead of agent_id, never both."`
 			Text    string `json:"text"`
 		}
 	}) (*struct {
 		Status int
 		Body   *domain.HypothesisComment
 	}, error) {
-		if in.Body.AgentID == "" {
-			return nil, huma.Error400BadRequest("agent_id is required")
-		}
 		if in.Body.Text == "" {
 			return nil, huma.Error400BadRequest("text is required")
 		}
-		c, err := h.svc.AddHypothesisComment(ctx, in.ID, in.Body.AgentID, in.Body.Text)
+		c, err := h.svc.AddHypothesisComment(ctx, in.ID, in.Body.AgentID, in.Body.Author, in.Body.Text)
 		if err != nil {
+			if errors.Is(err, domain.ErrHypothesisOrigin) {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
 			if errors.Is(err, db.ErrUnknownAgent) {
 				return nil, huma.Error400BadRequest("unknown_agent: " + in.Body.AgentID)
 			}

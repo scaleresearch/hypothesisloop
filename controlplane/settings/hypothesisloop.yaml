@@ -7,6 +7,46 @@ services:
   metrics_db_url: http://greptimedb:4000
 
 
+# Durable data between jobs — checkpoints and datasets one job produces and another needs.
+#
+# An S3-compatible object store, addressed rather than attached: a volume belongs to one cluster
+# and admission places jobs across clusters, so anything attached pins every later stage to
+# wherever the first one landed. Each job is handed HYPOTHESISLOOP_DATA_URI (its own prefix,
+# writable) and HYPOTHESISLOOP_DATA_SHARED (the platform experiment's prefix, readable), plus
+# AWS_* credentials its own client reads. The layout is <platform-experiment>/<agent>/<job>/.
+#
+# The platform is not in the data path: it lists prefixes and measures them, and nothing more.
+# Expiry is a lifecycle rule configured on the bucket itself — one rule, enforced where the bytes
+# are, with no sweeper here to fail silently.
+
+data_store:
+  # MUST be the host's LAN address, never localhost/127.0.0.1 — a job pod (k3s) has its own
+  # network namespace and cannot reach the host's loopback, so a loopback endpoint works
+  # everywhere except the one place that matters and fails hours into a run with nothing saved.
+  # The same rule the shared code repo's URL follows (agents/coordinator/setup.md step 3). Find
+  # it with `ip -4 addr show` (the main interface, not lo/docker0/br-*/tailscale0/cni0). The LAN
+  # address is reachable from the control-plane containers too, so this one value serves both.
+  # Loaded config rejects a loopback endpoint rather than letting it through.
+  endpoint: http://REPLACE-WITH-HOST-LAN-IP:9000
+  region: us-east-1
+  bucket: hypothesisloop-data
+  access_key_id: hypothesisloop
+  secret_access_key: hypothesisloop
+
+  # How many bytes one agent may hold within one platform experiment. Checked at admission
+  # against what the store reports right now, never mid-write: enforcing a ceiling mid-write
+  # needs a gateway in the data path, and a job killed as it saves loses the run it was about to
+  # preserve. 0 = unlimited.
+  max_bytes_per_agent: 214748364800
+
+  # How long a job's scoped credentials stay valid. Each job is handed an STS session that may
+  # write only its own prefix and read only its platform experiment's, so no agent can overwrite
+  # another's evidence whatever code it runs. Size this above the longest job the stage ladder
+  # allows: a job that outlives its session loses write access mid-run and cannot save what it
+  # produced. Between 900 and 43200.
+  session_duration_seconds: 43200
+
+
 # Accelerator types — priced hardware.
 #
 # A type is named by a fact its own driver publishes, written as a fully-qualified "key=value":

@@ -154,7 +154,6 @@ export interface Experiment {
   // The runtime's latest explanation for why this job's container hasn't started or keeps
   // restarting, merged in live from the metrics store on every read.
   phase_detail?: PhaseDetail
-  artifacts?: string[]
   // Lineage
   code_ref?: string
   config_hash?: string
@@ -334,9 +333,18 @@ export interface LineageNode {
 // the agent named in `agent_id` may ever change it.
 export type HypothesisStatus = 'open' | 'confirmed' | 'inconclusive'
 
+// Who put a row in the pool. Human rows come from the UI form and carry `author` instead of
+// `agent_id`; exactly one of the two is ever set. Both sit in the same pool under the same dedup,
+// but a human row owns no job, holds no quota, and appears in no standings.
+export type HypothesisSource = 'agent' | 'human'
+
 export interface Hypothesis {
   id: string
+  /** Empty on a human-submitted row — the owner column names nobody. */
   agent_id: string
+  source: HypothesisSource
+  /** The name a human typed. There is no auth: a claim, not an identity, exactly as agent_id is. */
+  author: string
   platform_experiment_id: string
   text: string
   status: HypothesisStatus
@@ -361,6 +369,8 @@ export interface HypothesisComment {
   id: string
   hypothesis_id: string
   agent_id: string
+  source: HypothesisSource
+  author: string
   text: string
   created_at: string
 }

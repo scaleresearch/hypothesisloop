@@ -42,8 +42,9 @@ const DesiredSpecHashAnnotation = workloadkeys.DesiredSpecHash
 // resource requests, node affinity, Indexed completion mode). Nothing upstream ever
 // constructs or reads a k8s type.
 //
-// Distributed jobs (NumNodes > 1) get native Indexed completion mode, per-index retry, an
-// OOM-aware pod failure policy, and rank/world-size env vars matching torchrun/Horovod convention.
+// Distributed jobs (NumNodes > 1) get native Indexed completion mode, rank/world-size env vars
+// matching torchrun/Horovod convention, and a pod failure policy that fails the whole Job on any
+// rank's non-zero exit — a gang is one unit, so it succeeds or fails as one.
 //
 // Pure: same desired state plus same placement always compiles to the same Job. It performs no
 // cluster reads of its own — callers resolve placement once (see ResolveAcceleratorPlacement) and
@@ -65,7 +66,13 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 	// DeviceClasses and node labels, so hashing it made a DeviceClass rename or a driver upgrade
 	// re-hash every running job of that type and drift-delete it mid-training — the cluster
 	// changing around a job is not the control plane asking for a different job.
-	identity, err := c.compileJob(exp, AcceleratorPlacement{})
+	// The same rule applies to the durable-data session: the control plane mints a fresh one on
+	// every reconcile pass, so hashing it would re-hash every running job every few seconds and
+	// drift-delete it mid-training. The addressing it carries is desired state and stays hashed;
+	// only the rotating credentials are dropped.
+	identityExp := *exp
+	identityExp.Data = exp.Data.WithoutCredentials()
+	identity, err := c.compileJob(&identityExp, AcceleratorPlacement{})
 	if err != nil {
 		return nil, err
 	}
@@ -108,9 +115,10 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 
 	restartPolicy := corev1.RestartPolicyOnFailure
 	if distributed {
-		// PodFailurePolicy (below) requires RestartPolicy=Never: failed containers must
-		// surface as failed pods for the Job controller's per-index accounting, rather
-		// than being retried in-place by the kubelet.
+		// PodFailurePolicy (below) requires RestartPolicy=Never, and the requirement is not
+		// incidental: the policy acts on failed *pods*, so a container the kubelet restarts in
+		// place never surfaces as one and a dead rank would go unnoticed by the rule meant to
+		// tear the gang down.
 		restartPolicy = corev1.RestartPolicyNever
 	} else if spec.MaxRetries != nil && *spec.MaxRetries == 0 {
 		// Retries happen at two independent layers: BackoffLimit recreates the pod, and
@@ -171,7 +179,22 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		resources.Limits[corev1.ResourceName(name)] = q
 	}
 
+	// Durable data is desired state, not a cluster-side setting: the control plane computes the
+	// address and hands it over with the credentials, so a job's checkpoint prefix is identical
+	// whichever cluster admission placed it on. Absent means the control plane is misconfigured,
+	// and a job that silently runs without a place to save is worse than one that never starts.
+	if exp.Data == nil {
+		return nil, fmt.Errorf("workload: experiment %s has no durable-data access in desired state", exp.ID)
+	}
 	env := []corev1.EnvVar{
+		{Name: "AWS_ACCESS_KEY_ID", Value: exp.Data.AccessKeyID},
+		{Name: "AWS_ENDPOINT_URL", Value: exp.Data.Endpoint},
+		{Name: "AWS_ENDPOINT_URL_S3", Value: exp.Data.Endpoint},
+		{Name: "AWS_REGION", Value: exp.Data.Region},
+		{Name: "AWS_SECRET_ACCESS_KEY", Value: exp.Data.SecretAccessKey},
+		{Name: "AWS_SESSION_TOKEN", Value: exp.Data.SessionToken},
+		{Name: "HYPOTHESISLOOP_DATA_SHARED", Value: exp.Data.Shared},
+		{Name: "HYPOTHESISLOOP_DATA_URI", Value: exp.Data.URI},
 		{Name: "HYPOTHESISLOOP_EXPERIMENT_ID", Value: exp.ID},
 		{Name: "HYPOTHESISLOOP_AGENT_ID", Value: exp.AgentID},
 		{Name: "HYPOTHESISLOOP_PROJECT_ID", Value: exp.ProjectID},
@@ -187,6 +210,18 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		// The total stays on the experiment, where billing and admission read it.
 		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", spec.AcceleratorCount)},
 		{Name: "HYPOTHESISLOOP_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
+		// Which attempt this is, 0 on the first. Always 0 for a single-pod job, whose retries are
+		// the runtime's own and never re-enter this path.
+		//
+		// This is load-bearing beyond telling the workload, and the reason is worth stating: a
+		// gang retry requeues the same experiment id, so the rebuilt Job has the same name as the
+		// terminal one still sitting in the cluster. Without the attempt in desired state the
+		// spec hash is byte-identical, the reconciler reads the FAILED Job as matching desired
+		// state, and nothing is ever recreated — the watcher then re-observes that same dead Job
+		// and spends the whole retry budget without running a single new attempt. Carrying the
+		// attempt here makes each one a genuinely different desired state, so the existing
+		// drift-repair path deletes and recreates the Job with no new mechanism.
+		{Name: "HYPOTHESISLOOP_ATTEMPT", Value: fmt.Sprintf("%d", exp.AttemptCount)},
 		{Name: "TRACEPARENT", Value: traceparentFromID(exp.ID)},
 	}
 	envNames := make([]string, 0, len(spec.Env))

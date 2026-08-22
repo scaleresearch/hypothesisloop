@@ -57,7 +57,9 @@ type Experiment struct {
 	// never persisted to PostgreSQL (metrics only in the metrics store, important.md #3). Nil
 	// when nothing has been reported yet.
 	PhaseDetail *PhaseDetail `json:"phase_detail,omitempty"`
-	Artifacts   []string     `json:"artifacts"`
+	// Data is the job's durable-data addressing and credentials, computed on the way out to a
+	// runtime and never stored. Nil on every other read of an experiment.
+	Data *DataAccess `json:"data,omitempty"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
@@ -160,7 +162,7 @@ type ExperimentFilter struct {
 	// NeedsSummary selects only COMPLETED experiments with no finding filed against them -- the
 	// exact set the admission summary gate blocks on. See db.UnsummarizedCompletedPredicate.
 	NeedsSummary bool
-	Limit  int
+	Limit        int
 	// Offset skips this many matching rows before applying Limit — used for page-by-page
 	// listing. Zero means "from the start".
 	Offset int

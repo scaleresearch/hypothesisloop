@@ -146,22 +146,40 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		shmSizeBytes = shmQty.Value()
 	}
 
+	// Same two variables, same source, as the k8s runtime: durable-data addressing arrives in
+	// desired state so a job reads and writes the same prefixes wherever it was placed.
+	if exp.Data == nil {
+		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no durable-data access in desired state", exp.ID)
+	}
 	env := map[string]string{
-		"HYPOTHESISLOOP_EXPERIMENT_ID":     exp.ID,
-		"HYPOTHESISLOOP_AGENT_ID":          exp.AgentID,
-		"HYPOTHESISLOOP_PROJECT_ID":        exp.ProjectID,
-		"HYPOTHESISLOOP_CODE_REF":          exp.CodeRef,
-		"HYPOTHESISLOOP_CONFIG_HASH":       exp.ConfigHash,
-		"HYPOTHESISLOOP_DATA_REF":          exp.DataRef,
-		"HYPOTHESISLOOP_API_URL":           e.apiURL,
-		"HYPOTHESISLOOP_ACCELERATOR_TYPE":  string(exp.AcceleratorType),
+		"AWS_ACCESS_KEY_ID":               exp.Data.AccessKeyID,
+		"AWS_ENDPOINT_URL":                exp.Data.Endpoint,
+		"AWS_ENDPOINT_URL_S3":             exp.Data.Endpoint,
+		"AWS_REGION":                      exp.Data.Region,
+		"AWS_SECRET_ACCESS_KEY":           exp.Data.SecretAccessKey,
+		"AWS_SESSION_TOKEN":               exp.Data.SessionToken,
+		"HYPOTHESISLOOP_DATA_SHARED":      exp.Data.Shared,
+		"HYPOTHESISLOOP_DATA_URI":         exp.Data.URI,
+		"HYPOTHESISLOOP_EXPERIMENT_ID":    exp.ID,
+		"HYPOTHESISLOOP_AGENT_ID":         exp.AgentID,
+		"HYPOTHESISLOOP_PROJECT_ID":       exp.ProjectID,
+		"HYPOTHESISLOOP_CODE_REF":         exp.CodeRef,
+		"HYPOTHESISLOOP_CONFIG_HASH":      exp.ConfigHash,
+		"HYPOTHESISLOOP_DATA_REF":         exp.DataRef,
+		"HYPOTHESISLOOP_API_URL":          e.apiURL,
+		"HYPOTHESISLOOP_ACCELERATOR_TYPE": string(exp.AcceleratorType),
 		// Per node (spec), never the job total (exp) — see the same variable in the k8s
 		// runtime's job_build.go for the failure this caused. Single-node-only today makes the
 		// two equal in practice; taking it from the spec is what keeps that an accident rather
 		// than something the next multi-node change has to remember.
 		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", spec.AcceleratorCount),
 		"HYPOTHESISLOOP_DURATION_SECONDS":  fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600)),
-		"TRACEPARENT":                      traceparentFromID(exp.ID),
+		// Always 0 here: this runtime is single-node, and a single-pod job's retries never reach
+		// the control-plane gang retry that increments it. Injected anyway so both runtimes hand a
+		// workload the same vocabulary, and so it lands in this executor's desired-spec hash for
+		// the same delete-and-recreate reason the k8s runtime documents.
+		"HYPOTHESISLOOP_ATTEMPT": fmt.Sprintf("%d", exp.AttemptCount),
+		"TRACEPARENT":            traceparentFromID(exp.ID),
 	}
 	for k, v := range spec.Env {
 		env[k] = v
@@ -219,6 +237,16 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 // hence sorted separately in BuildContainerSpec... actually env is a map here since podman -e
 // order is irrelevant to behavior).
 func hashContainerSpec(cs containerSpec) (string, error) {
+	// Exclude the durable-data session: the control plane mints a fresh one on every reconcile
+	// pass, and hashing it would recreate every running container every few seconds. The prefixes
+	// and endpoint it comes with are desired state and stay in.
+	env := make(map[string]string, len(cs.Env))
+	for k, v := range cs.Env {
+		env[k] = v
+	}
+	for _, name := range domain.DataCredentialEnvNames {
+		delete(env, name)
+	}
 	// Exclude the hash label itself (not yet set) and copy so this pass never mutates cs.
 	labels := make(map[string]string, len(cs.Labels))
 	for k, v := range cs.Labels {
@@ -242,7 +270,7 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 		Mounts         []string
 		ReadOnlyMounts map[string]string
 		Labels         map[string]string
-	}{cs.Name, cs.Image, cs.Command, cs.Args, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
+	}{cs.Name, cs.Image, cs.Command, cs.Args, env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("podexec: hash desired spec: %w", err)

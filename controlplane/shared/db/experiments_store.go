@@ -54,7 +54,7 @@ const experimentColumns = `
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
-	artifacts, quota_settled_at, attempt_count,
+	quota_settled_at, attempt_count,
 	created_at, updated_at
 `
 
@@ -70,11 +70,6 @@ const pgUniqueViolation = "23505"
 var ErrDuplicateExperiment = errors.New("experiment already exists")
 
 func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Experiment) error {
-	artifacts := exp.Artifacts
-	if artifacts == nil {
-		artifacts = []string{}
-	}
-
 	if exp.CapacityTier == "" {
 		exp.CapacityTier = domain.CapacityGuaranteed
 	}
@@ -94,7 +89,7 @@ INSERT INTO experiments (
 	estimated_duration_hours, estimated_cost_acch,
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
-	queued_at, not_admitted_reason, artifacts,
+	queued_at, not_admitted_reason,
 	created_at, updated_at
 ) VALUES (
 	$1, $2, $3, $4, $5, $6,
@@ -104,8 +99,8 @@ INSERT INTO experiments (
 	$17, $18,
 	$19, $20, $21,
 	$22, $23, $24, $25,
-	$26, NULLIF($27, ''), $28,
-	$29, $30
+	$26, NULLIF($27, ''),
+	$28, $29
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -125,7 +120,7 @@ INSERT INTO experiments (
 		exp.EstimatedDurationHours, exp.EstimatedCostAccH,
 		exp.EstimatedCPUCoreHours, exp.EstimatedRAMGBHours, exp.EstimatedStorageGBHours,
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
-		exp.CreatedAt, exp.NotAdmittedReason, artifacts,
+		exp.CreatedAt, exp.NotAdmittedReason,
 		exp.CreatedAt, exp.UpdatedAt,
 	)
 	if err != nil {

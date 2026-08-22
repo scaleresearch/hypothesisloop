@@ -3,11 +3,15 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
 // Load reads the YAML file at path and returns a validated Config.
@@ -82,6 +86,32 @@ func (c *Config) build() error {
 		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 || s.MaxLogTailLineChars <= 0 ||
 		s.ResourceDisbalanceTolerance <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
+	}
+	// Required, not optional: every job is handed a data address, so a deployment without a
+	// store would hand out an address that resolves to nothing.
+	if c.DataStore.Endpoint == "" || c.DataStore.Region == "" || c.DataStore.Bucket == "" ||
+		c.DataStore.AccessKeyID == "" || c.DataStore.SecretAccessKey == "" {
+		return fmt.Errorf("data_store endpoint, region, bucket, access_key_id and secret_access_key are all required")
+	}
+	if c.DataStore.MaxBytesPerAgent < 0 {
+		return fmt.Errorf("data_store max_bytes_per_agent must not be negative (0 means unlimited)")
+	}
+	sessionDuration := time.Duration(c.DataStore.SessionDurationSeconds) * time.Second
+	if sessionDuration < objectstore.STSMinDuration || sessionDuration > objectstore.STSMaxDuration {
+		return fmt.Errorf("data_store session_duration_seconds must be between %d and %d",
+			int(objectstore.STSMinDuration.Seconds()), int(objectstore.STSMaxDuration.Seconds()))
+	}
+	// A job pod resolves this endpoint from inside its own network namespace, which is not the
+	// control plane's. A loopback address works from every container that shares the host's
+	// network and from nothing else, so it fails only once a real job tries to save — hours in,
+	// with nothing to show for the run. Same failure the shared code repo's URL has (see
+	// agents/coordinator/setup.md step 3), caught here instead of in a job's logs.
+	endpointHost, err := url.Parse(c.DataStore.Endpoint)
+	if err != nil {
+		return fmt.Errorf("data_store endpoint %q is not a URL: %w", c.DataStore.Endpoint, err)
+	}
+	if host := endpointHost.Hostname(); host == "localhost" || net.ParseIP(host).IsLoopback() {
+		return fmt.Errorf("data_store endpoint %q is loopback — job pods run in their own network namespace and cannot reach it. Use the host's LAN address (ip -4 addr show)", c.DataStore.Endpoint)
 	}
 	if err := domain.ValidateStages(c.Stages.Default); err != nil {
 		return fmt.Errorf("stages.default: %w", err)

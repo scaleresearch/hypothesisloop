@@ -29,6 +29,7 @@ const (
 	ReasonSummaryRequired     = "summary_required"
 	ReasonRateLimited         = "rate_limited"
 	ReasonJobTooLong          = "job_too_long"
+	ReasonDataQuotaExceeded   = "data_quota_exceeded"
 )
 
 // AdmissionError is returned when an experiment cannot be admitted.

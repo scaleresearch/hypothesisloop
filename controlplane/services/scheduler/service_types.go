@@ -8,6 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
 // submission rate-limit window.
@@ -107,6 +108,12 @@ type Service struct {
 	settler      QuotaSettler
 	metricsDBURL string
 	logger       *zap.Logger
+	// dataStore and maxDataBytesPerAgent are the durable-data ceiling: how much one agent
+	// already holds in this platform experiment is asked of the store at admission and nowhere
+	// else. Not enforced mid-write — that needs a gateway in the data path, and a job killed as
+	// it saves loses the run it was about to preserve.
+	dataStore            *objectstore.Client
+	maxDataBytesPerAgent int64
 }
 
 // NewService constructs a Scheduler Service with the provided dependencies and
@@ -144,6 +151,14 @@ func NewService(
 // WithQuotaConfig overrides the quota constants (rates, limits) used by the scheduler.
 func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 	s.credits = cfg
+	return s
+}
+
+// WithDataStore wires the durable-data ceiling. A ceiling of 0 is unlimited, like every other
+// per-job cap, and then the store is never asked.
+func (s *Service) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *Service {
+	s.dataStore = client
+	s.maxDataBytesPerAgent = maxBytesPerAgent
 	return s
 }
 
