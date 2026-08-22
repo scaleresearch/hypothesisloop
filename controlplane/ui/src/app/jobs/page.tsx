@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { fetchExperimentsPage, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
+import { fetchExperimentsPage, fetchExperimentStats, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
 import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -112,12 +112,23 @@ function JobsPageContent() {
   const visible = data?.items ?? []
   const total = data?.total ?? 0
 
-  // KPI strip counts the current page only when server-paginated data is all we have loaded —
-  // acceptable here since these are "what's on screen" tiles, not claimed platform totals.
-  const running   = visible.filter(j => j.status === 'RUNNING' as any).length
-  const queued    = visible.filter(j => ['SUBMITTED', 'QUEUED', 'ADMITTED'].includes(j.status as any)).length
-  const evicted   = visible.filter(j => j.status === 'EVICTED' as any).length
-  const completed = visible.filter(j => j.status === 'COMPLETED' as any).length
+  // The tiles count the whole filtered set, server-side — the same filters this page's list
+  // read uses, minus its paging. Tallying the visible rows instead would report the page's
+  // shape under a label that reads as the platform's.
+  const { data: stats } = useSWR(
+    ['job-stats', agentFilter, peFilter, statusFilter],
+    () => fetchExperimentStats({
+      agent: agentFilter || undefined,
+      platform_experiment_id: peFilter || undefined,
+      status: statusFilter || undefined,
+    }),
+    { refreshInterval: 8_000, keepPreviousData: true },
+  )
+  const byStatus = stats?.by_status ?? {}
+  const running   = byStatus.RUNNING ?? 0
+  const queued    = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0) + (byStatus.ADMITTED ?? 0)
+  const evicted   = byStatus.EVICTED ?? 0
+  const completed = byStatus.COMPLETED ?? 0
 
   return (
     <div>
@@ -129,10 +140,10 @@ function JobsPageContent() {
 
       {/* KPI strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
-        <StatTile label="Running (page)" value={running} color={semantic.success} />
-        <StatTile label="Queued / Pending (page)" value={queued} color={semantic.warning} />
-        <StatTile label="Completed (page)" value={completed} color={semantic.accent} />
-        <StatTile label="Evicted (page)" value={evicted} color={semantic.danger} />
+        <StatTile label="Running" value={running} color={semantic.success} />
+        <StatTile label="Queued / Pending" value={queued} color={semantic.warning} />
+        <StatTile label="Completed" value={completed} color={semantic.accent} />
+        <StatTile label="Evicted" value={evicted} color={semantic.danger} />
       </div>
 
       {/* Filters */}
