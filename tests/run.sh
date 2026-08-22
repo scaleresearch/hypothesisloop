@@ -24,6 +24,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # pins an accelerator type's whole capacity to make admission ORDER externally observable, which
 # any other concurrent user of that type (however small) would silently invalidate.
 CLUSTER_EXCLUSIVE=(
+  # Starts a real bare-metal agent on this host and launches containers directly on it — the same
+  # host running the control plane and the k3s server. Sharing it with four other scenarios makes
+  # its own timings a function of their load rather than of the code under test.
+  bare-node-agent
   acceptable-accelerator-types
   resource-disbalance-evict
   concurrent-admission-race

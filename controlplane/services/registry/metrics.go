@@ -30,21 +30,6 @@ var ErrInvalidMetric = errors.New("invalid metric")
 // its values silently rank against unmodified runs on the wrong scale — this is what let a
 // ~20% "win" that was actually ~2x worse into a ranking undetected. Never inferred: only the
 // job that knows it changed the scale can say so.
-func validMetricLabel(field, value string) error {
-	if value == "" {
-		return fmt.Errorf("%w: %s is required", ErrInvalidMetric, field)
-	}
-	if len(value) > 64 {
-		return fmt.Errorf("%w: %s must be at most 64 characters", ErrInvalidMetric, field)
-	}
-	for _, r := range value {
-		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
-			return fmt.Errorf("%w: %s must be printable ASCII", ErrInvalidMetric, field)
-		}
-	}
-	return nil
-}
-
 func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, basis string, fractionComplete, value float64) error {
 	if basis == "" {
 		basis = "raw"
@@ -99,6 +84,22 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	}
 	if err := metricsdb.WriteGaugesAt(ctx, s.metricsDBURL, samples); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
+	}
+	return nil
+}
+
+// validMetricLabel bounds a value that becomes a Prometheus label.
+func validMetricLabel(field, value string) error {
+	if value == "" {
+		return fmt.Errorf("%w: %s is required", ErrInvalidMetric, field)
+	}
+	if len(value) > 64 {
+		return fmt.Errorf("%w: %s must be at most 64 characters", ErrInvalidMetric, field)
+	}
+	for _, r := range value {
+		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
+			return fmt.Errorf("%w: %s must be printable ASCII", ErrInvalidMetric, field)
+		}
 	}
 	return nil
 }
@@ -290,6 +291,14 @@ func latestAttemptOnly(experimentID string, valueResult []metricsdb.RangeSeries,
 // checks the transport status and the Prometheus envelope's status/resultType. A hand-rolled
 // client here used to decode a backend error into an empty successful matrix, so "the metrics
 // store rejected this query" reached the API as "this run produced no measurements".
+// queryRange reads one series over [start, end) at a step sized to the window, the same cap
+// GetPlatformExperimentTimeseries uses. A fixed 5s step is fine for a short run and absurd for a
+// long one: a fortnight of samples is a quarter of a million points per series, on an endpoint a
+// dashboard calls.
 func (s *Service) queryRange(ctx context.Context, query string, start, end time.Time) ([]metricsdb.RangeSeries, error) {
-	return metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, 5*time.Second)
+	step := end.Sub(start) / 500 // ~500 points/series regardless of window size
+	if step < 5*time.Second {
+		step = 5 * time.Second
+	}
+	return metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, step)
 }

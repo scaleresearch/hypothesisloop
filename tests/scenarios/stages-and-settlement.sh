@@ -46,7 +46,11 @@ done
 stages_json() { curl -sf "$API_URL/platform-experiments/${PE_ID}/stages"; }
 get_current_stage() { stages_json | py "import sys,json; print(json.load(sys.stdin)['current_stage'])"; }
 advanced() { [[ "$(get_current_stage)" -ge 2 ]]; }
-if wait_until "first stage boundary" 60 1 advanced; then
+# The boundary trips on observed consumption, so its arrival is bounded by how quickly the jobs
+# are admitted and run — which under a loaded suite is a good deal later than on an idle cluster.
+# Budgeted off the admission budget rather than a flat minute, so a slow cluster reads as slow
+# rather than as a broken ladder.
+if wait_until "first stage boundary" $((ADMISSION_BUDGET_SECONDS + 90)) 1 advanced; then
   pass "platform experiment advanced past its first stage boundary"
   ST=$(stages_json)
 	ACTIVE_N=$(echo "$ST" | py "import sys,json; print(len(json.load(sys.stdin)['active_agents']))")

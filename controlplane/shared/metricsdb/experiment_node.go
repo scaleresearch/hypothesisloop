@@ -3,6 +3,8 @@ package metricsdb
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 )
 
@@ -32,27 +34,28 @@ func RecordExperimentNode(ctx context.Context, dbURL, experimentID, node string,
 // maxLookback, or ("", false, nil) if nothing was ever recorded — e.g. a job that never got far
 // enough to schedule a pod, or one older than maxLookback.
 func LatestExperimentNode(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback time.Duration) (node string, found bool, err error) {
-	promQL := fmt.Sprintf(`max by (node) (last_over_time(%s{experiment_id=%q}[%s]))`,
-		experimentNodeMetric, experimentID, promSeconds(maxLookback))
-	series, err := QueryRange(ctx, dbURL, promQL, now.Add(-maxLookback), now, maxLookback)
+	if maxLookback <= 0 {
+		return "", false, nil
+	}
+	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+	// Ordered by each node's newest *real* sample. The range-query form this replaced asked with
+	// a step equal to the whole lookback, which put every node's last point on the same grid
+	// timestamp — so "which is latest" compared equal for all of them and the winner was whichever
+	// series came back first. After a reschedule that is as likely to name the node the job left
+	// as the one it moved to, and the disbalance evictor attributes jobs to nodes with this.
+	query := fmt.Sprintf(
+		`SELECT node, MAX(greptime_timestamp) AS last_seen FROM %s `+
+			`WHERE experiment_id = %s AND greptime_timestamp >= NOW() - INTERVAL '%d seconds' `+
+			`GROUP BY node ORDER BY last_seen DESC LIMIT 1`,
+		experimentNodeMetric, quote(experimentID), int64(math.Ceil(maxLookback.Seconds())))
+	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
 	if err != nil {
 		return "", false, fmt.Errorf("metricsdb.LatestExperimentNode: %w", err)
 	}
-	var latest string
-	var latestAt time.Time
-	for _, s := range series {
-		n := s.Labels["node"]
-		if n == "" || len(s.Points) == 0 {
-			continue
-		}
-		p := s.Points[len(s.Points)-1]
-		if p.Time.After(latestAt) {
-			latestAt = p.Time
-			latest = n
+	for _, sample := range samples {
+		if n := sample.Labels["node"]; n != "" {
+			return n, true, nil
 		}
 	}
-	if latest == "" {
-		return "", false, nil
-	}
-	return latest, true, nil
+	return "", false, nil
 }
