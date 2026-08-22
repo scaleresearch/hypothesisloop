@@ -142,11 +142,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin)
 
-	// Auto-close platform experiments past their ends_at deadline. Close() is safe to race
-	// across replicas — a second caller just logs invalid_transition.
-	go peSvc.StartExpirySweep(runCtx, 60*time.Second)
-
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peSvc, quotaCfg, pcfg, metricsDBURL, logger)
 	registryHandler := registry.NewHandler(registry.New(store, logger, metricsDBURL), logger)
 
 	r := chi.NewRouter()
@@ -189,9 +185,8 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
 	// (see workload/backend.go). queuebackend.Backend only reads/writes Postgres.
@@ -230,12 +225,15 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, p
 	// on exactly one replica. leaderelection.Run holds a Postgres advisory lock to pick that
 	// replica; others stand by and take over if the leader dies. Only these loops are
 	// leader-gated — the HTTP API stays multi-replica.
-	// The settlement reconciler joins the leader-gated loops rather than running per replica.
-	// Settle is an idempotent absolute set, so concurrent copies are not incorrect, but they are
-	// N redundant sweeps racing last-writer-wins over the same "final" figure. One owner.
+	// The settlement reconciler and the platform-experiment expiry sweep join the leader-gated
+	// loops rather than running per replica. Both are idempotent — Settle is an absolute set,
+	// Close() logs invalid_transition when it loses a race — so concurrent copies are not
+	// incorrect, just N redundant sweeps racing over the same row. One owner.
 	go leaderelection.Run(runCtx, pool.Raw(), leaderelection.SchedulerLockKey,
 		5*time.Second, logger, func(leaderCtx context.Context) {
 			go settlementReconciler.Start(leaderCtx)
+			// Auto-close platform experiments past their ends_at deadline.
+			go expQuotaSvc.StartExpirySweep(leaderCtx, 60*time.Second)
 			schedulerLoop.Start(leaderCtx)
 			watcher.Start(leaderCtx)
 		})
