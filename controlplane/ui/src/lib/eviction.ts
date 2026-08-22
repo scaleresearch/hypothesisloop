@@ -51,3 +51,31 @@ export function evictionLabel(reason?: string | null): string {
 export function evictionCodeLabel(code: string): string {
   return EVICTION_REASON_LABELS[code] ?? code
 }
+
+// Fault classes (shared/domain/fault_class.go). The class is the verdict an agent actually needs:
+// an agent seeing its failures are 'infrastructure' stops debugging code that was correct, and a
+// stage-cut job stops reading as a failed one. Derived server-side from the same by-reason tally,
+// never stored twice.
+const FAULT_CLASS_LABELS: Record<string, string> = {
+  workload: 'Agent',
+  infrastructure: 'Infrastructure',
+  policy: 'Platform decision',
+  unclassified: 'Unclassified',
+}
+
+// Order is meaning, not count: the agent's own failures first because that is the only column it
+// can act on, then the environment's, then the platform's own decisions — which are not failures.
+const FAULT_CLASS_ORDER = ['workload', 'infrastructure', 'policy', 'unclassified']
+
+export function faultClassLabel(faultClass: string): string {
+  return FAULT_CLASS_LABELS[faultClass] ?? faultClass
+}
+
+// faultBreakdown renders a by-class tally as "Agent (3) · Infrastructure (1)", empty when there
+// is nothing to report. Classes with no rows are omitted rather than shown as zero.
+export function faultBreakdown(byClass: Record<string, number>): string {
+  return FAULT_CLASS_ORDER
+    .filter(c => (byClass[c] ?? 0) > 0)
+    .map(c => `${faultClassLabel(c)} (${byClass[c]})`)
+    .join(' · ')
+}

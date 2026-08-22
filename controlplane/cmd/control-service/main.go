@@ -65,7 +65,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	store := db.NewStore(pool, metricsDBURL)
+	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
 	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
@@ -151,7 +151,14 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 		WithLiveCapacity(metricsDBURL, connectedWithin)
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
-	registryHandler := registry.NewHandler(registry.New(store, logger, metricsDBURL, dataStore), logger)
+	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
+	// connections are open. Nothing is persisted for it and nothing is held between connections
+	// — see services/registry/watch.go.
+	events := db.NewEventsStore(pool)
+	registrySvc := registry.New(store, logger, metricsDBURL, dataStore).WithEvents(events)
+	registryHandler := registry.NewHandler(registrySvc, logger)
+	watchHandler := registry.NewWatchHandler(events, store, logger)
+	watchHandler.Start(runCtx)
 	dataUsageHandler := quota.NewDataUsageHandler(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	r := chi.NewRouter()
@@ -166,6 +173,12 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 			fmt.Fprintln(w, `{"status":"ok"}`)
 		})
 	}
+	// /watch is a WebSocket upgrade, so it is mounted on the router rather than registered on
+	// the Huma doc below: Huma owns the response for every operation registered with it, and an
+	// upgrade needs the raw connection. Agents learn it from hl-watch, documented in the
+	// experimentator's system prompt.
+	r.Get("/watch", watchHandler.ServeHTTP)
+
 	// Cluster-agent traffic (Go cluster-agent binaries, not research agents) keeps its own
 	// registration and its own docs under a distinct prefix — a different audience entirely.
 	r.Mount("/internal/clusters", clusterAgentRouter)

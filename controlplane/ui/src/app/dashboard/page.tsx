@@ -13,7 +13,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 import { statusColor, semantic } from '@/lib/colors'
-import { evictionCodeLabel, evictionLabel } from '@/lib/eviction'
+import { evictionCodeLabel, evictionLabel, faultBreakdown } from '@/lib/eviction'
 
 type Job = Record<string, any>
 
@@ -77,6 +77,10 @@ export default function DashboardPage() {
   // Eviction reasons arrive already grouped by code — a reason may carry a ': detail'
   // explanation, and every distinct one would otherwise become its own category.
   const evictionByReason = stats?.evictions_by_reason ?? {}
+
+  // Whose fault, folded from the same tally. This is the line that keeps an agent from being
+  // read as unreliable because a node broke, and a stage-cut job from reading as a failure.
+  const faultSummary = faultBreakdown(stats?.evictions_by_class ?? {})
 
   const tierTotal = stats?.by_capacity_tier ?? {}
   const tierRunning = stats?.running_by_capacity_tier ?? {}
@@ -228,6 +232,9 @@ export default function DashboardPage() {
         <Pod>
           <PodHeader>Eviction Reasons</PodHeader>
           <PodContent>
+            {faultSummary && (
+              <div style={{ color: 'var(--muted-fg)', fontSize: 11, marginBottom: 8 }}>{faultSummary}</div>
+            )}
             {evictionChartData.length === 0 ? (
               <EmptyState>No evictions recorded.</EmptyState>
             ) : (

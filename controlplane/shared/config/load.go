@@ -84,6 +84,7 @@ func (c *Config) build() error {
 		s.ReconcileIntervalSeconds <= 0 ||
 		s.DefaultTerminationGracePeriodSeconds <= 0 || s.MaxTerminationGracePeriodSeconds <= 0 || s.DefaultReportIntervalSeconds <= 0 ||
 		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 || s.MaxLogTailLineChars <= 0 ||
+		s.MaxInfrastructureRequeues <= 0 ||
 		s.ResourceDisbalanceTolerance <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
 	}

@@ -25,12 +25,23 @@ type Store struct {
 	// usage is the sole read/write path for agent quota consumption (used_guaranteed_*/
 	// used_burst_*), backed by the metrics DB rather than Postgres — see metricsdb.UsageTracker.
 	usage *metricsdb.UsageTracker
+
+	// maxInfraRequeues bounds how many times one experiment may be returned to the queue for
+	// free after an infrastructure fault, before ResolveTermination gives up and terminates it
+	// with the reason that keeps ending it. Without a ceiling a job landing repeatedly on broken
+	// hardware loops forever, saying nothing.
+	maxInfraRequeues int
 }
 
 // NewStore creates a Store backed by the given pool, tracking agent quota usage in the metrics
-// DB at metricsDBURL.
-func NewStore(pool *Pool, metricsDBURL string) *Store {
+// DB at metricsDBURL. maxInfraRequeues must be positive: there is no "unbounded" and no "off" —
+// a zero would silently turn every infrastructure fault back into a terminal eviction.
+func NewStore(pool *Pool, metricsDBURL string, maxInfraRequeues int) *Store {
+	if maxInfraRequeues <= 0 {
+		panic("db.NewStore: max_infrastructure_requeues must be positive")
+	}
 	return &Store{
+		maxInfraRequeues:         maxInfraRequeues,
 		ExperimentsStore:         NewExperimentsStore(pool),
 		AgentsStore:              NewAgentsStore(pool),
 		DonationStore:            NewDonationStore(pool),

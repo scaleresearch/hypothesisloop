@@ -12,16 +12,33 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
-// evict marks the experiment EVICTED and refunds unused accelerator hours. Status transition,
-// reason, and refund happen in one DB transaction (TransitionAndRefund), so a crash mid-eviction
-// can never leave a partial refund.
+// evict ends the experiment with the given reason and settles what it genuinely consumed. The
+// store resolves what that means: an infrastructure fault with requeue budget left goes back to
+// QUEUED for a free attempt instead of terminating, and one that exhausts that budget ends
+// EVICTED and settles to a full refund — see db.Store.ResolveTermination and settlement.Settle.
+// Nothing here decides that; this function only reports the outcome and settles either way.
 func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, now time.Time) error {
-	updated, err := c.store.TransitionTerminal(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
+	outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
 		return fmt.Errorf("evict: %w", err)
 	}
-	if !updated {
+	switch outcome {
+	case domain.TerminationSkipped:
 		// Job already left exp.Status (completed or cancelled concurrently) — skip settlement.
+		return nil
+	case domain.TerminationRequeued:
+		// Bill what this attempt burned before it goes back in the queue, so a job cycling
+		// through requeues is not invisible to running-cost and quota exhaustion meanwhile. Not
+		// the refund: that lands only if the job ends in an infrastructure fault once its requeue
+		// allowance runs out — see settlement.Settle. Deliberately not MarkQuotaSettled, since
+		// the row is QUEUED again rather than terminal.
+		exp.Status = domain.StatusQueued
+		exp.EvictionReason = string(reason)
+		if err := c.settler.Settle(ctx, exp); err != nil {
+			c.logger.Warn("settle before infrastructure requeue", zap.String("id", exp.ID), zap.Error(err))
+		}
+		c.logger.Info("experiment requeued after an infrastructure fault",
+			zap.String("id", exp.ID), zap.String("reason", string(reason)))
 		return nil
 	}
 	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
@@ -67,14 +84,14 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 				}
 			} else {
 				// QUEUED or SUBMITTED: cancel — never started, so Settle refunds it to 0.
-				updated, err := c.store.TransitionTerminal(ctx, exp.ID, exp.Status, domain.StatusRejected,
+				outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusRejected,
 					string(domain.EvictionExperimentClosed))
 				if err != nil {
 					c.logger.Error("reconcileClosedExperiments: cancel pre-run job",
 						zap.String("exp", exp.ID), zap.Error(err))
 					continue
 				}
-				if !updated {
+				if outcome != domain.TerminationWritten {
 					continue
 				}
 				obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionExperimentClosed)).Inc()

@@ -103,6 +103,13 @@ type SchedulerConfig struct {
 	DefaultTerminationGracePeriodSeconds int `yaml:"default_termination_grace_period_seconds"`
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
 	MaxTerminationGracePeriodSeconds int `yaml:"max_termination_grace_period_seconds"`
+	// MaxInfrastructureRequeues bounds how many times one experiment may be returned to the
+	// queue for free after an infrastructure-class eviction reason (see domain.FaultClass) —
+	// the environment failed it, so it costs no max_retries attempt and no accelerator-hours.
+	// Required and positive, like every other setting here. There is no "unbounded": a job that
+	// keeps landing on broken hardware must eventually stop and say so with the reason that
+	// keeps ending it, rather than loop silently forever.
+	MaxInfrastructureRequeues int `yaml:"max_infrastructure_requeues"`
 	// MaxLogTailLineChars bounds one line of a job's reported log tail (see
 	// runtime/shared/agentloop.splitLongLines): large enough to keep a real compiler error or
 	// stack frame intact, small enough that one pathological line can't blow up a status push.

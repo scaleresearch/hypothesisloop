@@ -182,8 +182,11 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 // attempt_count in the same statement so the budget is spent exactly once even if two watchers
 // observe the same failure.
 //
-// maxAttemptsBefore is the number of failed attempts after which the job stays FAILED — i.e.
-// job.max_retries. The comparison is in the WHERE clause rather than in the caller so the read
+// maxAttemptsBefore is the number of the agent's OWN failed attempts after which the job stays
+// FAILED — i.e. job.max_retries. Attempts the environment ended are excluded by comparing
+// attempt_count - infra_requeue_count (domain.Experiment.RetriesUsed), so a job repeatedly
+// killed by broken hardware still gets its full allowance for its own bugs. The comparison is in
+// the WHERE clause rather than in the caller so the read
 // and the write cannot disagree under concurrency; requeued=false therefore means either "budget
 // exhausted" or "another writer got there first", and both mean the same thing to the caller: do
 // nothing more.
@@ -207,10 +210,55 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 		not_admitted_reason = 'capacity_unavailable',
 		quota_settled_at = NULL,
 		updated_at = NOW()
-	WHERE id = $1 AND status = 'FAILED' AND attempt_count < $2`
+	WHERE id = $1 AND status = 'FAILED' AND attempt_count - infra_requeue_count < $2`
 	tag, err := s.pool.pool.Exec(ctx, q, id, maxAttemptsBefore)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueForRetry: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RequeueInfrastructureFault returns an experiment the environment failed to QUEUED for a fresh
+// attempt that costs it nothing, spending one of its infrastructure-requeue allowance in the same
+// guarded UPDATE that reads it — so two watchers observing the same fault cannot both spend it,
+// and a read can never disagree with the write it authorised.
+//
+// attempt_count advances even though this is not one of the agent's failures, and that is the
+// point of having two counters rather than one. attempt_count is the generation number the
+// runtimes put in the workload's environment (HYPOTHESISLOOP_ATTEMPT): a requeue reuses the
+// experiment id, so without it the rebuilt workload is byte-identical to the terminal one still
+// sitting in the cluster, the reconciler reads that dead workload as matching desired state, and
+// the job never actually runs again. infra_requeue_count records how much of that advance was
+// not the agent's doing, and max_retries is compared against the difference — so the retry budget
+// is untouched while desired state still genuinely changes.
+//
+// The eviction reason is kept rather than cleared: it is the durable record of what ended the
+// last attempt, and the only thing that lets a stats reader say "these were infrastructure".
+// not_admitted_reason is required for any QUEUED row (experiments_queue_reason_consistent).
+//
+// quota_settled_at is cleared for the same reason RequeueForRetry clears it: the row is no longer
+// terminal and the next attempt owes a settlement of its own.
+//
+// Returns false when the ceiling is reached or another writer got there first — both mean the
+// caller must terminate instead.
+func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id string, from domain.ExperimentStatus, reason string, maxInfraRequeues int) (bool, error) {
+	const q = `UPDATE experiments SET
+		status = 'QUEUED',
+		eviction_reason = $3,
+		attempt_count = attempt_count + 1,
+		infra_requeue_count = infra_requeue_count + 1,
+		submitted_at = NULL,
+		-- clear cluster_name: the failed attempt holds no capacity, and the next admission tick
+		-- must be free to place this somewhere other than the cluster that just failed it.
+		cluster_name = '',
+		queued_at = COALESCE(queued_at, NOW()),
+		not_admitted_reason = 'capacity_unavailable',
+		quota_settled_at = NULL,
+		updated_at = NOW()
+	WHERE id = $1 AND status = $2 AND infra_requeue_count < $4`
+	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), reason, maxInfraRequeues)
+	if err != nil {
+		return false, fmt.Errorf("experiments_store.RequeueInfrastructureFault: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }

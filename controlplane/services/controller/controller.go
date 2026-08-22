@@ -30,10 +30,10 @@ type Store interface {
 	// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED,
 	// ADMITTED, RUNNING) for a platform experiment. Used by close-eviction reconciliation.
 	ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
-	// TransitionTerminal atomically transitions status and records the reason in one DB
-	// transaction — see db.Store.TransitionTerminal. Does not write usage; the caller settles
+	// ResolveTermination atomically transitions status and records the reason in one DB
+	// transaction — see db.Store.ResolveTermination. Does not write usage; the caller settles
 	// separately (see Controller.settleAndMark) so that write can be retried independently.
-	TransitionTerminal(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error

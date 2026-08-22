@@ -121,6 +121,10 @@ export interface ExperimentStats {
   running_by_capacity_tier: Record<string, number>
   evicted_by_capacity_tier: Record<string, number>
   evictions_by_reason: Record<string, number>
+  // evictions_by_class folds evictions_by_reason into whose fault each was — the agent's own
+  // ('workload'), the environment's ('infrastructure'), or the platform's own decision
+  // ('policy'). Derived server-side from the same tally; see shared/domain/fault_class.go.
+  evictions_by_class: Record<string, number>
 }
 
 export function fetchExperimentStats(params?: Omit<ExperimentsParams, 'limit' | 'offset' | 'sort'>): Promise<ExperimentStats> {

@@ -99,13 +99,13 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		return fmt.Errorf("get running: %w", err)
 	}
 	for _, exp := range running {
-		updated, err := c.stagesStore.TransitionTerminal(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
+		outcome, err := c.stagesStore.ResolveTermination(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
 			string(domain.EvictionStageCut))
 		if err != nil {
 			c.logger.Error("stage cut: evict running", zap.String("id", exp.ID), zap.Error(err))
 			continue
 		}
-		if !updated {
+		if outcome != domain.TerminationWritten {
 			continue
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStageCut)).Inc()
@@ -131,13 +131,13 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		if exp.Status == domain.StatusAdmitted {
 			to = domain.StatusEvicted
 		}
-		updated, err := c.stagesStore.TransitionTerminal(ctx, exp.ID, exp.Status, to,
+		outcome, err := c.stagesStore.ResolveTermination(ctx, exp.ID, exp.Status, to,
 			string(domain.EvictionStageCut))
 		if err != nil {
 			c.logger.Error("stage cut: reject queued", zap.String("id", exp.ID), zap.Error(err))
 			continue
 		}
-		if !updated {
+		if outcome != domain.TerminationWritten {
 			continue
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStageCut)).Inc()

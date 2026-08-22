@@ -54,7 +54,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	store := db.NewStore(pool, metricsDBURL)
+	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
 	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)

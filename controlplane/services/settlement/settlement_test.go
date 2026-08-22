@@ -110,3 +110,221 @@ func approx(a, b float64) bool {
 	d := a - b
 	return d < 1e-9 && d > -1e-9
 }
+
+// An infrastructure fault refunds every hour the job burned. It ran, but the environment is what
+// ended it, so the agent never chose to spend those hours — and a system whose whole output is a
+// ranking of agents cannot charge one for a broken node. The refund is expressed as zero observed
+// hours through this same absolute write rather than as a separate credit: a second write path to
+// one figure is free to disagree with this one and to double-apply across the retries Settle
+// exists to be safe under.
+func TestAJobThatEndedEvictedOnAnInfrastructureFaultSettlesToAFullRefund(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now) // two genuinely observed hours
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-bad-node",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		EstimatedCPUCoreHours:  4,
+		Status:                 domain.StatusEvicted,
+		EvictionReason:         string(domain.EvictionClusterUnreachable),
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 0.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+	if got, want := usage.amounts[domain.ResourceCPUCoreHours], 0.0; !approx(got, want) {
+		t.Errorf("cpu settled at got = %v, want %v", got, want)
+	}
+}
+
+// A workload fault is the agent's own, so it pays for exactly what it ran. Refunding here would
+// make every failure free and remove the only cost signal an agent has for its own bugs.
+func TestAWorkloadFaultIsBilledForEveryHourItRan(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now)
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-hung",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		Status:                 domain.StatusEvicted,
+		EvictionReason:         string(domain.EvictionSilent),
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+}
+
+// A policy termination is the platform's own decision, not a fault, and it is reported separately
+// for that reason — but the researcher still genuinely ran the hours, so a stage cut bills like
+// any other outcome. Only infrastructure changes the figure.
+func TestAPolicyTerminationIsBilledLikeAnyOtherOutcome(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now)
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-cut",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		Status:                 domain.StatusEvicted,
+		EvictionReason:         string(domain.EvictionStageCut),
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+}
+
+// The reason carries per-job detail through EvictionReason.WithDetail, and classification must be
+// driven by the typed code rather than the message text — otherwise a detailed reason silently
+// falls out of its class and gets billed as if it were the agent's fault.
+func TestAnInfrastructureFaultCarryingDetailIsStillRefunded(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now)
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-detailed",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		Status:                 domain.StatusEvicted,
+		EvictionReason:         string(domain.EvictionWorkloadGone.WithDetail("no pod on cluster tt-small")),
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 0.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+}
+
+// The bug this test exists for: eviction_reason deliberately survives an infrastructure requeue
+// as the record of what ended the previous attempt, so a job requeued once and then successful
+// reaches COMPLETED still carrying `cluster_unreachable`. Keying the refund on the reason alone
+// settled that whole job — the successful attempt included — at zero, which handed an agent an
+// unmetered run for the price of provoking one infrastructure fault. The refund must key on how
+// the job actually ENDED.
+func TestACompletedJobCarryingAStaleInfrastructureReasonIsStillBilled(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now)
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-requeued-then-completed",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		Status:                 domain.StatusCompleted,
+		EvictionReason:         string(domain.EvictionClusterUnreachable),
+		InfraRequeueCount:      1,
+		AttemptCount:           1,
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+}
+
+// The same stale reason on the other terminal outcome. A job requeued for an infrastructure fault
+// and then failing on its own — a bug in the workload — is the agent's failure and must be billed
+// like one; the reason it happens to still carry says nothing about how this attempt ended.
+func TestAFailedJobCarryingAStaleInfrastructureReasonIsStillBilled(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now)
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-requeued-then-failed",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		Status:                 domain.StatusFailed,
+		EvictionReason:         string(domain.EvictionWorkloadGone),
+		InfraRequeueCount:      1,
+		AttemptCount:           1,
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+}
+
+// A job still QUEUED after an infrastructure requeue is mid-flight, not ended. Settling it to zero
+// would make a job cycling through requeues invisible to running-cost and to the controller's
+// quota-exhaustion check, which read this same figure every tick.
+func TestAnInfrastructureRequeuedJobBackInTheQueueIsBilledForWhatItHasBurned(t *testing.T) {
+	step := time.Minute
+	now := time.Now().UTC()
+	server := aliveServer(t, 121, step, now)
+	defer server.Close()
+
+	usage := &capturedUsage{}
+	settler := New(usage, server.URL, 3*step)
+
+	exp := &domain.Experiment{
+		ID:                     "exp-requeued",
+		PlatformExperimentID:   "pe-1",
+		CreatedAt:              now.Add(-3 * time.Hour),
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		Status:                 domain.StatusQueued,
+		EvictionReason:         string(domain.EvictionClusterUnreachable),
+		InfraRequeueCount:      1,
+		AttemptCount:           1,
+	}
+	if err := settler.Settle(context.Background(), exp); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
+		t.Errorf("accelerator settled at got = %v, want %v", got, want)
+	}
+}

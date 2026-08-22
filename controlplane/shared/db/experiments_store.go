@@ -54,7 +54,7 @@ const experimentColumns = `
 	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
-	quota_settled_at, attempt_count,
+	quota_settled_at, attempt_count, infra_requeue_count,
 	created_at, updated_at
 `
 
@@ -237,7 +237,14 @@ GROUP BY status, capacity_tier, reason_code`
 			out.EvictionsByReason[reasonCode] += n
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out.EvictionsByClass = map[string]int{}
+	for class, n := range domain.ClassifyCounts(out.EvictionsByReason) {
+		out.EvictionsByClass[string(class)] = n
+	}
+	return out, nil
 }
 
 func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {

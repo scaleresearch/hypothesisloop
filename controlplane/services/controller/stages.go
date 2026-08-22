@@ -39,9 +39,9 @@ type StagesStore interface {
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
-	// TransitionTerminal atomically transitions status and records the reason. Does not write
+	// ResolveTermination atomically transitions status and records the reason. Does not write
 	// usage; the caller settles separately (see Controller.settleAndMark).
-	TransitionTerminal(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// MarkQuotaSettled records that a terminal experiment's final usage was durably written.
 	MarkQuotaSettled(ctx context.Context, id string) error
 }

@@ -167,13 +167,13 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		if !tierExhausted {
 			continue
 		}
-		updated, err := c.store.TransitionTerminal(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
+		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
 			string(domain.EvictionQuotaExhaustion))
 		if err != nil {
 			c.logger.Error("quota exhaustion evict", zap.String("id", exp.ID), zap.Error(err))
 			continue
 		}
-		if !updated {
+		if outcome != domain.TerminationWritten {
 			continue
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
@@ -192,13 +192,13 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		if !tierExhausted {
 			continue
 		}
-		updated, err := c.store.TransitionTerminal(ctx, exp.ID, domain.StatusAdmitted, domain.StatusEvicted,
+		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusAdmitted, domain.StatusEvicted,
 			string(domain.EvictionQuotaExhaustion))
 		if err != nil {
 			c.logger.Error("quota exhaustion evict admitted", zap.String("id", exp.ID), zap.Error(err))
 			continue
 		}
-		if !updated {
+		if outcome != domain.TerminationWritten {
 			continue
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
@@ -235,13 +235,13 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 				continue
 			}
 			prevStatus := exp.Status
-			updated, err := c.store.TransitionTerminal(ctx, exp.ID, prevStatus, finalStatus,
+			outcome, err := c.store.ResolveTermination(ctx, exp.ID, prevStatus, finalStatus,
 				string(domain.EvictionQuotaExhaustion))
 			if err != nil {
 				c.logger.Error("quota exhaustion cancel pre-run", zap.String("id", exp.ID), zap.Error(err))
 				continue
 			}
-			if !updated {
+			if outcome != domain.TerminationWritten {
 				continue
 			}
 			obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()

@@ -177,6 +177,13 @@ scheduler:
   # cluster-agent upgrade, and a transient network partition.
   cluster_status_silence_ceiling_seconds: 900
 
+  # How many times one experiment may go back to the queue for free after an infrastructure
+  # fault (cluster_unreachable, workload_gone, stuck_pending, flavor_mismatch,
+  # accelerator_type_unobservable). Those attempts cost no max_retries budget and no
+  # accelerator-hours -- the environment failed the job, not the agent. Past this ceiling the
+  # job stops and stays EVICTED with the reason that kept ending it.
+  max_infrastructure_requeues: 3
+
   # Age-bucket width for guaranteed-tier admission fairness: jobs queued within this window of
   # each other are ordered by least-used-quota agent first instead of exact FIFO timestamp,
   # bounding how far a steady-submitting agent's own jobs can jump ahead of other agents'

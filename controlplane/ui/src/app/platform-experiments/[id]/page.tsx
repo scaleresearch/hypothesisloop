@@ -31,7 +31,7 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
-import { evictionLabel } from '@/lib/eviction'
+import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
 import { AddIdeaForm } from '@/components/human-idea'
 
@@ -598,6 +598,10 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     .map(([r, n]) => `${evictionLabel(r)} (${n})`)
     .join(' · ')
 
+  // Whose fault those evictions were, folded from the same tally — an infrastructure count here
+  // says the platform failed these jobs, not the agents running them.
+  const evictionFaultBreakdown = faultBreakdown(stats?.evictions_by_class ?? {})
+
   // The metric that actually determines standings/cuts — role: 'ranking' when the platform
   // experiment reports several metrics, defaulting to the first (primary) one for older data
   // that predates the role field. Used below to show each job's own "final" value, since with
@@ -813,7 +817,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               label="Evicted"
               value={(jobsByStatus.EVICTED ?? 0).toString()}
               color={(jobsByStatus.EVICTED ?? 0) > 0 ? semantic.danger : undefined}
-              sub={evictionBreakdown || undefined}
+              sub={[evictionFaultBreakdown, evictionBreakdown].filter(Boolean).join(' — ') || undefined}
               href={`/jobs?platform_experiment_id=${pe.id}&status=EVICTED`}
             />
             <StatTile

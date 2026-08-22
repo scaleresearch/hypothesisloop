@@ -47,6 +47,21 @@ func New(usage UsageWriter, metricsDBURL string, gapCap time.Duration) *Settler 
 	return &Settler{usage: usage, metricsDBURL: metricsDBURL, gapCap: gapCap}
 }
 
+// endedInInfrastructureFault reports whether exp's FINAL outcome was the environment's fault:
+// EVICTED carrying an infrastructure-class reason, which is exactly the state
+// db.Store.ResolveTermination writes when an infrastructure fault exhausts its requeue
+// allowance. Both halves are required — see Settle for what keying on the reason alone cost.
+//
+// Deliberately derived here rather than kept true by clearing eviction_reason on every other
+// terminal write: that would put correctness in the hands of each writer remembering to clean up
+// (and any future one), and it would destroy a record other code depends on — a preempted job's
+// retained `preempted_for_guaranteed` is what marks it as having already run, which is what
+// forbids re-admitting it onto a different accelerator flavor.
+func endedInInfrastructureFault(exp *domain.Experiment) bool {
+	return exp.Status == domain.StatusEvicted &&
+		domain.IsInfrastructureFault(domain.EvictionReason(exp.EvictionReason))
+}
+
 // Settle writes exp's final observed cost for every resource dimension it was estimated for.
 // Safe to call any number of times, from any process: it always recomputes from the metrics
 // DB's confirmed-alive record rather than in-memory or caller-supplied state, and every write is
@@ -54,14 +69,44 @@ func New(usage UsageWriter, metricsDBURL string, gapCap time.Duration) *Settler 
 //
 // A job with no observation at all consumed nothing, so every reserved dimension settles to 0
 // regardless of why it was terminated (e.g. a queued job cancelled by a sibling exhausting
-// budget; it never ran, so it owes nothing).
+// budget; it never ran, so it owes nothing). A job that ENDED in an infrastructure fault settles
+// to 0 for the same reason expressed differently — it ran, but not by its own choice.
+//
+// KNOWN LIMITATION, deliberately not fixed: the refund is whole-job, not per-attempt. A job that
+// is infrastructure-requeued and then completes bills for every hour it ever ran, including the
+// stints burned on broken hardware — ObservedElapsedHours is cumulative over the whole experiment
+// window, and the attempt boundary is not recoverable from it. ObservedSpan.Stint looks like the
+// missing piece but is not: it is derived purely from a gap in observations, so it cannot tell an
+// infrastructure requeue from a preemption resume or a gang retry, and preemption is billed on
+// the cumulative total by design (see the rate-invariance note below). Separating the stints
+// would need each attempt tagged in the metrics store and a per-stint ledger to add them back up
+// — real retained machinery, and a second record of a figure this store already holds. So the
+// refund lands only when the job genuinely ends in an infrastructure fault: the ceiling case,
+// where the environment gets the last word. A job the environment merely interrupted pays for
+// the interruption.
 func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 	if exp.PlatformExperimentID == "" {
 		return nil
 	}
 	now := time.Now().UTC()
 	var hours float64
-	if exp.EstimatedDurationHours > 0 {
+	// A job that ended in an infrastructure fault owes nothing. The environment failed it, so the
+	// hours it burned were never the agent's choice to spend, and the refund is expressed here —
+	// as zero observed hours flowing through the one absolute SetObservedUsage write below —
+	// rather than as a credit issued by a second path. A separate refund write would be a second
+	// authority over the same figure, free to disagree with this one and to double-apply on any of
+	// the retries this function exists to be safe under; settling to zero cannot, because it is
+	// recomputed from scratch and written absolutely every time.
+	//
+	// The status is half of the condition and not decoration. eviction_reason is a durable record
+	// of what ended the LAST attempt and deliberately survives a requeue, so a row that was
+	// infrastructure-requeued and later completed still carries `cluster_unreachable` while being
+	// COMPLETED. Keying on the reason alone made that job — and any later workload-class failure
+	// of it — settle to zero, so a single provoked infrastructure fault bought an agent an
+	// unmetered run. Requiring EVICTED as well asks the question that actually matters, "did this
+	// job END in an infrastructure fault", and reads it off the exact state ResolveTermination
+	// writes when the requeue allowance runs out.
+	if exp.EstimatedDurationHours > 0 && !endedInInfrastructureFault(exp) {
 		var err error
 		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, exp.CreatedAt, now, s.gapCap)
 		if err != nil {
