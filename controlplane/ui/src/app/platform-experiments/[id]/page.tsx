@@ -11,6 +11,7 @@ import {
   fetchPlatformExperiment,
   fetchPlatformExperimentQuotas,
   fetchExperimentsPage,
+  fetchExperimentStats,
   fetchDonationsPage,
   MAX_LIST_PAGE_SIZE,
   fetchStages,
@@ -30,7 +31,7 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
-import { evictionCode, evictionLabel } from '@/lib/eviction'
+import { evictionLabel } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
@@ -487,6 +488,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   )
   const experiments = experimentsPage?.items
 
+  // Whole-experiment job counts, grouped server-side. The job list above is one bounded page,
+  // so tallying it would report the page's shape under a label that reads as the experiment's.
+  const { data: stats, error: statsError } = useSWR(
+    ['pe-stats', id],
+    () => fetchExperimentStats({ platform_experiment_id: id }),
+    { refreshInterval: 15_000 },
+  )
+
   const { data: donations } = useSWR(
     'donations-open',
     () => fetchDonationsPage({ status: 'open', limit: MAX_LIST_PAGE_SIZE }),
@@ -541,6 +550,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     stagesError && 'stage status',
     hypothesesError && 'hypotheses',
     metricSeriesError && 'metric history',
+    statsError && 'job counts',
   ].filter(Boolean) as string[]
 
   if (peLoading) return <Loading />
@@ -572,21 +582,17 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const hypothesisProgress = hypothesisProgressCounts(hypotheses ?? [], experiments ?? [])
 
   // Running experiments
+  const jobsByStatus = stats?.by_status ?? {}
   const running = (experiments ?? []).filter(e => e.status === 'RUNNING')
   const recent = (experiments ?? []).slice(0, 20)
 
   // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
   // different reasons (stuck on admission vs. explicitly cancelled vs. ran past a stage's job
   // length cap), so a single opaque count hides whether evictions are a symptom of something
-  // wrong versus routine stage cuts.
-  const evicted = (experiments ?? []).filter(e => e.status === 'EVICTED')
-  const evictionReasonCounts = evicted.reduce<Record<string, number>>((acc, e) => {
-    // Keyed on the code alone — a reason may carry a ': detail' explanation (see lib/eviction).
-    const r = evictionCode(e.eviction_reason) || 'unknown'
-    acc[r] = (acc[r] ?? 0) + 1
-    return acc
-  }, {})
-  const evictionBreakdown = Object.entries(evictionReasonCounts)
+  // wrong versus routine stage cuts. Counted server-side over the whole experiment, not over
+  // the page of jobs above it, and already grouped by code (a reason may carry a ': detail'
+  // explanation — see lib/eviction).
+  const evictionBreakdown = Object.entries(stats?.evictions_by_reason ?? {})
     .sort((a, b) => b[1] - a[1])
     .map(([r, n]) => `${evictionLabel(r)} (${n})`)
     .join(' · ')
@@ -795,23 +801,23 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
             <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
-            <StatTile label="Jobs" value={(experiments?.length ?? 0).toString()} href={`/jobs?platform_experiment_id=${pe.id}`} />
+            <StatTile label="Jobs" value={(stats?.total ?? 0).toString()} href={`/jobs?platform_experiment_id=${pe.id}`} />
             <StatTile
               label="Running"
-              value={running.length.toString()}
-              color={running.length > 0 ? semantic.success : undefined}
+              value={(jobsByStatus.RUNNING ?? 0).toString()}
+              color={(jobsByStatus.RUNNING ?? 0) > 0 ? semantic.success : undefined}
               href={`/jobs?platform_experiment_id=${pe.id}&status=RUNNING`}
             />
             <StatTile
               label="Evicted"
-              value={evicted.length.toString()}
-              color={evicted.length > 0 ? semantic.danger : undefined}
+              value={(jobsByStatus.EVICTED ?? 0).toString()}
+              color={(jobsByStatus.EVICTED ?? 0) > 0 ? semantic.danger : undefined}
               sub={evictionBreakdown || undefined}
               href={`/jobs?platform_experiment_id=${pe.id}&status=EVICTED`}
             />
             <StatTile
               label="Hypotheses"
-              value={(hypotheses?.length ?? 0).toString()}
+              value={(hypothesesPage?.total ?? 0).toString()}
               color={semantic.accent}
               sub={`${hypothesisProgress.finished} finished · ${hypothesisProgress.in_flight} in flight · ${hypothesisProgress.pending} pending`}
               href={`/hypotheses?pe=${pe.id}`}
