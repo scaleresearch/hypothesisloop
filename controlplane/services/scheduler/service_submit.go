@@ -209,9 +209,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			return fmt.Errorf("scheduler: update priority: %w", err)
 		}
 		exp.Status = domain.StatusQueued
-		if s.loop != nil {
-			s.loop.Trigger()
-		}
+		s.loop.Trigger()
 		return nil
 	}
 
@@ -236,9 +234,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 
 	// 8. Wake the scheduler loop.
-	if s.loop != nil {
-		s.loop.Trigger()
-	}
+	s.loop.Trigger()
 	return nil
 }
 

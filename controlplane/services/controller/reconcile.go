@@ -263,7 +263,6 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		cancelPreRun(preRun, domain.StatusRejected)
 	}
 
-	c.loop.Trigger()
 	return nil
 }
 

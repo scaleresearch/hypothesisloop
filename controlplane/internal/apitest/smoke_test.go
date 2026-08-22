@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
@@ -31,7 +32,8 @@ func TestSmoke(t *testing.T) {
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules)
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, nil))
-	scheduler.RegisterHuma(doc, scheduler.NewHandler(nil))
+	scheduler.RegisterHuma(doc, scheduler.NewHandler(
+		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
 	doc.MountExplore(r)
 

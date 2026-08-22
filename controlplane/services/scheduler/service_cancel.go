@@ -61,9 +61,7 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 				continue
 			}
 			exp.Status = domain.StatusEvicted
-			if s.loop != nil {
-				s.loop.Trigger()
-			}
+			s.loop.Trigger()
 			s.settle(ctx, "cancel", exp)
 			return nil
 

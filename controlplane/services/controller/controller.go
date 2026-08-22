@@ -54,17 +54,11 @@ type QuotaSettler interface {
 	Settle(ctx context.Context, exp *domain.Experiment) error
 }
 
-// SchedulerLoop is notified after evictions so it can refill freed capacity.
-type SchedulerLoop interface {
-	Trigger()
-}
-
 // Controller reconciles running experiments against their metric contracts.
 type Controller struct {
 	store             Store
 	quota             QuotaService
-	settler           QuotaSettler  // durably settles final usage after every termination
-	loop              SchedulerLoop // notified after evictions
+	settler           QuotaSettler // durably settles final usage after every termination
 	reconcileInterval time.Duration
 	logger            *zap.Logger
 
@@ -135,12 +129,6 @@ func (c *Controller) WithClusterSilenceCeiling(d time.Duration) *Controller {
 	return c
 }
 
-// WithSchedulerLoop wires the scheduler loop to be triggered after evictions.
-func (c *Controller) WithSchedulerLoop(l SchedulerLoop) *Controller {
-	c.loop = l
-	return c
-}
-
 // WithStagesStore enables the stage ladder. The metricsDBURL is used to rank agents at each
 // stage boundary. The ladder itself is per-platform-experiment config, not a controller knob.
 func (c *Controller) WithStagesStore(s StagesStore, metricsDBURL string) *Controller {
@@ -158,8 +146,8 @@ func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 // Start launches the reconcile loop in a goroutine; it stops when ctx is
 // cancelled and returns the first non-context error (if any).
 func (c *Controller) Start(ctx context.Context) error {
-	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.loop == nil || c.logger == nil {
-		return fmt.Errorf("controller: store, quota, settler, stages store, scheduler loop, and logger are required")
+	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.logger == nil {
+		return fmt.Errorf("controller: store, quota, settler, stages store, and logger are required")
 	}
 	if c.metricsDBURL == "" {
 		return fmt.Errorf("controller: metrics DB URL is required")

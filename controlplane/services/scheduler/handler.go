@@ -20,6 +20,12 @@ type Handler struct {
 
 // NewHandler creates a Handler for the given Service.
 func NewHandler(svc *Service) *Handler {
+	// The submit and cancel routes below wake the scheduler loop, and the Service/Loop pair is
+	// necessarily wired in two steps (each needs the other). Asserting it here, once, is what
+	// lets those routes call Trigger without re-checking on every request.
+	if svc.loop == nil {
+		panic("scheduler: NewHandler requires a Service with WithLoop already applied")
+	}
 	return &Handler{svc: svc}
 }
 

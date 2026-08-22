@@ -50,7 +50,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	t.Cleanup(metrics.Close)
 	r := chi.NewRouter()
 	d := apidocs.New(r, "scheduler", "1.0.0", "")
-	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil, contractSettler{}, metrics.URL, zap.NewNop())))
+	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil, contractSettler{}, metrics.URL, zap.NewNop()).WithLoop(noopLoop{})))
 	return r
 }
 
@@ -204,3 +204,7 @@ func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
 type contractSettler struct{}
 
 func (contractSettler) Settle(context.Context, *domain.Experiment) error { return nil }
+
+type noopLoop struct{}
+
+func (noopLoop) Trigger() {}

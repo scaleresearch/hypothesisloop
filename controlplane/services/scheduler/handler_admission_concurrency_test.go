@@ -93,7 +93,7 @@ func TestConcurrentOperatorAdmissionsDoNotExceedClusterCapacity(t *testing.T) {
 		}
 	}
 	workload := &concurrentAdmissionWorkload{store: store}
-	handler := NewHandler(NewService(store, nil, workload, nil, nil, noopSettler{}, "http://metrics.invalid", zap.NewNop()))
+	handler := NewHandler(NewService(store, nil, workload, nil, nil, noopSettler{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{}))
 
 	var wg sync.WaitGroup
 	results := make(chan error, 3)
@@ -121,3 +121,7 @@ func TestConcurrentOperatorAdmissionsDoNotExceedClusterCapacity(t *testing.T) {
 		t.Fatalf("claimed accelerator capacity = %d, want 8", store.claimed)
 	}
 }
+
+type noopLoop struct{}
+
+func (noopLoop) Trigger() {}

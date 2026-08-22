@@ -148,7 +148,6 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		c.logger.Info("stage cut: cancelled pre-run job", zap.String("exp", exp.ID), zap.String("agent", agentID))
 	}
 
-	c.loop.Trigger()
 	return nil
 }
 
