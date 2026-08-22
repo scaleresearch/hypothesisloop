@@ -64,7 +64,8 @@ type PlatformExperimentsStore interface {
 	// Donation persistence (experiment-scoped donations).
 	CreateDonationRequest(ctx context.Context, req *domain.DonationRequest) error
 	GetDonationRequest(ctx context.Context, id string) (*domain.DonationRequest, error)
-	ListDonationRequests(ctx context.Context, status string) ([]*domain.DonationRequest, error)
+	ListDonationRequests(ctx context.Context, status string, limit, offset int) ([]*domain.DonationRequest, error)
+	CountDonationRequests(ctx context.Context, status string) (int, error)
 	UpdateDonationStatus(ctx context.Context, id, status string) error
 }
 

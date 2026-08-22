@@ -2,7 +2,7 @@
 
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
-import { fetchExperiments, fetchPlatformExperiments, fetchClusters } from '@/lib/api'
+import { fetchExperiments, fetchExperimentStats, fetchPlatformExperiments, fetchClusters } from '@/lib/api'
 import type { Experiment, PlatformExperiment, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -13,9 +13,12 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 import { statusColor, semantic } from '@/lib/colors'
-import { evictionCode, evictionCodeLabel, evictionLabel } from '@/lib/eviction'
+import { evictionCodeLabel, evictionLabel } from '@/lib/eviction'
 
 type Job = Record<string, any>
+
+// How many of the newest evicted jobs the audit log shows.
+const RECENT_EVICTIONS = 10
 
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
@@ -35,9 +38,19 @@ function ChartTooltip({ active, payload, label }: any) {
 export default function DashboardPage() {
   const router = useRouter()
 
-  const { data: jobs, error, isLoading } = useSWR<Experiment[]>(
-    ['jobs-all'],
-    () => fetchExperiments({ limit: 1000 }),
+  // Counts come from the server's own aggregate, never from tallying fetched rows: list reads
+  // are capped at one page, so a client-side tally would silently report the page's shape as
+  // the platform's.
+  const { data: stats, error, isLoading } = useSWR(
+    'experiment-stats',
+    () => fetchExperimentStats(),
+    { refreshInterval: 15_000 },
+  )
+
+  // The audit log below is the one place that needs actual rows — the newest handful of them.
+  const { data: evictedJobs } = useSWR<Experiment[]>(
+    'recent-evictions',
+    () => fetchExperiments({ status: 'EVICTED', sort: '-updated_at', limit: RECENT_EVICTIONS }),
     { refreshInterval: 15_000 },
   )
 
@@ -53,36 +66,27 @@ export default function DashboardPage() {
     { refreshInterval: 5_000 },
   )
 
-  const exps: Job[] = (jobs ?? []) as Job[]
+  const byStatus = stats?.by_status ?? {}
+  const total = stats?.total ?? 0
+  const running = byStatus.RUNNING ?? 0
+  const completed = byStatus.COMPLETED ?? 0
+  const failed = byStatus.FAILED ?? 0
+  const evicted = byStatus.EVICTED ?? 0
+  const pending = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0) + (byStatus.ADMITTED ?? 0)
 
-  const total = exps.length
-  const running = exps.filter(e => e.status === 'RUNNING').length
-  const completed = exps.filter(e => e.status === 'COMPLETED').length
-  const failed = exps.filter(e => e.status === 'FAILED').length
-  const evicted = exps.filter(e => e.status === 'EVICTED').length
-  const pending = exps.filter(e => ['SUBMITTED', 'QUEUED', 'ADMITTED'].includes(e.status as any)).length
+  // Eviction reasons arrive already grouped by code — a reason may carry a ': detail'
+  // explanation, and every distinct one would otherwise become its own category.
+  const evictionByReason = stats?.evictions_by_reason ?? {}
 
-  // Eviction breakdown by reason
-  const evictedJobs = exps.filter(e => e.status === 'EVICTED')
-  const evictionByReason = evictedJobs.reduce((acc, e) => {
-    // Group by the code, never the whole string: a reason may carry a ': detail'
-    // explanation, and every distinct one would otherwise become its own category.
-    const r = evictionCode((e as any).eviction_reason) || 'unknown'
-    acc[r] = (acc[r] ?? 0) + 1
-    return acc
-  }, {} as Record<string, number>)
-
-  // Capacity tier breakdown
-  const guaranteed = exps.filter(e => (e as any).capacity_tier === 'guaranteed')
-  const burst = exps.filter(e => (e as any).capacity_tier === 'burst')
-  const guaranteedRunning = guaranteed.filter(e => e.status === 'RUNNING').length
-  const burstRunning = burst.filter(e => e.status === 'RUNNING').length
+  const tierTotal = stats?.by_capacity_tier ?? {}
+  const tierRunning = stats?.running_by_capacity_tier ?? {}
+  const tierEvicted = stats?.evicted_by_capacity_tier ?? {}
 
   // Completion rate: of jobs that reached a terminal state, the share that completed
   // successfully rather than failing or being evicted.
-  const terminalExps = exps.filter(e => ['COMPLETED', 'FAILED', 'EVICTED'].includes(e.status as any))
-  const completionRate = terminalExps.length > 0
-    ? Math.round((completed / terminalExps.length) * 100)
+  const terminalCount = completed + failed + evicted
+  const completionRate = terminalCount > 0
+    ? Math.round((completed / terminalCount) * 100)
     : null
 
   // Connected clusters
@@ -97,20 +101,12 @@ export default function DashboardPage() {
   const acceleratorTotal = clusterList.reduce((s, c) => s + c.accelerator_total, 0)
   const occupancyPct = acceleratorTotal > 0 ? Math.round((acceleratorBusy / acceleratorTotal) * 100) : null
 
-  // Recent evictions (last 10)
-  const recentEvictions = evictedJobs
-    .sort((a, b) => new Date((b as any).updated_at ?? b.created_at).getTime() - new Date((a as any).updated_at ?? a.created_at).getTime())
-    .slice(0, 10)
+  const recentEvictions: Job[] = (evictedJobs ?? []) as Job[]
 
   // Per-platform-experiment summary
   const peMap = Object.fromEntries((platformExps ?? []).map(pe => [pe.id, pe.name]))
 
-  const statusBreakdown = Object.entries(
-    exps.reduce((acc: Record<string, number>, e) => {
-      acc[e.status as any] = (acc[e.status as any] ?? 0) + 1
-      return acc
-    }, {})
-  ).sort((a, b) => b[1] - a[1])
+  const statusBreakdown = Object.entries(byStatus).sort((a, b) => b[1] - a[1])
 
   const evictionChartData = Object.entries(evictionByReason)
     .sort((a, b) => b[1] - a[1])
@@ -213,15 +209,15 @@ export default function DashboardPage() {
               <tbody>
                 <tr>
                   <td><Badge status="guaranteed">Guaranteed</Badge></td>
-                  <td className="mono">{guaranteedRunning}</td>
-                  <td className="mono">{guaranteed.length}</td>
-                  <td className="mono">{guaranteed.filter(e => e.status === 'EVICTED').length}</td>
+                  <td className="mono">{tierRunning.guaranteed ?? 0}</td>
+                  <td className="mono">{tierTotal.guaranteed ?? 0}</td>
+                  <td className="mono">{tierEvicted.guaranteed ?? 0}</td>
                 </tr>
                 <tr>
                   <td><Badge status="burst">Burst</Badge></td>
-                  <td className="mono">{burstRunning}</td>
-                  <td className="mono">{burst.length}</td>
-                  <td className="mono">{burst.filter(e => e.status === 'EVICTED').length}</td>
+                  <td className="mono">{tierRunning.burst ?? 0}</td>
+                  <td className="mono">{tierTotal.burst ?? 0}</td>
+                  <td className="mono">{tierEvicted.burst ?? 0}</td>
                 </tr>
               </tbody>
             </table>
@@ -335,8 +331,8 @@ export default function DashboardPage() {
                 <td>Burst eviction rate</td>
                 <td className="text-muted" style={{ fontSize: 12 }}>Burst evictions ÷ total burst jobs</td>
                 <td className="mono">
-                  {burst.length > 0
-                    ? `${Math.round(burst.filter(e => e.status === 'EVICTED').length / burst.length * 100)}%`
+                  {(tierTotal.burst ?? 0) > 0
+                    ? `${Math.round((tierEvicted.burst ?? 0) / (tierTotal.burst ?? 1) * 100)}%`
                     : 'n/a'}
                 </td>
               </tr>

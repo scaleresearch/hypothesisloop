@@ -53,26 +53,39 @@ WHERE dr.id = $1`
 	return r, nil
 }
 
-// ListDonationRequests returns all donation requests, optionally filtered by status.
-func (s *DonationStore) ListDonationRequests(ctx context.Context, status string) ([]*domain.DonationRequest, error) {
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if status != "" {
-		const q = `
-SELECT dr.id, dr.agent_id, a.name, dr.platform_experiment_id, dr.credits_want, dr.reason, dr.status, dr.created_at, dr.updated_at
-FROM donation_requests dr JOIN agents a ON a.id = dr.agent_id
-WHERE dr.status = $1
-ORDER BY dr.created_at DESC`
-		rows, err = s.pool.pool.Query(ctx, q, status)
-	} else {
-		const q = `
-SELECT dr.id, dr.agent_id, a.name, dr.platform_experiment_id, dr.credits_want, dr.reason, dr.status, dr.created_at, dr.updated_at
-FROM donation_requests dr JOIN agents a ON a.id = dr.agent_id
-ORDER BY dr.created_at DESC`
-		rows, err = s.pool.pool.Query(ctx, q)
+// defaultDonationListLimit and maxDonationListLimit bound every ListDonationRequests read the
+// same way ListAgents/ListHypotheses bound their own — donation_requests only ever grows, so
+// limit<=0 must not mean "unbounded".
+const (
+	defaultDonationListLimit = 200
+	maxDonationListLimit     = 200
+)
+
+// ListDonationRequests returns one page of donation requests, most recent first, optionally
+// filtered by status. limit is defaulted and clamped to [1, maxDonationListLimit].
+func (s *DonationStore) ListDonationRequests(ctx context.Context, status string, limit, offset int) ([]*domain.DonationRequest, error) {
+	if limit <= 0 {
+		limit = defaultDonationListLimit
+	} else if limit > maxDonationListLimit {
+		limit = maxDonationListLimit
 	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	q := `
+SELECT dr.id, dr.agent_id, a.name, dr.platform_experiment_id, dr.credits_want, dr.reason, dr.status, dr.created_at, dr.updated_at
+FROM donation_requests dr JOIN agents a ON a.id = dr.agent_id
+`
+	args := []any{}
+	if status != "" {
+		q += "WHERE dr.status = $1\n"
+		args = append(args, status)
+	}
+	q += fmt.Sprintf("ORDER BY dr.created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
+
+	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("donation_store.List: %w", err)
 	}
@@ -102,4 +115,20 @@ func (s *DonationStore) UpdateDonationStatus(ctx context.Context, id, status str
 		return fmt.Errorf("donation_store.UpdateStatus: donation %s not found or not open", id)
 	}
 	return nil
+}
+
+// CountDonationRequests returns how many donation requests match status (all of them when
+// status is empty), ignoring limit/offset — the X-Total-Count a paginating caller shows.
+func (s *DonationStore) CountDonationRequests(ctx context.Context, status string) (int, error) {
+	q := `SELECT COUNT(*) FROM donation_requests`
+	args := []any{}
+	if status != "" {
+		q += ` WHERE status = $1`
+		args = append(args, status)
+	}
+	var n int
+	if err := s.pool.pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("donation_store.Count: %w", err)
+	}
+	return n, nil
 }

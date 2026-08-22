@@ -25,6 +25,7 @@ type filterSpyStore struct {
 	scheduler.Store
 	gotList  domain.ExperimentFilter
 	gotCount domain.ExperimentFilter
+	gotStats domain.ExperimentFilter
 	items    []*domain.Experiment
 	total    int
 }
@@ -37,6 +38,11 @@ func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentF
 func (s *filterSpyStore) CountExperiments(_ context.Context, f domain.ExperimentFilter) (int, error) {
 	s.gotCount = f
 	return s.total, nil
+}
+
+func (s *filterSpyStore) ExperimentStats(_ context.Context, f domain.ExperimentFilter) (*domain.ExperimentStats, error) {
+	s.gotStats = f
+	return &domain.ExperimentStats{Total: s.total, ByStatus: map[string]int{"RUNNING": s.total}}, nil
 }
 
 func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
@@ -119,15 +125,32 @@ func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 	}
 }
 
-func TestListExperimentsDefaultsToNoFilter(t *testing.T) {
+// A bare list must filter nothing but still ask for a bounded page: experiments is the
+// fastest-growing table here, so an omitted ?limit reaching the store as "no limit" would hand
+// a caller every row ever submitted.
+func TestListExperimentsDefaultsToOneBoundedPage(t *testing.T) {
 	spy := &filterSpyStore{}
 	r := schedulerRouter(t, spy)
 
 	if code, _ := get(t, r, "/experiments"); code != 200 {
 		t.Fatalf("status = %d, want 200", code)
 	}
-	if (spy.gotList != domain.ExperimentFilter{}) {
-		t.Errorf("bare list built filter %+v, want the zero filter", spy.gotList)
+	want := domain.ExperimentFilter{Limit: 200}
+	if spy.gotList != want {
+		t.Errorf("bare list built filter %+v, want %+v", spy.gotList, want)
+	}
+}
+
+// An oversized ?limit must be clamped to the same ceiling rather than honoured.
+func TestListExperimentsClampsOversizedLimit(t *testing.T) {
+	spy := &filterSpyStore{}
+	r := schedulerRouter(t, spy)
+
+	if code, _ := get(t, r, "/experiments?limit=100000"); code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if spy.gotList.Limit != 200 {
+		t.Errorf("limit = %d, want it clamped to 200", spy.gotList.Limit)
 	}
 }
 
@@ -208,3 +231,26 @@ func (contractSettler) Settle(context.Context, *domain.Experiment) error { retur
 type noopLoop struct{}
 
 func (noopLoop) Trigger() {}
+
+// /experiments/stats must reach the stats handler, not be swallowed by /experiments/{id} as an
+// experiment whose ID happens to be "stats" — a route-ordering slip that would 404 or, worse,
+// answer with an unrelated body.
+func TestExperimentStatsIsNotShadowedByExperimentByID(t *testing.T) {
+	spy := &filterSpyStore{total: 7}
+	r := schedulerRouter(t, spy)
+
+	code, body := get(t, r, "/experiments/stats?status=RUNNING")
+	if code != 200 {
+		t.Fatalf("status = %d (%s), want 200", code, body)
+	}
+	var stats domain.ExperimentStats
+	if err := json.Unmarshal([]byte(body), &stats); err != nil {
+		t.Fatalf("unmarshal body %s: %v", body, err)
+	}
+	if stats.Total != 7 {
+		t.Errorf("total = %d, want 7", stats.Total)
+	}
+	if spy.gotStats.Status != domain.StatusRunning {
+		t.Errorf("stats filter status = %q, want RUNNING", spy.gotStats.Status)
+	}
+}

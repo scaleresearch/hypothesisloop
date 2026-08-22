@@ -7,8 +7,9 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 import {
   fetchPlatformExperimentsPage,
   fetchPlatformExperimentQuotas,
-  fetchExperimentsByPlatformExperiment,
-  fetchHypotheses,
+  fetchExperimentsPage,
+  fetchHypothesesPage,
+  MAX_LIST_PAGE_SIZE,
   createPlatformExperiment,
   updatePlatformExperiment,
 } from '@/lib/api'
@@ -73,17 +74,24 @@ function ExperimentCard({
     { refreshInterval: 10_000 },
   )
 
-  const { data: hypotheses } = useSWR<Hypothesis[]>(
+  // Progress is derived by joining this experiment's hypotheses to its jobs, which no single
+  // endpoint returns — so both are read as one explicitly bounded page each, and the card says
+  // so when either set is larger than the window rather than presenting a partial tally as the
+  // whole picture.
+  const { data: hypotheses } = useSWR(
     ['pe-hypotheses', pe.id],
-    () => fetchHypotheses(pe.id),
+    () => fetchHypothesesPage({ platform_experiment_id: pe.id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
-  const { data: jobs } = useSWR<Experiment[]>(
+  const { data: jobs } = useSWR(
     ['pe-experiments', pe.id],
-    () => fetchExperimentsByPlatformExperiment(pe.id),
+    () => fetchExperimentsPage({ platform_experiment_id: pe.id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 10_000 },
   )
-  const progress = hypothesisProgressCounts(hypotheses ?? [], jobs ?? [])
+  const progress = hypothesisProgressCounts(hypotheses?.items ?? [], jobs?.items ?? [])
+  const progressPartial =
+    (hypotheses?.total ?? 0) > (hypotheses?.items.length ?? 0) ||
+    (jobs?.total ?? 0) > (jobs?.items.length ?? 0)
 
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const daysLeft = !isZeroDate(pe.ends_at)
@@ -159,7 +167,14 @@ function ExperimentCard({
             </div>
           </div>
           <div>
-            <div className="uppercase-label">Hypotheses</div>
+            <div className="uppercase-label">
+              Hypotheses
+              {progressPartial && (
+                <span className="text-dim" style={{ marginLeft: 6, textTransform: 'none' }}>
+                  (first {MAX_LIST_PAGE_SIZE})
+                </span>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
               <span className="mono" style={{ fontSize: 13, color: semantic.success }}>
                 {progress.finished} <span className="text-muted" style={{ fontSize: 10 }}>finished</span>

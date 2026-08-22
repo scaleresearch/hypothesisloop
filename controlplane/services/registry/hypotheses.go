@@ -92,13 +92,18 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	return h, nil
 }
 
-// ListHypothesisFindings returns every finding filed against a hypothesis, oldest first.
-func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID string) ([]*domain.HypothesisFinding, error) {
-	fs, err := s.store.ListFindingsByHypothesis(ctx, hypothesisID)
+// ListHypothesisFindings returns one page of the findings filed against a hypothesis, oldest
+// first, alongside the full count the page was taken from.
+func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, int, error) {
+	fs, err := s.store.ListFindingsByHypothesis(ctx, hypothesisID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
+		return nil, 0, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
 	}
-	return fs, nil
+	total, err := s.store.CountFindingsByHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
+	}
+	return fs, total, nil
 }
 
 // AddHypothesisComment records a freeform, job-independent note against a hypothesis — see
@@ -116,11 +121,16 @@ func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentI
 	return c, nil
 }
 
-// ListHypothesisComments returns every comment filed against a hypothesis, oldest first.
-func (s *Service) ListHypothesisComments(ctx context.Context, hypothesisID string) ([]*domain.HypothesisComment, error) {
-	cs, err := s.store.ListCommentsByHypothesis(ctx, hypothesisID)
+// ListHypothesisComments returns one page of the comments filed against a hypothesis, oldest
+// first, alongside the full count the page was taken from.
+func (s *Service) ListHypothesisComments(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, int, error) {
+	cs, err := s.store.ListCommentsByHypothesis(ctx, hypothesisID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("registry.ListHypothesisComments: %w", err)
+		return nil, 0, fmt.Errorf("registry.ListHypothesisComments: %w", err)
 	}
-	return cs, nil
+	total, err := s.store.CountCommentsByHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("registry.ListHypothesisComments: %w", err)
+	}
+	return cs, total, nil
 }

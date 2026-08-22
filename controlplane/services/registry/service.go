@@ -24,9 +24,11 @@ type Store interface {
 	ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*db.HypothesisListItem, error)
 	CountHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus) (int, error)
 	UpdateHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error)
-	ListFindingsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisFinding, error)
+	ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error)
+	CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	CreateHypothesisComment(ctx context.Context, hypothesisID, agentID, text string) (*domain.HypothesisComment, error)
-	ListCommentsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisComment, error)
+	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
+	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 }
 
 // Service manages experiments and their metric timeseries.

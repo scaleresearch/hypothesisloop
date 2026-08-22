@@ -34,18 +34,27 @@ type hypothesisResponse struct {
 }
 
 // hypothesisWithJobs bundles a hypothesis with the jobs submitted against it and the
-// findings filed against it.
+// findings filed against it. Each of the three lists is one bounded page of a set that only
+// ever grows, so each carries the full count it was drawn from — a caller can always tell a
+// short list from a truncated one, and page the rest with ?limit/?offset.
 type hypothesisWithJobs struct {
 	*domain.Hypothesis
-	Jobs     []*domain.Experiment        `json:"jobs"`
-	Findings []*domain.HypothesisFinding `json:"findings"`
-	Comments []*domain.HypothesisComment `json:"comments"`
+	Jobs         []*domain.Experiment        `json:"jobs"`
+	JobCount     int                         `json:"job_count"`
+	Findings     []*domain.HypothesisFinding `json:"findings"`
+	FindingCount int                         `json:"finding_count"`
+	Comments     []*domain.HypothesisComment `json:"comments"`
+	CommentCount int                         `json:"comment_count"`
 }
 
 // RegisterHuma registers the registry's operations: what hangs off an experiment (lineage,
 // metrics, logs) and the hypothesis notebook. Paths sit under the resource they belong to —
 // /experiments/{id}/... and /hypotheses/... — so a caller never has to know which service
 // implements them; they are all registered on the one API doc alongside scheduler and quota.
+// maxHypothesisDetailLimit bounds each of the three sub-lists GET /hypotheses/{id} returns,
+// matching the ceiling every other list read here uses.
+const maxHypothesisDetailLimit = 200
+
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	// ---- what hangs off an experiment ----
 
@@ -257,9 +266,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-hypothesis", Method: "GET", Path: "/hypotheses/{id}",
 		Summary: "Get a hypothesis with its jobs, findings, and comments", Tags: []string{"hypotheses"},
+		Description: "?limit (default/max 200) and ?offset apply to each of jobs, findings and " +
+			"comments alike, oldest first; job_count/finding_count/comment_count report the full " +
+			"size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
+		ID     string `path:"id"`
+		Limit  int    `query:"limit"`
+		Offset int    `query:"offset"`
 	}) (*struct{ Body hypothesisWithJobs }, error) {
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		if in.Limit <= 0 || in.Limit > maxHypothesisDetailLimit {
+			in.Limit = maxHypothesisDetailLimit
+		}
 		hyp, err := h.svc.GetHypothesis(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -267,19 +287,31 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if hyp == nil {
 			return nil, huma.Error404NotFound("hypothesis not found")
 		}
-		jobs, err := h.svc.List(ctx, domain.ExperimentFilter{HypothesisID: in.ID})
+		jobFilter := domain.ExperimentFilter{HypothesisID: in.ID}
+		jobs, err := h.svc.List(ctx, domain.ExperimentFilter{
+			HypothesisID: in.ID, Limit: in.Limit, Offset: in.Offset,
+		})
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		findings, err := h.svc.ListHypothesisFindings(ctx, in.ID)
+		jobCount, err := h.svc.Count(ctx, jobFilter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		comments, err := h.svc.ListHypothesisComments(ctx, in.ID)
+		findings, findingCount, err := h.svc.ListHypothesisFindings(ctx, in.ID, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{Hypothesis: hyp, Jobs: jobs, Findings: findings, Comments: comments}}, nil
+		comments, commentCount, err := h.svc.ListHypothesisComments(ctx, in.ID, in.Limit, in.Offset)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{
+			Hypothesis: hyp,
+			Jobs:       jobs, JobCount: jobCount,
+			Findings: findings, FindingCount: findingCount,
+			Comments: comments, CommentCount: commentCount,
+		}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

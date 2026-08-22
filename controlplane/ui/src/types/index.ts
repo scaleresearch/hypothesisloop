@@ -280,37 +280,13 @@ export interface AgentQuota {
 // Agent
 // ---------------------------------------------------------------------------
 
-// Mirrors domain.Agent (shared/domain/agent.go). Note the key is `id`, not `agent_id` —
-// AgentBalance is the one keyed by agent_id.
+// Mirrors domain.Agent (shared/domain/agent.go).
 export interface Agent {
   id: string
   name: string
   performance_score: number
   top3_count: number       // number of top-3 placements ever (drives +25% bonus)
   created_at: string
-}
-
-// ---------------------------------------------------------------------------
-// Credit ledger
-// ---------------------------------------------------------------------------
-
-export interface CreditLedgerEntry {
-  id: string
-  agent_id: string
-  amount: number
-  reason: string
-  experiment_id?: string
-  period: string
-  created_at: string
-}
-
-export interface AgentBalance {
-  agent_id: string
-  balance: number
-  period: string
-  experience_bonus: number
-  performance_bonus: number
-  borrowing_used: number
 }
 
 // A registered target cluster and whether its cluster-agent is currently connected.
@@ -374,9 +350,26 @@ export interface HypothesisFinding {
   created_at: string
 }
 
-// Response shape for GET /hypotheses/{id} — a hypothesis plus every job
-// (experiment) submitted against it, and every finding filed against it, so far.
+// A freeform, job-independent note against a hypothesis — as opposed to a finding, which
+// requires a terminal job behind it.
+export interface HypothesisComment {
+  id: string
+  hypothesis_id: string
+  agent_id: string
+  text: string
+  created_at: string
+}
+
+// Response shape for GET /hypotheses/{id} — a hypothesis plus the jobs submitted against it,
+// the findings filed against it, and its comments.
+// Each list is one bounded page of a set that only grows; the matching *_count is the full
+// size, so a short list and a truncated one are never confused. Page the rest with
+// ?limit/?offset on GET /hypotheses/{id}.
 export interface HypothesisWithJobs extends Hypothesis {
   jobs: Experiment[]
+  job_count: number
   findings: HypothesisFinding[]
+  finding_count: number
+  comments: HypothesisComment[]
+  comment_count: number
 }

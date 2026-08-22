@@ -257,24 +257,6 @@ CREATE TABLE hypothesis_comments (
 CREATE INDEX idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
 
 -- ---------------------------------------------------------------------------
--- credit_ledger
--- ---------------------------------------------------------------------------
-
-CREATE TABLE credit_ledger (
-    id                     TEXT             PRIMARY KEY,
-    agent_id               TEXT             NOT NULL REFERENCES agents(id),
-    amount                 DOUBLE PRECISION NOT NULL,
-    reason                 TEXT             NOT NULL,   -- issuance | spend | refund | borrow
-    experiment_id          TEXT             REFERENCES experiments(id),
-    platform_experiment_id TEXT             REFERENCES platform_experiments(id),
-    period                 INTEGER          NOT NULL,
-    created_at             TIMESTAMPTZ      NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_credit_ledger_agent_id ON credit_ledger(agent_id);
-CREATE INDEX idx_credit_ledger_period   ON credit_ledger(period);
-
--- ---------------------------------------------------------------------------
 -- donation_requests
 -- ---------------------------------------------------------------------------
 

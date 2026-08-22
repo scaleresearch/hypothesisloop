@@ -27,10 +27,10 @@ type reasonError struct {
 func (e *reasonError) Error() string  { return e.Message }
 func (e *reasonError) GetStatus() int { return e.status }
 
-// RegisterHuma registers every quota-service operation (agents/balances/ledger,
+// RegisterHuma registers every quota-service operation (agents,
 // platform-experiments, donations, resource catalog) on the shared Huma doc.
 func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler) {
-	// ---- agents / balances / ledger ----
+	// ---- agents ----
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
@@ -90,48 +90,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Body       []*domain.Agent
 			TotalCount int `header:"X-Total-Count"`
 		}{Body: agents, TotalCount: total}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "list-balances", Method: "GET", Path: "/balances",
-		Summary: "List agent credit balances", Tags: []string{"agents"},
-		Description: "Optional ?limit (default/max 200) and ?offset, oldest first. Total " +
-			"registered count is returned in the X-Total-Count response header.",
-	}, func(ctx context.Context, in *struct {
-		Limit  int `query:"limit"`
-		Offset int `query:"offset"`
-	}) (*struct {
-		Body       []*domain.AgentBalance
-		TotalCount int `header:"X-Total-Count"`
-	}, error) {
-		if in.Limit < 0 || in.Offset < 0 {
-			return nil, huma.Error400BadRequest("limit and offset must not be negative")
-		}
-		balances, err := h.svc.ListBalances(ctx, in.Limit, in.Offset)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to list balances")
-		}
-		total, err := h.svc.CountBalances(ctx)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to count balances")
-		}
-		return &struct {
-			Body       []*domain.AgentBalance
-			TotalCount int `header:"X-Total-Count"`
-		}{Body: balances, TotalCount: total}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "get-agent-ledger", Method: "GET", Path: "/agents/{agentID}/ledger",
-		Summary: "Get an agent's credit ledger", Tags: []string{"agents"},
-	}, func(ctx context.Context, in *struct {
-		AgentID string `path:"agentID"`
-	}) (*struct{ Body []*domain.CreditLedgerEntry }, error) {
-		entries, err := h.svc.GetAgentLedger(ctx, in.AgentID)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to get ledger")
-		}
-		return &struct{ Body []*domain.CreditLedgerEntry }{Body: entries}, nil
 	})
 
 	// ---- platform experiments ----
@@ -489,17 +447,34 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-donations", Method: "GET", Path: "/donations",
 		Summary: "List donation requests", Tags: []string{"donations"},
+		Description: "Optional ?status filter, ?limit (default/max 200) and ?offset, most recent " +
+			"first. Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Status string `query:"status" doc:"Optional filter: open|fulfilled|cancelled"`
-	}) (*struct{ Body []*domain.DonationRequest }, error) {
-		reqs, err := peh.svc.store.ListDonationRequests(ctx, in.Status)
+		Limit  int    `query:"limit"`
+		Offset int    `query:"offset"`
+	}) (*struct {
+		Body       []*domain.DonationRequest
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		if in.Limit < 0 || in.Offset < 0 {
+			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		reqs, err := peh.svc.store.ListDonationRequests(ctx, in.Status, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list donations")
 		}
 		if reqs == nil {
 			reqs = []*domain.DonationRequest{}
 		}
-		return &struct{ Body []*domain.DonationRequest }{Body: reqs}, nil
+		total, err := peh.svc.store.CountDonationRequests(ctx, in.Status)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to count donations")
+		}
+		return &struct {
+			Body       []*domain.DonationRequest
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: reqs, TotalCount: total}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

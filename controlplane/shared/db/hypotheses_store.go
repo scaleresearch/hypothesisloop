@@ -243,12 +243,15 @@ VALUES ($1, $2, $3, $4, $5, $6)`
 	return f, nil
 }
 
-// ListFindingsByHypothesis returns every finding filed against a hypothesis, oldest first —
-// the accumulated evidence trail for that claim across every job that tested it.
-func (s *HypothesesStore) ListFindingsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisFinding, error) {
+// ListFindingsByHypothesis returns one page of the findings filed against a hypothesis, oldest
+// first — the accumulated evidence trail for that claim across every job that tested it. The
+// trail only ever grows, so limit is defaulted and clamped exactly like every other list read
+// here; CountFindingsByHypothesis reports how much of it a page left behind.
+func (s *HypothesesStore) ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error) {
+	limit, offset = clampHypothesisPage(limit, offset)
 	const q = `SELECT id, hypothesis_id, experiment_id, agent_id, summary, created_at
-FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC`
-	rows, err := s.pool.pool.Query(ctx, q, hypothesisID)
+FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
+	rows, err := s.pool.pool.Query(ctx, q, hypothesisID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.ListFindingsByHypothesis: %w", err)
 	}
@@ -292,11 +295,13 @@ VALUES ($1, $2, $3, $4, $5)`
 	return c, nil
 }
 
-// ListCommentsByHypothesis returns every comment filed against a hypothesis, oldest first.
-func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string) ([]*domain.HypothesisComment, error) {
+// ListCommentsByHypothesis returns one page of the comments filed against a hypothesis, oldest
+// first — bounded like ListFindingsByHypothesis, for the same reason.
+func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
+	limit, offset = clampHypothesisPage(limit, offset)
 	const q = `SELECT id, hypothesis_id, agent_id, text, created_at
-FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC`
-	rows, err := s.pool.pool.Query(ctx, q, hypothesisID)
+FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
+	rows, err := s.pool.pool.Query(ctx, q, hypothesisID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.ListCommentsByHypothesis: %w", err)
 	}
@@ -385,4 +390,39 @@ func (s *HypothesesStore) CountHypotheses(ctx context.Context, platformExperimen
 		return 0, fmt.Errorf("hypotheses_store.CountHypotheses: %w", err)
 	}
 	return total, nil
+}
+
+// clampHypothesisPage applies the shared list bounds to a hypothesis sub-list page.
+func clampHypothesisPage(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = defaultHypothesisListLimit
+	} else if limit > maxHypothesisListLimit {
+		limit = maxHypothesisListLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+// CountFindingsByHypothesis returns the full number of findings filed against a hypothesis,
+// ignoring limit/offset.
+func (s *HypothesesStore) CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error) {
+	var n int
+	if err := s.pool.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM hypothesis_findings WHERE hypothesis_id = $1`, hypothesisID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("hypotheses_store.CountFindingsByHypothesis: %w", err)
+	}
+	return n, nil
+}
+
+// CountCommentsByHypothesis returns the full number of comments filed against a hypothesis,
+// ignoring limit/offset.
+func (s *HypothesesStore) CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error) {
+	var n int
+	if err := s.pool.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM hypothesis_comments WHERE hypothesis_id = $1`, hypothesisID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("hypotheses_store.CountCommentsByHypothesis: %w", err)
+	}
+	return n, nil
 }

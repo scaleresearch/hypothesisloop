@@ -14,7 +14,6 @@ type Store interface {
 	CreateAgent(ctx context.Context, agent *domain.Agent) error
 	ListAgents(ctx context.Context, limit, offset int) ([]*domain.Agent, error)
 	CountAgents(ctx context.Context) (int, error)
-	GetAgentLedger(ctx context.Context, agentID string) ([]*domain.CreditLedgerEntry, error)
 }
 
 // AgentProvisioner performs any backend-specific durable registration work. The production
@@ -60,48 +59,3 @@ func (s *Service) RegisterAgent(ctx context.Context, id, name string) (*domain.A
 	return agent, nil
 }
 
-// ListBalances returns one page of registered agents' all-time credit_ledger balances,
-// ordered by created_at like the underlying agent list; limit/offset are bounded and
-// defaulted by the store — see db.AgentsStore.ListAgents. See domain.AgentBalance's doc
-// comment: nothing currently writes to credit_ledger, so Balance is always 0 today — real
-// consumption tracking lives in per-platform-experiment quotas
-// (PlatformExperimentsService/AgentQuota) instead.
-func (s *Service) ListBalances(ctx context.Context, limit, offset int) ([]*domain.AgentBalance, error) {
-	agents, err := s.store.ListAgents(ctx, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("quota.ListBalances: list agents: %w", err)
-	}
-	out := make([]*domain.AgentBalance, 0, len(agents))
-	for _, a := range agents {
-		entries, err := s.store.GetAgentLedger(ctx, a.ID)
-		if err != nil {
-			return nil, fmt.Errorf("quota.ListBalances: ledger for %s: %w", a.ID, err)
-		}
-		var balance float64
-		for _, e := range entries {
-			balance += e.Amount
-		}
-		out = append(out, &domain.AgentBalance{
-			AgentID:          a.ID,
-			Balance:          balance,
-			PerformanceBonus: a.PerformanceScore,
-		})
-	}
-	return out, nil
-}
-
-// CountBalances returns the total number of registered agents, ignoring limit/offset — the
-// X-Total-Count a paginating caller shows.
-func (s *Service) CountBalances(ctx context.Context) (int, error) {
-	return s.store.CountAgents(ctx)
-}
-
-// GetAgentLedger returns agentID's full credit_ledger history (see ListBalances — currently
-// always empty).
-func (s *Service) GetAgentLedger(ctx context.Context, agentID string) ([]*domain.CreditLedgerEntry, error) {
-	entries, err := s.store.GetAgentLedger(ctx, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("quota.GetAgentLedger: %w", err)
-	}
-	return entries, nil
-}

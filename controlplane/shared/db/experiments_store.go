@@ -183,6 +183,53 @@ func (s *ExperimentsStore) CountExperiments(ctx context.Context, filter domain.E
 	return total, nil
 }
 
+// ExperimentStats counts the experiments matching filter, grouped in PostgreSQL. Limit/Offset/
+// Sort are ignored: this is the whole matching set by construction, which is the point — a
+// caller reading pages of rows can only ever count the page it holds.
+func (s *ExperimentsStore) ExperimentStats(ctx context.Context, filter domain.ExperimentFilter) (*domain.ExperimentStats, error) {
+	clauses, args := experimentFilterClauses(filter)
+	// split_part yields the whole string when there is no ':', so a reason with no detail
+	// suffix is its own code — the same rule the UI applies when it labels one.
+	q := `SELECT status, capacity_tier, split_part(COALESCE(eviction_reason, ''), ':', 1) AS reason_code, COUNT(*)
+FROM experiments WHERE ` + strings.Join(clauses, " AND ") + `
+GROUP BY status, capacity_tier, reason_code`
+
+	rows, err := s.pool.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.ExperimentStats: %w", err)
+	}
+	defer rows.Close()
+
+	out := &domain.ExperimentStats{
+		ByStatus:              map[string]int{},
+		ByCapacityTier:        map[string]int{},
+		RunningByCapacityTier: map[string]int{},
+		EvictedByCapacityTier: map[string]int{},
+		EvictionsByReason:     map[string]int{},
+	}
+	for rows.Next() {
+		var status, tier, reasonCode string
+		var n int
+		if err := rows.Scan(&status, &tier, &reasonCode, &n); err != nil {
+			return nil, fmt.Errorf("experiments_store.ExperimentStats: scan: %w", err)
+		}
+		out.Total += n
+		out.ByStatus[status] += n
+		out.ByCapacityTier[tier] += n
+		if domain.ExperimentStatus(status) == domain.StatusRunning {
+			out.RunningByCapacityTier[tier] += n
+		}
+		if domain.ExperimentStatus(status) == domain.StatusEvicted {
+			out.EvictedByCapacityTier[tier] += n
+			if reasonCode == "" {
+				reasonCode = "unknown"
+			}
+			out.EvictionsByReason[reasonCode] += n
+		}
+	}
+	return out, rows.Err()
+}
+
 func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 	clauses := []string{"1=1"}
 	args := []any{}

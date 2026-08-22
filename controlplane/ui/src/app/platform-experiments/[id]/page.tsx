@@ -10,12 +10,13 @@ import {
 import {
   fetchPlatformExperiment,
   fetchPlatformExperimentQuotas,
-  fetchExperimentsByPlatformExperiment,
-  fetchDonations,
+  fetchExperimentsPage,
+  fetchDonationsPage,
+  MAX_LIST_PAGE_SIZE,
   fetchStages,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
-  fetchHypotheses,
+  fetchHypothesesPage,
 } from '@/lib/api'
 import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
@@ -477,15 +478,18 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  const { data: experiments } = useSWR<Experiment[]>(
+  // One explicitly bounded page: every list endpoint caps a read, so asking without a limit
+  // would only hide where the cut fell.
+  const { data: experimentsPage } = useSWR(
     ['pe-experiments', id],
-    () => fetchExperimentsByPlatformExperiment(id),
+    () => fetchExperimentsPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
+  const experiments = experimentsPage?.items
 
-  const { data: donations } = useSWR<DonationRequest[]>(
+  const { data: donations } = useSWR(
     'donations-open',
-    () => fetchDonations('open'),
+    () => fetchDonationsPage({ status: 'open', limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
 
@@ -495,11 +499,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  const { data: hypotheses } = useSWR<Hypothesis[]>(
+  const { data: hypothesesPage } = useSWR(
     ['pe-hypotheses', id],
-    () => fetchHypotheses(id),
+    () => fetchHypothesesPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
+  const hypotheses = hypothesesPage?.items
 
   // Fetch the full timeseries for every objective metric so the scoreboard can compute each
   // agent's best value per metric (needed for Pareto winner detection below). This is the
@@ -604,7 +609,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
   // Donations targeted at agents in this experiment
   const relevantAgents = new Set((quotas ?? []).map(q => q.agent_id))
-  const relevantDonations = (donations ?? []).filter(d => relevantAgents.has(d.agent_id))
+  const relevantDonations = (donations?.items ?? []).filter(d => relevantAgents.has(d.agent_id))
 
   return (
     <div>

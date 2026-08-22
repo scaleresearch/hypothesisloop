@@ -3,10 +3,9 @@
 import { Fragment, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAgentBalancesPage, fetchAgents, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonations } from '@/lib/api'
+import { fetchAgentsPage, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
 import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from '@/lib/quota'
-import type { AgentBalance, PlatformExperiment, AgentQuota } from '@/types'
-import type { DonationRequest } from '@/lib/api'
+import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
@@ -22,7 +21,7 @@ const PAGE_SIZE = 25
 // Filtering by experiment cross-references the full signed-up-agents set, which server-side
 // pagination can't do without a dedicated endpoint — so a filtered view asks for one big page
 // (bounded like every other list read) instead of paging through per-experiment signups.
-const MAX_PAGE_SIZE = 200
+const MAX_PAGE_SIZE = MAX_LIST_PAGE_SIZE
 
 function BonusChip({ label, active }: { label: string; active: boolean }) {
   return (
@@ -81,23 +80,19 @@ export default function AgentsPage() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
   const [experimentFilter, setExperimentFilter] = useState('')
   const [page, setPage] = useState(0)
+  const [donationPage, setDonationPage] = useState(0)
 
   const { data, error, isLoading, mutate } = useSWR(
-    ['agent-balances', experimentFilter, page],
-    () => fetchAgentBalancesPage(
+    ['agents-page', experimentFilter, page],
+    () => fetchAgentsPage(
       experimentFilter
         ? { limit: MAX_PAGE_SIZE, offset: 0 }
         : { limit: PAGE_SIZE, offset: page * PAGE_SIZE },
     ),
     { refreshInterval: 15_000, keepPreviousData: true },
   )
-  const balances = data?.items
+  const agents = data?.items
   const total = data?.total ?? 0
-  // top3_count lives on domain.Agent (GET /agents), not on AgentBalance — reading it off a
-  // balance yielded undefined for every agent, so the Top-3 KPI and every eligibility chip read
-  // a hard zero that looked like a real answer.
-  const { data: agentRecords } = useSWR(['agents'], fetchAgents, { refreshInterval: 30_000 })
-  const top3ByAgent = new Map((agentRecords ?? []).map(a => [a.id, a.top3_count]))
 
   const { data: experiments } = useSWR<PlatformExperiment[]>(
     'platform-experiments-all',
@@ -105,19 +100,21 @@ export default function AgentsPage() {
     { refreshInterval: 30_000 },
   )
 
-  const { data: donations } = useSWR<DonationRequest[]>(
-    'donations-open',
-    () => fetchDonations('open'),
-    { refreshInterval: 15_000 },
+  const { data: donations } = useSWR(
+    ['donations-open', donationPage],
+    () => fetchDonationsPage({ status: 'open', limit: PAGE_SIZE, offset: donationPage * PAGE_SIZE }),
+    { refreshInterval: 15_000, keepPreviousData: true },
   )
+  const donationItems = donations?.items ?? []
+  const donationTotal = donations?.total ?? 0
 
   // Filter agents by experiment (those who signed up)
-  const filteredBalances = (() => {
-    if (!experimentFilter || !experiments) return balances
+  const filteredAgents = (() => {
+    if (!experimentFilter || !experiments) return agents
     const pe = experiments.find(e => e.id === experimentFilter)
-    if (!pe || !pe.signed_up_agents) return balances
+    if (!pe || !pe.signed_up_agents) return agents
     const agentSet = new Set(pe.signed_up_agents)
-    return (balances ?? []).filter(b => agentSet.has(b.agent_id))
+    return (agents ?? []).filter(a => agentSet.has(a.id))
   })()
 
   const sortedExperiments = useMemo(
@@ -125,28 +122,28 @@ export default function AgentsPage() {
     [experiments],
   )
 
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_bonus', desc: true }])
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
-    { accessorKey: 'agent_id', header: 'Agent ID' },
+    { accessorKey: 'id', header: 'Agent ID' },
     { accessorKey: 'top3_count', header: 'Bonus Eligibility' },
-    { accessorKey: 'performance_bonus', header: 'Perf Score' },
+    { accessorKey: 'performance_score', header: 'Perf Score' },
   ], [])
   const agentTable = useReactTable({
-    data: filteredBalances ?? [],
+    data: filteredAgents ?? [],
     columns: agentColumns,
     state: { sorting },
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   })
-  const sortedBalances = agentTable.getRowModel().rows.map(r => r.original)
+  const sortedAgents = agentTable.getRowModel().rows.map(r => r.original)
 
   const selectedPE = experimentFilter ? (experiments ?? []).find(pe => pe.id === experimentFilter) ?? null : null
   const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
 
-  const top3Count = (balances ?? []).filter(b => (top3ByAgent.get(b.agent_id) ?? 0) > 0).length
-  const avgPerf = balances && balances.length > 0
-    ? balances.reduce((s, b) => s + (typeof b.performance_bonus === 'number' ? b.performance_bonus : 0), 0) / balances.length
+  const top3Count = (agents ?? []).filter(a => a.top3_count > 0).length
+  const avgPerf = agents && agents.length > 0
+    ? agents.reduce((s, a) => s + a.performance_score, 0) / agents.length
     : null
 
   return (
@@ -163,7 +160,7 @@ export default function AgentsPage() {
         <StatTile label="Registered Agents" value={total || '—'} />
         <StatTile label="Top-3 Eligible" value={top3Count} color={semantic.success} sub="+25% quota bonus" />
         <StatTile label="Avg Perf Bonus" value={avgPerf != null ? avgPerf.toFixed(3) : '—'} />
-        <StatTile label="Open Donation Requests" value={donations?.length ?? 0} color={(donations?.length ?? 0) > 0 ? semantic.warning : undefined} />
+        <StatTile label="Open Donation Requests" value={donationTotal} color={donationTotal > 0 ? semantic.warning : undefined} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
@@ -226,13 +223,13 @@ export default function AgentsPage() {
       <Pod>
         <PodHeader>
           Registered Agents
-          {filteredBalances && (
+          {filteredAgents && (
             <span className="text-dim" style={{ fontWeight: 400, marginLeft: 8 }}>
-              ({experimentFilter ? filteredBalances.length : total})
+              ({experimentFilter ? filteredAgents.length : total})
             </span>
           )}
-          {experimentFilter && balances && filteredBalances && filteredBalances.length !== balances.length && (
-            <span className="text-link" style={{ fontWeight: 400, fontSize: 11, marginLeft: 6 }}>filtered from {balances.length}</span>
+          {experimentFilter && agents && filteredAgents && filteredAgents.length !== agents.length && (
+            <span className="text-link" style={{ fontWeight: 400, fontSize: 11, marginLeft: 6 }}>filtered from {agents.length}</span>
           )}
         </PodHeader>
         {experimentFilter && total > MAX_PAGE_SIZE && (
@@ -250,7 +247,7 @@ export default function AgentsPage() {
                   <th
                     key={h.id}
                     style={{
-                      textAlign: h.id === 'top3_count' ? 'center' : h.id === 'performance_bonus' ? 'right' : undefined,
+                      textAlign: h.id === 'top3_count' ? 'center' : h.id === 'performance_score' ? 'right' : undefined,
                       cursor: 'pointer', userSelect: 'none',
                     }}
                     onClick={h.column.getToggleSortingHandler()}
@@ -263,7 +260,7 @@ export default function AgentsPage() {
               </tr>
             </thead>
             <tbody>
-              {!filteredBalances || filteredBalances.length === 0 ? (
+              {!filteredAgents || filteredAgents.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ padding: 0 }}>
                     <EmptyState>
@@ -271,24 +268,20 @@ export default function AgentsPage() {
                     </EmptyState>
                   </td>
                 </tr>
-              ) : sortedBalances.map(b => {
-                const top3 = top3ByAgent.get(b.agent_id) ?? 0
-                const hasTop3 = top3 > 0
-                const isExpanded = expandedAgent === b.agent_id
+              ) : sortedAgents.map(a => {
+                const isExpanded = expandedAgent === a.id
                 return (
-                  <Fragment key={b.agent_id}>
-                    <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedAgent(isExpanded ? null : b.agent_id)}>
-                      <td className="mono" style={{ fontWeight: 700 }}>{b.agent_id}</td>
+                  <Fragment key={a.id}>
+                    <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedAgent(isExpanded ? null : a.id)}>
+                      <td className="mono" style={{ fontWeight: 700 }}>{a.id}</td>
                       <td style={{ textAlign: 'center' }}>
-                        <BonusChip label="+25% Top-3" active={hasTop3} />
+                        <BonusChip label="+25% Top-3" active={a.top3_count > 0} />
                       </td>
-                      <td className="mono" style={{ textAlign: 'right' }}>
-                        {typeof b.performance_bonus === 'number' ? b.performance_bonus.toFixed(3) : '—'}
-                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{a.performance_score.toFixed(3)}</td>
                       <td className="text-dim" style={{ fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</td>
                     </tr>
                     {isExpanded && experiments && (
-                      <AgentQuotaRows agentId={b.agent_id} experiments={experiments} />
+                      <AgentQuotaRows agentId={a.id} experiments={experiments} />
                     )}
                   </Fragment>
                 )
@@ -303,10 +296,10 @@ export default function AgentsPage() {
       <Pod>
         <PodHeader>
           Compute Donation Requests
-          {donations && donations.length > 0 && <span className="text-link" style={{ fontWeight: 400, marginLeft: 8 }}>({donations.length} open)</span>}
+          {donationTotal > 0 && <span className="text-link" style={{ fontWeight: 400, marginLeft: 8 }}>({donationTotal} open)</span>}
         </PodHeader>
         <PodContent>
-          {!donations || donations.length === 0 ? (
+          {donationItems.length === 0 ? (
             <EmptyState>No open donation requests. Agents can request extra compute via POST /donations.</EmptyState>
           ) : (
             <table className="wa-table">
@@ -320,7 +313,7 @@ export default function AgentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {donations.map(d => (
+                {donationItems.map(d => (
                   <tr key={d.id}>
                     <td className="mono" style={{ fontWeight: 600 }}>{d.agent_name || d.agent_id}</td>
                     <td className="mono" style={{ textAlign: 'right' }}>{d.credits_want}</td>
@@ -332,6 +325,7 @@ export default function AgentsPage() {
               </tbody>
             </table>
           )}
+          <Pagination page={donationPage} pageSize={PAGE_SIZE} total={donationTotal} onPageChange={setDonationPage} />
         </PodContent>
       </Pod>
     </div>

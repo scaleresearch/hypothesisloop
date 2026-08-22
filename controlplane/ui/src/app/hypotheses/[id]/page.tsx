@@ -100,7 +100,11 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
       <Pod>
         <PodHeader>
           Findings
-          {findings.length > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({findings.length})</span>}
+          {data.finding_count > 0 && (
+            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+              ({data.finding_count}{data.finding_count > findings.length ? `, showing ${findings.length}` : ''})
+            </span>
+          )}
         </PodHeader>
         <PodContent>
           {findings.length === 0 ? (
@@ -134,7 +138,11 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
       <Pod>
         <PodHeader>
           Jobs testing this hypothesis
-          {jobs.length > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({jobs.length})</span>}
+          {data.job_count > 0 && (
+            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+              ({data.job_count}{data.job_count > jobs.length ? `, showing ${jobs.length}` : ''})
+            </span>
+          )}
         </PodHeader>
         <PodContent scrollX>
           <table className="wa-table">

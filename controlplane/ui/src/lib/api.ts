@@ -1,10 +1,8 @@
 import type {
   ClustersResponse,
-  AgentBalance,
   Agent,
   Experiment,
   MetricDataPoint,
-  CreditLedgerEntry,
   LineageNode,
   PlatformExperiment,
   AgentQuota,
@@ -33,6 +31,9 @@ export interface Page<T> {
   total: number
 }
 
+// The largest page every list endpoint will serve; asking for more is clamped server-side.
+export const MAX_LIST_PAGE_SIZE = 200
+
 async function apiFetchPage<T>(url: string): Promise<Page<T>> {
   const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) {
@@ -55,23 +56,26 @@ export function fetchClusters(): Promise<ClustersResponse> {
 }
 
 
-export interface AgentBalancesParams {
+export interface AgentsParams {
   limit?: number
   offset?: number
 }
 
-export function fetchAgentBalancesPage(params?: AgentBalancesParams): Promise<Page<AgentBalance>> {
-  const url = new URL(`${API_URL}/balances`)
+export function fetchAgentsPage(params?: AgentsParams): Promise<Page<Agent>> {
+  const url = new URL(`${API_URL}/agents`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined) url.searchParams.set(k, String(v))
     }
   }
-  return apiFetchPage<AgentBalance>(url.toString())
+  return apiFetchPage<Agent>(url.toString())
 }
 
+// The first page at the server's own ceiling, for the id->name lookups that decorate other
+// pages' rows. Callers that display agents as their subject must page instead — see
+// fetchAgentsPage.
 export function fetchAgents(): Promise<Agent[]> {
-  return apiFetch<Agent[]>(`${API_URL}/agents`)
+  return fetchAgentsPage({ limit: MAX_LIST_PAGE_SIZE }).then(p => p.items)
 }
 
 
@@ -106,6 +110,28 @@ export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment
   return fetchExperimentsPage(params).then(p => p.items)
 }
 
+// Whole-set counts for the same filters fetchExperimentsPage accepts, counted server-side.
+// Every list read is capped at one page, so a dashboard must count here rather than tally rows
+// it fetched — a tally of a page is a tally of the page, not of the platform.
+export interface ExperimentStats {
+  total: number
+  by_status: Record<string, number>
+  by_capacity_tier: Record<string, number>
+  running_by_capacity_tier: Record<string, number>
+  evicted_by_capacity_tier: Record<string, number>
+  evictions_by_reason: Record<string, number>
+}
+
+export function fetchExperimentStats(params?: Omit<ExperimentsParams, 'limit' | 'offset' | 'sort'>): Promise<ExperimentStats> {
+  const url = new URL(`${API_URL}/experiments/stats`)
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
+    }
+  }
+  return apiFetch<ExperimentStats>(url.toString())
+}
+
 export function fetchExperiment(id: string): Promise<Experiment> {
   return apiFetch<Experiment>(`${API_URL}/experiments/${id}`)
 }
@@ -137,15 +163,6 @@ export function fetchPlatformExperimentTimeseries(
 // ---------------------------------------------------------------------------
 // Hypotheses
 // ---------------------------------------------------------------------------
-
-// A hypothesis is scoped to a single platform experiment's shared idea pool, but GET
-// /hypotheses also supports omitting platform_experiment_id for the operator-facing global
-// view across every pool — see fetchHypothesesPage below, which every list caller should use.
-export function fetchHypotheses(platformExperimentID: string): Promise<Hypothesis[]> {
-  return apiFetch<Hypothesis[]>(
-    `${API_URL}/hypotheses?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
-  )
-}
 
 export interface HypothesesParams {
   /** Omit for the global, cross-platform-experiment view. */
@@ -304,17 +321,23 @@ export interface DonationRequest {
   created_at: string
 }
 
-export function fetchDonations(status?: string): Promise<DonationRequest[]> {
-  const url = new URL(`${API_URL}/donations`)
-  if (status) url.searchParams.set('status', status)
-  return apiFetch<DonationRequest[]>(url.toString())
+export interface DonationsParams {
+  status?: string
+  limit?: number
+  offset?: number
 }
 
-export function fetchExperimentsByPlatformExperiment(platformExpID: string): Promise<Experiment[]> {
-  const url = new URL(`${API_URL}/experiments`)
-  url.searchParams.set('platform_experiment_id', platformExpID)
-  return apiFetch<Experiment[]>(url.toString())
+export function fetchDonationsPage(params?: DonationsParams): Promise<Page<DonationRequest>> {
+  const url = new URL(`${API_URL}/donations`)
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
+    }
+  }
+  return apiFetchPage<DonationRequest>(url.toString())
 }
+
+
 
 export interface Stage {
   length_pct: number

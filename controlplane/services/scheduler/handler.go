@@ -92,13 +92,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
 	})
 
+	// maxExperimentListLimit bounds every GET /experiments page the same way the agent,
+	// hypothesis and platform-experiment lists bound theirs — experiments is the fastest-growing
+	// table here, so an omitted ?limit must not mean "every row ever submitted".
+	const maxExperimentListLimit = 200
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
 		Summary: "List experiments", Tags: []string{"experiments"},
 		Description: "Filter with ?agent, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?search (substring match " +
-			"against hypothesis/objective/theory), ?limit, ?offset. ?sort selects order: created_at, " +
+			"against hypothesis/objective/theory), ?limit (default/max 200), ?offset. ?sort selects order: created_at, " +
 			"priority_score, or status, optionally prefixed with - for descending (default -created_at " +
 			"is NOT the default order — omit ?sort to keep the historical priority-then-recency order). " +
 			"Total match count is returned in the X-Total-Count response header.",
@@ -125,6 +130,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		}
+		if in.Limit <= 0 || in.Limit > maxExperimentListLimit {
+			in.Limit = maxExperimentListLimit
 		}
 		var since time.Time
 		if in.Since != "" {
@@ -161,6 +169,48 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Body       []*domain.Experiment
 			TotalCount int `header:"X-Total-Count"`
 		}{Body: exps, TotalCount: total}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "experiment-stats", Method: "GET", Path: "/experiments/stats",
+		Summary: "Count experiments by status, capacity tier and eviction reason", Tags: []string{"experiments"},
+		Description: "Whole-set totals for the same ?agent/?platform_experiment_id/?hypothesis_id/" +
+			"?project_id/?status/?since/?search filters GET /experiments accepts, counted in " +
+			"PostgreSQL. Every list read is bounded to one page, so this is the only way to get a " +
+			"total that is not the page's own length.",
+	}, func(ctx context.Context, in *struct {
+		Agent                string `query:"agent"`
+		PlatformExperimentID string `query:"platform_experiment_id"`
+		HypothesisID         string `query:"hypothesis_id"`
+		ProjectID            string `query:"project_id"`
+		Status               string `query:"status"`
+		Since                string `query:"since"`
+		Search               string `query:"search"`
+	}) (*struct{ Body *domain.ExperimentStats }, error) {
+		if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
+			return nil, huma.Error400BadRequest("unknown status " + in.Status)
+		}
+		var since time.Time
+		if in.Since != "" {
+			parsed, err := time.Parse(time.RFC3339, in.Since)
+			if err != nil {
+				return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
+			}
+			since = parsed
+		}
+		stats, err := h.svc.store.ExperimentStats(ctx, domain.ExperimentFilter{
+			AgentID:              in.Agent,
+			PlatformExperimentID: in.PlatformExperimentID,
+			HypothesisID:         in.HypothesisID,
+			ProjectID:            in.ProjectID,
+			Status:               domain.ExperimentStatus(in.Status),
+			Since:                since,
+			Search:               in.Search,
+		})
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body *domain.ExperimentStats }{Body: stats}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

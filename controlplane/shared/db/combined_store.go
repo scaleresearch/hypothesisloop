@@ -15,7 +15,6 @@ import (
 type Store struct {
 	*ExperimentsStore
 	*AgentsStore
-	*LedgerStore
 	*DonationStore
 	*PlatformExperimentsStore
 	*ClusterQueueStore
@@ -32,7 +31,6 @@ func NewStore(pool *Pool, metricsDBURL string) *Store {
 	return &Store{
 		ExperimentsStore:         NewExperimentsStore(pool),
 		AgentsStore:              NewAgentsStore(pool),
-		LedgerStore:              NewLedgerStore(pool),
 		DonationStore:            NewDonationStore(pool),
 		PlatformExperimentsStore: NewPlatformExperimentsStore(pool),
 		ClusterQueueStore:        NewClusterQueueStore(pool),

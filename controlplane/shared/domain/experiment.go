@@ -165,8 +165,26 @@ type ExperimentFilter struct {
 // param straight into ORDER BY) is what makes Sort safe against SQL injection.
 var ExperimentSortFields = map[string]string{
 	"created_at":     "created_at",
+	"updated_at":     "updated_at",
 	"priority_score": "priority_score",
 	"status":         "status",
+}
+
+// ExperimentStats is the whole-table shape of the experiment set matching a filter, counted in
+// PostgreSQL rather than by reading the rows. A dashboard needs the totals, not the rows: every
+// list read is bounded to one page, so counting client-side would silently report the page.
+type ExperimentStats struct {
+	Total int `json:"total"`
+	// ByStatus counts every status present; a status with no rows is absent, not zero.
+	ByStatus map[string]int `json:"by_status"`
+	// ByCapacityTier counts guaranteed vs burst across all statuses, RunningByCapacityTier the
+	// same restricted to RUNNING — how much of the live load is preemptable.
+	ByCapacityTier        map[string]int `json:"by_capacity_tier"`
+	RunningByCapacityTier map[string]int `json:"running_by_capacity_tier"`
+	EvictedByCapacityTier map[string]int `json:"evicted_by_capacity_tier"`
+	// EvictionsByReason is keyed by the reason *code* — the part before any ": detail"
+	// explanation — so a reason carrying per-job detail stays one category.
+	EvictionsByReason map[string]int `json:"evictions_by_reason"`
 }
 
 // ValidSortField reports whether sort names a field in allowed, ignoring a leading "-" for

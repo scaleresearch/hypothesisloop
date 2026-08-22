@@ -2,32 +2,34 @@
 
 import Link from 'next/link'
 import useSWR from 'swr'
-import { fetchClusters, fetchExperiments, fetchAgents } from '@/lib/api'
-import type { ClustersResponse, Experiment, Agent } from '@/types'
+import { fetchClusters, fetchExperimentStats, fetchAgentsPage } from '@/lib/api'
+import type { ClustersResponse } from '@/types'
 import { semantic } from '@/lib/colors'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 
 const LINKS: Array<{ href: string; title: string; description: string }> = [
   { href: '/platform-experiments', title: 'Platform Experiments', description: 'Operator-defined compute envelopes agents compete within.' },
   { href: '/jobs', title: 'Jobs', description: 'Live and historical job runs with metrics and lineage.' },
-  { href: '/agents', title: 'Agents', description: 'Registered agents, balances, and performance history.' },
+  { href: '/agents', title: 'Agents', description: 'Registered agents, quota allocation, and performance history.' },
   { href: '/cluster', title: 'Cluster', description: 'Registered clusters and node-agent connectivity.' },
   { href: '/dashboard', title: 'Scheduler Quality', description: 'Eviction audit log, capacity utilisation, and completion rate.' },
 ]
 
 function LiveStrip() {
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
-  const { data: jobs } = useSWR<Experiment[]>('jobs-all', () => fetchExperiments({ limit: 1000 }), { refreshInterval: 15_000 })
-  const { data: agents } = useSWR<Agent[]>('agents', fetchAgents, { refreshInterval: 30_000 })
+  // Both counts are server-side totals, not the length of a fetched page — see
+  // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
+  const { data: stats } = useSWR('experiment-stats', () => fetchExperimentStats(), { refreshInterval: 15_000 })
+  const { data: agents } = useSWR('agent-count', () => fetchAgentsPage({ limit: 1 }), { refreshInterval: 30_000 })
 
   const clusterList = clusters?.clusters ?? []
   const connected = clusterList.filter(c => c.connected).length
-  const running = (jobs ?? []).filter(j => j.status === 'RUNNING').length
+  const running = stats?.by_status?.RUNNING ?? 0
 
   const items = [
     { label: 'Clusters online', value: clusters ? `${connected}/${clusterList.length}` : '—', color: clusterList.length > 0 && connected === clusterList.length ? semantic.success : semantic.warning },
-    { label: 'Jobs running', value: jobs ? String(running) : '—', color: semantic.success },
-    { label: 'Registered agents', value: agents ? String(agents.length) : '—', color: semantic.accent },
+    { label: 'Jobs running', value: stats ? String(running) : '—', color: semantic.success },
+    { label: 'Registered agents', value: agents ? String(agents.total) : '—', color: semantic.accent },
   ]
 
   return (
