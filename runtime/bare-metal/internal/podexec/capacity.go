@@ -205,6 +205,28 @@ func (e *Executor) GetFlavorCapacity(ctx context.Context, clusterName string) (g
 	return guaranteed, burst, nil
 }
 
+// GetLiveNodeResourceCapacity reports this node's free CPU/memory/storage. There is exactly one
+// node, so this is the per-node view of the same numbers the cluster-wide collectors report.
+func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	cpuAvail, _, err := e.GetLiveCPUCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ramAvail, _, err := e.GetLiveRAMCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	storageAvail, _, err := e.GetLiveStorageCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]map[string]int64{e.nodeName: {
+		domain.NodeResourceCPUMillicores: int64(cpuAvail * 1000),
+		domain.NodeResourceMemoryBytes:   ramAvail,
+		domain.NodeResourceStorageBytes:  storageAvail,
+	}}, nil
+}
+
 // GetAcceleratorCapacityByNode/GetNodeLabels give the plain cluster->node->... shape
 // workload.Backend expects, wrapping GetLiveAcceleratorCapacitySnapshot's single-node result.
 func (e *Executor) GetAcceleratorCapacityByNode(ctx context.Context, clusterName string) (map[string]map[string]map[string]int64, error) {

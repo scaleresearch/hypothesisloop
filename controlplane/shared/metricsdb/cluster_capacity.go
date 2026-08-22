@@ -26,9 +26,12 @@ type ClusterCapacitySnapshot struct {
 	CPUAvailable, CPUTotal                 float64
 	AcceleratorAvailable, AcceleratorTotal map[string]int64
 	AcceleratorAvailableByNode             map[string]map[string]int64
-	NodeLabelsByNode                       map[string]map[string]string
-	RAMAvailable, RAMTotal                 int64
-	StorageAvailable, StorageTotal         int64
+	// NodeResourcesByNode carries the fungible dimensions per node — node -> resource -> free
+	// amount, keyed by domain.NodeResource*.
+	NodeResourcesByNode            map[string]map[string]int64
+	NodeLabelsByNode               map[string]map[string]string
+	RAMAvailable, RAMTotal         int64
+	StorageAvailable, StorageTotal int64
 }
 
 func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot ClusterCapacitySnapshot) error {
@@ -51,6 +54,11 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 	for node, byType := range snapshot.AcceleratorAvailableByNode {
 		for acceleratorType, available := range byType {
 			samples = append(samples, GaugeSample{MetricName: clusterNodeAcceleratorAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "accelerator_type": acceleratorType}, Value: float64(available), At: snapshot.At})
+		}
+	}
+	for node, byResource := range snapshot.NodeResourcesByNode {
+		for resource, available := range byResource {
+			samples = append(samples, GaugeSample{MetricName: clusterNodeResourceAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "resource": resource}, Value: float64(available), At: snapshot.At})
 		}
 	}
 	for node, labels := range snapshot.NodeLabelsByNode {
@@ -148,7 +156,12 @@ const (
 	clusterAcceleratorAvailableMetric     = "cluster_accelerator_available_accelerators"
 	clusterAcceleratorTotalMetric         = "cluster_accelerator_total_accelerators"
 	clusterNodeAcceleratorAvailableMetric = "cluster_node_accelerator_available_accelerators"
-	clusterNodeLabelMetric                = "cluster_node_label"
+	// clusterNodeResourceAvailableMetric carries the fungible dimensions per node, keyed by a
+	// "resource" label, so a new dimension needs no new series. Reported alongside the per-node
+	// accelerator counts because a job is placed on one node and must fit that node in *every*
+	// dimension — a cluster-wide CPU total cannot answer that (see reservePlacement).
+	clusterNodeResourceAvailableMetric = "cluster_node_resource_available"
+	clusterNodeLabelMetric             = "cluster_node_label"
 )
 
 func LiveClusterNodeLabels(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]map[string]string, error) {
@@ -227,6 +240,38 @@ func LiveClusterNodeAcceleratorCapacity(ctx context.Context, dbURL string, windo
 			return nil, fmt.Errorf("metricsdb.LiveClusterNodeAcceleratorCapacity: duplicate cluster %q node %q accelerator type %q", cluster, node, acceleratorType)
 		}
 		out[cluster][node][acceleratorType] = value
+	}
+	return out, nil
+}
+
+// LiveClusterNodeResourceCapacity returns fresh actual capacity as
+// cluster -> node -> resource -> free amount, for the fungible dimensions (see
+// domain.NodeResource* for the keys).
+func LiveClusterNodeResourceCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]map[string]int64, error) {
+	samples, err := queryCompleteClusterSnapshot(ctx, dbURL, clusterNodeResourceAvailableMetric, window)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LiveClusterNodeResourceCapacity: %w", err)
+	}
+	out := make(map[string]map[string]map[string]int64)
+	for _, sample := range samples {
+		cluster, node, resource := sample.Labels["cluster_name"], sample.Labels["node"], sample.Labels["resource"]
+		if cluster == "" || node == "" || resource == "" {
+			return nil, fmt.Errorf("metricsdb.LiveClusterNodeResourceCapacity: sample missing cluster_name, node, or resource")
+		}
+		value, err := capacityInt64(sample.Value)
+		if err != nil {
+			return nil, fmt.Errorf("metricsdb.LiveClusterNodeResourceCapacity: cluster %q node %q resource %q: %w", cluster, node, resource, err)
+		}
+		if out[cluster] == nil {
+			out[cluster] = make(map[string]map[string]int64)
+		}
+		if out[cluster][node] == nil {
+			out[cluster][node] = make(map[string]int64)
+		}
+		if _, exists := out[cluster][node][resource]; exists {
+			return nil, fmt.Errorf("metricsdb.LiveClusterNodeResourceCapacity: duplicate cluster %q node %q resource %q", cluster, node, resource)
+		}
+		out[cluster][node][resource] = value
 	}
 	return out, nil
 }
@@ -384,7 +429,7 @@ func liveClusterAcceleratorMetric(ctx context.Context, dbURL, metricName string,
 
 func queryCompleteClusterSnapshot(ctx context.Context, dbURL, metricName string, window time.Duration) ([]VectorSample, error) {
 	switch metricName {
-	case clusterAcceleratorAvailableMetric, clusterAcceleratorTotalMetric, clusterNodeAcceleratorAvailableMetric, clusterNodeLabelMetric:
+	case clusterAcceleratorAvailableMetric, clusterAcceleratorTotalMetric, clusterNodeAcceleratorAvailableMetric, clusterNodeResourceAvailableMetric, clusterNodeLabelMetric:
 	default:
 		return nil, fmt.Errorf("unsupported snapshot metric %q", metricName)
 	}

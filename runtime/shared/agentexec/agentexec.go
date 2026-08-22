@@ -37,6 +37,10 @@ type Executor interface {
 	GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error)
 	GetLiveRAMCapacity(ctx context.Context) (available, total int64, err error)
 	GetLiveStorageCapacity(ctx context.Context) (available, total int64, err error)
+	// GetLiveNodeResourceCapacity reports free CPU/memory/storage per node, keyed by
+	// domain.NodeResource*. The cluster-wide totals above cannot answer "does this job fit a
+	// node", and a job runs on one node — admission needs both views.
+	GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error)
 	GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error)
 
 	ProvisionAgent(ctx context.Context, agentID string) error

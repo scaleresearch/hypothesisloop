@@ -362,6 +362,57 @@ func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resource
 	return total, requested
 }
 
+// GetLiveNodeResourceCapacity reports free CPU/memory/ephemeral-storage per schedulable node:
+// the node's allocatable minus the requests of every non-terminal pod already assigned to it.
+//
+// The same allocatable-minus-requested definition the cluster-wide totals use, kept per node
+// because a job runs on one node and must fit that node. A cluster-wide total cannot tell a job
+// that fits somewhere from one that fits nowhere.
+func (c *JobWorkloadClient) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dimensions := []struct {
+		key      string
+		name     corev1.ResourceName
+		quantity func(resource.Quantity) int64
+	}{
+		{domain.NodeResourceCPUMillicores, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
+		{domain.NodeResourceMemoryBytes, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() }},
+		{domain.NodeResourceStorageBytes, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() }},
+	}
+	out := make(map[string]map[string]int64, len(nodes))
+	for _, n := range nodes {
+		free := make(map[string]int64, len(dimensions))
+		for _, d := range dimensions {
+			var allocatable int64
+			if q, ok := n.Status.Allocatable[d.name]; ok {
+				allocatable = d.quantity(q)
+			}
+			var requested int64
+			for _, p := range pods {
+				if p.Spec.NodeName != n.Name {
+					continue
+				}
+				if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+					continue
+				}
+				for _, ctr := range p.Spec.Containers {
+					if q, ok := ctr.Resources.Requests[d.name]; ok {
+						requested += d.quantity(q)
+					}
+				}
+			}
+			if free[d.key] = allocatable - requested; free[d.key] < 0 {
+				free[d.key] = 0
+			}
+		}
+		out[n.Name] = free
+	}
+	return out, nil
+}
+
 // GetLiveAcceleratorCapacitySnapshot returns aggregate and per-node actual accelerator state
 // from one Kubernetes node/pod listing (DRA inventory listed once per configured driver), so
 // the reconcile exchange reports one internally consistent snapshot without duplicate reads.

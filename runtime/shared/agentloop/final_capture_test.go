@@ -57,6 +57,10 @@ func (e *captureExecutor) GetLiveCPUCapacity(context.Context) (float64, float64,
 func (e *captureExecutor) GetLiveRAMCapacity(context.Context) (int64, int64, error) {
 	return 1 << 34, 1 << 35, nil
 }
+func (e *captureExecutor) GetLiveNodeResourceCapacity(context.Context) (map[string]map[string]int64, error) {
+	return map[string]map[string]int64{}, nil
+}
+
 func (e *captureExecutor) GetLiveStorageCapacity(context.Context) (int64, int64, error) {
 	return 1 << 36, 1 << 37, nil
 }

@@ -270,10 +270,15 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 	if err != nil {
 		return nil, fmt.Errorf("get live storage capacity: %w", err)
 	}
+	nodeResources, err := a.Executor.GetLiveNodeResourceCapacity(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get live per-node resource capacity: %w", err)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
 		"accelerator_available_by_type": acceleratorAvail, "accelerator_total_by_type": acceleratorTotal,
 		"accelerator_available_by_node": acceleratorByNode,
+		"node_resources_by_node":        nodeResources,
 		"node_labels_by_node":           nodeLabels,
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
 		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,

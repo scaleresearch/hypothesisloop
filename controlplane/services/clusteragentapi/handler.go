@@ -123,6 +123,24 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
 			return nil, huma.Error400BadRequest("complete accelerator capacity report is required")
 		}
+		if report.NodeResourcesByNode == nil {
+			return nil, huma.Error400BadRequest("per-node resource capacity report is required")
+		}
+		for node, byResource := range report.NodeResourcesByNode {
+			if node == "" {
+				return nil, huma.Error400BadRequest("per-node resource report has empty node identity")
+			}
+			for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
+				if _, present := byResource[key]; !present {
+					return nil, huma.Error400BadRequest("per-node resource report for " + node + " is missing " + key)
+				}
+			}
+			for resource, available := range byResource {
+				if resource == "" || available < 0 {
+					return nil, huma.Error400BadRequest("invalid per-node resource capacity value")
+				}
+			}
+		}
 		if report.CPUAvailableCores < 0 || report.CPUTotalCores < 0 || report.CPUAvailableCores > report.CPUTotalCores {
 			return nil, huma.Error400BadRequest("invalid CPU capacity values")
 		}
@@ -169,6 +187,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
 			AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,
 			AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
+			NodeResourcesByNode:        report.NodeResourcesByNode,
 			NodeLabelsByNode:           report.NodeLabelsByNode,
 			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
 			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
@@ -280,16 +299,20 @@ type reconcileInput struct {
 }
 
 type capacityReport struct {
-	CPUAvailableCores            float64                      `json:"cpu_available_cores"`
-	CPUTotalCores                float64                      `json:"cpu_total_cores"`
-	AcceleratorAvailableByFlavor map[string]int64             `json:"accelerator_available_by_type"`
-	AcceleratorTotalByFlavor     map[string]int64             `json:"accelerator_total_by_type"`
-	AcceleratorAvailableByNode   map[string]map[string]int64  `json:"accelerator_available_by_node"`
-	NodeLabelsByNode             map[string]map[string]string `json:"node_labels_by_node"`
-	RAMAvailableBytes            int64                        `json:"ram_available_bytes"`
-	RAMTotalBytes                int64                        `json:"ram_total_bytes"`
-	StorageAvailableBytes        int64                        `json:"storage_available_bytes"`
-	StorageTotalBytes            int64                        `json:"storage_total_bytes"`
+	CPUAvailableCores            float64                     `json:"cpu_available_cores"`
+	CPUTotalCores                float64                     `json:"cpu_total_cores"`
+	AcceleratorAvailableByFlavor map[string]int64            `json:"accelerator_available_by_type"`
+	AcceleratorTotalByFlavor     map[string]int64            `json:"accelerator_total_by_type"`
+	AcceleratorAvailableByNode   map[string]map[string]int64 `json:"accelerator_available_by_node"`
+	// NodeResourcesByNode is free CPU/memory/storage per node, keyed by domain.NodeResource*.
+	// Required: a job runs on one node and must fit that node in every dimension, and a
+	// cluster-wide total cannot answer that — see scheduler.reservePlacement.
+	NodeResourcesByNode   map[string]map[string]int64  `json:"node_resources_by_node"`
+	NodeLabelsByNode      map[string]map[string]string `json:"node_labels_by_node"`
+	RAMAvailableBytes     int64                        `json:"ram_available_bytes"`
+	RAMTotalBytes         int64                        `json:"ram_total_bytes"`
+	StorageAvailableBytes int64                        `json:"storage_available_bytes"`
+	StorageTotalBytes     int64                        `json:"storage_total_bytes"`
 }
 
 // clusterInfo is one row of GET /internal/clusters.

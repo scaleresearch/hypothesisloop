@@ -74,6 +74,10 @@ func (resilienceWorkload) GetAcceleratorCapacityByNode(context.Context) (map[str
 	return map[string]map[string]map[string]int64{"c1": {}}, nil
 }
 
+func (resilienceWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"c1": {}}, nil
+}
+
 func (resilienceWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
 	return map[string]map[string]map[string]string{"c1": {}}, nil
 }

@@ -308,11 +308,15 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 		if err != nil {
 			return false, err
 		}
+		nodeResources, err := l.workload.GetNodeResourceCapacity(ctx)
+		if err != nil {
+			return false, err
+		}
 		nodeLabels, err := l.workload.GetNodeLabels(ctx)
 		if err != nil {
 			return false, err
 		}
-		return desiredPlacementFits(nodeAvail[clusterName], nodeLabels[clusterName], desired, exp), nil
+		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp), nil
 	})
 	if err != nil {
 		return err

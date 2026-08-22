@@ -16,19 +16,21 @@ source "$DIR/../lib/api.sh"
 
 AGENT="agent-mute-${RUN_ID}"
 register_agent "$AGENT"
-# report_interval_seconds=5 sets the contract the job is held to, but it does NOT set the grace
-# period: the silence window is max(min_silence_window_seconds, silence_multiplier x interval),
-# and the 60s floor dominates any short interval. So the real grace before a job is called mute is
-# two windows = ~120s, plus a reconcile tick — not the ~30s the interval alone suggests. The mute
-# job below must outlive that, or the scenario proves nothing about eviction.
+# report_interval_seconds sets the contract the job is held to, but it does NOT set the grace
+# period: the silence window is max(min_silence_window_seconds, silence_multiplier x interval), so
+# the configured floor dominates any short interval, and a job is only called mute after two full
+# windows. Read from the deployed settings rather than assumed — this scenario used to hardcode a
+# 60s floor, and once the real floor was raised it waited a fraction of the actual grace and could
+# never observe the eviction it exists to prove.
 REPORT_INTERVAL=5
-GRACE_SECONDS=120
+GRACE_SECONDS=$(( $(silence_window_seconds "$REPORT_INTERVAL") * 2 ))
+echo "  silence window x2 = ${GRACE_SECONDS}s before a live job counts as never-reported"
 PE_ID=$(create_platform_experiment "never-reported-${RUN_ID}" 10.0 1 "$REPORT_INTERVAL")
 signup_and_start "$PE_ID" "$AGENT"
 
 # Comfortably longer than GRACE_SECONDS so the job is still running when the verdict lands: if it
 # exited first, its disappearance — not the mute check — would explain the terminal status.
-MUTE_SECONDS=180
+MUTE_SECONDS=$((GRACE_SECONDS + 150))
 MUTE_HOURS=$(py "print(round($MUTE_SECONDS / 3600.0, 6))")
 MUTE_JOB=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "$MUTE_HOURS" "" "" "" "" \
   "$(py "
@@ -68,16 +70,17 @@ echo "  -- a job that does report survives the same window --"
 # The control: same platform experiment, same declared metric, same silence window — the only
 # difference is that this one reports. If this is evicted too, the check is not measuring
 # reporting, it is just killing jobs.
-HEALTHY_HOURS=$(py "print(round(90 / 3600.0, 6))")
+HEALTHY_SECONDS=$((GRACE_SECONDS + 60))
+HEALTHY_HOURS=$(py "print(round($HEALTHY_SECONDS / 3600.0, 6))")
 HEALTHY_JOB=$(submit_job_ext "$PE_ID" "$AGENT" "guaranteed" "$HEALTHY_HOURS" "$JOB_FILE" \
-  "{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"90\", \"HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS\": \"${REPORT_INTERVAL}\"}")
+  "{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${HEALTHY_SECONDS}\", \"HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS\": \"${REPORT_INTERVAL}\"}")
 echo "  ==> $HEALTHY_JOB submitted: same contract, actually reports"
 
 HS=$(wait_for_status "$HEALTHY_JOB" "RUNNING" "$ADMISSION_BUDGET_SECONDS" || true)
 if [[ "$HS" == "RUNNING" ]]; then
   # Hold it across more than the grace that condemned the mute job. Polling the whole time rather
   # than sleeping once catches an eviction that happens and is then superseded.
-  assert_stable_status "$HEALTHY_JOB" "RUNNING,COMPLETED" 45 "reporting job survives the window that evicted the mute one"
+  assert_stable_status "$HEALTHY_JOB" "RUNNING,COMPLETED" $((GRACE_SECONDS + 30)) "reporting job survives the window that evicted the mute one"
   [[ "$(get_field "$HEALTHY_JOB" eviction_reason)" == "" ]] \
     && pass "reporting job carries no eviction reason" \
     || fail "reporting job was evicted for '$(get_field "$HEALTHY_JOB" eviction_reason)' despite reporting normally"

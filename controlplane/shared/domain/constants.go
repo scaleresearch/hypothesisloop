@@ -72,6 +72,15 @@ func (r EvictionReason) Code() EvictionReason {
 	return r
 }
 
+// The fungible per-node dimensions a cluster reports free capacity for, alongside its per-node
+// accelerator counts. Named here so the runtimes reporting them and admission reading them cannot
+// drift apart — a mistyped key is not an error, it is a silently absent dimension.
+const (
+	NodeResourceCPUMillicores = "cpu_millicores"
+	NodeResourceMemoryBytes   = "memory_bytes"
+	NodeResourceStorageBytes  = "storage_bytes"
+)
+
 const (
 	EvictionSilent EvictionReason = "silent"
 	// EvictionNeverReportedMetrics is a job that never emitted a metric its platform experiment

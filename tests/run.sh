@@ -34,8 +34,10 @@ CLUSTER_EXCLUSIVE=(
 
 # Capacity/preemption scenarios deliberately hold real resources across multiple scheduler ticks.
 # quota-exhaustion is here for the same reason: it has to let a job actually overrun its estimate,
-# since observed consumption is the only thing that can exhaust a budget.
+# since observed consumption is the only thing that can exhaust a budget. never-reported-metrics
+# has to outlive two full silence windows, which the deployed floor sets in minutes.
 SLOW_TESTS=(
+  never-reported-metrics
   capacity-safety
   mixed-admission
   preemption-requeue
@@ -119,6 +121,18 @@ SCENARIO_TIMEOUT_SECONDS="${SCENARIO_TIMEOUT_SECONDS:-240}"
 # discovering it as a SIGTERM mid-assertion (see scenario_seconds_left in lib/common.sh).
 export SCENARIO_TIMEOUT_SECONDS
 
+# The one exception to that ceiling: a scenario whose subject *is* a platform timing window can
+# only be as fast as the window it exercises. never-reported-metrics has to keep a job alive past
+# two full silence windows, and the deployed floor sets those in minutes — shortening the job
+# would not make the test faster, it would make it stop testing anything. Everything else stays on
+# the shared ceiling.
+scenario_timeout() {
+  case "$1" in
+    never-reported-metrics) echo 1500 ;;
+    *) echo "$SCENARIO_TIMEOUT_SECONDS" ;;
+  esac
+}
+
 # GNU coreutils' timeout isn't on macOS by default (and gtimeout only if brew coreutils is
 # installed) — fall back to a watchdog that kills the scenario itself after the same ceiling.
 run_with_timeout() {
@@ -137,9 +151,10 @@ run_with_timeout() {
 }
 
 run_one() {
-  local name="$1" t0 t1 rc elapsed
+  local name="$1" t0 t1 rc elapsed budget
   t0=$(date +%s)
-  run_with_timeout "$SCENARIO_TIMEOUT_SECONDS" bash "$DIR/scenarios/${name}.sh" > "$LOG_DIR/${name}.log" 2>&1
+  budget=$(scenario_timeout "$name")
+  SCENARIO_TIMEOUT_SECONDS="$budget" run_with_timeout "$budget" bash "$DIR/scenarios/${name}.sh" > "$LOG_DIR/${name}.log" 2>&1
   rc=$?
   echo "$rc" > "$LOG_DIR/${name}.rc"
   t1=$(date +%s)

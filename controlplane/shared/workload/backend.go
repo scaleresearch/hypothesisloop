@@ -45,6 +45,10 @@ type Backend interface {
 	// GetAcceleratorCapacityByNode reports fresh actual free devices as
 	// cluster -> node -> flavor -> count for hard distributed-placement checks.
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
+	// GetNodeResourceCapacity reports fresh free CPU/memory/storage per node as
+	// cluster -> node -> domain.NodeResource* -> amount. A job runs on one node and must fit that
+	// node in every dimension, which a cluster-wide total cannot establish.
+	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 
 	// GetTotalCapacity reports each cluster's installed (not free) capacity as a canonical

@@ -78,6 +78,26 @@ scale_budget() {
   py "print(round($1 * $TEST_ACCH_RATE / $TEST_BASELINE_ACCH_RATE, 6))"
 }
 
+# silence_window_seconds REPORT_INTERVAL -> how long a job may be quiet before the controller acts,
+# read from the deployed settings rather than hardcoded. It is
+# max(min_silence_window_seconds, silence_multiplier x interval) — see controller.checkSilence — so
+# a scenario that assumes the interval alone sets its own grace will wait far too little and prove
+# nothing about eviction.
+silence_window_seconds() {
+  local interval="$1"
+  local cfg="${SCRIPT_DIR}/../controlplane/settings/hypothesisloop.yaml"
+  py "
+import re, sys
+text = open('$cfg').read()
+def setting(name):
+    m = re.search(rf'^\s*{name}:\s*([0-9.]+)', text, re.M)
+    if not m:
+        sys.exit(f'{name} not found in $cfg')
+    return float(m.group(1))
+print(int(max(setting('min_silence_window_seconds'), setting('silence_multiplier') * $interval)))
+"
+}
+
 # The generic job spec pins one accelerator type. Rather than have every scenario override it,
 # rewrite the spec once here when TEST_ACCELERATOR_TYPE asks for something else, so JOB_FILE is
 # already correct everywhere it is read. acceptable_accelerator_types is dropped along with it:

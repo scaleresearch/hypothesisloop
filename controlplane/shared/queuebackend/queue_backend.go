@@ -256,6 +256,12 @@ func (b *Backend) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]
 	return metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
+// GetNodeResourceCapacity reports fresh free CPU/memory/storage per node as
+// cluster -> node -> domain.NodeResource* -> amount.
+func (b *Backend) GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+	return metricsdb.LiveClusterNodeResourceCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
 // GetTotalCapacity returns each connected cluster's installed capacity — the same `total`
 // GetFlavorCapacity derives desired-free from, exposed on its own for consumers that need the
 // cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are

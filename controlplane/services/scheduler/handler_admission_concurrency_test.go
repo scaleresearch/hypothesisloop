@@ -65,6 +65,16 @@ func (w *concurrentAdmissionWorkload) GetAcceleratorCapacityByNode(context.Conte
 	}, nil
 }
 
+func (w *concurrentAdmissionWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{
+		"cluster-a": {"l40-node": {
+			domain.NodeResourceCPUMillicores: 64000,
+			domain.NodeResourceMemoryBytes:   1 << 40,
+			domain.NodeResourceStorageBytes:  1 << 40,
+		}},
+	}, nil
+}
+
 func (w *concurrentAdmissionWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
 	return map[string]map[string]map[string]string{"cluster-a": {"l40-node": {"nvidia.com/gpu.product": "NVIDIA-L40"}}}, nil
 }
