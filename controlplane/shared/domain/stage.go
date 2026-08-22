@@ -100,10 +100,21 @@ func StageProgress(consumedAccH, budgetAccH float64, startsAt, endsAt, now time.
 // onto a job at submission — a job outliving the stage that admitted it is exactly the
 // long-run-during-exploration case the cap exists to prevent.
 func (p *PlatformExperiment) CurrentMaxJobHours() float64 {
-	if p.CurrentStage < 1 || p.CurrentStage > len(p.Stages) {
+	stage, ok := p.CurrentStageDef()
+	if !ok {
 		return 0
 	}
-	return p.Stages[p.CurrentStage-1].MaxJobHours
+	return stage.MaxJobHours
+}
+
+// CurrentStageDef is the stage CurrentStage names, ok=false when the row's current_stage does not
+// address one. The bounds check lives here rather than at each call site: current_stage is a
+// stored integer, and an out-of-range one used to panic the reconcile loop on every tick.
+func (p *PlatformExperiment) CurrentStageDef() (Stage, bool) {
+	if p.CurrentStage < 1 || p.CurrentStage > len(p.Stages) {
+		return Stage{}, false
+	}
+	return p.Stages[p.CurrentStage-1], true
 }
 
 // BoundaryProgress returns the progress fraction (0..1) at which stage index (1-based) ends.

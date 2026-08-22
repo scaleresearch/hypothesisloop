@@ -61,15 +61,13 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) e
 	// stuck in ImagePullBackOff — the desired-state Job "exists and isn't finished" long
 	// before its container ever actually starts. A never-self-heals reason means it never
 	// will, whatever exp.Status currently says.
-	if detailer, ok := w.backend.(PhaseDetailer); ok {
-		reason, message, _, found, err := detailer.PollPhaseDetail(ctx, exp)
-		if err != nil {
-			return fmt.Errorf("poll phase detail: %w", err)
-		}
-		if found && domain.NeverSelfHealsPhaseReasons[reason] {
-			w.onUnschedulable(ctx, exp, reason, message)
-			return nil
-		}
+	reason, message, _, found, err := w.backend.PollPhaseDetail(ctx, exp)
+	if err != nil {
+		return fmt.Errorf("poll phase detail: %w", err)
+	}
+	if found && domain.NeverSelfHealsPhaseReasons[reason] {
+		w.onUnschedulable(ctx, exp, reason, message)
+		return nil
 	}
 
 	// The phase is polled before any deadline is applied, so every decision below is made against

@@ -94,17 +94,15 @@ type HypothesisStore interface {
 
 // Service is the Scheduler Service that gates, scores, and queues experiments.
 type Service struct {
-	store      Store
-	quota      QuotaService
-	workload   WorkloadClient
-	novelty    NoveltyDetector
-	hypotheses HypothesisStore
-	weights    domain.SchedulingWeights
-	credits    domain.CreditConfig
-	loop       Triggerable
-	settler    QuotaSettler
-	// metricsDBURL enables phase_detail enrichment on experiment reads. Empty disables it: the
-	// detail is diagnostic, so a read still succeeds without it.
+	store        Store
+	quota        QuotaService
+	workload     WorkloadClient
+	novelty      NoveltyDetector
+	hypotheses   HypothesisStore
+	weights      domain.SchedulingWeights
+	credits      domain.CreditConfig
+	loop         Triggerable
+	settler      QuotaSettler
 	metricsDBURL string
 	logger       *zap.Logger
 }
@@ -117,34 +115,33 @@ func NewService(
 	workload WorkloadClient,
 	novelty NoveltyDetector,
 	hypotheses HypothesisStore,
+	settler QuotaSettler,
+	metricsDBURL string,
+	logger *zap.Logger,
 ) *Service {
+	if settler == nil {
+		panic("scheduler: NewService requires a quota settler — it is the only path terminal usage is written by")
+	}
+	if metricsDBURL == "" || logger == nil {
+		panic("scheduler: NewService requires the metrics store URL and a logger")
+	}
 	return &Service{
-		store:      store,
-		quota:      quota,
-		workload:   workload,
-		novelty:    novelty,
-		hypotheses: hypotheses,
-		weights:    domain.DefaultSchedulingWeights(),
-		credits:    domain.DefaultCreditConfig(),
+		store:        store,
+		quota:        quota,
+		workload:     workload,
+		novelty:      novelty,
+		hypotheses:   hypotheses,
+		settler:      settler,
+		metricsDBURL: metricsDBURL,
+		logger:       logger,
+		weights:      domain.DefaultSchedulingWeights(),
+		credits:      domain.DefaultCreditConfig(),
 	}
 }
 
 // WithQuotaConfig overrides the quota constants (rates, limits) used by the scheduler.
 func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 	s.credits = cfg
-	return s
-}
-
-// WithQuotaSettler wires the one canonical metrics-based terminal accounting path.
-func (s *Service) WithQuotaSettler(settler QuotaSettler) *Service {
-	s.settler = settler
-	return s
-}
-
-// WithPhaseDetail enables merging the runtime's latest phase detail into experiment reads.
-func (s *Service) WithPhaseDetail(metricsDBURL string, logger *zap.Logger) *Service {
-	s.metricsDBURL = metricsDBURL
-	s.logger = logger
 	return s
 }
 

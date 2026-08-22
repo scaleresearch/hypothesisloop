@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,14 +23,9 @@ func aliveServer(t *testing.T, points int, step time.Duration, now time.Time) *h
 	first := now.Add(-observed)
 	body := fmt.Sprintf(`{"output":[{"records":{"rows":[[%d,%d,%d,%d]]}}]}`,
 		first.UnixMilli(), now.UnixMilli(), observed.Milliseconds(), observed.Milliseconds())
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
-			_, _ = w.Write([]byte(body))
-			return
-		}
-		// Nothing settled yet — the prior-settlement floor is empty.
-		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+		_, _ = w.Write([]byte(body))
 	}))
 }
 
@@ -84,7 +78,7 @@ func TestSettleBillsOverrunAtTheEstimatedRateWithNoCeiling(t *testing.T) {
 // A job that never posted an observation consumed nothing, whatever it reserved and however it
 // was terminated.
 func TestSettleChargesNothingForAJobThatNeverRan(t *testing.T) {
-	server := httptest.NewServer(emptyObservationsHandler(""))
+	server := httptest.NewServer(emptyObservationsHandler())
 	defer server.Close()
 
 	usage := &capturedUsage{}
@@ -105,102 +99,14 @@ func TestSettleChargesNothingForAJobThatNeverRan(t *testing.T) {
 	}
 }
 
-// Sample retention is finite, so for an old enough job "no observation in the window" stops
-// meaning "never ran", and it degrades gradually rather than all at once. Settling is idempotent
-// and re-runs long after the fact, so every dimension is floored at what was already settled for
-// it: a re-settlement reading a shrunken window used to refund a job that genuinely ran.
-func TestSettleNeverReducesAnAlreadyBilledJobAsItsSamplesAgeOut(t *testing.T) {
-	// Observations aged out (empty range query), but the earlier settlement is still on record.
-	server := httptest.NewServer(emptyObservationsHandler(`{"status":"success","data":{"resultType":"vector","result":[
-		{"metric":{"resource_type":"accelerator_hours"},"value":[0,"16"]}]}}`))
-	defer server.Close()
-
-	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*time.Minute)
-
-	exp := &domain.Experiment{
-		ID:                     "exp-long-finished",
-		PlatformExperimentID:   "pe-1",
-		CreatedAt:              time.Now().UTC().Add(-90 * 24 * time.Hour),
-		EstimatedDurationHours: 1,
-		EstimatedCostAccH:      8,
-	}
-	if err := settler.Settle(context.Background(), exp); err != nil {
-		t.Fatalf("Settle: %v", err)
-	}
-	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
-		t.Errorf("re-settlement wrote %v after the samples aged out, want the settled %v held", got, want)
-	}
-}
-
-// emptyObservationsHandler serves a metrics store holding no observations for the experiment:
-// ObserveSpan finds nothing. instantResult is what the already-settled usage lookup returns.
-func emptyObservationsHandler(instantResult string) http.HandlerFunc {
-	if instantResult == "" {
-		instantResult = `{"status":"success","data":{"resultType":"vector","result":[]}}`
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
+func emptyObservationsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
-			_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null,null,null,null]]}}]}`))
-			return
-		}
-		_, _ = w.Write([]byte(instantResult))
+		_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null,null,null,null]]}}]}`))
 	}
 }
 
 func approx(a, b float64) bool {
 	d := a - b
 	return d < 1e-9 && d > -1e-9
-}
-
-// Retention degrades gradually: a re-settlement can see a shorter span rather than none at all.
-// The recomputed figure is still positive, just smaller, which the never-refund rule keyed on an
-// empty window would have waved through.
-func TestSettleHoldsThePriorFigureWhenTheWindowShrinks(t *testing.T) {
-	step := time.Minute
-	now := time.Now().UTC()
-	// Only 30 minutes of the run survive retention; 2 hours were settled at the time.
-	server := shrunkenObservationServer(t, 30*step, now, `{"status":"success","data":{"resultType":"vector","result":[
-		{"metric":{"resource_type":"accelerator_hours"},"value":[0,"16"]},
-		{"metric":{"resource_type":"cpu_core_hours"},"value":[0,"8"]}]}}`)
-	defer server.Close()
-
-	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
-
-	exp := &domain.Experiment{
-		ID:                     "exp-aging",
-		PlatformExperimentID:   "pe-1",
-		CreatedAt:              now.Add(-30 * 24 * time.Hour),
-		EstimatedDurationHours: 1,
-		EstimatedCostAccH:      8,
-		EstimatedCPUCoreHours:  4,
-	}
-	if err := settler.Settle(context.Background(), exp); err != nil {
-		t.Fatalf("Settle: %v", err)
-	}
-	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
-		t.Errorf("accelerator re-settled at %v, want the prior %v held", got, want)
-	}
-	if got, want := usage.amounts[domain.ResourceCPUCoreHours], 8.0; !approx(got, want) {
-		t.Errorf("cpu re-settled at %v, want the prior %v held", got, want)
-	}
-}
-
-// shrunkenObservationServer answers ObserveSpan with `observed` of surviving run time and the
-// instant query with an earlier, larger settlement.
-func shrunkenObservationServer(t *testing.T, observed time.Duration, now time.Time, settled string) *httptest.Server {
-	t.Helper()
-	first := now.Add(-observed)
-	span := fmt.Sprintf(`{"output":[{"records":{"rows":[[%d,%d,%d,%d]]}}]}`,
-		first.UnixMilli(), now.UnixMilli(), observed.Milliseconds(), observed.Milliseconds())
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
-			_, _ = w.Write([]byte(span))
-			return
-		}
-		_, _ = w.Write([]byte(settled))
-	}))
 }

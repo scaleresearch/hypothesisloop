@@ -65,13 +65,14 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 		return nil
 	}
 
-	if pe.CurrentStage < 1 {
+	stage, ok := pe.CurrentStageDef()
+	if !ok {
 		c.logger.Error("platform experiment has invalid current_stage, skipping stage advance",
 			zap.String("platform_experiment", pe.ID),
-			zap.Int("current_stage", pe.CurrentStage))
+			zap.Int("current_stage", pe.CurrentStage),
+			zap.Int("stages", len(pe.Stages)))
 		return nil
 	}
-	stage := pe.Stages[pe.CurrentStage-1]
 	c.logger.Info("stage boundary reached",
 		zap.String("platform_experiment", pe.ID),
 		zap.Int("stage", pe.CurrentStage),

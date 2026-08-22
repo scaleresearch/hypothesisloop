@@ -90,8 +90,13 @@ func resilienceLoop(store LoopStore) *Loop {
 	l := NewLoop(store, resilienceQuota{}, resilienceWorkload{}, zap.NewNop())
 	l.evictor = noopEvictor{}
 	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.reprioritizer = noopReprioritizer{}
 	return l
 }
+
+type noopReprioritizer struct{}
+
+func (noopReprioritizer) RePrioritize(context.Context) error { return nil }
 
 type noopEvictor struct{}
 

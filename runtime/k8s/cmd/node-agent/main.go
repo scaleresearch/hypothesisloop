@@ -32,6 +32,12 @@ const (
 	// experimentIDLabel is set on every experiment pod's template by the control plane
 	// (see workload_client.go) — the same label this agent reads back to tag its samples.
 	experimentIDLabel = "hypothesisloop.io/experiment-id"
+
+	// pendingPushLimit bounds the retry buffer below. Every dropped payload is a hole in the
+	// observed record a job is billed and evicted against, so a failed push is retried rather
+	// than discarded — the control plane accepts backdated pushes for exactly this reason (see
+	// shared/metrics.maxPushBacklog). At the default 2s cadence this covers a one-hour outage.
+	pendingPushLimit = 1800
 )
 
 type podSample struct {
@@ -81,6 +87,7 @@ func main() {
 	ctx := context.Background()
 
 	client := &http.Client{Timeout: 5 * time.Second}
+	var pending []pushPayload
 
 	for {
 		time.Sleep(interval)
@@ -110,7 +117,16 @@ func main() {
 		}
 
 		if len(samples) > 0 {
-			push(client, endpoint, pushPayload{Node: nodeName, Timestamp: now, Pods: samples})
+			if len(pending) == pendingPushLimit {
+				log.Printf("push buffer full; dropping the observation from %s", pending[0].Timestamp)
+				pending = pending[1:]
+			}
+			pending = append(pending, pushPayload{Node: nodeName, Timestamp: now, Pods: samples})
+		}
+		// Oldest first, stopping at the first failure: the payloads carry their own collection
+		// time, so a backlog delivered late still lands on the instants it was observed at.
+		for len(pending) > 0 && push(client, endpoint, pending[0]) {
+			pending = pending[1:]
 		}
 	}
 }

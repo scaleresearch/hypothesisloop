@@ -68,21 +68,6 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 			return fmt.Errorf("settlement: observed elapsed hours: %w", err)
 		}
 	}
-	// Sample retention is finite, so recomputing later can see fewer observations than an earlier
-	// settlement did — an old job's evidence ages out gradually, not all at once. Settling is
-	// idempotent and re-runs long after the fact, so every dimension is clamped to what was
-	// already settled for it: observed consumption is monotonic in reality, and a smaller recompute
-	// is always the window shrinking, never the job having run less.
-	//
-	// The floor is on money rather than on hours only because the rate is frozen: exp is terminal
-	// here, and a terminal row's estimates never change again (RequeuePreempted, the one path that
-	// rescales them, runs only on RUNNING). Amount and hours therefore move together, and no
-	// legitimate downward correction exists for this to mask.
-	prior, priorFound, err := metricsdb.SettledCostForJob(ctx, s.metricsDBURL, exp.CreatedAt, exp.ID)
-	if err != nil {
-		return fmt.Errorf("settlement: prior settled cost: %w", err)
-	}
-
 	// Every dimension, accelerator included, settles at its estimated per-hour rate (estimate /
 	// duration) times cumulative observed hours. This rate is invariant across a preemption
 	// requeue's proportional rescale (see experiments_store_lifecycle.RequeuePreempted), so it's
@@ -126,11 +111,7 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		if d.estimated <= 0 {
 			continue
 		}
-		amount := d.amount
-		if priorFound && prior[d.resourceType] > amount {
-			amount = prior[d.resourceType]
-		}
-		amounts[d.resourceType] = amount
+		amounts[d.resourceType] = d.amount
 	}
 	if err := s.usage.SetObservedUsage(ctx, exp, amounts); err != nil {
 		return fmt.Errorf("settlement: write observed usage: %w", err)

@@ -253,27 +253,6 @@ func (s *disbalanceStore) ListRunningExperiments(context.Context) ([]*domain.Exp
 	return nil, nil
 }
 
-// Victim selection needs job->node attribution, which lives only in the metrics store. Without
-// it the pass must do nothing at all rather than fall back to evicting on cluster membership
-// alone — "we cannot prove where it is" has to read as innocent, not guilty. This is the only
-// precondition that can leave the pass inert: there is no configuration that disables it.
-func TestEvictDisbalancedDoesNothingWithoutNodeAttribution(t *testing.T) {
-	blocked := disbalanceJob("blocked", "2", 1)
-	total := disbalanceClusterTotal()
-	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
-
-	store := &disbalanceStore{}
-	loop := &Loop{evictor: nopEvictor{}, disbalanceTolerance: DefaultDisbalanceTolerance}
-	loop.store = store
-	loop.logger = zap.NewNop()
-	if err := loop.evictDisbalanced(context.Background(), blocked, "cluster-a", avail, total, disbalanceNodes(3), nil, nil, blocked.Footprint()); err != nil {
-		t.Fatalf("evictDisbalanced: %v", err)
-	}
-	if store.listRunningCalls != 0 {
-		t.Fatalf("listRunningCalls = %d, want 0: the pass must bail out before doing any work", store.listRunningCalls)
-	}
-}
-
 func TestEvictDisbalancedFailsSafeOnMissingClusterTotals(t *testing.T) {
 	// The cluster is connected but its total-capacity report is stale, so GetTotalCapacity
 	// omitted it and the loop hands in an empty footprint. No eviction, and no wasted queries.

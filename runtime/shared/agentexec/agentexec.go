@@ -27,8 +27,23 @@ type Executor interface {
 	WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error
 
 	ListManagedJobs(ctx context.Context) ([]string, error)
+	// ListManagedJobsForStatus is the set a status push reports on, which is not the set
+	// reconcile acts on: a job being deleted and recreated is still real and must keep being
+	// reported, or the control plane reads its absence from a complete snapshot as gone and
+	// evicts live work.
+	ListManagedJobsForStatus(ctx context.Context) ([]string, error)
 	ListManagedAuxiliaryWorkloads(ctx context.Context) ([]string, error)
 	WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error)
+
+	// ReapTerminal prunes whatever terminal records the ecosystem retains for jobs no longer
+	// desired. Nothing to prune is a valid implementation, not a missing one — k8s deletes the
+	// Job object itself, so its executor has no separate record to remove.
+	ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error
+
+	// FetchLogTail and PollPhaseDetail are how a job explains itself: the runtime watching the
+	// job relays its output and its non-start reason, never the job process (important.md #16).
+	FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error)
+	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error)
 
 	PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error)
 	PollJobPhaseAndUID(ctx context.Context, experimentID string) (workload.JobPhase, string, error)

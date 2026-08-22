@@ -101,7 +101,7 @@ type Loop struct {
 	store         LoopStore
 	quota         LoopQuotaStore
 	workload      LoopWorkloadClient
-	reprioritizer Reprioritizer // optional; called after each admission pass
+	reprioritizer Reprioritizer // called after each admission pass
 	trigger       chan struct{}
 	logger        *zap.Logger
 	heartbeat     time.Duration
@@ -242,6 +242,12 @@ func (l *Loop) Start(ctx context.Context) {
 	}
 	if l.settler == nil {
 		panic("scheduler: Loop started without WithQuotaSettler — preempted jobs' consumed hours would be counted nowhere")
+	}
+	if l.reprioritizer == nil {
+		panic("scheduler: Loop started without WithReprioritizer — queue order would never reflect new information")
+	}
+	if l.metricsDBURL == "" {
+		panic("scheduler: Loop started without WithObservedTimeConfig — preemption and disbalance eviction both read observed state")
 	}
 	go func() {
 		ticker := time.NewTicker(l.heartbeat)

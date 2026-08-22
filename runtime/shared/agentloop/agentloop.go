@@ -21,38 +21,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
-// StatusLister is implemented by executors that report a different job set for status pushes
-// than for reconcile. Executors without this method fall back to Executor.ListManagedJobs.
-type StatusLister interface {
-	ListManagedJobsForStatus(ctx context.Context) ([]string, error)
-}
-
-// Reaper is implemented by executors that retain terminal (stopped) records between ticks and
-// need an explicit prune once those records are no longer desired.
-type Reaper interface {
-	ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error
-}
-
-// LogTailer is implemented by executors that can report a job's own recent stdout/stderr —
-// k8sexec (pod logs via the Kubernetes API) and podexec (container logs) both do. Reported
-// alongside job phase in the same status push: the control plane never reaches into a cluster
-// to pull this itself, and no job process ever pushes its own logs — only the executor watching
-// it from the runtime side does, same as phase.
-type LogTailer interface {
-	FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error)
-}
-
-// PhaseDetailer is implemented by executors that can explain *why* a job's container hasn't
-// started or has been restarting — k8sexec (a pod's containerStatuses[].state.waiting/terminated)
-// and podexec (a container's inspected State) both do. reason is one of the control plane's
-// generic domain.PhaseReason* vocabulary (empty if the executor has nothing notable to report);
-// translating the runtime's own native taxonomy into that vocabulary happens here, in the
-// executor, so the control plane never learns a runtime's vocabulary (important.md #7). Read
-// live from the runtime on every call — no caching (important.md #4).
-type PhaseDetailer interface {
-	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error)
-}
-
 // DefaultLogTailLines is how many trailing lines FetchLogTail is asked for when the agent
 // binary doesn't override it (see RequiredEnv("LOG_TAIL_LINES", ...) in each cmd/'s main.go).
 const DefaultLogTailLines = 100
@@ -234,11 +202,9 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("deleted orphan auxiliary resources %s", id)
 	}
 
-	if reaper, ok := a.Executor.(Reaper); ok {
-		if err := reaper.ReapTerminal(ctx, desiredByID); err != nil {
-			a.Log("reap terminal workloads: %v", err)
-			reconcileErrors = append(reconcileErrors, fmt.Errorf("reap terminal workloads: %w", err))
-		}
+	if err := a.Executor.ReapTerminal(ctx, desiredByID); err != nil {
+		a.Log("reap terminal workloads: %v", err)
+		reconcileErrors = append(reconcileErrors, fmt.Errorf("reap terminal workloads: %w", err))
 	}
 	return errors.Join(reconcileErrors...)
 }
@@ -334,13 +300,7 @@ func (a *Agent) statusReportLoop(ctx context.Context) {
 }
 
 func (a *Agent) reportChangedStatuses(ctx context.Context) {
-	var ids []string
-	var err error
-	if lister, ok := a.Executor.(StatusLister); ok {
-		ids, err = lister.ListManagedJobsForStatus(ctx)
-	} else {
-		ids, err = a.Executor.ListManagedJobs(ctx)
-	}
+	ids, err := a.Executor.ListManagedJobsForStatus(ctx)
 	if err != nil {
 		a.Log("list managed jobs for status: %v", err)
 		return
@@ -391,29 +351,23 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		}
 	}
 
+	// A job the runtime no longer holds has nothing left to read: skipped because there is no
+	// source, not because reading it failed.
 	var logTail []string
-	if tailer, ok := a.Executor.(LogTailer); ok && phase != workload.JobPhaseGone {
-		maxLines := a.LogTailLines
-		if maxLines <= 0 {
-			maxLines = DefaultLogTailLines
-		}
-		// Best-effort: a job that hasn't produced output yet, or a transient read error,
-		// must not block reporting phase for every other job in this same batch.
-		logTail, err = tailer.FetchLogTail(ctx, id, maxLines)
+	var reason, message string
+	var restartCount int32
+	if phase != workload.JobPhaseGone {
+		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
+		// not stop this batch reporting phase for every other job (important.md #19), so it is
+		// logged and that job reports phase alone.
+		logTail, err = a.Executor.FetchLogTail(ctx, id, a.logTailLines())
 		if err != nil {
 			a.Log("fetch log tail %s: %v", id, err)
 			logTail = nil
 		} else {
 			logTail = splitLongLines(logTail, a.MaxLogLineChars)
 		}
-	}
-
-	var reason, message string
-	var restartCount int32
-	if detailer, ok := a.Executor.(PhaseDetailer); ok && phase != workload.JobPhaseGone {
-		// Best-effort, same as log tail above: a transient read error must not block
-		// reporting phase for every other job in this same batch.
-		reason, message, restartCount, err = detailer.PollPhaseDetail(ctx, id)
+		reason, message, restartCount, err = a.Executor.PollPhaseDetail(ctx, id)
 		if err != nil {
 			a.Log("poll phase detail %s: %v", id, err)
 			reason, message, restartCount = "", "", 0
@@ -493,4 +447,12 @@ func SignalContext(logFn func(format string, args ...any)) (context.Context, con
 		cancel()
 	}()
 	return ctx, cancel
+}
+
+// logTailLines is how many trailing log lines a status report carries.
+func (a *Agent) logTailLines() int {
+	if a.LogTailLines <= 0 {
+		return DefaultLogTailLines
+	}
+	return a.LogTailLines
 }

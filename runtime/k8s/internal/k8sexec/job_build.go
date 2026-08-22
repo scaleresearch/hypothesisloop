@@ -46,10 +46,8 @@ const DesiredSpecHashAnnotation = workloadkeys.DesiredSpecHash
 // OOM-aware pod failure policy, and rank/world-size env vars matching torchrun/Horovod convention.
 //
 // Pure: same desired state plus same placement always compiles to the same Job. It performs no
-// cluster reads of its own, because its output feeds the desired-spec hash — resolving live
-// inventory in here would make the hash drift whenever the cluster changed, and every job would
-// look permanently "drifted" to reconcile. Callers resolve placement once (see
-// ResolveAcceleratorPlacement) and pass it in.
+// cluster reads of its own — callers resolve placement once (see ResolveAcceleratorPlacement) and
+// pass it in.
 func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement AcceleratorPlacement) (*batchv1.Job, error) {
 	spec := exp.Job
 	if spec.CPU == "" || spec.Memory == "" || spec.Storage == "" || spec.MaxRetries == nil || *spec.MaxRetries < 0 {
@@ -58,6 +56,33 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 	if spec.AcceleratorCount > 0 && placement.ResourceName == "" && placement.DeviceClassName == "" {
 		return nil, fmt.Errorf("workload: accelerator %q has no resolved placement", exp.AcceleratorType)
 	}
+	job, err := c.compileJob(exp, placement)
+	if err != nil {
+		return nil, err
+	}
+	// The identity a drift check compares is the control-plane's desired state, never this
+	// runtime's translation of it into local inventory. Placement is resolved from live
+	// DeviceClasses and node labels, so hashing it made a DeviceClass rename or a driver upgrade
+	// re-hash every running job of that type and drift-delete it mid-training — the cluster
+	// changing around a job is not the control plane asking for a different job.
+	identity, err := c.compileJob(exp, AcceleratorPlacement{})
+	if err != nil {
+		return nil, err
+	}
+	specJSON, err := json.Marshal(identity.Spec)
+	if err != nil {
+		return nil, fmt.Errorf("workload: hash desired Job spec: %w", err)
+	}
+	hash := sha256.Sum256(specJSON)
+	job.Annotations[DesiredSpecHashAnnotation] = hex.EncodeToString(hash[:])
+	return job, nil
+}
+
+// compileJob assembles the Job. Split from BuildJob so the desired-spec hash can be taken over the
+// same assembly with placement left out, without enumerating (and later forgetting) which fields
+// placement reaches.
+func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement AcceleratorPlacement) (*batchv1.Job, error) {
+	spec := exp.Job
 
 	nodes := spec.NumNodes
 	if nodes < 1 {
@@ -343,15 +368,5 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 			}},
 		}
 	}
-	specJSON, err := json.Marshal(job.Spec)
-	if err != nil {
-		return nil, fmt.Errorf("workload: hash desired Job spec: %w", err)
-	}
-	hash := sha256.Sum256(specJSON)
-	if job.Annotations == nil {
-		job.Annotations = map[string]string{}
-	}
-	job.Annotations[DesiredSpecHashAnnotation] = hex.EncodeToString(hash[:])
-
 	return job, nil
 }

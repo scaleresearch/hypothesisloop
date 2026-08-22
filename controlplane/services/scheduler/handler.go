@@ -148,7 +148,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		h.svc.mergePhaseDetails(ctx, exps)
+		if err := h.svc.mergePhaseDetails(ctx, exps); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		return &struct {
 			Body       []*domain.Experiment
 			TotalCount int `header:"X-Total-Count"`

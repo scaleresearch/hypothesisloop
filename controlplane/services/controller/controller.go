@@ -68,7 +68,6 @@ type Controller struct {
 	reconcileInterval time.Duration
 	logger            *zap.Logger
 
-	// Stage ladder support. Optional — boundaries are skipped if nil.
 	stagesStore  StagesStore
 	metricsDBURL string
 
@@ -100,13 +99,9 @@ func (c *Controller) WithSettler(s QuotaSettler) *Controller {
 }
 
 // settleAndMark durably writes exp's final observed usage and marks it settled on success. Safe
-// to call unconditionally after any successful terminal transition: on failure, exp is left
-// unsettled for services/settlement.Reconciler to retry — this is a best-effort fast path, not
-// the only chance to settle.
+// to call after any successful terminal transition: on failure, exp is left unsettled for
+// services/settlement.Reconciler to retry the same write.
 func (c *Controller) settleAndMark(ctx context.Context, exp *domain.Experiment) {
-	if c.settler == nil {
-		return
-	}
 	if err := c.settler.Settle(ctx, exp); err != nil {
 		c.logger.Warn("controller: settle quota", zap.String("id", exp.ID), zap.Error(err))
 		return
@@ -163,8 +158,8 @@ func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 // Start launches the reconcile loop in a goroutine; it stops when ctx is
 // cancelled and returns the first non-context error (if any).
 func (c *Controller) Start(ctx context.Context) error {
-	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.logger == nil {
-		return fmt.Errorf("controller: store, quota, settler, stages store, and logger are required")
+	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.loop == nil || c.logger == nil {
+		return fmt.Errorf("controller: store, quota, settler, stages store, scheduler loop, and logger are required")
 	}
 	if c.metricsDBURL == "" {
 		return fmt.Errorf("controller: metrics DB URL is required")

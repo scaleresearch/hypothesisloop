@@ -142,7 +142,7 @@ func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, erro
 }
 
 // ListManagedJobsForStatus returns the experiment IDs of every managed Job, including ones that
-// are still terminating. Implements agentloop.StatusLister.
+// are still terminating.
 //
 // Deliberately a different set from ListManagedJobs. A status push is a complete cluster
 // snapshot, and the control plane reads an experiment missing from one as its workload having
@@ -693,3 +693,9 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 // type — the inverse of acceleratorNodeAffinity's type-to-label translation. Returns "" if no
 // configured type matches.
 func (c *JobWorkloadClient) ProvisionAgent(_ context.Context, _ string) error { return nil }
+
+// ReapTerminal has nothing to do here. A finished k8s Job is removed by the reconcile pass that
+// finds it undesired; unlike a container engine, k8s keeps no separate terminal record behind it.
+func (c *JobWorkloadClient) ReapTerminal(context.Context, map[string]*domain.Experiment) error {
+	return nil
+}

@@ -1,6 +1,8 @@
 package apitest
 
 import (
+	"go.uber.org/zap"
+
 	"context"
 	"encoding/json"
 	"io"
@@ -37,16 +39,24 @@ func (s *filterSpyStore) CountExperiments(_ context.Context, f domain.Experiment
 	return s.total, nil
 }
 
-func schedulerRouter(store scheduler.Store) chi.Router {
+func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
+	t.Helper()
+	// Phase detail is merged into every list/read from the metrics store, so these contract
+	// tests need one that answers.
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	t.Cleanup(metrics.Close)
 	r := chi.NewRouter()
 	d := apidocs.New(r, "scheduler", "1.0.0", "")
-	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil)))
+	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil, contractSettler{}, metrics.URL, zap.NewNop())))
 	return r
 }
 
 func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 	spy := &filterSpyStore{total: 45}
-	r := schedulerRouter(spy)
+	r := schedulerRouter(t, spy)
 
 	code, _ := get(t, r, "/experiments?agent=a1&platform_experiment_id=pe-1&status=RUNNING"+
 		"&hypothesis_id=h-1&project_id=proj-1&since=2026-01-02T03:04:05Z"+
@@ -76,7 +86,7 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 // The bug this endpoint was fixed for: an unrecognized filter silently returned every row.
 func TestListExperimentsHonoursPlatformExperimentFilter(t *testing.T) {
 	spy := &filterSpyStore{}
-	r := schedulerRouter(spy)
+	r := schedulerRouter(t, spy)
 
 	if code, _ := get(t, r, "/experiments?platform_experiment_id=pe-d564bb90"); code != 200 {
 		t.Fatalf("status = %d, want 200", code)
@@ -91,7 +101,7 @@ func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 		total: 45,
 		items: []*domain.Experiment{{ID: "job-1"}, {ID: "job-2"}},
 	}
-	r := schedulerRouter(spy)
+	r := schedulerRouter(t, spy)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest("GET", "/experiments?limit=2", nil))
@@ -111,7 +121,7 @@ func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 
 func TestListExperimentsDefaultsToNoFilter(t *testing.T) {
 	spy := &filterSpyStore{}
-	r := schedulerRouter(spy)
+	r := schedulerRouter(t, spy)
 
 	if code, _ := get(t, r, "/experiments"); code != 200 {
 		t.Fatalf("status = %d, want 200", code)
@@ -125,7 +135,7 @@ func TestListExperimentsDefaultsToNoFilter(t *testing.T) {
 // filtered and read the whole table instead. Unknown params must be refused, not dropped.
 func TestUnknownQueryParameterIsRejected(t *testing.T) {
 	spy := &filterSpyStore{}
-	r := schedulerRouter(spy)
+	r := schedulerRouter(t, spy)
 
 	code, body := get(t, r, "/experiments?platfrom_experiment_id=pe-1")
 	if code != http.StatusUnprocessableEntity && code != http.StatusBadRequest {
@@ -138,7 +148,7 @@ func TestUnknownQueryParameterIsRejected(t *testing.T) {
 
 func TestKnownQueryParametersStillAccepted(t *testing.T) {
 	spy := &filterSpyStore{}
-	r := schedulerRouter(spy)
+	r := schedulerRouter(t, spy)
 
 	for _, q := range []string{
 		"/experiments",
@@ -154,7 +164,7 @@ func TestKnownQueryParametersStillAccepted(t *testing.T) {
 // status is a Postgres enum, so an unrecognized value used to reach the driver and surface as a
 // 500 — a client mistake reported as a server fault.
 func TestUnknownStatusIsClientError(t *testing.T) {
-	r := schedulerRouter(&filterSpyStore{})
+	r := schedulerRouter(t, &filterSpyStore{})
 	if code, body := get(t, r, "/experiments?status=bogus"); code != http.StatusBadRequest {
 		t.Fatalf("status=bogus returned %d, want 400; body=%s", code, body)
 	}
@@ -168,7 +178,7 @@ func TestUnknownStatusIsClientError(t *testing.T) {
 // A mistyped sort field used to fall through to the default order, so the caller got a
 // differently-ordered page with no sign the sort had been dropped.
 func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
-	r := schedulerRouter(&filterSpyStore{})
+	r := schedulerRouter(t, &filterSpyStore{})
 	for _, q := range []string{
 		"/experiments?sort=-created", // near-miss for created_at
 		"/experiments?sort=bogus",
@@ -190,3 +200,7 @@ func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
 		}
 	}
 }
+
+type contractSettler struct{}
+
+func (contractSettler) Settle(context.Context, *domain.Experiment) error { return nil }

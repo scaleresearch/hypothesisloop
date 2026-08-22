@@ -37,7 +37,7 @@ func (*lifecycleStore) MarkQuotaSettled(context.Context, string) error          
 
 func TestTerminalObservationRequiresMetricsBeforeLifecycleTransition(t *testing.T) {
 	store := &lifecycleStore{}
-	w := NewJobWatcher(store, nil, zap.NewNop())
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}
 
 	if err := w.onFinished(context.Background(), exp, true); err == nil {
@@ -47,3 +47,7 @@ func TestTerminalObservationRequiresMetricsBeforeLifecycleTransition(t *testing.
 		t.Fatal("onFinished changed PostgreSQL desired state after metrics resolution failed")
 	}
 }
+
+type noopSettler struct{}
+
+func (noopSettler) Settle(context.Context, *domain.Experiment) error { return nil }

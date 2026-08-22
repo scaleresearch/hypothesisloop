@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"go.uber.org/zap"
+
 	"context"
 	"sync"
 	"testing"
@@ -91,7 +93,7 @@ func TestConcurrentOperatorAdmissionsDoNotExceedClusterCapacity(t *testing.T) {
 		}
 	}
 	workload := &concurrentAdmissionWorkload{store: store}
-	handler := NewHandler(NewService(store, nil, workload, nil, nil))
+	handler := NewHandler(NewService(store, nil, workload, nil, nil, noopSettler{}, "http://metrics.invalid", zap.NewNop()))
 
 	var wg sync.WaitGroup
 	results := make(chan error, 3)

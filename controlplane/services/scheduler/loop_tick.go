@@ -36,13 +36,11 @@ func (l *Loop) tick(ctx context.Context) error {
 	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
 	// exit path (including early returns below) runs it, keeping queue order fresh even when
 	// nothing was queued for burst.
-	if l.reprioritizer != nil {
-		defer func() {
-			if err := l.reprioritizer.RePrioritize(ctx); err != nil {
-				l.logger.Warn("reprioritize after tick", zap.Error(err))
-			}
-		}()
-	}
+	defer func() {
+		if err := l.reprioritizer.RePrioritize(ctx); err != nil {
+			l.logger.Warn("reprioritize after tick", zap.Error(err))
+		}
+	}()
 
 	// 1. Get available physical capacity as a domain.Footprint per cluster — a pooled total
 	// would hide which cluster has room, admitting against a combined number while the actual

@@ -36,9 +36,7 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 		zap.String("reason", string(reason)),
 	)
 
-	if c.loop != nil {
-		c.loop.Trigger()
-	}
+	c.loop.Trigger()
 	return nil
 }
 

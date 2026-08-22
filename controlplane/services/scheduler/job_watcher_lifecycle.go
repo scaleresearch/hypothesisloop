@@ -72,13 +72,9 @@ func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experim
 	w.settleQuota(ctx, exp)
 }
 
-// settleQuota durably writes exp's final observed usage and marks it settled on success. Safe
-// to call unconditionally (no-op settler or no platform experiment both succeed trivially). On
-// failure, exp is left unsettled for services/settlement.Reconciler to retry.
+// settleQuota durably writes exp's final observed usage and marks it settled on success. On
+// failure, exp is left unsettled for services/settlement.Reconciler to retry the same write.
 func (w *JobWatcher) settleQuota(ctx context.Context, exp *domain.Experiment) {
-	if w.settler == nil {
-		return
-	}
 	if err := w.settler.Settle(ctx, exp); err != nil {
 		w.logger.Warn("job_watcher: settle quota", zap.String("id", exp.ID), zap.Error(err))
 		return

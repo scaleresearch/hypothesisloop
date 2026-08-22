@@ -166,12 +166,6 @@ func (l *Loop) evictDisbalanced(
 	nodeLabels map[string]map[string]string,
 	blockedFP domain.Footprint,
 ) error {
-	// Victim selection needs job->node attribution, which lives only in the metrics store. With
-	// no metrics store configured there is no way to prove a job sits on the stranded node, so
-	// the pass disables itself rather than guessing.
-	if l.metricsDBURL == "" {
-		return nil
-	}
 	// A cluster with no fresh total-capacity report has no per-accelerator share to measure
 	// against. Absent denominator, no verdict.
 	if len(total) == 0 {

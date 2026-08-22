@@ -3,6 +3,7 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -158,6 +159,9 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 		hostConfig.StorageOpt = map[string]string{"size": spec.StorageOptSize}
 	}
 
+	if err := e.pullImage(ctx, spec.Image); err != nil {
+		return err
+	}
 	result, err := e.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: spec.Name,
 		Config: &container.Config{
@@ -195,4 +199,23 @@ func (e *Executor) removeContainer(ctx context.Context, name string) error {
 		return nil
 	}
 	return err
+}
+
+// pullImage fetches image before the container is created. Without it a job whose image is not
+// already on the host never gets a container at all — create fails every reconcile, and with no
+// container there is nothing for PollPhaseDetail to inspect, so the failure reaches an operator as
+// an unexplained stuck-pending job. Always pulled, never conditioned on a local lookup: this runs
+// once per container creation, and the engine serves an unchanged image from its own store.
+func (e *Executor) pullImage(ctx context.Context, image string) error {
+	body, err := e.docker.ImagePull(ctx, image, client.ImagePullOptions{})
+	if err != nil {
+		return fmt.Errorf("podexec: pull image %s: %w", image, err)
+	}
+	defer body.Close()
+	// The engine streams progress and reports a mid-stream failure only in the body, so the pull
+	// is not complete until the stream is drained.
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return fmt.Errorf("podexec: pull image %s: %w", image, err)
+	}
+	return nil
 }

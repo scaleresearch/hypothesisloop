@@ -118,10 +118,6 @@ func (s *Service) EvictExperiment(ctx context.Context, id string, reason domain.
 // The settlement reconciler (see settlement.go) sweeps and retries unsettled terminal
 // experiments, so logging and moving on here is safe.
 func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment) {
-	if s.settler == nil {
-		s.logger.Error("scheduler: quota settler is required", zap.String("op", op), zap.String("exp", exp.ID))
-		return
-	}
 	if err := s.settler.Settle(ctx, exp); err != nil {
 		s.logger.Warn("scheduler: settle observed usage", zap.String("op", op), zap.String("exp", exp.ID), zap.Error(err))
 		return

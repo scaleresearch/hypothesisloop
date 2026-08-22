@@ -33,60 +33,56 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	reportIntervalByPE := map[string]time.Duration{}
 	maxJobHoursByPE := map[string]float64{}
 	declaredMetricKeysByPE := map[string][]string{}
-	if c.stagesStore != nil {
-		// Only the stage ladder needs these maps. Silence and quota-exhaustion checks below do
-		// not, so an unreadable platform-experiment list must not stop them from running — that
-		// turned one failing query into a pass where nothing at all was reconciled.
-		pes, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "running"})
-		if err != nil {
-			c.logger.Error("stages: list platform experiments; continuing without stage maps", zap.Error(err))
-			errs = append(errs, fmt.Errorf("stages: list platform experiments: %w", err))
-			pes = nil
+	// Only the stage ladder needs these maps. Silence and quota-exhaustion checks below do
+	// not, so an unreadable platform-experiment list must not stop them from running — that
+	// turned one failing query into a pass where nothing at all was reconciled.
+	pes, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "running"})
+	if err != nil {
+		c.logger.Error("stages: list platform experiments; continuing without stage maps", zap.Error(err))
+		errs = append(errs, fmt.Errorf("stages: list platform experiments: %w", err))
+		pes = nil
+	}
+	for _, pe := range pes {
+		if pe.ReportIntervalSeconds > 0 {
+			reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
 		}
-		for _, pe := range pes {
-			if pe.ReportIntervalSeconds > 0 {
-				reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
+		var rankingKeys []string
+		for _, m := range pe.Metrics {
+			// Only ranking metrics prove training progress — a constraint or attribute
+			// metric changing (or staying put) says nothing about whether the run is stuck.
+			if m.EffectiveRole() == domain.MetricRoleRanking {
+				rankingKeys = append(rankingKeys, m.Key)
 			}
-			var rankingKeys []string
-			for _, m := range pe.Metrics {
-				// Only ranking metrics prove training progress — a constraint or attribute
-				// metric changing (or staying put) says nothing about whether the run is stuck.
-				if m.EffectiveRole() == domain.MetricRoleRanking {
-					rankingKeys = append(rankingKeys, m.Key)
-				}
-			}
-			if len(rankingKeys) > 0 {
-				declaredMetricKeysByPE[pe.ID] = rankingKeys
-			}
-			// Read before advanceStages: a boundary crossed on this tick takes effect from the
-			// next one, so no job is evicted under a cap it was never running under.
-			if maxHours := pe.CurrentMaxJobHours(); maxHours > 0 {
-				maxJobHoursByPE[pe.ID] = maxHours
-			}
-			// Stage ranking reads this contract per boundary; fail fast on a bad one rather
-			// than at the cut, where it would silently skew a cut. Create/Update already
-			// reject a bad contract before an experiment can ever reach here — this is
-			// defense against a row written before that validation existed.
-			if err := domain.ValidateMetricDefinitions(pe.Metrics); err != nil {
-				c.logger.Error("stages: invalid metric contract", zap.String("pe", pe.ID), zap.Error(err))
-				errs = append(errs, fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err))
-				continue
-			}
-			if err := c.advanceStages(ctx, pe, exps); err != nil {
-				c.logger.Error("stages: advance", zap.String("pe", pe.ID), zap.Error(err))
-				errs = append(errs, fmt.Errorf("stages: advance %s: %w", pe.ID, err))
-			}
+		}
+		if len(rankingKeys) > 0 {
+			declaredMetricKeysByPE[pe.ID] = rankingKeys
+		}
+		// Read before advanceStages: a boundary crossed on this tick takes effect from the
+		// next one, so no job is evicted under a cap it was never running under.
+		if maxHours := pe.CurrentMaxJobHours(); maxHours > 0 {
+			maxJobHoursByPE[pe.ID] = maxHours
+		}
+		// Stage ranking reads this contract per boundary; fail fast on a bad one rather
+		// than at the cut, where it would silently skew a cut. Create/Update already
+		// reject a bad contract before an experiment can ever reach here — this is
+		// defense against a row written before that validation existed.
+		if err := domain.ValidateMetricDefinitions(pe.Metrics); err != nil {
+			c.logger.Error("stages: invalid metric contract", zap.String("pe", pe.ID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err))
+			continue
+		}
+		if err := c.advanceStages(ctx, pe, exps); err != nil {
+			c.logger.Error("stages: advance", zap.String("pe", pe.ID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("stages: advance %s: %w", pe.ID, err))
 		}
 	}
 
 	// Evict active jobs belonging to closed platform experiments (spec op 7c).
 	// This runs on every tick, so it self-heals if the Close() call only updated DB
 	// status but pod termination or refunds were not yet completed.
-	if c.stagesStore != nil {
-		if err := c.reconcileClosedExperiments(ctx); err != nil {
-			c.logger.Error("reconcile closed experiments", zap.Error(err))
-			errs = append(errs, fmt.Errorf("reconcile closed experiments: %w", err))
-		}
+	if err := c.reconcileClosedExperiments(ctx); err != nil {
+		c.logger.Error("reconcile closed experiments", zap.Error(err))
+		errs = append(errs, fmt.Errorf("reconcile closed experiments: %w", err))
 	}
 
 	// Quota exhaustion check: per unique (agentID, platformExpID) pair.
@@ -267,9 +263,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		cancelPreRun(preRun, domain.StatusRejected)
 	}
 
-	if c.loop != nil {
-		c.loop.Trigger()
-	}
+	c.loop.Trigger()
 	return nil
 }
 

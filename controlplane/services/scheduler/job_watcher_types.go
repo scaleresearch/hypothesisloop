@@ -60,13 +60,8 @@ type QuotaSettler interface {
 type JobBackendClient interface {
 	PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error)
 	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error)
-}
-
-// PhaseDetailer is implemented by backends that can report a runtime's latest explanation for
-// why a job hasn't started (see domain.PhaseDetail). Optional, checked with a type assertion
-// the same way agentloop.PhaseDetailer is on the runtime side — JobBackendClient stays narrow
-// for any backend that doesn't have this to report.
-type PhaseDetailer interface {
+	// PollPhaseDetail is the runtime's latest explanation for why a job has not started (see
+	// domain.PhaseDetail). found=false means no runtime has reported one yet.
 	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, found bool, err error)
 }
 
@@ -76,7 +71,7 @@ type JobWatcher struct {
 	store        JobStatusStore
 	backend      JobBackendClient
 	logger       *zap.Logger
-	settler      QuotaSettler // optional; durably settles final usage on job end
+	settler      QuotaSettler // durably settles final usage on job end
 	pollInterval time.Duration
 	// stuckPendingTimeout bounds how long a job may stay SUBMITTED/ADMITTED without reporting
 	// RUNNING before it is evicted with reason stuck_pending and fully refunded.
@@ -90,12 +85,15 @@ type JobWatcher struct {
 }
 
 // NewJobWatcher constructs a JobWatcher.
-func NewJobWatcher(store JobStatusStore, backend JobBackendClient, logger *zap.Logger) *JobWatcher {
+func NewJobWatcher(store JobStatusStore, backend JobBackendClient, settler QuotaSettler, logger *zap.Logger) *JobWatcher {
+	if settler == nil {
+		panic("scheduler: NewJobWatcher requires a quota settler — it is the only path terminal usage is written by")
+	}
 	return &JobWatcher{
-		store:        store,
-		backend:      backend,
-		logger:       logger,
-		pollInterval: 0,
+		store:   store,
+		backend: backend,
+		settler: settler,
+		logger:  logger,
 	}
 }
 
@@ -108,13 +106,6 @@ func (w *JobWatcher) WithPollInterval(d time.Duration) *JobWatcher {
 // RUNNING before job_watcher evicts it as stuck_pending.
 func (w *JobWatcher) WithStuckPendingTimeout(d time.Duration) *JobWatcher {
 	w.stuckPendingTimeout = d
-	return w
-}
-
-// WithQuotaSettler attaches the durable settler used to write final observed usage on job
-// completion or stuck-pending eviction.
-func (w *JobWatcher) WithQuotaSettler(s QuotaSettler) *JobWatcher {
-	w.settler = s
 	return w
 }
 

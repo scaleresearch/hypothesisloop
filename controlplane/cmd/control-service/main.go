@@ -208,17 +208,14 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, p
 	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
-	watcher := scheduler.NewJobWatcher(store, jwc, logger).
-		WithQuotaSettler(settler).
+	watcher := scheduler.NewJobWatcher(store, jwc, settler, logger).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap)
 
 	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store).
-		WithQuotaConfig(quotaCfg).
-		WithQuotaSettler(settler).
-		WithPhaseDetail(metricsDBURL, logger)
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store, settler, metricsDBURL, logger).
+		WithQuotaConfig(quotaCfg)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
 		WithReprioritizer(schedulerSvc).

@@ -156,3 +156,35 @@ func TestBuildJobKeepsInPlaceRestartWhenRetriesRequested(t *testing.T) {
 		t.Errorf("backoff limit = %d, want 2", got)
 	}
 }
+
+// Placement is this runtime's translation of desired state into local inventory, not desired
+// state itself. Hashing it meant a DeviceClass rename or a driver upgrade re-hashed every running
+// job of that type, and reconcile drift-deleted them mid-training.
+func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
+	c := &JobWorkloadClient{
+		apiURL:                               "http://registry",
+		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+	}
+	exp := &domain.Experiment{ID: "placement-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
+
+	first, err := c.BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := nvidiaPlacement
+	renamed.ResourceName = "nvidia.com/gpu-v2"
+	renamed.NodeLabelKey = "nvidia.com/gpu.product.v2"
+	second, err := c.BuildJob(exp, renamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Annotations[DesiredSpecHashAnnotation] != second.Annotations[DesiredSpecHashAnnotation] {
+		t.Fatal("re-resolved placement changed the desired spec hash; reconcile would delete the running job")
+	}
+	// The built Job still carries the new resolution — only the identity ignores it.
+	if _, ok := second.Spec.Template.Spec.Containers[0].Resources.Requests["nvidia.com/gpu-v2"]; !ok {
+		t.Fatal("built Job did not use the resolved placement")
+	}
+}
