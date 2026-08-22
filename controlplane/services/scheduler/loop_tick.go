@@ -219,9 +219,16 @@ func (l *Loop) tick(ctx context.Context) error {
 			cluster, fp = resolveClusterAndFootprint(gAvail, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
+			// Reverting to the requested flavor re-places the job, layout included: picking on
+			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
+			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
 			fp = exp.Footprint()
-			cluster = clusterWithBestFit(gAvail, fp)
+			if placed, ok := placeAtFlavor(gAvail, nodeAvail, nodeResources, nodeLabels, exp); ok {
+				cluster = placed
+			} else {
+				cluster = clusterWithBestFit(gAvail, fp)
+			}
 		}
 		if !domain.Fits(gAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
 			// Try to preempt that cluster's own burst jobs to make room; scoped to this cluster
@@ -335,9 +342,16 @@ func (l *Loop) tick(ctx context.Context) error {
 			cluster, fp = resolveClusterAndFootprint(bAvail, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
+			// Reverting to the requested flavor re-places the job, layout included: picking on
+			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
+			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
 			fp = exp.Footprint()
-			cluster = clusterWithBestFit(bAvail, fp)
+			if placed, ok := placeAtFlavor(bAvail, nodeAvail, nodeResources, nodeLabels, exp); ok {
+				cluster = placed
+			} else {
+				cluster = clusterWithBestFit(bAvail, fp)
+			}
 		}
 		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
 			// Same shortage vector the guaranteed pass computes, for the same reason: "short
@@ -612,23 +626,34 @@ func resolveClusterAndFootprint(avail map[string]domain.Footprint, nodeAvail, no
 	for i, t := range candidateAcceleratorTypes(exp) {
 		exp.AcceleratorType = t
 		fp := exp.Footprint()
-		cluster := clusterWithBestFit(avail, fp)
 		if i == 0 {
-			fallbackCluster, fallbackFP = cluster, fp
+			fallbackCluster, fallbackFP = clusterWithBestFit(avail, fp), fp
 		}
-		clusters := make([]string, 0, len(avail))
-		for name := range avail {
-			clusters = append(clusters, name)
-		}
-		sort.Strings(clusters)
-		for _, candidate := range clusters {
-			if domain.Fits(avail[candidate], fp) && topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], exp) {
-				return candidate, fp
-			}
+		if cluster, ok := placeAtFlavor(avail, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			return cluster, fp
 		}
 	}
 	exp.AcceleratorType = requested
 	return fallbackCluster, fallbackFP
+}
+
+// placeAtFlavor names the cluster that can host exp at the accelerator type it currently carries,
+// judged on footprint and node layout alike. ok=false means no cluster can — the caller decides
+// what to do with a job that does not fit anywhere, rather than being handed a cluster that only
+// looks big enough in the scalar.
+func placeAtFlavor(avail map[string]domain.Footprint, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
+	fp := exp.Footprint()
+	clusters := make([]string, 0, len(avail))
+	for name := range avail {
+		clusters = append(clusters, name)
+	}
+	sort.Strings(clusters)
+	for _, candidate := range clusters {
+		if domain.Fits(avail[candidate], fp) && topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], exp) {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func requiresDistinctHosts(exp *domain.Experiment) bool {
