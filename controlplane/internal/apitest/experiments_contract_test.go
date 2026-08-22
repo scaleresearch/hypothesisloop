@@ -125,17 +125,18 @@ func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 	}
 }
 
-// A bare list must filter nothing but still ask for a bounded page: experiments is the
-// fastest-growing table here, so an omitted ?limit reaching the store as "no limit" would hand
-// a caller every row ever submitted.
-func TestListExperimentsDefaultsToOneBoundedPage(t *testing.T) {
+// A bare list must filter nothing but still ask for a small page. The caller is an agent reading
+// the whole response into a bounded context window: an omitted ?limit reaching the store as "no
+// limit" hands it every row ever submitted, and defaulting to the ceiling hands it a page an
+// order of magnitude larger than it asked for.
+func TestListExperimentsDefaultsToOneSmallPage(t *testing.T) {
 	spy := &filterSpyStore{}
 	r := schedulerRouter(t, spy)
 
 	if code, _ := get(t, r, "/experiments"); code != 200 {
 		t.Fatalf("status = %d, want 200", code)
 	}
-	want := domain.ExperimentFilter{Limit: 200}
+	want := domain.ExperimentFilter{Limit: 20}
 	if spy.gotList != want {
 		t.Errorf("bare list built filter %+v, want %+v", spy.gotList, want)
 	}

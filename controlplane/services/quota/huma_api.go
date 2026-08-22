@@ -66,7 +66,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
-		Description: "Optional ?limit (default/max 200) and ?offset, oldest first. Total " +
+		Description: "Optional ?limit (default 20, max 200) and ?offset, oldest first. Total " +
 			"registered count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Limit  int `query:"limit"`
@@ -447,7 +447,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-donations", Method: "GET", Path: "/donations",
 		Summary: "List donation requests", Tags: []string{"donations"},
-		Description: "Optional ?status filter, ?limit (default/max 200) and ?offset, most recent " +
+		Description: "Optional ?status filter, ?limit (default 20, max 200) and ?offset, most recent " +
 			"first. Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Status string `query:"status" doc:"Optional filter: open|fulfilled|cancelled"`

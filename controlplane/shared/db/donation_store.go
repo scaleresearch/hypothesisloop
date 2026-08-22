@@ -56,8 +56,13 @@ WHERE dr.id = $1`
 // defaultDonationListLimit and maxDonationListLimit bound every ListDonationRequests read the
 // same way ListAgents/ListHypotheses bound their own — donation_requests only ever grows, so
 // limit<=0 must not mean "unbounded".
+// The default is deliberately far below the maximum. Every caller of this API is an autonomous
+// agent whose whole response lands in a bounded context window, so a list that answers "here is
+// everything" hands it a truncated or poisoned context and no way to recover. A caller that
+// genuinely wants a large page asks for one; a caller that does not think about it gets a page it
+// can read, plus the exact total in X-Total-Count telling it what it has not seen.
 const (
-	defaultDonationListLimit = 200
+	defaultDonationListLimit = 20
 	maxDonationListLimit     = 200
 )
 

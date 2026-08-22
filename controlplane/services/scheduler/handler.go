@@ -92,10 +92,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
 	})
 
-	// maxExperimentListLimit bounds every GET /experiments page the same way the agent,
-	// hypothesis and platform-experiment lists bound theirs — experiments is the fastest-growing
-	// table here, so an omitted ?limit must not mean "every row ever submitted".
-	const maxExperimentListLimit = 200
+	// Every GET /experiments page is bounded the same way the agent, hypothesis and
+	// platform-experiment lists bound theirs. experiments is the fastest-growing table here, so
+	// an omitted ?limit must not mean "every row ever submitted" — and the default sits far
+	// below the maximum because the caller is an agent reading the response into a bounded
+	// context window, not a browser scrolling a table. See db.defaultAgentListLimit.
+	const (
+		defaultExperimentListLimit = 20
+		maxExperimentListLimit     = 200
+	)
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
@@ -103,7 +108,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Filter with ?agent, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?search (substring match " +
-			"against hypothesis/objective/theory), ?limit (default/max 200), ?offset. ?sort selects order: created_at, " +
+			"against hypothesis/objective/theory), ?limit (default 20, max 200), ?offset. ?sort selects order: created_at, " +
 			"priority_score, or status, optionally prefixed with - for descending (default -created_at " +
 			"is NOT the default order — omit ?sort to keep the historical priority-then-recency order). " +
 			"Total match count is returned in the X-Total-Count response header.",
@@ -131,7 +136,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		if in.Limit <= 0 || in.Limit > maxExperimentListLimit {
+		if in.Limit <= 0 {
+			in.Limit = defaultExperimentListLimit
+		} else if in.Limit > maxExperimentListLimit {
 			in.Limit = maxExperimentListLimit
 		}
 		var since time.Time

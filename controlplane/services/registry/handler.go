@@ -51,9 +51,13 @@ type hypothesisWithJobs struct {
 // metrics, logs) and the hypothesis notebook. Paths sit under the resource they belong to —
 // /experiments/{id}/... and /hypotheses/... — so a caller never has to know which service
 // implements them; they are all registered on the one API doc alongside scheduler and quota.
-// maxHypothesisDetailLimit bounds each of the three sub-lists GET /hypotheses/{id} returns,
-// matching the ceiling every other list read here uses.
-const maxHypothesisDetailLimit = 200
+// Each of the three sub-lists GET /hypotheses/{id} returns is bounded like every other list read
+// here — a small default for the agent that does not think about it, a ceiling for the one that
+// asks. See db.defaultAgentListLimit for why the two differ.
+const (
+	defaultHypothesisDetailLimit = 20
+	maxHypothesisDetailLimit     = 200
+)
 
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	// ---- what hangs off an experiment ----
@@ -238,7 +242,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Optional ?platform_experiment_id restricts to one pool; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
 			"Optional ?agent for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
-			"for just that status, ?limit (default/max 200) and ?offset, most recent first. " +
+			"for just that status, ?limit (default 20, max 200) and ?offset, most recent first. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry " +
 			"finding_count/comment_count — drill into GET /hypotheses/{id} only where a count or " +
 			"relevance earns it.",
@@ -275,7 +279,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-hypothesis", Method: "GET", Path: "/hypotheses/{id}",
 		Summary: "Get a hypothesis with its jobs, findings, and comments", Tags: []string{"hypotheses"},
-		Description: "?limit (default/max 200) and ?offset apply to each of jobs, findings and " +
+		Description: "?limit (default 20, max 200) and ?offset apply to each of jobs, findings and " +
 			"comments alike, oldest first; job_count/finding_count/comment_count report the full " +
 			"size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {
@@ -286,7 +290,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		if in.Limit <= 0 || in.Limit > maxHypothesisDetailLimit {
+		if in.Limit <= 0 {
+			in.Limit = defaultHypothesisDetailLimit
+		} else if in.Limit > maxHypothesisDetailLimit {
 			in.Limit = maxHypothesisDetailLimit
 		}
 		hyp, err := h.svc.GetHypothesis(ctx, in.ID)

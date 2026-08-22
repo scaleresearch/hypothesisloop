@@ -249,8 +249,13 @@ export function fetchPlatformExperimentsPage(params?: PlatformExperimentsParams)
   return apiFetchPage<PlatformExperiment>(url.toString())
 }
 
+// The first page at the server's own ceiling, for the id->name lookups and filter dropdowns that
+// decorate other pages. The list default is deliberately small (see the API's own docs), so this
+// asks explicitly rather than silently showing 20. Callers that display platform experiments as
+// their subject must page instead — see fetchPlatformExperimentsPage.
 export function fetchPlatformExperiments(status?: string): Promise<PlatformExperiment[]> {
-  return fetchPlatformExperimentsPage(status ? { status } : undefined).then(p => p.items)
+  return fetchPlatformExperimentsPage({ ...(status ? { status } : {}), limit: MAX_LIST_PAGE_SIZE })
+    .then(p => p.items)
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {
