@@ -221,3 +221,29 @@ ORDER BY updated_at ASC`
 	defer rows.Close()
 	return collectExperiments(rows)
 }
+
+// ClusterNameByID returns each named experiment's assigned cluster, for the ids that exist. One
+// query instead of a lookup per report: a cluster-agent pushes a complete snapshot every few
+// seconds, and a per-report round trip made that cost scale with the number of jobs it runs.
+func (s *ExperimentsStore) ClusterNameByID(ctx context.Context, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name FROM experiments WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.ClusterNameByID: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, cluster string
+		if err := rows.Scan(&id, &cluster); err != nil {
+			return nil, fmt.Errorf("experiments_store.ClusterNameByID: scan: %w", err)
+		}
+		out[id] = cluster
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("experiments_store.ClusterNameByID: %w", err)
+	}
+	return out, nil
+}

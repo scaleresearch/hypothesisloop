@@ -33,7 +33,9 @@ import (
 // Store is the desired-state persistence interface the handler needs.
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
-	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
+	// ClusterNameByID resolves many experiments' assigned clusters at once — a status push is a
+	// whole-cluster snapshot, so this is asked once per push rather than once per job.
+	ClusterNameByID(ctx context.Context, ids []string) (map[string]string, error)
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -233,16 +235,28 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		// rescale computed a stint of ~0 and requeued them at full estimate, and every rule keyed
 		// on "never observed" could not be bounded because it would have condemned all of them.
 		var observations []metricsdb.Observation
+		ids := make([]string, 0, len(in.Body.Reports))
 		for _, rep := range in.Body.Reports {
 			if rep.ExperimentID == "" || rep.Phase == "" {
 				return nil, huma.Error400BadRequest("every status report requires experiment_id and phase")
 			}
-			exp, err := h.store.GetExperiment(ctx, rep.ExperimentID)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			if exp == nil || exp.ClusterName != clusterName {
-				return nil, huma.Error409Conflict("status report does not belong to this cluster: " + rep.ExperimentID)
+			ids = append(ids, rep.ExperimentID)
+		}
+		clusterByID, err := h.store.ClusterNameByID(ctx, ids)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		for _, rep := range in.Body.Reports {
+			// A report for an experiment this cluster no longer owns is dropped, not a reason to
+			// reject the push. Mid-reschedule that is the ordinary state — the experiment has
+			// already been repointed at its new cluster while the old one is still tearing its
+			// workload down — and rejecting the whole snapshot blacked out status for every other
+			// job on the old cluster until it finished. Dropping it is also the honest report:
+			// the experiment genuinely is not this cluster's any more.
+			if clusterByID[rep.ExperimentID] != clusterName {
+				h.logger.Info("dropping status report for an experiment this cluster no longer owns",
+					zap.String("experiment", rep.ExperimentID), zap.String("cluster", clusterName))
+				continue
 			}
 			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,

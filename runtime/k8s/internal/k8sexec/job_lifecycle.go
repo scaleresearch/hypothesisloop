@@ -341,7 +341,9 @@ func schedulableNode(n corev1.Node) bool {
 // nodes, and separately across every non-terminal pod's container requests — only for pods
 // already assigned to a node (see GetLiveCPUCapacity doc).
 func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resourceName corev1.ResourceName, extract func(resource.Quantity) int64) (total, requested int64) {
+	schedulable := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
+		schedulable[n.Name] = true
 		if q, ok := n.Status.Allocatable[resourceName]; ok {
 			total += extract(q)
 		}
@@ -349,6 +351,13 @@ func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resource
 	for _, p := range pods {
 		if p.Spec.NodeName == "" {
 			continue // actual usage starts only once Kubernetes assigns a node
+		}
+		// Both sides of the subtraction must describe the same set of nodes. The total counts
+		// only schedulable ones, so counting requests from pods on every node made cordoning a
+		// busy machine subtract its whole workload from capacity that no longer included it —
+		// reported availability collapsed, and admission froze against hardware that was fine.
+		if !schedulable[p.Spec.NodeName] {
+			continue
 		}
 		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue
@@ -448,7 +457,11 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 	total = make(map[string]int64)
 	byNode = make(map[string]map[string]int64)
 	nodeLabels = make(map[string]map[string]string)
-	draSnapshots, err := c.liveDRACapacitySnapshots(ctx)
+	schedulableNames := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		schedulableNames[n.Name] = true
+	}
+	draSnapshots, err := c.liveDRACapacitySnapshots(ctx, schedulableNames)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

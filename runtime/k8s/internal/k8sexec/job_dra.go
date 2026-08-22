@@ -56,7 +56,11 @@ type draLiveCapacity struct {
 // check reads only that key, so the overlap is correct rather than double-counting. It also
 // means the platform never has to decide which attribute is "the model name" — the operator
 // prices whichever granularity they care about, and that is the one agents use.
-func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context) (map[string]draLiveCapacity, error) {
+// schedulable bounds the inventory to nodes that can actually accept work. DRA slices outlive
+// their node's health: a machine that is powered off, whose kubelet died, or that lost its
+// network stays registered and keeps advertising its devices, so without this filter its chips
+// are reported free forever and jobs are admitted against hardware that no longer exists.
+func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedulable map[string]bool) (map[string]draLiveCapacity, error) {
 	slices, err := c.dyn.Resource(resourceSliceGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("workload: list DRA ResourceSlices: %w", err)
@@ -97,6 +101,9 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context) (map[s
 			node, _, err := unstructured.NestedString(slice.Object, "spec", "nodeName")
 			if err != nil {
 				return nil, fmt.Errorf("workload: ResourceSlice %q has invalid spec.nodeName", slice.GetName())
+			}
+			if node != "" && !schedulable[node] {
+				continue
 			}
 			pool, found, err := unstructured.NestedString(slice.Object, "spec", "pool", "name")
 			if err != nil || !found || pool == "" {
