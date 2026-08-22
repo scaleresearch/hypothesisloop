@@ -40,6 +40,9 @@ CLUSTER_EXCLUSIVE=(
 # quota-exhaustion is here for the same reason: it has to let a job actually overrun its estimate,
 # since observed consumption is the only thing that can exhaust a budget. never-reported-metrics
 # has to outlive two full silence windows, which the deployed floor sets in minutes.
+# distributed-jobs joins them because it runs a real two-rank job and then a full
+# delete-and-recreate drift repair, which is several scheduler ticks of waiting on whatever else
+# the suite is doing.
 SLOW_TESTS=(
   never-reported-metrics
   capacity-safety
@@ -47,6 +50,7 @@ SLOW_TESTS=(
   preemption-requeue
   running-cost-live
   quota-exhaustion
+  distributed-jobs
 )
 
 # Needs real accelerator hardware — excluded unless explicitly requested.
@@ -121,19 +125,24 @@ exclusive_set=(${reordered[@]+"${reordered[@]}"})
 # One deterministic ceiling for every scenario. A scenario that needs a larger special case is
 # too slow or is hiding an unreliable assertion and must be fixed at its source.
 SCENARIO_TIMEOUT_SECONDS="${SCENARIO_TIMEOUT_SECONDS:-240}"
+# What the SLOW classification means. Those scenarios hold real resources across multiple scheduler
+# ticks by design, so they are slower than the ceiling above by construction rather than by
+# accident — and until now the classification chose which group they ran in without giving them any
+# more time to run in, so a busy cluster killed them mid-assertion.
+SLOW_SCENARIO_TIMEOUT_SECONDS="${SLOW_SCENARIO_TIMEOUT_SECONDS:-600}"
 # Exported so a scenario can budget against the same ceiling it will be killed at, instead of
 # discovering it as a SIGTERM mid-assertion (see scenario_seconds_left in lib/common.sh).
 export SCENARIO_TIMEOUT_SECONDS
 
-# The one exception to that ceiling: a scenario whose subject *is* a platform timing window can
-# only be as fast as the window it exercises. never-reported-metrics has to keep a job alive past
-# two full silence windows, and the deployed floor sets those in minutes — shortening the job
-# would not make the test faster, it would make it stop testing anything. Everything else stays on
-# the shared ceiling.
+# A scenario whose subject *is* a platform timing window can only be as fast as the window it
+# exercises. never-reported-metrics has to keep a job alive past two full silence windows, and the
+# deployed floor sets those in minutes — shortening the job would not make the test faster, it
+# would make it stop testing anything. The SLOW group gets its own ceiling for the same reason in
+# miniature; everything else stays on the shared one.
 scenario_timeout() {
   case "$1" in
     never-reported-metrics) echo 1500 ;;
-    *) echo "$SCENARIO_TIMEOUT_SECONDS" ;;
+    *) if is_slow "$1"; then echo "$SLOW_SCENARIO_TIMEOUT_SECONDS"; else echo "$SCENARIO_TIMEOUT_SECONDS"; fi ;;
   esac
 }
 
