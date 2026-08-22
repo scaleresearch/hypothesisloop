@@ -230,7 +230,10 @@ func (l *Loop) tick(ctx context.Context) error {
 				cluster = clusterWithBestFit(gAvail, fp)
 			}
 		}
-		if !domain.Fits(gAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
+		// Which of the two fit checks failed decides whether preemption can help at all, so they
+		// are evaluated separately rather than or-ed into one condition.
+		scalarFits := domain.Fits(gAvail[cluster], fp)
+		if !scalarFits || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
 			// Try to preempt that cluster's own burst jobs to make room; scoped to this cluster
 			// since freeing a burst job elsewhere wouldn't help here.
 			if !runningLoaded {
@@ -255,9 +258,28 @@ func (l *Loop) tick(ctx context.Context) error {
 			// preempt() only requeues victims — it never waits for their Jobs to disappear, so
 			// this tick can't know the accelerator is really free yet. exp stays QUEUED; a
 			// later tick's fresh capacity read admits it once the resource is genuinely gone.
-			committed, err := l.preempt(ctx, shortage, burstRunning, exp)
-			if err != nil {
-				l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
+			// Preemption picks victims to cover a cluster-wide scalar shortage. When the cluster
+			// already has the capacity in total and only the layout does not work -- distinct
+			// hosts, labels, per-node distribution -- covering that scalar proves nothing: the
+			// victims are chosen without knowing which node each one holds, so evicting them can
+			// free devices on a node the job could already use and leave it just as unplaceable.
+			// It would then do the same again next tick, destroying burst work every time.
+			//
+			// Targeting the right node needs per-job node attribution, which today is one
+			// metrics-store query per candidate per tick -- the exact pattern the query-volume
+			// work exists to remove, so it lands with the batched per-tick node read, not before
+			// it. Until then this refuses to guess: no plan is better than a destructive one.
+			// The disbalance pass below is node-aware and still runs.
+			var committed bool
+			var err error
+			if scalarFits {
+				l.logger.Info("skipping preemption: cluster has the capacity, the layout does not fit",
+					zap.String("exp", exp.ID), zap.String("cluster", cluster))
+			} else {
+				committed, err = l.preempt(ctx, shortage, burstRunning, exp)
+				if err != nil {
+					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
+				}
 			}
 			// Only a preempt that actually requeued victims makes the running set stale. Marking
 			// it stale unconditionally cost a full re-read for every blocked job behind it on a

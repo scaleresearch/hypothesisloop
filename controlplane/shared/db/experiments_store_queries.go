@@ -187,14 +187,19 @@ ORDER BY queued_at ASC`
 // platform experiment without a finding filed against its hypothesis (see hypothesis_findings,
 // one row per job). Agents must document successful runs before submitting new jobs. FAILED and
 // EVICTED runs are excluded since documenting infra failures adds little signal.
+// UnsummarizedCompletedPredicate is the admission summary gate written as SQL over the
+// experiments table: a finished job whose write-up was never filed. Admission asks whether any
+// row matches it; GET /experiments?needs_summary=true lists the rows that do. One definition, so
+// the set an agent is told to clear can never disagree with the rule that blocked it.
+const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT EXISTS (
+	SELECT 1 FROM hypothesis_findings f WHERE f.experiment_id = experiments.id)`
+
 func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error) {
 	const q = `SELECT EXISTS(
-		SELECT 1 FROM experiments e
-		LEFT JOIN hypothesis_findings f ON f.experiment_id = e.id
-		WHERE e.agent_id = $1
-		  AND e.platform_experiment_id = $2
-		  AND e.status = 'COMPLETED'
-		  AND f.id IS NULL
+		SELECT 1 FROM experiments
+		WHERE agent_id = $1
+		  AND platform_experiment_id = $2
+		  AND ` + UnsummarizedCompletedPredicate + `
 	)`
 	var exists bool
 	err := s.pool.pool.QueryRow(ctx, q, agentID, platformExpID).Scan(&exists)

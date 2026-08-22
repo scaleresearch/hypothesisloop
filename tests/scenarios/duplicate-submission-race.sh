@@ -1,22 +1,36 @@
 #!/usr/bin/env bash
 # One experiment id, one experiment — even when the same id arrives N times at the same instant.
 #
-# Submission checks for an existing row before it inserts one, so concurrent submissions of one id
-# all find nothing and all proceed; the primary key is what actually decides. The loser must come
-# back as a duplicate (409), not as a server error: an agent retrying a request whose response it
-# never saw has to be able to tell "you already have this" from "try again".
+# Submission decides inside its admission transaction whether an id is new, already QUEUED, or
+# taken. Two outcomes are both correct and must be told apart:
 #
-# API-only, no accelerator required (the jobs need never be admitted), parallel-safe: own agent and
-# platform experiment, own run-scoped id.
+#   - the SAME agent re-submitting its own queued job is an idempotent retry. An agent that never
+#     saw the response to its first POST must be able to send it again and be told "queued", not
+#     handed an error for work it legitimately owns. Every one of those returns 2xx and exactly
+#     one row exists.
+#   - a DIFFERENT agent naming that id is a collision, and must be refused (409) without touching
+#     the owner's job. Otherwise an agent could refresh the priority of work it does not own just
+#     by guessing an id.
+#
+# What must never happen either way is a 5xx: that was the original defect, where concurrent
+# submissions all passed a pre-transaction check and the loser hit the primary key.
+#
+# API-only, no accelerator required (the jobs need never be admitted), parallel-safe: own agent
+# and platform experiment, own run-scoped id.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/../lib/common.sh"
 source "$DIR/../lib/api.sh"
 
 AGENT="agent-dup-race-${RUN_ID}"
+# The second agent exists from the start: signup is only open before the platform experiment
+# starts, and the collision half below needs it to be a legitimate participant — so that what it
+# is refused is the id, not its right to submit at all.
+AGENT_B="agent-dup-other-${RUN_ID}"
 register_agent "$AGENT"
-PE_ID=$(create_platform_experiment "dup-race-${RUN_ID}" "$(scale_budget 5.0)" 1)
-signup_and_start "$PE_ID" "$AGENT"
+register_agent "$AGENT_B"
+PE_ID=$(create_platform_experiment "dup-race-${RUN_ID}" "$(scale_budget 5.0)" 2)
+signup_and_start "$PE_ID" "$AGENT" "$AGENT_B"
 
 N=4
 JOB_ID="job-dup-${RUN_ID}"
@@ -37,44 +51,39 @@ done
 for p in "${PIDS[@]}"; do wait "$p" || true; done
 
 ACCEPTED=0
-CONFLICT=0
 OTHER=""
 for i in $(seq 1 "$N"); do
   CODE=$(cat "$OUT_DIR/code_$i" 2>/dev/null || echo "")
   if [[ "$CODE" =~ ^2 ]]; then
     ACCEPTED=$((ACCEPTED + 1))
-  elif [[ "$CODE" == "409" ]]; then
-    CONFLICT=$((CONFLICT + 1))
   else
     OTHER="${OTHER} ${CODE}"
   fi
 done
-echo "  accepted=${ACCEPTED} conflict=${CONFLICT} other=${OTHER:-none}"
+echo "  accepted=${ACCEPTED} other=${OTHER:-none}"
 
-[[ "$ACCEPTED" == "1" ]] \
-  && pass "exactly one of ${N} concurrent submissions of the same id was accepted" \
-  || fail "${ACCEPTED} of ${N} concurrent submissions of the same id were accepted, expected exactly 1"
+# No 5xx, and no 409 either: every one of these is the owning agent retrying its own submission.
+[[ "$ACCEPTED" == "$N" ]] \
+  && pass "all ${N} concurrent retries by the owning agent were answered as accepted — the retry is idempotent" \
+  || fail "only ${ACCEPTED} of ${N} concurrent retries succeeded, the rest returned${OTHER} — an agent re-sending a request it never saw the answer to must not be handed an error for its own queued job"
 
-[[ -z "$OTHER" ]] \
-  && pass "every loser was refused as a duplicate (409), not as a server error" \
-  || fail "losing submissions returned${OTHER} — a duplicate id must be a 409, so a retrying agent can tell it apart from a transient failure"
-
-# The row that survived is a real, readable experiment, not a half-written one from the loser's
-# rolled-back transaction.
 STATUS=$(get_status "$JOB_ID" || true)
-[[ -n "$STATUS" ]] \
-  && pass "the surviving experiment is readable (status=$STATUS)" \
-  || fail "no experiment exists under ${JOB_ID} after a submission was accepted"
+[[ "$STATUS" == "QUEUED" || "$STATUS" == "SUBMITTED" || "$STATUS" == "RUNNING" ]] \
+  && pass "exactly one experiment exists under that id and it is live (status=$STATUS)" \
+  || fail "experiment ${JOB_ID} is '$STATUS' after ${N} concurrent submissions — expected one live row"
+
+# The id is the primary key, so a second row is impossible by construction; what this checks is
+# that the winner is a complete row and not a half-written one from a rolled-back transaction.
+COST=$(get_field "$JOB_ID" estimated_cost_acch)
+[[ -n "$COST" ]] \
+  && pass "the surviving row is fully written (estimated_cost_acch=$COST)" \
+  || fail "experiment ${JOB_ID} has no estimated_cost_acch — the surviving row is incomplete"
 
 echo "  -- a second agent cannot claim, or disturb, a job id it does not own --"
 # The id check is scoped to the submitter. Without that, an agent could name any queued job's id
 # and have its submission treated as a legal re-submission of that job -- refreshing the priority
 # of work it does not own. The admission transaction holds the lock for the *submitter's*
 # (agent, platform experiment) and so can say nothing about another owner's row.
-AGENT_B="agent-dup-other-${RUN_ID}"
-register_agent "$AGENT_B"
-curl -sf -X POST "$API_URL/platform-experiments/${PE_ID}/signup" -H 'Content-Type: application/json' \
-  -d "{\"agent_id\":\"$AGENT_B\"}" > /dev/null
 BODY_B=$(mk_submit_body_for_id "$JOB_ID" "$PE_ID" "$AGENT_B" "guaranteed") \
   || { fail "could not build the second agent's submission body"; finish; }
 CODE_B=$(post_experiment_body "$BODY_B")

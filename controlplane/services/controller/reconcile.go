@@ -22,7 +22,13 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	c.logger.Info("reconcile tick", zap.Int("running_experiments", len(exps)))
 
+	// One instant for the whole pass. Every consumer below judges the same job by the same
+	// numbers, instead of each taking its own clock reading and reaching a different verdict.
 	now := time.Now().UTC()
+
+	// One observed-elapsed read per job, shared by the stage-progress calculation and the
+	// job-length cap. See tickObservations for why this is not a cache.
+	obs := c.observeElapsed(ctx, exps, now)
 
 	// One bad row must not stop the pass: every other experiment still needs its stage
 	// advance, silence check, job-length cap and quota check this tick. Failures are logged
@@ -71,7 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err))
 			continue
 		}
-		if err := c.advanceStages(ctx, pe, exps); err != nil {
+		if err := c.advanceStages(ctx, pe, exps, obs, now); err != nil {
 			c.logger.Error("stages: advance", zap.String("pe", pe.ID), zap.Error(err))
 			errs = append(errs, fmt.Errorf("stages: advance %s: %w", pe.ID, err))
 		}
@@ -103,7 +109,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	}
 
 	for _, exp := range exps {
-		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, maxJobHoursByPE, declaredMetricKeysByPE); err != nil {
+		if err := c.reconcileOne(ctx, exp, now, obs, reportIntervalByPE, maxJobHoursByPE, declaredMetricKeysByPE); err != nil {
 			c.logger.Error("reconcile experiment", zap.String("exp", exp.ID), zap.Error(err))
 			errs = append(errs, fmt.Errorf("reconcile experiment %s: %w", exp.ID, err))
 		}
@@ -269,13 +275,12 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 // reconcileOne evicts exp when it has gone silent or has outrun the current stage's job-length
 // cap. Quality is the agent's own call: it reads its metrics and cancels a bad run itself, and
 // quota exhaustion bounds the damage if it doesn't.
-func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64, declaredMetricKeysByPE map[string][]string) error {
+func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, obs *tickObservations, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64, declaredMetricKeysByPE map[string][]string) error {
 	if maxHours, ok := maxJobHoursByPE[exp.PlatformExperimentID]; ok {
-		hours, err := c.observedElapsedHours(ctx, exp, now)
-		if err != nil {
-			return fmt.Errorf("stage job length: %w", err)
-		}
-		if hours > maxHours {
+		// The pass's own reading. A job this pass could not measure is left alone rather than
+		// evicted on a number nobody has.
+		hours, measured := obs.hours(exp.ID)
+		if measured && hours > maxHours {
 			c.logger.Info("stage job-length cap exceeded",
 				zap.String("exp", exp.ID),
 				zap.Float64("observed_hours", hours),

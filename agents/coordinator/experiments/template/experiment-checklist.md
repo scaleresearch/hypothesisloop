@@ -166,31 +166,6 @@ enough to make results comparable — record which physical device, firmware/run
 thermal/power state a result came from, or a real between-node variance can get mistaken for a
 genuine improvement (or vice versa).
 
-## Anti-patterns to avoid reintroducing
-
-- Hand-rolled per-agent measurement/validation code instead of one shared, pre-validated harness.
-- Agent-owned correctness checks instead of gating against a fixed external reference, with
-  submissions that edit the gate explicitly voided.
-- Cold clone + full rebuild on every expensive-path job instead of a pre-baked, pre-built starting
-  point with a warm cache.
-- Silent version/ref skew between what an agent reads and what a job actually runs.
-- Smoke-testing only that something builds, not that it runs end to end in the real job
-  environment.
-- Mutable image tags instead of pinned digests, or a heavy image with no rollout plan for ~100
-  simultaneous pulls.
-- Requesting storage/retries as a number that happens to work today instead of the real worst
-  case, with no cleanup and no retryable/non-retryable failure classification.
-- Per-iteration reporting that scales linearly with fleet size, or a reporting failure that loses
-  the final result instead of just a log line.
-- A constraint that's reported but never enforced, or a ranking metric trusted as a single
-  best-of-N minimum with no reproduction check.
-- No environment fingerprint (device identity, firmware, thermal state) when results are compared
-  across more than one physical node.
-- An experiment's own runtime source/pin (a cloned framework, a version bump) baked into the
-  shared `agents/experimentator/Dockerfile.base` instead of that experiment's own
-  `Dockerfile.experimentator` overlay — couples every experiment's agent image to whatever the
-  last experiment needed.
-
 ## Using this checklist
 
 When starting a new experiment definition, work through items 1-13 against its own `experiment.md`,

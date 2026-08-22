@@ -142,7 +142,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Empty (not an error) if none has been reported yet.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
-		N  int    `query:"n" default:"10"`
+		N  int    `query:"n" default:"10" doc:"How many of the last reported lines to return. Capped by however many the owning cluster-agent last reported."`
 	}) (*struct{ Body []string }, error) {
 		lines, err := h.svc.GetLogTail(ctx, in.ID, in.N)
 		if err != nil {
@@ -162,8 +162,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "One series per job so a dashboard can plot competing agents. Requires ?metric_name; optional ?lookback_hours (default 24).",
 	}, func(ctx context.Context, in *struct {
 		ID            string  `path:"id"`
-		MetricName    string  `query:"metric_name"`
-		LookbackHours float64 `query:"lookback_hours"`
+		MetricName    string  `query:"metric_name" doc:"Required. One of the metric keys this platform experiment declares (GET /platform-experiments/{id} -> metrics[].key)."`
+		LookbackHours float64 `query:"lookback_hours" doc:"How far back to plot, default 24. Each series is downsampled to about 500 points regardless of the window, so a longer window costs resolution rather than response size."`
 	}) (*struct {
 		Body struct {
 			Series []*domain.AgentMetricSeries `json:"series"`
@@ -247,11 +247,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"finding_count/comment_count — drill into GET /hypotheses/{id} only where a count or " +
 			"relevance earns it.",
 	}, func(ctx context.Context, in *struct {
-		PlatformExperimentID string                  `query:"platform_experiment_id"`
-		Agent                string                  `query:"agent"`
-		Status               domain.HypothesisStatus `query:"status"`
-		Limit                int                     `query:"limit"`
-		Offset               int                     `query:"offset"`
+		PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment's idea pool. Omitted, every pool's hypotheses are candidates -- the operator-facing global view."`
+		Agent                string                  `query:"agent" doc:"Only hypotheses registered by this agent."`
+		Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
+		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. See X-Total-Count for how much you have not seen."`
+		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*db.HypothesisListItem
 		TotalCount int `header:"X-Total-Count"`
@@ -284,8 +284,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {
 		ID     string `path:"id"`
-		Limit  int    `query:"limit"`
-		Offset int    `query:"offset"`
+		Limit  int    `query:"limit" doc:"Page size applied to each of jobs, findings and comments alike; default 20, maximum 200. job_count/finding_count/comment_count report the full size of each set."`
+		Offset int    `query:"offset" doc:"Rows to skip within each of the three lists."`
 	}) (*struct{ Body hypothesisWithJobs }, error) {
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")

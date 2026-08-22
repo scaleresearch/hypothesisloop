@@ -150,6 +150,9 @@ type ExperimentFilter struct {
 	// Search matches against hypothesis/objective/theory text, case-insensitively, substring
 	// match (mirrors PlatformExperimentsFilter.Search).
 	Search string
+	// NeedsSummary selects only COMPLETED experiments with no finding filed against them -- the
+	// exact set the admission summary gate blocks on. See db.UnsummarizedCompletedPredicate.
+	NeedsSummary bool
 	Limit  int
 	// Offset skips this many matching rows before applying Limit — used for page-by-page
 	// listing. Zero means "from the start".

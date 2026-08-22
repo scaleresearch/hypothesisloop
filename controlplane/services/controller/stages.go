@@ -44,7 +44,7 @@ type StagesStore interface {
 
 // advanceStages advances a running platform experiment's ladder by at most one stage per tick,
 // cutting the configured share of survivors at the boundary it crosses.
-func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) error {
+func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment, obs *tickObservations, now time.Time) error {
 	// Boundaries already crossed may have left job-stopping incomplete (a crash between the
 	// AdvanceStage commit and the eviction sweep). Retrying it is free — it is idempotent.
 	if err := c.reconcileCuts(ctx, pe, runningExps); err != nil {
@@ -56,7 +56,7 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 		return nil
 	}
 
-	progress, err := c.stageProgress(ctx, pe, runningExps)
+	progress, err := c.stageProgress(ctx, pe, runningExps, obs, now)
 	if err != nil {
 		return err
 	}
@@ -104,24 +104,23 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 // usage plus the live in-flight cost of its running jobs, against budget and wall clock.
 // Reservations never contribute — see shared/metricsdb/usage.go for why a large queued job
 // must not be able to trip a boundary.
-func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) (float64, error) {
+func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment, obs *tickObservations, now time.Time) (float64, error) {
 	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return 0, fmt.Errorf("stages: TotalObservedAccH: %w", err)
 	}
-	now := time.Now().UTC()
 	var inFlight float64
 	for _, exp := range runningExps {
 		if exp.PlatformExperimentID != pe.ID {
 			continue
 		}
-		actual, err := c.observedAcceleratorCost(ctx, exp, now)
-		if err != nil {
-			c.logger.Error("stageProgress: observed accelerator cost",
-				zap.String("experiment", exp.ID), zap.Error(err))
+		// The pass's own reading, not a fresh query: the boundary this feeds and the job-length
+		// cap must be judging the same job by the same number.
+		hours, ok := obs.hours(exp.ID)
+		if !ok {
 			continue
 		}
-		inFlight += actual
+		inFlight += observedAcceleratorCost(exp, hours)
 	}
 
 	return domain.StageProgress(committed+inFlight, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, now), nil

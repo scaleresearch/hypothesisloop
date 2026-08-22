@@ -69,8 +69,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Optional ?limit (default 20, max 200) and ?offset, oldest first. Total " +
 			"registered count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Limit  int `query:"limit"`
-		Offset int `query:"offset"`
+		Limit  int `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset int `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*domain.Agent
 		TotalCount int `header:"X-Total-Count"`
@@ -123,11 +123,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"- for descending (default -created_at). Total match count is returned in the " +
 			"X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Status string `query:"status" doc:"Optional status filter"`
-		Search string `query:"q" doc:"Optional search over name/description"`
-		Limit  int    `query:"limit"`
-		Offset int    `query:"offset"`
-		Sort   string `query:"sort"`
+		Status string `query:"status" doc:"draft, open, running or closed."`
+		Search string `query:"q" doc:"Case-insensitive substring match against name and description."`
+		Limit  int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
+		Sort   string `query:"sort" doc:"created_at, name or status, optionally prefixed with a minus for descending."`
 	}) (*struct {
 		Body       []*domain.PlatformExperiment
 		TotalCount int `header:"X-Total-Count"`
@@ -256,6 +256,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "start-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/start",
 		Summary: "Start a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "Closes signup and allocates each signed-up agent its quota, so it can only " +
+			"run once and only from status 'open'. Allocation divides the first stage's share of " +
+			"the budget across the agents present at this moment -- an agent that has not signed " +
+			"up by now gets nothing and cannot join later. Fails if nobody has signed up.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct {
@@ -282,6 +286,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "close-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/close",
 		Summary: "Close a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "Terminal: every still-running job is evicted (reason experiment_closed) and " +
+			"no further submission is accepted. Optional top_results records the final standings; " +
+			"omitted, standings are derived from observed metrics. Safe to call twice -- a second " +
+			"call reports invalid_transition rather than changing anything.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body *struct {
@@ -450,9 +458,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Optional ?status filter, ?limit (default 20, max 200) and ?offset, most recent " +
 			"first. Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Status string `query:"status" doc:"Optional filter: open|fulfilled|cancelled"`
-		Limit  int    `query:"limit"`
-		Offset int    `query:"offset"`
+		Status string `query:"status" doc:"open, fulfilled or cancelled."`
+		Limit  int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*domain.DonationRequest
 		TotalCount int `header:"X-Total-Count"`
@@ -508,6 +516,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-donation", Method: "POST", Path: "/donations/{id}/cancel",
 		Summary: "Cancel an open donation request", Tags: []string{"donations"},
+		Description: "Withdraws a request that has not been fulfilled. Only an 'open' request can " +
+			"be cancelled: a fulfilled one already moved quota and cannot be rewound here.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct {

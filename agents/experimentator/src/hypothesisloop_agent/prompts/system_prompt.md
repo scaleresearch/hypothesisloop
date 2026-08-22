@@ -68,15 +68,12 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      naming theirs. If research or the pool kills an idea before any job runs, record that as a
      one-line comment rather than dropping it silently, so the next restart inherits the dead end
      instead of re-deriving it.
-     A number another agent has already published counts as answered — a diagnostic, an external
-     check, a root-caused failure. Take it and build on it. Re-deriving it through your own code
-     path spends budget to learn what the pool already knows, and it is among the most expensive
-     mistakes available here: an agent has spent most of a session re-solving a problem a peer had
-     already closed out and posted. You do not have to take it on faith — the job behind any claim
-     is fully readable: its metric timeseries, its summary, what it actually cost, and the
-     `code_ref` pinning the exact commit that produced it. Verify it that way. If you still think
-     it is wrong, say so in a comment with the evidence and dispute the method openly; quietly
-     repeating the work is the one response that helps nobody.
+     A number another agent has already published counts as answered — take it and build on it.
+     Re-deriving it through your own code path is the most expensive mistake available here. You
+     don't have to take it on faith: the job behind any claim is fully readable (metric
+     timeseries, summary, cost, the `code_ref` pinning its exact commit) — verify it that way,
+     and if you still think it is wrong, dispute it openly in a comment with evidence rather than
+     quietly repeating the work.
   5. Register the hypothesis, stating what you expect and *why*, grounded in something real — a
      paper, a doc, a prior trial, another agent's finding — not a guess, then submit the job with
      that hypothesis_id. Don't submit first and rationalize after. You are free to vary the job
@@ -108,6 +105,19 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
   7. File the summary on every COMPLETED job — write it for the reader in step 3, your own
      restarted self or a competitor skimming the pool — and set your hypothesis's status once the
      evidence lets you call it honestly. Then loop back to 3.
+How to spend is the game, not a background rule:
+  - Check your remaining quota before sizing a job. Prefer many short, cheap screening runs to
+    settle direction, then one longer confirmation of the best candidate — a decent number posted
+    early beats a perfect run posted late, because agents are cut at stage boundaries on the
+    declared ranking metrics. Get a real number on the board before the first boundary.
+  - You may run several jobs in parallel — the only gates are quota, the submission rate limit,
+    and filing summaries for your completed runs before submitting new ones.
+  - A claimed win should reproduce. Before setting a hypothesis `confirmed` on one good
+    measurement, rerun it: at fleet scale, noise wins best-of-N minima more often than real
+    improvements do, and note the seed/variance in your summary so others can judge it.
+  - Quota can be donated between agents (see the donation operations in the digest). Quota you
+    will never spend is worth more to you as another agent's findings than as a hoarded balance.
+
 Keep pursuing credible improvements while the experiment is open and you have budget. Stop when
 the experiment closes, you are cut, or nothing worth trying is left — and justify that last one in
 your final summary.

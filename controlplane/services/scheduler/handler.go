@@ -108,24 +108,26 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Filter with ?agent, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?search (substring match " +
-			"against hypothesis/objective/theory), ?limit (default 20, max 200), ?offset. ?sort selects order: created_at, " +
+			"against hypothesis/objective/theory), ?needs_summary (finished experiments still missing " +
+			"their write-up -- the set that blocks further submission), ?limit (default 20, max 200), ?offset. ?sort selects order: created_at, " +
 			"priority_score, or status, optionally prefixed with - for descending (default -created_at " +
 			"is NOT the default order — omit ?sort to keep the historical priority-then-recency order). " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent"`
-		PlatformExperimentID string `query:"platform_experiment_id"`
-		HypothesisID         string `query:"hypothesis_id"`
-		ProjectID            string `query:"project_id"`
-		Status               string `query:"status"`
-		Since                string `query:"since"`
-		Search               string `query:"search"`
-		Limit                int    `query:"limit"`
-		Offset               int    `query:"offset"`
-		Sort                 string `query:"sort"`
+		Agent                string `query:"agent" doc:"Only this agent's experiments."`
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
+		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
+		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
+		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, ADMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
+		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
+		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
+		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set the admission summary gate blocks on. Combine with ?agent and ?platform_experiment_id to see what is blocking you, then file each one via POST /experiments/{id}/summary."`
+		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
+		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Omit to keep the scheduler's own priority-then-recency order, which is NOT the same as -created_at."`
 	}) (*struct {
 		Body       []*domain.Experiment
-		TotalCount int `header:"X-Total-Count"`
+		TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
 	}, error) {
 		if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
 			return nil, huma.Error400BadRequest("unknown status " + in.Status)
@@ -157,6 +159,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
+			NeedsSummary:         in.NeedsSummary,
 			Limit:                in.Limit,
 			Offset:               in.Offset,
 			Sort:                 in.Sort,
@@ -174,25 +177,28 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		return &struct {
 			Body       []*domain.Experiment
-			TotalCount int `header:"X-Total-Count"`
+			TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
 		}{Body: exps, TotalCount: total}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "experiment-stats", Method: "GET", Path: "/experiments/stats",
 		Summary: "Count experiments by status, capacity tier and eviction reason", Tags: []string{"experiments"},
 		Description: "Whole-set totals for the same ?agent/?platform_experiment_id/?hypothesis_id/" +
 			"?project_id/?status/?since/?search filters GET /experiments accepts, counted in " +
 			"PostgreSQL. Every list read is bounded to one page, so this is the only way to get a " +
-			"total that is not the page's own length.",
+			"total that is not the page's own length -- ask this before listing anything. " +
+			"evictions_by_reason is the cheapest diagnosis you have: several jobs evicted " +
+			"'silent' or 'never_reported_metrics' means your reporting path is broken, not that " +
+			"training is slow, and resubmitting unchanged fails the same way.",
 	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent"`
-		PlatformExperimentID string `query:"platform_experiment_id"`
-		HypothesisID         string `query:"hypothesis_id"`
-		ProjectID            string `query:"project_id"`
-		Status               string `query:"status"`
-		Since                string `query:"since"`
-		Search               string `query:"search"`
+		Agent                string `query:"agent" doc:"Only this agent's experiments."`
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
+		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
+		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
+		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
+		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
+		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
 	}) (*struct{ Body *domain.ExperimentStats }, error) {
 		if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
 			return nil, huma.Error400BadRequest("unknown status " + in.Status)
@@ -312,6 +318,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "reprioritize", Method: "POST", Path: "/experiments/reprioritize",
 		Summary: "Trigger an immediate re-prioritization pass", Tags: []string{"experiments"},
+		Description: "Recomputes novelty and priority for every QUEUED experiment now, instead of " +
+			"waiting for the next scheduled pass. Priority affects admission ORDER only -- it " +
+			"never admits a job that does not fit, and never evicts one. A job whose recompute " +
+			"fails keeps its previous score rather than blocking the rest of the queue.",
 	}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
 			Status string `json:"status"`

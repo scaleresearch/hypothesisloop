@@ -87,8 +87,12 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	if unsummarized {
 		return &AdmissionError{
-			Reason:  ReasonSummaryRequired,
-			Message: "agent has completed experiments without summaries — write summaries via POST /experiments/{id}/summary before submitting new jobs",
+			Reason: ReasonSummaryRequired,
+			Message: fmt.Sprintf(
+				"agent has completed experiments without summaries — list them with "+
+					"GET /experiments?needs_summary=true&agent=%s&platform_experiment_id=%s and file each one via "+
+					"POST /experiments/{id}/summary before submitting new jobs",
+				exp.AgentID, exp.PlatformExperimentID),
 		}
 	}
 
