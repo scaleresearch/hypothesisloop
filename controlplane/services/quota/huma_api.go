@@ -43,8 +43,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Name string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
-		if in.Body.ID == "" {
-			return nil, huma.Error400BadRequest("id is required")
+		// Validated here rather than only where it is used: an agent id is pasted verbatim into
+		// Kubernetes object names and into the object-store session policy that decides what a
+		// job may write. Registration is the one moment it can be refused for free.
+		if err := domain.ValidateIdentifier("id", in.Body.ID); err != nil {
+			return nil, huma.Error400BadRequest(err.Error())
 		}
 		// id is the only identity that matters; name is presentation-only (UI/leaderboard), so
 		// requiring it would reject an otherwise complete registration over a cosmetic field.

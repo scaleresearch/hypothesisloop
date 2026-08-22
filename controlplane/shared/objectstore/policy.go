@@ -3,6 +3,7 @@ package objectstore
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // PolicyStatement is one statement of an IAM session policy. Exported so the policy a job is
@@ -58,7 +59,29 @@ func matchesAny(patterns []string, value string) bool {
 //
 // Nothing grants s3:DeleteObject outside the job's prefix either, so a job cannot erase the
 // evidence behind a rival's claim any more than it can rewrite it.
-func SessionPolicy(bucket, platformExperimentID, agentID, experimentID string) Policy {
+// The ids are refused rather than escaped if they carry anything IAM would read as a pattern.
+// IAM expands '*' and '?' ANYWHERE in a Resource or StringLike value, not only at the end, so an
+// agent id of "agent-*" would produce the write resource "<pe>/agent-*/<job>/*" and grant that job
+// write access to every agent's prefix in the platform experiment. Registration already rejects
+// such an id (domain.ValidateIdentifier), and this is the second lock on the same door: this
+// function decides what a job may touch, so it must not be reachable with input that changes the
+// meaning of what it emits, whatever a future caller does upstream.
+func SessionPolicy(bucket, platformExperimentID, agentID, experimentID string) (Policy, error) {
+	for _, part := range []struct{ kind, value string }{
+		{"bucket", bucket},
+		{"platform_experiment_id", platformExperimentID},
+		{"agent_id", agentID},
+		{"experiment_id", experimentID},
+	} {
+		if strings.ContainsAny(part.value, "*?") {
+			return Policy{}, fmt.Errorf(
+				"objectstore: refusing to build a session policy from %s %q: IAM reads '*' and '?' as wildcards, so this would widen what the job may reach",
+				part.kind, part.value)
+		}
+		if part.value == "" {
+			return Policy{}, fmt.Errorf("objectstore: session policy needs a non-empty %s", part.kind)
+		}
+	}
 	bucketARN := "arn:aws:s3:::" + bucket
 	return Policy{
 		Version: "2012-10-17",
@@ -87,7 +110,7 @@ func SessionPolicy(bucket, platformExperimentID, agentID, experimentID string) P
 				Resource: []string{bucketARN + "/" + JobPrefix(platformExperimentID, agentID, experimentID) + "*"},
 			},
 		},
-	}
+	}, nil
 }
 
 // JSON renders the policy as the compact document STS takes as its session policy.
