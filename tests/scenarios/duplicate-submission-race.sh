@@ -66,5 +66,26 @@ STATUS=$(get_status "$JOB_ID" || true)
   && pass "the surviving experiment is readable (status=$STATUS)" \
   || fail "no experiment exists under ${JOB_ID} after a submission was accepted"
 
+echo "  -- a second agent cannot claim, or disturb, a job id it does not own --"
+# The id check is scoped to the submitter. Without that, an agent could name any queued job's id
+# and have its submission treated as a legal re-submission of that job -- refreshing the priority
+# of work it does not own. The admission transaction holds the lock for the *submitter's*
+# (agent, platform experiment) and so can say nothing about another owner's row.
+AGENT_B="agent-dup-other-${RUN_ID}"
+register_agent "$AGENT_B"
+curl -sf -X POST "$API_URL/platform-experiments/${PE_ID}/signup" -H 'Content-Type: application/json' \
+  -d "{\"agent_id\":\"$AGENT_B\"}" > /dev/null
+BODY_B=$(mk_submit_body_for_id "$JOB_ID" "$PE_ID" "$AGENT_B" "guaranteed") \
+  || { fail "could not build the second agent's submission body"; finish; }
+CODE_B=$(post_experiment_body "$BODY_B")
+[[ "$CODE_B" == "409" ]] \
+  && pass "a different agent submitting the same id was refused as a duplicate (409)" \
+  || fail "a different agent submitting the same id got HTTP $CODE_B, expected 409 — an id must not be claimable by whoever guesses it"
+
+OWNER=$(get_field "$JOB_ID" agent_id)
+[[ "$OWNER" == "$AGENT" ]] \
+  && pass "the job still belongs to its original agent" \
+  || fail "job ${JOB_ID} is now owned by '$OWNER', expected '$AGENT'"
+
 close_platform_experiment "$PE_ID"
 finish

@@ -119,22 +119,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	exp.Hypothesis = hyp.Text
 
-	// 3. Duplicate check — must happen before any side effects (quota debit).
-	// Agents may pre-register via the registry service, so the row may already exist.
-	// Only QUEUED experiments may be re-submitted (to refresh priority); all other
-	// states are either active or terminal and cannot be rewound without stopping the
-	// underlying backend workload.
-	existing, err := s.store.GetExperiment(ctx, exp.ID)
-	if err != nil {
-		return fmt.Errorf("scheduler: get experiment: %w", err)
-	}
-	if existing != nil && existing.Status != domain.StatusQueued {
-		return &AdmissionError{
-			Reason:  ReasonDuplicate,
-			Message: fmt.Sprintf("experiment %s already exists with status %s", exp.ID, existing.Status),
-		}
-	}
-
 	// 4. Compute estimated cost if not already set. Accelerator-hours is the primary/always-populated
 	// dimension; CPU-hours is only estimated (and therefore only debited/capped) when this
 	// platform experiment actually tracks that dimension (non-zero budget — most platform
@@ -191,21 +175,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	exp.PriorityScore = priorityScore
 
-	// 7. Persist: create if new, or refresh priority if already QUEUED.
-	// QUEUED re-submission only updates priority — no quota debit (the original debit
-	// still stands). All other statuses were rejected above.
-	if existing != nil {
-		// Already QUEUED: refresh priority score only.
-		if err := s.store.UpdateExperimentPriority(ctx, exp.ID, priorityScore); err != nil {
-			return fmt.Errorf("scheduler: update priority: %w", err)
-		}
-		exp.Status = domain.StatusQueued
-		s.loop.Trigger()
-		return nil
-	}
-
-	// Atomically validate aggregate desired estimates plus observed settled usage and insert the
-	// PostgreSQL desired-state row under the per-agent admission lock.
+	// 7. Persist. One transaction decides everything: whether this id is new, already QUEUED, or
+	// taken, and whether the aggregate desired estimates plus observed settled usage leave room
+	// for it. The id check used to run before the transaction, which made it non-atomic with the
+	// insert and left the primary key as a second, competing decider that surfaced as a 500.
 	now := time.Now().UTC()
 	exp.CreatedAt = now
 	exp.UpdatedAt = now
@@ -221,14 +194,14 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		MaxPerHour: s.credits.MaxSubmissionsPerHour,
 		Window:     submissionRateLimitWindow,
 	}
-	if err := s.quota.AdmitExperiment(ctx, exp, rateLimit); err != nil {
+	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit)
+	if err != nil {
 		var insufficient interface{ InsufficientQuota() bool }
 		if !errors.As(err, &insufficient) {
+			// The transaction found the id taken, or lost the primary key to another agent
+			// racing the same id. Either way it is a duplicate, not a server fault.
 			if errors.Is(err, db.ErrDuplicateExperiment) {
-				return &AdmissionError{
-					Reason:  ReasonDuplicate,
-					Message: fmt.Sprintf("experiment %s already exists", exp.ID),
-				}
+				return &AdmissionError{Reason: ReasonDuplicate, Message: err.Error()}
 			}
 			return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 		}
@@ -239,6 +212,14 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason:  reason,
 			Message: err.Error(),
+		}
+	}
+
+	// Re-submitting a job that is already QUEUED is legal and only refreshes its priority: it is
+	// still waiting for capacity, so there is nothing to insert and nothing to debit.
+	if decision == db.AdmitAlreadyQueued {
+		if err := s.store.UpdateExperimentPriority(ctx, exp.ID, priorityScore); err != nil {
+			return fmt.Errorf("scheduler: update priority: %w", err)
 		}
 	}
 

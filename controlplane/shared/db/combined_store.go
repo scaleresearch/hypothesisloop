@@ -1,9 +1,10 @@
 package db
 
 import (
-	"time"
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -90,6 +91,22 @@ func NewPlatformExperimentsFullStore(s *Store) *PlatformExperimentsFullStore {
 // PostgreSQL transaction. observed contains only the metrics-store snapshot taken immediately
 // before this call. An empty rejection reason means success; database failures are returned as
 // errors and must never be presented as quota rejection.
+// AdmitDecision is what AdmitExperimentTx concluded about one submission. The existence read that
+// produces it happens inside the transaction, under the same lock as quota validation, so there is
+// exactly one place that decides whether an id is new, a legal re-submission, or taken.
+type AdmitDecision int
+
+const (
+	// AdmitInserted: the id was free and the desired-state row now exists.
+	AdmitInserted AdmitDecision = iota
+	// AdmitAlreadyQueued: the id is already QUEUED. Re-submitting a queued job is legal and only
+	// refreshes its priority -- a state a unique constraint cannot express, which is why this
+	// decision is read rather than inferred from a failed insert.
+	AdmitAlreadyQueued
+	// AdmitRejected: nothing was written; the rejection reason says why.
+	AdmitRejected
+)
+
 // RejectionRateLimited prefixes the rejection reason AdmitExperimentTx returns when the
 // submission rate limit is what refused the experiment, so a caller can tell that apart from a
 // quota rejection without matching on prose.
@@ -102,21 +119,44 @@ type SubmissionRateLimit struct {
 	Window     time.Duration
 }
 
-func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit) (string, error) {
+func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit) (AdmitDecision, string, error) {
 	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
 	if err != nil {
-		return "", fmt.Errorf("admit experiment: begin: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	key := exp.AgentID + "/" + exp.PlatformExperimentID
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-		return "", fmt.Errorf("admit experiment: lock: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: lock: %w", err)
 	}
+	// The one place that decides whether this id is new, a legal re-submission, or taken. It is
+	// read here rather than before the transaction because only here is it atomic with the insert
+	// below, under the same lock. The unique constraint on the primary key remains, but it is an
+	// invariant backstop -- reaching it means two different agents raced the same id, which is a
+	// collision, not a retry -- and no longer a second place that decides "duplicate".
+	var existingStatus, existingAgent, existingPE string
+	err = tx.QueryRow(ctx, `SELECT status, agent_id, platform_experiment_id FROM experiments WHERE id = $1`,
+		exp.ID).Scan(&existingStatus, &existingAgent, &existingPE)
+	switch {
+	case err == nil && (existingAgent != exp.AgentID || existingPE != exp.PlatformExperimentID):
+		// Someone else's job. Ownership is checked, not just status: this transaction holds the
+		// lock for *this* submitter's (agent, platform experiment), so it can say nothing about
+		// another owner's row -- and treating one as a re-submission would let any agent refresh
+		// the priority of a job it does not own by guessing an id.
+		return AdmitRejected, "", fmt.Errorf("%w: %s belongs to another agent", ErrDuplicateExperiment, exp.ID)
+	case err == nil && domain.ExperimentStatus(existingStatus) == domain.StatusQueued:
+		return AdmitAlreadyQueued, "", nil
+	case err == nil:
+		return AdmitRejected, "", fmt.Errorf("%w: %s already exists with status %s", ErrDuplicateExperiment, exp.ID, existingStatus)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return AdmitRejected, "", fmt.Errorf("admit experiment: existing row: %w", err)
+	}
+
 	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
 	observed, err := observe(observedCtx)
 	cancelObserved()
 	if err != nil {
-		return "", fmt.Errorf("admit experiment: observed usage: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: observed usage: %w", err)
 	}
 
 	// Counted here rather than before the transaction: the advisory lock above is per
@@ -128,10 +168,10 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiments
 			WHERE agent_id = $1 AND platform_experiment_id = $2 AND created_at >= $3`,
 			exp.AgentID, exp.PlatformExperimentID, time.Now().UTC().Add(-rateLimit.Window)).Scan(&recent); err != nil {
-			return "", fmt.Errorf("admit experiment: recent submissions: %w", err)
+			return AdmitRejected, "", fmt.Errorf("admit experiment: recent submissions: %w", err)
 		}
 		if recent >= rateLimit.MaxPerHour {
-			return fmt.Sprintf("%s %d experiments submitted in the last hour (limit: %d)", RejectionRateLimited, recent, rateLimit.MaxPerHour), nil
+			return AdmitRejected, fmt.Sprintf("%s %d experiments submitted in the last hour (limit: %d)", RejectionRateLimited, recent, rateLimit.MaxPerHour), nil
 		}
 	}
 
@@ -139,19 +179,19 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (
 		SELECT 1 FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2
 	)`, exp.PlatformExperimentID, exp.AgentID).Scan(&cut); err != nil {
-		return "", fmt.Errorf("admit experiment: stage cut: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: stage cut: %w", err)
 	}
 	if cut {
-		return "agent was cut at a stage boundary", nil
+		return AdmitRejected, "agent was cut at a stage boundary", nil
 	}
 
 	allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`
 		FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2 FOR UPDATE`, exp.AgentID, exp.PlatformExperimentID))
 	if err == pgx.ErrNoRows {
-		return "no quota found (agent not signed up?)", nil
+		return AdmitRejected, "no quota found (agent not signed up?)", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("admit experiment: quota: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: quota: %w", err)
 	}
 
 	var desiredGuaranteedAcc, desiredBurstAcc, desiredGuaranteedCPU, desiredBurstCPU float64
@@ -173,7 +213,7 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		exp.AgentID, exp.PlatformExperimentID).Scan(
 		&desiredGuaranteedAcc, &desiredBurstAcc, &desiredGuaranteedCPU, &desiredBurstCPU,
 		&desiredGuaranteedRAM, &desiredBurstRAM, &desiredGuaranteedStorage, &desiredBurstStorage); err != nil {
-		return "", fmt.Errorf("admit experiment: desired usage: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: desired usage: %w", err)
 	}
 
 	guaranteed := exp.CapacityTier == domain.CapacityGuaranteed
@@ -188,24 +228,24 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		usedStorage, limitStorage = observed.UsedGuaranteedStorageGBH+desiredGuaranteedStorage, allocation.GuaranteedStorageGBHours
 	}
 	if exp.EstimatedCostAccH > 0 && usedAcc+exp.EstimatedCostAccH > limitAcc {
-		return fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc), nil
 	}
 	if exp.EstimatedCPUCoreHours > 0 && usedCPU+exp.EstimatedCPUCoreHours > limitCPU {
-		return fmt.Sprintf("insufficient_%s_quota: need %.2f cpu_core_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCPUCoreHours, limitCPU-usedCPU), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f cpu_core_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCPUCoreHours, limitCPU-usedCPU), nil
 	}
 	if exp.EstimatedRAMGBHours > 0 && usedRAM+exp.EstimatedRAMGBHours > limitRAM {
-		return fmt.Sprintf("insufficient_%s_quota: need %.2f ram_gb_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedRAMGBHours, limitRAM-usedRAM), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f ram_gb_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedRAMGBHours, limitRAM-usedRAM), nil
 	}
 	if exp.EstimatedStorageGBHours > 0 && usedStorage+exp.EstimatedStorageGBHours > limitStorage {
-		return fmt.Sprintf("insufficient_%s_quota: need %.2f storage_gb_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedStorageGBHours, limitStorage-usedStorage), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f storage_gb_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedStorageGBHours, limitStorage-usedStorage), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
-		return "", err
+		return AdmitRejected, "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("admit experiment: commit: %w", err)
+		return AdmitRejected, "", fmt.Errorf("admit experiment: commit: %w", err)
 	}
-	return "", nil
+	return AdmitInserted, "", nil
 }
 
 // ReserveAdmittedFlavorTx rechecks the selected flavor's estimate and persists it under the

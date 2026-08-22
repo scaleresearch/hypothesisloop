@@ -112,8 +112,11 @@ func (e *insufficientQuotaError) InsufficientQuota() bool { return true }
 // AdmitExperiment atomically validates every quota dimension and inserts the PostgreSQL desired
 // state under one per-agent advisory lock. No provisional row is exposed and no cleanup race is
 // possible: concurrent submissions observe a strict before-or-after ordering.
-func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) error {
-	reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
+// AdmitExperiment reports what the transaction decided: whether the desired-state row was
+// inserted, or the id was already QUEUED and this is a legal re-submission the caller should
+// answer by refreshing priority alone.
+func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) (db.AdmitDecision, error) {
+	decision, reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
 		pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
 		if err != nil {
@@ -128,12 +131,12 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 		return aq, nil
 	}, rateLimit)
 	if err != nil {
-		return err
+		return decision, err
 	}
 	if reason != "" {
-		return &insufficientQuotaError{message: reason}
+		return decision, &insufficientQuotaError{message: reason}
 	}
-	return nil
+	return decision, nil
 }
 
 // ReserveAdmittedFlavor revalidates quota before persisting a scheduler-selected accelerator
