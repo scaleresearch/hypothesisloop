@@ -51,6 +51,13 @@ COPY agents/coordinator/experiments $WORKLOAD_SAMPLES
 # hand-writing the same clone-and-checkout one-liner.
 RUN install -m 0755 $WORKLOAD_SAMPLES/hl-clone /usr/local/bin/hl-clone
 
+# hl-watch holds a WebSocket open and exits when the platform says the thing happened. Installed
+# on the same terms as hl-clone, and left in $WORKLOAD_SAMPLES for the same reason: a job image
+# COPYs it in exactly the same way. It is what a tool call cannot be -- a wait -- and without it
+# an agent has no choice but to re-read whole state on a timer to learn nothing changed. Python
+# stdlib only, so it runs in a workload image built on anything.
+RUN install -m 0755 $WORKLOAD_SAMPLES/hl-watch /usr/local/bin/hl-watch
+
 WORKDIR /agent
 COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked

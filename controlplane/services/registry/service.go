@@ -40,6 +40,22 @@ type Service struct {
 	// dataStore is the only way this service learns what a job wrote — listed live, never
 	// mirrored into PostgreSQL.
 	dataStore *objectstore.Client
+	// events, when wired, carries the metric-arrival pointer to /watch subscribers. Optional:
+	// every other event on that stream is emitted by the database itself, so a Service without
+	// it still serves a complete stream minus the one kind Postgres never sees.
+	events EventNotifier
+}
+
+// EventNotifier emits an event that no row change produced. See Service.notifyMetricArrived —
+// the metric pointer is the only such event, because a metric is never written to Postgres.
+type EventNotifier interface {
+	NotifyEvent(ctx context.Context, e db.Event) error
+}
+
+// WithEvents wires the change stream this service announces metric arrivals on.
+func (s *Service) WithEvents(events EventNotifier) *Service {
+	s.events = events
+	return s
 }
 
 // New returns a new registry Service.

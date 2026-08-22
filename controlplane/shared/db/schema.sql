@@ -202,6 +202,12 @@ CREATE TABLE experiments (
     -- first attempt. Only the control plane's gang retry writes it (see RequeueForRetry): a
     -- single-pod job's retries are the runtime's BackoffLimit and never reach here.
     attempt_count            INTEGER           NOT NULL DEFAULT 0,
+    -- infra_requeue_count: how many of attempt_count's attempts were ended by the environment
+    -- (an infrastructure-class eviction reason) and requeued for free. The agent's max_retries
+    -- allowance is attempt_count - infra_requeue_count, so a job that keeps landing on broken
+    -- hardware never spends the budget meant for its own bugs — while attempt_count still
+    -- advances, which is what makes each requeue a distinct desired state the runtime rebuilds.
+    infra_requeue_count      INTEGER           NOT NULL DEFAULT 0,
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
@@ -209,6 +215,7 @@ CREATE TABLE experiments (
 -- No migration history: a fresh apply gets this from the column definition above, an existing
 -- database from the ALTER, and both land on the same 0 backfill from the one DEFAULT clause.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_count INTEGER NOT NULL DEFAULT 0;
 
 -- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
 -- nothing else, so a job could never report its own files; the real bytes live in the object
@@ -370,6 +377,12 @@ CREATE TABLE agent_quotas (
     UNIQUE (agent_id, platform_experiment_id)
 );
 
+-- updated_at exists so a reconnecting watcher can ask "which allocations changed since my
+-- cursor" — an allocation is rewritten in place by stage moves and donations, so without it the
+-- row carries no evidence that it ever moved. Maintained by a trigger below, not by any writer:
+-- there is one clock for this column and no write path can forget it.
+ALTER TABLE agent_quotas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
 CREATE INDEX idx_agent_quotas_platform ON agent_quotas(platform_experiment_id);
 CREATE INDEX idx_agent_quotas_agent    ON agent_quotas(agent_id);
 
@@ -414,5 +427,159 @@ CREATE TABLE platform_experiment_stage_advances (
     advanced_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (platform_experiment_id, stage_index)
 );
+
+-- ---------------------------------------------------------------------------
+-- Change notification — the source of GET /watch's live event stream
+-- ---------------------------------------------------------------------------
+--
+-- Every event is emitted by an AFTER trigger on the row that changed, so the NOTIFY is part of
+-- the very transaction that wrote it: a rolled-back write emits nothing, and no event can ever
+-- describe a state the database did not commit. That is also why this is a trigger rather than a
+-- pg_notify() call added to each Go write path — a write path can be added tomorrow that forgets
+-- to notify, a trigger cannot be bypassed.
+--
+-- The payload is a small typed record — kind, subject, new value, a qualifying detail, the two
+-- scoping ids, and a cursor — never a copy of the row. A client wanting detail follows with a
+-- normal GET, so no read path is duplicated here and nothing is persisted twice.
+--
+-- The cursor is the changed row's own timestamp in microseconds. Replay (see db.EventsStore)
+-- re-derives events from those same timestamp columns, so a live event and its replayed twin
+-- carry the identical cursor and a reconnecting client can pick up exactly where it stopped.
+
+CREATE OR REPLACE FUNCTION hypothesisloop_notify_event(
+    kind TEXT, subject TEXT, new_value TEXT, detail TEXT,
+    pe_id TEXT, owner_agent_id TEXT, at TIMESTAMPTZ
+) RETURNS void AS $$
+BEGIN
+    PERFORM pg_notify('hypothesisloop_events', json_build_object(
+        'kind', kind,
+        'subject', subject,
+        'value', new_value,
+        'detail', COALESCE(detail, ''),
+        'platform_experiment_id', pe_id,
+        'agent_id', COALESCE(owner_agent_id, ''),
+        'cursor', (EXTRACT(EPOCH FROM at) * 1000000)::bigint
+    )::text);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION hypothesisloop_experiments_notify() RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
+        PERFORM hypothesisloop_notify_event('experiment.status', NEW.id, NEW.status::text,
+            COALESCE(NEW.eviction_reason, NEW.not_admitted_reason, ''),
+            NEW.platform_experiment_id, NEW.agent_id, NEW.updated_at);
+    END IF;
+    -- The queue reason is what an agent polls hardest for: it changes while the status does not,
+    -- so it needs an event of its own or a waiting agent learns nothing until admission.
+    IF NEW.not_admitted_reason IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
+        PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id, NEW.not_admitted_reason, '',
+            NEW.platform_experiment_id, NEW.agent_id, NEW.updated_at);
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS experiments_notify ON experiments;
+CREATE TRIGGER experiments_notify AFTER INSERT OR UPDATE ON experiments
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_experiments_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_quotas_touch() RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agent_quotas_touch ON agent_quotas;
+CREATE TRIGGER agent_quotas_touch BEFORE UPDATE ON agent_quotas
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_quotas_touch();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_quotas_notify() RETURNS trigger AS $$
+BEGIN
+    -- The value is the agent's total allocated accelerator hours: enough for a waiting agent to
+    -- see a grant, a donation or a stage move land. What it is made of comes from GET /quota.
+    PERFORM hypothesisloop_notify_event('quota.changed', NEW.agent_id,
+        (NEW.guaranteed_accelerator_hours + NEW.burst_accelerator_hours)::text, '',
+        NEW.platform_experiment_id, NEW.agent_id, NEW.updated_at);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agent_quotas_notify ON agent_quotas;
+CREATE TRIGGER agent_quotas_notify AFTER INSERT OR UPDATE ON agent_quotas
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_quotas_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_hypotheses_notify() RETURNS trigger AS $$
+BEGIN
+    -- The value is where the idea came from, agent or human. The text itself is not here: an
+    -- event says what changed and never carries a copy of the row, so a reader that wants the
+    -- claim fetches GET /hypotheses/{id} exactly as it would have anyway.
+    PERFORM hypothesisloop_notify_event('hypothesis.new', NEW.id, NEW.source, '',
+        NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''), NEW.created_at);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hypotheses_notify ON hypotheses;
+CREATE TRIGGER hypotheses_notify AFTER INSERT ON hypotheses
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_notify();
+
+-- Findings and comments both name the hypothesis they hang off as their subject, not their own
+-- id: the hypothesis is what a reader would GET, and it is what the pool is organised around.
+CREATE OR REPLACE FUNCTION hypothesisloop_findings_notify() RETURNS trigger AS $$
+DECLARE pe_id TEXT;
+BEGIN
+    SELECT platform_experiment_id INTO pe_id FROM hypotheses WHERE id = NEW.hypothesis_id;
+    PERFORM hypothesisloop_notify_event('finding.new', NEW.hypothesis_id, NEW.experiment_id, '',
+        pe_id, NEW.agent_id, NEW.created_at);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hypothesis_findings_notify ON hypothesis_findings;
+CREATE TRIGGER hypothesis_findings_notify AFTER INSERT ON hypothesis_findings
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_findings_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_comments_notify() RETURNS trigger AS $$
+DECLARE pe_id TEXT;
+BEGIN
+    SELECT platform_experiment_id INTO pe_id FROM hypotheses WHERE id = NEW.hypothesis_id;
+    PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, NEW.source, '',
+        pe_id, COALESCE(NEW.agent_id, ''), NEW.created_at);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hypothesis_comments_notify ON hypothesis_comments;
+CREATE TRIGGER hypothesis_comments_notify AFTER INSERT ON hypothesis_comments
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_comments_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_stage_advance_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
+        NEW.stage_index::text, 'advanced', NEW.platform_experiment_id, '', NEW.advanced_at);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS stage_advances_notify ON platform_experiment_stage_advances;
+CREATE TRIGGER stage_advances_notify AFTER INSERT ON platform_experiment_stage_advances
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_stage_advance_notify();
+
+-- A cut is committed in the same transaction as the advance that computed it, so a subscriber
+-- sees the boundary and who it fell on together or not at all.
+CREATE OR REPLACE FUNCTION hypothesisloop_cuts_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
+        NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id, NEW.cut_at);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS pe_cuts_notify ON platform_experiment_cuts;
+CREATE TRIGGER pe_cuts_notify AFTER INSERT ON platform_experiment_cuts
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_cuts_notify();
 
 COMMIT;

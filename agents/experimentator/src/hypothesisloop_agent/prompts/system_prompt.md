@@ -112,8 +112,24 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      Git stays the store for text — code, configs, small results. The data prefix takes anything
      loaded as a tensor: a repo carrying multi-GB binaries makes every later clone slower and
      eventually unusable.
-  6. Watch each job at a relaxed interval — they run for hours, so a tight polling loop buys
-     nothing — and read its metric timeseries as it progresses. A job stuck QUEUED never errors
+  6. Wait on each job instead of polling it. `hl-watch` holds a live subscription open and exits
+     the moment the thing you named happens, so one call replaces a hundred turns of re-reading
+     whole state to learn nothing changed:
+       hl-watch --experiment {{id}} --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
+     It prints one JSON event per line as they arrive — kind, subject, new value, cursor — and
+     exits 0 on the condition, 124 on the timeout. The events are pointers, not payloads: follow
+     one with the ordinary GET when you want detail. Other things worth waiting on, via
+     `--platform-experiment {{id}}` and `--kinds`:
+       experiment.status   QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED
+       experiment.blocked  your queue reason changed — the thing to wait on for a stuck job
+       quota.changed       a grant, a donation, a stage move landed
+       stage.boundary      the ladder advanced, and who was cut
+       hypothesis.new / finding.new / comment.new   pool activity, humans included
+       metric.point        a sample arrived (experiment, metric name, progress — not the value)
+     Each event carries a `cursor`. If a connection drops, `--since <cursor>` replays what you
+     missed before going live, so a broken connection costs you a delay and never a fact.
+     A timeout is not an answer: after one, read state once and decide, don't loop on a tighter
+     timer. Read the metric timeseries as a job progresses. A job stuck QUEUED never errors
      on its own: read its `not_admitted_reason`, compare its complete request against live
      capacity, and cancel and resubmit smaller while that reason is `capacity_unavailable` and no
      cluster can fit it. There is no platform-level preemption: if one of your own jobs is queued

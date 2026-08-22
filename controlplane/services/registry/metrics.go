@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"time"
 	"unicode"
 
+	"go.uber.org/zap"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -90,7 +94,35 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	if err := metricsdb.WriteGaugesAt(ctx, s.metricsDBURL, samples); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
 	}
+	s.notifyMetricArrived(ctx, experimentID, exp.PlatformExperimentID, exp.AgentID, metricName, fractionComplete)
 	return nil
+}
+
+// notifyMetricArrived tells subscribers that a sample landed, and tells them nothing about it
+// beyond where to find it: experiment, metric name, how far through the run it was. The value
+// itself stays in the metrics store, which is the only place it is ever kept — a subscriber that
+// wants the number reads it from there. Emitted after the write, never before: an event for a
+// sample the store rejected would report a state nothing holds.
+//
+// A failure to notify is logged and not returned. The metric is already durably stored, and
+// refusing an accepted push because a transient stream could not be told about it would turn a
+// notification outage into lost measurements.
+func (s *Service) notifyMetricArrived(ctx context.Context, experimentID, platformExperimentID, agentID, metricName string, fractionComplete float64) {
+	if s.events == nil {
+		return
+	}
+	err := s.events.NotifyEvent(ctx, db.Event{
+		Kind:                 db.EventMetricPoint,
+		Subject:              experimentID,
+		Value:                metricName,
+		Detail:               strconv.FormatFloat(fractionComplete, 'g', -1, 64),
+		PlatformExperimentID: platformExperimentID,
+		AgentID:              agentID,
+		Cursor:               db.NewCursor(time.Now().UTC()),
+	})
+	if err != nil {
+		s.logger.Warn("registry: notify metric arrival", zap.String("experiment_id", experimentID), zap.Error(err))
+	}
 }
 
 // validMetricLabel bounds a value that becomes a Prometheus label.

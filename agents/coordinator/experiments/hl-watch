@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""hl-watch — block until the platform says something happened, then print it and exit.
+
+A tool call is request/response: the model cannot hold a socket across turns, so it cannot wait
+on one. It ends its turn instead, gets nudged, and re-reads whole state to learn nothing changed.
+This process holds the socket on its behalf. One call replaces a hundred polling turns.
+
+    hl-watch --experiment $ID --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
+
+Exit 0 when --until became true (or the stream ended and no condition was asked for), 124 on the
+timeout — the same code /usr/bin/timeout uses — and 2 on a usage error. Every event is printed as
+one JSON line as it arrives, so the transcript shows what happened and not merely that it did.
+
+A dropped connection is a delay, never a gap: this reconnects with the cursor of the last event it
+saw, and the server replays what was missed before going live again.
+
+Read-only. Nothing sent up this socket does anything, and no event arriving on it instructs a job
+to do anything — the control plane's decisions reach a runtime as desired state and by no other
+path. A job may watch its own experiment; that is receiving, not self-reporting, so the rule that
+a job pushes metrics and nothing else is untouched.
+
+No dependencies: the platform's API images are whatever a workload happens to be built on, so this
+speaks RFC 6455 over a plain socket rather than assuming a library is installed.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import socket
+import ssl
+import struct
+import sys
+import time
+import urllib.parse
+
+TIMEOUT_EXIT_CODE = 124
+USAGE_EXIT_CODE = 2
+
+# Long enough that an idle stream is not mistaken for a dead one (the server pings every 20s),
+# short enough that a genuinely dead path is noticed and reconnected rather than waited out.
+READ_TIMEOUT_S = 45.0
+RECONNECT_DELAY_S = 2.0
+
+
+class Closed(Exception):
+    """The connection ended. Not an error on its own — reconnect and replay."""
+
+
+class WebSocket:
+    def __init__(self, sock: socket.socket) -> None:
+        self.sock = sock
+        self.buffer = b""
+
+    def _read(self, n: int) -> bytes:
+        while len(self.buffer) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise Closed("connection closed by peer")
+            self.buffer += chunk
+        out, self.buffer = self.buffer[:n], self.buffer[n:]
+        return out
+
+    def _send_frame(self, opcode: int, payload: bytes) -> None:
+        # A client must mask every frame it sends.
+        mask = os.urandom(4)
+        header = bytes([0x80 | opcode])
+        length = len(payload)
+        if length <= 125:
+            header += bytes([0x80 | length])
+        elif length <= 0xFFFF:
+            header += bytes([0x80 | 126]) + struct.pack("!H", length)
+        else:
+            header += bytes([0x80 | 127]) + struct.pack("!Q", length)
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(header + mask + masked)
+
+    def next_text(self) -> str:
+        """Returns the next text frame, answering pings and skipping everything else."""
+        while True:
+            head = self._read(2)
+            opcode = head[0] & 0x0F
+            length = head[1] & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self._read(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self._read(8))[0]
+            if head[1] & 0x80:
+                mask = self._read(4)
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self._read(length)))
+            else:
+                payload = self._read(length)
+            if opcode == 0x8:
+                raise Closed("server closed the stream")
+            if opcode == 0x9:
+                self._send_frame(0xA, payload)
+                continue
+            if opcode == 0x1:
+                return payload.decode("utf-8")
+
+    def close(self) -> None:
+        try:
+            self._send_frame(0x8, b"")
+        except OSError:
+            pass
+        self.sock.close()
+
+
+def connect(url: str, path: str) -> WebSocket:
+    parsed = urllib.parse.urlparse(url)
+    secure = parsed.scheme in ("https", "wss")
+    port = parsed.port or (443 if secure else 80)
+    sock = socket.create_connection((parsed.hostname, port), timeout=READ_TIMEOUT_S)
+    if secure:
+        sock = ssl.create_default_context().wrap_socket(sock, server_hostname=parsed.hostname)
+    key = base64.b64encode(os.urandom(16)).decode()
+    request = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {parsed.hostname}:{port}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n"
+    )
+    sock.sendall(request.encode())
+    ws = WebSocket(sock)
+    while b"\r\n\r\n" not in ws.buffer:
+        chunk = sock.recv(65536)
+        if not chunk:
+            raise Closed("server closed during the handshake")
+        ws.buffer += chunk
+    head, ws.buffer = ws.buffer.split(b"\r\n\r\n", 1)
+    status = head.split(b"\r\n", 1)[0].decode()
+    if " 101 " not in status:
+        raise Closed(f"handshake refused: {status} {head.decode(errors='replace')}")
+    return ws
+
+
+def parse_until(expression: str):
+    """Turns 'status in A,B,C' into a predicate over one event.
+
+    Exactly one form is understood, and an expression that is not that form is a usage error
+    rather than a condition that quietly never fires — a wait that can never end is the failure
+    this tool exists to remove.
+    """
+    parts = expression.split(None, 2)
+    if len(parts) != 3 or parts[0] != "status" or parts[1] != "in":
+        raise ValueError("--until must read: status in VALUE[,VALUE...]")
+    wanted = {value.strip() for value in parts[2].split(",") if value.strip()}
+    if not wanted:
+        raise ValueError("--until names no values")
+
+    def satisfied(event: dict) -> bool:
+        return event.get("kind") == "experiment.status" and event.get("value") in wanted
+
+    return satisfied
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Wait on platform events instead of polling for them.")
+    parser.add_argument("--experiment", default=os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", ""),
+                        help="watch one job (defaults to $HYPOTHESISLOOP_EXPERIMENT_ID)")
+    parser.add_argument("--platform-experiment", default="", help="watch a whole platform experiment")
+    parser.add_argument("--agent", default="", help="narrow job and quota events to this agent")
+    parser.add_argument("--kinds", default="", help="comma-separated event kinds; default is all of them")
+    parser.add_argument("--until", default="", help="stop when true, e.g. 'status in COMPLETED,FAILED,EVICTED'")
+    parser.add_argument("--timeout", type=float, default=900.0, help="give up after this many seconds")
+    parser.add_argument("--since", type=int, default=0, help="replay from this cursor before going live")
+    parser.add_argument("--url", default=os.environ.get("HYPOTHESISLOOP_API_URL") or os.environ.get("API_URL", ""),
+                        help="platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
+    args = parser.parse_args()
+
+    if not args.url:
+        print("hl-watch: no API URL given and neither HYPOTHESISLOOP_API_URL nor API_URL is set", file=sys.stderr)
+        return USAGE_EXIT_CODE
+    if not args.experiment and not args.platform_experiment:
+        print("hl-watch: one of --experiment or --platform-experiment is required", file=sys.stderr)
+        return USAGE_EXIT_CODE
+    satisfied = None
+    if args.until:
+        try:
+            satisfied = parse_until(args.until)
+        except ValueError as err:
+            print(f"hl-watch: {err}", file=sys.stderr)
+            return USAGE_EXIT_CODE
+
+    query = {}
+    if args.experiment:
+        query["experiment_id"] = args.experiment
+    if args.platform_experiment:
+        query["platform_experiment_id"] = args.platform_experiment
+    if args.agent:
+        query["agent"] = args.agent
+    if args.kinds:
+        query["kinds"] = args.kinds
+
+    deadline = time.monotonic() + args.timeout
+    cursor = args.since
+    while time.monotonic() < deadline:
+        query["since"] = str(cursor) if cursor else ""
+        path = "/watch?" + urllib.parse.urlencode({k: v for k, v in query.items() if v})
+        try:
+            ws = connect(args.url, path)
+        except (OSError, Closed) as err:
+            print(f"hl-watch: connect: {err}", file=sys.stderr)
+            time.sleep(RECONNECT_DELAY_S)
+            continue
+        try:
+            while time.monotonic() < deadline:
+                ws.sock.settimeout(min(READ_TIMEOUT_S, max(0.1, deadline - time.monotonic())))
+                line = ws.next_text()
+                print(line, flush=True)
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                cursor = event.get("cursor", cursor)
+                if satisfied and satisfied(event):
+                    return 0
+        except (OSError, Closed) as err:
+            print(f"hl-watch: stream ended ({err}) — reconnecting from cursor {cursor}", file=sys.stderr)
+            time.sleep(RECONNECT_DELAY_S)
+        finally:
+            ws.close()
+
+    if satisfied:
+        print(f"hl-watch: timed out after {args.timeout:g}s without: {args.until}", file=sys.stderr)
+        return TIMEOUT_EXIT_CODE
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
