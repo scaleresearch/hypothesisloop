@@ -7,7 +7,7 @@ const TERMINAL: ExperimentStatus[] = [
   ExperimentStatus.COMPLETED,
   ExperimentStatus.FAILED,
   ExperimentStatus.EVICTED,
-  ExperimentStatus.PROMOTED,
+  ExperimentStatus.REJECTED,
 ]
 
 // A hypothesis has no status of its own for "is it done running" — HypothesisStatus (open /

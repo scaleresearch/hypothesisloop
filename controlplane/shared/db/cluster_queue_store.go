@@ -30,7 +30,7 @@ func NewClusterQueueStore(pool *Pool) *ClusterQueueStore {
 }
 
 // desiredStatuses are the experiment statuses that should have a running Job. Anything not
-// in this set (COMPLETED, FAILED, EVICTED, REJECTED, QUEUED, DRAFT, PROMOTED) should not.
+// in this set (QUEUED, COMPLETED, FAILED, EVICTED, REJECTED) should not.
 var desiredStatuses = []string{
 	string(domain.StatusSubmitted),
 	string(domain.StatusAdmitted),

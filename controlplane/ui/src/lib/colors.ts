@@ -25,7 +25,6 @@ export const statusColors: Record<string, string> = {
   ADMITTED: semantic.info,
   FAILED: semantic.danger,
   EVICTED: semantic.pink,
-  PROMOTED: semantic.pink,
   REJECTED: semantic.danger,
   CANCELLED: semantic.neutral,
 }

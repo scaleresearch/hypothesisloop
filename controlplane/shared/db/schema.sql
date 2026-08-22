@@ -12,8 +12,10 @@ BEGIN;
 -- Enum types
 -- ---------------------------------------------------------------------------
 
+-- Exactly the set domain.ValidExperimentStatus accepts. It used to also carry DRAFT and
+-- PROMOTED, which no Go constant named and nothing could ever write -- a row could only reach
+-- them by a hand-written UPDATE, and every reader would then treat it as an unknown status.
 CREATE TYPE experiment_status AS ENUM (
-    'DRAFT',
     'SUBMITTED',
     'QUEUED',
     'ADMITTED',
@@ -21,7 +23,6 @@ CREATE TYPE experiment_status AS ENUM (
     'COMPLETED',
     'FAILED',
     'EVICTED',
-    'PROMOTED',
     'REJECTED'
 );
 
@@ -162,7 +163,7 @@ CREATE TABLE experiments (
     accelerator_type                 TEXT              NOT NULL,
     accelerator_count                INTEGER           NOT NULL DEFAULT 1,
     capacity_tier            capacity_tier     NOT NULL DEFAULT 'guaranteed',
-    status                   experiment_status NOT NULL DEFAULT 'DRAFT',
+    status                   experiment_status NOT NULL,
     priority_score           DOUBLE PRECISION  NOT NULL DEFAULT 0,
     estimated_duration_hours DOUBLE PRECISION  NOT NULL,
     estimated_cost_acch       DOUBLE PRECISION  NOT NULL DEFAULT 0,
