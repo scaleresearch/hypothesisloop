@@ -121,6 +121,23 @@ submit_job_ext() {
 
 _mk_job_id() { echo "job-$(py "import uuid; print(str(uuid.uuid4())[:8])")-${RUN_ID}"; }
 
+# submit_job_with_id ID PE_ID AGENT TIER [HOURS] -> prints the HTTP status code.
+# For scenarios that must control the experiment id -- e.g. to submit the same id twice and
+# assert the platform keeps exactly one of them.
+submit_job_with_id() {
+  local job_id="$1" pe_id="$2" agent="$3" tier="$4" hours="${5:-0.02}"
+  local body resp code
+  if ! body=$(_mk_submit_body "$job_id" "$agent" "$pe_id" "$hours" "$JOB_FILE" "$tier"); then
+    echo "submit_job_with_id: failed to build request body for $job_id" >&2
+    return 1
+  fi
+  resp=$(mktemp)
+  code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$API_URL/experiments" \
+    -H 'Content-Type: application/json' -d "$body")
+  rm -f "$resp"
+  echo "$code"
+}
+
 _mk_submit_body() {
   local job_id="$1" agent="$2" pe_id="$3" hours="$4" job_file="$5" tier="$6" \
         accelerator_type="$7" accelerator_count="$8" num_nodes="$9" env_json="${10}" \
