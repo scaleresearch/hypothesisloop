@@ -37,18 +37,19 @@ export enum PlatformExperimentStatus {
 // Metric data point (timeseries emitted by running experiment)
 // ---------------------------------------------------------------------------
 
+// Mirrors domain.MetricDataPoint (shared/domain/metrics.go). Every field is always sent, so
+// none of them are optional — marking them optional invited `?? somethingElse` fallbacks to
+// fields that never existed.
 export interface MetricDataPoint {
+  experiment_id: string
   fraction_complete: number
-  metric_name?: string
-  metric_value?: number
+  metric_name: string
+  metric_value: number
   // What scale/definition metric_value is on. "raw" (the default) means unmodified; anything
   // else means the job transformed what the number means and it must not be compared to a
   // "raw" value from another run — show it next to the value, don't drop it.
-  metric_basis?: string
-  value?: number
-  step?: number
-  wall_time?: string
-  recorded_at?: string
+  metric_basis: string
+  recorded_at: string
 }
 
 // One competing job's full metric history within a platform experiment — a leaderboard/
@@ -96,56 +97,63 @@ export interface JobSpec {
   extra_resources?: Record<string, string>
 }
 
+// Mirrors domain.PhaseDetail (shared/domain/constants.go) — the runtime's explanation for a
+// container that hasn't started or keeps restarting.
+export interface PhaseDetail {
+  reason?: string
+  message?: string
+  restart_count?: number
+}
+
+// Mirrors domain.Experiment (shared/domain/experiment.go). Fields the Go struct does not have
+// do not belong here: an optional phantom field type-checks fine and renders as an em dash
+// forever, which reads as "not reported yet" rather than "this was never real".
+//
+// Observed cost and final metric are deliberately absent — both live in the metrics store and are
+// read from it (important.md #3), never off the job record.
 export interface Experiment {
   id: string
   parent_id?: string
   agent_id: string
   platform_experiment_id: string
+  project_id: string
+  cluster_name?: string
   capacity_tier?: CapacityTier
   hypothesis_id: string
   hypothesis: string
   objective?: string
+  theory?: string
   status: ExperimentStatus
   estimated_cost_acch?: number
-  actual_cost_acch?: number
-  // Set once the scheduler has actually debited this job's cost against the agent's quota
-  // (distinct from `status === 'COMPLETED'`, which can precede settlement briefly). Absent/null
-  // means no quota was ever debited for this job (e.g. rejected before running).
+  // Set once this terminal job's final usage has been durably written to the metrics DB. Absent
+  // means settlement is still pending; meaningless for a non-terminal job.
   quota_settled_at?: string
-  // Additional resource-dimension cost/usage, mirroring estimated_cost_acch/actual_cost_acch.
-  // 0/absent means that dimension wasn't tracked for this job.
   estimated_cpu_core_hours?: number
-  actual_cpu_core_hours?: number
-  /** @deprecated RAM is no longer an hours-billed budget dimension — it's a physical fit-only
-   * check at admission now. Kept for backward compat with old API responses; nothing populates
-   * or debits this for new submissions. Do not render as a live budget/usage figure. */
   estimated_ram_gb_hours?: number
-  /** @deprecated see estimated_ram_gb_hours. */
   estimated_storage_gb_hours?: number
-  /** @deprecated see estimated_ram_gb_hours. */
-  actual_ram_gb_hours?: number
-  /** @deprecated see estimated_ram_gb_hours. */
-  actual_storage_gb_hours?: number
   accelerator_type: AcceleratorType
   accelerator_count: number
   estimated_duration_hours?: number
+  novelty_score?: number
+  priority_score: number
   // The job's own DSL — image, command, resources, accelerator count/type, distributed topology.
   job?: JobSpec
   created_at: string
-  // Set when the job was actually handed to a cluster — distinct from created_at (when the
-  // registry row was first written) and started_at (when it began running).
+  updated_at: string
+  queued_at?: string
+  // Set when the job was actually handed to a cluster — distinct from created_at, when the
+  // registry row was first written.
   submitted_at?: string
-  started_at?: string
-  completed_at?: string
   eviction_reason?: string
   not_admitted_reason?: string
-  final_metric_value?: number
-  // Lineage (Domain 7)
+  // The runtime's latest explanation for why this job's container hasn't started or keeps
+  // restarting, merged in live from the metrics store on every read.
+  phase_detail?: PhaseDetail
+  artifacts?: string[]
+  // Lineage
   code_ref?: string
   config_hash?: string
   data_ref?: string
-  /** @deprecated pre-JobSpec-DSL field, no longer sent by the backend; see `job.image` instead. */
-  env_image?: string
 }
 
 export interface MetricDefinition {
@@ -272,10 +280,11 @@ export interface AgentQuota {
 // Agent
 // ---------------------------------------------------------------------------
 
+// Mirrors domain.Agent (shared/domain/agent.go). Note the key is `id`, not `agent_id` —
+// AgentBalance is the one keyed by agent_id.
 export interface Agent {
   id: string
   name: string
-  periods_active: number
   performance_score: number
   top3_count: number       // number of top-3 placements ever (drives +25% bonus)
   created_at: string

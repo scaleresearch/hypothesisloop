@@ -40,7 +40,7 @@ func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Durati
 	if heartbeat {
 		return true, nil
 	}
-	metric, err := isAliveOn(ctx, dbURL, "experiment_metric_value", "job_id", experimentID, window)
+	metric, err := isAliveOn(ctx, dbURL, ExperimentMetricValue, "job_id", experimentID, window)
 	if err != nil {
 		return false, fmt.Errorf("metricsdb.IsAlive: experiment_metric_value: %w", err)
 	}
@@ -54,7 +54,7 @@ func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Durati
 // helper baked into the image, a swallowed exception), which needs a different fix than a hung
 // process and so is worth telling apart at eviction time.
 func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, maxLookback time.Duration) (bool, error) {
-	reported, err := isAliveOn(ctx, dbURL, "experiment_metric_value", "job_id", experimentID, maxLookback)
+	reported, err := isAliveOn(ctx, dbURL, ExperimentMetricValue, "job_id", experimentID, maxLookback)
 	if err != nil {
 		return false, fmt.Errorf("metricsdb.HasEverReportedMetric: %w", err)
 	}
@@ -119,7 +119,7 @@ func unionAliveGrid(ctx context.Context, dbURL, experimentID string, since, now 
 	if err != nil {
 		return nil, fmt.Errorf("heartbeat: %w", err)
 	}
-	metricGrid, err := aliveGridPoints(ctx, dbURL, "experiment_metric_value", "job_id", experimentID, since, now, gapCap, step)
+	metricGrid, err := aliveGridPoints(ctx, dbURL, ExperimentMetricValue, "job_id", experimentID, since, now, gapCap, step)
 	if err != nil {
 		return nil, fmt.Errorf("experiment_metric_value: %w", err)
 	}
@@ -140,24 +140,17 @@ func unionAliveGrid(ctx context.Context, dbURL, experimentID string, since, now 
 // AnyDeclaredMetricChanged); max_over_time - min_over_time over the same series is non-zero iff
 // the value moved between at least two points.
 func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey string, window time.Duration) (reported, changed bool, err error) {
-	countQL := fmt.Sprintf(`count_over_time(experiment_metric_value{job_id=%q, metric_name=%q}[%s])`,
-		experimentID, metricKey, promSeconds(window))
-	counts, err := QueryVector(ctx, dbURL, countQL)
+	count, err := metricSampleCount(ctx, dbURL, experimentID, metricKey, window)
 	if err != nil {
 		return false, false, err
 	}
-	if len(counts) == 0 || counts[0].Value == 0 {
+	if count < 2 {
+		// Zero samples, or one sample only: with one point real progress can't be ruled out yet,
+		// and it can't be confirmed either — treat exactly like "not reported", not like "stuck".
 		return false, false, nil
 	}
-	if counts[0].Value < 2 {
-		// One sample only: real progress can't be ruled out yet, and it can't be confirmed
-		// either — treat exactly like "not reported", not like "stuck".
-		return false, false, nil
-	}
-	spreadQL := fmt.Sprintf(
-		`max_over_time(experiment_metric_value{job_id=%q, metric_name=%q}[%s]) - min_over_time(experiment_metric_value{job_id=%q, metric_name=%q}[%s])`,
-		experimentID, metricKey, promSeconds(window), experimentID, metricKey, promSeconds(window),
-	)
+	sel := fmt.Sprintf(`%s{job_id=%q, metric_name=%q}[%s]`, ExperimentMetricValue, experimentID, metricKey, promSeconds(window))
+	spreadQL := fmt.Sprintf(`max_over_time(%s) - min_over_time(%s)`, sel, sel)
 	samples, err := QueryVector(ctx, dbURL, spreadQL)
 	if err != nil {
 		return false, false, err
@@ -171,6 +164,43 @@ func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey st
 		}
 	}
 	return true, false, nil
+}
+
+// AnyDeclaredMetricReported reports whether experimentID has posted even one sample of any of
+// metricKeys within window. Deliberately separate from AnyDeclaredMetricChanged: that one folds a
+// single sample into reported=false, because one point cannot prove or disprove progress. For
+// "has this job ever reported at all", one point is a complete answer — and conflating the two
+// would condemn a job that reported once as never having reported.
+func AnyDeclaredMetricReported(ctx context.Context, dbURL, experimentID string, metricKeys []string, window time.Duration) (bool, error) {
+	for _, key := range metricKeys {
+		count, err := metricSampleCount(ctx, dbURL, experimentID, key, window)
+		if err != nil {
+			return false, fmt.Errorf("metricsdb.AnyDeclaredMetricReported: %q: %w", key, err)
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// metricSampleCount is how many samples of one declared metric experimentID posted within window.
+// Shared because "did this job report at all" and "did the value move" both start from the same
+// count query, and had drifted into two separately-built copies of it.
+func metricSampleCount(ctx context.Context, dbURL, experimentID, metricKey string, window time.Duration) (float64, error) {
+	promQL := fmt.Sprintf(`count_over_time(%s{job_id=%q, metric_name=%q}[%s])`,
+		ExperimentMetricValue, experimentID, metricKey, promSeconds(window))
+	samples, err := QueryVector(ctx, dbURL, promQL)
+	if err != nil {
+		return 0, err
+	}
+	var max float64
+	for _, s := range samples {
+		if s.Value > max {
+			max = s.Value
+		}
+	}
+	return max, nil
 }
 
 // AnyDeclaredMetricChanged reports whether a platform experiment's declared metrics are showing
@@ -203,24 +233,47 @@ func AnyDeclaredMetricChanged(ctx context.Context, dbURL, experimentID string, m
 // back the query scans; it's a search window, not a clock the accounting trusts. Returns
 // ok=false if no sample exists in that window (job never started, or aged out of retention).
 func FirstObserved(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, step time.Duration) (t time.Time, ok bool, err error) {
-	if step <= 0 {
-		return time.Time{}, false, nil
-	}
-	since := now.Add(-maxLookback)
-	grid, err := unionAliveGrid(ctx, dbURL, experimentID, since, now, step, step)
+	b, err := sampleBounds(ctx, dbURL, experimentID, now.Add(-maxLookback), now, step)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("metricsdb.FirstObserved: %w", err)
 	}
-	if len(grid) == 0 {
-		return time.Time{}, false, nil
+	return b.first, b.ok, nil
+}
+
+// sampleBounds is the earliest and latest grid timestamp backed by a real sample in [since, now).
+// Asked with a range selector equal to step so a point appears only where a sample genuinely
+// landed, never where last_over_time carried one forward.
+//
+// Both ends come from one grid because both callers want the same query: FirstObserved needs the
+// minimum to place the start boundary, and elapsed-hours counting needs the maximum to know where
+// counting stops being observation and starts being extrapolation. Fetching them separately meant
+// querying the same two series twice with identical parameters.
+type sampleRange struct {
+	first, last time.Time
+	ok          bool
+}
+
+func sampleBounds(ctx context.Context, dbURL, experimentID string, since, now time.Time, step time.Duration) (sampleRange, error) {
+	if step <= 0 || !now.After(since) {
+		return sampleRange{}, nil
 	}
-	var min int64
+	grid, err := unionAliveGrid(ctx, dbURL, experimentID, since, now, step, step)
+	if err != nil {
+		return sampleRange{}, err
+	}
+	if len(grid) == 0 {
+		return sampleRange{}, nil
+	}
+	var min, max int64
 	for k := range grid {
 		if min == 0 || k < min {
 			min = k
 		}
+		if k > max {
+			max = k
+		}
 	}
-	return time.Unix(min, 0).UTC(), true, nil
+	return sampleRange{first: time.Unix(min, 0).UTC(), last: time.Unix(max, 0).UTC(), ok: true}, nil
 }
 
 // ObservedElapsedHours returns how long experimentID has been confirmed alive, in hours — the
@@ -243,19 +296,120 @@ func FirstObserved(ctx context.Context, dbURL, experimentID string, now time.Tim
 //     not required together), so a job between metric reports isn't mistaken for not running,
 //     and a job that never emits training metrics still accrues time from its heartbeat alone.
 func ObservedElapsedHours(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (float64, error) {
+	hours, _, err := ObservedElapsed(ctx, dbURL, experimentID, now, maxLookback, gapCap, step)
+	return hours, err
+}
+
+// ObservedElapsed is ObservedElapsedHours plus whether the job has ever been observed at all —
+// the two facts every billing caller needs, from one pass over the metrics. Zero hours is
+// ambiguous on its own: a job seen once and a job never seen both report 0, and callers bill them
+// differently (a never-seen job keeps its admission estimate). Asking FirstObserved separately to
+// tell them apart re-ran a query this already performs.
+func ObservedElapsed(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (float64, bool, error) {
+	if step <= 0 {
+		return 0, false, nil
+	}
+	b, err := sampleBounds(ctx, dbURL, experimentID, now.Add(-maxLookback), now, step)
+	if err != nil {
+		return 0, false, fmt.Errorf("metricsdb.ObservedElapsed: %w", err)
+	}
+	if !b.ok || !now.After(b.first) {
+		return 0, b.ok, nil
+	}
+	hours, err := elapsedHours(ctx, dbURL, experimentID, b.first, now, gapCap, step, b.last)
+	if err != nil {
+		return 0, false, fmt.Errorf("metricsdb.ObservedElapsed: %w", err)
+	}
+	return hours, true, nil
+}
+
+// ObservedElapsedHoursSince is ObservedElapsedHours over an explicit start boundary, for the one
+// caller that must not measure from the job's first-ever observation: preemption rescales a
+// victim's remaining estimate, and a job on its second stint has already had its estimate reduced
+// once, so charging it again for the hours of its first stint would subtract the same time twice.
+func ObservedElapsedHoursSince(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap, step time.Duration) (float64, error) {
+	if step <= 0 || !now.After(since) {
+		return 0, nil
+	}
+	b, err := sampleBounds(ctx, dbURL, experimentID, since, now, step)
+	if err != nil {
+		return 0, fmt.Errorf("metricsdb.ObservedElapsedHoursSince: %w", err)
+	}
+	if !b.ok {
+		return 0, nil
+	}
+	return elapsedHours(ctx, dbURL, experimentID, since, now, gapCap, step, b.last)
+}
+
+// elapsedHours counts the alive grid over [since, now), stopping at last — the newest real
+// sample, supplied by the caller that already knows it.
+func elapsedHours(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap, step time.Duration, last time.Time) (float64, error) {
+	union, err := unionAliveGrid(ctx, dbURL, experimentID, since, now, gapCap, step)
+	if err != nil {
+		return 0, fmt.Errorf("metricsdb.elapsedHours: %w", err)
+	}
+	// Grid points are boundaries, not durations: n points delimit n-1 intervals of `step`. Adding
+	// one more counts the closing boundary as a whole interval, which for a job observed exactly
+	// once bills a full step for a single instant.
+	//
+	// The gap cap does the rest of the damage on its own. last_over_time keeps emitting points for
+	// gapCap after the final real sample, which mid-run is exactly right — a blip shorter than
+	// gapCap is a reporting hiccup, not a stopped job. Past the last sample there is nothing to
+	// bridge to, so the same rule invents time nobody observed, and how much depends only on how
+	// long after the job died the query happens to run. Billing must not depend on that: settling
+	// promptly and settling an hour late have to produce the same number. So trailing points are
+	// cut back to one step past the newest real sample — the same one step of benefit of the doubt
+	// every other interval gets, and no more.
+	if len(union) == 0 {
+		return 0, nil
+	}
+	counted := 0
+	cutoff := last.Unix()
+	for t := range union {
+		if t <= cutoff {
+			counted++
+		}
+	}
+	if counted <= 1 {
+		return 0, nil
+	}
+	return step.Seconds() * float64(counted-1) / 3600, nil
+}
+
+// ObservedStintElapsedHours returns how long experimentID has been confirmed alive since it last
+// started running — the current stint only, not its whole life.
+//
+// The two differ exactly when a job has been requeued: preemption returns a victim to QUEUED with
+// its duration and all four resource estimates rescaled down to what is left. On the next
+// preemption that already-shortened estimate is the baseline, so the hours to subtract are the
+// ones consumed since it resumed. Measuring from the job's first observation instead makes the
+// two bases disagree, and a job preempted twice has its remaining estimate — and therefore the
+// budget it reserves — collapse to the floor while it still has most of its work to do.
+//
+// A job that has never been down reports its full observed elapsed time, which is the same
+// number by definition.
+func ObservedStintElapsedHours(ctx context.Context, dbURL, experimentID string, now time.Time, maxLookback, gapCap, step time.Duration) (float64, error) {
 	if step <= 0 {
 		return 0, nil
 	}
-	since, ok, err := FirstObserved(ctx, dbURL, experimentID, now, maxLookback, step)
+	first, ok, err := FirstObserved(ctx, dbURL, experimentID, now, maxLookback, step)
 	if err != nil {
-		return 0, fmt.Errorf("metricsdb.ObservedElapsedHours: %w", err)
+		return 0, fmt.Errorf("metricsdb.ObservedStintElapsedHours: %w", err)
 	}
-	if !ok || !now.After(since) {
+	if !ok || !now.After(first) {
 		return 0, nil
 	}
-	union, err := unionAliveGrid(ctx, dbURL, experimentID, since, now, gapCap, step)
+	// The end of the most recent not-running stretch is where this stint began. A mid-run gap
+	// longer than gapCap (node death, partition) also resets it, which undercounts the hours to
+	// subtract and so leaves the reservation slightly larger — the safe direction for a number
+	// that gates admission.
+	downAt, wasDown, err := LastNotAlive(ctx, dbURL, experimentID, first, now, gapCap, step)
 	if err != nil {
-		return 0, fmt.Errorf("metricsdb.ObservedElapsedHours: %w", err)
+		return 0, fmt.Errorf("metricsdb.ObservedStintElapsedHours: %w", err)
 	}
-	return step.Seconds() * float64(len(union)) / 3600, nil
+	since := first
+	if wasDown {
+		since = downAt.Add(step)
+	}
+	return ObservedElapsedHoursSince(ctx, dbURL, experimentID, since, now, gapCap, step)
 }

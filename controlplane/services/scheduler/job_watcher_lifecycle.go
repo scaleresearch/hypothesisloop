@@ -12,16 +12,31 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
-// onStuckPending evicts a job admitted but never reported RUNNING within stuckPendingTimeout
-// (e.g. unschedulable, bad image, accelerator stockout). Transitions SUBMITTED/ADMITTED ->
-// EVICTED; cluster-agent's own reconcile loop deletes the Job on its next pull. Refunds the
-// full reservation since no runtime was consumed.
-func (w *JobWatcher) onStuckPending(ctx context.Context, exp *domain.Experiment) {
-	w.logger.Warn("job_watcher: stuck pending, evicting",
+// evictIfPastAdmissionDeadline evicts a job that has stayed pre-RUNNING for longer than
+// stuckPendingTimeout, with the reason naming what actually failed to resolve. Called only for
+// experiments still in SUBMITTED/ADMITTED, from the one place that has just observed why the
+// lifecycle could not advance — the deadline is the bound on every such "still can't tell" state,
+// so none of them can hold a reservation indefinitely.
+func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) error {
+	if w.stuckPendingTimeout <= 0 {
+		return nil
+	}
+	if exp.SubmittedAt == nil {
+		// Every SUBMITTED/ADMITTED row is written with submitted_at (ClaimSubmitted sets it in
+		// the same UPDATE). Without it there is no deadline to measure against, and silently
+		// skipping is what makes a job immortal — surface it instead.
+		return fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
+	}
+	if time.Since(*exp.SubmittedAt) <= w.stuckPendingTimeout {
+		return nil
+	}
+	w.logger.Warn("job_watcher: admission deadline passed, evicting",
 		zap.String("id", exp.ID),
+		zap.String("reason", string(reason)),
 		zap.Duration("timeout", w.stuckPendingTimeout),
 	)
-	w.evictNeverStarted(ctx, exp, domain.EvictionStuckPending)
+	w.evictNotYetRunning(ctx, exp, reason)
+	return nil
 }
 
 // onUnschedulable evicts a job whose runtime reported a phase-detail reason in
@@ -36,15 +51,15 @@ func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment
 		zap.String("phase_reason", reason),
 		zap.String("phase_message", message),
 	)
-	w.evictNeverStarted(ctx, exp, domain.EvictionUnschedulable)
+	w.evictNotYetRunning(ctx, exp, domain.EvictionUnschedulable)
 }
 
-// evictNeverStarted is the shared body of onStuckPending/onUnschedulable: a job whose container
-// never actually started is evicted. Settle computes observed usage from real metrics either
-// way, so this naturally zeroes out to a full refund when nothing genuinely ran — true for both
-// callers even though onUnschedulable may fire after exp.Status already reads RUNNING.
-func (w *JobWatcher) evictNeverStarted(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
-	updated, err := w.store.TransitionStatus(ctx, exp.ID, exp.Status, domain.StatusEvicted)
+// evictNotYetRunning evicts a job the lifecycle never advanced to RUNNING, whatever prevented it.
+// Settle computes observed usage from real metrics, so this zeroes out to a full refund when
+// nothing genuinely ran and still bills a job whose pod was up (flavor mismatch, unreadable
+// accelerator type) for exactly what it burned.
+func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
+	updated, err := w.store.TransitionTerminal(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
 		return
@@ -52,9 +67,6 @@ func (w *JobWatcher) evictNeverStarted(ctx context.Context, exp *domain.Experime
 	if !updated {
 		// Already moved on (e.g. finished right before this check) — nothing to do.
 		return
-	}
-	if err := w.store.UpdateEvictionReason(ctx, exp.ID, string(reason)); err != nil {
-		w.logger.Warn("job_watcher: set eviction reason", zap.String("id", exp.ID), zap.Error(err))
 	}
 	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
 	w.settleQuota(ctx, exp)
@@ -76,41 +88,57 @@ func (w *JobWatcher) settleQuota(ctx context.Context, exp *domain.Experiment) {
 	}
 }
 
-// onRunning handles the ADMITTED/SUBMITTED → RUNNING transition, returning the accelerator type
-// this admission landed on and whether the transition actually happened. A false return means
-// the experiment already left SUBMITTED/ADMITTED (cancelled/evicted concurrently) — the caller
-// must stop watching and skip every side effect below.
-func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, bool) {
+// runningOutcome is what one attempt to advance a job to RUNNING concluded. onRunning reports
+// only what it observed; reconcileOne owns what to do about it, so no caller has to infer policy
+// from a bare bool or a generic error.
+type runningOutcome int
+
+const (
+	// runningMarked: the experiment is now RUNNING.
+	runningMarked runningOutcome = iota
+	// runningLeftState: it left SUBMITTED/ADMITTED underneath us (cancelled or evicted
+	// concurrently). Nothing to do — and nothing to bound, since it is already terminal.
+	runningLeftState
+	// runningTypeUnobservable: the pod is up but its accelerator type is not readable. Usually a
+	// sample or two behind and resolves on the next tick, so it is retried — but it is a
+	// "can't tell" state and therefore needs a deadline.
+	runningTypeUnobservable
+	// runningTypeMismatch: the pod is up on an accelerator type other than the one reserved and
+	// billed. Already-happened placement, so waiting cannot fix it.
+	runningTypeMismatch
+)
+
+// onRunning attempts the SUBMITTED/ADMITTED → RUNNING transition, returning the accelerator type
+// this admission landed on (empty unless the outcome is runningMarked).
+func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, runningOutcome) {
 	w.logger.Info("job_watcher: experiment running", zap.String("id", exp.ID))
 	var admittedType domain.AcceleratorType
 	if exp.AcceleratorCount > 0 {
 		var err error
 		admittedType, err = w.backend.GetAdmittedAcceleratorType(ctx, exp)
 		if err != nil {
-			// Expected and self-healing: right after Running is first observed, the
-			// cluster-agent may not have recorded which accelerator type it landed on yet.
-			// The next scan tick retries and normally succeeds, so this isn't error-worthy.
 			w.logger.Warn("job_watcher: observed accelerator type not yet available, will retry", zap.String("id", exp.ID), zap.Error(err))
-			return "", false
+			return "", runningTypeUnobservable
 		}
 		if admittedType != exp.AcceleratorType {
 			w.logger.Error("job_watcher: observed accelerator type disagrees with desired flavor",
 				zap.String("id", exp.ID), zap.String("desired", string(exp.AcceleratorType)), zap.String("observed", string(admittedType)))
-			return "", false
+			return "", runningTypeMismatch
 		}
 	}
 	started, err := w.store.MarkStarted(ctx, exp.ID)
 	if err != nil {
 		w.logger.Error("job_watcher: mark running", zap.String("id", exp.ID), zap.Error(err))
+		return "", runningTypeUnobservable
 	}
 	if !started {
 		w.logger.Info("job_watcher: experiment left SUBMITTED/ADMITTED before Running was observed — skipping", zap.String("id", exp.ID))
-		return "", false
+		return "", runningLeftState
 	}
 
 	// A CPU-only job has no accelerator dimension — whatever node it landed on (even an
 	// accelerator-labeled one) is not an "admitted flavor" and must not be reverse-mapped into one.
-	return admittedType, true
+	return admittedType, runningMarked
 }
 
 // backfillStartedFromObservations handles a terminal report for an experiment this watcher never

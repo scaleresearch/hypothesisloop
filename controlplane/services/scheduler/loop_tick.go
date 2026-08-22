@@ -24,6 +24,15 @@ func (l *Loop) tick(ctx context.Context) error {
 	start := time.Now()
 	defer func() { obsmetrics.AdmissionTickDuration.Observe(time.Since(start).Seconds()) }()
 
+	// Per-experiment failures collected across every pass below and joined at the end (#19). A
+	// tick reads state that is shared by every queued job but acts on each one individually, so
+	// only a failure to read that shared state is grounds for abandoning the pass.
+	var tickErrs []error
+
+	// The disbalance evictor is a cluster-level verdict about stranded accelerators — at most one
+	// per cluster per tick, shared by both admission passes. See its call sites for why.
+	disbalanceRan := map[string]bool{}
+
 	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
 	// exit path (including early returns below) runs it, keeping queue order fresh even when
 	// nothing was queued for burst.
@@ -50,17 +59,27 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("node labels: %w", err)
 	}
-	// Installed (not free) capacity, read only when the disbalance evictor is enabled — it is
-	// the sole consumer, and an extra metrics query every tick is not worth paying for a pass
-	// that is off. Clusters missing a fresh report are absent here, which disables the pass for
-	// exactly those clusters (see evictDisbalanced).
-	var totalCapacity map[string]domain.Footprint
-	if l.evictor != nil && l.disbalanceTolerance > 0 {
-		totalCapacity, err = l.workload.GetTotalCapacity(ctx)
-		if err != nil {
-			return fmt.Errorf("total capacity: %w", err)
-		}
+	// Installed (not free) capacity — evidence for one decision, the disbalance eviction, and an
+	// input to nothing else in this tick. Unlike the three reads above it, admission never
+	// consults it.
+	//
+	// So a failure here is logged and the pass continues with no totals, rather than aborting the
+	// tick. That is not a fallback: "no totals for a cluster" is already a defined state with one
+	// defined answer — evictDisbalanced refuses to condemn anything it cannot measure a share
+	// against. An unreadable read lands in that same state. Failing the whole tick instead would
+	// let a telemetry gap in the evidence for one destructive decision stop every ordinary
+	// admission on the platform, which is the opposite of what the evidence is for.
+	totalCapacity, err := l.workload.GetTotalCapacity(ctx)
+	if err != nil {
+		l.logger.Warn("total capacity unavailable; disbalance eviction cannot judge this tick", zap.Error(err))
+		totalCapacity = nil
 	}
+
+	// Credit back capacity from disbalance victims a prior tick already evicted but that this
+	// fresh read still can't see as free (the node/agent hasn't reported it back yet) — otherwise
+	// this tick re-derives the same shortage and evicts a fresh set of victims to free capacity
+	// that is already being freed. See loop_disbalance.go's applyPendingEvictions.
+	l.applyPendingEvictions(start, gAvail, bAvail, nodeAvail)
 
 	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
 	// ADMITTED/RUNNING). No second reservation or live-usage subtraction here — either would
@@ -82,6 +101,12 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 3b. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
 	// was running must not slip through after the ladder tightened. Held, not rejected — a later
 	// stage may lift the cap, and then it admits normally.
+	// One unreadable row must not decide the fate of every other queued job. A QUEUED experiment
+	// pointing at a deleted platform experiment is re-read on every tick forever, so aborting the
+	// pass here would wedge admission for the entire platform indefinitely — the exact shape
+	// important.md #19 exists to forbid. Per-experiment failures are logged, collected, and the
+	// experiment is dropped from this tick's consideration; the pass finishes, and the joined
+	// error surfaces at the end so the failure is still loud.
 	summaryBlocked := map[string]bool{} // key: agentID+"/"+platformExpID
 	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
 	filtered := queued[:0]
@@ -94,27 +119,30 @@ func (l *Loop) tick(ctx context.Context) error {
 		if !seen {
 			pe, err := l.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
 			if err != nil {
-				return fmt.Errorf("stage job length for %s: %w", exp.ID, err)
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("stage job length: %w", err))
+				continue
 			}
 			if pe == nil {
-				return fmt.Errorf("stage job length for %s: platform experiment %s not found", exp.ID, exp.PlatformExperimentID)
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("stage job length: platform experiment %s not found", exp.PlatformExperimentID))
+				continue
 			}
 			limit = pe.CurrentMaxJobHours()
 			maxJobHours[exp.PlatformExperimentID] = limit
 		}
 		if limit > 0 && exp.EstimatedDurationHours > limit {
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedJobTooLong); err != nil {
-				return err
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark job too long: %w", err))
 			}
 			continue
 		}
 		cut, err := l.store.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID)
 		if err != nil {
-			return fmt.Errorf("stage cut for %s: %w", exp.ID, err)
+			l.skipExperiment(&tickErrs, exp, fmt.Errorf("stage cut: %w", err))
+			continue
 		}
 		if cut {
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedStageCut); err != nil {
-				return err
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark stage cut: %w", err))
 			}
 			continue
 		}
@@ -127,14 +155,15 @@ func (l *Loop) tick(ctx context.Context) error {
 		}
 		blocked, err := l.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
 		if err != nil {
-			return fmt.Errorf("summary gate for %s: %w", exp.ID, err)
+			l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
+			continue
 		}
 		summaryBlocked[key] = blocked
 		if !blocked {
 			filtered = append(filtered, exp)
 		} else {
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedSummaryGate); err != nil {
-				return err
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark summary gate: %w", err))
 			}
 		}
 	}
@@ -150,6 +179,13 @@ func (l *Loop) tick(ctx context.Context) error {
 	sortGuaranteed(guaranteed, guaranteedQuotas, completion, l.guaranteedFairnessWindow)
 	gAvailInitial := cloneAvail(gAvail)
 
+	// Preemption candidates are read once per tick rather than once per job that fails to fit —
+	// a saturated cluster with a deep guaranteed queue otherwise issues one full scan per queued
+	// job, every tick. It is re-read after a preempt, because preempt requeues its victims and
+	// the next candidate must not consider them running.
+	var running []*domain.Experiment
+	runningLoaded := false
+
 	// Snapshot pre-tick availability so a skip can be classified: capacity_unavailable (no
 	// capacity existed before this tick) vs outranked (capacity existed, but other guaranteed
 	// jobs earlier in sort order already claimed it).
@@ -158,6 +194,10 @@ func (l *Loop) tick(ctx context.Context) error {
 		// pinned — just recompute its footprint under that flavor; otherwise pick a (cluster,
 		// flavor) pair among the requested type and any AcceptableAcceleratorTypes where the
 		// whole footprint fits — see resolveClusterAndFootprint/clusterWithBestFit.
+		// What the row says right now, captured before the placement search below mutates
+		// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it
+		// has a new flavor to persist.
+		persistedFlavor := exp.AcceleratorType
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {
@@ -173,9 +213,17 @@ func (l *Loop) tick(ctx context.Context) error {
 		if !domain.Fits(gAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeLabels[cluster], exp) {
 			// Try to preempt that cluster's own burst jobs to make room; scoped to this cluster
 			// since freeing a burst job elsewhere wouldn't help here.
-			running, err := l.store.ListRunningExperiments(ctx)
-			if err != nil {
-				return err
+			if !runningLoaded {
+				running, err = l.store.ListRunningExperiments(ctx)
+				if err != nil {
+					// Without the running set there is no tier-safe preemption plan to make, and
+					// no basis for the disbalance pass either — both reason about what is running.
+					// Skip this job rather than abandon the tick, and terminate nothing on state
+					// we could not read.
+					l.skipExperiment(&tickErrs, exp, fmt.Errorf("list running for preemption: %w", err))
+					continue
+				}
+				runningLoaded = true
 			}
 			burstRunning := filterTierCluster(running, domain.CapacityBurst, cluster)
 			shortage := preemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeLabels[cluster], exp, fp)
@@ -187,19 +235,34 @@ func (l *Loop) tick(ctx context.Context) error {
 			// preempt() only requeues victims — it never waits for their Jobs to disappear, so
 			// this tick can't know the accelerator is really free yet. exp stays QUEUED; a
 			// later tick's fresh capacity read admits it once the resource is genuinely gone.
-			if err := l.preempt(ctx, shortage, burstRunning, exp); err != nil {
+			committed, err := l.preempt(ctx, shortage, burstRunning, exp)
+			if err != nil {
 				l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 			}
-			if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
-				l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+			runningLoaded = false
+			// Three reasons this tick's disbalance pass may not run for this job, all of them
+			// "the evidence for terminating live work is not there":
+			//   - preempt already committed a plan covering the whole shortage: the capacity is
+			//     on its way back and the deficit is no longer outstanding (availability is not
+			//     decremented here, so re-reading it would double-count the same shortage).
+			//   - preempt errored: whatever it could not read or commit, we do not get to answer
+			//     a failed tier-safe remedy with a more destructive one.
+			//   - the pass already ran for this cluster this tick: it is a cluster-level verdict
+			//     about stranded accelerators, not a per-queued-job one. Running it once per
+			//     blocked job against unchanged availability evicts a fresh victim each time.
+			if err == nil && !committed && !disbalanceRan[cluster] {
+				disbalanceRan[cluster] = true
+				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
+					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp, shortage)); err != nil {
-				return err
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
 		}
-		if err := l.submitJob(ctx, exp, cluster); err != nil {
+		if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
 			l.logger.Error("submit guaranteed job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			reason := domain.NotAdmittedWorkloadCreation
@@ -207,7 +270,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedCapacityUnavailable
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
-				return err
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
 		}
@@ -222,25 +285,14 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 5. Burst pass: fairness-weighted (least quota used first), then completion proximity, shortest job first.
 	burst := filterTier(queued, domain.CapacityBurst)
 	if len(burst) == 0 {
-		return nil
+		return errors.Join(tickErrs...)
 	}
 
-	// Check if any burst capacity exists at all, on any cluster.
-	var totalBAvail int64
-	for _, fp := range bAvail {
-		for _, v := range fp {
-			totalBAvail += v
-		}
-	}
-	if totalBAvail <= 0 {
-		for _, exp := range burst {
-			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedCapacityUnavailable); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
+	// No cluster-wide "is there any capacity at all" shortcut here: a footprint's dimensions are
+	// different units (millicores, bytes, device counts), so summing them into one number answers
+	// no question anyone asked — RAM bytes dominate by orders of magnitude and the sum is
+	// positive whatever the accelerator situation is. Fit is decided per job, per dimension, by
+	// domain.Fits in the loop below, which writes the same capacity_unavailable reason.
 
 	// Fetch quota usage for fairness ordering.
 	quotaMap, err := l.fetchQuotaMap(ctx, burst)
@@ -255,6 +307,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	bAvailInitial := cloneAvail(bAvail)
 
 	for _, exp := range burst {
+		persistedFlavor := exp.AcceleratorType
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {
@@ -268,16 +321,23 @@ func (l *Loop) tick(ctx context.Context) error {
 			cluster = clusterWithBestFit(bAvail, fp)
 		}
 		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeLabels[cluster], exp) {
-			if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
-				l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+			// Same shortage vector the guaranteed pass computes, for the same reason: "short
+			// {cpu: 12}" tells an operator which dimension to fix, where a bare
+			// capacity_unavailable tells them only that something, somewhere, did not fit.
+			shortage := preemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeLabels[cluster], exp, fp)
+			if !disbalanceRan[cluster] {
+				disbalanceRan[cluster] = true
+				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeLabels[cluster], fp); err != nil {
+					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp, nil)); err != nil {
-				return err
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp, shortage)); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
 		}
-		if err := l.submitJob(ctx, exp, cluster); err != nil {
+		if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
 			l.logger.Error("submit burst job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			reason := domain.NotAdmittedWorkloadCreation
@@ -285,7 +345,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedCapacityUnavailable
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
-				return err
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
 		}
@@ -294,7 +354,18 @@ func (l *Loop) tick(ctx context.Context) error {
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "admitted").Inc()
 	}
 
-	return nil
+	return errors.Join(tickErrs...)
+}
+
+// skipExperiment drops one experiment from this tick and records why, so a pass over many
+// survives any one of them failing (#19). The log line is per-experiment because the joined
+// error is read as a tick-level summary and would otherwise bury which job was at fault.
+func (l *Loop) skipExperiment(errs *[]error, exp *domain.Experiment, err error) {
+	l.logger.Warn("skipping experiment this tick",
+		zap.String("exp", exp.ID),
+		zap.String("platform_experiment", exp.PlatformExperimentID),
+		zap.Error(err))
+	*errs = append(*errs, fmt.Errorf("experiment %s: %w", exp.ID, err))
 }
 
 func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint, shortage domain.Footprint) string {
@@ -331,7 +402,11 @@ func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool 
 	if quota == nil || exp.AcceleratorCount <= 0 {
 		return false
 	}
-	newCost := exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+	rate, ok := exp.AcceleratorType.LookupCost()
+	if !ok {
+		return false
+	}
+	newCost := rate * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 	used, limit := quota.UsedBurstAccH, quota.BurstAcceleratorHours
 	if exp.CapacityTier == domain.CapacityGuaranteed {
 		used, limit = quota.UsedGuaranteedAccH, quota.GuaranteedAcceleratorHours
@@ -463,6 +538,14 @@ func preemptionShortfall(clusterAvail domain.Footprint, byNode map[string]map[st
 func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType {
 	if exp.Job.AcceleratorType == "" {
 		return nil
+	}
+	// A job that has already executed re-admits onto the flavor it actually ran on, and nothing
+	// else. Settlement bills lifetime observed hours at the rate the row carries, so moving a
+	// requeued job to a different flavor silently re-prices the stint it already ran at the new
+	// flavor's rate. Keyed on the durable preemption marker rather than on observed hours: metrics
+	// are delayed, so "has it consumed anything yet" can still read zero for a job that has run.
+	if exp.EvictionReason == string(domain.EvictionPreemptedForGuaranteed) {
+		return []domain.AcceleratorType{exp.AcceleratorType}
 	}
 	types := make([]domain.AcceleratorType, 0, 1+len(exp.Job.AcceptableAcceleratorTypes))
 	types = append(types, exp.Job.AcceleratorType)

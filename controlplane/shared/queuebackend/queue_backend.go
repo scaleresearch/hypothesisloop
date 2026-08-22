@@ -102,9 +102,26 @@ func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (
 	return metricsdb.GetLatestPhaseDetail(ctx, b.metricsDBURL, exp.ID)
 }
 
-// GetAdmittedAcceleratorType reads the latest observed type metric.
+// GetAdmittedAcceleratorType reads the latest observed type metric for exp's current admission.
+//
+// The lookback is clamped to the time since submitted_at, which Postgres rewrites on every
+// ClaimSubmitted and clears on requeue. A job re-admitted onto a different flavor after
+// preemption would otherwise be readable through the tail of its previous pod's samples, and
+// comparing this against the newly reserved flavor would report a placement mismatch that
+// happened one admission ago.
 func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
-	t, found, err := metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, time.Now().UTC(), b.connectedWithin)
+	if exp.SubmittedAt == nil {
+		return "", fmt.Errorf("queuebackend: experiment %s has no submission time to read its accelerator type against", exp.ID)
+	}
+	now := time.Now().UTC()
+	window := b.connectedWithin
+	if sinceSubmit := now.Sub(*exp.SubmittedAt); sinceSubmit < window {
+		window = sinceSubmit
+	}
+	if window <= 0 {
+		return "", fmt.Errorf("queuebackend: accelerator type for %s is not observed yet", exp.ID)
+	}
+	t, found, err := metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, now, window)
 	if err != nil {
 		return "", err
 	}

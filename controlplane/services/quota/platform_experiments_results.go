@@ -3,7 +3,6 @@ package quota
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -15,14 +14,14 @@ import (
 // once, while the experiment it came from carries the code_ref — the patch someone can actually
 // pick up and reuse.
 type AgentStanding struct {
-	Rank         int     `json:"rank"`
-	AgentID      string  `json:"agent_id"`
-	Best         float64 `json:"best"`
+	Rank    int     `json:"rank"`
+	AgentID string  `json:"agent_id"`
+	Best    float64 `json:"best"`
 	// Basis is always "raw": only raw-basis values are ever ranked here. Present so the UI can
 	// show it next to the value without a second lookup.
-	Basis        string  `json:"basis"`
-	ExperimentID string  `json:"experiment_id,omitempty"`
-	CodeRef      string  `json:"code_ref,omitempty"`
+	Basis        string `json:"basis"`
+	ExperimentID string `json:"experiment_id,omitempty"`
+	CodeRef      string `json:"code_ref,omitempty"`
 }
 
 // MetricStandings is the full ranking on a single declared metric, best-first.
@@ -59,7 +58,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		return nil, fmt.Errorf("not_found")
 	}
 
-	ineligible, err := s.constraintIneligibleAgents(ctx, pe.ID, pe.Metrics)
+	ineligible, err := s.constraintIneligibleAgents(ctx, pe, pe.Metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +74,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
-		standings, nonRawAgents, err := s.standingsOnMetric(ctx, pe.ID, metric)
+		standings, nonRawAgents, err := s.standingsOnMetric(ctx, pe, metric)
 		if err != nil {
 			return nil, err
 		}
@@ -103,13 +102,13 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 // constraint metric violates its bound, or who never reported that metric at all — a
 // constraint must be reported and satisfied, not merely absent. A job violating one is
 // ineligible for standings entirely (docs: "the correctness gate"), never itself ranked.
-func (s *PlatformExperimentsService) constraintIneligibleAgents(ctx context.Context, platformExpID string, metrics []domain.MetricDefinition) (map[string]bool, error) {
+func (s *PlatformExperimentsService) constraintIneligibleAgents(ctx context.Context, pe *domain.PlatformExperiment, metrics []domain.MetricDefinition) (map[string]bool, error) {
 	ineligible := make(map[string]bool)
 	for _, metric := range metrics {
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
 		}
-		standings, _, err := s.standingsOnMetric(ctx, platformExpID, metric)
+		standings, _, err := s.standingsOnMetric(ctx, pe, metric)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +123,7 @@ func (s *PlatformExperimentsService) constraintIneligibleAgents(ctx context.Cont
 				ineligible[st.AgentID] = true
 			}
 		}
-		signups, err := s.store.ListSignups(ctx, platformExpID)
+		signups, err := s.store.ListSignups(ctx, pe.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -157,7 +156,7 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if primary == nil {
 		return nil, nil
 	}
-	standings, _, err := s.standingsOnMetric(ctx, pe.ID, *primary)
+	standings, _, err := s.standingsOnMetric(ctx, pe, *primary)
 	if err != nil {
 		return nil, err
 	}
@@ -169,56 +168,28 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 }
 
 // standingsOnMetric ranks every agent by its best "raw"-basis value on one metric, best-first.
-// Same direction-aware best-per-agent query the stage ladder ranks cuts with, so a run's final
-// standings and its mid-run cuts can never disagree about who is ahead.
-//
-// Grouping by (agent_id, metric_basis) rather than agent_id alone matters: collapsing basis
-// out of the query would let a rescaled/non-"raw" value silently win or lose a min/max_over_time
-// aggregation against a raw one — exactly the scale mismatch that made a ~20% "win" look real
-// when it was actually ~2x worse. An agent that only ever reported this metric on a non-"raw"
-// basis is returned separately, flagged, never blended into the ranked list.
-func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, platformExpID string, metric domain.MetricDefinition) ([]AgentStanding, []string, error) {
-	agg := "max"
-	if metric.Direction == "minimize" {
-		agg = "min"
-	}
-	promQL := fmt.Sprintf(`%s by (agent_id, metric_basis) (%s_over_time(experiment_metric_value{platform_experiment_id=%q, metric_name=%q}[30d]))`,
-		agg, agg, platformExpID, metric.Key)
-	samples, err := metricsdb.QueryVector(ctx, s.metricsDBURL, promQL)
+// The ranking itself is metricsdb.BestPerAgentOnMetric — the same call the stage ladder cuts with,
+// so a run's final standings and its mid-run cuts can never disagree about who is ahead. This
+// function only presents it: attaches each winner's code ref, sorts, and assigns ranks.
+func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) ([]AgentStanding, []string, error) {
+	best, nonRawAgents, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
 	if err != nil {
-		return nil, nil, fmt.Errorf("results: query %s: %w", metric.Key, err)
-	}
-
-	best := make(map[string]float64)
-	nonRaw := make(map[string]bool)
-	for _, sm := range samples {
-		agentID := sm.Labels["agent_id"]
-		if agentID == "" {
-			return nil, nil, fmt.Errorf("results: query %s: result missing agent_id", metric.Key)
-		}
-		basis := sm.Labels["metric_basis"]
-		if basis != "" && basis != "raw" {
-			nonRaw[agentID] = true
-			continue
-		}
-		// Two label-distinct series can both mean "raw": samples written before this label
-		// existed carry no metric_basis at all ("") alongside samples written after that
-		// explicitly say "raw". Both are eligible and must be merged with the same
-		// direction-aware aggregation as everything else here, not treated as a conflict.
-		if cur, exists := best[agentID]; exists {
-			if metric.Direction == "minimize" {
-				best[agentID] = math.Min(cur, sm.Value)
-			} else {
-				best[agentID] = math.Max(cur, sm.Value)
-			}
-			continue
-		}
-		best[agentID] = sm.Value
+		return nil, nil, fmt.Errorf("results: %w", err)
 	}
 
 	standings := make([]AgentStanding, 0, len(best))
-	for agentID, value := range best {
-		standings = append(standings, AgentStanding{AgentID: agentID, Best: value, Basis: "raw"})
+	for agentID, b := range best {
+		st := AgentStanding{AgentID: agentID, Best: b.Value, Basis: "raw", ExperimentID: b.ExperimentID}
+		if b.ExperimentID != "" {
+			exp, err := s.store.GetExperiment(ctx, b.ExperimentID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("results: %s: code ref for %s: %w", metric.Key, b.ExperimentID, err)
+			}
+			if exp != nil {
+				st.CodeRef = exp.CodeRef
+			}
+		}
+		standings = append(standings, st)
 	}
 	sort.Slice(standings, func(i, j int) bool {
 		if standings[i].Best != standings[j].Best {
@@ -232,11 +203,5 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, plat
 	for i := range standings {
 		standings[i].Rank = i + 1
 	}
-
-	nonRawAgents := make([]string, 0, len(nonRaw))
-	for agentID := range nonRaw {
-		nonRawAgents = append(nonRawAgents, agentID)
-	}
-	sort.Strings(nonRawAgents)
 	return standings, nonRawAgents, nil
 }

@@ -2,12 +2,33 @@ package metrics
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
+
+// A push may be buffered and retried through a network outage, so it is legitimately backdated;
+// it can never legitimately be from the future beyond ordinary clock jitter.
+const (
+	maxPushBacklog = 24 * time.Hour
+	maxPushSkew    = 5 * time.Minute
+)
+
+func validPushTime(at, now time.Time) error {
+	if at.IsZero() {
+		return fmt.Errorf("push has no timestamp")
+	}
+	if at.After(now.Add(maxPushSkew)) {
+		return fmt.Errorf("push timestamp %s is in the future", at)
+	}
+	if at.Before(now.Add(-maxPushBacklog)) {
+		return fmt.Errorf("push timestamp %s is older than %s", at, maxPushBacklog)
+	}
+	return nil
+}
 
 // PushRequest is the fresh observation payload sent by hypothesisloop-node-agent.
 type PushRequest struct {
@@ -41,6 +62,15 @@ func NewPushHandler(dbURL string) http.Handler {
 		}
 		var req PushRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		// The timestamp is the agent's own collection time, which is exactly why it must be
+		// bounded: it is written straight into the series billing is computed from, so a pod on a
+		// node with a skewed clock (or a payload with no timestamp at all, which unmarshals to
+		// year 1) corrupts elapsed time for every job on that node.
+		if err := validPushTime(req.Timestamp, time.Now().UTC()); err != nil {
+			log.Printf("metrics: rejecting push from node %s: %v", req.Node, err)
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}

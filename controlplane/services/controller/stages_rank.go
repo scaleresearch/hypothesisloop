@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 
 	"go.uber.org/zap"
@@ -53,7 +52,7 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	cutCount := make(map[string]int, len(survivors))
 	healthyMetrics := 0
 	for _, metric := range rankingMetrics {
-		cutOnMetric, hadData, err := c.cutOnMetric(ctx, pe.ID, metric, stage, survivors)
+		cutOnMetric, hadData, err := c.cutOnMetric(ctx, pe, metric, stage, survivors)
 		if err != nil {
 			c.logger.Warn("stages: metric ranking query failed, skipping metric",
 				zap.String("metric", metric.Key), zap.Error(err))
@@ -116,61 +115,36 @@ type ranked struct {
 }
 
 // cutOnMetric returns the agents cut on one metric, and whether the metric produced usable data.
-func (c *Controller) cutOnMetric(ctx context.Context, platformExpID string, metric domain.MetricDefinition, stage domain.Stage, survivors []string) ([]string, bool, error) {
+func (c *Controller) cutOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, stage domain.Stage, survivors []string) ([]string, bool, error) {
 	if c.metricsDBURL == "" {
 		return nil, false, nil
 	}
 
-	agg := "max"
-	if metric.Direction == "minimize" {
-		agg = "min"
-	}
-	// max_over_time/min_over_time are needed because Pushgateway stores only the latest pushed
-	// value per label set; the Prometheus timeseries tracks the scrape history, so a range query
-	// recovers the historical best.
-	//
-	// Grouped by (agent_id, metric_basis), not agent_id alone: a value reported on a rescaled/
-	// non-"raw" basis must never blend into the same min/max_over_time as a raw one — that is
-	// exactly the mismatch that let a rescaled loss look like a real win at a stage cut. Only
-	// "raw" values are used for cutting; an agent with only a non-raw value for this metric is
-	// treated as no data on it below, same as an agent that never reported it at all.
-	promQL := fmt.Sprintf(`%s by (agent_id, metric_basis) (%s_over_time(experiment_metric_value{platform_experiment_id=%q, metric_name=%q}[24h]))`,
-		agg, agg, platformExpID, metric.Key)
-	samples, err := metricsdb.QueryVector(ctx, c.metricsDBURL, promQL)
+	// Ranked by the same call the final standings use, so a mid-run cut and the final results can
+	// never rank the same field differently. Agents that only ever reported this metric on a
+	// non-"raw" basis come back flagged rather than ranked, and are treated here as no data on it
+	// — same as an agent that never reported it at all.
+	best, _, err := metricsdb.BestPerAgentOnMetric(ctx, c.metricsDBURL, pe, metric)
 	if err != nil {
-		return nil, false, fmt.Errorf("prometheus query: %w", err)
+		return nil, false, err
 	}
-	best := make(map[string]float64, len(samples))
-	for _, sm := range samples {
-		agentID := sm.Labels["agent_id"]
-		if agentID == "" {
-			return nil, false, fmt.Errorf("prometheus query: result missing agent_id")
-		}
-		basis := sm.Labels["metric_basis"]
-		if basis != "" && basis != "raw" {
-			continue
-		}
-		// "" (pre-label samples) and "raw" both mean raw and must be merged with the same
-		// direction-aware aggregation, not treated as a label conflict — see the identical
-		// merge in quota.standingsOnMetric.
-		if cur, exists := best[agentID]; exists {
-			if metric.Direction == "minimize" {
-				best[agentID] = math.Min(cur, sm.Value)
-			} else {
-				best[agentID] = math.Max(cur, sm.Value)
-			}
-			continue
-		}
-		best[agentID] = sm.Value
-	}
-	if len(best) == 0 {
-		return nil, false, nil
-	}
-
 	order := make([]ranked, 0, len(survivors))
+	withData := 0
 	for _, agentID := range survivors {
-		v, ok := best[agentID]
-		order = append(order, ranked{agentID: agentID, value: v, hasData: ok})
+		b, ok := best[agentID]
+		if ok {
+			withData++
+		}
+		order = append(order, ranked{agentID: agentID, value: b.Value, hasData: ok})
+	}
+	// Usable data means data from an agent still standing. Counting samples from any agent —
+	// including ones cut at earlier boundaries — made a metric that no current survivor reports
+	// look healthy while ranking them all as a single tie, which whole-tie-group protection then
+	// refuses to cut. Since an agent is only cut when it is below the line on *every* healthy
+	// metric, that one metric silently vetoed the entire boundary: stages advanced, nobody was
+	// ever cut, and nothing said so.
+	if withData == 0 {
+		return nil, false, nil
 	}
 	return cutBottom(order, metric.Direction, stage.EvictPct), true, nil
 }

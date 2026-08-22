@@ -57,6 +57,12 @@ type PhaseDetailer interface {
 // binary doesn't override it (see RequiredEnv("LOG_TAIL_LINES", ...) in each cmd/'s main.go).
 const DefaultLogTailLines = 100
 
+// finalStatusCaptureBudget bounds the whole last-chance observation-and-push phase for workloads
+// about to be deleted — the entire phase, not each workload, so a slow or unreachable control
+// plane costs the pass this much once rather than once per workload. Deleting them is the pass's
+// actual job; capturing why they ended is worth a few seconds of it and no more.
+const finalStatusCaptureBudget = 10 * time.Second
+
 // splitLongLines breaks any line over maxLineChars into multiple lines, done once here (client
 // side, before the report ever leaves this process) rather than left to the control plane to
 // truncate silently on ingest -- this way nothing is ever dropped, only wrapped. maxLineChars
@@ -64,6 +70,9 @@ const DefaultLogTailLines = 100
 // — large enough to keep a real compiler error or stack frame intact, small enough that one
 // pathological line (a base64 blob, a JSON dump with no newlines) can't blow up a status push.
 func splitLongLines(lines []string, maxLineChars int) []string {
+	if maxLineChars <= 0 {
+		return lines
+	}
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
 		for len(line) > maxLineChars {
@@ -175,6 +184,34 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("create workload %s: %w", id, err))
 			continue
 		}
+	}
+
+	// Deleting a workload destroys the only copy of why it ended: once the pod is gone, its log
+	// tail and its container's termination reason are unreadable forever. Observe everything once
+	// more and push before deleting, or a job that died between two status pushes reaches the
+	// control plane as FAILED with nothing attached — which is what turned single crashes into
+	// long blind debugging sessions.
+	//
+	// Deliberately the ordinary full status push, not a targeted one for the workloads about to
+	// go: a push IS a complete cluster snapshot (metricsdb.RecordJobStatuses rejects anything
+	// else), and a job missing from the newest snapshot reads as JobPhaseGone — which the
+	// controller evicts. Pushing a snapshot containing only the dying jobs would therefore tell
+	// the control plane that every other job on this cluster had vanished.
+	//
+	// Bounded, because the deletions must happen this pass whatever the control plane is doing:
+	// when the budget is spent the workloads are simply deleted uncaptured, since a workload left
+	// running is worse than a lost log line.
+	needsFinalCapture := false
+	for id := range actualSet {
+		if desiredByID[id] == nil {
+			needsFinalCapture = true
+			break
+		}
+	}
+	if needsFinalCapture {
+		captureCtx, cancelCapture := context.WithTimeout(ctx, finalStatusCaptureBudget)
+		a.reportChangedStatuses(captureCtx)
+		cancelCapture()
 	}
 
 	for id := range actualSet {
@@ -304,72 +341,90 @@ func (a *Agent) reportChangedStatuses(ctx context.Context) {
 		return
 	}
 
+	// All or nothing, deliberately. A push is a complete cluster snapshot — the control plane
+	// rejects anything else (metricsdb.RecordJobStatuses) and reads a job missing from the newest
+	// snapshot as JobPhaseGone, which the controller evicts. So omitting a job we merely failed to
+	// observe would report it as vanished and get it killed, which is far worse than this tick
+	// reporting nothing: a cluster with no fresh snapshot reads as "cannot tell", and the
+	// controller declines to act on it (see checkSilence's !found branch).
 	reports := make([]statusReportWire, 0, len(ids))
 	for _, id := range ids {
-		// One combined poll keeps phase and UID from two different reads from being combined
-		// into an impossible observation during a delete/recreate race.
-		phase, _, err := a.Executor.PollJobPhaseAndUID(ctx, id)
-		if err != nil {
-			a.Log("poll job phase %s: %v", id, err)
+		report, ok := a.statusReportFor(ctx, id)
+		if !ok {
+			a.Log("status snapshot incomplete (%s unobservable); skipping this push rather than reporting the rest as gone", id)
 			return
 		}
-		var admittedAcceleratorType, admittedNode string
-		if phase != workload.JobPhaseGone {
-			t, node, consistent, err := a.Executor.ResolveAdmittedAcceleratorType(ctx, id)
-			if err != nil {
-				a.Log("resolve admitted accelerator type %s: %v", id, err)
-				return
-			}
-			admittedAcceleratorType = string(t)
-			admittedNode = node
-			if !consistent {
-				a.Log("experiment %s: scheduled ranks landed on inconsistent accelerator types", id)
-				return
-			}
-		}
-
-		var logTail []string
-		if tailer, ok := a.Executor.(LogTailer); ok && phase != workload.JobPhaseGone {
-			maxLines := a.LogTailLines
-			if maxLines <= 0 {
-				maxLines = DefaultLogTailLines
-			}
-			// Best-effort: a job that hasn't produced output yet, or a transient read error,
-			// must not block reporting phase for every other job in this same batch.
-			logTail, err = tailer.FetchLogTail(ctx, id, maxLines)
-			if err != nil {
-				a.Log("fetch log tail %s: %v", id, err)
-				logTail = nil
-			} else {
-				logTail = splitLongLines(logTail, a.MaxLogLineChars)
-			}
-		}
-
-		var reason, message string
-		var restartCount int32
-		if detailer, ok := a.Executor.(PhaseDetailer); ok && phase != workload.JobPhaseGone {
-			// Best-effort, same as log tail above: a transient read error must not block
-			// reporting phase for every other job in this same batch.
-			reason, message, restartCount, err = detailer.PollPhaseDetail(ctx, id)
-			if err != nil {
-				a.Log("poll phase detail %s: %v", id, err)
-				reason, message, restartCount = "", "", 0
-			}
-		}
-
-		reports = append(reports, statusReportWire{
-			ExperimentID:            id,
-			Phase:                   phase.String(),
-			AdmittedAcceleratorType: admittedAcceleratorType,
-			AdmittedNode:            admittedNode,
-			LogTail:                 logTail,
-			Reason:                  reason,
-			Message:                 message,
-			RestartCount:            restartCount,
-		})
+		reports = append(reports, report)
 	}
 
 	a.pushStatus(ctx, reports)
+}
+
+// statusReportFor observes one job: its phase, where it landed, its log tail and why its
+// container is in the state it is in. ok is false when the job could not be observed coherently,
+// which costs the whole snapshot — see reportChangedStatuses for why a partial one is dangerous.
+func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWire, bool) {
+	// One combined poll keeps phase and UID from two different reads from being combined
+	// into an impossible observation during a delete/recreate race.
+	phase, _, err := a.Executor.PollJobPhaseAndUID(ctx, id)
+	if err != nil {
+		a.Log("poll job phase %s: %v", id, err)
+		return statusReportWire{}, false
+	}
+	var admittedAcceleratorType, admittedNode string
+	if phase != workload.JobPhaseGone {
+		t, node, consistent, err := a.Executor.ResolveAdmittedAcceleratorType(ctx, id)
+		if err != nil {
+			a.Log("resolve admitted accelerator type %s: %v", id, err)
+			return statusReportWire{}, false
+		}
+		admittedAcceleratorType = string(t)
+		admittedNode = node
+		if !consistent {
+			a.Log("experiment %s: scheduled ranks landed on inconsistent accelerator types", id)
+			return statusReportWire{}, false
+		}
+	}
+
+	var logTail []string
+	if tailer, ok := a.Executor.(LogTailer); ok && phase != workload.JobPhaseGone {
+		maxLines := a.LogTailLines
+		if maxLines <= 0 {
+			maxLines = DefaultLogTailLines
+		}
+		// Best-effort: a job that hasn't produced output yet, or a transient read error,
+		// must not block reporting phase for every other job in this same batch.
+		logTail, err = tailer.FetchLogTail(ctx, id, maxLines)
+		if err != nil {
+			a.Log("fetch log tail %s: %v", id, err)
+			logTail = nil
+		} else {
+			logTail = splitLongLines(logTail, a.MaxLogLineChars)
+		}
+	}
+
+	var reason, message string
+	var restartCount int32
+	if detailer, ok := a.Executor.(PhaseDetailer); ok && phase != workload.JobPhaseGone {
+		// Best-effort, same as log tail above: a transient read error must not block
+		// reporting phase for every other job in this same batch.
+		reason, message, restartCount, err = detailer.PollPhaseDetail(ctx, id)
+		if err != nil {
+			a.Log("poll phase detail %s: %v", id, err)
+			reason, message, restartCount = "", "", 0
+		}
+	}
+
+	return statusReportWire{
+		ExperimentID:            id,
+		Phase:                   phase.String(),
+		AdmittedAcceleratorType: admittedAcceleratorType,
+		AdmittedNode:            admittedNode,
+		LogTail:                 logTail,
+		Reason:                  reason,
+		Message:                 message,
+		RestartCount:            restartCount,
+	}, true
 }
 
 type pushStatusResponse struct {

@@ -18,6 +18,7 @@ import {
   fetchHypotheses,
 } from '@/lib/api'
 import type { StagesStatus } from '@/lib/api'
+import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries, MetricDefinition, Hypothesis } from '@/types'
 import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -28,7 +29,7 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
-import { EVICTION_REASON_LABELS } from '@/lib/eviction'
+import { evictionCode, evictionLabel } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
@@ -51,7 +52,7 @@ function JobMetricMini({ jobId, metricName }: { jobId: string; metricName?: stri
     .filter((p) => p.recorded_at && (!metricName || p.metric_name === metricName))
     .map((p) => ({
       t: new Date(p.recorded_at as string).getTime(),
-      value: p.metric_value ?? (p as any).value,
+      value: p.metric_value,
     }))
     .sort((a, b) => a.t - b.t)
   if (chartData.length === 0) {
@@ -562,13 +563,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // wrong versus routine stage cuts.
   const evicted = (experiments ?? []).filter(e => e.status === 'EVICTED')
   const evictionReasonCounts = evicted.reduce<Record<string, number>>((acc, e) => {
-    const r = e.eviction_reason || 'unknown'
+    // Keyed on the code alone — a reason may carry a ': detail' explanation (see lib/eviction).
+    const r = evictionCode(e.eviction_reason) || 'unknown'
     acc[r] = (acc[r] ?? 0) + 1
     return acc
   }, {})
   const evictionBreakdown = Object.entries(evictionReasonCounts)
     .sort((a, b) => b[1] - a[1])
-    .map(([r, n]) => `${EVICTION_REASON_LABELS[r] ?? r} (${n})`)
+    .map(([r, n]) => `${evictionLabel(r)} (${n})`)
     .join(' · ')
 
   // The metric that actually determines standings/cuts — role: 'ranking' when the platform
@@ -987,8 +989,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 {recent.map(exp => {
                   const metric = finalMetricByJobId.get(exp.id)
                   const cost = exp.estimated_cost_acch
-                  const evictionLabel = exp.eviction_reason
-                    ? (EVICTION_REASON_LABELS[exp.eviction_reason] ?? exp.eviction_reason)
+                  const evictionText = exp.eviction_reason
+                    ? evictionLabel(exp.eviction_reason)
                     : undefined
                   return (
                     <tr key={exp.id}>
@@ -998,9 +1000,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <td className="mono">{exp.agent_id}</td>
                       <td>
                         <StatusBadge status={exp.status} />
-                        {evictionLabel && (
+                        {evictionText && (
                           <div className="text-dim" style={{ fontSize: 10, marginTop: 2 }} title="eviction_reason">
-                            {evictionLabel}
+                            {evictionText}
                           </div>
                         )}
                       </td>
@@ -1033,15 +1035,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               </thead>
               <tbody>
                 {quotas.map(q => {
-                  const gRem = q.guaranteed_accelerator_hours - q.used_guaranteed_acch
-                  const bRem = q.burst_accelerator_hours - q.used_burst_acch
+                  const remaining = quotaRemainingAccH(q)
                   return (
                     <tr key={q.id}>
                       <td className="mono" style={{ fontWeight: 600 }}>{q.agent_id}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
                       <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
-                      <td className="mono" style={{ fontSize: 11, color: gRem + bRem > 0 ? semantic.success : semantic.danger }}>
-                        {formatAccH(Math.max(0, gRem) + Math.max(0, bRem))} AccH
+                      <td className="mono" style={{ fontSize: 11, color: remaining > 0 ? semantic.success : semantic.danger }}>
+                        {formatAccH(remaining)} AccH
                       </td>
                       {!!pe.budget_cpu_core_hours && (
                         <td className="mono" style={{ fontSize: 11 }}>

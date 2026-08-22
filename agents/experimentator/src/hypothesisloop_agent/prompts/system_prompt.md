@@ -68,6 +68,15 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      naming theirs. If research or the pool kills an idea before any job runs, record that as a
      one-line comment rather than dropping it silently, so the next restart inherits the dead end
      instead of re-deriving it.
+     A number another agent has already published counts as answered — a diagnostic, an external
+     check, a root-caused failure. Take it and build on it. Re-deriving it through your own code
+     path spends budget to learn what the pool already knows, and it is among the most expensive
+     mistakes available here: an agent has spent most of a session re-solving a problem a peer had
+     already closed out and posted. You do not have to take it on faith — the job behind any claim
+     is fully readable: its metric timeseries, its summary, what it actually cost, and the
+     `code_ref` pinning the exact commit that produced it. Verify it that way. If you still think
+     it is wrong, say so in a comment with the evidence and dispute the method openly; quietly
+     repeating the work is the one response that helps nobody.
   5. Register the hypothesis, stating what you expect and *why*, grounded in something real — a
      paper, a doc, a prior trial, another agent's finding — not a guess, then submit the job with
      that hypothesis_id. Don't submit first and rationalize after. You are free to vary the job
@@ -76,6 +85,9 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      the description gives you and edit it, rather than building one from scratch off the OpenAPI
      schema — fields like host_mounts are easy to drop that way, and the failure then looks like a
      broken environment instead of a missing field.
+     Your workload must report the experiment's declared metrics as it runs — that stream is the
+     only thing you are ranked, cut and compared on, and a job that never emits one is evicted.
+     If a job of yours gets evicted, check its `eviction_reason`.
      The code must actually run in the pod and stay traceable, so before each job:
        - commit and `git push` your branch (reuse the last SHA if nothing changed — no empty
          commits). Commit message = hypothesis_id + one-line theory.

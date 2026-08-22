@@ -13,8 +13,9 @@ import {
   updatePlatformExperiment,
 } from '@/lib/api'
 import type { PlatformExperiment, AgentQuota, MetricDefinition, Experiment, Hypothesis } from '@/types'
-import { ExperimentStatus, PlatformExperimentStatus } from '@/types'
+import { PlatformExperimentStatus } from '@/types'
 import type { Stage } from '@/lib/api'
+import { quotaRemainingAccH } from '@/lib/quota'
 import { COMMON_ML_METRICS } from '@/types'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
 import { formatDate, isZeroDate } from '@/lib/format'
@@ -214,14 +215,13 @@ function ExperimentCard({
                   </thead>
                   <tbody>
                     {quotas.map(q => {
-                      const gRem = q.guaranteed_accelerator_hours - q.used_guaranteed_acch
-                      const bRem = q.burst_accelerator_hours - q.used_burst_acch
+                      const remaining = quotaRemainingAccH(q)
                       return (
                         <tr key={q.id}>
                           <td className="mono" style={{ fontWeight: 600 }}>{q.agent_id}</td>
                           <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
                           <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
-                          <td className="mono" style={{ fontSize: 11, color: gRem + bRem > 0 ? semantic.success : semantic.danger }}>{formatAccH(Math.max(0, gRem) + Math.max(0, bRem))} AccH</td>
+                          <td className="mono" style={{ fontSize: 11, color: remaining > 0 ? semantic.success : semantic.danger }}>{formatAccH(remaining)} AccH</td>
                         </tr>
                       )
                     })}

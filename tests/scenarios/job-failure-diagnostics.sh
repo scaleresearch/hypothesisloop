@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# What the platform can tell an agent about a job that died. Both halves are about diagnosis
+# surviving cleanup, which is where this used to fail silently:
+#
+#   1. A crashing job's own output must still be readable after its workload is gone. Terminal
+#      status removes a job from desired state, and the cluster-agent's next reconcile pass deletes
+#      the workload — pod, logs and container termination reason with it. The runtime captures and
+#      pushes that output *before* deleting; without it, whether a failure was diagnosable came
+#      down to whether a status push happened to land first, and an agent debugging a dead job saw
+#      a bare FAILED with nothing attached.
+#   2. A job that can never be scheduled (a bad image) is evicted early as `unschedulable` and
+#      refunded, rather than sitting on a reservation until the generic stuck-pending timeout.
+#
+# API-only and parallel-safe: neither job consumes an accelerator for any real length of time, and
+# neither touches shared cluster state.
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$DIR/../lib/common.sh"
+source "$DIR/../lib/api.sh"
+
+AGENT="agent-failure-diag-${RUN_ID}"
+register_agent "$AGENT"
+PE_ID=$(create_platform_experiment "failure-diagnostics-${RUN_ID}" 10.0 1 5)
+signup_and_start "$PE_ID" "$AGENT"
+
+echo "  -- a crashing job's output outlives its workload --"
+# A marker string this scenario can find unambiguously in the log tail, and a distinctive non-zero
+# exit code. max_retries=0 so the job reaches FAILED on the first attempt instead of retrying three
+# times inside the scenario's ceiling.
+MARKER="HYPOTHESISLOOP-CRASH-MARKER-${RUN_ID}"
+CRASH_OVERRIDE=$(py "
+import json
+print(json.dumps({
+  'command': ['/bin/sh', '-c'],
+  'args': ['echo \"$MARKER\" >&2; exit 42'],
+  'max_retries': 0,
+}))
+")
+CRASH_JOB=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "" "" "" "" "$CRASH_OVERRIDE")
+echo "  ==> $CRASH_JOB submitted (exits 42 after printing its marker)"
+
+CS=$(wait_for_status "$CRASH_JOB" "FAILED,EVICTED,COMPLETED" "$ADMISSION_BUDGET_SECONDS" || true)
+# FAILED specifically: a job whose container exits non-zero failed. Accepting EVICTED too would let
+# an unrelated policy eviction satisfy this scenario while the crash diagnosis went missing.
+[[ "$CS" == "FAILED" ]] \
+  && pass "crashing job reached FAILED" \
+  || fail "crashing job ended as '$CS' — expected FAILED (exit 42 is a container failure, not a policy eviction)"
+
+# The workload is deleted on a reconcile pass *after* the status transition, so poll rather than
+# sampling once: the assertion is that the output is still there once cleanup has had time to run,
+# not that it is there immediately.
+# ?n well above the default 10: the tail is sectioned (failed attempt / current attempt) and the
+# marker must not be pushed out of a short window by section headers.
+job_logs() { curl -sf "$API_URL/experiments/$1/logs?n=200" || true; }
+logs_have_marker() { job_logs "$1" | grep -q "$MARKER"; }
+if wait_until "crashed job's log tail reaches the control plane" 30 1 logs_have_marker "$CRASH_JOB"; then
+  pass "crashed job's own stderr is readable through the API"
+else
+  fail "crashed job's output never reached the control plane — its log tail died with its workload"
+fi
+
+# Deletion is what used to destroy this. Give the cluster-agent several reconcile passes to remove
+# the workload, then re-read: the record must still explain the failure.
+sleep 15
+logs_have_marker "$CRASH_JOB" \
+  && pass "log tail still readable after the workload was cleaned up" \
+  || fail "log tail disappeared once the workload was deleted — the final capture did not survive cleanup"
+
+# phase_detail is a nested object on the experiment ({reason, message, restart_count}), enriched
+# from the metrics store on read — not a flat field.
+phase_detail_field() {
+  curl -sf "$API_URL/experiments/$1" \
+    | py "import sys,json; print((json.load(sys.stdin).get('phase_detail') or {}).get('$2',''))"
+}
+REASON=$(phase_detail_field "$CRASH_JOB" reason)
+MESSAGE=$(phase_detail_field "$CRASH_JOB" message)
+echo "  phase_detail: reason='${REASON}' message='${MESSAGE}'"
+# The specific reason, not merely a non-empty one: any nonblank string would otherwise satisfy this
+# while the real termination detail was lost (domain.PhaseReasonContainerFailed).
+[[ "$REASON" == "container_failed" ]] \
+  && pass "terminal record names the container failure (reason=$REASON)" \
+  || fail "phase_detail.reason is '$REASON', expected container_failed — the container's own termination detail did not survive"
+# The runtime formats this as "container exited with code N" (see terminatedPhaseDetail), so the
+# exit code the workload actually returned must be recoverable from the record.
+[[ "$MESSAGE" == *"container exited with code 42"* ]] \
+  && pass "terminal record carries the container's real exit code" \
+  || fail "phase_detail.message is '$MESSAGE', expected it to contain 'container exited with code 42'"
+
+echo "  -- an unschedulable job is evicted early and refunded, not left to time out --"
+USED_BEFORE=$(quota_used_guaranteed "$PE_ID" "$AGENT")
+BAD_IMAGE_OVERRIDE='{"image": "localhost/hypothesisloop-image-that-does-not-exist:nope", "max_retries": 0}'
+BAD_JOB=$(submit_job "$PE_ID" "$AGENT" "guaranteed" "0.02" "" "" "" "" "$BAD_IMAGE_OVERRIDE")
+echo "  ==> $BAD_JOB submitted with an image that cannot be pulled"
+
+BS=$(wait_for_status "$BAD_JOB" "EVICTED,FAILED,REJECTED" "$ADMISSION_BUDGET_SECONDS" || true)
+if [[ "$BS" == "EVICTED" || "$BS" == "FAILED" ]]; then
+  pass "unpullable job was terminated rather than left pending ($BS)"
+  BAD_REASON=$(get_field "$BAD_JOB" eviction_reason)
+  echo "  bad-image phase_detail: reason='$(phase_detail_field "$BAD_JOB" reason)' message='$(phase_detail_field "$BAD_JOB" message)'"
+  # unschedulable specifically. The generic stuck-pending timeout is 300s (see
+  # scheduler.stuck_pending_timeout_seconds) and this scenario only waits the 60s admission budget,
+  # so reaching a terminal state this fast can only be the early image-specific verdict — which is
+  # the behaviour being tested: believe the runtime's phase detail instead of waiting out a job
+  # that can never start.
+  [[ "$BAD_REASON" == "unschedulable" ]] \
+    && pass "evicted as unschedulable — the runtime's phase detail was believed, not waited out" \
+    || fail "unpullable job ended with eviction_reason='$BAD_REASON', expected unschedulable"
+
+  # It never ran, so it consumed nothing: its reservation must come back in full.
+  refunded() {
+    local now
+    now=$(quota_used_guaranteed "$PE_ID" "$AGENT")
+    py "import sys; sys.exit(0 if abs(float('$now' or 0) - float('$USED_BEFORE' or 0)) < 1e-6 else 1)"
+  }
+  if wait_until "unschedulable job's reservation returned" 30 1 refunded; then
+    pass "reservation was returned in full — a job that never ran is billed nothing"
+  else
+    fail "used_guaranteed_acch is $(quota_used_guaranteed "$PE_ID" "$AGENT"), was $USED_BEFORE — an unschedulable job kept part of its reservation"
+  fi
+else
+  fail "unpullable job is '$BS' after ${ADMISSION_BUDGET_SECONDS}s — nothing terminated it"
+fi
+
+close_platform_experiment "$PE_ID"
+finish

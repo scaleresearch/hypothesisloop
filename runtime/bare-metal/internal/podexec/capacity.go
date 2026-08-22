@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/moby/moby/client"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -220,6 +222,102 @@ func (e *Executor) GetNodeLabels(ctx context.Context, clusterName string) (map[s
 	return map[string]map[string]map[string]string{clusterName: nodeLabels}, nil
 }
 
+// devicesInUseExcluding returns the set of host device paths (case-folded, matching the
+// case-insensitive comparison already used by GetLiveAcceleratorCapacitySnapshot above) actually
+// bound to a running/pending managed container, skipping excludeExperimentID's own container(s)
+// for the same reason sumRunningRequestsExcluding does.
+//
+// resolvePlacementFor used to infer "in use" positionally — treating the first N devices (in
+// probe order) matching a type as claimed, where N was just a per-type running count. That
+// assumes in-use devices are always a prefix of probe order, which doesn't hold once a
+// mid-probe-order device is freed while an earlier or later one stays busy: the next placement
+// could then hand out an already-claimed device. Inspecting each container's actual
+// HostConfig.Devices instead ties "in use" to the specific device path really passed through.
+func (e *Executor) devicesInUseExcluding(ctx context.Context, excludeExperimentID string) (map[string]bool, error) {
+	containers, err := e.listManagedContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inUse := map[string]bool{}
+	for _, c := range containers {
+		if excludeExperimentID != "" && c.Labels[LabelExperimentID] == excludeExperimentID {
+			continue
+		}
+		if c.State != "running" && c.State != "created" {
+			continue
+		}
+		if c.Labels[LabelAcceleratorType] == "" {
+			continue
+		}
+		resp, err := e.docker.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("podexec: inspect container %s: %w", c.ID, err)
+		}
+		if resp.Container.HostConfig == nil {
+			continue
+		}
+		for _, d := range resp.Container.HostConfig.Devices {
+			inUse[strings.ToLower(d.PathOnHost)] = true
+		}
+		// NVIDIA devices are never in HostConfig.Devices: startContainer passes them through
+		// DeviceRequests so the nvidia-container-toolkit hook runs. Reading only Devices meant
+		// every NVIDIA GPU always looked free, and placement handed the same chip to job after
+		// job while the rest of the node sat idle.
+		for _, req := range resp.Container.HostConfig.DeviceRequests {
+			if req.Driver != "nvidia" {
+				continue
+			}
+			for _, id := range req.DeviceIDs {
+				inUse[strings.ToLower(nvidiaDevicePath(id))] = true
+			}
+		}
+	}
+	return inUse, nil
+}
+
+// nvidiaDevicePath reverses startContainer's split of a device path into a DeviceRequest ID.
+func nvidiaDevicePath(deviceID string) string {
+	return "/dev/nvidia" + deviceID
+}
+
+// currentDevicesFor returns the device paths the experiment's live container already holds, in
+// the order they were assigned, or nil if it has no live container.
+func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) ([]string, error) {
+	containers, err := e.listManagedContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range containers {
+		if c.Labels[LabelExperimentID] != experimentID {
+			continue
+		}
+		if c.State != "running" && c.State != "created" {
+			continue
+		}
+		resp, err := e.docker.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("podexec: inspect container %s: %w", c.ID, err)
+		}
+		if resp.Container.HostConfig == nil {
+			continue
+		}
+		var devices []string
+		for _, d := range resp.Container.HostConfig.Devices {
+			devices = append(devices, d.PathOnHost)
+		}
+		for _, req := range resp.Container.HostConfig.DeviceRequests {
+			if req.Driver != "nvidia" {
+				continue
+			}
+			for _, id := range req.DeviceIDs {
+				devices = append(devices, nvidiaDevicePath(id))
+			}
+		}
+		return devices, nil
+	}
+	return nil, nil
+}
+
 // resolvePlacementFor picks which free local devices satisfy exp's AcceleratorType/Count —
 // the single-node analogue of k8sexec's ResolveAcceleratorPlacement. Placement is a pure
 // function of live device probes plus current container labels, recomputed every call: no
@@ -232,11 +330,19 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 	if err != nil {
 		return Placement{}, err
 	}
-	requests, err := e.sumRunningRequestsExcluding(ctx, exp.ID)
+	// A job that already has a container keeps the devices it is running on. Re-resolving
+	// first-free would move a healthy job onto a different chip the moment a neighbour finished,
+	// which changes its spec hash, makes reconcile drift-delete it, and terminalizes real work.
+	if current, err := e.currentDevicesFor(ctx, exp.ID); err != nil {
+		return Placement{}, err
+	} else if int64(len(current)) == int64(exp.Job.AcceleratorCount) {
+		return Placement{DevicePaths: current}, nil
+	}
+
+	inUseDevices, err := e.devicesInUseExcluding(ctx, exp.ID)
 	if err != nil {
 		return Placement{}, err
 	}
-	inUseByLabel := requests.accelerators
 
 	candidateTypes := append([]domain.AcceleratorType{exp.AcceleratorType}, exp.Job.AcceptableAcceleratorTypes...)
 	for _, candidate := range candidateTypes {
@@ -244,14 +350,11 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 			continue
 		}
 		var freeDevices []string
-		used := int64(0)
-		limit := inUseByLabel[string(candidate)]
 		for _, d := range devices {
 			if !hasLabel(d.Labels, string(candidate)) {
 				continue
 			}
-			if used < limit {
-				used++
+			if inUseDevices[strings.ToLower(d.DevicePath)] {
 				continue // already claimed by a running container
 			}
 			freeDevices = append(freeDevices, d.DevicePath)

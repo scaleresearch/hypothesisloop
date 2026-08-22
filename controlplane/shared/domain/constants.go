@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 // MinRemainingHours is the minimum rescheduled duration after preemption (15 minutes).
 const MinRemainingHours = 0.25
 
@@ -53,18 +55,37 @@ func (s ExperimentStatus) IsTerminal() bool {
 // EvictionReason classifies why a job was terminated early.
 type EvictionReason string
 
+// WithDetail appends a human-readable explanation to a reason, in the same "code: detail" shape
+// the scheduler already writes into NotAdmittedReason. The code stays the first token, so anything
+// matching on the reason keeps working by prefix; the detail exists because a terminated job is
+// the one outcome an agent cannot investigate afterwards — its workload is gone — so whatever the
+// platform knew at the moment it decided has to be recorded there and then.
+func (r EvictionReason) WithDetail(detail string) EvictionReason {
+	return EvictionReason(string(r) + ": " + detail)
+}
+
+// Code strips any WithDetail suffix, for callers comparing against the constants above.
+func (r EvictionReason) Code() EvictionReason {
+	if code, _, found := strings.Cut(string(r), ":"); found {
+		return EvictionReason(code)
+	}
+	return r
+}
+
 const (
 	EvictionSilent EvictionReason = "silent"
-	// EvictionNeverReportedMetrics is silence by a job that never reported a single metric, as
-	// opposed to one that reported and then went quiet. The distinction matters because the
-	// causes are different: a hung training process versus a reporting path that never worked
-	// at all (wrong URL, a stale metrics helper baked into the image, an exception the workload
-	// swallows). Reported as plain silence, both look like "the job hung".
+	// EvictionNeverReportedMetrics is a job that never emitted a metric its platform experiment
+	// declared, as opposed to one that reported and then went quiet. The distinction matters
+	// because the causes are different: a hung training process versus a reporting path that
+	// never worked at all (wrong URL, a stale metrics helper baked into the image, an exception
+	// the workload swallows). Reported as plain silence, both look like "the job hung".
+	//
+	// Fires whether or not the pod is still alive: a live pod emitting nothing cannot be ranked,
+	// cut or compared against anything, so it holds an accelerator and bills for it while
+	// producing no evidence at all. See controller.checkSilence for the grace period.
 	EvictionNeverReportedMetrics EvictionReason = "never_reported_metrics"
-	EvictionCrashLoop            EvictionReason = "crash_loop"
 	EvictionQuotaExhaustion      EvictionReason = "quota_exhaustion"
 	EvictionExperimentClosed     EvictionReason = "experiment_closed"
-	EvictionAgentRemoved         EvictionReason = "agent_removed"
 	EvictionCancelled            EvictionReason = "cancelled"
 	// EvictionStageCut terminates an agent's jobs when it is cut at a stage boundary.
 	// Terminal for the rest of the platform experiment — see the stage ladder.
@@ -95,6 +116,33 @@ const (
 	// reporting; this is no pod at all (e.g. an orphaned pod lost across a host reboot). Without
 	// this, such a job stays RUNNING forever and its quota is never released — see checks.go.
 	EvictionWorkloadGone EvictionReason = "workload_gone"
+	// EvictionClusterUnreachable marks a job whose cluster has pushed no status snapshot at all
+	// for longer than ClusterSilenceCeilingSeconds. Distinct from EvictionWorkloadGone, which
+	// requires a fresh snapshot that omits the job: here there is no fresh snapshot to read, so
+	// nothing can be concluded about the job itself — only about its cluster.
+	//
+	// Without a ceiling this state is unbounded, and a cluster that dies or partitions strands
+	// every reservation on it forever. Eviction is expressed purely as desired state, so if the
+	// cluster does come back its agent reconciles the job away on its next pull; the accelerator
+	// is genuinely occupied until then, which is the unavoidable cost of an unreachable cluster.
+	EvictionClusterUnreachable EvictionReason = "cluster_unreachable"
+	// EvictionFlavorMismatch marks a job whose cluster reported it running on an accelerator type
+	// other than the one reserved and billed for it. Unlike missing telemetry this cannot resolve
+	// itself by waiting — the placement already happened and is wrong — so it is terminal rather
+	// than retried. Only raised for an observation newer than the experiment's current
+	// submitted_at, so a stale sample from a previous admission can never trigger it.
+	EvictionFlavorMismatch EvictionReason = "flavor_mismatch"
+	// EvictionAcceleratorTypeUnobservable marks a job whose pod the runtime reports as Running but
+	// whose accelerator type never became readable, so the lifecycle could not be advanced to
+	// RUNNING. Deliberately not EvictionStuckPending: the pod did start and is burning real
+	// hardware, and calling that "stuck pending" would both misname the fault and imply a
+	// never-ran refund. See scheduler.JobWatcher.reconcileOne.
+	EvictionAcceleratorTypeUnobservable EvictionReason = "accelerator_type_unobservable"
+	// EvictionPreemptedForGuaranteed marks a burst job returned to QUEUED to free capacity for a
+	// guaranteed one. Not terminal — the job runs again — so it doubles as the durable record
+	// that this job has already executed once, which is what forbids re-admitting it onto a
+	// different accelerator flavor (see candidateAcceleratorTypes).
+	EvictionPreemptedForGuaranteed EvictionReason = "preempted_for_guaranteed"
 )
 
 // PhaseDetail is what a runtime observed about why a job's container hasn't started (or

@@ -208,6 +208,25 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-job-cost", Method: "GET", Path: "/experiments/{id}/cost",
+		Summary: "Get what a job actually cost", Tags: []string{"platform-experiments"},
+		Description: "Actual consumption, not the admission-time estimate: confirmed-alive hours and the " +
+			"accelerator/CPU hours billed for them. `settled` distinguishes a final bill from a running total. " +
+			"The estimate is returned alongside so the two can be compared.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{ Body *JobCost }, error) {
+		cost, err := peh.svc.JobCost(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if cost == nil {
+			return nil, huma.Error404NotFound("experiment not found")
+		}
+		return &struct{ Body *JobCost }{Body: cost}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Returns status, budget, the stage ladder and the list of signed-up agents.",

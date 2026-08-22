@@ -15,6 +15,15 @@ import (
 // restart.
 const aliveHeartbeatMetric = "experiment_alive_heartbeat"
 
+// The two series a job's own reporting writes: its metric values, and how far through the run each
+// was recorded. Exported because the writer (registry.RecordMetric) and every reader must name the
+// same series — a mistyped metric name in a PromQL selector is not an error, it is an empty result,
+// which reads downstream as "this run produced no measurements".
+const (
+	ExperimentMetricValue    = "experiment_metric_value"
+	ExperimentMetricFraction = "experiment_metric_fraction"
+)
+
 // RecordObservation writes a single "experimentID was alive" sample at `at` — the agent's own
 // collection time, not receipt time (see WriteGaugeAt). extraLabels (pod_uid, node, ...) are
 // carried for debugging only; every read here collapses across them.

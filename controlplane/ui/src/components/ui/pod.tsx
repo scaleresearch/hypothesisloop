@@ -51,15 +51,15 @@ interface PodContentProps {
 }
 
 export function PodContent({ children, className, style, onClick, scrollX }: PodContentProps) {
-  if (scrollX) {
-    return (
-      <div style={{ overflowX: 'auto' }}>
-        {children}
-      </div>
-    )
-  }
+  // scrollX is a modifier on the standard content box, not a different box: returning early here
+  // dropped wa-pod-content along with every caller-supplied prop, so 15+ scrolling panels lost
+  // the padding every other panel has.
   return (
-    <div className={clsx('wa-pod-content', className)} style={style} onClick={onClick}>
+    <div
+      className={clsx('wa-pod-content', className)}
+      style={scrollX ? { overflowX: 'auto', ...style } : style}
+      onClick={onClick}
+    >
       {children}
     </div>
   )

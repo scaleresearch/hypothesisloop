@@ -105,6 +105,20 @@ func ValidateMetricDefinitions(defs []MetricDefinition) error {
 	return nil
 }
 
+// RequireRankingMetric rejects a metric contract that can never rank anyone. Constraint and
+// attribute metrics gate and describe; only a ranking metric orders a field. Without one the
+// ladder runs to the end cutting nobody and the results endpoint returns no standings — a run
+// that consumed a real budget and answered nothing, silently. Enforced where the contract is
+// written (create/update), not on read: a row predating this rule must still reconcile.
+func RequireRankingMetric(defs []MetricDefinition) error {
+	for _, d := range defs {
+		if d.EffectiveRole() == MetricRoleRanking {
+			return nil
+		}
+	}
+	return fmt.Errorf("at least one metric must have role \"ranking\": nothing else can order the field or cut a stage")
+}
+
 // MetricDefinitionsEqual reports whether two metric declarations are the same set in the same
 // order — order matters (the first ranking metric is primary), so this is not a set comparison.
 func MetricDefinitionsEqual(a, b []MetricDefinition) bool {

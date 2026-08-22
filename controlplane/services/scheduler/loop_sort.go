@@ -78,6 +78,13 @@ func sortGuaranteed(exps []*domain.Experiment, quotaMap map[string]*domain.Agent
 	sort.SliceStable(exps, func(i, j int) bool {
 		ei, ej := exps[i], exps[j]
 
+		// A missing queued_at sorts last, deterministically. Treating nil as "equal on age" while
+		// two non-nil jobs compare unequal is not a strict weak order — it admits a < b, b ~ nil,
+		// a ~ nil, which lets sort produce a different order on identical input from tick to tick.
+		if (ei.QueuedAt == nil) != (ej.QueuedAt == nil) {
+			return ej.QueuedAt == nil
+		}
+
 		// Primary: age bucket (oldest queued_at, quantized to fairnessWindow, first).
 		if ei.QueuedAt != nil && ej.QueuedAt != nil && fairnessWindow > 0 {
 			bi := ei.QueuedAt.Truncate(fairnessWindow)

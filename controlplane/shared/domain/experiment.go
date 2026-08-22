@@ -76,6 +76,21 @@ func (e *Experiment) RequestedCPUCores() float64 {
 	return e.EstimatedCPUCoreHours / e.EstimatedDurationHours
 }
 
+// RatedCost is the single formula settlement and live running-cost accounting both use to bill
+// any resource dimension: estimated's admission-time per-hour rate (estimated /
+// EstimatedDurationHours) times hours actually observed. Using the admission-time estimate as the
+// rate — rather than a live catalog lookup (domain.AcceleratorType.LookupCost) — keeps the two
+// call sites priced identically for the life of the job: it's invariant across a preemption
+// requeue's proportional rescale (see experiments_store_lifecycle.RequeuePreempted), and it can't
+// be knocked out by an operator retiring the accelerator flavor from the rate table mid-run, since
+// it never looks the flavor up again after admission. Zero for an unset/invalid duration.
+func (e *Experiment) RatedCost(estimated, hours float64) float64 {
+	if e.EstimatedDurationHours <= 0 {
+		return 0
+	}
+	return (estimated / e.EstimatedDurationHours) * hours
+}
+
 // Footprint returns e's physical resource footprint in canonical units, across every dimension
 // with live per-cluster capacity reporting: CPU (millicores), memory/storage (bytes) — read
 // straight from e.Job's own quantity strings, scaled by e.Job.Nodes() — plus its accelerator, if

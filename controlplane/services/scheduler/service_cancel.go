@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -15,46 +17,64 @@ import (
 //
 // Every path then uses the canonical settlement service; there is no cancellation-specific
 // accounting implementation.
+
+// cancelMaxAttempts bounds the re-read-and-retry loop below. A lost CAS almost always means
+// admission progressed the status by exactly one step (QUEUED->SUBMITTED->ADMITTED->RUNNING);
+// a handful of attempts comfortably outruns that without risking a livelock against a truly
+// concurrent cancel (which converges immediately: the second cancel's CAS is a no-op because
+// the first one already moved the row to terminal).
+const cancelMaxAttempts = 5
+
 func (s *Service) CancelExperiment(ctx context.Context, id string) error {
-	exp, err := s.store.GetExperiment(ctx, id)
-	if err != nil {
-		return fmt.Errorf("cancel: get experiment: %w", err)
-	}
-	if exp == nil {
-		return &AdmissionError{Reason: "not_found", Message: "experiment not found"}
-	}
-
-	switch exp.Status {
-	case domain.StatusQueued, domain.StatusSubmitted:
-		updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
+	for attempt := 0; attempt < cancelMaxAttempts; attempt++ {
+		exp, err := s.store.GetExperiment(ctx, id)
 		if err != nil {
-			return fmt.Errorf("cancel: update status: %w", err)
+			return fmt.Errorf("cancel: get experiment: %w", err)
 		}
-		if !updated {
-			return nil // concurrent cancellation already handled it
+		if exp == nil {
+			return &AdmissionError{Reason: "not_found", Message: "experiment not found"}
 		}
-		exp.Status = domain.StatusRejected
 
-	case domain.StatusAdmitted, domain.StatusRunning:
-		updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
-		if err != nil {
-			return fmt.Errorf("cancel: update status: %w", err)
-		}
-		if !updated {
+		switch exp.Status {
+		case domain.StatusQueued, domain.StatusSubmitted:
+			updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
+			if err != nil {
+				return fmt.Errorf("cancel: update status: %w", err)
+			}
+			if !updated {
+				// Lost the CAS: either a concurrent cancel already terminalized it, or admission
+				// moved it forward (e.g. QUEUED->SUBMITTED) between our read and this write.
+				// Re-read and retry rather than assuming the former — otherwise a cancel racing
+				// admission can report success while the job goes on to run to completion.
+				continue
+			}
+			exp.Status = domain.StatusRejected
+			s.settle(ctx, "cancel", exp)
 			return nil
-		}
-		exp.Status = domain.StatusEvicted
-		if s.loop != nil {
-			s.loop.Trigger()
-		}
 
-	default:
-		return &AdmissionError{
-			Reason:  "invalid_state",
-			Message: fmt.Sprintf("cannot cancel experiment in status %s", exp.Status),
+		case domain.StatusAdmitted, domain.StatusRunning:
+			updated, err := s.store.TransitionTerminal(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
+			if err != nil {
+				return fmt.Errorf("cancel: update status: %w", err)
+			}
+			if !updated {
+				continue
+			}
+			exp.Status = domain.StatusEvicted
+			if s.loop != nil {
+				s.loop.Trigger()
+			}
+			s.settle(ctx, "cancel", exp)
+			return nil
+
+		default:
+			return &AdmissionError{
+				Reason:  "invalid_state",
+				Message: fmt.Sprintf("cannot cancel experiment in status %s", exp.Status),
+			}
 		}
 	}
-	return s.settle(ctx, "cancel", exp)
+	return fmt.Errorf("cancel: experiment %s status kept changing underneath the cancel; give up after %d attempts", id, cancelMaxAttempts)
 }
 
 // EvictExperiment terminates a RUNNING or ADMITTED experiment through the same canonical path
@@ -84,22 +104,31 @@ func (s *Service) EvictExperiment(ctx context.Context, id string, reason domain.
 	}
 	exp.Status = domain.StatusEvicted
 	exp.EvictionReason = string(reason)
-	return s.settle(ctx, "evict", exp)
+	s.settle(ctx, "evict", exp)
+	return nil
 }
 
 // settle runs the one canonical terminal-accounting step for an experiment this service just
 // moved to a terminal status. There is deliberately no per-caller accounting implementation.
-func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment) error {
+//
+// Best-effort: the terminal transition above already committed, so a settlement failure here
+// must not be reported as if the cancel/evict itself failed — callers like the disbalance
+// evictor read a returned error as "the transition never happened" and retry against a fresh
+// victim, condemning extra jobs for the same shortage while this one sits evicted-but-unsettled.
+// The settlement reconciler (see settlement.go) sweeps and retries unsettled terminal
+// experiments, so logging and moving on here is safe.
+func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment) {
 	if s.settler == nil {
-		return fmt.Errorf("%s: quota settler is required", op)
+		s.logger.Error("scheduler: quota settler is required", zap.String("op", op), zap.String("exp", exp.ID))
+		return
 	}
 	if err := s.settler.Settle(ctx, exp); err != nil {
-		return fmt.Errorf("%s: settle observed usage: %w", op, err)
+		s.logger.Warn("scheduler: settle observed usage", zap.String("op", op), zap.String("exp", exp.ID), zap.Error(err))
+		return
 	}
 	if err := s.store.MarkQuotaSettled(ctx, exp.ID); err != nil {
-		return fmt.Errorf("%s: mark quota settled: %w", op, err)
+		s.logger.Error("scheduler: mark quota settled", zap.String("op", op), zap.String("exp", exp.ID), zap.Error(err))
 	}
-	return nil
 }
 
 // WriteExperimentSummary files the agent's post-run write-up on a terminal experiment,

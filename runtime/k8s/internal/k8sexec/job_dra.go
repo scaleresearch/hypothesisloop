@@ -7,6 +7,7 @@ package k8sexec
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -352,7 +353,8 @@ func (c *JobWorkloadClient) addManagedDRAIDs(ctx context.Context, ids map[string
 	for _, template := range templates.Items {
 		id := template.GetLabels()[workloadkeys.ExperimentID]
 		if id == "" {
-			return fmt.Errorf("managed ResourceClaimTemplate %q has no experiment identity", template.GetName())
+			log.Printf("workload: skipping managed ResourceClaimTemplate %q with no experiment identity", template.GetName())
+			continue
 		}
 		ids[id] = struct{}{}
 	}

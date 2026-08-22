@@ -2,10 +2,10 @@
 - is there a simpler structural solution with the same guarantees and less retained machinery? if so, use it
 - metrics only in the metrics store, no duplicates between the relational db and metrics storage. when metrics are needed, the metrics store is assumed to answer in real time
 - no caches / in-ram state. we trust that our storage is performant and we care about simplicity, so we do not introduce duplicates or eventual consistency, except between clusters and the scheduler
-- cluster software fetches desired state and reconciles it; commands go one way only. cluster software sends metrics and other important information about jobs to the control plane; the control plane makes the decisions
-- the control plane decides, and every decision is written as desired state. no push, no "kill" command, no second path to the same effect
+- cluster software fetches desired state and reconciles it; commands go one way only. cluster software sends metrics and other important information about jobs to the control plane; the control plane makes all decisions and produces final state
+- the control plane decides, and every decision is written as desired state. no push, no "kill" command, no second path to the same effect, no remote functions or procedural style
 - the control plane shall not be coupled with k8s; runtime software receives state from the control plane and decides how to run it within its own ecosystem
-- never bake a decision (a deadline, a threshold, a policy) into the desired state we hand a cluster - that creates a second decision-maker we cannot revoke
+- desired state says what should exist, never a condition the runtime evaluates itself - any rule we hand over is a decision we can no longer revoke
 - the control plane can accept connections and requests from multiple clusters, and can dispatch jobs to multiple clusters
 - metrics and the overall design shall be very reactive, as we react to job state changes and reschedule fast. the code and its loops shall be reactive, close to real time
 - we aim to keep the desired state in postgresql; cluster software pulls that desired state and tries to make it happen. metrics show the actual state with a small delay, postgresql shows the desired one
@@ -15,3 +15,6 @@
 - do not add comments at the top of files unless they capture a hard-learned lesson. the code should be self-explanatory
 - job processes may only push metrics to the platform — logs and debug comments must be collected and relayed by the supervising runtime/experimentator agent, never self-reported by the job.
 - documentation (guidance md files) shall not be treated as working log and shall be generalizable across different types of experiments
+- admission decides on reserved budget, eviction and billing only on observed consumption - one figure serving both evicts jobs for budget nobody spent
+- a loop over many must survive any one of them failing - skip it and finish the pass
+- every datastore is queried only through its own package, never ad-hoc from a service

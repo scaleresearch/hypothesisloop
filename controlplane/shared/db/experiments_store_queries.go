@@ -161,11 +161,13 @@ ORDER BY updated_at ASC`
 	return collectExperiments(rows)
 }
 
-// GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent in a platform experiment.
-// Used by the quota-exhaustion path to cancel waiting jobs and return their reservations.
+// GetAgentQueuedExperiments returns QUEUED, SUBMITTED, and ADMITTED experiments for an agent in a
+// platform experiment. Used by the quota-exhaustion path to cancel waiting jobs and return their
+// reservations. ADMITTED is included because a workload is already being created for it — leaving
+// it out lets a cut/exhausted agent's job start after the sweep believes it stopped everything.
 func (s *ExperimentsStore) GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ('QUEUED', 'SUBMITTED')
+WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ('QUEUED', 'SUBMITTED', 'ADMITTED')
 ORDER BY queued_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID)
 	if err != nil {

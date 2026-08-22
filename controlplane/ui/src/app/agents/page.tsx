@@ -3,7 +3,8 @@
 import { Fragment, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAgentBalancesPage, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonations } from '@/lib/api'
+import { fetchAgentBalancesPage, fetchAgents, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonations } from '@/lib/api'
+import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from '@/lib/quota'
 import type { AgentBalance, PlatformExperiment, AgentQuota } from '@/types'
 import type { DonationRequest } from '@/lib/api'
 import { PageHeader } from '@/components/ui/page-header'
@@ -47,9 +48,9 @@ function AgentExperimentQuota({ agentId, pe }: { agentId: string; pe: PlatformEx
   )
   const q = quotas?.find(q => q.agent_id === agentId)
   if (!q) return null
-  const gRem = q.guaranteed_accelerator_hours - q.used_guaranteed_acch
-  const bRem = q.burst_accelerator_hours - q.used_burst_acch
-  const totalRem = Math.max(0, gRem) + Math.max(0, bRem)
+  const gRem = guaranteedRemainingAccH(q)
+  const bRem = burstRemainingAccH(q)
+  const totalRem = quotaRemainingAccH(q)
   return (
     <tr style={{ background: 'var(--muted)' }}>
       <td style={{ paddingLeft: 28, fontSize: 12 }} className="text-link">{pe.name}</td>
@@ -92,6 +93,11 @@ export default function AgentsPage() {
   )
   const balances = data?.items
   const total = data?.total ?? 0
+  // top3_count lives on domain.Agent (GET /agents), not on AgentBalance — reading it off a
+  // balance yielded undefined for every agent, so the Top-3 KPI and every eligibility chip read
+  // a hard zero that looked like a real answer.
+  const { data: agentRecords } = useSWR(['agents'], fetchAgents, { refreshInterval: 30_000 })
+  const top3ByAgent = new Map((agentRecords ?? []).map(a => [a.id, a.top3_count]))
 
   const { data: experiments } = useSWR<PlatformExperiment[]>(
     'platform-experiments-all',
@@ -138,7 +144,7 @@ export default function AgentsPage() {
   const selectedPE = experimentFilter ? (experiments ?? []).find(pe => pe.id === experimentFilter) ?? null : null
   const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
 
-  const top3Count = (balances ?? []).filter(b => ((b as any).top3_count ?? 0) > 0).length
+  const top3Count = (balances ?? []).filter(b => (top3ByAgent.get(b.agent_id) ?? 0) > 0).length
   const avgPerf = balances && balances.length > 0
     ? balances.reduce((s, b) => s + (typeof b.performance_bonus === 'number' ? b.performance_bonus : 0), 0) / balances.length
     : null
@@ -266,7 +272,7 @@ export default function AgentsPage() {
                   </td>
                 </tr>
               ) : sortedBalances.map(b => {
-                const top3 = (b as any).top3_count ?? 0
+                const top3 = top3ByAgent.get(b.agent_id) ?? 0
                 const hasTop3 = top3 > 0
                 const isExpanded = expandedAgent === b.agent_id
                 return (

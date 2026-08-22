@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -62,9 +61,9 @@ func (c *Controller) observedAcceleratorCost(ctx context.Context, exp *domain.Ex
 	if err != nil {
 		return 0, err
 	}
-	rate, ok := exp.AcceleratorType.LookupCost()
-	if !ok {
-		return 0, fmt.Errorf("observed accelerator cost for %s: no registered rate for accelerator type %q", exp.ID, exp.AcceleratorType)
-	}
-	return hours * float64(exp.AcceleratorCount) * rate, nil
+	// The same formula settlement bills by: the rate frozen into the reservation at admission,
+	// not the live catalog. A mid-run rate change (or a retired flavor, which made the live
+	// lookup fail and the job's cost silently drop out of the boundary) otherwise puts stage
+	// progress and the budget agents are actually billed against on different numbers.
+	return exp.RatedCost(exp.EstimatedCostAccH, hours), nil
 }

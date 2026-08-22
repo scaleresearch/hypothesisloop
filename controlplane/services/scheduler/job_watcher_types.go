@@ -39,6 +39,10 @@ type JobStatusStore interface {
 	// COMPLETED/FAILED/EVICTED — used where the caller can't name the exact prior status (see
 	// onFinished's ADMITTED-terminal branch) but still must not resurrect an already-terminal job.
 	TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus) (bool, error)
+	// TransitionTerminal atomically sets status and eviction_reason together in one UPDATE,
+	// guarded on from. Used by evictNeverStarted so an eviction can never persist a status
+	// change with its reason lost (e.g. a crash between the two separate writes).
+	TransitionTerminal(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.

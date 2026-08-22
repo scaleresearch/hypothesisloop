@@ -206,6 +206,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		clusterName := in.Name
 		now := time.Now().UTC()
 		statusSamples := make([]metricsdb.JobStatusSample, 0, len(in.Body.Reports))
+		// A runtime reporting a job as running is an observation that it is alive, and it is the
+		// one liveness observation every runtime produces — the per-pod cgroup heartbeat exists
+		// only where a node-agent is deployed. Recording it here, once, is what gives runtimes
+		// without one (bare metal) any observed runtime at all: without it their jobs were billed
+		// only in slivers around whatever metrics they happened to report, their preemption
+		// rescale computed a stint of ~0 and requeued them at full estimate, and every rule keyed
+		// on "never observed" could not be bounded because it would have condemned all of them.
+		var observations []metricsdb.Observation
 		for _, rep := range in.Body.Reports {
 			if rep.ExperimentID == "" || rep.Phase == "" {
 				return nil, huma.Error400BadRequest("every status report requires experiment_id and phase")
@@ -221,6 +229,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
 				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, At: now,
 			})
+			if rep.Phase == metricsdb.PhaseRunning {
+				labels := map[string]string{"cluster_name": clusterName}
+				if rep.AdmittedNode != "" {
+					labels["node"] = rep.AdmittedNode
+				}
+				observations = append(observations, metricsdb.Observation{
+					ExperimentID: rep.ExperimentID, At: now, ExtraLabels: labels,
+				})
+			}
 			// LogTail is optional per report (nil when the executor has nothing new, or
 			// doesn't implement LogTailer) -- only write when the agent actually sent one, so a
 			// job with no fresh output this tick doesn't wipe out its last-known tail.
@@ -241,6 +258,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if len(observations) > 0 {
+			if err := metricsdb.RecordObservations(ctx, h.metricsDBURL, observations); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
 		}
 		resp := &struct {
 			Body struct {

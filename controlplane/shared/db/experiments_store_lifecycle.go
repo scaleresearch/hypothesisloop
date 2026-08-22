@@ -58,7 +58,8 @@ func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) er
 		return fmt.Errorf("experiments_store.MarkQueued: reason is required")
 	}
 	const q = `UPDATE experiments SET status = 'QUEUED', queued_at = COALESCE(queued_at, NOW()),
-	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, updated_at = NOW() WHERE id = $1`
+	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, updated_at = NOW()
+	WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
 	_, err := s.pool.pool.Exec(ctx, q, id, reason)
 	return err
 }
@@ -148,10 +149,16 @@ func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reas
 // with the caller-computed, proportionally rescaled remaining amounts — all four dimensions move
 // together so no downstream reader mixes an old estimate with a new one. Loop.preempt computes
 // the rescale ratio once from the pre-mutation experiment.
-func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) error {
+//
+// Returns requeued=false when the job was no longer RUNNING. The status guard is not optional:
+// preempt reads its candidates, then spends metrics queries ranking them, and a job can complete,
+// be cancelled, be stage-cut or be evicted inside that window. Without the guard this UPDATE
+// would drag a terminal job back to QUEUED and re-run work that had already finished — or that a
+// human had explicitly cancelled.
+func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) (bool, error) {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',
-		eviction_reason = 'preempted_for_guaranteed',
+		eviction_reason = $7,
 		estimated_duration_hours = $2,
 		estimated_cost_acch = $3,
 		estimated_cpu_core_hours = $4,
@@ -162,9 +169,13 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 		cluster_name = '',
 		not_admitted_reason = 'capacity_unavailable',
 		updated_at = NOW()
-	WHERE id = $1`
-	_, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours)
-	return err
+	WHERE id = $1 AND status = 'RUNNING'`
+	tag, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours,
+		string(domain.EvictionPreemptedForGuaranteed))
+	if err != nil {
+		return false, fmt.Errorf("experiments_store.RequeuePreempted: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // MarkQuotaSettled records that exp's final usage was durably written to the metrics DB, so the

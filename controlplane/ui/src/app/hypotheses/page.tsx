@@ -7,6 +7,7 @@ import useSWR from 'swr'
 import { useMemo, useState } from 'react'
 import { fetchHypothesesPage, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
 import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
+import { relTime } from '@/lib/format'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button } from '@/components/ui/button'
@@ -23,15 +24,6 @@ const STATUS_FILTERS: Array<{ value: HypothesisStatus | ''; label: string }> = [
   { value: 'confirmed', label: 'Confirmed' },
   { value: 'inconclusive', label: 'Inconclusive' },
 ]
-
-function relTime(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const s = Math.round(diffMs / 1000)
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  return new Date(iso).toLocaleDateString()
-}
 
 export default function HypothesesPage() {
   return (

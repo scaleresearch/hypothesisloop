@@ -9,18 +9,23 @@ import (
 
 // ---- experiment_signups ----
 
-// Signup records an agent's intent to participate in a platform experiment.
-func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string) error {
+// Signup records an agent's intent to participate in a platform experiment. The insert is
+// conditional on the experiment still being open so it cannot land after StartPlatformExperimentTx
+// has decided who participates — such a row would be a durable signup with no quota row and no
+// path to ever get one. inserted=false means the experiment is no longer open, or the agent was
+// already signed up.
+func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	const q = `
 INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at)
-VALUES ($1, $2, NOW())
+SELECT $1, $2, NOW()
+WHERE EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1 AND status = 'open')
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`
 
-	_, err := s.pool.pool.Exec(ctx, q, platformExpID, agentID)
+	tag, err := s.pool.pool.Exec(ctx, q, platformExpID, agentID)
 	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Signup: %w", err)
+		return false, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 // ListSignups returns all agent IDs signed up for a platform experiment.

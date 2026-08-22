@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -21,16 +23,33 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 	}
 
 	for _, exp := range queued {
-		noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, activeExps)
+		// A per-job failure here (novelty lookup, quota lookup, or the DB write) must not abort
+		// reprioritization of the rest of the queue: an unrelated job's transient error would
+		// otherwise leave every job after it with a stale score for the rest of this tick. Log
+		// and skip just this job instead, mirroring completionFractions' per-item skip in
+		// loop_preempt.go.
+		othersActive := make([]*domain.Experiment, 0, len(activeExps))
+		for _, other := range activeExps {
+			if other.ID != exp.ID {
+				othersActive = append(othersActive, other)
+			}
+		}
+		noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, othersActive)
 		if err != nil {
-			return fmt.Errorf("scheduler: compute novelty for %s: %w", exp.ID, err)
+			s.logger.Warn("reprioritize: compute novelty failed; leaving stale priority",
+				zap.String("exp", exp.ID), zap.Error(err))
+			continue
 		}
 		score, err := s.computePriority(ctx, exp, noveltyScore)
 		if err != nil {
-			return fmt.Errorf("scheduler: compute priority for %s: %w", exp.ID, err)
+			s.logger.Warn("reprioritize: compute priority failed; leaving stale priority",
+				zap.String("exp", exp.ID), zap.Error(err))
+			continue
 		}
 		if err := s.store.UpdateExperimentPriority(ctx, exp.ID, score); err != nil {
-			return fmt.Errorf("scheduler: update priority for %s: %w", exp.ID, err)
+			s.logger.Warn("reprioritize: persist priority failed; leaving stale priority",
+				zap.String("exp", exp.ID), zap.Error(err))
+			continue
 		}
 	}
 	return nil
@@ -48,7 +67,12 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 // cost) got a maximal score regardless of its real CPU/RAM/storage footprint.
 // domain.AgentQuota.DominantCostFraction fixes this by expressing "how big is this job" as a
 // dimensionless fraction of the agent's own guaranteed budget, comparable across resource types.
-// Falls back to 0 if no quota row is found yet or exp has no PlatformExperimentID.
+// Falls back to 0 only if no quota row is found yet (aq == nil) or exp has no
+// PlatformExperimentID — both mean "this job doesn't have a quota footprint yet", which is a
+// legitimate 0. A GetAgentQuota *error* is different: it means the cost is unknown, not zero, so
+// it must not be treated as "this job is free" (that would hand a transient lookup failure
+// maximal scheduling priority). Such errors are returned to the caller, which skips updating
+// this job's score for the tick rather than scoring it as costless.
 //
 // Note: SchedulingWeights has no W2/abuse-penalty field — abuse is handled by the controller's
 // eviction guards, not by suppressing admission priority.
@@ -57,7 +81,11 @@ func (s *Service) computePriority(ctx context.Context, exp *domain.Experiment, n
 
 	costFraction := 0.0
 	if exp.PlatformExperimentID != "" {
-		if aq, err := s.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID); err == nil && aq != nil {
+		aq, err := s.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
+		if err != nil {
+			return 0, fmt.Errorf("scheduler: get agent quota for %s: %w", exp.ID, err)
+		}
+		if aq != nil {
 			costFraction = aq.DominantCostFraction(exp)
 		}
 	}

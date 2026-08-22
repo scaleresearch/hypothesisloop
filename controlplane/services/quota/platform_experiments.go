@@ -21,7 +21,11 @@ type PlatformExperimentsStore interface {
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
-	Signup(ctx context.Context, platformExpID, agentID string) error
+	// Signup inserts only while the experiment is still open; inserted=false means it is closed
+	// or the agent was already signed up.
+	Signup(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
+	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(signups []string) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	CountSignups(ctx context.Context, platformExpID string) (int, error)
@@ -37,6 +41,9 @@ type PlatformExperimentsStore interface {
 	// only knows each RUNNING job's static admission-time estimate, which goes stale the moment
 	// a job runs longer (or shorter) than that estimate — see running_cost.go for why that matters.
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
+	// GetExperiment resolves a winning sample's job_id to the row carrying its code_ref — see
+	// standingsOnMetric, where a standing without it is a number nobody can reproduce.
+	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, observed func(context.Context, string, string) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
@@ -49,9 +56,10 @@ type PlatformExperimentsStore interface {
 	UpdateAgent(ctx context.Context, agent *domain.Agent) error
 	// FulfillDonationTx performs a donation transfer atomically and idempotently — locking the
 	// donation + both quota rows, verifying the donation is still open and the donor has headroom,
-	// moving the amount and marking the donation fulfilled in one transaction. See
-	// db.PlatformExperimentsStore.FulfillDonationTx.
-	FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, donorUsedGuaranteed float64) (bool, error)
+	// moving the amount and marking the donation fulfilled in one transaction. observe is called
+	// inside that transaction, with the rows already locked, so the headroom check reads usage a
+	// concurrent admission can no longer change. See db.PlatformExperimentsStore.FulfillDonationTx.
+	FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, burstAmount float64, observe func(context.Context) (*domain.AgentQuota, error)) (bool, error)
 	// Donation persistence (experiment-scoped donations).
 	CreateDonationRequest(ctx context.Context, req *domain.DonationRequest) error
 	GetDonationRequest(ctx context.Context, id string) (*domain.DonationRequest, error)
@@ -66,13 +74,30 @@ type PlatformExperimentsService struct {
 	metricsDBURL string
 	cfg          domain.QuotaConfig
 	logger       *zap.Logger
+	// observedGapCap/observedStep are the deployment-wide observation cadence, identical to the
+	// controller's and the settler's. Every observed-usage query in a deployment must agree on
+	// what "how long did this run" means, or the same job's cost changes depending on which code
+	// path is asked — visibly jumping the moment it settles.
+	observedGapCap time.Duration
+	observedStep   time.Duration
 }
 
 // NewPlatformExperimentsService constructs the service. metricsDBURL is the GreptimeDB instance
 // backing observed agent quota consumption. PostgreSQL holds allocations and current desired
 // experiment estimates.
-func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string) *PlatformExperimentsService {
-	return &PlatformExperimentsService{store: store, usage: metricsdb.NewUsageTracker(metricsDBURL), metricsDBURL: metricsDBURL, cfg: cfg, logger: logger}
+func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string, observedGapCap, observedStep time.Duration) *PlatformExperimentsService {
+	if observedGapCap <= 0 || observedStep <= 0 {
+		panic("quota: NewPlatformExperimentsService requires a positive observation cadence — it must match the controller's and the settler's")
+	}
+	return &PlatformExperimentsService{
+		store:          store,
+		usage:          metricsdb.NewUsageTracker(metricsDBURL),
+		metricsDBURL:   metricsDBURL,
+		cfg:            cfg,
+		logger:         logger,
+		observedGapCap: observedGapCap,
+		observedStep:   observedStep,
+	}
 }
 
 // CreatePlatformExperimentRequest is the input for Create.

@@ -71,7 +71,7 @@ func (t *UsageTracker) SetObservedBatch(ctx context.Context, agentID, platformEx
 // which would spuriously hide a sample written in the same second.
 const minObservedLookback = time.Hour
 
-// observedLookback turns a platform experiment's own start time into a last_over_time window
+// ObservedLookback turns a platform experiment's own start time into a last_over_time window
 // long enough to see every sample it could possibly have produced — never a fixed constant.
 // Each settled job writes its cost exactly once, as an absolute set against its own series (see
 // SetObservedBatch), so a bare instant-vector selector loses it the moment it falls outside
@@ -81,7 +81,10 @@ const minObservedLookback = time.Hour
 // real, already-settled cost from budgets and stage accounting again (see important.md: never
 // bake a decision/threshold into desired state). Sizing the window to the experiment's own
 // lifetime instead means it always covers every sample the experiment could have written.
-func observedLookback(start time.Time) string {
+//
+// Exported because every reader that ranks or bills off a platform experiment's history needs the
+// same window — a second, hand-picked constant elsewhere reintroduces exactly this cliff.
+func ObservedLookback(start time.Time) string {
 	d := time.Since(start)
 	if d < minObservedLookback {
 		d = minObservedLookback
@@ -92,7 +95,7 @@ func observedLookback(start time.Time) string {
 // PopulateUsage fills every quotas[i].Used* field from the metrics DB with a single query for
 // the whole platform experiment (summed across every settled job, grouped by
 // agent/resource/tier) instead of one query per bucket per agent. platformExpStart is the
-// platform experiment's own creation time (see observedLookback) — callers that already hold the
+// platform experiment's own creation time (see ObservedLookback) — callers that already hold the
 // domain.PlatformExperiment pass its CreatedAt; others fetch it once via their store, the same
 // pattern registry.GetTimeseries uses to size its own query window off the real experiment.
 func PopulateUsage(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {
@@ -100,7 +103,7 @@ func PopulateUsage(ctx context.Context, dbURL string, platformExpStart time.Time
 		return nil
 	}
 	promQL := fmt.Sprintf(`sum by (agent_id, resource_type, tier) (last_over_time(%s{platform_experiment_id=%q, kind=%q}[%s]))`,
-		usedHoursMetric, platformExpID, kindObserved, observedLookback(platformExpStart))
+		usedHoursMetric, platformExpID, kindObserved, ObservedLookback(platformExpStart))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return fmt.Errorf("metricsdb.PopulateUsage: %w", err)
@@ -128,7 +131,7 @@ func PopulateUsageOne(ctx context.Context, dbURL string, platformExpStart time.T
 		return nil
 	}
 	promQL := fmt.Sprintf(`sum by (resource_type, tier) (last_over_time(%s{agent_id=%q, platform_experiment_id=%q, kind=%q}[%s]))`,
-		usedHoursMetric, q.AgentID, q.PlatformExperimentID, kindObserved, observedLookback(platformExpStart))
+		usedHoursMetric, q.AgentID, q.PlatformExperimentID, kindObserved, ObservedLookback(platformExpStart))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return fmt.Errorf("metricsdb.PopulateUsageOne: %w", err)
@@ -137,6 +140,27 @@ func PopulateUsageOne(ctx context.Context, dbURL string, platformExpStart time.T
 		applyUsedSample(q, domain.ResourceType(s.Labels["resource_type"]), domain.CapacityTier(s.Labels["tier"]), s.Value)
 	}
 	return nil
+}
+
+// SettledCostForJob returns one job's settled cost per resource dimension, or ok=false when
+// nothing has been settled for it yet (it is still running, or its terminal write has not landed).
+// This is the number the platform actually billed — read from the same absolute-set series
+// settlement writes, never recomputed from an estimate.
+func SettledCostForJob(ctx context.Context, dbURL string, platformExpStart time.Time, experimentID string) (map[domain.ResourceType]float64, bool, error) {
+	promQL := fmt.Sprintf(`last_over_time(%s{experiment_id=%q, kind=%q}[%s])`,
+		usedHoursMetric, experimentID, kindObserved, ObservedLookback(platformExpStart))
+	samples, err := QueryVector(ctx, dbURL, promQL)
+	if err != nil {
+		return nil, false, fmt.Errorf("metricsdb.SettledCostForJob: %w", err)
+	}
+	if len(samples) == 0 {
+		return nil, false, nil
+	}
+	out := make(map[domain.ResourceType]float64, len(samples))
+	for _, s := range samples {
+		out[domain.ResourceType(s.Labels["resource_type"])] = s.Value
+	}
+	return out, true, nil
 }
 
 func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier, value float64) {
@@ -178,7 +202,7 @@ func TotalObservedAccH(ctx context.Context, dbURL string, platformExpStart time.
 	// See PopulateUsage for why the lookback is sized off the platform experiment's own start
 	// time rather than a fixed constant.
 	promQL := fmt.Sprintf(`sum(last_over_time(%s{platform_experiment_id=%q, resource_type=%q, kind=%q}[%s]))`,
-		usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved, observedLookback(platformExpStart))
+		usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved, ObservedLookback(platformExpStart))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return 0, fmt.Errorf("metricsdb.TotalObservedAccH: %w", err)

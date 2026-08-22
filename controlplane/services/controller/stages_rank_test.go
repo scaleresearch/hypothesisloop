@@ -81,48 +81,27 @@ func TestCutBottomZeroEvictCutsNobody(t *testing.T) {
 	assertCut(t, cutBottom(order, "maximize", 0))
 }
 
-func TestCollectRedistributionSplitsReleaseAndReclaimsUnspent(t *testing.T) {
-	quotas := map[string]*domain.AgentQuota{
-		// Cut with 4 of its 10 guaranteed hours unspent.
-		"cut1": {AgentID: "cut1", GuaranteedAcceleratorHours: 10, UsedGuaranteedAccH: 6},
-		// Cut having overspent its guarantee — nothing to reclaim, and it must not subtract.
-		"cut2":  {AgentID: "cut2", GuaranteedAcceleratorHours: 10, UsedGuaranteedAccH: 12},
-		"keep1": {AgentID: "keep1"},
-		"keep2": {AgentID: "keep2"},
+func TestStageReleaseSplitsBudgetShareAndReclaimsUnspent(t *testing.T) {
+	dim := db.StageRedistribution{
+		ResourceType: domain.ResourceAcceleratorHours,
+		Budget:       100,
+		ReleaseFrac:  0.6,
+		// cut2 overspent its guarantee — nothing to reclaim, and it must not subtract.
+		UsedByAgent: map[string]float64{"cut1": 6, "cut2": 12},
 	}
-	var zeros []db.StageZeroOp
-	var adds []db.StageAddOp
-	// 60% of a 100 AccH budget released, plus cut1's 4 unspent hours = 64, split two ways.
-	collectRedistribution(&zeros, &adds, []string{"cut1", "cut2"}, []string{"keep1", "keep2"}, quotas, 0.6,
-		domain.ResourceAcceleratorHours, 100,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedAcceleratorHours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH },
-	)
+	allocated := map[string]float64{"cut1": 10, "cut2": 10}
 
-	if len(zeros) != 2 {
-		t.Fatalf("zeros = %d, want 2", len(zeros))
-	}
-	if len(adds) != 2 {
-		t.Fatalf("adds = %d, want 2", len(adds))
-	}
-	for _, a := range adds {
-		if a.Delta != 32 {
-			t.Errorf("%s delta = %v, want 32", a.AgentID, a.Delta)
-		}
+	// 60% of a 100 AccH budget, plus cut1's 4 unspent hours.
+	if got, want := db.StageReleaseTotal(dim, allocated), 64.0; got != want {
+		t.Fatalf("release = %v, want %v", got, want)
 	}
 }
 
-// A dimension the platform experiment doesn't budget produces no ops at all.
-func TestCollectRedistributionSkipsUntrackedDimension(t *testing.T) {
-	var zeros []db.StageZeroOp
-	var adds []db.StageAddOp
-	collectRedistribution(&zeros, &adds, []string{"cut1"}, []string{"keep1"},
-		map[string]*domain.AgentQuota{}, 0.6, domain.ResourceCPUCoreHours, 0,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedCPUCoreHours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedCPUCoreH },
-	)
-	if len(zeros) != 0 || len(adds) != 0 {
-		t.Fatalf("expected no ops for an untracked dimension, got %d zeros / %d adds", len(zeros), len(adds))
+// A dimension the platform experiment does not budget releases nothing.
+func TestStageReleaseSkipsUntrackedDimension(t *testing.T) {
+	dim := db.StageRedistribution{ResourceType: domain.ResourceCPUCoreHours, Budget: 0, ReleaseFrac: 0.6}
+	if got := db.StageReleaseTotal(dim, map[string]float64{}); got != 0 {
+		t.Fatalf("release = %v, want 0 for an untracked dimension", got)
 	}
 }
 

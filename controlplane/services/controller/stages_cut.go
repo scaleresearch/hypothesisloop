@@ -32,40 +32,41 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	for _, q := range quotas {
 		quotaByAgent[q.AgentID] = q
 	}
+	// What returns to the survivors is what a cut agent did NOT spend, and only observed
+	// consumption can answer that (#18). The two calls above leave a cut agent's in-flight jobs
+	// counted at their full admission estimate, so an agent cut while holding a job estimated at
+	// 100 AccH that has really burned 10 looks 90 AccH poorer than it is — and those 90 AccH
+	// reach nobody: this agent's row is zeroed moments later, and the eviction that follows
+	// settles the job at its real 10. Re-read each cut agent against observed usage alone.
+	for _, agentID := range cut {
+		observed, err := c.quota.GetObservedAgentQuota(ctx, agentID, pe.ID)
+		if err != nil {
+			return fmt.Errorf("stages: observed quota for cut agent %s: %w", agentID, err)
+		}
+		quotaByAgent[agentID] = observed
+	}
 
 	// The share of the budget withheld for the stage now starting is released here. Only real
 	// (guaranteed) hours move — burst is a virtual overcommit limit, not physical compute, so
 	// redistributing it would inflate survivors' allocations beyond the actual remaining budget.
 	releaseFrac := pe.Stages[stageIndex].LengthPct / 100.0
 
-	// Collect every dimension's ops and apply them in one transaction (AdvanceStage) instead of
-	// four independently-committing loops. Accelerator-hours drives progress itself and always
-	// moves; CPU/RAM/storage move too for any platform experiment that tracks them (0 budget =
-	// skipped, the same "not tracked" convention as elsewhere).
-	var zeros []db.StageZeroOp
-	var adds []db.StageAddOp
-	collectRedistribution(&zeros, &adds, cut, survivors, quotaByAgent, releaseFrac,
-		domain.ResourceAcceleratorHours, pe.BudgetAcceleratorHours,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedAcceleratorHours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH },
-	)
-	collectRedistribution(&zeros, &adds, cut, survivors, quotaByAgent, releaseFrac,
-		domain.ResourceCPUCoreHours, pe.BudgetCPUCoreHours,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedCPUCoreHours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedCPUCoreH },
-	)
-	collectRedistribution(&zeros, &adds, cut, survivors, quotaByAgent, releaseFrac,
-		domain.ResourceRAMGBHours, pe.BudgetRAMGBHours,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedRAMGBHours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedRAMGBH },
-	)
-	collectRedistribution(&zeros, &adds, cut, survivors, quotaByAgent, releaseFrac,
-		domain.ResourceStorageGBHours, pe.BudgetStorageGBHours,
-		func(q *domain.AgentQuota) float64 { return q.GuaranteedStorageGBHours },
-		func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedStorageGBH },
-	)
+	// Accelerator-hours drives progress itself and always moves; CPU/RAM/storage move too for any
+	// platform experiment that tracks them (0 budget = skipped, the same "not tracked" convention
+	// as elsewhere). Only observed usage travels into the transaction — the allocation each
+	// unspent figure is measured against is read there, under lock.
+	dims := []db.StageRedistribution{
+		{ResourceType: domain.ResourceAcceleratorHours, Budget: pe.BudgetAcceleratorHours, ReleaseFrac: releaseFrac,
+			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH })},
+		{ResourceType: domain.ResourceCPUCoreHours, Budget: pe.BudgetCPUCoreHours, ReleaseFrac: releaseFrac,
+			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedCPUCoreH })},
+		{ResourceType: domain.ResourceRAMGBHours, Budget: pe.BudgetRAMGBHours, ReleaseFrac: releaseFrac,
+			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedRAMGBH })},
+		{ResourceType: domain.ResourceStorageGBHours, Budget: pe.BudgetStorageGBHours, ReleaseFrac: releaseFrac,
+			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedStorageGBH })},
+	}
 
-	advanced, err := c.stagesStore.AdvanceStage(ctx, pe.ID, stageIndex, cut, zeros, adds)
+	advanced, err := c.stagesStore.AdvanceStage(ctx, pe.ID, stageIndex, cut, survivors, dims)
 	if err != nil {
 		return fmt.Errorf("stages: advance stage %d: %w", stageIndex, err)
 	}
@@ -123,7 +124,14 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		return fmt.Errorf("get queued: %w", err)
 	}
 	for _, exp := range preRun {
-		updated, err := c.stagesStore.TransitionTerminal(ctx, exp.ID, exp.Status, domain.StatusRejected,
+		// ADMITTED already has a workload being created for it, so it must go to EVICTED (the
+		// desired-state pull's deletion signal) — REJECTED is only correct for QUEUED/SUBMITTED,
+		// which never had a workload to tear down. See CancelExperiment for the same split.
+		to := domain.StatusRejected
+		if exp.Status == domain.StatusAdmitted {
+			to = domain.StatusEvicted
+		}
+		updated, err := c.stagesStore.TransitionTerminal(ctx, exp.ID, exp.Status, to,
 			string(domain.EvictionStageCut))
 		if err != nil {
 			c.logger.Error("stage cut: reject queued", zap.String("id", exp.ID), zap.Error(err))
@@ -134,7 +142,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStageCut)).Inc()
 		// Never reached RUNNING; settlement derives zero usage from absent metrics.
-		exp.Status = domain.StatusRejected
+		exp.Status = to
 		exp.EvictionReason = string(domain.EvictionStageCut)
 		c.settleAndMark(ctx, exp)
 		c.logger.Info("stage cut: cancelled pre-run job", zap.String("exp", exp.ID), zap.String("agent", agentID))
@@ -146,38 +154,12 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 	return nil
 }
 
-// collectRedistribution computes one resource dimension's cut-agent zero ops and survivor add ops
-// and appends them to zeros/adds — it performs no writes itself, so every dimension's ops across
-// the whole boundary can be applied together in one transaction (see AdvanceStage). No-op if
-// budget is 0 (platform experiment doesn't track this dimension).
-func collectRedistribution(
-	zeros *[]db.StageZeroOp,
-	adds *[]db.StageAddOp,
-	cut, survivors []string,
-	quotaByAgent map[string]*domain.AgentQuota,
-	releaseFrac float64,
-	resourceType domain.ResourceType,
-	budget float64,
-	guaranteedOf, usedOf func(*domain.AgentQuota) float64,
-) {
-	if budget <= 0 {
-		return
-	}
-	release := budget * releaseFrac
+func usedByCutAgent(cut []string, quotaByAgent map[string]*domain.AgentQuota, usedOf func(*domain.AgentQuota) float64) map[string]float64 {
+	used := make(map[string]float64, len(cut))
 	for _, agentID := range cut {
 		if q, ok := quotaByAgent[agentID]; ok {
-			if rem := guaranteedOf(q) - usedOf(q); rem > 0 {
-				release += rem
-			}
+			used[agentID] = usedOf(q)
 		}
-		*zeros = append(*zeros, db.StageZeroOp{AgentID: agentID, ResourceType: resourceType})
 	}
-
-	if len(survivors) == 0 || release <= 0 {
-		return
-	}
-	perAgent := release / float64(len(survivors))
-	for _, agentID := range survivors {
-		*adds = append(*adds, db.StageAddOp{AgentID: agentID, ResourceType: resourceType, Delta: perAgent})
-	}
+	return used
 }

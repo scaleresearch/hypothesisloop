@@ -69,20 +69,12 @@ func RecordClusterHeartbeat(ctx context.Context, dbURL, clusterName string, at t
 }
 
 func LiveClusterHeartbeats(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
-	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, clusterHeartbeatMetric, promSeconds(window))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	beats, err := lastValuePerCluster(ctx, dbURL, clusterHeartbeatMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: %w", err)
 	}
-	out := make(map[string]bool, len(samples))
-	for _, sample := range samples {
-		cluster := sample.Labels["cluster_name"]
-		if cluster == "" {
-			return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: sample missing cluster_name")
-		}
-		if _, exists := out[cluster]; exists {
-			return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: duplicate cluster %q", cluster)
-		}
+	out := make(map[string]bool, len(beats))
+	for cluster := range beats {
 		out[cluster] = true
 	}
 	return out, nil
@@ -100,25 +92,41 @@ func RecordClusterCPUCapacity(ctx context.Context, dbURL, clusterName string, av
 	return nil
 }
 
-func liveClusterFloatCapacity(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]float64, error) {
+// lastValuePerCluster is the most recent value of a per-cluster gauge within window, keyed by
+// cluster. Every "what does each cluster currently report for X" read goes through this — the
+// heartbeat, the float capacities and the scalar (byte/count) capacities all asked the identical
+// last_over_time query and then re-implemented the same missing-label and duplicate-cluster
+// checks. One cluster reporting a metric twice is a real ambiguity, not something to resolve by
+// whichever sample the backend happened to return last, so it stays an error here for all of them.
+func lastValuePerCluster(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]float64, error) {
 	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, metricName, promSeconds(window))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.liveClusterFloatCapacity(%s): %w", metricName, err)
+		return nil, fmt.Errorf("metricsdb: query %s: %w", metricName, err)
 	}
 	out := make(map[string]float64, len(samples))
 	for _, sample := range samples {
 		cluster := sample.Labels["cluster_name"]
 		if cluster == "" {
-			return nil, fmt.Errorf("metricsdb.liveClusterFloatCapacity(%s): sample missing cluster_name", metricName)
-		}
-		if sample.Value < 0 {
-			return nil, fmt.Errorf("metricsdb.liveClusterFloatCapacity(%s): cluster %q has negative capacity", metricName, cluster)
+			return nil, fmt.Errorf("metricsdb: %s: sample missing cluster_name", metricName)
 		}
 		if _, exists := out[cluster]; exists {
-			return nil, fmt.Errorf("metricsdb.liveClusterFloatCapacity(%s): duplicate cluster %q", metricName, cluster)
+			return nil, fmt.Errorf("metricsdb: %s: duplicate cluster %q", metricName, cluster)
 		}
 		out[cluster] = sample.Value
+	}
+	return out, nil
+}
+
+func liveClusterFloatCapacity(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]float64, error) {
+	out, err := lastValuePerCluster(ctx, dbURL, metricName, window)
+	if err != nil {
+		return nil, err
+	}
+	for cluster, value := range out {
+		if value < 0 {
+			return nil, fmt.Errorf("metricsdb: %s: cluster %q has negative capacity", metricName, cluster)
+		}
 	}
 	return out, nil
 }
@@ -522,23 +530,15 @@ func recordClusterScalarCapacity(ctx context.Context, dbURL, clusterName, availM
 // restricted to samples within window of now — same staleness gating as
 // LiveClusterAcceleratorCapacity.
 func liveClusterScalarCapacity(ctx context.Context, dbURL, availMetric string, window time.Duration) (map[string]int64, error) {
-	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, availMetric, promSeconds(window))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	raw, err := lastValuePerCluster(ctx, dbURL, availMetric, window)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.liveClusterScalarCapacity(%s): %w", availMetric, err)
+		return nil, err
 	}
-	out := make(map[string]int64, len(samples))
-	for _, s := range samples {
-		cluster := s.Labels["cluster_name"]
-		if cluster == "" {
-			return nil, fmt.Errorf("metricsdb.liveClusterScalarCapacity(%s): sample missing cluster_name", availMetric)
-		}
-		value, err := capacityInt64(s.Value)
+	out := make(map[string]int64, len(raw))
+	for cluster, v := range raw {
+		value, err := capacityInt64(v)
 		if err != nil {
-			return nil, fmt.Errorf("metricsdb.liveClusterScalarCapacity(%s): cluster %q: %w", availMetric, cluster, err)
-		}
-		if _, exists := out[cluster]; exists {
-			return nil, fmt.Errorf("metricsdb.liveClusterScalarCapacity(%s): duplicate cluster %q", availMetric, cluster)
+			return nil, fmt.Errorf("metricsdb: %s: cluster %q: %w", availMetric, cluster, err)
 		}
 		out[cluster] = value
 	}

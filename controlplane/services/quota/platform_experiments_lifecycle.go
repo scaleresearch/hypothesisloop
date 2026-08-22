@@ -21,6 +21,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := domain.ValidateMetricDefinitions(metrics); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
+	if err := domain.RequireRankingMetric(metrics); err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+	}
 	reportInterval := req.ReportIntervalSeconds
 	if reportInterval <= 0 {
 		reportInterval = 30
@@ -126,6 +129,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 			if err := domain.ValidateMetricDefinitions(req.Metrics); err != nil {
 				return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 			}
+			if err := domain.RequireRankingMetric(req.Metrics); err != nil {
+				return nil, fmt.Errorf("platform_experiments.Update: %w", err)
+			}
 			pe.Metrics = req.Metrics
 		}
 		if req.ReportIntervalSeconds > 0 {
@@ -165,8 +171,20 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 		return fmt.Errorf("max_agents_reached: limit is %d", pe.MaxAgents)
 	}
 
-	if err := s.store.Signup(ctx, platformExpID, agentID); err != nil {
+	inserted, err := s.store.Signup(ctx, platformExpID, agentID)
+	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
+	}
+	if !inserted {
+		// The insert is guarded on the experiment still being open, so this is either a repeat
+		// signup or a Start that committed since the status was read above.
+		already, err := s.store.IsSignedUp(ctx, platformExpID, agentID)
+		if err != nil {
+			return fmt.Errorf("platform_experiments.Signup: %w", err)
+		}
+		if !already {
+			return fmt.Errorf("signup_closed: experiment started")
+		}
 	}
 	s.logger.Info("agent signed up", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID))
 	return nil
@@ -185,40 +203,6 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 		return nil, fmt.Errorf("invalid_transition: experiment is %s, expected open", pe.Status)
 	}
 
-	signedUp, err := s.store.ListSignups(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if len(signedUp) == 0 {
-		return nil, fmt.Errorf("no_agents: cannot start with zero sign-ups")
-	}
-
-	// Pass 1: resolve agents and compute each agent's bonus fraction.
-	// Unknown agents are skipped; only resolved agents participate in quota.
-	type agentBonus struct {
-		id    string
-		bonus float64
-	}
-	resolved := make([]agentBonus, 0, len(signedUp))
-	totalBonusFraction := 0.0
-	for _, agentID := range signedUp {
-		agent, err := s.store.GetAgent(ctx, agentID)
-		if err != nil || agent == nil {
-			s.logger.Warn("start: agent not found, skipping", zap.String("agentID", agentID))
-			continue
-		}
-		hasTop3, _ := s.store.HasTop3History(ctx, agentID)
-		bonus := 0.0
-		if hasTop3 {
-			bonus += s.cfg.Top3BonusFraction
-		}
-		resolved = append(resolved, agentBonus{id: agentID, bonus: bonus})
-		totalBonusFraction += bonus
-	}
-
-	quotas := make([]*domain.AgentQuota, 0, len(resolved))
-	now := time.Now().UTC()
-
 	// Only the first stage's share of the budget is released now; each later stage releases its
 	// own share at the boundary it starts (see controller.applyCut). This is what stops one agent
 	// exhausting the whole budget before the ladder has cut anyone. Applied uniformly to every
@@ -226,49 +210,78 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	// CPU/RAM/storage budgets of 0 correctly allocate 0 (AllocateQuota(0, ...) returns 0,0),
 	// which is exactly "not tracked."
 	exploreFrac := pe.Stages[0].LengthPct / 100.0
+	now := time.Now().UTC()
 
-	for _, ab := range resolved {
-		acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
-			pe.BudgetAcceleratorHours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
-		)
-		cpuGuaranteed, cpuBurst := domain.AllocateQuota(
-			pe.BudgetCPUCoreHours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
-		)
-		ramGuaranteed, ramBurst := domain.AllocateQuota(
-			pe.BudgetRAMGBHours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
-		)
-		storageGuaranteed, storageBurst := domain.AllocateQuota(
-			pe.BudgetStorageGBHours*exploreFrac, len(resolved), ab.bonus, totalBonusFraction, s.cfg,
-		)
-
-		aq := &domain.AgentQuota{
-			ID:                         uuid.New().String(),
-			AgentID:                    ab.id,
-			PlatformExperimentID:       id,
-			GuaranteedAcceleratorHours: acceleratorGuaranteed,
-			BurstAcceleratorHours:      acceleratorBurst,
-			GuaranteedCPUCoreHours:     cpuGuaranteed,
-			BurstCPUCoreHours:          cpuBurst,
-			GuaranteedRAMGBHours:       ramGuaranteed,
-			BurstRAMGBHours:            ramBurst,
-			GuaranteedStorageGBHours:   storageGuaranteed,
-			BurstStorageGBHours:        storageBurst,
-			CreatedAt:                  now,
+	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, id, func(signups []string) ([]*domain.AgentQuota, error) {
+		if len(signups) == 0 {
+			return nil, fmt.Errorf("no_agents: cannot start with zero sign-ups")
 		}
-		if err := s.store.UpsertAgentQuota(ctx, aq); err != nil {
-			return nil, fmt.Errorf("platform_experiments.Start: upsert quota for %s: %w", ab.id, err)
+		// Every signed-up agent participates or the start fails. Skipping the ones that could not
+		// be resolved used to mean a transient database error permanently disinherited an agent:
+		// the experiment started without it, and there is no second allocation pass.
+		bonuses := make([]float64, len(signups))
+		totalBonusFraction := 0.0
+		for i, agentID := range signups {
+			agent, err := s.store.GetAgent(ctx, agentID)
+			if err != nil {
+				return nil, fmt.Errorf("platform_experiments.Start: resolve agent %s: %w", agentID, err)
+			}
+			if agent == nil {
+				return nil, fmt.Errorf("platform_experiments.Start: agent %s is signed up but does not exist", agentID)
+			}
+			hasTop3, err := s.store.HasTop3History(ctx, agentID)
+			if err != nil {
+				return nil, fmt.Errorf("platform_experiments.Start: top3 history for %s: %w", agentID, err)
+			}
+			if hasTop3 {
+				bonuses[i] = s.cfg.Top3BonusFraction
+				totalBonusFraction += s.cfg.Top3BonusFraction
+			}
 		}
-		quotas = append(quotas, aq)
 
-		s.logger.Info("quota allocated",
-			zap.String("agentID", ab.id),
-			zap.Float64("guaranteed_accelerator_hours", acceleratorGuaranteed),
-			zap.Float64("burst_accelerator_hours", acceleratorBurst),
-		)
-	}
-
-	if err := s.store.UpdatePlatformExperimentStatus(ctx, id, domain.PlatformExpRunning); err != nil {
+		allocated := make([]*domain.AgentQuota, 0, len(signups))
+		for i, agentID := range signups {
+			acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
+				pe.BudgetAcceleratorHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+			)
+			cpuGuaranteed, cpuBurst := domain.AllocateQuota(
+				pe.BudgetCPUCoreHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+			)
+			ramGuaranteed, ramBurst := domain.AllocateQuota(
+				pe.BudgetRAMGBHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+			)
+			storageGuaranteed, storageBurst := domain.AllocateQuota(
+				pe.BudgetStorageGBHours*exploreFrac, len(signups), bonuses[i], totalBonusFraction, s.cfg,
+			)
+			allocated = append(allocated, &domain.AgentQuota{
+				ID:                         uuid.New().String(),
+				AgentID:                    agentID,
+				PlatformExperimentID:       id,
+				GuaranteedAcceleratorHours: acceleratorGuaranteed,
+				BurstAcceleratorHours:      acceleratorBurst,
+				GuaranteedCPUCoreHours:     cpuGuaranteed,
+				BurstCPUCoreHours:          cpuBurst,
+				GuaranteedRAMGBHours:       ramGuaranteed,
+				BurstRAMGBHours:            ramBurst,
+				GuaranteedStorageGBHours:   storageGuaranteed,
+				BurstStorageGBHours:        storageBurst,
+				CreatedAt:                  now,
+			})
+		}
+		return allocated, nil
+	})
+	if err != nil {
 		return nil, err
+	}
+	if !started {
+		return nil, fmt.Errorf("invalid_transition: experiment is no longer open")
+	}
+	for _, q := range quotas {
+		s.logger.Info("quota allocated",
+			zap.String("agentID", q.AgentID),
+			zap.Float64("guaranteed_accelerator_hours", q.GuaranteedAcceleratorHours),
+			zap.Float64("burst_accelerator_hours", q.BurstAcceleratorHours),
+		)
 	}
 	return quotas, nil
 }
@@ -335,10 +348,9 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			// auto-closed (ends_at-expired) platform experiment — the only realistic path for a
 			// real deadline-bound experiment. RecordTop3/HasTop3History (the quota bonus new
 			// experiments give agents with a prior top-3) is effectively dead code as a result.
-			// Fix: compute topResults here from the same per-agent-best-metric ranking a stage
-			// boundary already does (metricsdb.QueryAgentValues with a max_over_time/
-			// min_over_time PromQL over experiment_metric_value, see
-			// controller.cutOnMetric), keyed off pe.Metrics[0] as the primary metric,
+			// Fix: compute topResults here from the same per-agent-best-metric ranking the stage
+			// boundary and the final standings both already use
+			// (metricsdb.BestPerAgentOnMetric), keyed off pe.Metrics[0] as the primary metric,
 			// sorted best-first, then pass the top 3 into Close. Deliberately not done here —
 			// see agent/ session notes: no leaderboard/reputation use case needs it yet.
 			if err := s.Close(ctx, pe.ID, nil); err != nil {

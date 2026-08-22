@@ -19,14 +19,15 @@ type StagesStore interface {
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
 
 	// Stage boundaries.
-	// AdvanceStage atomically records the cut agents, applies every zero/add op, and claims
-	// the boundary. Returns (false, nil) if already committed by an earlier call.
-	AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs []string, zeros []db.StageZeroOp, adds []db.StageAddOp) (bool, error)
+	// AdvanceStage atomically records the cut agents, redistributes each dimension's released
+	// allocation to survivors, and claims the boundary. Returns (false, nil) if already
+	// committed by an earlier call.
+	AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs, survivorIDs []string, dims []db.StageRedistribution) (bool, error)
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 
 	// Quota. Accelerator-hours drives progress itself (GetTotalConsumedAccH); CPU/RAM/storage
-	// are released alongside it (see collectRedistribution).
+	// are released alongside it (see applyCut).
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
 	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
 
@@ -65,6 +66,12 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 		return nil
 	}
 
+	if pe.CurrentStage < 1 {
+		c.logger.Error("platform experiment has invalid current_stage, skipping stage advance",
+			zap.String("platform_experiment", pe.ID),
+			zap.Int("current_stage", pe.CurrentStage))
+		return nil
+	}
 	stage := pe.Stages[pe.CurrentStage-1]
 	c.logger.Info("stage boundary reached",
 		zap.String("platform_experiment", pe.ID),

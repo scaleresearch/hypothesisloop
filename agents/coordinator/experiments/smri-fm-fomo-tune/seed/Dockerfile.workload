@@ -12,7 +12,12 @@
 # d9a68815f5fcf08a5bfbffb6f1f811823fba8edd + tenstorrent/patches/vendored-tt-metal-changes.patch.
 # That REF must stay identical here, in Dockerfile.experimentator, in seed/job*.yaml and in
 # experiment.md -- a drift between them invalidates every result without raising anything.
-ARG BASE_IMAGE=localhost/hypothesisloop-smri-fm-workload@sha256:90930359be7709678f4c355380e0f62a4c9feeffa626a496da501f74a5dbbb69
+#
+# 2026-08-17: repinned after the prior digest (sha256:90930359...) turned out to point at a
+# podman-local image with a corrupted storage blob (checksum failure reading the baked-in
+# checkpoint on every save/import attempt -- see fix-later.md). Rebuilt from source at the same
+# TT_METAL_REF + patch, which is why the digest changed with no functional difference intended.
+ARG BASE_IMAGE=localhost/hypothesisloop-smri-fm-workload@sha256:d804bb8075434c7ff3bbed147d0ca8fe5da994c9c29839de728703bd08557514
 FROM ${BASE_IMAGE}
 
 ENV TT_METAL_REF=d9a68815f5fcf08a5bfbffb6f1f811823fba8edd

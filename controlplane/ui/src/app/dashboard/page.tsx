@@ -13,7 +13,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 import { statusColor, semantic } from '@/lib/colors'
-import { EVICTION_REASON_LABELS as EVICTION_LABELS } from '@/lib/eviction'
+import { evictionCode, evictionCodeLabel, evictionLabel } from '@/lib/eviction'
 
 type Job = Record<string, any>
 
@@ -65,7 +65,9 @@ export default function DashboardPage() {
   // Eviction breakdown by reason
   const evictedJobs = exps.filter(e => e.status === 'EVICTED')
   const evictionByReason = evictedJobs.reduce((acc, e) => {
-    const r = (e as any).eviction_reason ?? 'unknown'
+    // Group by the code, never the whole string: a reason may carry a ': detail'
+    // explanation, and every distinct one would otherwise become its own category.
+    const r = evictionCode((e as any).eviction_reason) || 'unknown'
     acc[r] = (acc[r] ?? 0) + 1
     return acc
   }, {} as Record<string, number>)
@@ -112,7 +114,7 @@ export default function DashboardPage() {
 
   const evictionChartData = Object.entries(evictionByReason)
     .sort((a, b) => b[1] - a[1])
-    .map(([r, n]) => ({ reason: EVICTION_LABELS[r] ?? r, count: n }))
+    .map(([r, n]) => ({ reason: evictionCodeLabel(r), count: n }))
 
   return (
     <div>
@@ -268,7 +270,6 @@ export default function DashboardPage() {
                   <th>Agent</th>
                   <th>Platform Experiment</th>
                   <th>Eviction Reason</th>
-                  <th style={{ textAlign: 'right' }}>Metric at Eviction</th>
                   <th>Accelerator</th>
                   <th>Tier</th>
                 </tr>
@@ -289,10 +290,7 @@ export default function DashboardPage() {
                       {e.platform_experiment_id ? (peMap[e.platform_experiment_id] ?? e.platform_experiment_id.slice(0, 8) + '…') : '—'}
                     </td>
                     <td style={{ fontSize: 12 }}>
-                      <Badge status="evicted">{EVICTION_LABELS[e.eviction_reason] ?? e.eviction_reason ?? '—'}</Badge>
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
-                      {e.metric_at_eviction != null ? e.metric_at_eviction.toFixed(4) : '—'}
+                      <Badge status="evicted">{e.eviction_reason ? evictionLabel(e.eviction_reason) : '—'}</Badge>
                     </td>
                     <td className="mono" style={{ fontSize: 11 }}>{e.accelerator_count}× {e.accelerator_type}</td>
                     <td><Badge status={e.capacity_tier ?? 'unknown'}>{e.capacity_tier ?? '—'}</Badge></td>

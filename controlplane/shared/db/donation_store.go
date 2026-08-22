@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,7 +45,7 @@ WHERE dr.id = $1`
 		&r.ID, &r.AgentID, &r.AgentName, &r.PlatformExperimentID, &r.CreditsWant, &r.Reason, &r.Status, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("donation_store.Get: %w", err)
@@ -88,12 +89,17 @@ ORDER BY dr.created_at DESC`
 	return out, rows.Err()
 }
 
-// UpdateDonationStatus changes the status of a donation request.
+// UpdateDonationStatus moves a donation request from 'open' to status. It is a CAS: fulfilled
+// (or already-cancelled) donations cannot be overwritten, and a nonexistent ID returns an error
+// instead of a silent no-op.
 func (s *DonationStore) UpdateDonationStatus(ctx context.Context, id, status string) error {
-	const q = `UPDATE donation_requests SET status=$2, updated_at=$3 WHERE id=$1`
-	_, err := s.pool.pool.Exec(ctx, q, id, status, time.Now().UTC())
+	const q = `UPDATE donation_requests SET status=$2, updated_at=$3 WHERE id=$1 AND status='open'`
+	tag, err := s.pool.pool.Exec(ctx, q, id, status, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("donation_store.UpdateStatus: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("donation_store.UpdateStatus: donation %s not found or not open", id)
 	}
 	return nil
 }

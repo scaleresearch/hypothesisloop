@@ -40,13 +40,12 @@ type Settler struct {
 	metricsDBURL string
 	gapCap       time.Duration
 	step         time.Duration
-	maxLookback  time.Duration
 }
 
-// New constructs a Settler. gapCap/step/maxLookback must match every other observed-usage query
-// in this deployment, so every termination path agrees on what "how long did this run" means.
-func New(usage UsageWriter, metricsDBURL string, gapCap, step, maxLookback time.Duration) *Settler {
-	return &Settler{usage: usage, metricsDBURL: metricsDBURL, gapCap: gapCap, step: step, maxLookback: maxLookback}
+// New constructs a Settler. gapCap/step must match every other observed-usage query in this
+// deployment, so every termination path agrees on what "how long did this run" means.
+func New(usage UsageWriter, metricsDBURL string, gapCap, step time.Duration) *Settler {
+	return &Settler{usage: usage, metricsDBURL: metricsDBURL, gapCap: gapCap, step: step}
 }
 
 // Settle writes exp's final observed cost for every resource dimension it was estimated for.
@@ -62,15 +61,44 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		return nil
 	}
 	now := time.Now().UTC()
-	_, observed, err := metricsdb.FirstObserved(ctx, s.metricsDBURL, exp.ID, now, s.maxLookback, s.step)
-	if err != nil {
-		return fmt.Errorf("settlement: first observed: %w", err)
+	// The lookback is exp's own real lifetime (its CreatedAt), never a fixed constant — the same
+	// window quota.runningCostCalc.costOf uses for live running-cost accounting, and for the same
+	// reason (see that function's doc): a fixed cap would make an old-but-legitimately-running
+	// job's later observations invisible to this query, so a job alive past the cap would settle
+	// for less than live accounting already charged it while it ran. The two must agree on what
+	// "how long did this run" means, or a long-lived job's final bill silently disagrees with the
+	// live number the operator saw and quota exhaustion was evicted against.
+	lookback := now.Sub(exp.CreatedAt)
+	var observed bool
+	if lookback > 0 {
+		var err error
+		_, observed, err = metricsdb.FirstObserved(ctx, s.metricsDBURL, exp.ID, now, lookback, s.step)
+		if err != nil {
+			return fmt.Errorf("settlement: first observed: %w", err)
+		}
 	}
 	neverStarted := !observed
+	if neverStarted {
+		// Sample retention is finite, so "no observation in the window" stops meaning "never ran"
+		// for an old enough job. Settling is idempotent and re-runs long after the fact, and a
+		// prior non-zero figure is the durable record that this job did run — never overwrite it
+		// with a full refund just because the evidence has since aged out.
+		settled, found, err := metricsdb.SettledCostForJob(ctx, s.metricsDBURL, exp.CreatedAt, exp.ID)
+		if err != nil {
+			return fmt.Errorf("settlement: prior settled cost: %w", err)
+		}
+		if found {
+			for _, amount := range settled {
+				if amount > 0 {
+					return nil
+				}
+			}
+		}
+	}
 	var hours float64
 	if !neverStarted && exp.EstimatedDurationHours > 0 {
 		var err error
-		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, now, s.maxLookback, s.gapCap, s.step)
+		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, now, lookback, s.gapCap, s.step)
 		if err != nil {
 			return fmt.Errorf("settlement: observed elapsed hours: %w", err)
 		}
@@ -92,11 +120,15 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 	// flat per-job rate below can't bill a mid-run type change correctly, but a fixed
 	// AcceleratorType per job's whole run is already the common case, and this needs no live
 	// observation at all — it can't ever silently zero out.
+	// Deliberately uncapped. A job that outran its estimate really did consume the hours, and
+	// billing it for less would put a number in the metrics store that never happened — the one
+	// thing that store is for. The bound on overrun is enforced upstream, not here: the
+	// controller's quota-exhaustion check reads this same observed cost every reconcile tick and
+	// evicts once the budget is spent, so observed usage can exceed an agent's budget by at most
+	// one reconcile interval's worth of running jobs (plus a stage's max_job_hours cap, where the
+	// platform experiment sets one).
 	rateCost := func(estimated float64) float64 {
-		if exp.EstimatedDurationHours <= 0 {
-			return 0
-		}
-		return (estimated / exp.EstimatedDurationHours) * hours
+		return exp.RatedCost(estimated, hours)
 	}
 
 	dims := []struct {

@@ -25,6 +25,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # any other concurrent user of that type (however small) would silently invalidate.
 CLUSTER_EXCLUSIVE=(
   acceptable-accelerator-types
+  resource-disbalance-evict
   concurrent-admission-race
   node-and-daemonset-faults
   connectivity-loss
@@ -32,11 +33,14 @@ CLUSTER_EXCLUSIVE=(
 )
 
 # Capacity/preemption scenarios deliberately hold real resources across multiple scheduler ticks.
+# quota-exhaustion is here for the same reason: it has to let a job actually overrun its estimate,
+# since observed consumption is the only thing that can exhaust a budget.
 SLOW_TESTS=(
   capacity-safety
   mixed-admission
   preemption-requeue
   running-cost-live
+  quota-exhaustion
 )
 
 # Needs real accelerator hardware — excluded unless explicitly requested.
@@ -111,6 +115,9 @@ exclusive_set=(${reordered[@]+"${reordered[@]}"})
 # One deterministic ceiling for every scenario. A scenario that needs a larger special case is
 # too slow or is hiding an unreliable assertion and must be fixed at its source.
 SCENARIO_TIMEOUT_SECONDS="${SCENARIO_TIMEOUT_SECONDS:-240}"
+# Exported so a scenario can budget against the same ceiling it will be killed at, instead of
+# discovering it as a SIGTERM mid-assertion (see scenario_seconds_left in lib/common.sh).
+export SCENARIO_TIMEOUT_SECONDS
 
 # GNU coreutils' timeout isn't on macOS by default (and gtimeout only if brew coreutils is
 # installed) — fall back to a watchdog that kills the scenario itself after the same ceiling.
@@ -140,6 +147,11 @@ run_one() {
   echo "$elapsed" > "$LOG_DIR/${name}.elapsed"
   [[ "$rc" == "0" ]] && echo "  [PASS] $name (${elapsed}s)" || echo "  [FAIL] $name (${elapsed}s, rc=$rc)"
 }
+
+# A scenario that was killed (suite timeout, ^C) may never have written its .rc/.elapsed files.
+# Missing means "did not report success", which is a failure — never a silently-skipped row.
+scenario_rc() { [[ -r "$LOG_DIR/$1.rc" ]] && cat "$LOG_DIR/$1.rc" || echo "1"; }
+scenario_elapsed() { [[ -r "$LOG_DIR/$1.elapsed" ]] && cat "$LOG_DIR/$1.elapsed" || echo "?"; }
 
 START=$(date +%s)
 run_parallel_group() {
@@ -188,8 +200,11 @@ echo "=========================================================="
 FAILED=0
 for name in ${fast_set[@]+"${fast_set[@]}"} ${slow_set[@]+"${slow_set[@]}"} ${exclusive_set[@]+"${exclusive_set[@]}"} ${hardware_set[@]+"${hardware_set[@]}"}; do
   [[ -z "$name" ]] && continue
-  rc=$(<"$LOG_DIR/${name}.rc")
-  secs=$(<"$LOG_DIR/${name}.elapsed")
+  # A scenario killed before it could write its own result files has not passed — report it as a
+  # failure rather than letting the read error decide, which prints a confusing shell diagnostic
+  # and leaves rc empty.
+  rc=$(scenario_rc "$name")
+  secs=$(scenario_elapsed "$name")
   if [[ "$rc" == "0" ]]; then
     echo "  [PASS] $name (${secs}s)"
   else
@@ -203,11 +218,11 @@ if [[ "$FAILED" == "1" ]]; then
   echo "==> Full output for failed scenarios:"
   for name in ${fast_set[@]+"${fast_set[@]}"} ${slow_set[@]+"${slow_set[@]}"} ${exclusive_set[@]+"${exclusive_set[@]}"} ${hardware_set[@]+"${hardware_set[@]}"}; do
     [[ -z "$name" ]] && continue
-    rc=$(<"$LOG_DIR/${name}.rc")
+    rc=$(scenario_rc "$name")
     if [[ "$rc" != "0" ]]; then
       echo ""
       echo "---- $name ----"
-      cat "$LOG_DIR/${name}.log"
+      cat "$LOG_DIR/${name}.log" 2>/dev/null || echo "(no output captured: scenario did not start or was killed)"
     fi
   done
   echo ""

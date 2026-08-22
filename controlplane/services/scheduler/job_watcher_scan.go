@@ -72,34 +72,47 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) e
 		}
 	}
 
-	if exp.Status != domain.StatusRunning && w.stuckPendingTimeout > 0 && exp.SubmittedAt != nil &&
-		time.Since(*exp.SubmittedAt) > w.stuckPendingTimeout {
-		w.onStuckPending(ctx, exp)
-		return nil
-	}
-
+	// The phase is polled before any deadline is applied, so every decision below is made against
+	// what the runtime reports right now rather than against how long a Postgres row has sat in a
+	// pre-RUNNING status. Keying "stuck pending" on status alone evicted pods that were plainly
+	// Running — they were merely blocked from being *marked* RUNNING, which is a different fault
+	// with a different remedy, and refunding them as never-started billed nobody for real hardware.
 	phase, err := w.backend.PollJobPhase(ctx, exp)
 	if err != nil {
 		return fmt.Errorf("poll actual phase: %w", err)
 	}
 
 	switch phase {
-	case workload.JobPhaseGone, workload.JobPhasePending:
-		// Desired state remains authoritative. The cluster agent independently retries creation;
-		// an admission that never becomes Running is bounded by stuckPendingTimeout above.
-		return nil
-	case workload.JobPhaseRunning:
-		if exp.Status != domain.StatusRunning {
-			w.onRunning(ctx, exp)
-			return nil
-		}
-		// The cluster agent continuously writes actual accelerator type into the metrics store.
 	case workload.JobPhaseSucceeded:
 		return w.onFinished(ctx, exp, true)
 	case workload.JobPhaseFailed:
 		return w.onFinished(ctx, exp, false)
+	case workload.JobPhaseRunning:
+		if exp.Status == domain.StatusRunning {
+			// The cluster agent continuously writes actual accelerator type into the metrics store.
+			return nil
+		}
+		switch _, outcome := w.onRunning(ctx, exp); outcome {
+		case runningMarked, runningLeftState:
+			return nil
+		case runningTypeMismatch:
+			w.evictNotYetRunning(ctx, exp, domain.EvictionFlavorMismatch)
+			return nil
+		case runningTypeUnobservable:
+			return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionAcceleratorTypeUnobservable)
+		default:
+			return fmt.Errorf("unknown running outcome %d", outcome)
+		}
+	case workload.JobPhaseGone, workload.JobPhasePending:
+		if exp.Status == domain.StatusRunning {
+			// Desired state remains authoritative and the cluster agent independently retries
+			// creation. A RUNNING job whose workload has genuinely vanished is the controller's
+			// call, not this loop's: it is the side that can tell an absent workload apart from
+			// an absent cluster (see controller.checkSilence).
+			return nil
+		}
+		return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending)
 	default:
 		return fmt.Errorf("unknown actual phase %q", phase)
 	}
-	return nil
 }

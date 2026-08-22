@@ -37,9 +37,44 @@ func (s *PlatformExperimentsService) GetQuota(ctx context.Context, agentID, plat
 	return aq, nil
 }
 
-// GetAgentQuota is an alias for GetQuota satisfying the controller.QuotaService interface.
+// GetAgentQuota is an alias for GetQuota satisfying the scheduler's QuotaService interface.
 func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 	return s.GetQuota(ctx, agentID, platformExpID)
+}
+
+// GetObservedAgentQuota returns an agent's allocation with usage that counts only what has
+// actually happened: settled observed consumption plus each running job's observed-elapsed cost.
+// No reservation term — deliberately not GetQuota. Admission asks "may I start one more?", which
+// no amount of actual state can answer, so it sums reservations. Eviction and billing ask "has
+// this budget been spent?", which is a claim about the actual state and nothing else; sharing one
+// figure between the two evicts running jobs for budget that only queued work reserved.
+//
+// It lags real consumption by at most one reconcile interval, and a just-terminated job is
+// invisible until settlement writes its cost. Both are undercounts, both self-correct, and both
+// err toward letting real work finish — the right direction for an eviction that is irreversible
+// and unrefunded.
+func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: %w", err)
+	}
+	if aq == nil {
+		return nil, nil
+	}
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: platform experiment %s not found", platformExpID)
+	}
+	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: populate usage: %w", err)
+	}
+	if err := s.addRunningActualCosts(ctx, platformExpID, aq); err != nil {
+		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: %w", err)
+	}
+	return aq, nil
 }
 
 // ListQuotas returns every agent's allocation and current usage for a platform experiment,

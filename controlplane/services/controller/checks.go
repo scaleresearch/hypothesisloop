@@ -51,22 +51,39 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	if err != nil {
 		return false, "", fmt.Errorf("silence job phase: %w", err)
 	}
-	if !found {
-		// No fresh phase report at all — indistinguishable from "cluster-agent itself
-		// can't currently observe/report" (e.g. a control-plane <-> cluster connectivity
-		// gap). Can't tell whether the pod is actually gone or just unreported; assuming
-		// the latter and evicting would kill real, still-running work. Skip and let a
-		// later reconcile decide once reporting resumes.
-		return false, "", nil
-	}
-	if phase == workload.JobPhaseGone {
-		// A fresh, complete cluster snapshot that doesn't mention this job at all — the
-		// runtime's own confirmation no live pod/container exists for it (see
-		// metricsdb.LatestJobPhase). Unlike Pending, this cannot resolve itself by waiting:
-		// nothing is converging. Most commonly a host reboot that wiped a bare-metal executor's
-		// container state out from under a RUNNING job, permanently stranding its quota until a
-		// human notices. Refund and terminate through the same path every other reason uses.
-		// Takes priority over any stale liveness/metric samples still inside the window below.
+	// Absence has two completely different causes, and they must be told apart before either can
+	// be acted on: the cluster is not reporting (nothing can be concluded about this job), or the
+	// cluster is reporting and this job is not in what it reports. Both branches need the same
+	// snapshot facts, and only these branches do — the common case above never pays for the query.
+	if !found || phase == workload.JobPhaseGone {
+		presence, err := metricsdb.ClusterSnapshotPresence(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, now, c.observedMaxLookback())
+		if err != nil {
+			return false, "", fmt.Errorf("silence snapshot presence: %w", err)
+		}
+		if !presence.Reported || presence.SnapshotAge > c.clusterSilenceCeiling {
+			// The cluster itself has gone quiet. Whether this job is alive is genuinely unknown
+			// and stays unknown until reporting resumes, so waiting produces no better evidence —
+			// only an ever-growing pile of reservations held against a cluster nobody can see.
+			return true, domain.EvictionClusterUnreachable, nil
+		}
+		if !found {
+			// The cluster is reporting, just not freshly enough for this job's silence window.
+			// Not a verdict on the job; the next pass re-reads.
+			return false, "", nil
+		}
+		if presence.AbsentSnapshots < metricsdb.GoneConfirmingSnapshots {
+			// Missing from the newest snapshot but present in the one before it. That is exactly
+			// what a routine drift-delete-then-recreate looks like from here, and it resolves
+			// itself within a snapshot or two. Wait for the absence to be confirmed.
+			return false, "", nil
+		}
+		// Consecutive complete snapshots from a live cluster, none of which mention this job —
+		// the runtime's own confirmation that no pod/container exists for it. Unlike Pending this
+		// cannot resolve itself by waiting: nothing is converging. Most commonly a host reboot
+		// that wiped a bare-metal executor's container state out from under a RUNNING job,
+		// permanently stranding its quota until a human notices. Refund and terminate through the
+		// same path every other reason uses. Takes priority over any stale liveness/metric
+		// samples still inside the window below.
 		return true, domain.EvictionWorkloadGone, nil
 	}
 	if phase != workload.JobPhaseRunning {
@@ -95,13 +112,37 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		if err != nil {
 			return false, "", fmt.Errorf("silence declared-metric progress: %w", err)
 		}
-		if !reported || changed {
-			// Not reported yet, or too few samples to judge: still warming up, or its own
-			// reporting is broken — the latter is exactly what checkQuotaExhaustion/
-			// stuck-pending bounds, not this check.
+		if changed {
+			return false, "", nil // moving, which is the whole point
+		}
+		if reported {
+			// Reporting, but every declared metric held one constant value across the window.
+			// reported=true means at least two samples (see declaredMetricSpread — a single point
+			// reads as not-reported precisely because it cannot show movement), so this is a job
+			// re-emitting a cached value with its training loop hung, not one still warming up.
+			return true, domain.EvictionSilent, nil
+		}
+		// Nothing in the window. That is two different jobs: one that reported earlier and went
+		// quiet, and one whose reporting path never worked at all. Only the second is decided
+		// here — ask over the job's whole life rather than this window, or a job that reported
+		// fine an hour ago gets condemned as if it never reported. Asked with the "even one
+		// sample" reader, not the progress one: a single point is not enough to judge movement,
+		// but it is a complete answer to "did this job ever report".
+		everReported, err := metricsdb.AnyDeclaredMetricReported(ctx, c.metricsDBURL, exp.ID, declaredMetricKeys, now.Sub(startedAt))
+		if err != nil {
+			return false, "", fmt.Errorf("silence declared-metric ever-reported: %w", err)
+		}
+		if everReported {
 			return false, "", nil
 		}
-		return true, domain.EvictionSilent, nil
+		// Alive, past its grace period, and has never once emitted a metric its own platform
+		// experiment declared. It cannot be ranked, cut, or compared — there is nothing to judge
+		// it by — while it holds an accelerator and bills for it. The reporting path is broken
+		// (wrong URL, a stale helper baked into the image, a swallowed exception), and no amount
+		// of further running fixes that. The grace above is 2x the silence window, i.e. six times
+		// the platform experiment's own declared reporting cadence: a job that has not reported
+		// in six of its own intervals is not slow, it is not reporting.
+		return true, domain.EvictionNeverReportedMetrics, nil
 	}
 	// Same silence, two very different causes. A job that reported and then stopped has a
 	// hung or dead training process; one that never reported at all has a reporting path

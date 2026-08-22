@@ -39,6 +39,7 @@ from fomo_tune.backbone import SmriMaeTransform
 from fomo_tune.main_task3 import score as score_task3
 from fomo_tune.main_task5 import score as score_task5
 from fomo_tune_tt.backbone_tt import TTBackbone, choose_l_vis, embed_subjects
+from fomo_tune_tt.confound import FoldSafeResidualizer, ap_extent
 from fomo_tune_tt.data import load_task
 from fomo_tune_tt.metrics import post_metric
 
@@ -60,21 +61,35 @@ def head_for(task: str):
     )
 
 
-def cross_validate(task: str, features: np.ndarray, y: np.ndarray) -> np.ndarray:
+def cross_validate(task: str, features: np.ndarray, y: np.ndarray, confound: np.ndarray | None = None) -> np.ndarray:
     """Out-of-fold prediction for every subject. Task 3 predicts an age; task 5
     predicts the positive-class probability, indexing `classes_` rather than
-    assuming column 1 (upstream's `Task5Method.predict`'s reasoning)."""
+    assuming column 1 (upstream's `Task5Method.predict`'s reasoning).
+
+    `confound`, task 5 only: Task_5's public 48-subject set has a real scanner/
+    acquisition confound (physical head coverage along the AP axis) that alone predicts
+    the label at AUROC ~0.92 and otherwise inflates the naive score to ~0.995 (see
+    fomo_tune_tt/confound.py and scratch_task5_repro/confound_regression_full_protocol.py).
+    When given, every fold fits a `FoldSafeResidualizer` on that fold's TRAIN rows only
+    and residualizes both train and test features before the head sees them -- this is
+    the DEFAULT behavior for task 5 (see main()). Task 3 has not been checked for the
+    same kind of confound and is unaffected: `confound` is left `None` for it."""
     oof = np.zeros(len(y), dtype=float)
     folds = KFold(n_splits=N_FOLDS, shuffle=True, random_state=PROTOCOL_SEED)
     start = time.perf_counter()
     for fold, (train, test) in enumerate(folds.split(features)):
+        X_train, X_test = features[train], features[test]
+        if confound is not None:
+            residualizer = FoldSafeResidualizer().fit(X_train, confound[train])
+            X_train = residualizer.transform(X_train, confound[train])
+            X_test = residualizer.transform(X_test, confound[test])
         head = head_for(task)
-        head.fit(features[train], y[train])
+        head.fit(X_train, y[train])
         if task == "task3":
-            oof[test] = head.predict(features[test])
+            oof[test] = head.predict(X_test)
         else:
             positive = list(head.classes_).index(1)
-            oof[test] = head.predict_proba(features[test])[:, positive]
+            oof[test] = head.predict_proba(X_test)[:, positive]
         logger.info(f"fold {fold + 1}/{N_FOLDS} n={len(test)} ({time.perf_counter() - start:.0f}s)")
         post_metric((fold + 1) / N_FOLDS, float(time.perf_counter() - start), "cv_seconds")
     return oof
@@ -148,7 +163,12 @@ def main() -> None:
     y = np.array([s.label for s in subjects], dtype=float if args.task == "task3" else int)
     np.savez(args.output_dir / "embeddings.npz", subjects=np.array([s.subject for s in subjects]), features=features, y=y)
 
-    oof = cross_validate(args.task, features, y)
+    # Task 5's default confound correction (see fomo_tune_tt/confound.py docstring and
+    # cross_validate's `confound` parameter). Task 3 has not been checked for the same
+    # confound, so it is deliberately left uncorrected.
+    confound = np.array([ap_extent(s.t1w_path) for s in subjects]) if args.task == "task5" else None
+
+    oof = cross_validate(args.task, features, y, confound)
     summary = (score_task3 if args.task == "task3" else score_task5)(y, oof)
 
     record = {

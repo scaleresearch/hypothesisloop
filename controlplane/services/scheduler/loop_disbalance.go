@@ -54,6 +54,82 @@ type placedExperiment struct {
 	node       string
 }
 
+// pendingEviction is one disbalance victim whose termination has been requested but whose freed
+// capacity a fresh capacity read cannot yet be trusted to reflect. See Loop.pendingEvictions.
+type pendingEviction struct {
+	cluster          string
+	node             string
+	footprint        domain.Footprint
+	acceleratorType  string // lowercase, as looked up via foldMatchingKey against nodeAvail
+	acceleratorCount int64
+	evictedAt        time.Time
+}
+
+// applyPendingEvictions credits every still-fresh pendingEviction's footprint back into gAvail,
+// bAvail, and nodeAvail before this tick's admission passes run, and prunes any entry older than
+// l.evictionTTL. Without this, a tick reads the victim's node/accelerator as still occupied
+// (the node/agent hasn't reported it back yet) even though the victim is already gone from
+// ListRunningExperiments, and re-derives the same shortage — driving a fresh eviction for
+// capacity that is already being freed. Mutates gAvail/bAvail/nodeAvail in place; not safe to
+// call concurrently with itself, which tick()'s single-threaded invariant already guarantees.
+func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]domain.Footprint, nodeAvail map[string]map[string]map[string]int64) {
+	for id, pe := range l.pendingEvictions {
+		if now.Sub(pe.evictedAt) > l.evictionTTL {
+			delete(l.pendingEvictions, id)
+			continue
+		}
+		if g, ok := gAvail[pe.cluster]; ok {
+			g.AddFootprint(pe.footprint)
+		}
+		if b, ok := bAvail[pe.cluster]; ok {
+			b.AddFootprint(pe.footprint)
+		}
+		if pe.acceleratorCount > 0 && pe.acceleratorType != "" {
+			if byNode, ok := nodeAvail[pe.cluster]; ok {
+				if capacity, ok := byNode[pe.node]; ok {
+					key := foldMatchingKey(capacity, pe.acceleratorType)
+					capacity[key] += pe.acceleratorCount
+				}
+			}
+		}
+	}
+}
+
+// isPendingEviction reports whether id already has an outstanding, unexpired eviction request —
+// candidate victims already in flight must not be selected again, and their node's idle
+// accelerator count (see disbalancePremises) must not be double-counted against them.
+func (l *Loop) isPendingEviction(id string, now time.Time) bool {
+	pe, ok := l.pendingEvictions[id]
+	if !ok {
+		return false
+	}
+	return now.Sub(pe.evictedAt) <= l.evictionTTL
+}
+
+// disbalanceVictim is a job selected for eviction together with the evidence that condemned it.
+// The evidence is carried out of selection rather than recomputed afterwards, so what the agent is
+// told is exactly what the scheduler measured — an eviction nobody asked for has to explain
+// itself, and "resource_disbalance" on its own tells the agent nothing it can act on.
+type disbalanceVictim struct {
+	experiment *domain.Experiment
+	node       string
+	// dimension is the resource the job overreached on, requested/share its request against its
+	// proportionate entitlement, and idleAccelerators what that request stranded.
+	dimension        domain.ResourceKind
+	requested        int64
+	share            float64
+	idleAccelerators int64
+}
+
+// explain states what the job did, what it was entitled to, and what that cost — in that order,
+// because the agent reading it needs to know what to change about its next submission.
+func (v disbalanceVictim) explain() string {
+	return fmt.Sprintf(
+		"held %d accelerator(s) on node %s while requesting %s %d against a proportionate share of %.0f (%.1fx), stranding %d idle accelerator(s) that no queued job could reach; resubmit with %s sized closer to the accelerators it holds",
+		v.experiment.AcceleratorCount, v.node, v.dimension, v.requested, v.share,
+		float64(v.requested)/v.share, v.idleAccelerators, v.dimension)
+}
+
 // evictDisbalanced is called for a queued job that just failed to be admitted. It terminates the
 // running jobs whose disproportionate CPU/memory/storage requests are the sole reason `blocked`
 // cannot reach accelerators that are sitting idle on their node. Returns without acting unless
@@ -71,9 +147,6 @@ func (l *Loop) evictDisbalanced(
 	nodeLabels map[string]map[string]string,
 	blockedFP domain.Footprint,
 ) error {
-	if l.evictor == nil || l.disbalanceTolerance <= 0 {
-		return nil
-	}
 	// Victim selection needs job->node attribution, which lives only in the metrics store. With
 	// no metrics store configured there is no way to prove a job sits on the stranded node, so
 	// the pass disables itself rather than guessing.
@@ -97,9 +170,23 @@ func (l *Loop) evictDisbalanced(
 		return fmt.Errorf("disbalance: list running: %w", err)
 	}
 
+	now := time.Now()
 	placed := make([]placedExperiment, 0, len(running))
 	for _, exp := range running {
 		if exp.ClusterName != cluster || exp.ID == blocked.ID {
+			continue
+		}
+		// Already being evicted by a prior tick: its capacity is already accounted for via
+		// applyPendingEvictions, and it must not be condemned a second time.
+		if l.isPendingEviction(exp.ID, now) {
+			continue
+		}
+		// A burst job may never displace guaranteed work, however disproportionate that work
+		// looks. preempt() enforces exactly this by only ever considering burst victims; this
+		// pass terminates jobs outright, so it cannot be the laxer of the two. Without this a
+		// queued burst job could evict a running guaranteed one and invert the whole tier
+		// guarantee.
+		if blocked.CapacityTier == domain.CapacityBurst && exp.CapacityTier != domain.CapacityBurst {
 			continue
 		}
 		node, found, err := metricsdb.LatestExperimentNode(ctx, l.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback)
@@ -116,17 +203,33 @@ func (l *Loop) evictDisbalanced(
 
 	victims := selectDisbalanceVictims(blocked, blockedFP, avail, total, nodeAvail, nodeLabels, placed, l.disbalanceTolerance)
 	for _, victim := range victims {
+		explanation := victim.explain()
 		l.logger.Info("evicting resource-disbalanced job",
-			zap.String("victim", victim.ID),
+			zap.String("victim", victim.experiment.ID),
 			zap.String("blocked", blocked.ID),
 			zap.String("cluster", cluster),
-			zap.Int("victim_accelerators", victim.AcceleratorCount),
-			zap.String("victim_footprint", footprintStr(victim.Footprint())),
+			zap.String("why", explanation),
+			zap.String("victim_footprint", footprintStr(victim.experiment.Footprint())),
 			zap.String("cluster_total", footprintStr(total)),
 		)
-		if err := l.evictor.EvictExperiment(ctx, victim.ID, domain.EvictionResourceDisbalance); err != nil {
-			l.logger.Error("evict resource-disbalanced job", zap.String("victim", victim.ID), zap.Error(err))
+		// The explanation rides the eviction reason itself, in the same "code: detail" shape the
+		// scheduler already uses for not_admitted_reason — so the agent that lost the job reads
+		// why on the record it already checks, with no second field or channel to discover.
+		if err := l.evictor.EvictExperiment(ctx, victim.experiment.ID,
+			domain.EvictionResourceDisbalance.WithDetail(explanation)); err != nil {
+			l.logger.Error("evict resource-disbalanced job", zap.String("victim", victim.experiment.ID), zap.Error(err))
 			continue
+		}
+		// Record the freed capacity as pending so the next tick(s) — until evictionTTL or a
+		// capacity read catches up, whichever first — credit it back rather than evicting a fresh
+		// victim to cover the same shortage again. See applyPendingEvictions.
+		l.pendingEvictions[victim.experiment.ID] = pendingEviction{
+			cluster:          cluster,
+			node:             victim.node,
+			footprint:        victim.experiment.Footprint(),
+			acceleratorType:  strings.ToLower(string(victim.experiment.AcceleratorType)),
+			acceleratorCount: int64(victim.experiment.AcceleratorCount),
+			evictedAt:        now,
 		}
 		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionResourceDisbalance)).Inc()
 	}
@@ -149,12 +252,17 @@ func disbalancePremises(
 	blockedFP, clusterAvail domain.Footprint,
 	nodeAvail map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
-) (domain.Footprint, map[string]bool, bool) {
+) (domain.Footprint, map[string]int64, bool) {
 	if blocked.Job.AcceleratorCount <= 0 {
 		return nil, nil, false
 	}
-	// shortfall() only records dimensions with a real deficit, so every entry here is positive.
-	shortage := shortfall(clusterAvail, blockedFP)
+	// preemptionShortfall — the same function the tick's own fit check uses at the call site that
+	// led here (see loop_tick.go) — rather than a plain cluster-total shortfall(): the evictor
+	// must judge "is blocked's accelerator dimension really short" with the identical per-node
+	// placement evidence the trigger used, not a coarser cluster-wide sum that can disagree with
+	// it. shortfall() only records dimensions with a real deficit, so every entry here is
+	// positive.
+	shortage := preemptionShortfall(clusterAvail, nodeAvail, nodeLabels, blocked, blockedFP)
 	if len(shortage) == 0 {
 		return nil, nil, false
 	}
@@ -166,13 +274,15 @@ func disbalancePremises(
 
 	flavor := strings.ToLower(string(blocked.AcceleratorType))
 	perRank := int64(blocked.Job.AcceleratorCount)
-	strandedNodes := make(map[string]bool, len(nodeAvail))
+	// Value, not just presence: how many accelerators a node is stranding is the whole cost of
+	// the disproportion, and the agent is told it verbatim (see disbalanceVictim.explain).
+	strandedNodes := make(map[string]int64, len(nodeAvail))
 	for node, capacity := range nodeAvail {
 		if !labelsMatch(nodeLabels[node], blocked.Job.NodeSelector) {
 			continue
 		}
-		if foldLookup(capacity, flavor) >= perRank {
-			strandedNodes[node] = true
+		if free := foldLookup(capacity, flavor); free >= perRank {
+			strandedNodes[node] = free
 		}
 	}
 	if len(strandedNodes) == 0 {
@@ -212,8 +322,8 @@ func selectDisbalanceVictims(
 	nodeLabels map[string]map[string]string,
 	placed []placedExperiment,
 	tolerance float64,
-) []*domain.Experiment {
-	if tolerance <= 0 || blocked.Job.AcceleratorCount <= 0 || len(clusterTotal) == 0 {
+) []disbalanceVictim {
+	if blocked.Job.AcceleratorCount <= 0 || len(clusterTotal) == 0 {
 		return nil
 	}
 
@@ -239,18 +349,22 @@ func selectDisbalanceVictims(
 
 	// (4) Score every candidate by how far past its proportionate share it reaches, in the
 	// dimensions that are actually short. Dimensions the cluster reports no total for are
-	// skipped, never assumed violated.
+	// skipped, never assumed violated. Grouped by node, not pooled cluster-wide: `blocked` can
+	// only land where it has both idle accelerators AND the fungible headroom freeing these
+	// victims would create, so a plan is only meaningful if every victim in it sits on the same
+	// node as the idle accelerators it is meant to unlock — see (5).
 	type scoredVictim struct {
-		experiment *domain.Experiment
-		ratio      float64
+		victim disbalanceVictim
+		ratio  float64
 	}
-	var candidates []scoredVictim
+	byNode := make(map[string][]scoredVictim)
 	for _, p := range placed {
-		if !strandedNodes[p.node] || p.experiment.AcceleratorCount <= 0 {
+		if strandedNodes[p.node] <= 0 || p.experiment.AcceleratorCount <= 0 {
 			continue
 		}
 		fp := p.experiment.Footprint()
 		worst := 0.0
+		evidence := disbalanceVictim{experiment: p.experiment, node: p.node, idleAccelerators: strandedNodes[p.node]}
 		for key := range shortage {
 			installed := clusterTotal[key]
 			if installed <= 0 {
@@ -260,54 +374,74 @@ func selectDisbalanceVictims(
 			if share <= 0 {
 				continue
 			}
-			if ratio := float64(fp[key]) / share; ratio > worst {
-				worst = ratio
+			ratio := float64(fp[key]) / share
+			if ratio <= worst {
+				continue
 			}
+			worst = ratio
+			evidence.dimension, evidence.requested, evidence.share = key.Kind, fp[key], share
 		}
 		if worst > tolerance {
-			candidates = append(candidates, scoredVictim{experiment: p.experiment, ratio: worst})
+			byNode[p.node] = append(byNode[p.node], scoredVictim{victim: evidence, ratio: worst})
 		}
 	}
-	if len(candidates) == 0 {
+	if len(byNode) == 0 {
 		return nil
 	}
 
-	// Most disproportionate first, so the smallest number of the most offending jobs is taken;
-	// experiment ID breaks ties for a deterministic decision across ticks.
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].ratio != candidates[j].ratio {
-			return candidates[i].ratio > candidates[j].ratio
-		}
-		return candidates[i].experiment.ID < candidates[j].experiment.ID
-	})
+	// (5) For each node with disproportionate candidates, accumulate until that node's own
+	// victims alone cover the whole shortage — a plan that frees room on nodes A+B is worthless
+	// if `blocked`'s idle accelerators (and the fungible headroom this plan buys) are only usable
+	// together on one specific node. Nodes are tried in deterministic (sorted) order; among nodes
+	// that produce a complete plan, the smallest plan wins, node name breaking ties.
+	nodes := make([]string, 0, len(byNode))
+	for node := range byNode {
+		nodes = append(nodes, node)
+	}
+	sort.Strings(nodes)
 
-	// (5) Accumulate until the whole shortage is covered.
-	var selected []*domain.Experiment
-	freed := domain.NewFootprint()
-	contributions := make(map[string]domain.Footprint, len(candidates))
-	for _, c := range candidates {
-		if domain.Fits(freed, shortage) {
-			break
-		}
-		fp := c.experiment.Footprint()
-		contributions[c.experiment.ID] = fp
-		selected = append(selected, c.experiment)
-		freed.AddFootprint(fp)
-	}
-	if !domain.Fits(freed, shortage) {
-		return nil
-	}
+	var best []disbalanceVictim
+	for _, node := range nodes {
+		candidates := byNode[node]
+		// Most disproportionate first, so the smallest number of the most offending jobs is
+		// taken; experiment ID breaks ties for a deterministic decision across ticks.
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].ratio != candidates[j].ratio {
+				return candidates[i].ratio > candidates[j].ratio
+			}
+			return candidates[i].victim.experiment.ID < candidates[j].victim.experiment.ID
+		})
 
-	// Fill-back pass: reprieve any victim whose removal still leaves the shortage covered, so an
-	// overshoot in the loop above never costs an extra job. Mirrors preempt()'s pass.
-	for i := len(selected) - 1; i >= 0; i-- {
-		trial := freed.Sub(contributions[selected[i].ID])
-		if domain.Fits(trial, shortage) {
-			freed = trial
-			selected = append(selected[:i], selected[i+1:]...)
+		var selected []disbalanceVictim
+		freed := domain.NewFootprint()
+		contributions := make(map[string]domain.Footprint, len(candidates))
+		for _, c := range candidates {
+			if domain.Fits(freed, shortage) {
+				break
+			}
+			fp := c.victim.experiment.Footprint()
+			contributions[c.victim.experiment.ID] = fp
+			selected = append(selected, c.victim)
+			freed.AddFootprint(fp)
+		}
+		if !domain.Fits(freed, shortage) {
+			continue
+		}
+
+		// Fill-back pass: reprieve any victim whose removal still leaves the shortage covered, so
+		// an overshoot in the loop above never costs an extra job. Mirrors preempt()'s pass.
+		for i := len(selected) - 1; i >= 0; i-- {
+			trial := freed.Sub(contributions[selected[i].experiment.ID])
+			if domain.Fits(trial, shortage) {
+				freed = trial
+				selected = append(selected[:i], selected[i+1:]...)
+			}
+		}
+		if best == nil || len(selected) < len(best) {
+			best = selected
 		}
 	}
-	return selected
+	return best
 }
 
 // Follow-up, deliberately not implemented here: a usage-based refinement that also catches a job

@@ -7,12 +7,12 @@ A platform for running autonomous ML research agents against a shared compute bu
 - **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (accelerator-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
 - **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool (agents register hypothesis text once via `POST /hypotheses`; registering equivalent text again returns the existing row instead of a duplicate). A completed run requires a written finding — attached to the hypothesis it tested — before the same agent can submit again.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler distinguishes "job is mid-reschedule" from "job actually hung" before evicting for silence, and billing settles against observed usage across the gap.
-- **Inspectable eviction reasons.** Jobs are evicted with a specific reason (`silent`, `crash_loop`, `quota_exhaustion`, `stuck_pending`, ...) rather than disappearing silently. `COMPLETED`/`FAILED`/`EVICTED` are terminal.
+- **Inspectable eviction reasons.** Jobs are evicted with a specific reason (`silent`, `never_reported_metrics`, `quota_exhaustion`, `stuck_pending`, ...) rather than disappearing silently. `COMPLETED`/`FAILED`/`EVICTED` are terminal.
 - **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting — and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors (see `the stage ladder`).
 - **No cluster credentials in the control plane.** Agents talk to a REST API; the control plane never holds a kubeconfig or dials into a target cluster.
 - **Runs on plain Kubernetes.** Jobs are scheduled as native Kubernetes `Job` objects with `PriorityClass` for admission/preemption — no external queueing operator (Kueue, Volcano, etc.) required, though the scheduling backend is pluggable if you want one.
 
-See [`tests/workloads/generic/spec.md`](tests/workloads/generic/spec.md) for the agent-facing API reference.
+The agent-facing API reference is served by the control plane itself, at `/explore` — generated from the live API, so it cannot drift from it.
 
 ## How it works
 
@@ -124,10 +124,10 @@ make controlplane-up
 `API_URL` just needs to be reachable *outbound* from inside
 the target cluster — the control plane never needs to reach the cluster at all, so
 there's no kubeconfig or credential to hand it. Repeat `make cluster-agent-up
-CLUSTER=<name>` for every additional target cluster, and add a matching entry to
-`controlplane/settings/clusters.yaml` so the control plane knows the name
-(registration is config-driven today, not auto-discovered from an agent's first
-connection).
+CLUSTER=<name>` for every additional target cluster. There is nothing to register
+control-plane side: a cluster exists as soon as its agent reports a heartbeat, and its
+capacity is read from those heartbeats. A typo'd `CLUSTER=` therefore produces a second,
+phantom cluster rather than an error — the name the agent reports is the name.
 
 ### Option C — Windows (untested)
 
@@ -166,7 +166,8 @@ setup, job submission, status polling, node/connectivity/daemonset fault injecti
 ## Agent API
 
 Agents interact with HypothesisLoop exclusively through a REST API — no direct
-cluster access. Start here: [`tests/workloads/generic/spec.md`](tests/workloads/generic/spec.md).
+cluster access. Start here: `GET /explore` on a running control plane
+(http://localhost:8081/explore), the agent-facing digest of every endpoint.
 
 ## Endpoints
 

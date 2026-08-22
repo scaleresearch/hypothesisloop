@@ -84,7 +84,13 @@ func main() {
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
 
-	apiServer := newAPIServer(pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	// One root context for every background loop, cancelled before the HTTP server drains.
+	// They used to run on context.Background(), so SIGTERM tore the process down mid-admission
+	// pass while the connection pool was closing underneath them.
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	apiServer := newAPIServer(runCtx, pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -98,6 +104,7 @@ func main() {
 
 	<-sigCh
 	logger.Info("control-service: shutting down")
+	runCancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
@@ -107,7 +114,7 @@ func main() {
 	logger.Info("control-service: stopped")
 }
 
-func newAPIServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// Native Kubernetes Jobs need no per-agent object; keeps agent registration
 	// independent from the scheduler backend.
 	provisioner := quota.AgentProvisioner(noopAgentProvisioner{})
@@ -115,7 +122,12 @@ func newAPIServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperi
 	svc := quota.NewService(store, provisioner, logger)
 	handler := quota.NewHandler(svc, logger)
 
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
+	// One observation cadence for the whole process: the quota service, the settler, the
+	// controller and the scheduler loop must all measure "how long did this run" the same way,
+	// or the same job's cost depends on which of them is asked.
+	observedGapCap, observedStep := pcfg.Scheduler.ObservationCadence()
+
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap, observedStep)
 	acceleratorTypeInfos := make([]quota.AcceleratorTypeInfo, 0, len(pcfg.AcceleratorTypes))
 	for _, g := range pcfg.AcceleratorTypes {
 		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, AccHRate: g.AccHRate})
@@ -130,12 +142,11 @@ func newAPIServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperi
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin)
 
-	// Auto-close platform experiments past their ends_at deadline. Runs under
-	// context.Background() since it's a periodic scan with no state to drain on shutdown.
-	// Close() is safe to race across replicas — a second caller just logs invalid_transition.
-	go peSvc.StartExpirySweep(context.Background(), 60*time.Second)
+	// Auto-close platform experiments past their ends_at deadline. Close() is safe to race
+	// across replicas — a second caller just logs invalid_transition.
+	go peSvc.StartExpirySweep(runCtx, 60*time.Second)
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, logger)
 	registryHandler := registry.NewHandler(registry.New(store, logger, metricsDBURL), logger)
 
 	r := chi.NewRouter()
@@ -178,8 +189,9 @@ func newAPIServer(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperi
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
-	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
+func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+	observedGapCap, observedStep := pcfg.Scheduler.ObservationCadence()
+	expQuotaSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap, observedStep)
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
 	// (see workload/backend.go). queuebackend.Backend only reads/writes Postgres.
@@ -190,15 +202,11 @@ func newSchedulerParts(pool *db.Pool, store *db.Store, peFullStore *db.PlatformE
 	}
 	var jwc workload.Backend = queueBackend
 
-	observedGapCap := time.Duration(pcfg.Scheduler.SilenceMultiplier * float64(pcfg.Scheduler.DefaultReportIntervalSeconds) * float64(time.Second))
-	observedStep := time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second
-
 	// settler is the sole path that durably writes a terminal experiment's final observed usage
 	// (see services/settlement) — used inline by JobWatcher and by the reconciler below to
 	// retry anything a crash or metrics-DB outage left unsettled.
-	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap, observedStep, scheduler.ObservedMaxLookback)
+	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap, observedStep)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
-	go settlementReconciler.Start(context.Background())
 
 	watcher := scheduler.NewJobWatcher(store, jwc, logger).
 		WithQuotaSettler(settler).
@@ -217,15 +225,20 @@ func newSchedulerParts(pool *db.Pool, store *db.Store, peFullStore *db.PlatformE
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap, observedStep).
-		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance)
+		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance).
+		WithQuotaSettler(settler)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 
 	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run
 	// on exactly one replica. leaderelection.Run holds a Postgres advisory lock to pick that
 	// replica; others stand by and take over if the leader dies. Only these loops are
 	// leader-gated — the HTTP API stays multi-replica.
-	go leaderelection.Run(context.Background(), pool.Raw(), leaderelection.SchedulerLockKey,
+	// The settlement reconciler joins the leader-gated loops rather than running per replica.
+	// Settle is an idempotent absolute set, so concurrent copies are not incorrect, but they are
+	// N redundant sweeps racing last-writer-wins over the same "final" figure. One owner.
+	go leaderelection.Run(runCtx, pool.Raw(), leaderelection.SchedulerLockKey,
 		5*time.Second, logger, func(leaderCtx context.Context) {
+			go settlementReconciler.Start(leaderCtx)
 			schedulerLoop.Start(leaderCtx)
 			watcher.Start(leaderCtx)
 		})

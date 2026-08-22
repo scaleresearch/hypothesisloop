@@ -8,16 +8,7 @@ import type { PlatformExperiment, MetricDefinition } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
-import { formatAccH } from '@/lib/format'
-
-function relTime(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const s = Math.round(diffMs / 1000)
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  return new Date(iso).toLocaleDateString()
-}
+import { formatAccH, relTime } from '@/lib/format'
 
 // The registry's job record has no final_metric_value field at all (confirmed against the live
 // API — it was always undefined, rendering "—" for every job regardless of outcome). The real
@@ -33,9 +24,8 @@ function JobFinalMetric({ jobId, primaryMetric }: { jobId: string; primaryMetric
   )
   if (!primaryMetric) return <span className="text-muted">—</span>
   const values = (data ?? [])
-    .filter(p => (p.metric_name ?? 'default') === primaryMetric.key)
-    .map(p => p.metric_value ?? p.value)
-    .filter((v): v is number => v != null)
+    .filter(p => p.metric_name === primaryMetric.key)
+    .map(p => p.metric_value)
   if (values.length === 0) return <span className="text-muted">—</span>
   const best = primaryMetric.direction === 'maximize' ? Math.max(...values) : Math.min(...values)
   return <span className="accent">{best.toFixed(4)}</span>
@@ -168,7 +158,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                   </td>
                 </tr>
               ) : jobs.map(job => {
-                const j = job as any
+                const j = job
                 const status = j.status ?? 'UNKNOWN'
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (

@@ -44,3 +44,34 @@ func TestResolveHostMounts(t *testing.T) {
 		}
 	})
 }
+
+// TestHashContainerSpecDetectsReadOnlyMountsDrift guards against a regression where
+// ReadOnlyMounts was omitted from hashContainerSpec's input: reconcile compares this hash
+// against the running container's desired-spec label to decide whether to recreate it, so a
+// change to a job's desired host mounts (different host path or container target) must change
+// the hash, or the running container silently keeps stale/wrong mounts forever.
+func TestHashContainerSpecDetectsReadOnlyMountsDrift(t *testing.T) {
+	base := containerSpec{
+		Name:  "test-container",
+		Image: "example/image:latest",
+		ReadOnlyMounts: map[string]string{
+			"/data/dataset": "/host/dataset-v1",
+		},
+	}
+	changed := base
+	changed.ReadOnlyMounts = map[string]string{
+		"/data/dataset": "/host/dataset-v2",
+	}
+
+	baseHash, err := hashContainerSpec(base)
+	if err != nil {
+		t.Fatalf("hashContainerSpec(base): unexpected error: %v", err)
+	}
+	changedHash, err := hashContainerSpec(changed)
+	if err != nil {
+		t.Fatalf("hashContainerSpec(changed): unexpected error: %v", err)
+	}
+	if baseHash == changedHash {
+		t.Fatal("hashContainerSpec: hash unchanged when ReadOnlyMounts changed — reconcile will never detect this drift")
+	}
+}

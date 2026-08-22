@@ -54,9 +54,6 @@ export function fetchClusters(): Promise<ClustersResponse> {
   return apiFetch<ClustersResponse>(`${API_URL}/internal/clusters`)
 }
 
-export function fetchAgentBalances(): Promise<AgentBalance[]> {
-  return apiFetch<AgentBalance[]>(`${API_URL}/balances`)
-}
 
 export interface AgentBalancesParams {
   limit?: number
@@ -77,9 +74,6 @@ export function fetchAgents(): Promise<Agent[]> {
   return apiFetch<Agent[]>(`${API_URL}/agents`)
 }
 
-export function fetchAgentLedger(agentID: string): Promise<CreditLedgerEntry[]> {
-  return apiFetch<CreditLedgerEntry[]>(`${API_URL}/agents/${agentID}/ledger`)
-}
 
 // ---------------------------------------------------------------------------
 // Registry / Experiments
@@ -116,9 +110,6 @@ export function fetchExperiment(id: string): Promise<Experiment> {
   return apiFetch<Experiment>(`${API_URL}/experiments/${id}`)
 }
 
-export function fetchExperimentLineage(id: string): Promise<LineageNode[]> {
-  return apiFetch<LineageNode[]>(`${API_URL}/experiments/${id}/lineage`)
-}
 
 export function fetchExperimentMetrics(id: string): Promise<MetricDataPoint[]> {
   return apiFetch<MetricDataPoint[]>(`${API_URL}/experiments/${id}/metrics`)
@@ -277,9 +268,6 @@ export interface ResourceCatalog {
   storage_gb_hour_rate: number
 }
 
-export function fetchResourceCatalog(): Promise<ResourceCatalog> {
-  return apiFetch<ResourceCatalog>(`${API_URL}/resource-catalog`)
-}
 
 // Live, per-cluster accelerator capacity — what's actually schedulable right now, as opposed to
 // fetchResourceCatalog's static type/rate list. Same numbers the scheduler's own admission loop

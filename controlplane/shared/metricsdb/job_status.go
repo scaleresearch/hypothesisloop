@@ -21,12 +21,18 @@ const (
 	clusterJobSnapshotMetric   = "cluster_job_status_snapshot"
 )
 
+// PhaseRunning is the wire value a runtime reports for a job whose workload is executing.
+// Exported because a caller deciding anything from a reported phase must name the same string
+// this package validates against — an unrecognised phase here is a write error, but a mistyped
+// comparison elsewhere is just a branch that is silently never taken.
+const PhaseRunning = "running"
+
 var phaseValue = map[string]float64{
-	"pending":   1,
-	"running":   2,
-	"succeeded": 3,
-	"failed":    4,
-	"gone":      5,
+	"pending":    1,
+	PhaseRunning: 2,
+	"succeeded":  3,
+	"failed":     4,
+	"gone":       5,
 }
 
 // JobStatusSample is one current cluster observation. It is telemetry, not desired state, and
@@ -84,6 +90,74 @@ func RecordJobStatuses(ctx context.Context, dbURL, clusterName string, at time.T
 	return WriteGaugesAt(ctx, dbURL, samples)
 }
 
+// SnapshotPresence answers, in one round trip, the two independent questions the eviction path
+// asks before it may act on an experiment's absence.
+type SnapshotPresence struct {
+	// Reported is false when the cluster has pushed no snapshot at all within searchBack. Nothing
+	// about the experiment can be concluded in that case — the silence is the cluster's, not the job's.
+	Reported bool
+	// SnapshotAge is how stale the cluster's newest snapshot is.
+	SnapshotAge time.Duration
+	// AbsentSnapshots counts the cluster snapshots strictly newer than the last one that still
+	// carried this experiment — i.e. how many consecutive complete snapshots have now omitted it.
+	// Zero while the experiment is still being reported.
+	AbsentSnapshots int
+	// EverPresent is false when no snapshot within searchBack carried this experiment at all, in
+	// which case AbsentSnapshots counts every snapshot in the window.
+	EverPresent bool
+}
+
+// GoneConfirmingSnapshots is how many consecutive complete cluster snapshots must omit an
+// experiment before its absence is accepted as real.
+//
+// Counted in snapshots rather than measured in seconds on purpose. Absence is only ever
+// established relative to a snapshot that did arrive, so a cluster that stops pushing cannot
+// accumulate evidence against its own jobs, and no assumption about a cluster's local push
+// cadence — which the control plane does not configure and must not guess — leaks into an
+// irreversible decision. Two is the smallest count that survives a single-tick blind spot, which
+// is what a routine drift-delete-then-recreate produces: the Job is genuinely absent for the one
+// snapshot between its removal and its recreation, and evicting on that killed real training.
+const GoneConfirmingSnapshots = 2
+
+// ClusterSnapshotPresence reports how recently a cluster reported at all and how many of its
+// most recent complete snapshots have omitted one experiment. Both facts come from the snapshot
+// series' own recorded observation times, never from wall-clock arithmetic over sample
+// timestamps, so a cluster outage freezes the absence count instead of growing it.
+func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterName string, now time.Time, searchBack time.Duration) (SnapshotPresence, error) {
+	if searchBack <= 0 {
+		return SnapshotPresence{}, fmt.Errorf("metricsdb.ClusterSnapshotPresence: search window must be positive")
+	}
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
+	seconds := int64(math.Ceil(searchBack.Seconds()))
+	// Both series carry the snapshot's own observation time as their value (see RecordJobStatuses),
+	// so comparing values compares snapshots directly — no timestamp encoding assumptions.
+	query := fmt.Sprintf(
+		`WITH snaps AS (SELECT greptime_value AS v FROM %s WHERE cluster_name = %s AND greptime_timestamp >= NOW() - INTERVAL '%d seconds'), `+
+			`present AS (SELECT MAX(greptime_value) AS v FROM %s WHERE experiment_id = %s AND cluster_name = %s AND greptime_timestamp >= NOW() - INTERVAL '%d seconds') `+
+			`SELECT MAX(snaps.v), MAX(present.v), SUM(CASE WHEN present.v IS NULL OR snaps.v > present.v THEN 1 ELSE 0 END) `+
+			`FROM snaps CROSS JOIN present`,
+		clusterJobSnapshotMetric, quote(clusterName), seconds,
+		clusterJobObservedAtMetric, quote(experimentID), quote(clusterName), seconds,
+	)
+	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.ClusterSnapshotPresence", query, 3)
+	if err != nil {
+		return SnapshotPresence{}, err
+	}
+	// No rows, or an all-NULL aggregate row, both mean the cluster pushed nothing in the window.
+	if !found || row[0] == nil {
+		return SnapshotPresence{}, nil
+	}
+	presence := SnapshotPresence{
+		Reported:    true,
+		SnapshotAge: now.Sub(time.UnixMilli(int64(*row[0] * 1000)).UTC()),
+		EverPresent: row[1] != nil,
+	}
+	if row[2] != nil {
+		presence.AbsentSnapshots = int(*row[2])
+	}
+	return presence, nil
+}
+
 // LatestJobPhase returns the most recent phase observed within window. found=false means no
 // complete cluster snapshot exists; callers decide whether absence is expected for their state.
 func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string, window time.Duration) (workload.JobPhase, bool, error) {
@@ -134,28 +208,42 @@ func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string
 }
 
 func queryJobStatusSnapshot(ctx context.Context, dbURL, query string) (float64, *float64, *float64, bool, error) {
+	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.LatestJobPhase", query, 3)
+	if err != nil || !found {
+		return 0, nil, nil, false, err
+	}
+	if row[0] == nil {
+		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: malformed snapshot result")
+	}
+	return *row[0], row[1], row[2], true, nil
+}
+
+// querySingleRow runs a SQL query expected to yield exactly one row of cols numeric columns and
+// returns that row. found=false means the query returned no rows at all. Individual columns may
+// still be nil (SQL NULL) — that is the caller's to interpret. op names the caller in errors.
+func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*float64, bool, error) {
 	u, err := url.Parse(dbURL + "/v1/sql")
 	if err != nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: query URL: %w", err)
+		return nil, false, fmt.Errorf("%s: query URL: %w", op, err)
 	}
 	params := u.Query()
 	params.Set("sql", query)
 	u.RawQuery = params.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: build query: %w", err)
+		return nil, false, fmt.Errorf("%s: build query: %w", op, err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: query: %w", err)
+		return nil, false, fmt.Errorf("%s: query: %w", op, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: read query: %w", err)
+		return nil, false, fmt.Errorf("%s: read query: %w", op, err)
 	}
 	if resp.StatusCode/100 != 2 {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: greptimedb returned %d: %s", resp.StatusCode, body)
+		return nil, false, fmt.Errorf("%s: greptimedb returned %d: %s", op, resp.StatusCode, body)
 	}
 	var result struct {
 		Error  string `json:"error"`
@@ -166,27 +254,27 @@ func queryJobStatusSnapshot(ctx context.Context, dbURL, query string) (float64, 
 		} `json:"output"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: decode query: %w", err)
+		return nil, false, fmt.Errorf("%s: decode query: %w", op, err)
 	}
 	if result.Error != "" {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: greptimedb query failed: %s", result.Error)
+		return nil, false, fmt.Errorf("%s: greptimedb query failed: %s", op, result.Error)
 	}
 	if len(result.Output) != 1 || result.Output[0].Records == nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: expected one records result")
+		return nil, false, fmt.Errorf("%s: expected one records result", op)
 	}
 	rows := result.Output[0].Records.Rows
 	if len(rows) == 0 {
-		return 0, nil, nil, false, nil
+		return nil, false, nil
 	}
-	if len(rows) != 1 || len(rows[0]) != 3 || rows[0][0] == nil {
-		return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: malformed snapshot result")
+	if len(rows) != 1 || len(rows[0]) != cols {
+		return nil, false, fmt.Errorf("%s: malformed result", op)
 	}
 	for _, value := range rows[0] {
 		if value != nil && (math.IsNaN(*value) || math.IsInf(*value, 0)) {
-			return 0, nil, nil, false, fmt.Errorf("metricsdb.LatestJobPhase: snapshot result contains a non-finite value")
+			return nil, false, fmt.Errorf("%s: result contains a non-finite value", op)
 		}
 	}
-	return *rows[0][0], rows[0][1], rows[0][2], true, nil
+	return rows[0], true, nil
 }
 
 // LatestAcceleratorType resolves the latest accelerator marker from the metrics store.

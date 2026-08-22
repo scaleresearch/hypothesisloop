@@ -12,7 +12,7 @@ import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
-import { EVICTION_REASON_LABELS } from '@/lib/eviction'
+import { evictionLabel } from '@/lib/eviction'
 
 function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
   return (
@@ -48,8 +48,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
   if (!job) return <Loading />
 
-  const j = job as any
-  const evictionLabel = j.eviction_reason ? (EVICTION_REASON_LABELS[j.eviction_reason] ?? j.eviction_reason) : null
+  const j = job
+  // evictionLabel maps the code to its human label and keeps any explanation the scheduler
+  // attached — see lib/eviction.
+  const evictionText = j.eviction_reason ? evictionLabel(j.eviction_reason) : null
 
   // Jobs report one or more metrics (the objective plus any secondary ones the workload
   // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
@@ -73,7 +75,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     if (!seriesByMetric.has(name)) seriesByMetric.set(name, [])
     seriesByMetric.get(name)!.push({
       frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
-      value: p.metric_value ?? (p as any).value,
+      value: p.metric_value,
     })
     if (!basesByMetric.has(name)) basesByMetric.set(name, new Set())
     basesByMetric.get(name)!.add(p.metric_basis || 'raw')
@@ -85,7 +87,12 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   })
 
   const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
-  const costActual = j.actual_cost_acch != null ? formatAccH(j.actual_cost_acch) : null
+  // The job's final metric comes from the metrics store, never from the job record — the record
+  // has no such field, and metric values live in one place (important.md #3). The series is
+  // already sorted by recorded_at above, so the last point of the primary metric is the answer.
+  const primarySeries = primaryMetricName ? seriesByMetric.get(primaryMetricName) : undefined
+  const finalPrimaryMetric = primarySeries?.length ? primarySeries[primarySeries.length - 1].value : null
+
 
   const axisColor = 'rgba(255,255,255,.45)'
   const gridColor = 'rgba(255,255,255,.08)'
@@ -115,7 +122,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       </div>
 
       {/* Eviction alert */}
-      {j.status === 'EVICTED' && evictionLabel && (
+      {j.status === 'EVICTED' && evictionText && (
         <div
           style={{
             background: 'rgba(166,152,255,.08)',
@@ -126,12 +133,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           }}
         >
           <strong style={{ color: semantic.accent }}>Evicted:</strong>{' '}
-          <span style={{ color: semantic.accent, fontSize: 13 }}>{evictionLabel}</span>
-          {j.metric_at_eviction != null && (
-            <span className="mono text-muted" style={{ marginLeft: 12, fontSize: 12 }}>
-              metric at eviction: {j.metric_at_eviction.toFixed(4)}
-            </span>
-          )}
+          <span style={{ color: semantic.accent, fontSize: 13 }}>{evictionText}</span>
         </div>
       )}
 
@@ -199,11 +201,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
               <Row label="Est. duration" value={j.estimated_duration_hours != null ? `${j.estimated_duration_hours.toFixed(2)} h` : '—'} />
               <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} AccH` : '—'} />
-              {costActual != null && <Row label="Actual cost" value={`${costActual} AccH`} highlight={semantic.accent} />}
               <Row label="Submitted" value={j.created_at ? new Date(j.created_at).toLocaleString() : '—'} />
-              {j.started_at && <Row label="Started" value={new Date(j.started_at).toLocaleString()} />}
-              {j.completed_at && <Row label="Completed" value={new Date(j.completed_at).toLocaleString()} />}
-              {j.final_metric_value != null && <Row label="Final metric" value={j.final_metric_value.toFixed(4)} highlight={semantic.success} />}
+              {finalPrimaryMetric != null && <Row label="Final metric" value={finalPrimaryMetric.toFixed(4)} highlight={semantic.success} />}
               {j.objective && <Row label="Objective" value={j.objective} />}
             </tbody>
           </table>
@@ -219,6 +218,12 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               {metricNames.map((name, i) => {
                 const bases = Array.from(basesByMetric.get(name) ?? [])
                 const nonRaw = bases.filter(b => b !== 'raw')
+                const points = seriesByMetric.get(name) ?? []
+                // A Line needs 2+ points to draw a segment; a job that reports a metric only
+                // once (many one-shot diagnostics do) has exactly 1 point, and dot={false}
+                // would render nothing at all for it — real data, empty-looking chart. Show
+                // dots whenever there aren't enough points for the line itself to be visible.
+                const showDots = points.length < 2
                 return (
                 <div key={name}>
                   <div className="mono text-muted" style={{ fontSize: 11, marginBottom: 4 }}>
@@ -259,7 +264,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                         dataKey="value"
                         name={name}
                         stroke={name === primaryMetricName ? semantic.accentStrong : agentPalette[i % agentPalette.length]}
-                        dot={false}
+                        dot={showDots ? { r: 3 } : false}
                         strokeWidth={2}
                         type="monotone"
                       />
@@ -275,7 +280,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       </Pod>
 
       {/* Lineage */}
-      {(j.code_ref || j.config_hash || j.data_ref || j.env_image) && (
+      {(j.code_ref || j.config_hash || j.data_ref) && (
         <Pod style={{ marginBottom: 12 }}>
           <PodHeader>Lineage &amp; Reproducibility</PodHeader>
           <PodContent>
@@ -284,7 +289,6 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 {j.code_ref && <Row label="Code ref (git SHA)" value={j.code_ref} />}
                 {j.config_hash && <Row label="Config hash (sha256)" value={j.config_hash} />}
                 {j.data_ref && <Row label="Data ref" value={j.data_ref} />}
-                {j.env_image && <Row label="Env image (digest)" value={j.env_image} />}
               </tbody>
             </table>
           </PodContent>

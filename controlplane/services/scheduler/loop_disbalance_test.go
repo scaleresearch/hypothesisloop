@@ -55,7 +55,7 @@ func TestSelectDisbalanceVictimsEvictsHogStrandingIdleAccelerators(t *testing.T)
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
 		disbalanceNodes(3), nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
 
-	if len(got) != 1 || got[0].ID != "hog" {
+	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the disproportionate job stranding the idle accelerators", victimIDs(got))
 	}
 }
@@ -184,7 +184,7 @@ func TestSelectDisbalanceVictimsEvictsOnlyAsManyAsNeeded(t *testing.T) {
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(), disbalanceNodes(3), nil,
 		[]placedExperiment{{experiment: milder, node: "node-a"}, {experiment: worse, node: "node-a"}}, DefaultDisbalanceTolerance)
 
-	if len(got) != 1 || got[0].ID != "worse" {
+	if len(got) != 1 || got[0].experiment.ID != "worse" {
 		t.Fatalf("victims = %v, want only the most disproportionate job", victimIDs(got))
 	}
 }
@@ -234,24 +234,11 @@ func TestSelectDisbalanceVictimsDetectsMemoryDisbalance(t *testing.T) {
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
 		disbalanceNodes(3), nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
 
-	if len(got) != 1 || got[0].ID != "hog" {
+	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the memory-disproportionate job", victimIDs(got))
 	}
 	if avail[disbalanceMemKey] >= hog.Footprint()[disbalanceMemKey] {
 		t.Fatal("test setup no longer exercises a memory shortage")
-	}
-}
-
-func TestSelectDisbalanceVictimsDisabledByZeroTolerance(t *testing.T) {
-	blocked := disbalanceJob("blocked", "2", 1)
-	hog := disbalanceJob("hog", "14", 1)
-	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
-
-	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodes(3), nil, []placedExperiment{{experiment: hog, node: "node-a"}}, 0)
-
-	if got != nil {
-		t.Fatalf("victims = %v, want none: the pass is disabled", victimIDs(got))
 	}
 }
 
@@ -266,34 +253,24 @@ func (s *disbalanceStore) ListRunningExperiments(context.Context) ([]*domain.Exp
 	return nil, nil
 }
 
-func TestEvictDisbalancedIsInertWithoutItsPreconditions(t *testing.T) {
+// Victim selection needs job->node attribution, which lives only in the metrics store. Without
+// it the pass must do nothing at all rather than fall back to evicting on cluster membership
+// alone — "we cannot prove where it is" has to read as innocent, not guilty. This is the only
+// precondition that can leave the pass inert: there is no configuration that disables it.
+func TestEvictDisbalancedDoesNothingWithoutNodeAttribution(t *testing.T) {
 	blocked := disbalanceJob("blocked", "2", 1)
 	total := disbalanceClusterTotal()
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
-	cases := []struct {
-		name string
-		loop *Loop
-	}{
-		{"no evictor wired", &Loop{disbalanceTolerance: DefaultDisbalanceTolerance, metricsDBURL: "http://metrics"}},
-		{"tolerance disables it", &Loop{evictor: nopEvictor{}, metricsDBURL: "http://metrics"}},
-		// No metrics store means no job->node attribution, so no candidate could ever be proven
-		// to sit on the stranded node — the pass must not fall back to evicting on cluster
-		// membership alone.
-		{"no metrics store for node attribution", &Loop{evictor: nopEvictor{}, disbalanceTolerance: DefaultDisbalanceTolerance}},
+	store := &disbalanceStore{}
+	loop := &Loop{evictor: nopEvictor{}, disbalanceTolerance: DefaultDisbalanceTolerance}
+	loop.store = store
+	loop.logger = zap.NewNop()
+	if err := loop.evictDisbalanced(context.Background(), blocked, "cluster-a", avail, total, disbalanceNodes(3), nil, blocked.Footprint()); err != nil {
+		t.Fatalf("evictDisbalanced: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &disbalanceStore{}
-			tc.loop.store = store
-			tc.loop.logger = zap.NewNop()
-			if err := tc.loop.evictDisbalanced(context.Background(), blocked, "cluster-a", avail, total, disbalanceNodes(3), nil, blocked.Footprint()); err != nil {
-				t.Fatalf("evictDisbalanced: %v", err)
-			}
-			if store.listRunningCalls != 0 {
-				t.Fatalf("listRunningCalls = %d, want 0: the pass must bail out before doing any work", store.listRunningCalls)
-			}
-		})
+	if store.listRunningCalls != 0 {
+		t.Fatalf("listRunningCalls = %d, want 0: the pass must bail out before doing any work", store.listRunningCalls)
 	}
 }
 
@@ -346,10 +323,10 @@ type nopEvictor struct{}
 
 func (nopEvictor) EvictExperiment(context.Context, string, domain.EvictionReason) error { return nil }
 
-func victimIDs(victims []*domain.Experiment) []string {
+func victimIDs(victims []disbalanceVictim) []string {
 	ids := make([]string, 0, len(victims))
 	for _, v := range victims {
-		ids = append(ids, v.ID)
+		ids = append(ids, v.experiment.ID)
 	}
 	return ids
 }

@@ -20,3 +20,16 @@ export function formatAccH(n: number): string {
   if (Math.abs(n) < 1) return n.toFixed(3)
   return String(Math.round(n * 2) / 2)
 }
+
+// Relative age for a timestamp, falling back to an absolute date past a day. Zero-time-aware:
+// an unset Go timestamp is "N/A", not "2025y ago" — which is what the three copied local
+// versions of this each rendered.
+export function relTime(iso: string | null | undefined): string {
+  if (isZeroDate(iso)) return 'N/A'
+  const then = new Date(iso as string)
+  const s = Math.round((Date.now() - then.getTime()) / 1000)
+  if (s < 60) return `${s}s ago`
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`
+  return then.toLocaleDateString()
+}

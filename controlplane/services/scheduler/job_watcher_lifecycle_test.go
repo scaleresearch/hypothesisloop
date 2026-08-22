@@ -28,6 +28,10 @@ func (s *lifecycleStore) TransitionStatusFromNonTerminal(context.Context, string
 	s.transitioned = true
 	return true, nil
 }
+func (s *lifecycleStore) TransitionTerminal(context.Context, string, domain.ExperimentStatus, domain.ExperimentStatus, string) (bool, error) {
+	s.transitioned = true
+	return true, nil
+}
 func (*lifecycleStore) UpdateEvictionReason(context.Context, string, string) error { return nil }
 func (*lifecycleStore) MarkQuotaSettled(context.Context, string) error             { return nil }
 

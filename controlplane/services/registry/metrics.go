@@ -2,15 +2,10 @@ package registry
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
-	"net/url"
 	"sort"
-	"strconv"
 	"time"
 	"unicode"
 
@@ -35,19 +30,34 @@ var ErrInvalidMetric = errors.New("invalid metric")
 // its values silently rank against unmodified runs on the wrong scale — this is what let a
 // ~20% "win" that was actually ~2x worse into a ranking undetected. Never inferred: only the
 // job that knows it changed the scale can say so.
+func validMetricLabel(field, value string) error {
+	if value == "" {
+		return fmt.Errorf("%w: %s is required", ErrInvalidMetric, field)
+	}
+	if len(value) > 64 {
+		return fmt.Errorf("%w: %s must be at most 64 characters", ErrInvalidMetric, field)
+	}
+	for _, r := range value {
+		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
+			return fmt.Errorf("%w: %s must be printable ASCII", ErrInvalidMetric, field)
+		}
+	}
+	return nil
+}
+
 func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, basis string, fractionComplete, value float64) error {
 	if basis == "" {
 		basis = "raw"
 	}
-	// metric_basis becomes a Prometheus label, so it must stay small and bounded — unconstrained
-	// free text here is unbounded label cardinality in the metrics store.
-	if len(basis) > 64 {
-		return fmt.Errorf("%w: metric_basis must be at most 64 characters", ErrInvalidMetric)
+	// Both become Prometheus labels, so both must stay small and bounded — unconstrained free
+	// text is unbounded label cardinality in the metrics store. metric_name matters at least as
+	// much as metric_basis: a job embedding a step counter in the name creates one series per
+	// sample, degrading the exact ranking and silence queries this check protects.
+	if err := validMetricLabel("metric_name", metricName); err != nil {
+		return err
 	}
-	for _, r := range basis {
-		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
-			return fmt.Errorf("%w: metric_basis must be printable ASCII", ErrInvalidMetric)
-		}
+	if err := validMetricLabel("metric_basis", basis); err != nil {
+		return err
 	}
 	// Reject malformed values before touching the store: NaN/Inf and out-of-range fractions
 	// would silently corrupt percentile rankings and completion-progress reads.
@@ -84,8 +94,8 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	// zip the two series back together index-for-index (both are pushed at the same cadence).
 	at := time.Now().UTC()
 	samples := []metricsdb.GaugeSample{
-		{MetricName: "experiment_metric_value", Labels: labels, Value: value, At: at},
-		{MetricName: "experiment_metric_fraction", Labels: labels, Value: fractionComplete, At: at},
+		{MetricName: metricsdb.ExperimentMetricValue, Labels: labels, Value: value, At: at},
+		{MetricName: metricsdb.ExperimentMetricFraction, Labels: labels, Value: fractionComplete, At: at},
 	}
 	if err := metricsdb.WriteGaugesAt(ctx, s.metricsDBURL, samples); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
@@ -93,24 +103,10 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	return nil
 }
 
-// prometheusSeries is one label-identified series within a PromQL range-query result: one
-// distinct combination of labels (job_id, agent_id, metric_name, ...) with its own ordered
-// samples. A job that retried onto a different agent produces two prometheusSeries for the
-// same job_id+metric_name, distinguished by agent_id — that label difference is the real
+// Range queries return one metricsdb.RangeSeries per distinct label combination (job_id,
+// agent_id, metric_name, ...). A job that retried onto a different agent produces two series for
+// the same job_id+metric_name, distinguished by agent_id — that label difference is the real
 // attempt identity, not something to be inferred later from flattened data.
-type prometheusSeries struct {
-	Metric map[string]string `json:"metric"`
-	Values [][2]interface{}  `json:"values"`
-}
-
-// prometheusRangeResult is the response shape for a PromQL range query (matrix), which
-// returns every sample in the window — an instant query only ever returns the single latest
-// value per series, which cannot show trend-over-time.
-type prometheusRangeResult struct {
-	Data struct {
-		Result []prometheusSeries `json:"result"`
-	} `json:"data"`
-}
 
 // GetPlatformExperimentTimeseries returns the full metric history (not just the latest
 // value) for every job in platformExpID, one AgentMetricSeries per job — the data a
@@ -127,54 +123,28 @@ func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformE
 		step = time.Second
 	}
 
-	query := fmt.Sprintf(`experiment_metric_value{platform_experiment_id=%q, metric_name=%q}`, platformExpID, metricName)
-	apiURL := fmt.Sprintf("%s/v1/prometheus/api/v1/query_range?query=%s&start=%d&end=%d&step=%ds",
-		s.metricsDBURL, url.QueryEscape(query), start.Unix(), end.Unix(), int(step.Seconds()))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	query := fmt.Sprintf(`%s{platform_experiment_id=%q, metric_name=%q}`, metricsdb.ExperimentMetricValue, platformExpID, metricName)
+	result, err := metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, step)
 	if err != nil {
-		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: build request: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: query prometheus: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: read body: %w", err)
-	}
-	var result prometheusRangeResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: decode response: %w", err)
+		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: %w", err)
 	}
 
-	out := make([]*domain.AgentMetricSeries, 0, len(result.Data.Result))
-	for _, r := range result.Data.Result {
-		basis := r.Metric["metric_basis"]
+	out := make([]*domain.AgentMetricSeries, 0, len(result))
+	for _, r := range result {
+		basis := r.Labels["metric_basis"]
 		if basis == "" {
 			basis = "raw"
 		}
 		series := &domain.AgentMetricSeries{
-			AgentID:      r.Metric["agent_id"],
-			ExperimentID: r.Metric["job_id"],
-			MetricName:   r.Metric["metric_name"],
+			AgentID:      r.Labels["agent_id"],
+			ExperimentID: r.Labels["job_id"],
+			MetricName:   r.Labels["metric_name"],
 			MetricBasis:  basis,
 		}
-		for _, v := range r.Values {
-			var ts float64
-			switch t := v[0].(type) {
-			case float64:
-				ts = t
-			}
-			val, ok := parseSampleValue(v[1])
-			if !ok {
-				continue
-			}
+		for _, p := range r.Points {
 			series.Points = append(series.Points, domain.MetricSeriesPoint{
-				Timestamp: time.Unix(int64(ts), 0).UTC(),
-				Value:     val,
+				Timestamp: p.Time,
+				Value:     p.Value,
 			})
 		}
 		out = append(out, series)
@@ -200,11 +170,11 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 	end := time.Now().UTC()
 	start := exp.CreatedAt
 
-	valueSeries, err := s.queryRange(ctx, fmt.Sprintf(`experiment_metric_value{job_id=%q}`, experimentID), start, end)
+	valueSeries, err := s.queryRange(ctx, fmt.Sprintf(`%s{job_id=%q}`, metricsdb.ExperimentMetricValue, experimentID), start, end)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}
-	fractionSeries, err := s.queryRange(ctx, fmt.Sprintf(`experiment_metric_fraction{job_id=%q}`, experimentID), start, end)
+	fractionSeries, err := s.queryRange(ctx, fmt.Sprintf(`%s{job_id=%q}`, metricsdb.ExperimentMetricFraction, experimentID), start, end)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}
@@ -214,27 +184,19 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 	// collapsing distinct agent_id/metric_name label-sets (distinct retry attempts, or a job
 	// reporting more than one metric_name in the same second) onto one shared timestamp map.
 	fractionByAgentTS := make(map[string]map[int64]float64)
-	for _, r := range fractionSeries.Data.Result {
-		key := r.Metric["agent_id"] + "\x00" + r.Metric["metric_name"]
+	for _, r := range fractionSeries {
+		key := r.Labels["agent_id"] + "\x00" + r.Labels["metric_name"]
 		m, ok := fractionByAgentTS[key]
 		if !ok {
 			m = make(map[int64]float64)
 			fractionByAgentTS[key] = m
 		}
-		for _, v := range r.Values {
-			var ts float64
-			if t, ok := v[0].(float64); ok {
-				ts = t
-			}
-			val, ok := parseSampleValue(v[1])
-			if !ok {
-				continue
-			}
-			m[int64(ts)] = val
+		for _, p := range r.Points {
+			m[p.Time.Unix()] = p.Value
 		}
 	}
 
-	out := latestAttemptOnly(experimentID, valueSeries.Data.Result, fractionByAgentTS)
+	out := latestAttemptOnly(experimentID, valueSeries, fractionByAgentTS)
 	// Points from the surviving attempt's series (one per metric_name) are appended series by
 	// series; sort once here, at the one place all consumers read from, so every chart gets a
 	// single time-ordered line instead of every caller re-sorting defensively.
@@ -252,45 +214,38 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 // per metric_name (a true same-agent in-place restart, where the runtime reused its own pod) is
 // there no label to key on; there, and only there, we fall back to cutting the series at its own
 // last fraction_complete regression.
-func latestAttemptOnly(experimentID string, valueResult []prometheusSeries, fractionByAgentTS map[string]map[int64]float64) []*domain.MetricDataPoint {
+func latestAttemptOnly(experimentID string, valueResult []metricsdb.RangeSeries, fractionByAgentTS map[string]map[int64]float64) []*domain.MetricDataPoint {
 	type series struct {
 		agentID    string
 		metricName string
-		firstTS    float64
+		firstTS    int64
 		points     []*domain.MetricDataPoint
 	}
 
 	byMetric := make(map[string][]*series)
 	var order []string
 	for _, r := range valueResult {
-		metricName := r.Metric["metric_name"]
-		agentID := r.Metric["agent_id"]
-		basis := r.Metric["metric_basis"]
+		metricName := r.Labels["metric_name"]
+		agentID := r.Labels["agent_id"]
+		basis := r.Labels["metric_basis"]
 		if basis == "" {
 			basis = "raw"
 		}
 		fractions := fractionByAgentTS[agentID+"\x00"+metricName]
 
 		sr := &series{agentID: agentID, metricName: metricName}
-		for _, v := range r.Values {
-			var ts float64
-			if t, ok := v[0].(float64); ok {
-				ts = t
-			}
-			val, ok := parseSampleValue(v[1])
-			if !ok {
-				continue
-			}
+		for _, p := range r.Points {
+			ts := p.Time.Unix()
 			if len(sr.points) == 0 {
 				sr.firstTS = ts
 			}
 			sr.points = append(sr.points, &domain.MetricDataPoint{
 				ExperimentID:     experimentID,
 				MetricName:       metricName,
-				MetricValue:      val,
+				MetricValue:      p.Value,
 				MetricBasis:      basis,
-				FractionComplete: fractions[int64(ts)],
-				RecordedAt:       time.Unix(int64(ts), 0).UTC(),
+				FractionComplete: fractions[ts],
+				RecordedAt:       p.Time,
 			})
 		}
 		if len(sr.points) == 0 {
@@ -331,43 +286,10 @@ func latestAttemptOnly(experimentID string, valueResult []prometheusSeries, frac
 	return out
 }
 
-// queryRange runs a PromQL range query against GreptimeDB and returns the raw matrix result.
-func (s *Service) queryRange(ctx context.Context, query string, start, end time.Time) (*prometheusRangeResult, error) {
-	apiURL := fmt.Sprintf("%s/v1/prometheus/api/v1/query_range?query=%s&start=%d&end=%d&step=5s",
-		s.metricsDBURL, url.QueryEscape(query), start.Unix(), end.Unix())
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("query prometheus: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	var result prometheusRangeResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-	return &result, nil
-}
-
-// parseSampleValue converts one Prometheus sample value. A sample the backend cannot express as
-// a number is skipped rather than recorded as 0: these values feed rankings and stage cuts, where
-// a spurious 0 reads as a real result — a perfect score on any minimized metric.
-func parseSampleValue(v any) (float64, bool) {
-	s, ok := v.(string)
-	if !ok {
-		return 0, false
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, false
-	}
-	return f, true
+// queryRange runs a PromQL range query against GreptimeDB on the metric-store's own client, which
+// checks the transport status and the Prometheus envelope's status/resultType. A hand-rolled
+// client here used to decode a backend error into an empty successful matrix, so "the metrics
+// store rejected this query" reached the API as "this run produced no measurements".
+func (s *Service) queryRange(ctx context.Context, query string, start, end time.Time) ([]metricsdb.RangeSeries, error) {
+	return metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, 5*time.Second)
 }

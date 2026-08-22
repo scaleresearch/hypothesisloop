@@ -43,7 +43,10 @@ type Store interface {
 // QuotaService reads agent quota state. Refunds no longer go through here — every
 // early-termination path settles observed cost via Controller.settleAndMark instead.
 type QuotaService interface {
-	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
+	// GetObservedAgentQuota reports allocation against observed consumption only, never
+	// reservations — see quota.PlatformExperimentsService.GetObservedAgentQuota. The controller
+	// terminates work, and a termination is a verdict on what actually happened.
+	GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage — see
@@ -73,6 +76,11 @@ type Controller struct {
 	silenceMultiplier     float64
 	defaultReportInterval time.Duration
 	minSilenceWindow      time.Duration
+	// clusterSilenceCeiling bounds how long a job may be held by a cluster that has stopped
+	// pushing status snapshots entirely before it is evicted as EvictionClusterUnreachable.
+	// A policy decision about how long an outage is tolerated, not a protocol timing value —
+	// it cannot be derived from a cluster's push cadence, which this side does not configure.
+	clusterSilenceCeiling time.Duration
 }
 
 // New constructs an unwired Controller. Start validates every production dependency and
@@ -126,6 +134,13 @@ func (c *Controller) WithMinSilenceWindow(d time.Duration) *Controller {
 	return c
 }
 
+// WithClusterSilenceCeiling bounds how long a cluster may push no status snapshot at all before
+// the jobs it holds are evicted as EvictionClusterUnreachable.
+func (c *Controller) WithClusterSilenceCeiling(d time.Duration) *Controller {
+	c.clusterSilenceCeiling = d
+	return c
+}
+
 // WithSchedulerLoop wires the scheduler loop to be triggered after evictions.
 func (c *Controller) WithSchedulerLoop(l SchedulerLoop) *Controller {
 	c.loop = l
@@ -157,7 +172,7 @@ func (c *Controller) Start(ctx context.Context) error {
 	}
 	if c.reconcileInterval <= 0 ||
 		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 ||
-		c.silenceMultiplier <= 0 {
+		c.silenceMultiplier <= 0 || c.clusterSilenceCeiling <= 0 {
 		return fmt.Errorf("controller: all timing and multiplier values must be explicitly valid")
 	}
 	go func() {

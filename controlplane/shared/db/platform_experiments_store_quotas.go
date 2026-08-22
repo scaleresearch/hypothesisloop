@@ -16,8 +16,7 @@ import (
 // tracked" for platform experiments that don't budget them). Only the allocation (capacity
 // setting) lives here — consumption (used_*) lives solely in the metrics DB, see
 // metricsdb.UsageTracker; Postgres never holds a copy of observed consumption.
-func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error {
-	const sql = `
+const upsertAgentQuotaSQL = `
 INSERT INTO agent_quotas (
 	id, agent_id, platform_experiment_id,
 	guaranteed_accelerator_hours, burst_accelerator_hours,
@@ -37,14 +36,19 @@ ON CONFLICT (agent_id, platform_experiment_id) DO UPDATE SET
 	guaranteed_storage_gb_hours = EXCLUDED.guaranteed_storage_gb_hours,
 	burst_storage_gb_hours      = EXCLUDED.burst_storage_gb_hours`
 
-	_, err := s.pool.pool.Exec(ctx, sql,
+func agentQuotaUpsertArgs(q *domain.AgentQuota) []any {
+	return []any{
 		q.ID, q.AgentID, q.PlatformExperimentID,
 		q.GuaranteedAcceleratorHours, q.BurstAcceleratorHours,
 		q.GuaranteedCPUCoreHours, q.BurstCPUCoreHours,
 		q.GuaranteedRAMGBHours, q.BurstRAMGBHours,
 		q.GuaranteedStorageGBHours, q.BurstStorageGBHours,
 		q.CreatedAt,
-	)
+	}
+}
+
+func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error {
+	_, err := s.pool.pool.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(q)...)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.UpsertAgentQuota: %w", err)
 	}
@@ -114,6 +118,15 @@ func (s *PlatformExperimentsStore) ListAgentQuotas(ctx context.Context, platform
 // AddDesiredQuotaUsage adds outstanding scheduler reservations to quotas. A non-terminal
 // experiment row is the reservation: its estimates are authoritative PostgreSQL desired state,
 // so no reservation series or second table is maintained elsewhere.
+//
+// This is an admission-side figure only ("may I start one more?"). Nothing that terminates or
+// bills work may read it — see quota.GetObservedAgentQuota.
+//
+// The terminal-but-unsettled arm overlaps settlement's observed write by design: settlement
+// writes the observed cost and then marks the row settled, two stores that cannot share a
+// transaction, so in between a job counts as both a reservation and an observation. That
+// over-counts, which for admission is the safe direction (it refuses work rather than
+// overspending), and the settlement reconciler closes the window on retry.
 func (s *PlatformExperimentsStore) AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error {
 	if len(quotas) == 0 {
 		return nil

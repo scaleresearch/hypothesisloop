@@ -22,9 +22,13 @@ var errAdmissionCapacityChanged = errors.New("capacity changed during admission"
 // preemption, not a scalar count. Requeuing is fire-and-forget: this tick never waits for a
 // victim's Job to disappear; whichever future tick first observes the resource genuinely free
 // admits the preempting job.
-func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunning []*domain.Experiment, preemptor *domain.Experiment) error {
+// Returns committed=true when it requeued a victim set that covers the whole shortage. The
+// caller uses that to stand the disbalance evictor down: capacity for this job is already on its
+// way back, and a second destructive pass against the same unchanged availability would kill live
+// work for a deficit that is no longer outstanding.
+func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunning []*domain.Experiment, preemptor *domain.Experiment) (committed bool, err error) {
 	if len(burstRunning) == 0 || len(needed) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job stuck in a
@@ -35,7 +39,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	for _, exp := range burstRunning {
 		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, time.Now().UTC(), ObservedMaxLookback, l.observedGapCap, l.observedStep)
 		if err != nil {
-			return fmt.Errorf("preempt: observed elapsed hours for %s: %w", exp.ID, err)
+			return false, fmt.Errorf("preempt: observed elapsed hours for %s: %w", exp.ID, err)
 		}
 		elapsed[exp.ID] = hours
 	}
@@ -90,7 +94,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	// Never disrupt jobs for a partial plan. If the complete candidate set cannot free every
 	// deficient dimension, leave all victims running and retry from fresh actual state later.
 	if len(selected) == 0 || !domain.Fits(freed, needed) {
-		return nil
+		return false, nil
 	}
 
 	// Fill-back pass: heterogeneous footprints can make the loop above overshoot (e.g. victim
@@ -105,6 +109,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		}
 	}
 
+	requeued := 0
 	for _, victim := range selected {
 		l.logger.Info("preempting burst job",
 			zap.String("victim", victim.ID),
@@ -125,7 +130,18 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	// reservation against a rescaled estimate). The completion handler refunds unused budget
 	// when the job eventually finishes.
 	for _, victim := range selected {
-		remaining := victim.EstimatedDurationHours - elapsed[victim.ID]
+		// Rescale against THIS stint's hours, not the job's lifetime. EstimatedDurationHours is
+		// already the remaining estimate a previous preemption wrote, so subtracting lifetime
+		// elapsed would charge the earlier stint's hours a second time — on a second preemption
+		// the two cancel and the estimate, plus every resource reservation derived from it,
+		// collapses to the floor while most of the work is still ahead. The ranking above keeps
+		// using lifetime elapsed, which is the right measure of "who has done the most work".
+		stintElapsed, err := metricsdb.ObservedStintElapsedHours(ctx, l.metricsDBURL, victim.ID, time.Now().UTC(), ObservedMaxLookback, l.observedGapCap, l.observedStep)
+		if err != nil {
+			l.logger.Error("stint elapsed for preemption rescale", zap.String("id", victim.ID), zap.Error(err))
+			continue
+		}
+		remaining := victim.EstimatedDurationHours - stintElapsed
 		minimum := domain.MinRemainingHours
 		if victim.EstimatedDurationHours < minimum {
 			minimum = victim.EstimatedDurationHours
@@ -142,14 +158,41 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		newRAM := victim.EstimatedRAMGBHours * ratio
 		newStorage := victim.EstimatedStorageGBHours * ratio
 
-		if err := l.store.RequeuePreempted(ctx, victim.ID, remaining, newCostAccH, newCPU, newRAM, newStorage); err != nil {
+		ok, err := l.store.RequeuePreempted(ctx, victim.ID, remaining, newCostAccH, newCPU, newRAM, newStorage)
+		if err != nil {
 			l.logger.Error("requeue preempted job", zap.String("id", victim.ID), zap.Error(err))
 			continue
 		}
-
+		if !ok {
+			// It reached a terminal status between selection and here — it is already releasing
+			// its capacity, so the plan is short by nothing, but this tick cannot claim to have
+			// executed the plan it planned.
+			l.logger.Info("preemption victim was no longer running", zap.String("victim", victim.ID))
+			continue
+		}
+		// The row now reserves only the remaining work. Record what has already been consumed as
+		// observed usage, or those hours are counted nowhere until the job finally terminates,
+		// possibly days later: a job preempted three quarters of the way through would look to
+		// admission, quota exhaustion and stage progress like it had barely run, and its agent
+		// could re-admit against budget it has already spent.
+		//
+		// Deliberately does not mark the experiment settled — quota_settled_at means "terminal and
+		// final", and this job is going to run again. Settle writes an absolute figure for the
+		// whole life so far, so the eventual terminal settlement simply overwrites it with the
+		// same quantity recomputed over a longer window.
+		l.settleStint(ctx, victim)
+		requeued++
 	}
 
-	return nil
+	if requeued == len(selected) {
+		return true, nil
+	}
+	// A partially executed plan is the worst of both worlds: some victims are already releasing
+	// capacity, so the shortage this tick measured is stale, yet the plan did not cover it.
+	// Reporting it as an ordinary "no plan" would let the caller answer with the disbalance
+	// evictor — terminating further live work on top of the victims already requeued. It is an
+	// error, so the caller stands down and a later tick re-plans from fresh state.
+	return false, fmt.Errorf("preempt: requeued %d of %d planned victims for %s", requeued, len(selected), preemptor.ID)
 }
 
 // preemptionContribution is the capacity a victim can actually return to the preemptor's
@@ -180,7 +223,14 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 		}
 		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, now, ObservedMaxLookback, l.observedGapCap, l.observedStep)
 		if err != nil {
-			return nil, fmt.Errorf("completion fraction: observed elapsed hours for %s: %w", exp.ID, err)
+			// This value is a sort tiebreak and nothing else (see sortGuaranteed). A transient
+			// metrics-store failure on one job must not stop the platform admitting anything
+			// this tick — and since the query runs before either admission pass, returning here
+			// would do exactly that (#19). Absent means "no observed progress", which is what an
+			// unranked job sorts as anyway.
+			l.logger.Warn("completion fraction unavailable; ranking this job as unstarted",
+				zap.String("exp", exp.ID), zap.Error(err))
+			continue
 		}
 		fraction := hours / exp.EstimatedDurationHours
 		if fraction < 0 {
@@ -197,13 +247,33 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 // (atomically — see MarkSubmitted), then creates the backend workload. MarkSubmitted is itself
 // the durable capacity claim because GetFlavorCapacity subtracts all desired experiments. On
 // backend failure we roll back to QUEUED so the next tick can retry from durable state.
-func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string) error {
-	// resolveClusterAndFootprint may have substituted an AcceptableAcceleratorTypes alternative
-	// for the originally requested flavor to find a cluster the job fits on — persist that now
-	// so the record matches from the start. This is also what lets onRunning's flavor-
-	// substitution debit correctly detect whether our guess here matches the real k8s placement.
-	if exp.AcceleratorCount > 0 && exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType {
-		newEstCost := exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+// settleStint records a requeued preemption victim's consumed hours as observed usage.
+//
+// Best-effort: the requeue itself has already committed, and reporting a settlement failure as if
+// the preemption had failed would leave the tick believing it never freed the capacity it did
+// free. An unsettled stint is re-derived from the metrics store by the next settlement of the
+// same experiment, since every settlement is an absolute set over the job's whole life.
+func (l *Loop) settleStint(ctx context.Context, exp *domain.Experiment) {
+	if err := l.settler.Settle(ctx, exp); err != nil {
+		l.logger.Warn("settle preempted stint", zap.String("id", exp.ID), zap.Error(err))
+	}
+}
+
+// persistedFlavor is what the experiments row said before this tick's placement search ran.
+// Passing it in is what makes the write below correct: the search communicates its choice by
+// mutating exp.AcceleratorType, so by the time submitJob runs, exp no longer knows what is
+// actually stored. Comparing the choice against the immutable *requested* flavor instead used to
+// leave the row stranded on a substitute — tick 1 persists flavor B and then fails its claim,
+// tick 2 re-picks the originally requested A, the requested-flavor comparison sees no
+// substitution and writes nothing, and the row says B for the rest of the job's life while the
+// scheduler reserves and fit-checks A.
+func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType) error {
+	if exp.AcceleratorCount > 0 && exp.AcceleratorType != persistedFlavor {
+		rate, ok := exp.AcceleratorType.LookupCost()
+		if !ok {
+			return fmt.Errorf("submitJob: unknown accelerator flavor %q for experiment %s", exp.AcceleratorType, exp.ID)
+		}
+		newEstCost := rate * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 		if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, exp.AcceleratorType, newEstCost); err != nil {
 			return fmt.Errorf("reserve selected accelerator flavor: %w", err)
 		}

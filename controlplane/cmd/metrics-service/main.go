@@ -16,7 +16,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
@@ -94,7 +93,8 @@ func main() {
 }
 
 func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL)
+	observedGapCap, observedStep := pcfg.Scheduler.ObservationCadence()
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap, observedStep)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (services/controller) — the
@@ -103,6 +103,7 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 		WithSilenceMultiplier(pcfg.Scheduler.SilenceMultiplier).
 		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second).
 		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds) * time.Second).
+		WithClusterSilenceCeiling(time.Duration(pcfg.Scheduler.ClusterStatusSilenceCeilingSeconds) * time.Second).
 		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
 	// is per-platform-experiment config, not a controller-wide setting.
@@ -113,14 +114,18 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
 	// gapCap/step mirror Controller.observedGapCap/observedStep exactly, so every observed-usage
 	// query in this deployment agrees on what "how long did this run" means.
-	observedGapCap := time.Duration(pcfg.Scheduler.SilenceMultiplier * float64(pcfg.Scheduler.DefaultReportIntervalSeconds) * float64(time.Second))
-	observedStep := time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second
-	settler := settlement.New(peSvc, metricsDBURL, observedGapCap, observedStep, scheduler.ObservedMaxLookback)
+	settler := settlement.New(peSvc, metricsDBURL, observedGapCap, observedStep)
 	ctrl = ctrl.WithSettler(settler)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
-	go settlementReconciler.Start(context.Background())
 
+	// metrics-service runs single-replica. The reconcile loop below is not leader-elected, and
+	// two of them would compute stage cuts from two different mid-flight snapshots — computeCut is
+	// read-decide-then-write, not a CAS, so whichever commits first wins and the other's verdict
+	// is lost. (The settlement reconciler above is safe either way: Settle is an idempotent
+	// absolute set.) Scale this out only behind the same leaderelection.Run gate control-service
+	// uses for its scheduler loop.
 	runCtx, runCancel := context.WithCancel(context.Background())
+	go settlementReconciler.Start(runCtx)
 	if err := ctrl.Start(runCtx); err != nil {
 		logger.Fatal("metrics-service: start reconcile loop", zap.Error(err))
 	}

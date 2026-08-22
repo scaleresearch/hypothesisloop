@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,14 +24,24 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	now := time.Now().UTC()
 
+	// One bad row must not stop the pass: every other experiment still needs its stage
+	// advance, silence check, job-length cap and quota check this tick. Failures are logged
+	// as they happen and returned together at the end.
+	var errs []error
+
 	// Build the PE report-interval and stage job-length maps and advance stage ladders in one pass.
 	reportIntervalByPE := map[string]time.Duration{}
 	maxJobHoursByPE := map[string]float64{}
 	declaredMetricKeysByPE := map[string][]string{}
 	if c.stagesStore != nil {
+		// Only the stage ladder needs these maps. Silence and quota-exhaustion checks below do
+		// not, so an unreadable platform-experiment list must not stop them from running — that
+		// turned one failing query into a pass where nothing at all was reconciled.
 		pes, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "running"})
 		if err != nil {
-			return fmt.Errorf("stages: list platform experiments: %w", err)
+			c.logger.Error("stages: list platform experiments; continuing without stage maps", zap.Error(err))
+			errs = append(errs, fmt.Errorf("stages: list platform experiments: %w", err))
+			pes = nil
 		}
 		for _, pe := range pes {
 			if pe.ReportIntervalSeconds > 0 {
@@ -57,10 +68,13 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			// reject a bad contract before an experiment can ever reach here — this is
 			// defense against a row written before that validation existed.
 			if err := domain.ValidateMetricDefinitions(pe.Metrics); err != nil {
-				return fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err)
+				c.logger.Error("stages: invalid metric contract", zap.String("pe", pe.ID), zap.Error(err))
+				errs = append(errs, fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err))
+				continue
 			}
 			if err := c.advanceStages(ctx, pe, exps); err != nil {
-				return fmt.Errorf("stages: advance %s: %w", pe.ID, err)
+				c.logger.Error("stages: advance", zap.String("pe", pe.ID), zap.Error(err))
+				errs = append(errs, fmt.Errorf("stages: advance %s: %w", pe.ID, err))
 			}
 		}
 	}
@@ -70,7 +84,8 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	// status but pod termination or refunds were not yet completed.
 	if c.stagesStore != nil {
 		if err := c.reconcileClosedExperiments(ctx); err != nil {
-			return fmt.Errorf("reconcile closed experiments: %w", err)
+			c.logger.Error("reconcile closed experiments", zap.Error(err))
+			errs = append(errs, fmt.Errorf("reconcile closed experiments: %w", err))
 		}
 	}
 
@@ -86,22 +101,27 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 		checked[key] = true
 		if err := c.checkQuotaExhaustion(ctx, exp.AgentID, exp.PlatformExperimentID, now); err != nil {
-			return fmt.Errorf("quota exhaustion check for %s: %w", exp.AgentID, err)
+			c.logger.Error("quota exhaustion check", zap.String("agent", exp.AgentID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("quota exhaustion check for %s: %w", exp.AgentID, err))
 		}
 	}
 
 	for _, exp := range exps {
 		if err := c.reconcileOne(ctx, exp, now, reportIntervalByPE, maxJobHoursByPE, declaredMetricKeysByPE); err != nil {
-			return fmt.Errorf("reconcile experiment %s: %w", exp.ID, err)
+			c.logger.Error("reconcile experiment", zap.String("exp", exp.ID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("reconcile experiment %s: %w", exp.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // checkQuotaExhaustion evicts all running jobs for an agent when actual AccH consumed
 // reaches their tier quota. No refund — budget genuinely exhausted.
 func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platformExpID string, now time.Time) error {
-	aq, err := c.quota.GetAgentQuota(ctx, agentID, platformExpID)
+	// Observed consumption only. A reservation-inclusive figure would trip this check on work
+	// that has merely been queued, and evict — irreversibly, unrefunded — running jobs for budget
+	// nobody has spent. RAM/storage are not enforced here because nothing observes them.
+	aq, err := c.quota.GetObservedAgentQuota(ctx, agentID, platformExpID)
 	if err != nil || aq == nil {
 		return err
 	}
@@ -110,30 +130,16 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	if err != nil {
 		return err
 	}
-
-	// aq.UsedGuaranteedAccH/UsedBurstAccH already carry the actual-cost correction for every
-	// running job (c.quota.GetAgentQuota -> correctRunningCosts swaps each running job's
-	// estimate for its observed-so-far accelerator cost) — do not apply that delta again here,
-	// or a running job's overrun gets debited twice, tripping eviction early.
-	// CPU is not corrected by correctRunningCosts, so it still needs the same delta swap here.
-	// RAM/storage are not enforced here because nothing debits an observed RAM/storage figure to
-	// true up against.
-	var cpuDeltaG, cpuDeltaB float64
-	for _, exp := range running {
-		var cpuDelta float64
-		if exp.EstimatedCPUCoreHours > 0 {
-			hours, err := c.observedElapsedHours(ctx, exp.ID, now)
-			if err != nil {
-				return fmt.Errorf("observed elapsed hours for %s: %w", exp.ID, err)
-			}
-			cpuDelta = hours*exp.RequestedCPUCores() - exp.EstimatedCPUCoreHours
-		}
-		if exp.CapacityTier == domain.CapacityGuaranteed {
-			cpuDeltaG += cpuDelta
-		} else {
-			cpuDeltaB += cpuDelta
-		}
+	// ADMITTED jobs already hold their reservation and are about to have a workload created for
+	// them — without stopping these too, a cut/exhausted agent's job can still start after this
+	// sweep believes it has stopped everything (GetAgentQueuedExperiments also returns QUEUED and
+	// SUBMITTED, which never spent observed hours and are excluded by tierExhausted's usage check
+	// below being about observed consumption, not queue membership).
+	admitted, err := c.store.GetAgentQueuedExperiments(ctx, agentID, platformExpID)
+	if err != nil {
+		return err
 	}
+
 	// 0.99 not 1.0: floating-point accumulation across many debit/refund calls means "exactly
 	// exhausted" may never compare equal/greater than the raw budget — a 1% margin avoids a
 	// budget that's genuinely spent sitting just under the threshold forever.
@@ -141,13 +147,13 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	// experiment has GuaranteedAcceleratorHours == 0) is not an exhaustion condition — it means
 	// "no quota of that kind to spend", not "quota spent". Without the guard 0 >= 0*0.99 is true on
 	// the first tick and every job is evicted for quota_exhaustion.
-	spent := func(budget, used, delta float64) bool {
-		return budget > 0 && (used+delta) >= budget*0.99
+	spent := func(budget, used float64) bool {
+		return budget > 0 && used >= budget*0.99
 	}
-	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH, 0) ||
-		spent(aq.GuaranteedCPUCoreHours, aq.UsedGuaranteedCPUCoreH, cpuDeltaG)
-	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH, 0) ||
-		spent(aq.BurstCPUCoreHours, aq.UsedBurstCPUCoreH, cpuDeltaB)
+	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH) ||
+		spent(aq.GuaranteedCPUCoreHours, aq.UsedGuaranteedCPUCoreH)
+	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH) ||
+		spent(aq.BurstCPUCoreHours, aq.UsedBurstCPUCoreH)
 
 	if !guaranteedExhausted && !burstExhausted {
 		return nil
@@ -173,6 +179,34 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		exp.Status = domain.StatusEvicted
 		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
 		c.settleAndMark(ctx, exp)
+	}
+
+	for _, exp := range admitted {
+		if exp.Status != domain.StatusAdmitted {
+			continue // QUEUED/SUBMITTED haven't claimed a reservation the way ADMITTED has
+		}
+		tierExhausted := (guaranteedExhausted && exp.CapacityTier == domain.CapacityGuaranteed) ||
+			(burstExhausted && exp.CapacityTier == domain.CapacityBurst)
+		if !tierExhausted {
+			continue
+		}
+		updated, err := c.store.TransitionTerminal(ctx, exp.ID, domain.StatusAdmitted, domain.StatusEvicted,
+			string(domain.EvictionQuotaExhaustion))
+		if err != nil {
+			c.logger.Error("quota exhaustion evict admitted", zap.String("id", exp.ID), zap.Error(err))
+			continue
+		}
+		if !updated {
+			continue
+		}
+		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
+		// Never reached RUNNING; settlement derives zero usage from absent metrics. EVICTED (not
+		// REJECTED) to match CancelExperiment's convention: ADMITTED already has a workload being
+		// created for it, so moving it out of the SUBMITTED/ADMITTED/RUNNING desired-state set is
+		// what makes the cluster-agent tear that workload down.
+		exp.Status = domain.StatusEvicted
+		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
+		c.settleAndMark(ctx, exp)
 		// Status is already EVICTED above — that's what removes it from the cluster-agent's
 		// desired-running set; the Job disappears on the agent's next reconcile pass.
 		c.logger.Info("quota exhaustion eviction",
@@ -182,8 +216,8 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			zap.Float64("actual_burst_acch", aq.UsedBurstAccH),
 			zap.Float64("quota_guaranteed_acch", aq.GuaranteedAcceleratorHours),
 			zap.Float64("quota_burst_acch", aq.BurstAcceleratorHours),
-			zap.Float64("actual_guaranteed_cpuh", aq.UsedGuaranteedCPUCoreH+cpuDeltaG),
-			zap.Float64("actual_burst_cpuh", aq.UsedBurstCPUCoreH+cpuDeltaB),
+			zap.Float64("actual_guaranteed_cpuh", aq.UsedGuaranteedCPUCoreH),
+			zap.Float64("actual_burst_cpuh", aq.UsedBurstCPUCoreH),
 			zap.Float64("quota_guaranteed_cpuh", aq.GuaranteedCPUCoreHours),
 			zap.Float64("quota_burst_cpuh", aq.BurstCPUCoreHours),
 		)

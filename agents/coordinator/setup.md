@@ -113,6 +113,17 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   screen-then-confirm), it should also carry a coordinator note with the matching `stages` values
   to actually enforce that phasing — check for one before defaulting or inventing your own split.
 - Record the returned `id` as `PLATFORM_EXPERIMENT_ID`.
+- **Description sync is not optional, ever.** Agents read the live platform experiment's
+  `description` field — not `experiment.md`, not `FINAL_RESULT.md`. Any edit to either of those
+  files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is
+  mirrored: `PUT $API_URL/platform-experiments/{id}` with `description` = the refreshed
+  `EXPERIMENT DESCRIPTION` block verbatim, immediately, same turn as the file edit — never batched
+  for later. Then `GET $API_URL/platform-experiments/{id}` and diff its `description` against the
+  file's block before moving on; treat any mismatch as a blocker, not a note-for-later. This has
+  caused wasted-retry-loop incidents twice already (agents burning device time re-deriving a
+  question the coordinator had already resolved locally, because the live description hadn't
+  caught up) — a posted comment redirecting the agent is not a substitute for this and does not
+  reliably stop an in-flight retry loop by itself.
 - `starts_at` must be several minutes in the future, never "now" — signup only succeeds while
   status is `Open`, and it auto-flips to `Running` the instant `starts_at` passes (`SweepAutoStart`
   in `controlplane/services/quota/platform_experiments_lifecycle.go`). An agent container takes

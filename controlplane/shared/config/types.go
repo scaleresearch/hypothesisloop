@@ -1,7 +1,11 @@
 // Package config loads hypothesisloop.yaml and exposes a typed Config used across all services.
 package config
 
-import "github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+import (
+	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+)
 
 // AcceleratorTypeConfig defines platform-wide accelerator identity and exchange rate.
 type AcceleratorTypeConfig struct {
@@ -40,6 +44,24 @@ type QuotaConfig struct {
 }
 
 // SchedulerConfig holds timing and eviction tuning constants.
+// ObservationCadence is the one definition of the grid every observed-usage query in a
+// deployment measures on: step is the resolution samples are counted at, gapCap how long a
+// sample keeps counting as "still alive" before a gap is treated as genuinely down.
+//
+// step is the billing resolution, deliberately coarser than the node-agent's own heartbeat
+// (PUSH_INTERVAL_MS, 2s by default). That is the constraint, not a coincidence: the grid must be
+// no finer than the heartbeat, or every grid point between two heartbeats reads as a gap. Coarser
+// is free — a 30s grid over a 2s heartbeat always finds a sample — and 15x cheaper to query.
+//
+// It belongs here, computed once, because these two values only mean anything when the quota
+// service, the settler, the controller and the scheduler all use the same pair. Three copies of
+// the arithmetic is how they drifted apart in the first place, and a drifted pair makes the same
+// job cost different amounts depending on which code path is asked.
+func (c SchedulerConfig) ObservationCadence() (gapCap, step time.Duration) {
+	step = time.Duration(c.DefaultReportIntervalSeconds) * time.Second
+	return time.Duration(c.SilenceMultiplier * float64(step)), step
+}
+
 type SchedulerConfig struct {
 	LoopHeartbeatSeconds         int     `yaml:"loop_heartbeat_seconds"`
 	JobPollIntervalSeconds       int     `yaml:"job_poll_interval_seconds"`
@@ -62,6 +84,14 @@ type SchedulerConfig struct {
 	// Jobs already RUNNING there are left alone until it reconnects — avoids duplicate dispatch
 	// if it comes back. ~15 missed polls at the ~2s desired-state cadence.
 	ClusterUnreachableAfterSeconds int `yaml:"cluster_unreachable_after_seconds"`
+	// ClusterStatusSilenceCeilingSeconds bounds how long a cluster may push no job-status
+	// snapshot at all before the jobs it holds are evicted as cluster_unreachable and their
+	// reservations released. Deliberately far longer than ClusterUnreachableAfterSeconds, which
+	// only ages a cluster's capacity out of admission: this one ends real work, so it must
+	// tolerate a control-plane restart, a rolling agent upgrade, and a transient partition
+	// without firing. Without any ceiling, a cluster that never comes back strands every
+	// reservation on it forever.
+	ClusterStatusSilenceCeilingSeconds int `yaml:"cluster_status_silence_ceiling_seconds"`
 	// GuaranteedFairnessWindowSeconds quantizes queued_at into age buckets for the guaranteed
 	// tier's admission ordering: jobs within the same bucket are ordered by least-used-quota
 	// agent first instead of exact submission timestamp, bounding the latency-fairness gap a
@@ -70,10 +100,11 @@ type SchedulerConfig struct {
 	GuaranteedFairnessWindowSeconds int `yaml:"guaranteed_fairness_window_seconds"`
 	// ResourceDisbalanceTolerance is the multiple of a cluster's per-accelerator CPU/memory/
 	// storage share a running job may request before the scheduler evicts it for stranding idle
-	// accelerators on its own node (see services/scheduler/loop_disbalance.go). Unlike the
-	// *_seconds fields above, 0/unset means DISABLED, not "use a default": this is the only pass
-	// that terminates a running job nobody asked to stop, so it stays opt-in per deployment.
-	// scheduler.DefaultDisbalanceTolerance is the suggested starting value.
+	// accelerators on its own node (see services/scheduler/loop_disbalance.go). Required and
+	// positive, like every other setting here — scheduler.DefaultDisbalanceTolerance is the
+	// suggested value. There is no "off": a disabled pass is a second scheduling behaviour to
+	// reason about, and a cluster whose accelerators are stranded by one job's shape is broken
+	// whether or not an operator remembered to switch the fix on.
 	ResourceDisbalanceTolerance float64 `yaml:"resource_disbalance_tolerance"`
 	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
 	DefaultTerminationGracePeriodSeconds int `yaml:"default_termination_grace_period_seconds"`

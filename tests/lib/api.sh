@@ -157,6 +157,14 @@ get_field()  { curl -sf "$API_URL/experiments/$1" | py "import sys,json; print(j
 wait_for_status() {
   local id="$1" want="$2" tries="${3:-30}"
   local s
+  # Clamped to the scenario's remaining ceiling (see scenario_seconds_left): a wait that outlives
+  # the suite's own timeout gets the scenario killed mid-assertion instead of reporting anything.
+  tries=$(budgeted_tries "$tries" 1)
+  if [[ "$tries" -le 0 ]]; then
+    budget_exhausted "$id to reach {$want}"
+    get_status "$id"
+    return 1
+  fi
   for ((i = 1; i <= tries; i++)); do
     s=$(get_status "$id")
     if [[ ",$want," == *",$s,"* ]]; then echo "$s"; return 0; fi

@@ -15,16 +15,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
-import { formatAccH } from '@/lib/format'
-
-function relTime(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const s = Math.round(diffMs / 1000)
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  return new Date(iso).toLocaleDateString()
-}
+import { formatAccH, relTime } from '@/lib/format'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -199,7 +190,6 @@ function JobsPageContent() {
                 <th>Tier</th>
                 <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
-                <th style={{ textAlign: 'right' }}>Final Metric</th>
                 <th>Hypothesis</th>
                 <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} />
                 <th></th>
@@ -217,7 +207,7 @@ function JobsPageContent() {
                   </td>
                 </tr>
               ) : visible.map((job: Experiment) => {
-                const j = job as any
+                const j = job
                 const status = j.status ?? 'UNKNOWN'
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
@@ -267,11 +257,6 @@ function JobsPageContent() {
                     <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {j.accelerator_type}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
                       {cost != null ? `${cost} AccH` : '—'}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      <span className={j.final_metric != null ? 'accent' : 'text-muted'}>
-                        {j.final_metric != null ? j.final_metric.toFixed(4) : '—'}
-                      </span>
                     </td>
                     <td
                       className={j.hypothesis_id ? 'accent' : undefined}

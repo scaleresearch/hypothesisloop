@@ -117,10 +117,64 @@ FAILED=0
 pass() { echo "  [PASS] $*"; }
 fail() { echo "  [FAIL] $*"; FAILED=1; }
 
+# One deadline for the whole scenario, shared by every wait below.
+#
+# Each wait carries its own generous budget, which is right in isolation: none of them knows what
+# else the scenario still has to do. But the suite kills a scenario at SCENARIO_TIMEOUT_SECONDS
+# regardless, so on a contended cluster a run could spend its entire allowance inside the first two
+# waits and be SIGTERMed mid-assertion — surfacing as a bare [FAIL] with no failed assertion in it,
+# which reads as a product bug rather than a slow cluster. Clamping every wait to what is actually
+# left turns that into an explicit, attributable [BUDGET] line instead.
+#
+# The margin leaves room for the scenario's own cleanup (closing its platform experiments) to run
+# before the suite's timeout fires.
+SCENARIO_BUDGET_MARGIN_SECONDS="${SCENARIO_BUDGET_MARGIN_SECONDS:-15}"
+SCENARIO_BUDGET_SECONDS=$(( ${SCENARIO_TIMEOUT_SECONDS:-240} - SCENARIO_BUDGET_MARGIN_SECONDS ))
+# A ceiling at or below the margin would leave nothing to spend and fail every wait instantly,
+# turning a misconfigured timeout into a wall of unexplained failures. Fall back to the ceiling
+# itself: the scenario then loses only the cleanup margin, and is still bounded by the number the
+# operator actually set — never by a floor larger than it, which would put this budget back on the
+# wrong side of the suite's own timeout.
+[[ "$SCENARIO_BUDGET_SECONDS" -lt 1 ]] && SCENARIO_BUDGET_SECONDS="${SCENARIO_TIMEOUT_SECONDS:-240}"
+SCENARIO_STARTED_AT=$(date +%s)
+
+# scenario_seconds_left prints how much of the scenario's ceiling remains, never below zero.
+scenario_seconds_left() {
+  local left=$(( SCENARIO_BUDGET_SECONDS - ($(date +%s) - SCENARIO_STARTED_AT) ))
+  [[ "$left" -lt 0 ]] && left=0
+  echo "$left"
+}
+
+# budgeted_tries prints the smaller of a wait's own tries and what the scenario can still afford,
+# given each try costs SLEEP seconds. Zero means the scenario is out of time.
+budgeted_tries() {
+  local tries="$1" sleep_s="${2:-1}" left affordable
+  left=$(scenario_seconds_left)
+  affordable=$(( left / sleep_s ))
+  # Polling checks first and only sleeps between failed attempts, so any remaining time at all buys
+  # one more check. Rounding that down to zero would give up a whole interval early — and the check
+  # it skips is the one most likely to have just become true.
+  [[ "$affordable" -lt 1 && "$left" -gt 0 ]] && affordable=1
+  [[ "$affordable" -lt "$tries" ]] && tries="$affordable"
+  [[ "$tries" -lt 0 ]] && tries=0
+  echo "$tries"
+}
+
+# budget_exhausted reports the scenario running out of time as its own distinct outcome — never a
+# silent timeout that reads like the platform failing to do something.
+budget_exhausted() {
+  echo "  [BUDGET] scenario ran out of time waiting for: $1 (ceiling ${SCENARIO_BUDGET_SECONDS}s)" >&2
+}
+
 # wait_until DESC TRIES SLEEP CHECK_CMD...  — polls CHECK_CMD (a command, not a string) until
 # it exits 0 or TRIES is exhausted. Every "wait for X" in this suite reduces to this.
 wait_until() {
   local desc="$1" tries="$2" sleep_s="$3"; shift 3
+  tries=$(budgeted_tries "$tries" "$sleep_s")
+  if [[ "$tries" -le 0 ]]; then
+    budget_exhausted "$desc"
+    return 1
+  fi
   for ((i = 1; i <= tries; i++)); do
     if "$@"; then return 0; fi
     [[ "$i" -lt "$tries" ]] && sleep "$sleep_s"

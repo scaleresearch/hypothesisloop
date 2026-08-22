@@ -130,6 +130,13 @@ scheduler:
   # ~15 missed polls at the ~2s desired-state cadence.
   cluster_unreachable_after_seconds: 30
 
+  # How long a cluster may push no job-status snapshot at all before the jobs it still holds are
+  # evicted as cluster_unreachable and their reservations released. Far longer than
+  # cluster_unreachable_after_seconds above, which only freezes admission to the cluster: this
+  # one ends real work, so it must comfortably outlast a control-plane restart, a rolling
+  # cluster-agent upgrade, and a transient network partition.
+  cluster_status_silence_ceiling_seconds: 900
+
   # Age-bucket width for guaranteed-tier admission fairness: jobs queued within this window of
   # each other are ordered by least-used-quota agent first instead of exact FIFO timestamp,
   # bounding how far a steady-submitting agent's own jobs can jump ahead of other agents'
@@ -140,9 +147,10 @@ scheduler:
   # proportionate per-accelerator share of the cluster, while that request is provably the only
   # thing keeping a queued job off idle accelerators on the same node. Guards against a job
   # taking one of a node's four accelerators and all of its cores, stranding the other three.
-  # 0 disables it (the default): this is the only pass that terminates a running job the queue
-  # never asked to stop. 3 is the suggested starting value — a job is entitled to its share, and
-  # three times that is already past any plausible host-side need.
+  # Required and positive — there is no off switch: a disabled pass is a second scheduling
+  # behaviour to reason about, and stranded accelerators are stranded whether or not an operator
+  # switched the fix on. 3 is the suggested value — a job is entitled to its proportionate share,
+  # and three times that is already past any plausible host-side need.
   resource_disbalance_tolerance: 3
 
   # How often the metric controller reconciles running experiments.
@@ -158,7 +166,7 @@ scheduler:
   # how short a platform experiment's own report_interval_seconds is configured. Must comfortably
   # exceed realistic node-death -> reschedule -> pod-running-again recovery time, or a fast
   # reporting cadence turns a normal self-heal into a false permanent eviction.
-  min_silence_window_seconds: 60
+  min_silence_window_seconds: 300
 
   # Kubernetes Job retries (RestartPolicy=OnFailure) before k8s marks the Job Failed.
   # Absorbs transient pod flakes; a persistently crashing job exhausts these retries and is

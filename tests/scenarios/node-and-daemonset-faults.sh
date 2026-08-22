@@ -127,7 +127,9 @@ else
     [[ "$SHRINK_STATUS" == "QUEUED" ]] \
       && pass "new admission stayed QUEUED while live H100 capacity was reduced" \
       || fail "8-device job became $SHRINK_STATUS while only seven H100 devices were free"
-    [[ "$(get_field "$SHRINK_JOB" not_admitted_reason)" == "capacity_unavailable" ]] \
+    # The reason is a code optionally followed by ": <detail>" naming what was short (see
+    # notAdmittedReasonFor) — match the code, not the whole string, same as job-lifecycle.sh.
+    [[ "$(get_field "$SHRINK_JOB" not_admitted_reason)" == capacity_unavailable* ]] \
       && pass "reduced-capacity decision is visible as capacity_unavailable" \
       || fail "reduced-capacity job has wrong not_admitted_reason=$(get_field "$SHRINK_JOB" not_admitted_reason)"
 

@@ -3,9 +3,11 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
+	"github.com/moby/moby/client"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
@@ -30,6 +32,14 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 			continue
 		}
 		if c.Labels[LabelDesiredSpecHash] == spec.Labels[LabelDesiredSpecHash] {
+			if c.State == "created" {
+				// Created but never started — the container exists and hash-matches, so this
+				// used to read as "already running" and the start was never retried, wedging the
+				// job silently for its whole life.
+				if _, err := e.docker.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
+					return fmt.Errorf("podexec: start created container %s: %w", c.name(), err)
+				}
+			}
 			return nil // already running the desired spec
 		}
 		// Drifted: remove the stale container (whatever state it's in) so this call can
@@ -105,7 +115,10 @@ func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
 		}
 		id := c.Labels[LabelExperimentID]
 		if id == "" {
-			return nil, fmt.Errorf("podexec: managed container %q has no experiment identity", c.name())
+			// One unidentifiable container must not brick the node: this list drives both
+			// reconcile and status reporting (important.md #19).
+			log.Printf("podexec: skipping managed container %q with no experiment identity", c.name())
+			continue
 		}
 		ids = append(ids, id)
 	}
@@ -126,7 +139,8 @@ func (e *Executor) ListManagedJobsForStatus(ctx context.Context) ([]string, erro
 	for _, c := range containers {
 		id := c.Labels[LabelExperimentID]
 		if id == "" {
-			return nil, fmt.Errorf("podexec: managed container %q has no experiment identity", c.name())
+			log.Printf("podexec: skipping managed container %q with no experiment identity", c.name())
+			continue
 		}
 		ids = append(ids, id)
 	}
@@ -183,8 +197,12 @@ func (e *Executor) PollJobPhaseAndUID(ctx context.Context, experimentID string) 
 			continue
 		}
 		switch c.State {
-		case "running", "created":
+		case "running":
 			return workload.JobPhaseRunning, c.ID, nil
+		case "created":
+			// Created but not started is not running: it consumes nothing and may never start.
+			// Reporting it as running billed a wedged container as if it were training.
+			return workload.JobPhasePending, c.ID, nil
 		case "exited", "stopped":
 			code, err := e.exitCode(ctx, c.ID)
 			if err != nil {
@@ -261,7 +279,10 @@ func (e *Executor) reapTerminal(ctx context.Context, desiredIDs map[string]bool)
 			continue
 		}
 		if err := e.removeContainer(ctx, c.name()); err != nil {
-			return fmt.Errorf("podexec: reap terminal container %s: %w", c.name(), err)
+			// Finish the pass: one container that refuses to be removed must not leave every
+			// other terminal container on the node un-reaped (important.md #19).
+			log.Printf("podexec: reap terminal container %s: %v", c.name(), err)
+			continue
 		}
 	}
 	return nil

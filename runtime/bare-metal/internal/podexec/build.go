@@ -236,8 +236,9 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 		StorageOptSize string
 		Devices        []string
 		Mounts         []string
+		ReadOnlyMounts map[string]string
 		Labels         map[string]string
-	}{cs.Name, cs.Image, cs.Command, cs.Args, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, labels}
+	}{cs.Name, cs.Image, cs.Command, cs.Args, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("podexec: hash desired spec: %w", err)

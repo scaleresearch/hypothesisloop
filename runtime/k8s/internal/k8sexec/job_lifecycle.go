@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -132,7 +133,39 @@ func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, erro
 		}
 		id := j.Labels[workloadkeys.ExperimentID]
 		if id == "" {
-			return nil, fmt.Errorf("workload: managed job %q has no experiment identity", j.Name)
+			log.Printf("workload: skipping managed job %q with no experiment identity", j.Name)
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// ListManagedJobsForStatus returns the experiment IDs of every managed Job, including ones that
+// are still terminating. Implements agentloop.StatusLister.
+//
+// Deliberately a different set from ListManagedJobs. A status push is a complete cluster
+// snapshot, and the control plane reads an experiment missing from one as its workload having
+// vanished. A drift-delete-then-recreate leaves the Job terminating for a moment, and reporting
+// that as "not here" told the control plane real, still-running training had disappeared. The
+// honest report is that the Job is present and not yet Running — which is what PollJobPhaseAndUID
+// returns for it once its pods are gone, so no phase mapping is needed here, only the inclusion.
+func (c *JobWorkloadClient) ListManagedJobsForStatus(ctx context.Context) ([]string, error) {
+	jobs, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ManagedBy, workloadkeys.ManagedByValue),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("workload: list managed jobs for status: %w", err)
+	}
+	ids := make([]string, 0, len(jobs.Items))
+	for _, j := range jobs.Items {
+		id := j.Labels[workloadkeys.ExperimentID]
+		if id == "" {
+			// One unidentifiable object must not abort the pass: this list drives every create
+			// and delete, so failing it wedged reconcile for the whole cluster until a human
+			// intervened (important.md #19).
+			log.Printf("workload: skipping managed job %q with no experiment identity", j.Name)
+			continue
 		}
 		ids = append(ids, id)
 	}
@@ -198,7 +231,8 @@ func (c *JobWorkloadClient) ListManagedAuxiliaryWorkloads(ctx context.Context) (
 	for _, service := range services.Items {
 		id := service.Labels[workloadkeys.ExperimentID]
 		if id == "" {
-			return nil, fmt.Errorf("workload: managed Service %q has no experiment identity", service.Name)
+			log.Printf("workload: skipping managed Service %q with no experiment identity", service.Name)
+			continue
 		}
 		ids[id] = struct{}{}
 	}
@@ -496,7 +530,18 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 			return workload.JobPhaseSucceeded, uid, nil
 		}
 	}
-	if job.Status.Active > 0 {
+	// Ready, not Active. Active counts a pod from the moment it exists, so a pod sitting in
+	// ImagePullBackOff or ContainerCreating reported as Running — which told the control plane a
+	// job was executing (and consuming, and therefore billable) before its container had ever
+	// started, and routed it away from the pending path that would have diagnosed it.
+	//
+	// Ready is the count of pods whose containers are actually up. These pods define no readiness
+	// probe (nothing in BuildJob sets one), so for them the Ready condition means exactly
+	// "the containers are running" and nothing about service availability.
+	//
+	// A nil Ready is a cluster that does not populate the field at all: no evidence of execution,
+	// so the job is reported as not yet running rather than assumed to be.
+	if job.Status.Ready != nil && *job.Status.Ready > 0 {
 		return workload.JobPhaseRunning, uid, nil
 	}
 	return workload.JobPhasePending, uid, nil

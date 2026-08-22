@@ -71,7 +71,14 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 	// a double transfer. The headroom re-check inside the tx (against the metrics-store reserved
 	// total passed here) is the authoritative guard; an error from it means a concurrent donation
 	// raced this one past the donor's balance. Donations are accelerator-hours only today.
-	fulfilled, err := s.store.FulfillDonationTx(ctx, donationID, donorAgentID, req.AgentID, req.PlatformExperimentID, domain.ResourceAcceleratorHours, req.CreditsWant, donorQuota.UsedGuaranteedAccH)
+	// The matching burst headroom moves with the guaranteed hours, since burst is derived from
+	// guaranteed (domain.AllocateQuota) — moving one without the other leaves the donor with burst
+	// for hours it gave away and the recipient with none for hours it received.
+	fulfilled, err := s.store.FulfillDonationTx(ctx, donationID, donorAgentID, req.AgentID, req.PlatformExperimentID,
+		domain.ResourceAcceleratorHours, req.CreditsWant, req.CreditsWant*s.cfg.BurstFraction,
+		func(ctx context.Context) (*domain.AgentQuota, error) {
+			return s.GetQuota(ctx, donorAgentID, req.PlatformExperimentID)
+		})
 	if err != nil {
 		return fmt.Errorf("FulfillDonation: transfer: %w", err)
 	}

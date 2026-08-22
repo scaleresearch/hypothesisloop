@@ -26,6 +26,15 @@ and restart clean — but log why in `$FINDINGS_FILE` first. Keep in mind these 
 No established baseline (number + config) is a blocker: queue one now, concurrently, not once
 things are quiet. Check for an in-flight/completed one first to avoid duplicates.
 
+## Keeping the live description in sync
+
+Every time you edit `experiment.md` or `FINAL_RESULT.md` (a resolved question, a redirect, a new
+recommended direction), immediately `PUT` the refreshed `EXPERIMENT DESCRIPTION` block to the live
+platform experiment's `description` field, then `GET` it back and diff against the file — see
+`setup.md` step 2. Don't rely on a hypothesis comment alone to redirect an agent's in-flight retry
+loop; it has failed to stop one before. If an agent keeps retrying past a comment, verify the
+*description* actually changed before assuming the agent is ignoring you.
+
 ## Record findings
 
 Append to `$FINDINGS_FILE` as you go, not just at the end. Each entry: what happened (observed,
