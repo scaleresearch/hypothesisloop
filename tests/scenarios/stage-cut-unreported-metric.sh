@@ -26,8 +26,12 @@ STAGES='[{"length_pct":20,"evict_pct":50},{"length_pct":30,"evict_pct":25},{"len
 # decoy. Both must be ranking-role, since constraint/attribute metrics never cut and so could not
 # reproduce the veto.
 METRICS='[{"key":"val_accuracy","direction":"maximize"},{"key":"never_reported_score","direction":"maximize"}]'
-JOB_HOURS=0.0084
-BUDGET=$(scale_budget 0.075)
+# Estimate, real runtime and budget all sized exactly as stage-ladder-cut.sh sizes them — see the
+# comment there for why a wave has to overrun its estimate to reach a boundary at all.
+JOB_HOURS=0.0028
+RUN_SECONDS=40
+RUN_ENV="{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${RUN_SECONDS}\"}"
+BUDGET=$(scale_budget 0.03)
 PE_ID=$(create_platform_experiment "stage-decoy-${RUN_ID}" "$BUDGET" "${#AGENTS[@]}" 10 0 "$METRICS" "$STAGES")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 

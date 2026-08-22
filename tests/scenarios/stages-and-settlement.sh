@@ -12,12 +12,21 @@ source "$DIR/../lib/api.sh"
 
 AGENTS=("agent-alpha-${RUN_ID}" "agent-beta-${RUN_ID}" "agent-gamma-${RUN_ID}")
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
-PE_ID=$(create_platform_experiment "stages-settlement-${RUN_ID}" "$(scale_budget 0.03)" "${#AGENTS[@]}")
+# Jobs declare a short estimate and genuinely run longer, which is what carries the wave past the
+# first stage boundary: observed consumption is measured from the observations themselves, so a
+# job that runs exactly its estimate consumes slightly less than the allocation it is measured
+# against and a wave of on-estimate jobs can never quite reach the line. See stage-ladder-cut.sh.
+JOB_HOURS=0.0028
+RUN_SECONDS=40
+RUN_ENV="{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${RUN_SECONDS}\"}"
+# Three jobs observe roughly 3 x 0.25 x 37s = 0.0077 AccH; the default ladder's 40% first stage of
+# a 0.012 AccH budget puts the boundary at 0.0048, about 60% through the wave.
+PE_ID=$(create_platform_experiment "stages-settlement-${RUN_ID}" "$(scale_budget 0.012)" "${#AGENTS[@]}")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
 declare -a JOBS
 for a in "${AGENTS[@]}"; do
-  JOBS+=("$(submit_job "$PE_ID" "$a" "guaranteed" "0.0084")")
+  JOBS+=("$(submit_job_ext "$PE_ID" "$a" "guaranteed" "$JOB_HOURS" "$JOB_FILE" "$RUN_ENV")")
 done
 echo "  submitted: ${JOBS[*]}"
 

@@ -20,15 +20,25 @@ for i in 1 2 3 4 5 6; do AGENTS+=("agent-ladder-${i}-${RUN_ID}"); done
 for a in "${AGENTS[@]}"; do register_agent "$a"; done
 
 STAGES='[{"length_pct":20,"evict_pct":50},{"length_pct":30,"evict_pct":25},{"length_pct":50,"evict_pct":0}]'
-JOB_HOURS=0.0084
-# Budget sized so the first boundary (20%) lands late in this one wave of jobs. Cost is in
-# H100-equivalent AccH, not raw hours: the generic workload's L40 carries acch_rate 0.25, so six
-# 0.0084h jobs settle at roughly 0.021 AccH total, and 20% of 0.075 is 0.015 — about two thirds
-# of the way through. Every agent has therefore been streaming metrics for most of its run by the
-# time the boundary trips, so the cut is drawn from real data rather than from whoever started
-# first. It also leaves each agent 0.075*0.2/6 = 0.0025 guaranteed AccH, comfortably above one
-# job's ~0.0021, so nothing queues behind quota instead of running.
-BUDGET=$(scale_budget 0.075)
+# Each job declares a short estimate and then genuinely runs longer than it, which is what lets a
+# wave of jobs burn past the first stage's share of the budget at all.
+#
+# Observed consumption is now measured from the observations themselves, so a job that runs
+# exactly its estimate consumes very slightly *less* than it reserved (the head and tail either
+# side of its first and last observation). An agent's stage-1 allocation is the stage's share
+# divided by the roster, so one on-estimate job per agent can never quite reach the boundary —
+# it is bounded by the very allocation it is measured against. Overrunning is the honest way to
+# push a wave past the line, and it is ordinary behaviour the platform bills for (see
+# quota-exhaustion.sh, which relies on the same thing).
+JOB_HOURS=0.0028   # ~10s reserved
+RUN_SECONDS=40     # ~4x that actually consumed
+RUN_ENV="{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${RUN_SECONDS}\"}"
+# Sized off those two numbers. Six jobs observe roughly 6 x 0.25 x 37s = 0.0154 AccH, so a 20%
+# first stage of a 0.03 AccH budget puts the boundary at 0.006 — about 40% of the way through the
+# wave, drawn from real streamed metrics rather than from whoever started first. It also leaves
+# each agent 0.03*0.2/6 = 0.001 guaranteed AccH against a 0.0007 reservation, so nothing queues
+# behind quota instead of running.
+BUDGET=$(scale_budget 0.03)
 PE_ID=$(create_platform_experiment "stage-ladder-${RUN_ID}" "$BUDGET" "${#AGENTS[@]}" 10 0 "" "$STAGES")
 signup_and_start "$PE_ID" "${AGENTS[@]}"
 
@@ -62,7 +72,7 @@ py "import sys; sys.exit(0 if $FIRST_ALLOC < $BUDGET * 0.2 else 1)" \
 
 declare -a JOBS
 for a in "${AGENTS[@]}"; do
-  JOBS+=("$(submit_job "$PE_ID" "$a" "guaranteed" "$JOB_HOURS")")
+  JOBS+=("$(submit_job_ext "$PE_ID" "$a" "guaranteed" "$JOB_HOURS" "$JOB_FILE" "$RUN_ENV")")
 done
 echo "  submitted: ${JOBS[*]}"
 
@@ -101,7 +111,7 @@ if [[ "$CUT_N" -gt 0 ]]; then
 
   # A cut is terminal: further submissions are rejected platform-side, not merely discouraged.
   VICTIM=$(echo "$CUT_AGENTS" | awk '{print $1}')
-  if submit_job "$PE_ID" "$VICTIM" "guaranteed" "$JOB_HOURS" >/dev/null 2>&1; then
+  if submit_job_ext "$PE_ID" "$VICTIM" "guaranteed" "$JOB_HOURS" "$JOB_FILE" "$RUN_ENV" >/dev/null 2>&1; then
     fail "$VICTIM was cut but its resubmission was accepted"
   else
     pass "$VICTIM was cut and its resubmission is rejected"
