@@ -86,8 +86,16 @@ CREATE TABLE platform_experiments (
     -- The elimination ladder: an ordered list of {length_pct, evict_pct}, fixed at creation.
     -- Validated by domain.ValidateStages before insert.
     stages               JSONB                      NOT NULL DEFAULT '[{"length_pct":40,"evict_pct":75},{"length_pct":60,"evict_pct":0}]',
-    -- 1-based index into stages of the stage currently running.
+    -- 1-based index into stages of the stage currently running. Zero or negative indexes the
+    -- ladder out of bounds, which the reconcile loop then hits on every tick.
     current_stage        INTEGER                    NOT NULL DEFAULT 1,
+    CONSTRAINT platform_experiments_current_stage CHECK (current_stage >= 1),
+    CONSTRAINT platform_experiments_budgets_non_negative CHECK (
+        budget_accelerator_hours >= 0 AND budget_cpu_core_hours >= 0 AND
+        budget_ram_gb_hours >= 0 AND budget_storage_gb_hours >= 0
+    ),
+    CONSTRAINT platform_experiments_max_agents CHECK (max_agents > 0),
+    CONSTRAINT platform_experiments_report_interval CHECK (report_interval_seconds > 0),
     -- Operator's narrative verdict on the finished run: what was learned, which result won and
     -- why, what to carry into the next run. Deliberately prose and nothing else — the standings
     -- themselves are never stored here, they are derived from the metrics store on read (see
@@ -198,6 +206,15 @@ CREATE INDEX idx_experiments_unsettled  ON experiments(updated_at)
 CREATE INDEX idx_experiments_project    ON experiments(project_id);
 CREATE INDEX idx_experiments_platform   ON experiments(platform_experiment_id);
 CREATE INDEX idx_experiments_hypothesis ON experiments(hypothesis_id);
+-- Every cluster-agent polls its desired workload set continuously, and ClaimSubmitted re-reads it
+-- while holding the cross-replica admission lock. Partial on the three desired statuses so the
+-- index stays proportional to what is in flight rather than to everything ever run — without it
+-- both sequential-scan the whole table as it grows, the second one inside the lock.
+CREATE INDEX idx_experiments_desired ON experiments(cluster_name, status)
+    WHERE status IN ('SUBMITTED', 'ADMITTED', 'RUNNING');
+-- Quota and stage sweeps ask per (agent, platform experiment, status) — see
+-- GetAgentRunningExperiments/GetAgentQueuedExperiments, called once per agent per reconcile tick.
+CREATE INDEX idx_experiments_agent_platform_status ON experiments(agent_id, platform_experiment_id, status);
 
 -- ---------------------------------------------------------------------------
 -- hypothesis_findings — the post-run write-up an agent files after a job reaches a
@@ -267,12 +284,17 @@ CREATE TABLE donation_requests (
     platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
     credits_want           DOUBLE PRECISION NOT NULL,
     reason                 TEXT             NOT NULL,
-    status                 TEXT             NOT NULL DEFAULT 'open',  -- open | fulfilled | cancelled
+    status                 TEXT             NOT NULL DEFAULT 'open',
+    -- Free text here meant a typo produced a donation nobody could ever see again: every reader
+    -- filters on one of these three values, so an unrecognised one is invisible, not invalid.
+    CONSTRAINT donation_requests_status CHECK (status IN ('open', 'fulfilled', 'cancelled')),
+    CONSTRAINT donation_requests_credits_positive CHECK (credits_want > 0),
     created_at             TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ      NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_donation_requests_agent_id ON donation_requests(agent_id);
+CREATE INDEX idx_donation_requests_platform ON donation_requests(platform_experiment_id);
 CREATE INDEX idx_donation_requests_status   ON donation_requests(status);
 
 -- ---------------------------------------------------------------------------
@@ -307,6 +329,15 @@ CREATE TABLE agent_quotas (
     burst_ram_gb_hours           DOUBLE PRECISION NOT NULL DEFAULT 0,
     guaranteed_storage_gb_hours  DOUBLE PRECISION NOT NULL DEFAULT 0,
     burst_storage_gb_hours       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    -- An allocation is a quantity of hours; a negative one is a bug, not a state. Without this,
+    -- a stale-snapshot donation or a negative stage delta silently produced one, and the agent
+    -- got rejections explaining it had "-3.2 hours remaining".
+    CONSTRAINT agent_quotas_non_negative CHECK (
+        guaranteed_accelerator_hours >= 0 AND burst_accelerator_hours >= 0 AND
+        guaranteed_cpu_core_hours    >= 0 AND burst_cpu_core_hours    >= 0 AND
+        guaranteed_ram_gb_hours      >= 0 AND burst_ram_gb_hours      >= 0 AND
+        guaranteed_storage_gb_hours  >= 0 AND burst_storage_gb_hours  >= 0
+    ),
     created_at             TIMESTAMPTZ      NOT NULL DEFAULT now(),
     UNIQUE (agent_id, platform_experiment_id)
 );

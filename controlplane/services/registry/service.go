@@ -14,7 +14,6 @@ type Store interface {
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error)
 	CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error)
-	UpdateExperiment(ctx context.Context, exp *domain.Experiment) error
 	MarkStarted(ctx context.Context, id string) (bool, error)
 	GetLineage(ctx context.Context, experimentID string) ([]*domain.Experiment, error)
 	// FindOrCreateHypothesis registers a hypothesis within a platform experiment, or returns

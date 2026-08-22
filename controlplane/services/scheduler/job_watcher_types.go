@@ -26,7 +26,6 @@ import (
 // JobStatusStore is the persistence interface needed by JobWatcher.
 type JobStatusStore interface {
 	ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error)
-	UpdateExperimentStatus(ctx context.Context, id string, status domain.ExperimentStatus) error
 	// MarkStarted transitions SUBMITTED/ADMITTED -> RUNNING. Returns false (no error) if the
 	// experiment already left that state (e.g. cancelled/evicted concurrently) — the caller
 	// must skip every other onRunning side effect in that case.

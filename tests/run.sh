@@ -168,13 +168,27 @@ run_one() {
 scenario_rc() { [[ -r "$LOG_DIR/$1.rc" ]] && cat "$LOG_DIR/$1.rc" || echo "1"; }
 scenario_elapsed() { [[ -r "$LOG_DIR/$1.elapsed" ]] && cat "$LOG_DIR/$1.elapsed" || echo "?"; }
 
+# How many scenarios may hold cluster capacity at once. Every scenario reserves real
+# accelerators and, since admission proves a job fits a single node in every dimension, real
+# per-node CPU too — so firing the whole suite at once oversubscribes the cluster and scenarios
+# fail on admission timeouts that say nothing about the code. A cap trades some wall-clock for
+# results that mean the same thing every run; raise it on a larger cluster.
+SUITE_CONCURRENCY="${SUITE_CONCURRENCY:-5}"
+
 START=$(date +%s)
 run_parallel_group() {
   local label="$1"; shift
-  local names=(${@+"$@"}) pids=() name pid
+  local names=(${@+"$@"}) pids=() name pid inflight=0
   [[ "${#names[@]}" -gt 0 ]] || return 0
-  echo "==> Running ${#names[@]} ${label} scenario(s) concurrently: ${names[*]}"
-  for name in "${names[@]}"; do run_one "$name" & pids+=("$!"); done
+  echo "==> Running ${#names[@]} ${label} scenario(s), ${SUITE_CONCURRENCY} at a time: ${names[*]}"
+  for name in "${names[@]}"; do
+    run_one "$name" & pids+=("$!")
+    inflight=$(( inflight + 1 ))
+    if [[ "$inflight" -ge "$SUITE_CONCURRENCY" ]]; then
+      wait -n 2>/dev/null || true
+      inflight=$(( inflight - 1 ))
+    fi
+  done
   for pid in ${pids[@]+"${pids[@]}"}; do wait "$pid"; done
 }
 
