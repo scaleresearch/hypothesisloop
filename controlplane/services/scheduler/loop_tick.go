@@ -83,6 +83,13 @@ func (l *Loop) tick(ctx context.Context) error {
 	// that is already being freed. See loop_disbalance.go's applyPendingEvictions.
 	l.applyPendingEvictions(start, gAvail, bAvail, nodeAvail)
 
+	// The capacity this tick started with, before any admission below claims a slice of it. It
+	// is what separates "you lost this to jobs ahead of you, wait" from "this cluster cannot
+	// host your request, shrink it" — a distinction a submitter cannot make from the outside
+	// and cannot act on if it is wrong. Both passes classify against the same snapshot.
+	nodeAvailAtTickStart := cloneNodeAvailByCluster(nodeAvail)
+	nodeResourcesAtTickStart := cloneNodeAvailByCluster(nodeResources)
+
 	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
 	// ADMITTED/RUNNING). No second reservation or live-usage subtraction here — either would
 	// double-count. MarkSubmitted is itself the durable capacity claim.
@@ -259,7 +266,9 @@ func (l *Loop) tick(ctx context.Context) error {
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(gAvail[cluster], gAvailInitial[cluster], fp, shortage)); err != nil {
+			fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
+				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(fitAtTickStart, fp, shortage)); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
@@ -334,7 +343,9 @@ func (l *Loop) tick(ctx context.Context) error {
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(bAvail[cluster], bAvailInitial[cluster], fp, shortage)); err != nil {
+			fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
+				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(fitAtTickStart, fp, shortage)); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
@@ -370,11 +381,15 @@ func (l *Loop) skipExperiment(errs *[]error, exp *domain.Experiment, err error) 
 	*errs = append(*errs, fmt.Errorf("experiment %s: %w", exp.ID, err))
 }
 
-func notAdmittedReasonFor(current, initial domain.Footprint, footprint domain.Footprint, shortage domain.Footprint) string {
-	for key := range footprint {
-		if current[key] < initial[key] {
-			return domain.NotAdmittedOutranked
-		}
+// notAdmittedReasonFor names why a queued job was skipped. fitAtTickStart is the whole
+// discriminator: outranked means the job *would* have been admitted against the capacity this
+// tick started with and lost it to jobs earlier in sort order, so waiting is the right response.
+// It used to be inferred from "some dimension of the footprint shrank this tick", which is true
+// of every skipped job on any busy cluster — a request oversized for the hardware was told it
+// had been outranked, and waiting for the queue to drain would never admit it.
+func notAdmittedReasonFor(fitAtTickStart bool, footprint domain.Footprint, shortage domain.Footprint) string {
+	if fitAtTickStart {
+		return domain.NotAdmittedOutranked
 	}
 	// The shortfall vector is otherwise only visible in the scheduler's own logs (see the
 	// "guaranteed job needs preemption" log a few lines above this call site) -- a submitter has
@@ -878,4 +893,14 @@ func clusterWithBestFit(avail map[string]domain.Footprint, footprint domain.Foot
 		}
 	}
 	return best
+}
+
+// cloneNodeAvailByCluster deep-copies a cluster -> node -> resource capacity map, so a snapshot
+// survives the in-place reservations admission makes as it walks the queue.
+func cloneNodeAvailByCluster(byCluster map[string]map[string]map[string]int64) map[string]map[string]map[string]int64 {
+	cloned := make(map[string]map[string]map[string]int64, len(byCluster))
+	for cluster, byNode := range byCluster {
+		cloned[cluster] = cloneNodeCapacity(byNode)
+	}
+	return cloned
 }

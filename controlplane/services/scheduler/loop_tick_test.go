@@ -58,16 +58,23 @@ func TestShortfallOnlyCountsDeficitDimensions(t *testing.T) {
 
 func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
 	need := domain.Footprint{cpuKey: 2000, acceleratorKey("flavor-t4"): 1}
-	initial := domain.Footprint{cpuKey: 1000, acceleratorKey("flavor-t4"): 1}
-	if got := notAdmittedReasonFor(initial, initial, need, nil); got != domain.NotAdmittedCapacityUnavailable {
+
+	// Never fit this cluster to begin with: waiting for the queue to drain cannot admit it, so
+	// telling the submitter it was outranked would point them at the wrong remedy.
+	if got := notAdmittedReasonFor(false, need, nil); got != domain.NotAdmittedCapacityUnavailable {
 		t.Fatalf("unchanged insufficient capacity reason = %q", got)
 	}
-	current := domain.Footprint{cpuKey: 500, acceleratorKey("flavor-t4"): 1}
-	if got := notAdmittedReasonFor(current, initial, need, nil); got != domain.NotAdmittedOutranked {
+	// Would have fit against the capacity the tick opened with; jobs ahead of it took that.
+	if got := notAdmittedReasonFor(true, need, nil); got != domain.NotAdmittedOutranked {
 		t.Fatalf("capacity consumed earlier in tick reason = %q", got)
 	}
 	shortage := domain.Footprint{cpuKey: 1000}
-	if got := notAdmittedReasonFor(initial, initial, need, shortage); got != domain.NotAdmittedCapacityUnavailable+": short "+footprintStr(shortage) {
+	if got := notAdmittedReasonFor(false, need, shortage); got != domain.NotAdmittedCapacityUnavailable+": short "+footprintStr(shortage) {
 		t.Fatalf("detailed shortage reason = %q", got)
+	}
+	// A shortage vector alongside a fit at tick start still means outranked: the shortfall is
+	// measured against what is left now, which is the definition of having lost it.
+	if got := notAdmittedReasonFor(true, need, shortage); got != domain.NotAdmittedOutranked {
+		t.Fatalf("outranked with a live shortfall reason = %q", got)
 	}
 }
