@@ -49,6 +49,13 @@ type Backend interface {
 	// cluster -> node -> domain.NodeResource* -> amount. A job runs on one node and must fit that
 	// node in every dimension, which a cluster-wide total cannot establish.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
+	// GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
+	// allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
+	// permanently resident; platform job pods themselves are not subtracted) — as
+	// cluster -> node -> domain.NodeResource* -> amount — the same shape GetNodeResourceCapacity
+	// returns, but total rather than free. Free capacity moves every time something is scheduled
+	// or freed; this is the stable per-node denominator fair-share math needs instead.
+	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 
 	// GetMultiNodeCapability reports, per cluster, whether its runtime can execute a job spanning

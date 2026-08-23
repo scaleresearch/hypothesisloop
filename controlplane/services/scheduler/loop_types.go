@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // exp's admission footprint is domain.Experiment.Footprint() — CPU (millicores) and its
@@ -30,11 +31,14 @@ type LoopStore interface {
 	ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	MarkQueued(ctx context.Context, id, reason string) error
-	ClaimSubmitted(ctx context.Context, id, clusterName string, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
-	// RequeuePreempted returns id to QUEUED and overwrites its duration plus every resource
+	// ClaimSubmitted persists resolvedJob (exp.ResolvedJob — nil if the job had nothing to
+	// resolve) alongside the SUBMITTED status transition, in the same transaction — see
+	// domain.Experiment.ResolvedJob's doc comment.
+	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
+	// RequeuePreempted returns id to QUEUED and overwrites its duration plus the accelerator-hours
 	// estimate with the caller's proportionally rescaled remaining amounts — see the store
-	// implementation's doc comment for why all four must move together.
-	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) (bool, error)
+	// implementation's doc comment for why both must move together.
+	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error)
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	UpdateNotAdmittedReason(ctx context.Context, id, reason string) error
 	// HasUnsummarizedCompleted enforces the summary gate during admission so batch-submitted
@@ -44,6 +48,11 @@ type LoopStore interface {
 	// GetPlatformExperiment supplies the current stage, whose max_job_hours gates admission of
 	// jobs queued before the ladder moved.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
+	// ListCapacityClaimedExperiments returns every experiment that has already claimed
+	// accelerator capacity toward the nodes it landed on — RUNNING, SUBMITTED, and ADMITTED, not
+	// just RUNNING — see resolutionCache.loadClaimed for why the narrower RUNNING-only view
+	// undercounts "installed" capacity during tick-time "max" resolution.
+	ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without
@@ -53,6 +62,37 @@ type LoopStore interface {
 type LoopQuotaStore interface {
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64) error
+}
+
+// ObservedState is the actual state the loop reads back from the metrics store: how long a job has
+// really been running, and which node it landed on. Postgres holds the desired state and answers
+// what should exist; this answers what does.
+//
+// It is an interface for the same reason LoopStore is — the loop states what it needs, and the
+// datastore package supplies it. gapCap is deployment configuration rather than a per-call
+// decision, so it lives in the implementation instead of every call site.
+type ObservedState interface {
+	ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error)
+	ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error)
+	LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (node string, found bool, err error)
+}
+
+// metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
+type metricsDBObserver struct {
+	url    string
+	gapCap time.Duration
+}
+
+func (o metricsDBObserver) ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
+	return metricsdb.ObservedElapsedHours(ctx, o.url, experimentID, createdAt, now, o.gapCap)
+}
+
+func (o metricsDBObserver) ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
+	return metricsdb.ObservedStintElapsedHours(ctx, o.url, experimentID, createdAt, now, o.gapCap)
+}
+
+func (o metricsDBObserver) LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (string, bool, error) {
+	return metricsdb.LatestExperimentNode(ctx, o.url, experimentID, createdAt, now)
 }
 
 // LoopWorkloadClient is the backend-agnostic interface needed by the loop. No DeleteWorkload:
@@ -69,6 +109,11 @@ type LoopWorkloadClient interface {
 	// reservePlacement, which must prove a job fits one node in every dimension.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
+	// GetNodeTotalCapacity reports each node's TOTAL installed capacity (not just what's
+	// currently free — see GetNodeResourceCapacity) for CPU/memory/storage, keyed the same way:
+	// cluster -> node -> domain.NodeResource* -> canonical units. Used to compute a job's exact
+	// proportional "max" share of the node it lands on (see resolveClusterLocalResources).
+	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	// GetMultiNodeCapability reports which clusters can run a job spanning more than one node.
 	// A cluster absent from the map is treated as single-node only.
 	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
@@ -119,11 +164,10 @@ type Loop struct {
 	// instead of silently double-admitting/double-preempting.
 	ticking atomic.Bool
 
-	// metricsDBURL and observedGapCap let preempt() rank victims by real observed
-	// runtime instead of wall-clock ElapsedHours() — a job stuck in a reschedule/node-death gap
-	// isn't "the one that's made the most progress" just because it was admitted a while ago.
-	metricsDBURL   string
-	observedGapCap time.Duration
+	// observed lets preempt() rank victims by real observed runtime instead of wall-clock
+	// ElapsedHours() — a job stuck in a reschedule/node-death gap isn't "the one that's made the
+	// most progress" just because it was admitted a while ago.
+	observed ObservedState
 
 	// evictor and disbalanceTolerance drive the resource-disbalance evictor (see
 	// loop_disbalance.go). Both are required: the pass has one behaviour, not an on and an off
@@ -197,8 +241,7 @@ func (l *Loop) WithHeartbeat(d time.Duration) *Loop {
 // victims by real observed runtime. Pass the same values every other observed-time consumer in
 // this deployment uses.
 func (l *Loop) WithObservedTimeConfig(metricsDBURL string, gapCap time.Duration) *Loop {
-	l.metricsDBURL = metricsDBURL
-	l.observedGapCap = gapCap
+	l.observed = metricsDBObserver{url: metricsDBURL, gapCap: gapCap}
 	return l
 }
 
@@ -249,7 +292,7 @@ func (l *Loop) Start(ctx context.Context) {
 	if l.reprioritizer == nil {
 		panic("scheduler: Loop started without WithReprioritizer — queue order would never reflect new information")
 	}
-	if l.metricsDBURL == "" {
+	if l.observed == nil {
 		panic("scheduler: Loop started without WithObservedTimeConfig — preemption and disbalance eviction both read observed state")
 	}
 	go func() {

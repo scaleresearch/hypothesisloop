@@ -23,6 +23,13 @@ func newPoolStore() *poolStore {
 	return &poolStore{rows: map[string]*domain.Hypothesis{}}
 }
 
+// GetPlatformExperimentSubmitPolicies defaults to "not found" — every existing test in this file
+// registers hypotheses against a platform experiment id this fake never populates a policy for,
+// and RegisterHypothesis must treat that exactly like today's behavior: unrestricted.
+func (s *poolStore) GetPlatformExperimentSubmitPolicies(_ context.Context, _ string) (domain.SubmitterPolicy, domain.SubmitterPolicy, bool, error) {
+	return "", "", false, nil
+}
+
 func (s *poolStore) FindOrCreateHypothesis(_ context.Context, source domain.HypothesisSource, agentID, author, platformExperimentID, text string) (*domain.Hypothesis, bool, error) {
 	key := platformExperimentID + "\x00" + domain.NormalizeHypothesisText(text)
 	if existing, ok := s.rows[key]; ok {

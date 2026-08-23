@@ -148,26 +148,28 @@ Compose runs.
 
 ## Testing
 
-All e2e tests live under `tests/scenarios/`, run via `tests/run.sh`. Almost all are portable
-(fake accelerator types, run on any k3s); `tenstorrent-hardware.sh` is the one exception —
-it needs real Blackhole silicon, so it's excluded by default and only included with
-`RUN_HARDWARE_TESTS=1` (set automatically by `localdev/k3s-tenstorrent-qb2/run-e2e.sh`). The
-whole suite is capped at 5 minutes wall-clock (`TOTAL_TIMEOUT_SECONDS`) — a scenario that can't
-finish in that shared budget fails rather than hanging the run.
+All e2e tests live under `tests/e2e/` as pytest, driven by the API client and wait helpers in
+`tests/support/` (see `tests/improve.md` for the full design). Almost all are portable (fake
+accelerator types, run on any k3s); the two `hardware`-marked tests are the exception — they need
+real silicon, so they're excluded by default and only included with `-m hardware` (run
+automatically by `localdev/k3s-tenstorrent-qb2/run-e2e.sh` and `localdev/k3s-nvidia/run-e2e.sh`
+on hosts that have it). Tests are grouped with pytest markers: `parallel` (API-only, run
+concurrently), `exclusive` (needs the whole cluster idle — node death, connectivity loss,
+daemonset redeploy, preemption), `slow`, and `hardware`.
 
 ```bash
-bash tests/run.sh                         # portable suite: API-only scenarios run
-                                           # concurrently, cluster-mutating ones (node death,
-                                           # connectivity loss, daemonset redeploy) run after
-bash tests/run.sh node lifecycle          # only scenarios whose filename matches
-ONLY_FAST=1 bash tests/run.sh             # skip cluster-mutating scenarios (no kubectl needed)
-RUN_HARDWARE_TESTS=1 bash tests/run.sh    # also include the Tenstorrent hardware-only scenario
-bash tests/scenarios/job-lifecycle.sh     # run a single scenario directly
+make e2e-py                                              # portable lane: parallel-safe tests only
+cd tests && uv run pytest e2e -k job_lifecycle           # only tests whose name matches
+cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"  # same as e2e-py
+cd tests && uv run pytest e2e -m exclusive               # cluster-mutating tests, one at a time
+cd tests && uv run pytest e2e -m hardware                # hardware-only tests (needs real silicon)
+cd tests && uv run pytest e2e/test_job_lifecycle.py -v   # run a single test file directly
 ```
 
-Scenarios live under `tests/scenarios/`, built on shared helpers in `tests/lib/` (agent/PE
-setup, job submission, status polling, node/connectivity/daemonset fault injection) — see
-`tests/lib/api.sh` and `tests/lib/cluster.sh` to add a new one.
+Test files live under `tests/e2e/`, built on the shared API client (`tests/support/api.py`),
+polling helper (`tests/support/wait.py`), and kubectl helpers (`tests/support/cluster.py`) — see
+those and `tests/conftest.py`'s fixtures (`api`, `experiment`, `deadline`, `idle_cluster`) to add
+a new one.
 
 ## Agent API
 

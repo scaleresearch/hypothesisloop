@@ -91,10 +91,27 @@ END $$;
 CREATE TABLE IF NOT EXISTS agents (
     id                TEXT             PRIMARY KEY,
     name              TEXT             NOT NULL,
+    -- domain.AgentKind. Scheduling and standings never branch on it; quota does, via
+    -- domain.ResolveQuotaTier. 'agent' is the default so every row that predates this column
+    -- keeps the burst-only tier an autonomous participant gets.
+    kind              TEXT             NOT NULL DEFAULT 'agent',
     performance_score DOUBLE PRECISION NOT NULL DEFAULT 0.5,
     top3_count        INTEGER          NOT NULL DEFAULT 0,
-    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now()
+    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    CONSTRAINT agents_kind CHECK (kind IN ('agent', 'human'))
 );
+
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'agent';
+
+-- The inline CONSTRAINT above only ever runs on a database that does not have this table yet:
+-- CREATE TABLE IF NOT EXISTS is a no-op otherwise, and ADD COLUMN IF NOT EXISTS adds a column,
+-- not a check. Without this an existing deployment silently accepts any kind string while a fresh
+-- one rejects it — the same schema.sql producing two different schemas.
+DO $$ BEGIN
+    ALTER TABLE agents ADD CONSTRAINT agents_kind CHECK (kind IN ('agent', 'human'));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- platform_experiments — operator-defined compute envelopes
@@ -105,9 +122,6 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
     name                 TEXT                       NOT NULL,
     description          TEXT                       NOT NULL DEFAULT '',
     budget_accelerator_hours      DOUBLE PRECISION           NOT NULL,
-    budget_cpu_core_hours    DOUBLE PRECISION       NOT NULL DEFAULT 0,
-    budget_ram_gb_hours      DOUBLE PRECISION       NOT NULL DEFAULT 0,
-    budget_storage_gb_hours  DOUBLE PRECISION       NOT NULL DEFAULT 0,
     max_agents           INTEGER                    NOT NULL DEFAULT 100,
     starts_at            TIMESTAMPTZ                NOT NULL,
     ends_at              TIMESTAMPTZ                NOT NULL,
@@ -122,8 +136,7 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
     current_stage        INTEGER                    NOT NULL DEFAULT 1,
     CONSTRAINT platform_experiments_current_stage CHECK (current_stage >= 1),
     CONSTRAINT platform_experiments_budgets_non_negative CHECK (
-        budget_accelerator_hours >= 0 AND budget_cpu_core_hours >= 0 AND
-        budget_ram_gb_hours >= 0 AND budget_storage_gb_hours >= 0
+        budget_accelerator_hours >= 0
     ),
     CONSTRAINT platform_experiments_max_agents CHECK (max_agents > 0),
     CONSTRAINT platform_experiments_report_interval CHECK (report_interval_seconds > 0),
@@ -132,9 +145,25 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
     -- themselves are never stored here, they are derived from the metrics store on read (see
     -- GET /platform-experiments/{id}/results), so there is one source of truth for a number.
     summary              TEXT                       NOT NULL DEFAULT '',
+    -- domain.SubmitterPolicy: who may register a hypothesis / submit a job within this platform
+    -- experiment (human/agent identity), gated independently. 'mixed' (the default) is today's
+    -- behavior — both may submit — unchanged for every row that predates this column.
+    hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed',
+    job_submit_policy        TEXT NOT NULL DEFAULT 'mixed',
+    CONSTRAINT platform_experiments_hypothesis_submit_policy CHECK (hypothesis_submit_policy IN ('mixed', 'human_only', 'agent_only')),
+    CONSTRAINT platform_experiments_job_submit_policy CHECK (job_submit_policy IN ('mixed', 'human_only', 'agent_only')),
     created_at           TIMESTAMPTZ                NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ                NOT NULL DEFAULT now()
 );
+
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_submit_policy        TEXT NOT NULL DEFAULT 'mixed';
+
+-- Per-agent CPU-hours and RAM/storage-hours quota tracking were never reachable through the UI
+-- and are fully deleted: no code reads or writes these columns any more.
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_cpu_core_hours;
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_ram_gb_hours;
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_storage_gb_hours;
 
 -- ---------------------------------------------------------------------------
 -- hypotheses — the research-claim registry, scoped to a single platform experiment. Each
@@ -203,6 +232,12 @@ CREATE TABLE IF NOT EXISTS experiments (
     config_hash              TEXT              NOT NULL,
     data_ref                 TEXT              NOT NULL,
     job_spec                 JSONB             NOT NULL DEFAULT '{}'::jsonb,
+    -- resolved_job_spec is the durably-persisted literal resolution of any "max" resource
+    -- sentinel in job_spec's cpu/memory/storage, written once at admission (ClaimSubmitted) onto
+    -- the specific cluster the job landed on, reset to NULL on requeue (MarkQueued). NULL until
+    -- admitted, or for a job with nothing to resolve. job_spec itself is NEVER rewritten, so a
+    -- GET always shows exactly what was submitted — see domain.Experiment.ResolvedJob/EffectiveJob.
+    resolved_job_spec        JSONB,
     hypothesis_id            TEXT              NOT NULL REFERENCES hypotheses(id),
     hypothesis               TEXT              NOT NULL,
     objective                TEXT              NOT NULL,
@@ -215,9 +250,6 @@ CREATE TABLE IF NOT EXISTS experiments (
     priority_score           DOUBLE PRECISION  NOT NULL DEFAULT 0,
     estimated_duration_hours DOUBLE PRECISION  NOT NULL,
     estimated_cost_acch       DOUBLE PRECISION  NOT NULL DEFAULT 0,
-    estimated_cpu_core_hours    DOUBLE PRECISION NOT NULL DEFAULT 0,
-    estimated_ram_gb_hours      DOUBLE PRECISION NOT NULL DEFAULT 0,
-    estimated_storage_gb_hours  DOUBLE PRECISION NOT NULL DEFAULT 0,
     queued_at                TIMESTAMPTZ,
     submitted_at             TIMESTAMPTZ,
 	eviction_reason          TEXT,
@@ -246,11 +278,18 @@ CREATE TABLE IF NOT EXISTS experiments (
 -- database from the ALTER, and both land on the same 0 backfill from the one DEFAULT clause.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resolved_job_spec JSONB;
 
 -- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
 -- nothing else, so a job could never report its own files; the real bytes live in the object
 -- store and GET /experiments/{id}/data lists them there. A copy here would only drift.
 ALTER TABLE experiments DROP COLUMN IF EXISTS artifacts;
+
+-- Per-agent CPU-hours and RAM/storage-hours quota tracking were never reachable through the UI
+-- and are fully deleted.
+ALTER TABLE experiments DROP COLUMN IF EXISTS estimated_cpu_core_hours;
+ALTER TABLE experiments DROP COLUMN IF EXISTS estimated_ram_gb_hours;
+ALTER TABLE experiments DROP COLUMN IF EXISTS estimated_storage_gb_hours;
 
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS not_admitted_reason TEXT;
 UPDATE experiments
@@ -368,10 +407,24 @@ CREATE TABLE IF NOT EXISTS experiment_signups (
     -- domain.SignupRole. Fixed at signup and never updated: a role change mid-run would
     -- retroactively rewrite who a completed cut applied to. Only ranking reads it.
     role                   TEXT        NOT NULL DEFAULT 'competitor',
-    PRIMARY KEY (platform_experiment_id, agent_id)
+    -- domain.QuotaTier, or '' to defer to the agent's kind (domain.ResolveQuotaTier). Fixed at
+    -- signup for the same reason role is: the allocation it decides is made once, at start, and
+    -- changing the input afterwards would describe a split that never happened.
+    quota_tier             TEXT        NOT NULL DEFAULT '',
+    PRIMARY KEY (platform_experiment_id, agent_id),
+    CONSTRAINT experiment_signups_quota_tier CHECK (quota_tier IN ('', 'guaranteed', 'burst_only'))
 );
 
-ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'competitor';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL DEFAULT 'competitor';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS quota_tier TEXT NOT NULL DEFAULT '';
+
+-- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
+DO $$ BEGIN
+    ALTER TABLE experiment_signups ADD CONSTRAINT experiment_signups_quota_tier
+        CHECK (quota_tier IN ('', 'guaranteed', 'burst_only'));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_experiment_signups_platform ON experiment_signups(platform_experiment_id);
 CREATE INDEX IF NOT EXISTS idx_experiment_signups_agent    ON experiment_signups(agent_id);
@@ -388,20 +441,11 @@ CREATE TABLE IF NOT EXISTS agent_quotas (
     platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
     guaranteed_accelerator_hours    DOUBLE PRECISION NOT NULL,
     burst_accelerator_hours         DOUBLE PRECISION NOT NULL,
-    guaranteed_cpu_core_hours    DOUBLE PRECISION NOT NULL DEFAULT 0,
-    burst_cpu_core_hours         DOUBLE PRECISION NOT NULL DEFAULT 0,
-    guaranteed_ram_gb_hours      DOUBLE PRECISION NOT NULL DEFAULT 0,
-    burst_ram_gb_hours           DOUBLE PRECISION NOT NULL DEFAULT 0,
-    guaranteed_storage_gb_hours  DOUBLE PRECISION NOT NULL DEFAULT 0,
-    burst_storage_gb_hours       DOUBLE PRECISION NOT NULL DEFAULT 0,
     -- An allocation is a quantity of hours; a negative one is a bug, not a state. Without this,
     -- a stale-snapshot donation or a negative stage delta silently produced one, and the agent
     -- got rejections explaining it had "-3.2 hours remaining".
     CONSTRAINT agent_quotas_non_negative CHECK (
-        guaranteed_accelerator_hours >= 0 AND burst_accelerator_hours >= 0 AND
-        guaranteed_cpu_core_hours    >= 0 AND burst_cpu_core_hours    >= 0 AND
-        guaranteed_ram_gb_hours      >= 0 AND burst_ram_gb_hours      >= 0 AND
-        guaranteed_storage_gb_hours  >= 0 AND burst_storage_gb_hours  >= 0
+        guaranteed_accelerator_hours >= 0 AND burst_accelerator_hours >= 0
     ),
     created_at             TIMESTAMPTZ      NOT NULL DEFAULT now(),
     UNIQUE (agent_id, platform_experiment_id)
@@ -412,6 +456,15 @@ CREATE TABLE IF NOT EXISTS agent_quotas (
 -- row carries no evidence that it ever moved. Maintained by a trigger below, not by any writer:
 -- there is one clock for this column and no write path can forget it.
 ALTER TABLE agent_quotas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- Per-agent CPU-hours and RAM/storage-hours quota tracking were never reachable through the UI
+-- and are fully deleted.
+ALTER TABLE agent_quotas DROP COLUMN IF EXISTS guaranteed_cpu_core_hours;
+ALTER TABLE agent_quotas DROP COLUMN IF EXISTS burst_cpu_core_hours;
+ALTER TABLE agent_quotas DROP COLUMN IF EXISTS guaranteed_ram_gb_hours;
+ALTER TABLE agent_quotas DROP COLUMN IF EXISTS burst_ram_gb_hours;
+ALTER TABLE agent_quotas DROP COLUMN IF EXISTS guaranteed_storage_gb_hours;
+ALTER TABLE agent_quotas DROP COLUMN IF EXISTS burst_storage_gb_hours;
 
 CREATE INDEX IF NOT EXISTS idx_agent_quotas_platform ON agent_quotas(platform_experiment_id);
 CREATE INDEX IF NOT EXISTS idx_agent_quotas_agent    ON agent_quotas(agent_id);

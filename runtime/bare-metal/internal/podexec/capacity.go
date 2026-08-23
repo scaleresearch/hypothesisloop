@@ -234,6 +234,37 @@ func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]
 	}}, nil
 }
 
+// GetNodeTotalCapacity reports this node's capacity available to platform-scheduled jobs — the
+// same per-node shape GetLiveNodeResourceCapacity returns, but total rather than free. There is
+// exactly one node here too.
+//
+// Unlike the k8s backend, this is the raw installed total with nothing subtracted: a bare-metal
+// node onboarded via the tt-bare-metal-node flow is dedicated to HypothesisLoop and runs no
+// DaemonSet, CNI, monitoring agent, or any other permanently-resident non-platform process (see
+// onboard-tt-bare-metal-node's "no always-on DaemonSet/service" requirement) — there is nothing
+// non-platform here to exclude. sumRunningRequests already accounts for this runtime's own
+// managed containers via the free-capacity views; there is no separate "OS baseline" concept
+// modeled here.
+func (e *Executor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	_, cpuTotal, err := e.GetLiveCPUCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, ramTotal, err := e.GetLiveRAMCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, storageTotal, err := e.GetLiveStorageCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]map[string]int64{e.nodeName: {
+		domain.NodeResourceCPUMillicores: int64(cpuTotal * 1000),
+		domain.NodeResourceMemoryBytes:   ramTotal,
+		domain.NodeResourceStorageBytes:  storageTotal,
+	}}, nil
+}
+
 // GetAcceleratorCapacityByNode/GetNodeLabels give the plain cluster->node->... shape
 // workload.Backend expects, wrapping GetLiveAcceleratorCapacitySnapshot's single-node result.
 func (e *Executor) GetAcceleratorCapacityByNode(ctx context.Context, clusterName string) (map[string]map[string]map[string]int64, error) {

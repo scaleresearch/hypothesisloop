@@ -173,11 +173,6 @@ type Config struct {
 	Scheduler        SchedulerConfig         `yaml:"scheduler"`
 	Stages           StagesConfig            `yaml:"stages"`
 	Services         ServicesConfig          `yaml:"services"`
-	// CPUCoreHourRate/RAMGBHourRate/StorageGBHourRate are the flat per-unit quota rates for
-	// the non-Accelerator resource dimensions (default 1.0 — see domain.SetCPUCoreHourRate etc).
-	CPUCoreHourRate   float64 `yaml:"cpu_core_hour_rate"`
-	RAMGBHourRate     float64 `yaml:"ram_gb_hour_rate"`
-	StorageGBHourRate float64 `yaml:"storage_gb_hour_rate"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName map[string]float64 // accelerator name → AccH rate

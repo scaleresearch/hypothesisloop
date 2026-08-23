@@ -57,7 +57,31 @@ func sanitizeLabel(s string) string {
 	return v
 }
 
+// client-go's own default (QPS 5, Burst 10) is sized for a single controller managing a handful
+// of objects, not for a control plane that lists pods per job on every poll across however many
+// jobs are in flight at once. Unconfigured, that default is what a busy cluster hits first: every
+// caller of this client shares the same conservative budget, so load from one job's polling starves
+// every other request behind it, and the failure shows up as "rate: Wait(n=1) would exceed context
+// deadline" wherever the next caller happened to be — a job stuck reporting SUBMITTED, a Service
+// repair that never lands, a log tail that never resolves — none of which name the actual cause.
+// This process talks to nothing but its own cluster's API server, so the limit here IS the ceiling
+// on how fast this whole component can act; there is no other consumer to protect from it.
+const (
+	k8sClientQPS   = 200
+	k8sClientBurst = 400
+)
+
 func buildRestConfig(kubeconfigPath, context string) (*rest.Config, error) {
+	cfg, err := loadRestConfig(kubeconfigPath, context)
+	if err != nil {
+		return nil, err
+	}
+	cfg.QPS = k8sClientQPS
+	cfg.Burst = k8sClientBurst
+	return cfg, nil
+}
+
+func loadRestConfig(kubeconfigPath, context string) (*rest.Config, error) {
 	if kubeconfigPath == "" && context == "" {
 		if cfg, err := rest.InClusterConfig(); err == nil {
 			return cfg, nil

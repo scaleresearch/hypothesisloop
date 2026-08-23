@@ -11,6 +11,17 @@
 # Code CLI binary, no separate install needed) + curl (the agent will likely reach for it via
 # its Bash tool anyway). No sandboxing of what the agent can do *inside* this container — the
 # container boundary itself is the isolation, same as the request that led to this file.
+
+# Builder stage for the Go `hl` CLI (cli/) -- the platform's own client. The agent uses it (not
+# raw curl) for everything a human would do through it too: hl register/signup, hl hypothesis
+# submit --file hypothesis.yaml, hl job submit job.yaml, hl watch. Built from the repo root
+# (build context — see Makefile `experimentator-base-image`), same module as the controlplane.
+FROM golang:1.25-bookworm AS hl-builder
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY cli/ cli/
+RUN CGO_ENABLED=0 go build -o /out/hl ./cli
+
 FROM python:3.13-slim
 
 # git: the agent pushes the exact code each job runs to its branch in the shared CODE_REPO_URL
@@ -45,28 +56,20 @@ RUN useradd --create-home --shell /bin/bash agent
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
 COPY agents/coordinator/experiments $WORKLOAD_SAMPLES
 
-# hl-clone turns "<url>@<sha>" into a checked-out working copy. Installed here so the agent can
-# run it, and left in $WORKLOAD_SAMPLES so a job image can COPY it in the same way it copies a
-# seed workload -- git stays the store for anything read as text, and every agent was otherwise
-# hand-writing the same clone-and-checkout one-liner.
-RUN install -m 0755 $WORKLOAD_SAMPLES/hl-clone /usr/local/bin/hl-clone
-
-# hl-watch holds a WebSocket open and exits when the platform says the thing happened. Installed
-# on the same terms as hl-clone, and left in $WORKLOAD_SAMPLES for the same reason: a job image
-# COPYs it in exactly the same way. It is what a tool call cannot be -- a wait -- and without it
-# an agent has no choice but to re-read whole state on a timer to learn nothing changed. Python
-# stdlib only, so it runs in a workload image built on anything.
-RUN install -m 0755 $WORKLOAD_SAMPLES/hl-watch /usr/local/bin/hl-watch
+# The `hl` CLI, built in the hl-builder stage above. This is how the agent talks to the platform
+# for everything a human would use it for too -- hl register/signup, hl platform-experiments
+# create/start, hl hypothesis submit --file hypothesis.yaml, hl job submit job.yaml, hl watch
+# (which replaces the old standalone hl-watch script: `hl watch --experiment ID --until '...'`
+# holds a websocket open and exits when the platform says the thing happened). A job image that
+# wants it too can COPY it in the same way it copies a seed workload.
+COPY --from=hl-builder /out/hl /usr/local/bin/hl
 
 WORKDIR /agent
 COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked
 
 COPY agents/experimentator/src/ src/
-# The role briefs the agent reads for itself: the system prompt names $ROLE_BRIEFS/$AGENT_ROLE.md
-# rather than hardcoding this layout, the same way WORKLOAD_SAMPLES is pointed at above, so moving
-# the tree cannot leave the briefing pointing at a path that is no longer there.
-ENV ROLE_BRIEFS=/agent/src/hypothesisloop_agent/prompts/roles
+ENV FLAVOR_BRIEFS=/agent/src/hypothesisloop_agent/prompts/flavors
 # No docs/ copy: the API contract is fetched live from each service's /llms.txt at runtime
 # (see api_client.PlatformClient.fetch_api_guide), not baked into the image.
 RUN mkdir -p /agent/workspace && chown -R agent:agent /agent

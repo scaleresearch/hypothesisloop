@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 var errAdmissionCapacityChanged = errors.New("capacity changed during admission")
@@ -42,7 +41,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	elapsed := make(map[string]float64, len(burstRunning))
 	rankable := burstRunning[:0]
 	for _, exp := range burstRunning {
-		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, exp.CreatedAt, time.Now().UTC(), l.observedGapCap)
+		hours, err := l.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, time.Now().UTC())
 		if err != nil {
 			l.logger.Warn("preempt: cannot rank candidate, skipping it",
 				zap.String("candidate", exp.ID), zap.Error(err))
@@ -148,7 +147,7 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		// the two cancel and the estimate, plus every resource reservation derived from it,
 		// collapses to the floor while most of the work is still ahead. The ranking above keeps
 		// using lifetime elapsed, which is the right measure of "who has done the most work".
-		stintElapsed, err := metricsdb.ObservedStintElapsedHours(ctx, l.metricsDBURL, victim.ID, victim.CreatedAt, time.Now().UTC(), l.observedGapCap)
+		stintElapsed, err := l.observed.ObservedStintElapsedHours(ctx, victim.ID, victim.CreatedAt, time.Now().UTC())
 		if err != nil {
 			l.logger.Error("stint elapsed for preemption rescale", zap.String("id", victim.ID), zap.Error(err))
 			continue
@@ -166,11 +165,8 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 			ratio = remaining / victim.EstimatedDurationHours
 		}
 		newCostAccH := victim.EstimatedCostAccH * ratio
-		newCPU := victim.EstimatedCPUCoreHours * ratio
-		newRAM := victim.EstimatedRAMGBHours * ratio
-		newStorage := victim.EstimatedStorageGBHours * ratio
 
-		ok, err := l.store.RequeuePreempted(ctx, victim.ID, remaining, newCostAccH, newCPU, newRAM, newStorage)
+		ok, err := l.store.RequeuePreempted(ctx, victim.ID, remaining, newCostAccH)
 		if err != nil {
 			l.logger.Error("requeue preempted job", zap.String("id", victim.ID), zap.Error(err))
 			continue
@@ -237,7 +233,7 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 		if exp.EstimatedDurationHours <= 0 {
 			continue
 		}
-		hours, err := metricsdb.ObservedElapsedHours(ctx, l.metricsDBURL, exp.ID, exp.CreatedAt, now, l.observedGapCap)
+		hours, err := l.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now)
 		if err != nil {
 			// This value is a sort tiebreak and nothing else (see sortGuaranteed). A transient
 			// metrics-store failure on one job must not stop the platform admitting anything
@@ -296,7 +292,7 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 		exp.EstimatedCostAccH = newEstCost
 	}
 	fp := exp.Footprint()
-	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, exp.ResolvedJob, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 		guaranteed, burst, err := l.workload.GetFlavorCapacity(ctx)
 		if err != nil {
 			return false, err

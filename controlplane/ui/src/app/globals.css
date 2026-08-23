@@ -221,6 +221,8 @@ select:focus-visible,
 
 /* A pool row someone typed in rather than an agent registering it — same pool, no owner. */
 .badge-human { background: rgba(245, 176, 24, 0.14); color: #fbbf24; }
+/* domain.AgentKind on the agents/leaderboard page: muted since "agent" is the default/common case. */
+.badge-agent { background: rgba(255, 255, 255, 0.07); color: #b7bcc9; }
 
 /* Accent */
 .accent { color: var(--accent-light); }

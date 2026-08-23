@@ -8,7 +8,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
@@ -22,7 +21,7 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	}
 	// Cut agents' *unspent* quota is what returns to the pool, so their usage must be current
 	// before the ops are computed.
-	if err := metricsdb.PopulateUsage(ctx, c.metricsDBURL, pe.CreatedAt, pe.ID, quotas); err != nil {
+	if err := c.observed.PopulateUsage(ctx, pe.CreatedAt, pe.ID, quotas); err != nil {
 		return fmt.Errorf("stages: populate usage: %w", err)
 	}
 	if err := c.stagesStore.AddDesiredQuotaUsage(ctx, pe.ID, quotas); err != nil {
@@ -51,19 +50,12 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	// redistributing it would inflate survivors' allocations beyond the actual remaining budget.
 	releaseFrac := pe.Stages[stageIndex].LengthPct / 100.0
 
-	// Accelerator-hours drives progress itself and always moves; CPU/RAM/storage move too for any
-	// platform experiment that tracks them (0 budget = skipped, the same "not tracked" convention
-	// as elsewhere). Only observed usage travels into the transaction — the allocation each
-	// unspent figure is measured against is read there, under lock.
+	// Accelerator-hours drives progress itself and always moves. Only observed usage travels into
+	// the transaction — the allocation each unspent figure is measured against is read there,
+	// under lock.
 	dims := []db.StageRedistribution{
 		{ResourceType: domain.ResourceAcceleratorHours, Budget: pe.BudgetAcceleratorHours, ReleaseFrac: releaseFrac,
 			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH })},
-		{ResourceType: domain.ResourceCPUCoreHours, Budget: pe.BudgetCPUCoreHours, ReleaseFrac: releaseFrac,
-			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedCPUCoreH })},
-		{ResourceType: domain.ResourceRAMGBHours, Budget: pe.BudgetRAMGBHours, ReleaseFrac: releaseFrac,
-			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedRAMGBH })},
-		{ResourceType: domain.ResourceStorageGBHours, Budget: pe.BudgetStorageGBHours, ReleaseFrac: releaseFrac,
-			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedStorageGBH })},
 	}
 
 	advanced, err := c.stagesStore.AdvanceStage(ctx, pe.ID, stageIndex, cut, survivors, dims)
@@ -108,7 +100,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStageCut)).Inc()
+		obsmetrics.CountEviction(domain.EvictionStageCut)
 		// Status is already EVICTED above — the cluster-agent's next reconcile pass removes the
 		// Job on its own. A stage cut still owes the researcher whatever they genuinely ran, same
 		// as every other eviction path — settleAndMark computes that from observed metrics, not
@@ -140,7 +132,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionStageCut)).Inc()
+		obsmetrics.CountEviction(domain.EvictionStageCut)
 		// Never reached RUNNING; settlement derives zero usage from absent metrics.
 		exp.Status = to
 		exp.EvictionReason = string(domain.EvictionStageCut)

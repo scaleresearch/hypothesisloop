@@ -29,9 +29,12 @@ const (
 	DonationReasonInsufficientQuota = "insufficient_quota"
 )
 
-// FulfillDonation transfers AccH from donor to recipient within a platform experiment.
-// Debits donor's guaranteed_accelerator_hours and credits recipient's guaranteed_accelerator_hours.
-// The donation must have a platform_experiment_id; the donor must have sufficient available quota.
+// FulfillDonation transfers AccH from donor to recipient within a platform experiment. Debits
+// the donor's guaranteed_accelerator_hours; credits the recipient's guaranteed_accelerator_hours
+// if the recipient's resolved quota tier is guaranteed, or burst_accelerator_hours if it's
+// burst-only (see domain.ResolveQuotaTier / domain.ApplyQuotaTier — only a donor's own guaranteed
+// quota is ever debited, since only a guaranteed-tier participant can have any). The donation
+// must have a platform_experiment_id; the donor must have sufficient available quota.
 func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donationID, donorAgentID string) error {
 	req, err := s.store.GetDonationRequest(ctx, donationID)
 	if err != nil {

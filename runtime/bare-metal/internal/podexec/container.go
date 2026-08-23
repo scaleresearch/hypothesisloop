@@ -151,11 +151,16 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 			Type:   "json-file",
 			Config: map[string]string{"max-size": "64m", "max-file": "2"},
 		},
-		// Host networking: this runtime always runs on a single bare node with no orchestrated
-		// service mesh, so "reachable from inside the container" (e.g. API_URL) means
-		// whatever's reachable from the host itself, including localhost — a bridge network
-		// would put the container on its own loopback, breaking that.
-		NetworkMode: "host",
+		// Bridge networking, not host: the engine masks most of /sys/kernel/mm under host
+		// networking (a host-wide-tunable path it hides from containers by default even though
+		// it doesn't namespace it) -- tt-metal's UMD driver reads
+		// /sys/kernel/mm/hugepages/*/nr_hugepages directly to find its host DMA channel and fails
+		// outright without it, and no narrower unmask/security-opt/capability restores just that
+		// one path; only Privileged does, and that also drops the Devices cgroup allow-list
+		// below, exposing every accelerator on the host instead of just the one this experiment
+		// was placed on. Loopback URLs a workload needs (API_URL, the object-store endpoint) are
+		// rewritten to containerHostAlias (see containerReachable) and resolved via ExtraHosts.
+		ExtraHosts: []string{containerHostAlias + ":host-gateway"},
 		Resources: container.Resources{
 			NanoCPUs:       spec.NanoCPUs,
 			Memory:         spec.MemoryBytes,
@@ -212,9 +217,20 @@ func (e *Executor) removeContainer(ctx context.Context, name string) error {
 // pullImage fetches image before the container is created. Without it a job whose image is not
 // already on the host never gets a container at all — create fails every reconcile, and with no
 // container there is nothing for PollPhaseDetail to inspect, so the failure reaches an operator as
-// an unexplained stuck-pending job. Always pulled, never conditioned on a local lookup: this runs
-// once per container creation, and the engine serves an unchanged image from its own store.
+// an unexplained stuck-pending job.
+//
+// Checked against the local store first: a bare image ref with no registry host (e.g. a locally
+// built "localhost/hypothesisloop-workload:latest") makes the engine treat "localhost" as an
+// actual registry host and dial it over the network -- there is nothing listening there, so that
+// pull always fails, even though the image already sits in the local store from the build step
+// this ran right after. Skipping the network round-trip when the image is already present is also
+// just the IfNotPresent policy every other image in this repo already runs under.
 func (e *Executor) pullImage(ctx context.Context, image string) error {
+	if _, err := e.docker.ImageInspect(ctx, image); err == nil {
+		return nil
+	} else if !errdefs.IsNotFound(err) {
+		return fmt.Errorf("podexec: inspect image %s: %w", image, err)
+	}
 	body, err := e.docker.ImagePull(ctx, image, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("podexec: pull image %s: %w", image, err)

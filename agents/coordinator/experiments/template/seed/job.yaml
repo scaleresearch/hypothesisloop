@@ -1,0 +1,45 @@
+# Job template for a new experiment under agents/coordinator/experiments/<name>/seed/. This file
+# is a full POST /experiments request body (id + metadata + job), not just the job spec. id/
+# metadata below are placeholders -- nothing here knows in advance which hypothesis or platform
+# experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id, agent_id
+# (and id, for a fresh submission) before/at submit time. Submit with
+# `hl job submit --agent <agent_id> job.yaml`. See
+# controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL reference.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from `hl hypothesis submit --file hypothesis.yaml`
+  # project_id: optional free-text grouping tag (GET /experiments?project_id=) -- no Project entity exists, omit if unneeded.
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
+  # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
+  # validated. Omit both if you have nothing to point at.
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  estimated_duration_hours: 1.0
+job:
+  # REPLACE with this experiment's own base runtime image (built via Dockerfile.experimentator /
+  # `make experimentator-image EXPERIMENT=<name>`, or a job-specific image built and imported into
+  # the cluster per setup.md step 1.4).
+  image: localhost:5000/hypothesisloop-REPLACE-WITH-EXPERIMENT-IMAGE:latest
+
+  # REPLACE with a command that clones your pushed code_ref and runs it, e.g.:
+  #   bash -lc 'cd "$(hl-clone)" && exec python your_workload.py'
+  command: ["bash", "-lc", "REPLACE-WITH-YOUR-RUN-COMMAND"]
+
+  # Starting point only -- raise these in your own submissions any time your workload needs more.
+  cpu: "4"
+  memory: "16Gi"
+  storage: "10Gi"
+  max_retries: 3
+
+  # REPLACE: accelerator_type as the flavor's own driver publishes it (see
+  # `GET /resource-catalog/capacity`, or the live listing your system prompt already fetched for
+  # you) -- a type with none available queues forever and never errors.
+  accelerator_count: 1
+  accelerator_type: REPLACE-WITH-AN-ACCELERATOR-TYPE-WITH-AVAILABLE-CAPACITY

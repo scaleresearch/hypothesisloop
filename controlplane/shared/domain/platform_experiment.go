@@ -127,40 +127,32 @@ func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
 
 // PlatformExperiment is the operator-defined compute envelope agents compete within.
 type PlatformExperiment struct {
-	ID                     string  `json:"id"`
-	Name                   string  `json:"name"`
-	Description            string  `json:"description"`
-	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
-	// BudgetCPUCoreHours is an optional additional resource budget tracked the same way as
-	// BudgetAcceleratorHours. Current PostgreSQL estimates and settled metrics observations
-	// contribute to its guaranteed/burst usage. Zero means the dimension is not tracked.
-	BudgetCPUCoreHours float64 `json:"budget_cpu_core_hours,omitempty"`
-	// BudgetRAMGBHours/BudgetStorageGBHours: Deprecated. RAM/storage are hard
-	// physical-fit-checked at admission, never
-	// hours-budgeted (see domain.ResourceRAMGBHours' doc comment for the full migration note).
-	// Nothing reads these two fields to gate or debit anything anymore; the JSON keys are kept
-	// accepted (not rejected) purely so an existing caller that still sends them doesn't start
-	// failing submission, and a platform experiment created before this migration with a
-	// non-zero value here simply keeps it inert in the DB — no debit ever consumes it again.
-	BudgetRAMGBHours      float64                  `json:"budget_ram_gb_hours,omitempty"`
-	BudgetStorageGBHours  float64                  `json:"budget_storage_gb_hours,omitempty"`
-	MaxAgents             int                      `json:"max_agents"`
-	Metrics               []MetricDefinition       `json:"metrics"`                 // metrics jobs must emit; used for ranking
-	ReportIntervalSeconds int                      `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
-	StartsAt              time.Time                `json:"starts_at"`
-	EndsAt                time.Time                `json:"ends_at"`
-	Status                PlatformExperimentStatus `json:"status"`
+	ID                     string                   `json:"id"`
+	Name                   string                   `json:"name"`
+	Description            string                   `json:"description"`
+	BudgetAcceleratorHours float64                  `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
+	MaxAgents              int                      `json:"max_agents"`
+	Metrics                []MetricDefinition       `json:"metrics"`                 // metrics jobs must emit; used for ranking
+	ReportIntervalSeconds  int                      `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
+	StartsAt               time.Time                `json:"starts_at"`
+	EndsAt                 time.Time                `json:"ends_at"`
+	Status                 PlatformExperimentStatus `json:"status"`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
 	CurrentStage int `json:"current_stage"`
 	// Summary is the operator's narrative verdict on the finished run. Prose only: the standings
 	// are derived from the metrics store on read, never copied here.
-	Summary        string    `json:"summary,omitempty"`
-	SignedUpAgents []string  `json:"signed_up_agents,omitempty"`
-	SignupCount    int       `json:"signup_count"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Summary        string   `json:"summary,omitempty"`
+	SignedUpAgents []string `json:"signed_up_agents,omitempty"`
+	SignupCount    int      `json:"signup_count"`
+	// HypothesisSubmitPolicy/JobSubmitPolicy independently control who may register a hypothesis
+	// vs. submit a job within this platform experiment — see SubmitterPolicy. Empty resolves to
+	// SubmitterPolicyMixed (today's behavior, unchanged) via ParseSubmitterPolicy.
+	HypothesisSubmitPolicy SubmitterPolicy `json:"hypothesis_submit_policy,omitempty"`
+	JobSubmitPolicy        SubmitterPolicy `json:"job_submit_policy,omitempty"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
 }
 
 // SignupRole is what an agent was signed up to do in one platform experiment. It lives on the
@@ -194,4 +186,43 @@ func ParseSignupRole(s string) (SignupRole, error) {
 		return SignupRole(s), nil
 	}
 	return "", fmt.Errorf("unknown role %q: must be one of competitor, baseline, reviewer", s)
+}
+
+// SubmitterPolicy governs who may submit into a platform experiment — a hypothesis or a job,
+// each gated independently (see PlatformExperiment.HypothesisSubmitPolicy/JobSubmitPolicy) —
+// distinguishing a human identity from an autonomous agent identity.
+type SubmitterPolicy string
+
+const (
+	// SubmitterPolicyMixed allows both humans and agents — today's behavior, unchanged, and the
+	// default when the field is left empty.
+	SubmitterPolicyMixed SubmitterPolicy = "mixed"
+	// SubmitterPolicyHumanOnly allows only a human submitter.
+	SubmitterPolicyHumanOnly SubmitterPolicy = "human_only"
+	// SubmitterPolicyAgentOnly allows only an autonomous-agent submitter.
+	SubmitterPolicyAgentOnly SubmitterPolicy = "agent_only"
+)
+
+// ParseSubmitterPolicy resolves a requested policy. An empty string is the mixed default, so
+// every caller written before this field existed keeps meaning what it meant. Anything else
+// unrecognized is an error: defaulting a typo to mixed would silently open a restricted platform
+// experiment to submitters the operator meant to exclude.
+func ParseSubmitterPolicy(s string) (SubmitterPolicy, error) {
+	switch SubmitterPolicy(s) {
+	case "":
+		return SubmitterPolicyMixed, nil
+	case SubmitterPolicyMixed, SubmitterPolicyHumanOnly, SubmitterPolicyAgentOnly:
+		return SubmitterPolicy(s), nil
+	}
+	return "", fmt.Errorf("unknown submitter policy %q: must be one of mixed, human_only, agent_only", s)
+}
+
+// AllowsHuman reports whether p permits a human submitter.
+func (p SubmitterPolicy) AllowsHuman() bool {
+	return p != SubmitterPolicyAgentOnly
+}
+
+// AllowsAgent reports whether p permits an autonomous-agent submitter.
+func (p SubmitterPolicy) AllowsAgent() bool {
+	return p != SubmitterPolicyHumanOnly
 }

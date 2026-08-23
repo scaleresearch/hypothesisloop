@@ -65,12 +65,21 @@ func main() {
 	}
 	defer pool.Close()
 
+	// control-service is the sole owner of the schema (schema.sql is baked into this image only
+	// — see controlplane/build/Dockerfile.control-service — not metrics-service's, which needs
+	// Postgres to READ the same tables but never applies DDL to them). Every statement in it is
+	// idempotent, so this is safe on every boot, not just the first; a Postgres advisory lock
+	// inside ApplySchema serializes it against a second control-service replica doing the same.
+	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = db.ApplySchema(migrateCtx, pool)
+	migrateCancel()
+	if err != nil {
+		logger.Fatal("control-service: apply schema", zap.Error(err))
+	}
+
 	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
-	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
-	domain.SetRAMGBHourRate(pcfg.RAMGBHourRate)
-	domain.SetStorageGBHourRate(pcfg.StorageGBHourRate)
 
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:         pcfg.Quota.Top3BonusFraction,
@@ -141,10 +150,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, AccHRate: g.AccHRate})
 	}
 	resourceCatalog := quota.ResourceCatalog{
-		AcceleratorTypes:  acceleratorTypeInfos,
-		CPUCoreHourRate:   domain.CPUCoreHourRate(),
-		RAMGBHourRate:     domain.RAMGBHourRate(),
-		StorageGBHourRate: domain.StorageGBHourRate(),
+		AcceleratorTypes: acceleratorTypeInfos,
 	}
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).
 		WithCatalog(resourceCatalog).

@@ -1,0 +1,25 @@
+{{- $raw := .Files.Get "files/hypothesisloop.yaml" }}
+{{- if not $raw }}
+{{- fail "files/hypothesisloop.yaml is missing — run `make helm-prepare` before installing this chart" }}
+{{- end }}
+{{- $raw = regexReplaceAll "endpoint: http://REPLACE-WITH-HOST-LAN-IP:9000" $raw (printf "endpoint: %s" .Values.objectStore.endpoint) }}
+{{- $raw = regexReplaceAll "metrics_db_url: http://greptimedb:4000" $raw (printf "metrics_db_url: %s" (include "hypothesisloop.metricsDBURL" .)) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hypothesisloop-config
+  namespace: {{ include "hypothesisloop.namespace" . }}
+data:
+  hypothesisloop.yaml: |
+{{ $raw | indent 4 }}
+{{- if not .Values.postgres.external.existingSecret }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hypothesisloop-db
+  namespace: {{ include "hypothesisloop.namespace" . }}
+type: Opaque
+stringData:
+  DATABASE_URL: {{ include "hypothesisloop.databaseURL" . | quote }}
+{{- end }}

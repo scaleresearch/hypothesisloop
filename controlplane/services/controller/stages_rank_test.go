@@ -3,15 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 func withData(agentID string, v float64) ranked {
@@ -105,7 +103,7 @@ func TestStageReleaseSplitsBudgetShareAndReclaimsUnspent(t *testing.T) {
 
 // A dimension the platform experiment does not budget releases nothing.
 func TestStageReleaseSkipsUntrackedDimension(t *testing.T) {
-	dim := db.StageRedistribution{ResourceType: domain.ResourceCPUCoreHours, Budget: 0, ReleaseFrac: 0.6}
+	dim := db.StageRedistribution{ResourceType: domain.ResourceAcceleratorHours, Budget: 0, ReleaseFrac: 0.6}
 	if got := db.StageReleaseTotal(dim, map[string]float64{}); got != 0 {
 		t.Fatalf("release = %v, want 0 for an untracked dimension", got)
 	}
@@ -157,24 +155,20 @@ func (f *rolesStagesStore) ListSignupsByRole(ctx context.Context, platformExpID 
 	return f.competitors, nil
 }
 
-// bestPerAgentServer answers BestPerAgentOnMetric's single PromQL query with one sample per
-// agent, so a cut can be computed against real values rather than a stubbed ranking.
-func bestPerAgentServer(t *testing.T, values map[string]float64) *httptest.Server {
-	t.Helper()
-	results := make([]string, 0, len(values))
+// bestPerAgent is the per-agent standing the ladder cuts on, so a cut can be computed against
+// real values rather than a stubbed ranking.
+func bestPerAgent(values map[string]float64) fakeObserved {
+	best := make(map[string]metricsdb.AgentBest, len(values))
 	for agentID, v := range values {
-		results = append(results, fmt.Sprintf(
-			`{"metric":{"agent_id":%q,"metric_basis":"raw","job_id":"job-%s"},"value":[1,"%v"]}`, agentID, agentID, v))
+		best[agentID] = metricsdb.AgentBest{Value: v, ExperimentID: "job-" + agentID}
 	}
-	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"vector","result":[%s]}}`, strings.Join(results, ","))
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
+	return fakeObserved{best: best}
 }
 
-func rolesController(store *rolesStagesStore, metricsURL string) *Controller {
-	return &Controller{stagesStore: store, metricsDBURL: metricsURL}
+// rolesController takes an ObservedState rather than a URL, so a test that must prove no metric
+// was read can pass nil — the same "not wired to a metrics store" state cutOnMetric checks for.
+func rolesController(store *rolesStagesStore, observed ObservedState) *Controller {
+	return &Controller{stagesStore: store, observed: observed}
 }
 
 func rankedPE(evictPct float64) (*domain.PlatformExperiment, domain.Stage) {
@@ -193,7 +187,7 @@ func TestCurrentSurvivorsExcludesAgentsSignedUpInANonCompetitorRole(t *testing.T
 		quotaAgents: []string{"a", "b", "baseline", "reviewer"},
 		competitors: []string{"a", "b"},
 	}
-	got, err := rolesController(store, "").currentSurvivors(context.Background(), &domain.PlatformExperiment{ID: "pe-roles"})
+	got, err := rolesController(store, nil).currentSurvivors(context.Background(), &domain.PlatformExperiment{ID: "pe-roles"})
 	if err != nil {
 		t.Fatalf("currentSurvivors err = %v, want nil", err)
 	}
@@ -205,16 +199,15 @@ func TestCurrentSurvivorsExcludesAgentsSignedUpInANonCompetitorRole(t *testing.T
 func TestCutWithFiveCompetitorsAndTwoNonCompetitorsCutsOnlyFromTheFive(t *testing.T) {
 	// The two non-competitors sit at the very bottom on the metric — exactly where a cut would
 	// take them if roles were ignored.
-	srv := bestPerAgentServer(t, map[string]float64{
+	observed := bestPerAgent(map[string]float64{
 		"c1": 50, "c2": 40, "c3": 30, "c4": 20, "c5": 10, "baseline": 1, "reviewer": 2,
 	})
-	defer srv.Close()
 	store := &rolesStagesStore{
 		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5", "baseline", "reviewer"},
 		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
 	}
 	pe, stage := rankedPE(30) // 30% of 5 competitors floors to 1; of all 7 it would floor to 2.
-	kept, cut, err := rolesController(store, srv.URL).computeCut(context.Background(), pe, stage)
+	kept, cut, err := rolesController(store, observed).computeCut(context.Background(), pe, stage)
 	if err != nil {
 		t.Fatalf("computeCut err = %v, want nil", err)
 	}
@@ -230,9 +223,9 @@ func TestBoundaryWithFourCompetitorsAndThreeNonCompetitorsCutsNobody(t *testing.
 		competitors: []string{"c1", "c2", "c3", "c4"},
 	}
 	pe, stage := rankedPE(50)
-	// metricsDBURL is empty on purpose: reaching a metric read at all would mean the guardrail
-	// counted seven agents and let the boundary through.
-	kept, cut, err := rolesController(store, "").computeCut(context.Background(), pe, stage)
+	// No metrics store on purpose: reaching a metric read at all would mean the guardrail counted
+	// seven agents and let the boundary through.
+	kept, cut, err := rolesController(store, nil).computeCut(context.Background(), pe, stage)
 	if err != nil {
 		t.Fatalf("computeCut err = %v, want nil", err)
 	}

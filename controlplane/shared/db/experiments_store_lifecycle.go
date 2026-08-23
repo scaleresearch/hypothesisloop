@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -52,21 +53,27 @@ func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id stri
 	return nil
 }
 
-// MarkQueued sets the QUEUED lifecycle and its current scheduler decision together.
+// MarkQueued sets the QUEUED lifecycle and its current scheduler decision together. Also resets
+// resolved_job_spec to NULL: a requeued job is re-admitted from scratch and may land on a
+// different cluster with a different fair share, so any previous "max" resolution is stale and
+// must not be read as though it were the resolution for wherever it lands next.
 func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("experiments_store.MarkQueued: reason is required")
 	}
 	const q = `UPDATE experiments SET status = 'QUEUED', queued_at = COALESCE(queued_at, NOW()),
-	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, updated_at = NOW()
+	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, resolved_job_spec = NULL, updated_at = NOW()
 	WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
 	_, err := s.pool.pool.Exec(ctx, q, id, reason)
 	return err
 }
 
 // ClaimSubmitted serializes admission decisions for one cluster, checks fresh capacity while
-// holding that lock, and conditionally persists the desired-state claim.
-func (s *ExperimentsStore) ClaimSubmitted(ctx context.Context, id, clusterName string, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+// holding that lock, and conditionally persists the desired-state claim. resolvedJob is the
+// literal resolution of any "max" sentinel in the job (nil if there was nothing to resolve),
+// written into resolved_job_spec in the SAME transaction as the SUBMITTED status transition —
+// see domain.Experiment.ResolvedJob's doc comment.
+func (s *ExperimentsStore) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: begin: %w", err)
@@ -93,10 +100,18 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	if !available {
 		return false, nil
 	}
+	var resolvedJobSpec []byte
+	if resolvedJob != nil {
+		var err error
+		resolvedJobSpec, err = json.Marshal(resolvedJob)
+		if err != nil {
+			return false, fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
+		}
+	}
 	const q = `UPDATE experiments
-SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, not_admitted_reason = NULL, updated_at = NOW()
+SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, not_admitted_reason = NULL, resolved_job_spec = $3, updated_at = NOW()
 WHERE id = $1 AND status = 'QUEUED'`
-	tag, err := tx.Exec(ctx, q, id, clusterName)
+	tag, err := tx.Exec(ctx, q, id, clusterName, resolvedJobSpec)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)
 	}
@@ -145,32 +160,29 @@ func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reas
 }
 
 // RequeuePreempted returns a job to QUEUED after preemption, preserving original queued_at
-// (age_score) and overwriting estimated_duration_hours plus every resource-dimension estimate
-// with the caller-computed, proportionally rescaled remaining amounts — all four dimensions move
-// together so no downstream reader mixes an old estimate with a new one. Loop.preempt computes
-// the rescale ratio once from the pre-mutation experiment.
+// (age_score) and overwriting estimated_duration_hours plus the accelerator-hours estimate with
+// the caller-computed, proportionally rescaled remaining amounts — both move together so no
+// downstream reader mixes an old estimate with a new one. Loop.preempt computes the rescale ratio
+// once from the pre-mutation experiment.
 //
 // Returns requeued=false when the job was no longer RUNNING. The status guard is not optional:
 // preempt reads its candidates, then spends metrics queries ranking them, and a job can complete,
 // be cancelled, be stage-cut or be evicted inside that window. Without the guard this UPDATE
 // would drag a terminal job back to QUEUED and re-run work that had already finished — or that a
 // human had explicitly cancelled.
-func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours float64) (bool, error) {
+func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error) {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',
-		eviction_reason = $7,
+		eviction_reason = $4,
 		estimated_duration_hours = $2,
 		estimated_cost_acch = $3,
-		estimated_cpu_core_hours = $4,
-		estimated_ram_gb_hours = $5,
-		estimated_storage_gb_hours = $6,
 		submitted_at = NULL,
 		-- clear cluster_name: job holds no capacity, so next admission tick can place it anywhere.
 		cluster_name = '',
 		not_admitted_reason = 'capacity_unavailable',
 		updated_at = NOW()
 	WHERE id = $1 AND status = 'RUNNING'`
-	tag, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH, newCPUCoreHours, newRAMGBHours, newStorageGBHours,
+	tag, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH,
 		string(domain.EvictionPreemptedForGuaranteed))
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeuePreempted: %w", err)

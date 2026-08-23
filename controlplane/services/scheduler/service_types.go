@@ -31,6 +31,9 @@ type Store interface {
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// GetAgent resolves the submitting agent's Kind, to gate submission against
+	// PlatformExperiment.JobSubmitPolicy (see domain.SubmitterPolicy).
+	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// IsAgentCut reports whether the agent was cut at a stage boundary (see
 	// controller/stages.go) — a cut is terminal, and cut agents may not submit new jobs.
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
@@ -45,7 +48,7 @@ type Store interface {
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
-	ClaimSubmitted(ctx context.Context, id, clusterName string, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
+	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource
@@ -71,6 +74,11 @@ type WorkloadClient interface {
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — admission must prove a
 	// job fits one node in every dimension, not just in accelerators.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
+	// GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
+	// allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
+	// permanently resident; platform job pods themselves are not subtracted), as
+	// LoopWorkloadClient.GetNodeTotalCapacity.
+	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 }
 

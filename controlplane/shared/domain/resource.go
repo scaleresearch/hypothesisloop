@@ -124,6 +124,34 @@ func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, r
 	return fp
 }
 
+// FairShare returns a node's per-accelerator entitlement for heldAccelerators of its
+// installedAccelerators, in the same canonical integer unit totalCanonical is expressed in.
+// Floored, never ceiling: a "max" resolution built from this value must never be judged as
+// exceeding its own fair share later by loop_disbalance.go's evictor, which compares with a
+// strict > — a floored exact share is always <= itself, so it is never flagged as disbalanced
+// due to rounding up.
+//
+// installedAccelerators <= 0 is a hard error, never a silent 0: per important.md's "one path or
+// error, fail fast" rule, a zero/negative denominator is an invalid call, not a legitimate
+// "nothing installed" answer with its own defined result — a node genuinely reporting no
+// accelerators of a flavor is a case every caller must recognize and skip BEFORE calling this
+// (see loop_disbalance.go/loop_resolve.go's own `if installed <= 0 { continue }` guards), not one
+// this function should paper over by returning a number that looks like a valid share.
+func FairShare(totalCanonical int64, heldAccelerators, installedAccelerators int64) (int64, error) {
+	if installedAccelerators <= 0 {
+		return 0, fmt.Errorf("domain.FairShare: installedAccelerators must be positive, got %d", installedAccelerators)
+	}
+	if heldAccelerators <= 0 || totalCanonical <= 0 {
+		return 0, nil
+	}
+	// totalCanonical*heldAccelerators before dividing, not (totalCanonical/installedAccelerators)
+	// *heldAccelerators — the latter floors twice and can under-report a multi-accelerator holder's
+	// exact share (e.g. total=5, installed=2, held=3: true share floor(15/2)=7, but
+	// floor(5/2)*3=6). Canonical units (millicores/bytes) times a per-job accelerator count never
+	// approach int64 overflow in practice.
+	return (totalCanonical * heldAccelerators) / installedAccelerators, nil
+}
+
 // NodeShape is what exactly one node of a job takes from the node it lands on: its accelerator
 // count and its fungible resources in canonical units, keyed by NodeResource*. A dimension the
 // node does not ask for is absent rather than zero.
@@ -190,6 +218,15 @@ func (j JobSpec) Footprint(acceleratorType AcceleratorType) (Footprint, error) {
 	total := NewFootprint()
 	for _, group := range j.NodeGroups() {
 		perNode := NewFootprint()
+		// A "max" sentinel is always resolved to a plain literal once an experiment is admitted (see
+		// scheduler.Loop.resolveClusterLocalResources; JobSpec.Footprint is called with the already-
+		// resolved copy — see domain.Experiment.EffectiveJob), so it should never reach here in that
+		// case — but resource.ParseQuantity("max") fails with a generic
+		// "quantities must match the regular expression" error that names nothing about the real
+		// cause, so name it explicitly instead.
+		if group.CPU == MaxResourceSentinel || group.Memory == MaxResourceSentinel || group.Storage == MaxResourceSentinel {
+			return nil, fmt.Errorf("job.cpu/memory/storage is still %q — it should have been resolved to a literal quantity at submission", MaxResourceSentinel)
+		}
 		if group.CPU != "" {
 			q, err := resource.ParseQuantity(group.CPU)
 			if err != nil {

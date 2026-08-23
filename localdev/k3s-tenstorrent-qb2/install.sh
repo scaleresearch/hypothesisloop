@@ -39,6 +39,17 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-tt"
 
+# Same host-LAN-IP heuristic Makefile's render-settings uses for data_store.endpoint -- one
+# detection, reused everywhere an address for this host needs to reach a pod's network
+# namespace. k3s's own containerd needs it too: it pulls workload images from the local registry
+# (docker-compose.yml) over this address, never localhost.
+REGISTRY_HOST_IP="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | \
+  grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1 | cut -d/ -f1)"
+if [[ -z "${REGISTRY_HOST_IP}" ]]; then
+  echo "ERROR: could not detect a host LAN address for the local registry." >&2
+  exit 1
+fi
+
 # Matches localdev/k3s-macos/install.sh's pin so both profiles track the same tested k8s
 # minor version — deliberately not "latest". DRA (resource.k8s.io/v1) is GA
 # from k8s 1.34; this is comfortably past that, so no DRA feature-gate flags
@@ -102,6 +113,20 @@ fi
 
 # ---- k3s: native systemd service, same version pin as localdev --------------
 STAGE_T0=$(date +%s)
+echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
+sudo mkdir -p /etc/rancher/k3s
+cat <<EOF | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
+mirrors:
+  "${REGISTRY_HOST_IP}:5000":
+    endpoint:
+      - "http://${REGISTRY_HOST_IP}:5000"
+configs:
+  "${REGISTRY_HOST_IP}:5000":
+    tls:
+      insecure_skip_verify: true
+EOF
+sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
+
 echo "==> Ensuring k3s ${K3S_VERSION} is installed and running..."
 if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
   echo "    Installing/upgrading k3s..."
@@ -197,17 +222,11 @@ wait_for 40 3 "Tenstorrent ResourceSlice" sh -c \
 echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # ---- cluster-agent bundle -------------------------------------------------
-# Import the images `make images` built locally (Makefile's `tt-up: images` prerequisite) into
-# k3s's own containerd, the same way localdev/k3s-macos/install.sh's native-Linux branch does,
-# then install the node-agent DaemonSet + cluster-agent Deployment. Without this, jobs submitted
-# to the control plane have nothing polling for them on this cluster and stay QUEUED forever.
+# `make images` (Makefile's `tt-up: images` prerequisite) already pushed the images this cluster
+# needs to the local registry; this node pulls them normally via the registries.yaml written
+# above. Install the node-agent DaemonSet + cluster-agent Deployment so something is actually
+# polling the control plane for work -- without this, jobs submitted to it stay QUEUED forever.
 STAGE_T0=$(date +%s)
-for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload; do
-  if podman image inspect "localhost/${img}:latest" &>/dev/null; then
-    echo "==> Importing ${img} into k3s..."
-    podman save "localhost/${img}:latest" | sudo k3s ctr images import -
-  fi
-done
 # host.containers.internal is a podman-machine hostname and is not available to native k3s pods
 # convenience hostname that doesn't exist on native Linux — nothing on this host maps it to
 # anything, so cluster-agent would poll a name that never resolves. The control plane's containers
@@ -216,7 +235,9 @@ done
 HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
 CLUSTER_NAME="tt-quietbox" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://${HOST_IP}:8081" METRICS_URL="http://${HOST_IP}:8084" \
+  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG:-latest}" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
+echo "${REGISTRY_HOST_IP}" > "${SCRIPT_DIR}/../.registry-host-ip"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # Donates zero capacity to workloads by default, same as localdev/k3s-macos/install.sh — applied

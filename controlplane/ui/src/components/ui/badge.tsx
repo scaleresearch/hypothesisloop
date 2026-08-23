@@ -23,3 +23,13 @@ export function TierBadge({ tier }: { tier?: string }) {
   if (!tier) return <span className="text-muted">—</span>
   return <Badge status={tier}>{tier}</Badge>
 }
+
+/**
+ * Human vs agent participant badge, driven by domain.AgentKind. Missing/undefined (older API
+ * response, or a field this build predates) is treated as "agent" — that has always been every
+ * existing row's real kind.
+ */
+export function AgentKindBadge({ kind, className }: { kind?: string; className?: string }) {
+  const isHuman = kind === 'human'
+  return <Badge status={isHuman ? 'human' : 'agent'} className={className}>{isHuman ? 'Human' : 'Agent'}</Badge>
+}

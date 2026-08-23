@@ -88,7 +88,7 @@ func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experim
 			zap.String("id", exp.ID), zap.String("reason", string(reason)))
 		return
 	}
-	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
+	obsmetrics.CountEviction(reason)
 	exp.Status = domain.StatusEvicted
 	w.settleQuota(ctx, exp)
 }

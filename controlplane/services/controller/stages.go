@@ -10,7 +10,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // StagesStore is the persistence interface for the stage ladder.
@@ -111,7 +110,7 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 // Reservations never contribute — see shared/metricsdb/usage.go for why a large queued job
 // must not be able to trip a boundary.
 func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment, obs *tickObservations, now time.Time) (float64, error) {
-	committed, err := metricsdb.TotalObservedAccH(ctx, c.metricsDBURL, pe.CreatedAt, pe.ID)
+	committed, err := c.observed.TotalObservedAccH(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return 0, fmt.Errorf("stages: TotalObservedAccH: %w", err)
 	}

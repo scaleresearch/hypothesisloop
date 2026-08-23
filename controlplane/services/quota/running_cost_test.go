@@ -75,8 +75,7 @@ func newObservedTestService(t *testing.T, metricsURL string, running []*domain.E
 // A retired accelerator type (no entry in the live rate catalog — see
 // domain.AcceleratorType.LookupCost) must not affect billing at all any more: accH is now derived
 // from the job's own admission-time estimate (domain.Experiment.RatedCost), which needs no catalog
-// lookup, so it prices identically whether or not the flavor is still registered. This also
-// exercises that CPU-core-hours (which never needed an accelerator rate) keep billing normally.
+// lookup, so it prices identically whether or not the flavor is still registered.
 func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testing.T) {
 	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
 	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{"h100": 1.0}) })
@@ -92,7 +91,6 @@ func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testi
 		AcceleratorCount:       2,
 		EstimatedDurationHours: 1,
 		EstimatedCostAccH:      8,
-		EstimatedCPUCoreHours:  4,
 		CapacityTier:           domain.CapacityGuaranteed,
 	}
 	svc, logs := newObservedTestService(t, server.URL, []*domain.Experiment{exp})
@@ -108,10 +106,6 @@ func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testi
 	if q.UsedGuaranteedAccH <= 0 {
 		t.Fatalf("used_guaranteed_acch = %v, want > 0 — billed from the admission-time estimate, which needs no catalog rate",
 			q.UsedGuaranteedAccH)
-	}
-	if q.UsedGuaranteedCPUCoreH <= 0 {
-		t.Fatalf("used_guaranteed_cpu_core_h = %v, want > 0 — CPU cost needs no accelerator rate and must still be billed",
-			q.UsedGuaranteedCPUCoreH)
 	}
 }
 

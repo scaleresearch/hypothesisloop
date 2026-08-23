@@ -150,6 +150,16 @@ func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota
 			return ei.PriorityScore > ej.PriorityScore
 		}
 
+		// A missing queued_at sorts last, deterministically — the same rule sortGuaranteed applies,
+		// and for the same reason. Falling straight through to "return false" treated a nil as
+		// equal on age to every timestamp while two real timestamps still compared unequal, which
+		// is not a strict weak order: it admits a < c alongside a ~ nil and nil ~ c. sort.Slice
+		// gives no diagnostic for that, it just returns an order that depends on the input
+		// permutation — and the input permutation here is whatever order the store returned rows
+		// in, so the burst queue could admit different jobs on two ticks that saw identical state.
+		if (ei.QueuedAt == nil) != (ej.QueuedAt == nil) {
+			return ej.QueuedAt == nil
+		}
 		if ei.QueuedAt != nil && ej.QueuedAt != nil {
 			return ei.QueuedAt.Before(*ej.QueuedAt)
 		}

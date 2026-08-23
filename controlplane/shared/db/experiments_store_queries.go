@@ -90,6 +90,26 @@ ORDER BY created_at ASC`
 	return collectExperiments(rows)
 }
 
+// ListCapacityClaimedExperiments returns every experiment in RUNNING, SUBMITTED, or ADMITTED
+// status — the same three statuses SumDesiredFootprintByCluster sums, i.e. every experiment that
+// has already claimed physical capacity whether or not the workload backend has confirmed it
+// RUNNING yet. QUEUED is deliberately excluded: a queued job has not claimed anything. Used by the
+// scheduler's tick-time node-attribution reconstruction (see loop_resolve.go's
+// installedAcceleratorsByNode), which must count SUBMITTED/ADMITTED holds too — ListRunningExperiments
+// alone undercounts a node's already-claimed capacity whenever such jobs exist.
+func (s *ExperimentsStore) ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
+	q := `SELECT` + experimentColumns + `FROM experiments
+WHERE status IN ('RUNNING', 'SUBMITTED', 'ADMITTED')
+ORDER BY created_at ASC`
+
+	rows, err := s.pool.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.ListCapacityClaimedExperiments: %w", err)
+	}
+	defer rows.Close()
+	return collectExperiments(rows)
+}
+
 // ListExperimentsByPlatformExperiment returns all jobs for a given platform experiment.
 func (s *ExperimentsStore) ListExperimentsByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
@@ -221,28 +241,31 @@ ORDER BY updated_at ASC`
 	return collectExperiments(rows)
 }
 
-// ClusterNameByID returns each named experiment's assigned cluster, for the ids that exist. One
-// query instead of a lookup per report: a cluster-agent pushes a complete snapshot every few
-// seconds, and a per-report round trip made that cost scale with the number of jobs it runs.
-func (s *ExperimentsStore) ClusterNameByID(ctx context.Context, ids []string) (map[string]string, error) {
+// PlacementByID returns each named experiment's assigned cluster and current attempt, for the ids
+// that exist. One query instead of a lookup per report: a cluster-agent pushes a complete snapshot
+// every few seconds, and a per-report round trip made that cost scale with the number of jobs it
+// runs. Both columns come from the same row read, so a report can never be judged against one
+// experiment's cluster and another read's generation.
+func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error) {
 	if len(ids) == 0 {
-		return map[string]string{}, nil
+		return map[string]domain.Placement{}, nil
 	}
-	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name FROM experiments WHERE id = ANY($1)`, ids)
+	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name, attempt_count FROM experiments WHERE id = ANY($1)`, ids)
 	if err != nil {
-		return nil, fmt.Errorf("experiments_store.ClusterNameByID: %w", err)
+		return nil, fmt.Errorf("experiments_store.PlacementByID: %w", err)
 	}
 	defer rows.Close()
-	out := make(map[string]string, len(ids))
+	out := make(map[string]domain.Placement, len(ids))
 	for rows.Next() {
-		var id, cluster string
-		if err := rows.Scan(&id, &cluster); err != nil {
-			return nil, fmt.Errorf("experiments_store.ClusterNameByID: scan: %w", err)
+		var id string
+		var p domain.Placement
+		if err := rows.Scan(&id, &p.ClusterName, &p.AttemptCount); err != nil {
+			return nil, fmt.Errorf("experiments_store.PlacementByID: scan: %w", err)
 		}
-		out[id] = cluster
+		out[id] = p
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("experiments_store.ClusterNameByID: %w", err)
+		return nil, fmt.Errorf("experiments_store.PlacementByID: %w", err)
 	}
 	return out, nil
 }

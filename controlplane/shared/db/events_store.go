@@ -197,6 +197,32 @@ func (f EventFilter) Matches(e Event) bool {
 	return true
 }
 
+// Annotate marks an event as ambient rather than addressed to this subscription: it prefixes
+// Detail with "FYI: " when the event names an agent other than the one this filter is scoped to.
+//
+// It only ever adds a prefix to Detail, never new text — the pointer stays a pointer, and a
+// subscriber that wants the finding or comment itself still follows with the ordinary GET. It is
+// deliberately narrow: without an AgentID a filter has no "own" to compare against (a subscription
+// scoped only to a platform experiment or an experiment id is watching the whole thing, not one
+// agent's slice of it), and an event with no AgentID names nobody in particular (a human-authored
+// hypothesis, a platform-wide status) so there is no "someone else" to flag it against.
+//
+// Agent-owned kinds (see isAgentOwned) never reach here already prefixed: Matches admits them to
+// an agent-scoped subscription only when e.AgentID equals f.AgentID, so every one an agent-scoped
+// connection is delivered is already its own. The prefix therefore only ever lands on the shared
+// kinds — the pool, the ladder, the run — when they were written by somebody else's job.
+func (f EventFilter) Annotate(e Event) Event {
+	if f.AgentID == "" || e.AgentID == "" || e.AgentID == f.AgentID {
+		return e
+	}
+	if e.Detail == "" {
+		e.Detail = "FYI"
+		return e
+	}
+	e.Detail = "FYI: " + e.Detail
+	return e
+}
+
 // EventsStore is the only path to the change stream: it listens for live events and derives the
 // replay of missed ones. Like every other store here it owns its queries — nothing outside this
 // package writes SQL against these tables to build an event.

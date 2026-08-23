@@ -33,6 +33,10 @@ func (l *Loop) tick(ctx context.Context) error {
 	// per cluster per tick, shared by both admission passes. See its call sites for why.
 	disbalanceRan := map[string]bool{}
 
+	// Amortizes the running-experiment node-attribution lookups tick-time "max" resolution needs
+	// (see loop_resolve.go) across every queued job this tick considers, in both passes.
+	resolveCache := newResolutionCache(l)
+
 	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
 	// exit path (including early returns below) runs it, keeping queue order fresh even when
 	// nothing was queued for burst.
@@ -83,6 +87,16 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		l.logger.Warn("total capacity unavailable; disbalance eviction cannot judge this tick", zap.Error(err))
 		totalCapacity = nil
+	}
+	// Per-node installed CPU/memory/storage — the stable denominator evictDisbalanced's node-local
+	// fair-share math needs, since nodeResources above is free capacity and moves every tick. Same
+	// degrade-gracefully treatment as totalCapacity immediately above: absent for a cluster (or
+	// entirely, on a read failure) just means that cluster's disbalance judgment abstains this
+	// tick, never that the whole tick fails.
+	nodeResourcesTotal, err := l.workload.GetNodeTotalCapacity(ctx)
+	if err != nil {
+		l.logger.Warn("per-node total capacity unavailable; disbalance eviction cannot judge this tick", zap.Error(err))
+		nodeResourcesTotal = nil
 	}
 
 	// Credit back capacity from disbalance victims a prior tick already evicted but that this
@@ -246,6 +260,25 @@ func (l *Loop) tick(ctx context.Context) error {
 				cluster = clusterWithBestFit(candidates, fp)
 			}
 		}
+		// Resolve any "max" CPU/memory/storage sentinel (and validate any explicit number) against
+		// THIS cluster's own fair share, now that cluster and accelerator flavor are finally
+		// settled for this attempt — see loop_resolve.go. A cluster this job's own resources
+		// cannot fit is folded into the ordinary not-admitted path below by simply un-picking the
+		// cluster, exactly like a scalar or topology miss: preemption cannot fix a job whose own
+		// request is oversized for every node, so there is nothing else to try here.
+		if cluster != "" {
+			resolvedJob, fitsCluster, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
+			if rerr != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
+				continue
+			}
+			if !fitsCluster {
+				cluster = ""
+			} else {
+				exp.ResolvedJob = resolvedJob
+				fp = exp.Footprint()
+			}
+		}
 		// Which of the two fit checks failed decides whether preemption can help at all, so they
 		// are evaluated separately rather than or-ed into one condition.
 		scalarFits := domain.Fits(gAvail[cluster], fp)
@@ -315,7 +348,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			//     blocked job against unchanged availability evicts a fresh victim each time.
 			if err == nil && !committed && !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
-				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
+				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
 				}
 			}
@@ -399,6 +432,21 @@ func (l *Loop) tick(ctx context.Context) error {
 				cluster = clusterWithBestFit(candidates, fp)
 			}
 		}
+		// See the guaranteed pass above for why this runs here, after cluster/flavor settle and
+		// before the fit check.
+		if cluster != "" {
+			resolvedJob, fitsCluster, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
+			if rerr != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
+				continue
+			}
+			if !fitsCluster {
+				cluster = ""
+			} else {
+				exp.ResolvedJob = resolvedJob
+				fp = exp.Footprint()
+			}
+		}
 		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
 			// Same shortage vector the guaranteed pass computes, for the same reason: "short
 			// {cpu: 12}" tells an operator which dimension to fix, where a bare
@@ -406,7 +454,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			shortage := preemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
 			if !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
-				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
+				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
 				}
 			}
@@ -619,7 +667,7 @@ func preemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources ma
 	// every node wants the same count and the order is immaterial; for a grouped one, pairing the
 	// learner with the emptiest host is the assignment that leaves the smallest real shortage.
 	perRank := make([]int64, 0, exp.Job.Nodes())
-	for _, shape := range exp.Job.NodeShapes() {
+	for _, shape := range exp.NodeShapes() {
 		if shape.AcceleratorCount > 0 {
 			perRank = append(perRank, shape.AcceleratorCount)
 		}
@@ -703,7 +751,13 @@ func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType 
 // handed a cluster whose nodes had not one free device of the hardware it asked for.
 func resolveClusterAndFootprint(avail map[string]domain.Footprint, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
 	if exp.Job.TotalAccelerators() <= 0 {
+		// Still judged on node layout: a cluster whose aggregate is large enough but whose nodes
+		// are individually too small for one rank would otherwise be picked on the scalar alone,
+		// fail topologyFits in the tick, and go to preemption while another cluster could host it.
 		fp := exp.Footprint()
+		if cluster, ok := placeAtFlavor(avail, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			return cluster, fp
+		}
 		return clusterWithBestFit(avail, fp), fp
 	}
 
@@ -769,14 +823,14 @@ func labelsMatch(actual, required map[string]string) bool {
 }
 
 func desiredPlacementFits(byNode map[string]map[string]int64, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment) bool {
-	remaining := cloneNodeCapacity(byNode)
-	remainingResources := cloneNodeCapacity(nodeResources)
-	for _, exp := range desired {
-		if !reservePlacement(remaining, remainingResources, labelsByNode, exp) {
-			return false
-		}
-	}
-	return reservePlacement(remaining, remainingResources, labelsByNode, candidate)
+	// Planned jointly, not one job after another: the runtime is free to put an already-desired
+	// job on whichever node it likes, so replaying it onto one fixed node and then asking whether
+	// the candidate fits around that guess rejected candidates the cluster could host.
+	jobs := make([]*domain.Experiment, 0, len(desired)+1)
+	jobs = append(jobs, desired...)
+	jobs = append(jobs, candidate)
+	_, ok := planPlacement(cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources), labelsByNode, jobs)
+	return ok
 }
 
 func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string]int64 {
@@ -806,49 +860,223 @@ func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string
 // job are genuinely different shapes. An averaged shape would be the one thing that must not be
 // used here: no node ever holds the average of a learner and 64 actors, so a job proven to fit
 // against it fits nowhere.
+//
+// The walk is a search, not a single greedy pass: ranks are tried hardest-first, each on the
+// tightest node that fits, and a rank that finds no host sends the search back to move an earlier
+// one. A plain first-fit in declared order let a small rank take the only node a later large rank
+// could use and reported a job with a valid assignment as not fitting. The input maps are
+// modified only when the whole job is placed — a false answer leaves them exactly as they were.
 func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
-	key := string(exp.AcceleratorType)
-	// Two candidate sets: a node that reported accelerators, and any node the cluster reported
-	// resources for. A node needing no accelerator must not be confined to accelerator nodes.
-	acceleratorNodes := qualifyingNodes(byNode, labelsByNode, exp)
-	plainNodes := qualifyingNodes(nodeResources, labelsByNode, exp)
-	used := make(map[string]bool)
-	for _, shape := range exp.Job.NodeShapes() {
-		nodes := plainNodes
-		if shape.AcceleratorCount > 0 {
-			nodes = acceleratorNodes
+	plan, ok := planPlacement(cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources), labelsByNode, []*domain.Experiment{exp})
+	if !ok {
+		return false
+	}
+	for _, p := range plan {
+		if p.shape.AcceleratorCount > 0 {
+			byNode[p.node][p.key] -= p.shape.AcceleratorCount
 		}
-		selected := ""
-		var nodeKey string
-		for _, node := range nodes {
-			if requiresDistinctHosts(exp) && used[node] {
-				continue
-			}
-			if shape.AcceleratorCount > 0 {
-				// byNode retains each device's own raw driver-reported casing (see
-				// domain.AcceleratorType.MatchesLabels re: casing) — find the matching key
-				// case-insensitively rather than assuming it equals key verbatim.
-				nodeKey = foldMatchingKey(byNode[node], key)
-				if byNode[node][nodeKey] < shape.AcceleratorCount {
-					continue
-				}
-			}
-			if !nodeHasRoom(nodeResources[node], shape.Resources) {
-				continue
-			}
-			selected = node
-			break
-		}
-		if selected == "" {
-			return false
-		}
-		if shape.AcceleratorCount > 0 {
-			byNode[selected][nodeKey] -= shape.AcceleratorCount
-		}
-		subtractNodeResources(nodeResources[selected], shape.Resources)
-		used[selected] = true
+		subtractNodeResources(nodeResources[p.node], p.shape.Resources)
 	}
 	return true
+}
+
+// rankAssignment is one rank of one job pinned to a node by planPlacement. key is the exact
+// accelerator key under which that node reported the job's flavor (see foldMatchingKey).
+type rankAssignment struct {
+	job   int
+	shape domain.NodeShape
+	node  string
+	key   string
+}
+
+// placementSearchBudget bounds the number of node trials one planPlacement call may make before
+// it gives up. Hardest-first ordering with best-fit node choice and equivalent-node pruning places
+// realistic jobs without backtracking at all; the budget is a guard against an adversarial layout
+// exhausting the tick, and running out of it is reported as "does not fit" — a conservative
+// answer, the same one the greedy walk gave whenever it guessed wrong.
+var placementSearchBudget = 50000
+
+// planPlacement finds nodes for every rank of every job in jobs against the given free capacity,
+// consuming capacity in the maps as it goes (callers pass clones). Distinct-host rules apply per
+// job; ranks of different jobs may share a node. Returns the assignment and whether all ranks
+// were placed. On false the maps are left in an unspecified state.
+func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment) ([]rankAssignment, bool) {
+	type rank struct {
+		job      int
+		shape    domain.NodeShape
+		key      string
+		distinct bool
+		nodes    []string // qualifying candidate set for this rank
+	}
+	var ranks []rank
+	for i, exp := range jobs {
+		key := string(exp.AcceleratorType)
+		// Two candidate sets: a node that reported accelerators, and any node the cluster
+		// reported resources for. A node needing no accelerator must not be confined to
+		// accelerator nodes.
+		acceleratorNodes := qualifyingNodes(byNode, labelsByNode, exp)
+		plainNodes := qualifyingNodes(nodeResources, labelsByNode, exp)
+		distinct := requiresDistinctHosts(exp)
+		for _, shape := range exp.NodeShapes() {
+			nodes := plainNodes
+			if shape.AcceleratorCount > 0 {
+				nodes = acceleratorNodes
+			}
+			ranks = append(ranks, rank{job: i, shape: shape, key: key, distinct: distinct, nodes: nodes})
+		}
+	}
+	// Hardest rank first: most accelerators, then the largest fungible request. The rank with the
+	// fewest possible hosts is placed while the most hosts are still free.
+	sort.SliceStable(ranks, func(a, b int) bool {
+		if ranks[a].shape.AcceleratorCount != ranks[b].shape.AcceleratorCount {
+			return ranks[a].shape.AcceleratorCount > ranks[b].shape.AcceleratorCount
+		}
+		return shapeResourceTotal(ranks[a].shape) > shapeResourceTotal(ranks[b].shape)
+	})
+
+	used := make([]map[string]bool, len(jobs))
+	for i := range used {
+		used[i] = make(map[string]bool)
+	}
+	plan := make([]rankAssignment, len(ranks))
+	budget := placementSearchBudget
+
+	// nodeFits reports whether node can host r right now and the accelerator key it would draw on.
+	nodeFits := func(r rank, node string) (string, bool) {
+		if r.distinct && used[r.job][node] {
+			return "", false
+		}
+		nodeKey := ""
+		if r.shape.AcceleratorCount > 0 {
+			// byNode retains each device's own raw driver-reported casing (see
+			// domain.AcceleratorType.MatchesLabels re: casing) — find the matching key
+			// case-insensitively rather than assuming it equals key verbatim.
+			nodeKey = foldMatchingKey(byNode[node], r.key)
+			if byNode[node][nodeKey] < r.shape.AcceleratorCount {
+				return "", false
+			}
+		}
+		if !nodeHasRoom(nodeResources[node], r.shape.Resources) {
+			return "", false
+		}
+		return nodeKey, true
+	}
+	// leftover is what node would have left after hosting r, summed into one number per family —
+	// the best-fit sort key only. Summing across dimensions is fine for deciding which node to
+	// *try* first (a rough "how much room is left" ranking); it is not fine for deciding two nodes
+	// are the same node, which is what equivalentState below is for.
+	leftover := func(r rank, node, nodeKey string) (int64, int64) {
+		var accelerators, resources int64
+		if r.shape.AcceleratorCount > 0 {
+			accelerators = byNode[node][nodeKey] - r.shape.AcceleratorCount
+		}
+		for k, v := range nodeResources[node] {
+			resources += v - r.shape.Resources[k]
+		}
+		return accelerators, resources
+	}
+	// equivalentState is the exact post-placement state of a node, dimension by dimension. It is
+	// the key the interchangeability pruning below is allowed to use.
+	//
+	// The scalar sum from leftover must never be used for this. Memory and storage are both
+	// byte-valued and of the same magnitude, so a node with 2Gi of memory and no disk and a node
+	// with no memory and 2Gi of disk produce the identical sum — the pruning then discarded one of
+	// them as a duplicate of the other and lost every assignment that needed the discarded one,
+	// reporting a placeable job as not fitting.
+	equivalentState := func(r rank, node, nodeKey string) string {
+		dimensions := make([]string, 0, len(nodeResources[node]))
+		for k := range nodeResources[node] {
+			dimensions = append(dimensions, k)
+		}
+		sort.Strings(dimensions)
+		var b strings.Builder
+		if r.shape.AcceleratorCount > 0 {
+			fmt.Fprintf(&b, "a=%d;", byNode[node][nodeKey]-r.shape.AcceleratorCount)
+		}
+		for _, k := range dimensions {
+			fmt.Fprintf(&b, "%s=%d;", k, nodeResources[node][k]-r.shape.Resources[k])
+		}
+		return b.String()
+	}
+
+	var place func(i int) bool
+	place = func(i int) bool {
+		if i == len(ranks) {
+			return true
+		}
+		r := ranks[i]
+		type candidate struct {
+			node, key string
+			accLeft   int64
+			resLeft   int64
+			state     string
+		}
+		candidates := make([]candidate, 0, len(r.nodes))
+		for _, node := range r.nodes {
+			nodeKey, ok := nodeFits(r, node)
+			if !ok {
+				continue
+			}
+			accLeft, resLeft := leftover(r, node, nodeKey)
+			candidates = append(candidates, candidate{node: node, key: nodeKey, accLeft: accLeft, resLeft: resLeft, state: equivalentState(r, node, nodeKey)})
+		}
+		sort.SliceStable(candidates, func(a, b int) bool {
+			if candidates[a].accLeft != candidates[b].accLeft {
+				return candidates[a].accLeft < candidates[b].accLeft
+			}
+			return candidates[a].resLeft < candidates[b].resLeft
+		})
+		// Two nodes that would be left in the same state are interchangeable for this rank, and
+		// for every rank after it. Retrying the same failed subtree from an equivalent node is
+		// what turns a homogeneous cluster into an exponential search.
+		tried := make(map[string]bool)
+		for _, c := range candidates {
+			if tried[c.state] {
+				continue
+			}
+			tried[c.state] = true
+			if budget <= 0 {
+				return false
+			}
+			budget--
+			if r.shape.AcceleratorCount > 0 {
+				byNode[c.node][c.key] -= r.shape.AcceleratorCount
+			}
+			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
+			used[r.job][c.node] = true
+			plan[i] = rankAssignment{job: r.job, shape: r.shape, node: c.node, key: c.key}
+			if place(i + 1) {
+				return true
+			}
+			used[r.job][c.node] = false
+			addNodeResources(nodeResources[c.node], r.shape.Resources)
+			if r.shape.AcceleratorCount > 0 {
+				byNode[c.node][c.key] += r.shape.AcceleratorCount
+			}
+			if budget <= 0 {
+				return false
+			}
+		}
+		return false
+	}
+	if !place(0) {
+		return nil, false
+	}
+	return plan, true
+}
+
+func shapeResourceTotal(shape domain.NodeShape) int64 {
+	var total int64
+	for _, amount := range shape.Resources {
+		total += amount
+	}
+	return total
+}
+
+func addNodeResources(available, used map[string]int64) {
+	for key, amount := range used {
+		available[key] += amount
+	}
 }
 
 // qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels.
@@ -871,7 +1099,7 @@ func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[stri
 func hardestNodeShape(exp *domain.Experiment) domain.NodeShape {
 	var hardest domain.NodeShape
 	var hardestTotal int64
-	for _, shape := range exp.Job.NodeShapes() {
+	for _, shape := range exp.NodeShapes() {
 		var total int64
 		for _, amount := range shape.Resources {
 			total += amount
@@ -908,52 +1136,105 @@ func subtractNodeResources(available, used map[string]int64) {
 	}
 }
 
-// addNodeResourceShortfall folds in what the *least* deficient qualifying node still lacks in the
-// fungible dimensions. Least deficient because covering that node covers the job: the shortage is
-// what has to be freed somewhere, not everywhere.
+// addNodeResourceShortfall folds in what the fungible dimensions still lack once the job's ranks
+// are laid out over the qualifying nodes. It walks the ranks hardest-first, consuming each node it
+// places one on, and reports the *least* deficient node for the first rank that finds no host —
+// least deficient because covering that one node lets that rank land, which is what has to be
+// freed somewhere rather than everywhere.
+//
+// The walk has to consume capacity as it goes, because a job's ranks compete with each other. Only
+// asking whether some node could host one rank called a job satisfied whenever a single node had
+// room, even when the job needed several such nodes and the cluster had one: two ranks wanting 2Gi
+// of disk apiece on a cluster holding 4Gi spread as 1+1+2 passes the cluster-level check, cannot
+// be placed, and was reported as needing nothing at all — leaving preemption with no vector to
+// cover and the disbalance evictor with no deficit to explain, so the job sat queued forever while
+// the scheduler said it wanted nothing.
 func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) {
-	hardest := hardestNodeShape(exp)
-	needed := hardest.Resources
-	if len(needed) == 0 {
+	shapes := exp.NodeShapes()
+	if len(shapes) == 0 {
 		return
 	}
-	key := strings.ToLower(string(exp.AcceleratorType))
-	perRank := hardest.AcceleratorCount
+	// Hardest first, mirroring planPlacement: the rank with the fewest possible hosts is laid down
+	// while the most nodes are still free, so a deficit reported here is one the real search would
+	// also have hit rather than an artefact of an unlucky order.
+	sort.SliceStable(shapes, func(a, b int) bool {
+		if shapes[a].AcceleratorCount != shapes[b].AcceleratorCount {
+			return shapes[a].AcceleratorCount > shapes[b].AcceleratorCount
+		}
+		return shapeResourceTotal(shapes[a]) > shapeResourceTotal(shapes[b])
+	})
 
-	var best map[string]int64
-	var bestTotal int64
-	for node := range nodeResources {
-		if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			continue
-		}
-		// Only nodes that could host a rank's accelerators are candidates; where the accelerators
-		// themselves are missing, the per-node accelerator shortfall below already says so.
-		if perRank > 0 && foldLookup(byNode[node], key) < perRank {
-			continue
-		}
-		deficit := map[string]int64{}
-		var total int64
-		for resource, need := range needed {
-			if short := need - nodeResources[node][resource]; short > 0 {
-				deficit[resource] = short
-				total += short
+	// Clones: this is a diagnostic pass over the tick's live capacity maps and must not disturb
+	// them for the admission decisions that follow.
+	accelerators := cloneNodeCapacity(byNode)
+	resources := cloneNodeCapacity(nodeResources)
+	key := strings.ToLower(string(exp.AcceleratorType))
+	distinct := requiresDistinctHosts(exp)
+	occupied := map[string]bool{}
+
+	nodes := make([]string, 0, len(resources))
+	for node := range resources {
+		nodes = append(nodes, node)
+	}
+	sort.Strings(nodes) // deterministic reporting across ticks
+
+	for _, shape := range shapes {
+		var bestDeficit map[string]int64
+		var bestTotal int64
+		placed := ""
+
+		for _, node := range nodes {
+			if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+				continue
+			}
+			if distinct && occupied[node] {
+				continue
+			}
+			// Only nodes that could host this rank's accelerators are candidates; where the
+			// accelerators themselves are missing, the per-node accelerator shortfall reported by
+			// preemptionShortfall already says so.
+			if shape.AcceleratorCount > 0 && foldLookup(accelerators[node], key) < shape.AcceleratorCount {
+				continue
+			}
+			deficit := map[string]int64{}
+			var total int64
+			for resource, need := range shape.Resources {
+				if short := need - resources[node][resource]; short > 0 {
+					deficit[resource] = short
+					total += short
+				}
+			}
+			if total == 0 {
+				placed = node
+				break
+			}
+			if bestDeficit == nil || total < bestTotal {
+				bestDeficit, bestTotal = deficit, total
 			}
 		}
-		if best == nil || total < bestTotal {
-			best, bestTotal = deficit, total
-		}
-		if bestTotal == 0 {
-			return // some qualifying node already has room; nothing is short
-		}
-	}
-	for resource, short := range best {
-		kind, ok := nodeResourceKind(resource)
-		if !ok {
+
+		if placed != "" {
+			if shape.AcceleratorCount > 0 {
+				nodeKey := foldMatchingKey(accelerators[placed], key)
+				accelerators[placed][nodeKey] -= shape.AcceleratorCount
+			}
+			subtractNodeResources(resources[placed], shape.Resources)
+			occupied[placed] = true
 			continue
 		}
-		if k := (domain.ResourceKey{Kind: kind}); out[k] < short {
-			out[k] = short
+
+		// This rank has nowhere to go. Report what the closest node lacks and stop: freeing that
+		// much lets this rank land, and a later tick re-measures whatever remains.
+		for resource, short := range bestDeficit {
+			kind, ok := nodeResourceKind(resource)
+			if !ok {
+				continue
+			}
+			if k := (domain.ResourceKey{Kind: kind}); out[k] < short {
+				out[k] = short
+			}
 		}
+		return
 	}
 }
 

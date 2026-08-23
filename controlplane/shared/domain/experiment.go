@@ -25,6 +25,14 @@ type Experiment struct {
 	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the
 	// billing/admission-facing canonical values derived from it once at submission time.
 	Job JobSpec `json:"job"`
+	// ResolvedJob is the durably-persisted literal resolution of any MaxResourceSentinel ("max")
+	// value in Job's cpu/memory/storage, written once at admission onto the specific cluster the
+	// job landed on. Nil until admitted (or for a job with no "max" fields to resolve — see
+	// admission's write path). Job itself is NEVER rewritten, so a GET always shows exactly what
+	// was submitted; every downstream consumer that needs the runnable/executable values (cost
+	// estimation, BuildJobs, Footprint, NodeShapes) must call EffectiveJob() instead of reading
+	// Job directly.
+	ResolvedJob *JobSpec `json:"resolved_job,omitempty"`
 	// HypothesisID references a row registered via POST /hypotheses. Required: every
 	// experiment must test a specific, previously-registered hypothesis, not free text ad hoc.
 	HypothesisID string `json:"hypothesis_id"`
@@ -32,23 +40,18 @@ type Experiment struct {
 	Objective    string `json:"objective"`
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
-	Theory                 string          `json:"theory,omitempty"`
-	AcceleratorType        AcceleratorType `json:"accelerator_type"`
-	AcceleratorCount       int             `json:"accelerator_count"`
-	EstimatedDurationHours float64         `json:"estimated_duration_hours"`
-	EstimatedCostAccH      float64         `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
-	// EstimatedCPUCoreHours/EstimatedRAMGBHours/EstimatedStorageGBHours mirror EstimatedCostAccH
-	// for the 3 additional dimensions — zero when the platform experiment doesn't track it.
-	EstimatedCPUCoreHours   float64          `json:"estimated_cpu_core_hours,omitempty"`
-	EstimatedRAMGBHours     float64          `json:"estimated_ram_gb_hours,omitempty"`
-	EstimatedStorageGBHours float64          `json:"estimated_storage_gb_hours,omitempty"`
-	CapacityTier            CapacityTier     `json:"capacity_tier"`
-	NoveltyScore            float64          `json:"novelty_score,omitempty"` // computed at admission; advisory only
-	PriorityScore           float64          `json:"priority_score"`
-	Status                  ExperimentStatus `json:"status"`
-	QueuedAt                *time.Time       `json:"queued_at,omitempty"`
-	SubmittedAt             *time.Time       `json:"submitted_at,omitempty"`
-	EvictionReason          string           `json:"eviction_reason,omitempty"`
+	Theory                 string           `json:"theory,omitempty"`
+	AcceleratorType        AcceleratorType  `json:"accelerator_type"`
+	AcceleratorCount       int              `json:"accelerator_count"`
+	EstimatedDurationHours float64          `json:"estimated_duration_hours"`
+	EstimatedCostAccH      float64          `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
+	CapacityTier           CapacityTier     `json:"capacity_tier"`
+	NoveltyScore           float64          `json:"novelty_score,omitempty"` // computed at admission; advisory only
+	PriorityScore          float64          `json:"priority_score"`
+	Status                 ExperimentStatus `json:"status"`
+	QueuedAt               *time.Time       `json:"queued_at,omitempty"`
+	SubmittedAt            *time.Time       `json:"submitted_at,omitempty"`
+	EvictionReason         string           `json:"eviction_reason,omitempty"`
 	// NotAdmittedReason is the scheduler's current decision explaining why a QUEUED job was
 	// skipped. Overwritten each decision and cleared on admission; not tick history.
 	NotAdmittedReason string `json:"not_admitted_reason,omitempty"`
@@ -86,22 +89,32 @@ type Experiment struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+// EffectiveJob returns e.Job as it should actually be run: e's own ResolvedJob if admission has
+// already resolved one, otherwise e.Job verbatim (a never-admitted experiment, or one with
+// nothing to resolve). Every consumer of the runnable/executable job shape (cost estimation,
+// BuildJobs, Footprint, NodeShapes) must read this instead of e.Job directly, so a "max" sentinel
+// resolved at admission is honored everywhere the job actually runs while GET still shows exactly
+// what was submitted.
+func (e *Experiment) EffectiveJob() JobSpec {
+	if e.ResolvedJob != nil {
+		return *e.ResolvedJob
+	}
+	return e.Job
+}
+
+// NodeShapes is the placement view of e's EffectiveJob — see JobSpec.NodeShapes. It is on
+// Experiment, not JobSpec, specifically so a resolved "max" value is reflected in what the
+// scheduler thinks the job's footprint actually is, never the original possibly-"max" spec.
+func (e *Experiment) NodeShapes() []NodeShape {
+	return e.EffectiveJob().NodeShapes()
+}
+
 // RetriesUsed is how much of the agent's max_retries allowance this experiment has spent: every
 // attempt so far minus the ones the environment, not the agent, ended. This is the figure
 // RequeueForRetry compares against max_retries, computed the same way in SQL so the read and the
 // write cannot disagree.
 func (e *Experiment) RetriesUsed() int {
 	return e.AttemptCount - e.InfraRequeueCount
-}
-
-// RequestedCPUCores returns CPU cores requested, derived from estimated_cpu_core_hours /
-// estimated_duration_hours. Zero for accelerator jobs or unset duration. Used by the admission
-// loop's live CPU-capacity check.
-func (e *Experiment) RequestedCPUCores() float64 {
-	if e.EstimatedDurationHours <= 0 {
-		return 0
-	}
-	return e.EstimatedCPUCoreHours / e.EstimatedDurationHours
 }
 
 // RatedCost is the single formula settlement and live running-cost accounting both use to bill
@@ -240,4 +253,13 @@ func ValidSortField(sort string, allowed map[string]string) bool {
 	}
 	_, ok := allowed[strings.TrimPrefix(sort, "-")]
 	return ok
+}
+
+// Placement is where an experiment's workload is supposed to be running and which generation of
+// it is current — the pair a cluster's status report is fenced against. Both halves must come
+// from one row read: judged against a cluster from one read and an attempt from another, a report
+// can be accepted for a generation that no longer exists.
+type Placement struct {
+	ClusterName  string
+	AttemptCount int
 }

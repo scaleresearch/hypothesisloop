@@ -19,15 +19,14 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
 	var acceleratorType, capacityTier, status string
 	var evictionReason, notAdmittedReason *string
-	var jobSpec []byte
+	var jobSpec, resolvedJobSpec []byte
 
 	if err := row.Scan(
 		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ProjectID, &exp.ClusterName,
-		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec,
+		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec, &resolvedJobSpec,
 		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory,
 		&acceleratorType, &exp.AcceleratorCount,
 		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
-		&exp.EstimatedCPUCoreHours, &exp.EstimatedRAMGBHours, &exp.EstimatedStorageGBHours,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
 		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount,
@@ -40,6 +39,13 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		if err := json.Unmarshal(jobSpec, &exp.Job); err != nil {
 			return nil, fmt.Errorf("scan experiment: unmarshal job spec: %w", err)
 		}
+	}
+	if len(resolvedJobSpec) > 0 {
+		var resolved domain.JobSpec
+		if err := json.Unmarshal(resolvedJobSpec, &resolved); err != nil {
+			return nil, fmt.Errorf("scan experiment: unmarshal resolved job spec: %w", err)
+		}
+		exp.ResolvedJob = &resolved
 	}
 	exp.AcceleratorType = domain.AcceleratorType(acceleratorType)
 	// Recovering the per-node count by dividing the stored total works only because an ungrouped

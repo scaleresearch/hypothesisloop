@@ -18,6 +18,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -492,6 +493,65 @@ func (c *JobWorkloadClient) GetLiveNodeResourceCapacity(ctx context.Context) (ma
 	return out, nil
 }
 
+// GetNodeTotalCapacity reports each schedulable node's capacity available to PLATFORM-scheduled
+// jobs: node.Status.Allocatable minus the requests of every currently-resident pod that is NOT a
+// HypothesisLoop-managed job pod (workloadkeys.ManagedBy != workloadkeys.ManagedByValue) —
+// DaemonSets, CNI, monitoring, and anything else permanently resident on the node. HypothesisLoop
+// never scheduled that capacity away and will never reclaim it, so counting it as available would
+// double-count capacity that is permanently gone.
+//
+// Platform job pods themselves are deliberately NOT subtracted, unlike GetLiveNodeResourceCapacity's
+// free-capacity view: this is the stable per-node denominator fair-share math (domain.FairShare)
+// needs, and it must report the same number whether or not a platform job happens to be running
+// there right now — a platform job coming and going must not move its own node's fair-share base.
+func (c *JobWorkloadClient) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dimensions := []struct {
+		key      string
+		name     corev1.ResourceName
+		quantity func(resource.Quantity) int64
+	}{
+		{domain.NodeResourceCPUMillicores, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
+		{domain.NodeResourceMemoryBytes, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() }},
+		{domain.NodeResourceStorageBytes, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() }},
+	}
+	out := make(map[string]map[string]int64, len(nodes))
+	for _, n := range nodes {
+		total := make(map[string]int64, len(dimensions))
+		for _, d := range dimensions {
+			var allocatable int64
+			if q, ok := n.Status.Allocatable[d.name]; ok {
+				allocatable = d.quantity(q)
+			}
+			var nonPlatformRequested int64
+			for _, p := range pods {
+				if p.Spec.NodeName != n.Name {
+					continue
+				}
+				if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+					continue
+				}
+				if p.Labels[workloadkeys.ManagedBy] == workloadkeys.ManagedByValue {
+					continue // a platform job pod's own request is not subtracted — see doc comment
+				}
+				for _, ctr := range p.Spec.Containers {
+					if q, ok := ctr.Resources.Requests[d.name]; ok {
+						nonPlatformRequested += d.quantity(q)
+					}
+				}
+			}
+			if total[d.key] = allocatable - nonPlatformRequested; total[d.key] < 0 {
+				total[d.key] = 0
+			}
+		}
+		out[n.Name] = total
+	}
+	return out, nil
+}
+
 // GetLiveAcceleratorCapacitySnapshot returns aggregate and per-node actual accelerator state
 // from one Kubernetes node/pod listing (DRA inventory listed once per configured driver), so
 // the reconcile exchange reports one internally consistent snapshot without duplicate reads.
@@ -701,12 +761,13 @@ func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID
 }
 
 func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error) {
-	phase, _, err := c.PollJobPhaseAndUID(ctx, experimentID)
-	return phase, err
+	status, err := c.PollJobStatus(ctx, experimentID)
+	return status.Phase, err
 }
 
-// PollJobPhaseAndUID reports the phase of the experiment's whole workload and a UID that changes
-// whenever any part of it is recreated ("" if nothing exists). One List instead of a Get per
+// PollJobStatus reports the phase of the experiment's whole workload, a UID that changes
+// whenever any part of it is recreated ("" if nothing exists), and the generation it was created
+// for. One List instead of a Get per
 // group: two polls a few hundred ms apart could each observe "Active>0" across a
 // preempt-then-recreate cycle, making an old Job's disappearance and a new Job's appearance look
 // like "no change" to a phase-only comparison. Comparing UID alongside phase (see cluster-agent's
@@ -726,13 +787,22 @@ func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID strin
 //   - any group Running -> Running. Some of the job is executing, so it is executing (and
 //     billable) even while another group is still pulling its image.
 //   - otherwise Pending.
-func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID string) (workload.JobPhase, string, error) {
+func (c *JobWorkloadClient) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	jobs, err := c.managedJobsFor(ctx, experimentID)
 	if err != nil {
-		return workload.JobPhasePending, "", err
+		return agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}, err
 	}
 	if len(jobs) == 0 {
-		return workload.JobPhaseGone, "", nil
+		return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
+	}
+	// managedJobsFor is one experiment's Jobs, so every group carries the same attempt; the
+	// first is the workload's. Unparseable or absent reads as unknown rather than as a number:
+	// the control plane fences on it, and a wrong number is worse than no number.
+	attempt := workload.AttemptUnknown
+	if raw, ok := jobs[0].Labels[workloadkeys.Attempt]; ok {
+		if n, err := strconv.Atoi(raw); err == nil {
+			attempt = n
+		}
 	}
 	// Sorted by name (managedJobsFor), so the composite is stable across polls and changes as
 	// soon as any one group's Job is replaced.
@@ -740,13 +810,14 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 	for i := range jobs {
 		uids = append(uids, string(jobs[i].UID))
 	}
-	uid := strings.Join(uids, ",")
+	observed := agentexec.JobStatus{UID: strings.Join(uids, ","), Attempt: attempt}
 
 	succeeded, running := 0, 0
 	for i := range jobs {
 		switch jobPhase(&jobs[i]) {
 		case workload.JobPhaseFailed:
-			return workload.JobPhaseFailed, uid, nil
+			observed.Phase = workload.JobPhaseFailed
+			return observed, nil
 		case workload.JobPhaseSucceeded:
 			succeeded++
 		case workload.JobPhaseRunning:
@@ -755,12 +826,13 @@ func (c *JobWorkloadClient) PollJobPhaseAndUID(ctx context.Context, experimentID
 	}
 	switch {
 	case succeeded == len(jobs):
-		return workload.JobPhaseSucceeded, uid, nil
+		observed.Phase = workload.JobPhaseSucceeded
 	case running > 0:
-		return workload.JobPhaseRunning, uid, nil
+		observed.Phase = workload.JobPhaseRunning
 	default:
-		return workload.JobPhasePending, uid, nil
+		observed.Phase = workload.JobPhasePending
 	}
+	return observed, nil
 }
 
 // jobPhase maps one native Job to a platform phase. Never Gone — a Job that was handed to this

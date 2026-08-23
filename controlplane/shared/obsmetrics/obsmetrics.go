@@ -6,6 +6,8 @@ package obsmetrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 var (
@@ -40,6 +42,14 @@ var (
 		Help: "Count of SUBMITTED/ADMITTED/RUNNING experiments with no recent cluster job report, from the last GC sweep pass.",
 	})
 )
+
+// CountEviction is the only way to increment EvictedExperimentsTotal. Reasons carry a per-job
+// detail in production (domain.EvictionReason.WithDetail — the image that could not be pulled, the
+// node, the numbers), and labelling with that detail mints a time series per eviction, which
+// eventually kills the scrape. Code() folds it back to the constant.
+func CountEviction(reason domain.EvictionReason) {
+	EvictedExperimentsTotal.WithLabelValues(string(reason.Code())).Inc()
+}
 
 func init() {
 	prometheus.MustRegister(EvictedExperimentsTotal, AdmissionTickDuration, AdmissionTickResultsTotal,

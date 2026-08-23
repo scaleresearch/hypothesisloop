@@ -2,7 +2,7 @@
 # Provisions fake-accelerator container nodes (same as localdev/k3s-macos/dev-nodes-up.sh).
 # Does NOT attach tt-quietbox as a general worker — it hosts the control plane and cluster-agent,
 # and sharing it with test workloads starves those under load. tt-quietbox stays reserved for
-# tests/scenarios/tenstorrent-hardware.sh, which attaches/detaches it itself.
+# tests/e2e/test_tenstorrent_hardware.py, which attaches/detaches it itself.
 # NODE_PODMAN=sudo podman: rootless podman can't create nested containerd cgroups for pods on
 # these nodes; see lib_create_node's comment in node.sh.
 set -euo pipefail
@@ -46,7 +46,16 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT}" "${name}"
 
-  lib_import_images "${name}" hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload
+  # node-agent/cluster-agent/workload all run with imagePullPolicy: Never for local dev, so each
+  # node's own containerd needs the image pushed in directly -- the registries.yaml mirror
+  # lib_create_node wrote only matters to pods that actually pull. Run `make images` beforehand so
+  # the local store has current builds to import. This list is every image the e2e suite's own
+  # scenarios reference (not every hypothesisloop-* image on the host -- some of those are
+  # multi-GB experiment workloads unrelated to e2e and would blow up import time/disk per node).
+  lib_import_images "${name}" \
+    localhost/hypothesisloop-node-agent:latest \
+    localhost/hypothesisloop-cluster-agent:latest \
+    localhost/hypothesisloop-workload:latest
   bash "${DIR}/../lib/fake-gpu-node.sh" "${CONTEXT}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
 done
 

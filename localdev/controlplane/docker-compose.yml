@@ -1,0 +1,130 @@
+# Local control-plane stack: Postgres, GreptimeDB, MinIO, control-service, metrics-service.
+# Brought up via `make controlplane-up` (podman compose) — nothing here is
+# podman-specific; `docker compose -f this-file up` works identically).
+#
+# Host ports published below are load-bearing, not cosmetic: a k3s job pod (runtime/k8s), the
+# cluster-agent/node-agent bundle, `hl` (cli/), the UI dev server, and every test scenario all
+# reach this stack the same way production would reach a real deployment — by one HTTP base URL,
+# configured externally (API_URL / NEXT_PUBLIC_API_URL / HYPOTHESISLOOP_CONTROL_PLANE_URL), never
+# hardcoded. Change a published port here and every one of those needs the same change. Do not
+# rename a service either: controlplane/settings/hypothesisloop.yaml's metrics_db_url is the
+# literal DNS name "greptimedb" (compose's own per-service DNS resolves it — no /etc/hosts hack
+# needed, unlike the single-pod model this replaces), so a service rename breaks config that is
+# otherwise identical between this stack and a real cluster's.
+
+services:
+  registry:
+    image: docker.io/library/registry:2
+    restart: unless-stopped
+    environment:
+      # Required for registry-prune.sh's tag DELETE calls to take effect -- without this the
+      # registry accepts the DELETE (204) but never removes the manifest.
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hypothesisloop
+      POSTGRES_USER: hypothesisloop
+      POSTGRES_PASSWORD: hypothesisloop
+    ports:
+      # Host port 5433, not 5432: leaves a real local Postgres (if the host has one) alone.
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Demo-seed only (agent-alice/agent-bob, one sample platform experiment) — runs once, at
+      # Postgres's own first boot against an empty volume, which is BEFORE control-service ever
+      # starts. Its `\i /schema/schema.sql` include is what lets its INSERTs find real tables at
+      # that moment; the actual migration path for every later boot is control-service's own
+      # db.ApplySchema (see controlplane/shared/db/migrate.go) baked into its image, not this file.
+      - ../../localdev/controlplane/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../../controlplane/shared/db/schema.sql:/schema/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypothesisloop -d hypothesisloop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  greptimedb:
+    image: docker.io/greptime/greptimedb:latest
+    restart: unless-stopped
+    command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--rpc-bind-addr=0.0.0.0:4001"]
+    ports:
+      - "4010:4000"
+      - "4001:4001"
+    volumes:
+      - greptimedb-data:/tmp/greptimedb-data
+
+  minio:
+    image: docker.io/minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--address", "0.0.0.0:9000"]
+    environment:
+      MINIO_ROOT_USER: hypothesisloop
+      MINIO_ROOT_PASSWORD: hypothesisloop
+    ports:
+      - "9000:9000"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio-init:
+    image: docker.io/minio/minio:latest
+    entrypoint: ["sh", "-c"]
+    command:
+      - "mc alias set hl http://minio:9000 hypothesisloop hypothesisloop && mc mb --ignore-existing hl/hypothesisloop-data"
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  control-service:
+    image: localhost:5000/hypothesisloop-control-service:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
+    ports:
+      - "8081:8081"
+    volumes:
+      # Rendered by `make render-settings` (host-LAN data_store.endpoint substituted in) —
+      # same file both services mount, same as the pod model this replaces.
+      - ../../controlplane/settings/.hypothesisloop.rendered.yaml:/settings/hypothesisloop.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  metrics-service:
+    image: localhost:5000/hypothesisloop-metrics-service:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
+    ports:
+      - "8084:8084"
+    volumes:
+      - ../../controlplane/settings/.hypothesisloop.rendered.yaml:/settings/hypothesisloop.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+volumes:
+  registry-data:
+    name: hypothesisloop-registry-data
+  postgres-data:
+    name: hypothesisloop-postgres-data
+  greptimedb-data:
+    name: hypothesisloop-greptimedb-data
+  minio-data:
+    name: hypothesisloop-minio-data

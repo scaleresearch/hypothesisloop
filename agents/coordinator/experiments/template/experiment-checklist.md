@@ -13,7 +13,7 @@ input like a dataset/corpus/fixture set from scratch). An agent's entire attenti
 the objective — forming and testing hypotheses — never to plumbing, environment archaeology, or
 working around a gap the experiment definition left for it to discover.
 
-## 1. Zero-setup start: `experiment.md` + `seed/`
+## 1. Zero-setup start: `experiment.md` + three yaml files + `seed/`
 
 An agent that spends its first hour building a harness or discovering a shape isn't competing,
 it's re-deriving what every prior agent already derived. An experiment definition needs:
@@ -22,6 +22,22 @@ it's re-deriving what every prior agent already derived. An experiment definitio
   (the system prompt is deliberately experiment-agnostic). It must be fully self-contained: objective,
   ranking metric(s) + how to report them, constraints, and where the pre-built tools live. If it's
   not in this block, no agent sees it.
+- Three checked-in yaml files, one per stage of the flow an agent (or the coordinator) drives
+  through `hl`, copied from `template/` and never hand-assembled in bash/curl:
+  - `experiment.yaml` — the `POST /platform-experiments` body (see `template/experiment.yaml` and
+    `controlplane/settings/examples/experiment.yaml` for the full DSL), submitted verbatim with
+    `hl platform-experiments create experiment.yaml` in setup.md step 2. Its `description` must be
+    `experiment.md`'s `EXPERIMENT DESCRIPTION` block, kept in sync the same way the live platform
+    experiment is (setup.md step 2's description-sync rule). Its `budget_accelerator_hours`/
+    `max_agents`/`starts_at` are filled in at spawn time (they depend on `NUM_AGENTS`/
+    `CHIPS_PER_AGENT`, decided then, not ahead of time) — the checked-in file carries
+    `REPLACE-WITH-...` placeholders for those.
+  - `hypothesis.yaml` — the `POST /hypotheses` body (see `template/hypothesis.yaml` and
+    `controlplane/settings/examples/hypothesis.yaml`), the seed an agent copies and fills in
+    before `hl hypothesis submit --file hypothesis.yaml` (system_prompt.md step 5).
+  - `seed/job.yaml` — the `POST /experiments` body (see below and
+    `controlplane/settings/examples/experiment-submission.yaml`), submitted with
+    `hl job submit --agent <id> job.yaml`.
 - `seed/` — working, hardware/environment-validated code an agent copies and adapts, not a spec
   it implements from scratch. If every agent independently reinvents the same measurement code,
   slightly differently, that costs real iteration time and makes results harder to compare
@@ -32,7 +48,9 @@ it's re-deriving what every prior agent already derived. An experiment definitio
   pin the agent needs to *read* to form hypotheses (a cloned framework repo, a pinned commit) —
   never in the shared base, or one experiment's pin bump silently changes what every other
   experiment's agent reads. An experiment with nothing extra to read can skip this file entirely
-  and run straight off the base image; it doesn't need an overlay just to exist.
+  and run straight off the base image; it doesn't need an overlay just to exist. `git add`/commit
+  every file it `COPY`s — an untracked file builds fine in your own working tree but is invisible
+  to a different agent's own git worktree.
 - A `BASELINE` block inside the `EXPERIMENT DESCRIPTION`, so an agent's first job is a
   confirmation and not a fresh discovery. The control an experiment measures against is a
   property of the program, not an object the platform owns — nothing in the domain encodes it,
@@ -185,8 +203,8 @@ genuine improvement (or vice versa).
 ## Using this checklist
 
 When starting a new experiment definition, work through items 1-13 against its own `experiment.md`,
-`seed/` and `Dockerfile.experimentator` — each item should have a concrete answer, not just "not
-applicable." If a new problem
+`experiment.yaml`, `seed/` and `Dockerfile.experimentator` — each item should have a concrete
+answer, not just "not applicable." If a new problem
 shows up in a live run that this checklist doesn't already cover, add it here as a new item (with
 the failure mode it prevents, like the ones above) before building the fix into the experiment
 definition — that keeps the next experiment definition benefiting from it too, not just this one.

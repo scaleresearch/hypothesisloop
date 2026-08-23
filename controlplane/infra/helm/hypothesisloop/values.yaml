@@ -1,0 +1,105 @@
+# Default values for the hypothesisloop chart.
+#
+# Platform policy (accelerator prices, quota, stage ladder, scheduler timing) is NOT
+# duplicated here — it lives in one place, controlplane/settings/hypothesisloop.yaml,
+# staged into files/hypothesisloop.yaml by `make helm-prepare` and rendered verbatim into
+# the ConfigMap. This file only overrides the handful of fields that are genuinely
+# environment-specific (the object store endpoint) and the deployment knobs Helm exists
+# to manage (images, replicas, resources, secrets).
+
+namespace:
+  create: true
+  name: hypothesisloop
+
+images:
+  # Built and pushed with `make helm-push` (from the repo root) to a real registry every node in
+  # the target cluster can already reach -- provisioning that reachability is the cluster
+  # provisioner's job, same division of responsibility as runtime/k8s/infra/install.sh's
+  # REGISTRY_URL. No default: a prod registry host is never a safe guess, so rendering fails
+  # fast without one instead of silently defaulting to a dev-only address.
+  registry: ""
+  pullPolicy: IfNotPresent
+  # No default either: `make helm-push` computes this as the git SHA it just built and pushed
+  # (content-addressed, so IfNotPresent never risks running stale bytes under a reused tag) --
+  # supply the same value here that it printed.
+  tag: ""
+
+postgres:
+  image: postgres:16-alpine
+  user: hypothesisloop
+  password: hypothesisloop
+  database: hypothesisloop
+  storage: 5Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  # A managed Postgres instance (RDS, Cloud SQL, etc.) instead of the StatefulSet this chart
+  # would otherwise deploy. Only one of url/existingSecret is needed; existingSecret takes an
+  # already-existing Secret name + key so the connection string (which usually carries a
+  # password) never has to sit in plain values.yaml.
+  external:
+    enabled: false
+    url: ""
+    existingSecret: ""
+    existingSecretKey: "url"
+
+greptimedb:
+  image: greptime/greptimedb:latest
+  storage: 5Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  # A managed metrics store (e.g. GreptimeDB Cloud) instead of the StatefulSet this chart would
+  # otherwise deploy. Same url/existingSecret choice as postgres.external above.
+  external:
+    enabled: false
+    url: ""
+    existingSecret: ""
+    existingSecretKey: "url"
+
+controlService:
+  replicas: 1
+  port: 8081
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  service:
+    type: ClusterIP
+
+metricsService:
+  replicas: 1
+  port: 8084
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Durable-data object store (S3-compatible). Not deployed by this chart — addressed like
+# any other external dependency, same as the platform's own design (see
+# controlplane/settings/hypothesisloop.yaml's data_store comment: the platform is not in
+# the data path). Point this at a real bucket before installing.
+objectStore:
+  endpoint: "http://REPLACE-WITH-HOST-LAN-IP:9000"
+
+# The cluster-agent/node-agent bundle (runs training Jobs on this cluster's own nodes).
+# Disabled by default: a cluster may already have this bundle installed via
+# runtime/k8s/infra/install.sh, and installing both would double-register the same
+# cluster with the control plane. Enable only on a cluster that has neither.
+clusterAgentBundle:
+  enabled: false
+  clusterName: local
+  apiURL: "http://control-service:8081"
+  # node-agent POSTs to $HYPOTHESISLOOP_CONTROL_PLANE_URL/internal/node-metrics, which is served
+  # only by metrics-service (controlplane/cmd/metrics-service/main.go), never control-service —
+  # despite the env var's name, this must point at metrics-service or every push 404s silently.
+  metricsURL: "http://metrics-service:8084"
+  clusterAgent:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { cpu: 300m, memory: 64Mi }
+  nodeAgent:
+    pushIntervalMs: 2000
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { cpu: 250m, memory: 32Mi }

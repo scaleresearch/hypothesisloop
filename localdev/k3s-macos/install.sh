@@ -9,6 +9,27 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 
+# Same host-LAN-IP detection Makefile's render-settings uses for data_store.endpoint -- one
+# heuristic, reused everywhere an address for this host needs to reach into a VM/container.
+# k3s's own server needs this too now: it pulls workload images from the local registry
+# (docker-compose.yml) over this address, not localhost, since the VM/native k3s process is not
+# the same network namespace as the host running podman compose.
+REGISTRY_HOST_IP="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | \
+  grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1 | cut -d/ -f1)"
+if [[ -z "${REGISTRY_HOST_IP}" ]]; then
+  echo "ERROR: could not detect a host LAN address for the local registry." >&2
+  exit 1
+fi
+REGISTRIES_YAML="mirrors:
+  \"${REGISTRY_HOST_IP}:5000\":
+    endpoint:
+      - \"http://${REGISTRY_HOST_IP}:5000\"
+configs:
+  \"${REGISTRY_HOST_IP}:5000\":
+    tls:
+      insecure_skip_verify: true
+"
+
 # Pinned to a k3s release bundling k8s 1.36, which introduced native (alpha) gang scheduling —
 # the Job controller auto-creates Workload/PodGroup objects and the in-tree scheduler admits/
 # binds the whole gang atomically for parallelism==completions Indexed Jobs, which is exactly
@@ -63,6 +84,14 @@ if [[ "$(uname)" == "Darwin" ]]; then
       -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
       core@localhost "$@"
   }
+
+  # base64-piped rather than interpolated into the remote command string: this file's content
+  # (colons, quotes) would otherwise need a second layer of shell-quoting through ssh, the exact
+  # trap K3S_KUBELET_IMAGE_GC_FLAGS's own escaping comment above warns about.
+  echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
+  REGISTRIES_YAML_B64="$(printf '%s' "${REGISTRIES_YAML}" | base64 | tr -d '\n')"
+  vm "sudo mkdir -p /etc/rancher/k3s && echo ${REGISTRIES_YAML_B64} | base64 -d | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null"
+  vm "sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true"
 
   if ! vm "test -f /usr/local/bin/k3s" || ! vm "/usr/local/bin/k3s --version" 2>/dev/null | grep -q "${K3S_VERSION}"; then
     echo "==> Installing/upgrading k3s to ${K3S_VERSION}..."
@@ -128,6 +157,11 @@ sys.stdout.write(re.sub(
 
 # ---- Linux: k3s native ------------------------------------------------------
 else
+  echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
+  sudo mkdir -p /etc/rancher/k3s
+  printf '%s' "${REGISTRIES_YAML}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
+  sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
+
   if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
     echo "==> Installing/upgrading k3s to ${K3S_VERSION}..."
     sudo systemctl stop k3s 2>/dev/null || true
@@ -160,13 +194,6 @@ sys.stdout.write(re.sub(
 " > "${HOME}/.kube/k3s-container.yaml"
   chmod 600 "${HOME}/.kube/k3s-container.yaml"
 
-  # Import workload images into k3s containerd (pre-built by `make images`).
-  for img in hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload; do
-    if podman image exists "${img}:latest" 2>/dev/null; then
-      echo "==> Importing ${img} into k3s..."
-      podman save "${img}:latest" | sudo k3s ctr images import -
-    fi
-  done
 fi
 
 # Wait for node registration then readiness (fresh installs: node object appears
@@ -183,20 +210,13 @@ source "${SCRIPT_DIR}/../lib/node.sh"
 
 # The control-plane node donates zero capacity to workloads by default — it never runs
 # training pods, but node-agent's DaemonSet tolerates every taint
-# (runtime/k8s/infra/node-agent-daemonset.yaml) so it still monitors this node. Import just that
-# image here; workload/cluster-agent images land on whatever nodes dev-nodes-up.sh attaches or
-# creates below.
+# (runtime/k8s/infra/node-agent-daemonset.yaml) so it still monitors this node. It pulls
+# hypothesisloop-node-agent from the registry (registries.yaml, written above) the same way
+# every other node does — nothing to import by hand any more.
 CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"
 lib_detach_node "${CONTEXT_NAME}" "${CONTROL_PLANE_NODE}"
-if [[ "$(uname)" == "Darwin" ]]; then
-  # On macOS k3s runs inside the podman VM; import workload images via stdin.
-  if podman image exists "hypothesisloop-node-agent:latest" 2>/dev/null; then
-    echo "==> Importing hypothesisloop-node-agent into k3s..."
-    podman save "hypothesisloop-node-agent:latest" \
-      | ssh -i "${SSH_KEY}" -p "${SSH_PORT}" -o StrictHostKeyChecking=no core@localhost \
-          "sudo k3s ctr images import -"
-  fi
-fi
+
+echo "${REGISTRY_HOST_IP}" > "${SCRIPT_DIR}/../.registry-host-ip"
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 kubectl --context "${CONTEXT_NAME}" get nodes
@@ -207,6 +227,7 @@ kubectl --context "${CONTEXT_NAME}" get nodes
 echo "==> Installing cluster-agent bundle onto local cluster..."
 STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
+  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG:-latest}" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 

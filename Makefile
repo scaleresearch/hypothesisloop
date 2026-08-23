@@ -1,6 +1,7 @@
-.PHONY: up down reset build test lint images check-experiment-seeds sparse-sdpa-workload-image \
-	experimentator-base-image experimentator-image \
-	controlplane-up controlplane-down controlplane-destroy \
+.PHONY: up down reset build test e2e-py lint images sparse-sdpa-workload-image \
+	experimentator-base-image experimentator-image check-clean-tree registry-up registry-prune \
+	helm-prepare helm-push helm-lint helm-template \
+	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down k3s-e2e \
 	full-stop full-start reload \
@@ -8,18 +9,82 @@
 	git-daemon-start git-daemon-stop git-daemon-status git-daemon-destroy git-daemon-test
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
-controlplane-up: images
-	bash controlplane/infra/podman.sh up
+COMPOSE_FILE := localdev/controlplane/docker-compose.yml
+RENDERED_SETTINGS := controlplane/settings/.hypothesisloop.rendered.yaml
+REGISTRY_HOST_IP_FILE := localdev/.registry-host-ip
+
+# In production REGISTRY names a real registry the operator provisioned and every cluster
+# node already has network access to (see runtime/k8s/infra/install.sh's REGISTRY_URL) --
+# this default is dev-only. TAG is the git SHA of the tree that was actually built: content-
+# addressed, so a manifest that pins one tag can never silently start running different bytes
+# under imagePullPolicy: IfNotPresent. REGISTRY_TLS_VERIFY=false only because the dev registry
+# in docker-compose.yml serves plain HTTP; a prod REGISTRY with real TLS overrides it to true.
+REGISTRY ?= localhost:5000
+GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null)
+TAG ?= $(GIT_SHA)
+REGISTRY_TLS_VERIFY ?= false
+
+# Refuses a dirty tree rather than tagging a build with an ambiguous `-dirty` suffix: a mutable
+# tag defeats the whole point of pinning DaemonSet/Deployment/Job manifests to a SHA, since two
+# builds from a dirty tree at different times could tag identically while differing in bytes.
+check-clean-tree:
+	@test -n "$(GIT_SHA)" || { echo "make: not a git repository -- can't compute an image TAG" >&2; exit 1; }
+	@git diff --quiet && git diff --cached --quiet || { \
+		echo "make: git tree is dirty -- commit or stash before building images (make images)." >&2; \
+		echo "  A tag built from a dirty tree can't be trusted to mean one fixed set of bytes." >&2; \
+		exit 1; \
+	}
+
+# data_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
+# REPLACE-WITH-HOST-LAN-IP placeholder rather than an address, because a k3s job pod has its own
+# network namespace and can't reach the host's loopback -- the real address is specific to
+# whichever machine runs this stack, and baking one host's address into a tracked file breaks it
+# for every other. This renders the real address in at start-up; the control plane rejects a
+# loopback endpoint outright, so a host where detection picks the wrong interface fails here,
+# not hours into a run with nothing saved.
+#
+# The same detected address is written to REGISTRY_HOST_IP_FILE for the local registry: a k3s
+# node container reaches the compose-published registry the same way it reaches the data store
+# -- over the host's LAN address, never localhost/127.0.0.1 -- and this must stay the one place
+# that detection happens (see localdev/lib/node.sh's registries.yaml comment).
+render-settings:
+	@host_ip=$$(ip -4 addr show 2>/dev/null | awk '/inet /{print $$2}' | \
+		grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1 | cut -d/ -f1); \
+	if [ -z "$$host_ip" ]; then \
+		echo "make render-settings: could not detect a host LAN address for data_store.endpoint." >&2; \
+		echo "  Set it by hand in controlplane/settings/hypothesisloop.yaml (see the comment there)." >&2; \
+		exit 1; \
+	fi; \
+	sed "s|REPLACE-WITH-HOST-LAN-IP|$$host_ip|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS); \
+	echo "$$host_ip" > $(REGISTRY_HOST_IP_FILE); \
+	echo "make render-settings: data_store.endpoint and registry host rendered against $$host_ip"
+
+registry-up:
+	podman compose -f $(COMPOSE_FILE) up -d registry
+	@until curl -fsS -o /dev/null http://localhost:5000/v2/; do sleep 1; done
+
+registry-prune:
+	bash localdev/controlplane/registry-prune.sh
+
+controlplane-up: registry-up render-settings images
+	TAG=$(TAG) podman compose -f $(COMPOSE_FILE) up -d
+	@until curl -fsS -o /dev/null http://localhost:8081/health; do sleep 1; done
+	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 
 # Stops and removes the control-plane containers but KEEPS the data volumes, so `down` + `up` is
 # always safe. To delete the data too, ask for it by name: `make controlplane-destroy`.
 controlplane-down:
-	bash controlplane/infra/podman.sh down
+	podman compose -f $(COMPOSE_FILE) down
 
-# Irreversible: deletes the postgres + GreptimeDB volumes (every platform experiment, experiment
-# record, metric and hypothesis). Prompts unless CONFIRM=--yes is passed.
+# Irreversible: deletes the postgres + GreptimeDB + MinIO volumes (every platform experiment,
+# experiment record, metric, hypothesis and stored checkpoint). Prompts unless CONFIRM=--yes.
 controlplane-destroy:
-	bash controlplane/infra/podman.sh destroy $(CONFIRM)
+	@if [ "$(CONFIRM)" != "--yes" ]; then \
+		echo "make controlplane-destroy: this DELETES ALL control-plane data. There is no backup and no undo." >&2; \
+		echo "  Re-run with CONFIRM=--yes to proceed." >&2; \
+		exit 1; \
+	fi
+	podman compose -f $(COMPOSE_FILE) down --volumes
 
 # Back-compat aliases for the old target names.
 up: controlplane-up
@@ -110,10 +175,14 @@ tt-down:
 tt-dev-nodes-up:
 	bash localdev/k3s-tenstorrent-qb2/dev-nodes-up.sh
 
-# Provisions the serving node, runs the portable e2e suite, detaches it — pass/fail either way.
-tt-hardware-image:
-	podman build -f tests/workloads/tenstorrent/Dockerfile.train -t localhost/hypothesisloop-tenstorrent-workload tests/workloads/tenstorrent/
-	podman save localhost/hypothesisloop-tenstorrent-workload:latest | sudo k3s ctr images import -
+# Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the tt-quietbox
+# k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
+# image; no more local save/import.
+tt-hardware-image: check-clean-tree
+	podman build -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
+	podman tag $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
+	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
+	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 
 tt-e2e: tt-hardware-image
 	bash localdev/k3s-tenstorrent-qb2/run-e2e.sh
@@ -134,20 +203,20 @@ tt-status:
 
 # ---- git:// daemon: serves per-experiment code repos to experimentator agent containers ----------
 # Always restarts (not just "start if not running") and always passes --enable=receive-pack --
-# see localdev/git/git-daemon.sh's header comment for why both matter. Run `start` again any time a new
+# see localdev/local-git/git-daemon.sh's header comment for why both matter. Run `start` again any time a new
 # experiment repo is created under the daemon's base-path, since a running daemon won't pick it up on
 # its own.
 git-daemon-start:
-	bash localdev/git/git-daemon.sh start
+	bash localdev/local-git/git-daemon.sh start
 
 git-daemon-stop:
-	bash localdev/git/git-daemon.sh stop
+	bash localdev/local-git/git-daemon.sh stop
 
 git-daemon-status:
-	bash localdev/git/git-daemon.sh status
+	bash localdev/local-git/git-daemon.sh status
 
 git-daemon-destroy:
-	bash localdev/git/git-daemon.sh destroy
+	bash localdev/local-git/git-daemon.sh destroy
 
 tt-stop:
 	bash localdev/k3s-tenstorrent-qb2/stop.sh
@@ -155,23 +224,27 @@ tt-stop:
 tt-start:
 	bash localdev/k3s-tenstorrent-qb2/start.sh
 
-# Tagged explicitly under localhost/ (not just the short name) because the DaemonSet/
-# Deployment/Job specs reference these images as localhost/hypothesisloop-*:latest with
-# imagePullPolicy: Never — podman defaults unqualified build tags to localhost/ already, but
-# Docker's CLI (and podman in rootful mode talking through the docker-compatible socket)
-# defaults to docker.io/library/ instead, which silently breaks that pull-policy match.
-images:
-	podman build -f controlplane/build/Dockerfile.control-service    -t localhost/hypothesisloop-control-service .
-	podman build -f controlplane/build/Dockerfile.metrics-service    -t localhost/hypothesisloop-metrics-service .
-	podman build -f runtime/k8s/build/Dockerfile.node-agent              -t localhost/hypothesisloop-node-agent .
-	podman build -f runtime/k8s/build/Dockerfile.cluster-agent           -t localhost/hypothesisloop-cluster-agent .
-	podman build -f tests/workloads/generic/Dockerfile.train    -t localhost/hypothesisloop-workload tests/workloads/generic/
+# Builds every platform image and pushes it to $(REGISTRY) under two tags: $(TAG) (the git SHA
+# that produced it -- the one every manifest pins) and latest (a mutable convenience pointer for
+# interactive dev, never referenced by a manifest). Every consumer (k3s nodes via
+# registries.yaml, the Helm chart's images.registry) pulls normally instead of the old
+# podman-save-pipe-ctr-import sideload, which is what left an unpinned image ID for kubelet's
+# own image GC to reclaim mid-run (see the fix-later.md incident this replaced).
+IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:. \
+	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
+	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
+	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
+	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
-# Every file an experiment definition's Dockerfile COPYs in (or that COPY'd code imports) must exist in git --
-# a seed/ that only works because of an untracked or previously-built-image-only file breaks
-# silently for anyone starting from a clean checkout. See localdev/check-experiment-seeds.sh.
-check-experiment-seeds:
-	bash localdev/check-experiment-seeds.sh
+images: check-clean-tree registry-up
+	@for entry in $(IMAGE_TARGETS); do \
+		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
+		echo "==> building hypothesisloop-$$name:$(TAG)"; \
+		podman build -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
+		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
+		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
+		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
+	done
 
 # Shared base every experiment's own Dockerfile.experimentator FROMs (see
 # agents/experimentator/Dockerfile.base's header) -- the agent harness, git/Claude Code plumbing,
@@ -184,7 +257,7 @@ experimentator-base-image:
 # `make experimentator-image EXPERIMENT=sparse-sdpa`. Each experiment owns its Dockerfile.experimentator
 # (agents/coordinator/experiments/<name>/Dockerfile.experimentator) for whatever runtime source/pins
 # its agent needs to read (tt-metal today; nothing here assumes that's the only case).
-experimentator-image: check-experiment-seeds experimentator-base-image
+experimentator-image: experimentator-base-image
 	test -n "$(EXPERIMENT)" || { echo "usage: make experimentator-image EXPERIMENT=<name>" >&2; exit 1; }
 	test -f agents/coordinator/experiments/$(EXPERIMENT)/Dockerfile.experimentator || \
 		{ echo "no agents/coordinator/experiments/$(EXPERIMENT)/Dockerfile.experimentator" >&2; exit 1; }
@@ -195,15 +268,45 @@ experimentator-image: check-experiment-seeds experimentator-base-image
 # sparse_sdpa test-utils baked in -- see agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload)
 # so every job an agent submits starts instantly with zero per-job setup. Run this once before
 # starting a sparse-sdpa platform experiment, same as experimentator-image.
-sparse-sdpa-workload-image: check-experiment-seeds
+sparse-sdpa-workload-image: check-clean-tree registry-up
 	podman build -f agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload \
-		-t localhost/hypothesisloop-sparse-sdpa-workload agents/coordinator/experiments/sparse-sdpa/seed/
+		-t $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) agents/coordinator/experiments/sparse-sdpa/seed/
+	podman tag $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:latest
+	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG)
+	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:latest
+
+# Stages the one file the helm chart renders verbatim (never edited in the chart itself, so
+# there is exactly one source of truth for platform config) — run before any helm
+# lint/template/install/upgrade. schema.sql is NOT staged here: control-service/metrics-service
+# each bake it into their own image and self-apply it on startup (db.ApplySchema) — see
+# controlplane/build/Dockerfile.control-service.
+HELM_CHART := controlplane/infra/helm/hypothesisloop
+helm-prepare:
+	cp controlplane/settings/hypothesisloop.yaml $(HELM_CHART)/files/hypothesisloop.yaml
+
+helm-lint: helm-prepare
+	helm lint $(HELM_CHART)
+
+helm-template: helm-prepare
+	helm template hypothesisloop $(HELM_CHART)
+
+# `make images` already builds and pushes every image the chart references (control-service,
+# metrics-service, cluster-agent, node-agent) to $(REGISTRY):$(TAG) -- this is only a named
+# alias so a helm install/upgrade reads as `make helm-push && helm upgrade --install ...
+# --set images.registry=$(REGISTRY) --set images.tag=$(TAG)`, the two values images already
+# computed for you.
+helm-push: images
 
 build:
 	go build ./...
 
 test:
 	go test ./... -timeout 60s
+
+# Portable e2e suite (pytest), API-only/parallel lane -- fast local loop. See tests/improve.md for
+# the marker scheme (parallel/exclusive/slow/hardware/accelerator) and the migration this replaces.
+e2e-py:
+	cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"
 
 lint:
 	golangci-lint run ./...

@@ -1,0 +1,30 @@
+[project]
+name = "hypothesisloop-e2e"
+version = "0.1.0"
+description = "End-to-end tests against a live control plane (API, PostgreSQL, controllers, k8s)."
+requires-python = ">=3.12"
+dependencies = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-order>=1.2",
+    "requests>=2.31",
+    "pyyaml>=6.0",
+]
+
+[tool.uv]
+# No importable package here (support/ is imported via rootdir on sys.path, the pytest way) --
+# this file exists only to pin/manage the test dependencies with uv, not to build a distributable.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["e2e"]
+markers = [
+    "parallel: owns only UUID-namespaced API resources and a bounded share of capacity (default lane, xdist-safe)",
+    "exclusive: needs global inventory, full capacity, node state, or cluster-agent/daemonset mutation — run with -n 0, never alongside another exclusive test",
+    "slow: duration-only marker, orthogonal to isolation — excluded from the default quick loop",
+    "hardware: needs real accelerator hardware behavior beyond generic scheduling; skipped unless explicitly requested",
+    "accelerator: touches at least one real accelerator (as opposed to pure API/DB state)",
+]
+timeout = 240
+timeout_method = "thread"

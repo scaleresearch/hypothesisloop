@@ -40,7 +40,7 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 			zap.String("id", exp.ID), zap.String("reason", string(reason)))
 		return nil
 	}
-	obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(reason)).Inc()
+	obsmetrics.CountEviction(reason)
 	// Settling final usage is a separate, independently-retryable step (see settleAndMark) —
 	// its failure must never undo or block the transition above.
 	exp.Status = domain.StatusEvicted
@@ -93,7 +93,7 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 				if outcome != domain.TerminationWritten {
 					continue
 				}
-				obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionExperimentClosed)).Inc()
+				obsmetrics.CountEviction(domain.EvictionExperimentClosed)
 				exp.Status = domain.StatusRejected
 				exp.EvictionReason = string(domain.EvictionExperimentClosed)
 				c.settleAndMark(ctx, exp)

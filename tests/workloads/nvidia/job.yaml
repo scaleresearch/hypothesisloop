@@ -1,19 +1,43 @@
-# Standalone job definition for the NVIDIA real-hardware e2e test (see
-# tests/scenarios/nvidia-hardware.sh) — train.py runs real fp16 matmuls on whichever GPU the
-# container engine actually passes through (podexec's DeviceRequests, not a synthetic stub).
-#
-# Unlike tenstorrent.com/chipArch=blackhole (one label per chip family), NVIDIA's
-# nvidia.com/gpu.product label is exact-model (e.g. NVIDIA-H100-80GB-HBM3, see
-# controlplane/settings/hypothesisloop.yaml's accelerator_types) — there is no single value that
-# works across arbitrary NVIDIA hardware. accelerator_type below is a placeholder;
-# nvidia-hardware.sh overrides it at submit time with the value this host's own nvidia-smi
-# reports, normalized the same way runtime/bare-metal/internal/podexec/nvidia.go does.
-image: localhost/hypothesisloop-nvidia-workload:latest
+# This file is a full POST /experiments request body (id + metadata + job), not just the job
+# spec. id/metadata below are placeholders -- nothing here knows in advance which hypothesis or
+# platform experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id,
+# agent_id (and id, for a fresh submission) before/at submit time. The `job:` block below is the
+# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# for the fully-commented DSL reference.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
+  # project_id: optional free-text grouping tag (GET /experiments?project_id=) -- no Project entity exists, omit if unneeded.
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
+  # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
+  # validated. Omit both if you have nothing to point at.
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  estimated_duration_hours: 1.0
+job:
+  # Standalone job definition for the NVIDIA real-hardware e2e test (see
+  # tests/e2e/test_nvidia_hardware.py) — train.py runs real fp16 matmuls on whichever GPU the
+  # container engine actually passes through (podexec's DeviceRequests, not a synthetic stub).
+  #
+  # Unlike tenstorrent.com/chipArch=blackhole (one label per chip family), NVIDIA's
+  # nvidia.com/gpu.product label is exact-model (e.g. NVIDIA-H100-80GB-HBM3, see
+  # controlplane/settings/hypothesisloop.yaml's accelerator_types) — there is no single value that
+  # works across arbitrary NVIDIA hardware. accelerator_type below is a placeholder;
+  # nvidia-hardware.sh overrides it at submit time with the value this host's own nvidia-smi
+  # reports, normalized the same way runtime/bare-metal/internal/podexec/nvidia.go does.
+  image: localhost/hypothesisloop-nvidia-workload:latest
 
-cpu: "1"
-memory: "2Gi"
-storage: "1Gi"
-max_retries: 0
+  cpu: "1"
+  memory: "2Gi"
+  storage: "1Gi"
+  max_retries: 0
 
-accelerator_count: 1
-accelerator_type: nvidia.com/gpu.product=REPLACE_ME
+  accelerator_count: 1
+  accelerator_type: nvidia.com/gpu.product=REPLACE_ME

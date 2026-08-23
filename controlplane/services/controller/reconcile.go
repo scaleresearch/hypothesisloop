@@ -144,17 +144,14 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	// 0.99 not 1.0: floating-point accumulation across many debit/refund calls means "exactly
 	// exhausted" may never compare equal/greater than the raw budget — a 1% margin avoids a
 	// budget that's genuinely spent sitting just under the threshold forever.
-	// Guard each dimension on a positive budget: a zero budget (e.g. a CPU-only platform
-	// experiment has GuaranteedAcceleratorHours == 0) is not an exhaustion condition — it means
+	// Guard on a positive budget: a zero budget is not an exhaustion condition — it means
 	// "no quota of that kind to spend", not "quota spent". Without the guard 0 >= 0*0.99 is true on
 	// the first tick and every job is evicted for quota_exhaustion.
 	spent := func(budget, used float64) bool {
 		return budget > 0 && used >= budget*0.99
 	}
-	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH) ||
-		spent(aq.GuaranteedCPUCoreHours, aq.UsedGuaranteedCPUCoreH)
-	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH) ||
-		spent(aq.BurstCPUCoreHours, aq.UsedBurstCPUCoreH)
+	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH)
+	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH)
 
 	if !guaranteedExhausted && !burstExhausted {
 		return nil
@@ -175,7 +172,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
+		obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
 		// Persist the same observed terminal usage as every other terminal path.
 		exp.Status = domain.StatusEvicted
 		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
@@ -200,7 +197,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
+		obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
 		// Never reached RUNNING; settlement derives zero usage from absent metrics. EVICTED (not
 		// REJECTED) to match CancelExperiment's convention: ADMITTED already has a workload being
 		// created for it, so moving it out of the SUBMITTED/ADMITTED/RUNNING desired-state set is
@@ -217,10 +214,6 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			zap.Float64("actual_burst_acch", aq.UsedBurstAccH),
 			zap.Float64("quota_guaranteed_acch", aq.GuaranteedAcceleratorHours),
 			zap.Float64("quota_burst_acch", aq.BurstAcceleratorHours),
-			zap.Float64("actual_guaranteed_cpuh", aq.UsedGuaranteedCPUCoreH),
-			zap.Float64("actual_burst_cpuh", aq.UsedBurstCPUCoreH),
-			zap.Float64("quota_guaranteed_cpuh", aq.GuaranteedCPUCoreHours),
-			zap.Float64("quota_burst_cpuh", aq.BurstCPUCoreHours),
 		)
 	}
 
@@ -243,7 +236,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			if outcome != domain.TerminationWritten {
 				continue
 			}
-			obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionQuotaExhaustion)).Inc()
+			obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
 			// exp never reached RUNNING, so Settle derives zero usage from metrics
 			// regardless of the quota_exhaustion reason string — it never consumed anything.
 			exp.Status = finalStatus

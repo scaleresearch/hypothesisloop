@@ -12,7 +12,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // reasonError preserves the historical {"reason","message"} error envelope used
@@ -36,11 +35,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
-		Description:   "Idempotent identity registration. Returns 409 if the id already exists. Do this once before signing up to a platform experiment.",
+		Description:   "Idempotent identity registration. Returns 409 if the id already exists. Do this once before signing up to a platform experiment. A human participant registers exactly the same way, with kind=\"human\".",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ID   string `json:"id" doc:"Stable unique agent id"`
 			Name string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
+			Kind string `json:"kind,omitempty" required:"false" doc:"\"agent\" (default) or \"human\""`
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
 		// Validated here rather than only where it is used: an agent id is pasted verbatim into
@@ -49,13 +49,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := domain.ValidateIdentifier("id", in.Body.ID); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
+		if !domain.ValidAgentKind(domain.AgentKind(in.Body.Kind)) {
+			return nil, huma.Error400BadRequest("kind must be \"agent\" or \"human\", got " + in.Body.Kind)
+		}
 		// id is the only identity that matters; name is presentation-only (UI/leaderboard), so
 		// requiring it would reject an otherwise complete registration over a cosmetic field.
 		name := in.Body.Name
 		if name == "" {
 			name = in.Body.ID
 		}
-		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name)
+		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name, domain.AgentKind(in.Body.Kind))
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 				return nil, huma.Error409Conflict("agent already exists: " + in.Body.ID)
@@ -231,44 +234,43 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "signup-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/signup",
 		Summary: "Sign up an agent to a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Join before submitting jobs. Every job's metadata.platform_experiment_id must be one you are signed up to. " +
-			"`role` is fixed at signup and there is no path to change it: `competitor` (default) is ranked, cut-eligible and " +
-			"earns the top-3 bonus; `baseline` runs the experiment's declared control and `reviewer` re-checks other agents' " +
-			"claims — neither is ranked or cut, and neither counts against `max_agents`. Every role's jobs are admitted, " +
-			"billed, evicted and settled identically, and every role must file its findings.",
+			"role decides how the signup is treated by ranking and cuts: \"competitor\" (default) is ranked, cut-eligible, " +
+			"and counted against max_agents; \"baseline\" and \"reviewer\" are neither ranked nor cut nor counted against " +
+			"max_agents, though their jobs are billed and gated identically to a competitor's. An unrecognized role is " +
+			"refused, never defaulted. quota_tier optionally overrides this signup's guaranteed-vs-burst-only split " +
+			"regardless of the agent's kind (\"guaranteed\" or \"burst_only\"); omit it to use the kind default " +
+			"(humans guaranteed+burst, agents burst-only).",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
-			AgentID string `json:"agent_id"`
-			// required:"false" is load-bearing: huma makes a body field required unless told
-			// otherwise, and a required role would reject every signup written before roles
-			// existed -- the exact opposite of "competitor is the default, so every existing
-			// signup still means what it meant".
-			Role string `json:"role,omitempty" required:"false" doc:"competitor (default), baseline or reviewer. Fixed at signup."`
+			AgentID   string `json:"agent_id"`
+			Role      string `json:"role,omitempty"`
+			QuotaTier string `json:"quota_tier,omitempty"`
 		}
 	}) (*struct {
 		Body struct {
 			Status string `json:"status"`
-			Role   string `json:"role"`
 		}
 	}, error) {
 		if in.Body.AgentID == "" {
 			return nil, huma.Error400BadRequest("agent_id is required")
 		}
+		if !domain.ValidQuotaTierOverride(in.Body.QuotaTier) {
+			return nil, huma.Error400BadRequest("quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got " + in.Body.QuotaTier)
+		}
 		role, err := domain.ParseSignupRole(in.Body.Role)
 		if err != nil {
 			return nil, &reasonError{status: 400, Reason: "unknown_role", Message: err.Error()}
 		}
-		if err := peh.svc.Signup(ctx, in.ID, in.Body.AgentID, role); err != nil {
+		if err := peh.svc.Signup(ctx, in.ID, in.Body.AgentID, role, domain.QuotaTier(in.Body.QuotaTier)); err != nil {
 			return nil, &reasonError{status: 400, Reason: err.Error(), Message: err.Error()}
 		}
 		out := &struct {
 			Body struct {
 				Status string `json:"status"`
-				Role   string `json:"role"`
 			}
 		}{}
 		out.Body.Status = "signed_up"
-		out.Body.Role = string(role)
 		return out, nil
 	})
 
@@ -642,20 +644,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Clusters []ClusterCapacity `json:"clusters"`
 		}
 	}, error) {
+		clusters, err := peh.liveCapacity(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		out := &struct {
 			Body struct {
 				Clusters []ClusterCapacity `json:"clusters"`
 			}
 		}{}
-		out.Body.Clusters = []ClusterCapacity{}
-		if peh.metricsDBURL == "" {
-			return out, nil
-		}
-		available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, peh.metricsDBURL, peh.capacityFreshness)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		out.Body.Clusters = buildClusterCapacity(available, total)
+		out.Body.Clusters = clusters
 		return out, nil
 	})
 }

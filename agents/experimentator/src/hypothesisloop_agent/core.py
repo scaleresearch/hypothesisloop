@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -23,11 +24,8 @@ log = logging.getLogger("llm_agent")
 # agent the moment the service serves it. Every path written here instead would be a second,
 # silently-drifting copy of a contract this file cannot see.
 #
-# One briefing for every role. The differentiation that matters between a competitor, a baseline
-# and a reviewer is what each is asked to do, not what the platform lets it do — every role's jobs
-# are admitted, billed and settled identically. So the capability content lives here once and the
-# role delta lives in prompts/roles/<role>.md, which the agent reads itself at $ROLE_BRIEFS: three
-# parallel prompts drifted apart within hours of the first capability being added to one of them.
+# One briefing shared by every flavor; the specialization lives in prompts/flavors/<flavor>.md,
+# read by the agent itself at $FLAVOR_BRIEFS.
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
@@ -81,8 +79,9 @@ def prepare() -> RunSetup:
 
     template = (_PROMPTS_DIR / "system_prompt.md").read_text()
     system_prompt = template.format(
-        api_guide=api_guide, agent_id=cfg.agent_id, role=cfg.role,
+        api_guide=api_guide, agent_id=cfg.agent_id, flavor=cfg.flavor,
         platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,
+        hyperparameters=json.dumps(cfg.hyperparameters),
     )
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt,
                     max_turns=max_turns, workdir=workdir)

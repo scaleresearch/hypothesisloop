@@ -26,8 +26,9 @@ type PlatformExperimentsStore interface {
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	// Signup inserts only while the experiment is still open; inserted=false means it is closed
-	// or the agent was already signed up.
-	Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole) (bool, error)
+	// or the agent was already signed up. quotaTier is the resolved (override-or-kind-default)
+	// tier this signup lands in — see domain.ResolveQuotaTier.
+	Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error)
 	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
 	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
@@ -110,22 +111,21 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 
 // CreatePlatformExperimentRequest is the input for Create.
 type CreatePlatformExperimentRequest struct {
-	Name                   string  `json:"name"`
-	Description            string  `json:"description"`
-	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
-	// BudgetCPUCoreHours/BudgetRAMGBHours/BudgetStorageGBHours are optional; 0 means that
-	// resource dimension isn't tracked for this platform experiment (Accelerator-only, as before).
-	BudgetCPUCoreHours    float64                   `json:"budget_cpu_core_hours,omitempty"`
-	BudgetRAMGBHours      float64                   `json:"budget_ram_gb_hours,omitempty"`
-	BudgetStorageGBHours  float64                   `json:"budget_storage_gb_hours,omitempty"`
-	MaxAgents             int                       `json:"max_agents"`
-	Metrics               []domain.MetricDefinition `json:"metrics"`                 // metric keys jobs must emit
-	ReportIntervalSeconds int                       `json:"report_interval_seconds"` // expected reporting cadence
-	StartsAt              time.Time                 `json:"starts_at"`
-	EndsAt                time.Time                 `json:"ends_at"`
+	Name                   string                    `json:"name"`
+	Description            string                    `json:"description"`
+	BudgetAcceleratorHours float64                   `json:"budget_accelerator_hours"`
+	MaxAgents              int                       `json:"max_agents"`
+	Metrics                []domain.MetricDefinition `json:"metrics"`                 // metric keys jobs must emit
+	ReportIntervalSeconds  int                       `json:"report_interval_seconds"` // expected reporting cadence
+	StartsAt               time.Time                 `json:"starts_at"`
+	EndsAt                 time.Time                 `json:"ends_at"`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
+	// HypothesisSubmitPolicy/JobSubmitPolicy independently gate who may register a hypothesis vs.
+	// submit a job — empty resolves to "mixed" (today's behavior). See domain.SubmitterPolicy.
+	HypothesisSubmitPolicy string `json:"hypothesis_submit_policy,omitempty"`
+	JobSubmitPolicy        string `json:"job_submit_policy,omitempty"`
 }
 
 // AgentResult is (agentID, finalMetric) used when closing an experiment.

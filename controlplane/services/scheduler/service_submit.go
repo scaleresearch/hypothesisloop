@@ -10,7 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // Submit runs the admission gate for an experiment. On success the experiment is
@@ -65,6 +64,30 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason:  "agent_held",
 			Message: "agent was cut at a stage boundary and cannot submit new jobs for the rest of this platform experiment — check GET /platform-experiments/{id}/stages",
+		}
+	}
+
+	// 2a. job_submit_policy gate: independent of hypothesis_submit_policy (registry package),
+	// this governs who may submit a JOB — never who may register a hypothesis. Runs before
+	// hypothesis binding so an agent/human blocked from submitting jobs here never reaches (or
+	// depends on) the hypothesis lookup below.
+	if pe.JobSubmitPolicy != "" {
+		agent, err := s.store.GetAgent(ctx, exp.AgentID)
+		if err != nil {
+			return fmt.Errorf("scheduler: get agent: %w", err)
+		}
+		var allowed bool
+		switch {
+		case agent != nil && agent.Kind == domain.AgentKindHuman:
+			allowed = pe.JobSubmitPolicy.AllowsHuman()
+		default:
+			allowed = pe.JobSubmitPolicy.AllowsAgent()
+		}
+		if !allowed {
+			return &AdmissionError{
+				Reason:  ReasonSubmitterNotAllowed,
+				Message: fmt.Sprintf("platform experiment %s's job_submit_policy is %q and does not allow this submitter — read the experiment's job_submit_policy before retrying", exp.PlatformExperimentID, pe.JobSubmitPolicy),
+			}
 		}
 	}
 
@@ -138,34 +161,16 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	exp.Hypothesis = hyp.Text
 
 	// 4. Compute estimated cost if not already set. Accelerator-hours is the primary/always-populated
-	// dimension; CPU-hours is only estimated (and therefore only debited/capped) when this
-	// platform experiment actually tracks that dimension (non-zero budget — most platform
-	// experiments are accelerator-only, and their agents' CPU quota pool is correctly 0/0, so debiting
-	// anything against it would always fail). 0 correctly means "not tracked" for that
-	// submission. CPU/Memory/Storage are always set on JobSpec now (see ValidateExperiment's
+	// dimension. CPU/Memory/Storage are always set on JobSpec now (see ValidateExperiment's
 	// "explicit resource requests" cross-cutting fix), so there is no more "left unset,
 	// resolved later by a cluster-side default" case to work around here.
 	//
-	// RAM/storage are hard physical-fit-checked
-	// at admission (see domain.Experiment.Footprint()/domain.Fits, wired into loop_tick.go) but
-	// deliberately never estimated/debited as hours here — EstimatedRAMGBHours/
-	// EstimatedStorageGBHours are left at 0 for every new submission from this point on. This
-	// is an intentional migration decision, not an oversight: PlatformExperiment.BudgetRAMGBHours/
-	// BudgetStorageGBHours, AgentQuota's RAM/storage guaranteed/burst columns, and
-	// domain.ResourceRAMGBHours/ResourceStorageGBHours all remain defined (deprecated, not
-	// deleted — see their own doc comments) so existing rows/history are never silently
-	// dropped or rewritten. A platform experiment created before this change with a non-zero
-	// RAM/storage budget keeps that number in the DB, but it is no longer read by anything: no
-	// new debit ever happens against it, so its guaranteed/burst pools simply stop moving.
-	// Historical ActualRAMGBHours/ActualStorageGBHours on already-terminal experiments are
-	// untouched (this is a forward-only behavior change, not a backfill/rewrite).
+	// RAM/storage are hard physical-fit-checked at admission (see
+	// domain.Experiment.Footprint()/domain.Fits, wired into loop_tick.go), never hours-estimated
+	// or hours-debited: the RAM/storage hours-quota machinery (PlatformExperiment budget fields,
+	// AgentQuota guaranteed/burst columns, domain.ResourceType entries) has been removed entirely.
 	if exp.EstimatedCostAccH == 0 && exp.AcceleratorCount > 0 {
 		exp.EstimatedCostAccH = estimatedAcceleratorCost(exp)
-	}
-	if exp.EstimatedCPUCoreHours == 0 && pe.BudgetCPUCoreHours > 0 {
-		if cores, err := workload.ParseCPUCores(exp.Job.CPU); err == nil && cores > 0 {
-			exp.EstimatedCPUCoreHours = cores * float64(exp.Job.Nodes()) * exp.EstimatedDurationHours * domain.CPUCoreHourRate()
-		}
 	}
 
 	// 5. Novelty detection: compare against running and queued experiments.

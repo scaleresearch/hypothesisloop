@@ -10,6 +10,7 @@ import (
 	"github.com/moby/moby/client"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 // CreateWorkload places exp's container on this node. No admission handshake: the scheduler
@@ -100,11 +101,11 @@ func (e *Executor) stopGrace(labels map[string]string, grantCheckpointWindow boo
 func (e *Executor) WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		phase, _, err := e.PollJobPhaseAndUID(ctx, experimentID)
+		status, err := e.PollJobStatus(ctx, experimentID)
 		if err != nil {
 			return err
 		}
-		if phase == workload.JobPhaseGone || phase == workload.JobPhaseSucceeded || phase == workload.JobPhaseFailed {
+		if phase := status.Phase; phase == workload.JobPhaseGone || phase == workload.JobPhaseSucceeded || phase == workload.JobPhaseFailed {
 			return nil
 		}
 		select {
@@ -197,43 +198,51 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 
 // PollJobPhase reports experimentID's current lifecycle phase.
 func (e *Executor) PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error) {
-	phase, _, err := e.PollJobPhaseAndUID(ctx, experimentID)
-	return phase, err
+	status, err := e.PollJobStatus(ctx, experimentID)
+	return status.Phase, err
 }
 
-// PollJobPhaseAndUID inspects experimentID's container state. The container ID itself stands
+// PollJobStatus inspects experimentID's container state. The container ID itself stands
 // in for k8s's UID: it changes on every stop+remove+recreate cycle, so callers can still detect
 // a preempt-then-recreate race the same way status.go's reportChangedStatuses does.
-func (e *Executor) PollJobPhaseAndUID(ctx context.Context, experimentID string) (workload.JobPhase, string, error) {
+func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
+	pending := agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
-		return workload.JobPhasePending, "", err
+		return pending, err
 	}
 	for _, c := range containers {
 		if c.Labels[LabelExperimentID] != experimentID {
 			continue
 		}
+		// Unparseable or absent reads as unknown rather than as a number: the control plane
+		// fences status on this, and a wrong generation is worse than no generation.
+		observed := agentexec.JobStatus{UID: c.ID, Attempt: workload.AttemptUnknown}
+		if n, err := strconv.Atoi(c.Labels[LabelAttempt]); err == nil {
+			observed.Attempt = n
+		}
 		switch c.State {
 		case "running":
-			return workload.JobPhaseRunning, c.ID, nil
+			observed.Phase = workload.JobPhaseRunning
 		case "created":
 			// Created but not started is not running: it consumes nothing and may never start.
 			// Reporting it as running billed a wedged container as if it were training.
-			return workload.JobPhasePending, c.ID, nil
+			observed.Phase = workload.JobPhasePending
 		case "exited", "stopped":
 			code, err := e.exitCode(ctx, c.ID)
 			if err != nil {
-				return workload.JobPhasePending, "", err
+				return pending, err
 			}
+			observed.Phase = workload.JobPhaseFailed
 			if code == 0 {
-				return workload.JobPhaseSucceeded, c.ID, nil
+				observed.Phase = workload.JobPhaseSucceeded
 			}
-			return workload.JobPhaseFailed, c.ID, nil
 		default:
-			return workload.JobPhasePending, c.ID, nil
+			observed.Phase = workload.JobPhasePending
 		}
+		return observed, nil
 	}
-	return workload.JobPhaseGone, "", nil
+	return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
 }
 
 // ResolveAdmittedAcceleratorType reports the accelerator type and node this experiment actually

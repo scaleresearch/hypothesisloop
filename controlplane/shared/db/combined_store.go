@@ -205,50 +205,27 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		return AdmitRejected, "", fmt.Errorf("admit experiment: quota: %w", err)
 	}
 
-	var desiredGuaranteedAcc, desiredBurstAcc, desiredGuaranteedCPU, desiredBurstCPU float64
-	var desiredGuaranteedRAM, desiredBurstRAM, desiredGuaranteedStorage, desiredBurstStorage float64
+	var desiredGuaranteedAcc, desiredBurstAcc float64
 	if err := tx.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='guaranteed'), 0),
-			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='burst'), 0),
-			COALESCE(SUM(estimated_cpu_core_hours) FILTER (WHERE capacity_tier='guaranteed'), 0),
-			COALESCE(SUM(estimated_cpu_core_hours) FILTER (WHERE capacity_tier='burst'), 0),
-			COALESCE(SUM(estimated_ram_gb_hours) FILTER (WHERE capacity_tier='guaranteed'), 0),
-			COALESCE(SUM(estimated_ram_gb_hours) FILTER (WHERE capacity_tier='burst'), 0),
-			COALESCE(SUM(estimated_storage_gb_hours) FILTER (WHERE capacity_tier='guaranteed'), 0),
-			COALESCE(SUM(estimated_storage_gb_hours) FILTER (WHERE capacity_tier='burst'), 0)
+			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='burst'), 0)
 		FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2
 		  AND (status IN ('QUEUED','SUBMITTED','ADMITTED','RUNNING')
 		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
 		exp.AgentID, exp.PlatformExperimentID).Scan(
-		&desiredGuaranteedAcc, &desiredBurstAcc, &desiredGuaranteedCPU, &desiredBurstCPU,
-		&desiredGuaranteedRAM, &desiredBurstRAM, &desiredGuaranteedStorage, &desiredBurstStorage); err != nil {
+		&desiredGuaranteedAcc, &desiredBurstAcc); err != nil {
 		return AdmitRejected, "", fmt.Errorf("admit experiment: desired usage: %w", err)
 	}
 
 	guaranteed := exp.CapacityTier == domain.CapacityGuaranteed
 	usedAcc, limitAcc := observed.UsedBurstAccH+desiredBurstAcc, allocation.BurstAcceleratorHours
-	usedCPU, limitCPU := observed.UsedBurstCPUCoreH+desiredBurstCPU, allocation.BurstCPUCoreHours
-	usedRAM, limitRAM := observed.UsedBurstRAMGBH+desiredBurstRAM, allocation.BurstRAMGBHours
-	usedStorage, limitStorage := observed.UsedBurstStorageGBH+desiredBurstStorage, allocation.BurstStorageGBHours
 	if guaranteed {
 		usedAcc, limitAcc = observed.UsedGuaranteedAccH+desiredGuaranteedAcc, allocation.GuaranteedAcceleratorHours
-		usedCPU, limitCPU = observed.UsedGuaranteedCPUCoreH+desiredGuaranteedCPU, allocation.GuaranteedCPUCoreHours
-		usedRAM, limitRAM = observed.UsedGuaranteedRAMGBH+desiredGuaranteedRAM, allocation.GuaranteedRAMGBHours
-		usedStorage, limitStorage = observed.UsedGuaranteedStorageGBH+desiredGuaranteedStorage, allocation.GuaranteedStorageGBHours
 	}
 	if exp.EstimatedCostAccH > 0 && usedAcc+exp.EstimatedCostAccH > limitAcc {
 		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc), nil
-	}
-	if exp.EstimatedCPUCoreHours > 0 && usedCPU+exp.EstimatedCPUCoreHours > limitCPU {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f cpu_core_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCPUCoreHours, limitCPU-usedCPU), nil
-	}
-	if exp.EstimatedRAMGBHours > 0 && usedRAM+exp.EstimatedRAMGBHours > limitRAM {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f ram_gb_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedRAMGBHours, limitRAM-usedRAM), nil
-	}
-	if exp.EstimatedStorageGBHours > 0 && usedStorage+exp.EstimatedStorageGBHours > limitStorage {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f storage_gb_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedStorageGBHours, limitStorage-usedStorage), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err

@@ -8,7 +8,7 @@ import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from 
 import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Badge } from '@/components/ui/badge'
+import { Badge, AgentKindBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
@@ -273,7 +273,10 @@ export default function AgentsPage() {
                 return (
                   <Fragment key={a.id}>
                     <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedAgent(isExpanded ? null : a.id)}>
-                      <td className="mono" style={{ fontWeight: 700 }}>{a.id}</td>
+                      <td className="mono" style={{ fontWeight: 700 }}>
+                        {a.id}
+                        <AgentKindBadge kind={a.kind} className="ml-2" />
+                      </td>
                       <td style={{ textAlign: 'center' }}>
                         <BonusChip label="+25% Top-3" active={a.top3_count > 0} />
                       </td>

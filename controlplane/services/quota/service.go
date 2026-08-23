@@ -39,10 +39,16 @@ func NewService(store Store, provisioner AgentProvisioner, logger *zap.Logger) *
 }
 
 // RegisterAgent creates a new agent and provisions its backend-side namespace/queue equivalent.
-func (s *Service) RegisterAgent(ctx context.Context, id, name string) (*domain.Agent, error) {
+// kind distinguishes a human participant from an AI agent (domain.AgentKind); an empty kind
+// defaults to domain.AgentKindAgent, same as the pre-existing single-kind behavior.
+func (s *Service) RegisterAgent(ctx context.Context, id, name string, kind domain.AgentKind) (*domain.Agent, error) {
+	if kind == "" {
+		kind = domain.AgentKindAgent
+	}
 	agent := &domain.Agent{
 		ID:               id,
 		Name:             name,
+		Kind:             kind,
 		PerformanceScore: 0.5,
 		CreatedAt:        time.Now().UTC(),
 	}
@@ -58,4 +64,3 @@ func (s *Service) RegisterAgent(ctx context.Context, id, name string) (*domain.A
 	s.logger.Info("agent registered", zap.String("id", id), zap.String("name", name))
 	return agent, nil
 }
-

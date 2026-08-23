@@ -30,6 +30,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // Store is the desired-state persistence interface the handler needs.
@@ -41,9 +42,10 @@ type Store interface {
 	// cluster_name in the same statement that records it, so the cluster is no longer on the row
 	// to filter by (see db.ListRecentlyUndesiredWorkloads).
 	ListRecentlyUndesiredWorkloads(ctx context.Context, within time.Duration) ([]*domain.Experiment, error)
-	// ClusterNameByID resolves many experiments' assigned clusters at once — a status push is a
-	// whole-cluster snapshot, so this is asked once per push rather than once per job.
-	ClusterNameByID(ctx context.Context, ids []string) (map[string]string, error)
+	// PlacementByID resolves many experiments' assigned cluster and current attempt at once — a
+	// status push is a whole-cluster snapshot, so this is asked once per push rather than once
+	// per job.
+	PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error)
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -180,6 +182,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if report.NodeResourcesByNode == nil {
 			return nil, huma.Error400BadRequest("per-node resource capacity report is required")
 		}
+		if report.NodeResourcesTotalByNode == nil {
+			return nil, huma.Error400BadRequest("per-node total resource capacity report is required")
+		}
 		for node, byResource := range report.NodeResourcesByNode {
 			if node == "" {
 				return nil, huma.Error400BadRequest("per-node resource report has empty node identity")
@@ -192,6 +197,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			for resource, available := range byResource {
 				if resource == "" || available < 0 {
 					return nil, huma.Error400BadRequest("invalid per-node resource capacity value")
+				}
+			}
+			total, present := report.NodeResourcesTotalByNode[node]
+			if !present {
+				return nil, huma.Error400BadRequest("per-node total resource report for " + node + " is missing")
+			}
+			for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
+				totalValue, present := total[key]
+				if !present || totalValue < 0 {
+					return nil, huma.Error400BadRequest("per-node total resource report for " + node + " is missing or invalid " + key)
+				}
+				if byResource[key] > totalValue {
+					return nil, huma.Error400BadRequest("per-node available resource exceeds total for " + node)
 				}
 			}
 		}
@@ -242,6 +260,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,
 			AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
 			NodeResourcesByNode:        report.NodeResourcesByNode,
+			NodeResourcesTotalByNode:   report.NodeResourcesTotalByNode,
 			NodeLabelsByNode:           report.NodeLabelsByNode,
 			MultiNodeCapable:           report.MultiNodeCapable,
 			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
@@ -312,7 +331,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 			ids = append(ids, rep.ExperimentID)
 		}
-		clusterByID, err := h.store.ClusterNameByID(ctx, ids)
+		placementByID, err := h.store.PlacementByID(ctx, ids)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -323,9 +342,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// workload down — and rejecting the whole snapshot blacked out status for every other
 			// job on the old cluster until it finished. Dropping it is also the honest report:
 			// the experiment genuinely is not this cluster's any more.
-			if clusterByID[rep.ExperimentID] != clusterName {
-				h.logger.Info("dropping status report for an experiment this cluster no longer owns",
-					zap.String("experiment", rep.ExperimentID), zap.String("cluster", clusterName))
+			if reason, ok := rejectReport(rep, placementByID[rep.ExperimentID], clusterName); !ok {
+				h.logger.Info(reason, zap.String("experiment", rep.ExperimentID),
+					zap.String("cluster", clusterName), zap.Int("reported_attempt", reportedAttempt(rep)),
+					zap.Int("current_attempt", placementByID[rep.ExperimentID].AttemptCount))
 				continue
 			}
 			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
@@ -402,8 +422,14 @@ type capacityReport struct {
 	// NodeResourcesByNode is free CPU/memory/storage per node, keyed by domain.NodeResource*.
 	// Required: a job runs on one node and must fit that node in every dimension, and a
 	// cluster-wide total cannot answer that — see scheduler.reservePlacement.
-	NodeResourcesByNode map[string]map[string]int64  `json:"node_resources_by_node"`
-	NodeLabelsByNode    map[string]map[string]string `json:"node_labels_by_node"`
+	NodeResourcesByNode map[string]map[string]int64 `json:"node_resources_by_node"`
+	// NodeResourcesTotalByNode mirrors NodeResourcesByNode but carries each node's installed
+	// (allocatable) amount rather than what's currently free — the stable per-node denominator
+	// fair-share math needs, since free capacity fluctuates with what's running. Required for the
+	// same reason NodeResourcesByNode is: a job's node-local fair share cannot be judged against a
+	// number that moves every time something else is scheduled or freed.
+	NodeResourcesTotalByNode map[string]map[string]int64  `json:"node_resources_total_by_node"`
+	NodeLabelsByNode         map[string]map[string]string `json:"node_labels_by_node"`
 	// MultiNodeCapable is whether this cluster's runtime can execute a job spanning more than one
 	// node. A capability of the cluster, reported alongside its capacity and read by admission —
 	// see agentexec.Executor.SupportsMultiNodeJobs. Absent (false) means single-node only, which
@@ -442,4 +468,45 @@ type statusReport struct {
 	Reason                  string   `json:"reason,omitempty"`
 	Message                 string   `json:"message,omitempty"`
 	RestartCount            int32    `json:"restart_count,omitempty"`
+	// Attempt is the generation of the workload this observation came from, as the control plane
+	// numbered it (domain.Experiment.AttemptCount, handed to the runtime and carried on the
+	// workload it created). A pointer because absent and zero are different answers — see
+	// reportedAttempt.
+	Attempt *int `json:"attempt,omitempty"`
+}
+
+// rejectReport decides whether one status report describes the workload the control plane is
+// actually waiting on. ok=false means drop it — never reject the whole push: mid-reschedule a
+// stale report is the ordinary state, and failing the snapshot blacks out status for every other
+// job on the cluster until it settles.
+//
+// Two things have to match. Ownership, because the experiment may already have been repointed at
+// another cluster while this one is still tearing its workload down. And generation, because
+// ownership alone does not cover a retry that lands back on the cluster it just failed on: the
+// previous attempt's workload is still terminating and still in this snapshot
+// (ListManagedJobsForStatus includes terminating workloads on purpose), so the Failed that caused
+// the requeue would be recorded as the observation of the attempt that just started, and fail it
+// again immediately.
+//
+// AttemptUnknown is accepted rather than dropped. It means a cluster-agent that predates the
+// field, which can still be trusted for everything ownership already establishes; dropping it
+// would black out status for every job on that cluster until it was upgraded — the far larger
+// harm, and the reason absence must survive decoding as absence rather than as attempt 0.
+func rejectReport(rep statusReport, placement domain.Placement, clusterName string) (string, bool) {
+	if placement.ClusterName != clusterName {
+		return "dropping status report for an experiment this cluster no longer owns", false
+	}
+	if attempt := reportedAttempt(rep); attempt != workload.AttemptUnknown && attempt != placement.AttemptCount {
+		return "dropping status report from a superseded attempt", false
+	}
+	return "", true
+}
+
+// reportedAttempt is the generation a report belongs to, or workload.AttemptUnknown when the
+// cluster-agent named none.
+func reportedAttempt(rep statusReport) int {
+	if rep.Attempt == nil {
+		return workload.AttemptUnknown
+	}
+	return *rep.Attempt
 }

@@ -18,6 +18,14 @@
 #                       (default: http://host.containers.internal:8081)
 #   METRICS_URL       — outbound URL node-agents push observations to
 #                       (default: http://host.containers.internal:8084)
+#   REGISTRY_URL      — registry host:port these images are pulled from. Must already be
+#                       reachable from every node in this cluster — provisioning that
+#                       reachability (a registry mirror, VPC peering, whatever the cluster's own
+#                       network needs) is the cluster provisioner's job, not this script's; it
+#                       only names the address, same as API_URL/METRICS_URL (default: localhost:5000,
+#                       the local dev registry from localdev/controlplane/docker-compose.yml)
+#   TAG               — image tag to deploy, normally the git SHA `make images` just pushed
+#                       (default: latest)
 #   KUBECONFIG_PATH   — kubeconfig file to use (default: $HOME/.kube/config)
 #   KUBE_CONTEXT      — kubectl context to target (default: current-context)
 set -euo pipefail
@@ -25,6 +33,8 @@ set -euo pipefail
 CLUSTER_NAME="${CLUSTER_NAME:-local}"
 API_URL="${API_URL:-http://host.containers.internal:8081}"
 METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
+REGISTRY_URL="${REGISTRY_URL:-localhost:5000}"
+TAG="${TAG:-latest}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 
@@ -52,7 +62,8 @@ echo "==> Installing cluster-agent bundle on cluster '${CLUSTER_NAME}' (context:
 # metric-controller). The image must already be built and imported into the
 # cluster's container runtime.
 echo "==> Applying node-agent DaemonSet..."
-sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|${METRICS_URL}|g" "${SCRIPT_DIR}/node-agent-daemonset.yaml" \
+sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|${METRICS_URL}|g; \
+     s|__REGISTRY__|${REGISTRY_URL}|g; s|__TAG__|${TAG}|g" "${SCRIPT_DIR}/node-agent-daemonset.yaml" \
   | kctl apply -f -
 
 # ---- cluster-agent Deployment (RBAC + the actual reconciler) ------------------
@@ -60,7 +71,8 @@ sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|${METRICS_URL}|g" "
 # API_URL for create/delete-workload commands and pushes job status
 # back — the control plane itself never opens a connection into this cluster.
 echo "==> Applying cluster-agent Deployment (API: ${API_URL})..."
-sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__API_URL__|${API_URL}|g" \
+sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__API_URL__|${API_URL}|g; \
+     s|__REGISTRY__|${REGISTRY_URL}|g; s|__TAG__|${TAG}|g" \
   "${SCRIPT_DIR}/cluster-agent-deployment.yaml" \
   | kctl apply -f -
 

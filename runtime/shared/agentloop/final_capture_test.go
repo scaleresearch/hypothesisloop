@@ -25,8 +25,15 @@ type captureExecutor struct {
 	logTail []string
 	// unpollable names a job whose phase cannot be read, standing in for a transient API failure.
 	unpollable string
-	mu         sync.Mutex
-	deleted    []string
+	// undeletable names a job whose deletion fails, standing in for one bad entry in a pass that
+	// loops over many.
+	undeletable string
+	// drifted makes every comparison against desired state report a mismatch, so a pass that
+	// reaches the comparison at all acts on it visibly.
+	drifted bool
+	mu      sync.Mutex
+	deleted []string
+	created int
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
@@ -48,13 +55,20 @@ func (e *captureExecutor) ReapTerminal(context.Context, map[string]*domain.Exper
 	return nil
 }
 func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *domain.Experiment) (bool, error) {
-	return true, nil
+	return !e.drifted, nil
 }
-func (e *captureExecutor) PollJobPhaseAndUID(_ context.Context, id string) (workload.JobPhase, string, error) {
+func (e *captureExecutor) CreateWorkload(context.Context, *domain.Experiment) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.created++
+	return nil
+}
+func (e *captureExecutor) PollJobStatus(_ context.Context, id string) (agentexec.JobStatus, error) {
 	if id != "" && id == e.unpollable {
-		return workload.JobPhasePending, "", fmt.Errorf("transient poll failure for %s", id)
+		return agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown},
+			fmt.Errorf("transient poll failure for %s", id)
 	}
-	return workload.JobPhaseFailed, "uid", nil
+	return agentexec.JobStatus{Phase: workload.JobPhaseFailed, UID: "uid", Attempt: 0}, nil
 }
 func (e *captureExecutor) ResolveAdmittedAcceleratorType(context.Context, string) (domain.AcceleratorType, string, bool, error) {
 	return "nvidia.com/gpu.product=NVIDIA-L40", "node-a", true, nil
@@ -74,6 +88,9 @@ func (e *captureExecutor) GetLiveRAMCapacity(context.Context) (int64, int64, err
 func (e *captureExecutor) GetLiveNodeResourceCapacity(context.Context) (map[string]map[string]int64, error) {
 	return map[string]map[string]int64{}, nil
 }
+func (e *captureExecutor) GetNodeTotalCapacity(context.Context) (map[string]map[string]int64, error) {
+	return map[string]map[string]int64{}, nil
+}
 
 func (e *captureExecutor) GetLiveStorageCapacity(context.Context) (int64, int64, error) {
 	return 1 << 36, 1 << 37, nil
@@ -82,6 +99,9 @@ func (e *captureExecutor) GetLiveAcceleratorCapacitySnapshot(context.Context) (m
 	return map[string]int64{}, map[string]int64{}, map[string]map[string]int64{}, map[string]map[string]string{}, nil
 }
 func (e *captureExecutor) DeleteWorkload(_ context.Context, id string, _ bool) error {
+	if id != "" && id == e.undeletable {
+		return fmt.Errorf("delete failed for %s", id)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deleted = append(e.deleted, id)

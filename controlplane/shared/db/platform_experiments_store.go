@@ -42,8 +42,8 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // CreatePlatformExperiment inserts a new platform experiment.
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -59,10 +59,11 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		return fmt.Errorf("platform_experiments_store.Create: marshal stages: %w", err)
 	}
 	_, err = s.pool.pool.Exec(ctx, q,
-		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
+		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
 		pe.StartsAt, pe.EndsAt, string(pe.Status),
 		stages, 1,
+		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
 		pe.CreatedAt, pe.UpdatedAt,
 	)
 	if err != nil {
@@ -74,18 +75,19 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, name, description, budget_accelerator_hours, budget_cpu_core_hours, budget_ram_gb_hours, budget_storage_gb_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at
+SELECT id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at
 FROM platform_experiments
 WHERE id = $1`
 
 	pe := &domain.PlatformExperiment{}
-	var status string
+	var status, hypothesisPolicy, jobPolicy string
 	var metricsRaw, stagesRaw []byte
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
-		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
+		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &pe.EndsAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
+		&hypothesisPolicy, &jobPolicy,
 		&pe.CreatedAt, &pe.UpdatedAt,
 	)
 	if err != nil {
@@ -101,7 +103,24 @@ WHERE id = $1`
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
 	pe.Status = domain.PlatformExperimentStatus(status)
+	pe.HypothesisSubmitPolicy = domain.SubmitterPolicy(hypothesisPolicy)
+	pe.JobSubmitPolicy = domain.SubmitterPolicy(jobPolicy)
 	return pe, nil
+}
+
+// GetPlatformExperimentSubmitPolicies is a narrow read of just HypothesisSubmitPolicy/
+// JobSubmitPolicy, used to gate hypothesis registration (registry.Service.RegisterHypothesis)
+// without pulling the whole row through that service's Store interface.
+func (s *PlatformExperimentsStore) GetPlatformExperimentSubmitPolicies(ctx context.Context, id string) (hypothesisPolicy, jobPolicy domain.SubmitterPolicy, found bool, err error) {
+	const q = `SELECT hypothesis_submit_policy, job_submit_policy FROM platform_experiments WHERE id = $1`
+	var h, j string
+	if err := s.pool.pool.QueryRow(ctx, q, id).Scan(&h, &j); err != nil {
+		if err == pgx.ErrNoRows {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("platform_experiments_store.GetPlatformExperimentSubmitPolicies: %w", err)
+	}
+	return domain.SubmitterPolicy(h), domain.SubmitterPolicy(j), true, nil
 }
 
 // PlatformExperimentsFilter constrains ListPlatformExperiments/CountPlatformExperiments.
@@ -220,10 +239,11 @@ func (s *PlatformExperimentsStore) ListPlatformExperimentsByStatus(ctx context.C
 
 func platformExperimentSelect(clauses []string, sort string) string {
 	return `
-SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
+SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
+       pe.hypothesis_submit_policy, pe.job_submit_policy,
        pe.created_at, pe.updated_at,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
@@ -243,13 +263,14 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 	var out []*domain.PlatformExperiment
 	for rows.Next() {
 		pe := &domain.PlatformExperiment{}
-		var status string
+		var status, hypothesisPolicy, jobPolicy string
 		var metricsRaw, stagesRaw []byte
 		if err := rows.Scan(
-			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.BudgetCPUCoreHours, &pe.BudgetRAMGBHours, &pe.BudgetStorageGBHours, &pe.MaxAgents,
+			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &pe.EndsAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
+			&hypothesisPolicy, &jobPolicy,
 			&pe.CreatedAt, &pe.UpdatedAt,
 			&pe.SignupCount,
 		); err != nil {
@@ -262,6 +283,8 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
+		pe.HypothesisSubmitPolicy = domain.SubmitterPolicy(hypothesisPolicy)
+		pe.JobSubmitPolicy = domain.SubmitterPolicy(jobPolicy)
 		out = append(out, pe)
 	}
 	return out, rows.Err()
@@ -317,12 +340,13 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
 	}
 	const q = `UPDATE platform_experiments
-SET name=$2, description=$3, budget_accelerator_hours=$4, budget_cpu_core_hours=$5, budget_ram_gb_hours=$6, budget_storage_gb_hours=$7, max_agents=$8, metrics=$9,
-    report_interval_seconds=$10, starts_at=$11, ends_at=$12, updated_at=NOW()
-WHERE id=$1 AND status=$13`
+SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
+    report_interval_seconds=$7, starts_at=$8, ends_at=$9, hypothesis_submit_policy=$10, job_submit_policy=$11, updated_at=NOW()
+WHERE id=$1 AND status=$12`
 	tag, err := s.pool.pool.Exec(ctx, q,
-		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.BudgetCPUCoreHours, pe.BudgetRAMGBHours, pe.BudgetStorageGBHours, pe.MaxAgents,
-		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt, expectedStatus,
+		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
+		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
+		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy), expectedStatus,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)
@@ -355,6 +379,12 @@ type StartParticipant struct {
 	AgentID     string
 	AgentExists bool
 	HasTop3     bool
+	// Kind and QuotaTierOverride are the two inputs domain.ResolveQuotaTier needs to decide which
+	// column this participant's share lands in. Read here, inside the start transaction, because
+	// the signup set is: resolving the tier from a separate query could pair one transaction's
+	// participants with another's overrides.
+	Kind              domain.AgentKind
+	QuotaTierOverride domain.QuotaTier
 }
 
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
@@ -390,7 +420,8 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 	// transaction is open: several concurrent starts would each hold a connection and wait for
 	// another from the same pool, which is a deadlock rather than a slow path.
 	rows, err := tx.Query(ctx, `
-SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id)
+SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id),
+       COALESCE(a.kind, ''), s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
 WHERE s.platform_experiment_id = $1
@@ -401,7 +432,7 @@ ORDER BY s.agent_id`, id)
 	var participants []StartParticipant
 	for rows.Next() {
 		var p StartParticipant
-		if err := rows.Scan(&p.AgentID, &p.AgentExists, &p.HasTop3); err != nil {
+		if err := rows.Scan(&p.AgentID, &p.AgentExists, &p.HasTop3, &p.Kind, &p.QuotaTierOverride); err != nil {
 			rows.Close()
 			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
 		}
@@ -524,8 +555,8 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 		if len(survivorIDs) == 0 || release <= 0 {
 			continue
 		}
-		addQ := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s + $3 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed)
-		if _, err := tx.Exec(ctx, addQ, platformExpID, survivorIDs, release/float64(len(survivorIDs))); err != nil {
+		if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst,
+			release/float64(len(survivorIDs)), 0); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: add %s: %w", dim.ResourceType, err)
 		}
 	}
@@ -707,8 +738,10 @@ func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donati
 	if _, err := tx.Exec(ctx, debitQ, donorAgentID, platformExpID, amount, movedBurst); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: debit donor: %w", err)
 	}
-	creditQ := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s + $3, %[2]s = %[2]s + $4 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed, burst)
-	if _, err := tx.Exec(ctx, creditQ, recipientAgentID, platformExpID, amount, movedBurst); err != nil {
+	// The donor is debited exactly what it gave; the recipient is credited into its own tier. A
+	// human's guaranteed hours donated to a burst-only agent stay hours, but they do not carry
+	// the donor's priority across with them — see creditIntoTier.
+	if err := creditIntoTier(ctx, tx, platformExpID, []string{recipientAgentID}, guaranteed, burst, amount, movedBurst); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: credit recipient: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE donation_requests SET status='fulfilled', updated_at=now() WHERE id=$1`, donationID); err != nil {

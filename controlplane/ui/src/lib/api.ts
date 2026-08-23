@@ -235,15 +235,6 @@ export interface CreatePlatformExperimentRequest {
   name: string
   description?: string
   budget_accelerator_hours: number
-  // Optional CPU budget. Current PostgreSQL estimates and settled metrics observations
-  // contribute to its guaranteed/burst usage. 0/omitted means it is not tracked.
-  budget_cpu_core_hours?: number
-  /** @deprecated RAM is no longer an hours-billed budget dimension — physical fit-only check at
-   * admission now. Always sent as 0 by the UI; kept in the request type only because the backend
-   * still accepts/echoes the field for backward compat. */
-  budget_ram_gb_hours?: number
-  /** @deprecated see budget_ram_gb_hours. */
-  budget_storage_gb_hours?: number
   max_agents: number
   metrics?: MetricDefinition[]
   report_interval_seconds?: number
@@ -297,11 +288,20 @@ export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment>
   return apiFetch<PlatformExperiment>(`${API_URL}/platform-experiments/${id}`)
 }
 
-export async function signupPlatformExperiment(id: string, agentID: string): Promise<{ status: string }> {
+// quotaTier optionally overrides this signup's guaranteed-vs-burst-only split regardless of the
+// agent's kind — 'guaranteed' or 'burst_only'. Omit to use the kind default (humans
+// guaranteed+burst, agents burst-only). Lets one experiment mix tiers across participants.
+export type QuotaTierOverride = 'guaranteed' | 'burst_only' | undefined
+
+export async function signupPlatformExperiment(
+  id: string,
+  agentID: string,
+  quotaTier?: QuotaTierOverride,
+): Promise<{ status: string }> {
   const res = await fetch(`${API_URL}/platform-experiments/${id}/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent_id: agentID }),
+    body: JSON.stringify({ agent_id: agentID, ...(quotaTier ? { quota_tier: quotaTier } : {}) }),
     cache: 'no-store',
   })
   if (!res.ok) throw new Error(`signup failed: ${res.status}`)
@@ -316,13 +316,10 @@ export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<Ag
   return apiFetch<AgentQuota[]>(`${API_URL}/platform-experiments/${platformExpID}/quotas`)
 }
 
-// Resource pricing reference data (Accelerator type rates, CPU/RAM/storage flat rates) — fetched
-// from the backend instead of hardcoded, so the UI never drifts from the operator's config.
+// Resource pricing reference data (Accelerator type rates) — fetched from the backend instead of
+// hardcoded, so the UI never drifts from the operator's config.
 export interface ResourceCatalog {
   accelerator_types: Array<{ name: string; acch_rate: number }>
-  cpu_core_hour_rate: number
-  ram_gb_hour_rate: number
-  storage_gb_hour_rate: number
 }
 
 

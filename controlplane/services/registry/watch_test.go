@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -466,6 +467,69 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 	}
 }
 
+// The real battle test: two agents' jobs under one platform experiment, each running the actual
+// hl-watch script against the actual server. Each agent's own stage cut must arrive unmarked, and
+// the other agent's must arrive "FYI: cut" — proving the prefix survives the real WebSocket
+// handshake and framing, not just the in-process db.EventFilter unit tests above, and that each
+// agent still receives the full picture rather than having the other's news withheld.
+func TestHLWatchDistinguishesItsOwnStageCutFromAnotherAgentsWithAnFYIPrefix(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		now := time.Now().UnixMicro()
+		// One boundary row produces both agents' cut events, exactly as the real ladder does.
+		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
+			PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: now}
+		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: now + 1}
+	}()
+
+	var wg sync.WaitGroup
+	var outA, outB string
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, outA, _ = runHLWatch(t, server.URL, "--platform-experiment", "pe-1", "--agent", "agent-a",
+			"--kinds", db.EventStageBoundary, "--timeout", "5")
+	}()
+	go func() {
+		defer wg.Done()
+		_, outB, _ = runHLWatch(t, server.URL, "--platform-experiment", "pe-1", "--agent", "agent-b",
+			"--kinds", db.EventStageBoundary, "--timeout", "5")
+	}()
+	wg.Wait()
+
+	linesFor := func(agentID, output string) []string {
+		var lines []string
+		for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+			if strings.Contains(line, `"agent_id":"`+agentID+`"`) {
+				lines = append(lines, line)
+			}
+		}
+		return lines
+	}
+
+	// Agent A: sees both cuts (the ladder is shared), its own unmarked and agent-b's flagged.
+	if lines := linesFor("agent-a", outA); len(lines) != 1 || strings.Contains(lines[0], "FYI") {
+		t.Errorf("agent-a's own cut in its own watch output: got = %v, want = one unmarked line", lines)
+	}
+	if lines := linesFor("agent-b", outA); len(lines) != 1 || !strings.Contains(lines[0], `"detail":"FYI: cut"`) {
+		t.Errorf("agent-b's cut in agent-a's watch output: got = %v, want = one line with detail FYI: cut", lines)
+	}
+
+	// Agent B: the mirror image — every agent gets the full picture, distinguished by the prefix.
+	if lines := linesFor("agent-b", outB); len(lines) != 1 || strings.Contains(lines[0], "FYI") {
+		t.Errorf("agent-b's own cut in its own watch output: got = %v, want = one unmarked line", lines)
+	}
+	if lines := linesFor("agent-a", outB); len(lines) != 1 || !strings.Contains(lines[0], `"detail":"FYI: cut"`) {
+		t.Errorf("agent-a's cut in agent-b's watch output: got = %v, want = one line with detail FYI: cut", lines)
+	}
+}
+
 // agent.cut is the one new kind that is agent-owned, and that is the whole reason it exists: an
 // agent watching for its own stop condition must not be woken by every rival's elimination, and
 // must never conclude from one that it was cut itself. Getting this wrong turns a stop condition
@@ -511,6 +575,48 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 		if got := client.next(t).Kind; got != want {
 			t.Errorf("delivered kind: got = %v, want = %v", got, want)
 		}
+	}
+}
+
+// A shared event that names a different agent's job is ambient context, not this connection's own
+// concern, and the server marks it so on delivery — live and on replay both — so an agent's loop
+// can tell "act on this" from "FYI" without a second GET. Its own events, whether agent-owned or
+// shared but self-authored, are never marked.
+func TestASharedEventFromAnotherAgentIsDeliveredWithAnFYIPrefixLiveAndOnReplay(t *testing.T) {
+	source := newFakeEvents(
+		db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 50},
+	)
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+		"since":                  {"10"},
+	})
+
+	// Replayed: another agent's stage cut is ambient, this agent's own is not.
+	if got := client.next(t); got.Detail != "FYI: cut" {
+		t.Errorf("replayed stage.boundary detail for another agent's cut: got = %q, want = %q", got.Detail, "FYI: cut")
+	}
+
+	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "2", Detail: "cut",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "3", Detail: "cut",
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1", Value: "agent", Detail: "",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 300}
+
+	if got := client.next(t); got.Detail != "FYI: cut" || got.Value != "2" {
+		t.Errorf("live stage.boundary for another agent's cut: got = %+v, want detail = %q", got, "FYI: cut")
+	}
+	if got := client.next(t); got.Detail != "cut" || got.Value != "3" {
+		t.Errorf("live stage.boundary for this agent's own cut: got = %+v, want detail = %q (unmarked)", got, "cut")
+	}
+	// hypothesis.new, comment.new and most other kinds never carry Detail text at all — without
+	// a bare "FYI" for the empty case, another agent's activity on these kinds would be silently
+	// indistinguishable from this subscriber's own in the printed line, defeating the point.
+	if got := client.next(t); got.Detail != "FYI" {
+		t.Errorf("another agent's event with no detail: got = %q, want = %q", got.Detail, "FYI")
 	}
 }
 

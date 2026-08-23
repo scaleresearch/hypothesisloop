@@ -47,11 +47,10 @@ func qualifyColumns(cols, alias string) string {
 
 const experimentColumns = `
 	id, parent_id, agent_id, platform_experiment_id, project_id, cluster_name,
-	code_ref, config_hash, data_ref, job_spec,
+	code_ref, config_hash, data_ref, job_spec, resolved_job_spec,
 	hypothesis_id, hypothesis, objective, theory,
 	accelerator_type, accelerator_count,
 	estimated_duration_hours, estimated_cost_acch,
-	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
 	quota_settled_at, attempt_count, infra_requeue_count,
@@ -87,7 +86,6 @@ INSERT INTO experiments (
 	hypothesis_id, hypothesis, objective, theory,
 	accelerator_type, accelerator_count,
 	estimated_duration_hours, estimated_cost_acch,
-	estimated_cpu_core_hours, estimated_ram_gb_hours, estimated_storage_gb_hours,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, not_admitted_reason,
 	created_at, updated_at
@@ -97,10 +95,9 @@ INSERT INTO experiments (
 	$11, $12, $13, $14,
 	$15, $16,
 	$17, $18,
-	$19, $20, $21,
-	$22, $23, $24, $25,
-	$26, NULLIF($27, ''),
-	$28, $29
+	$19, $20, $21, $22,
+	$23, NULLIF($24, ''),
+	$25, $26
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -118,7 +115,6 @@ INSERT INTO experiments (
 		exp.HypothesisID, exp.Hypothesis, exp.Objective, exp.Theory,
 		string(exp.AcceleratorType), exp.AcceleratorCount,
 		exp.EstimatedDurationHours, exp.EstimatedCostAccH,
-		exp.EstimatedCPUCoreHours, exp.EstimatedRAMGBHours, exp.EstimatedStorageGBHours,
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
 		exp.CreatedAt, exp.NotAdmittedReason,
 		exp.CreatedAt, exp.UpdatedAt,

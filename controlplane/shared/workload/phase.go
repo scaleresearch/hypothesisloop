@@ -43,3 +43,10 @@ func ParseJobPhase(s string) JobPhase {
 		return JobPhasePending
 	}
 }
+
+// AttemptUnknown is the attempt of a workload whose generation cannot be established: a
+// cluster-agent that predates the attempt field reports none, and its silence must survive
+// decoding as silence. Read as 0 instead it would be indistinguishable from a genuine first
+// attempt — first attempts would pass the generation fence while every retry read as a foreign
+// generation and had its status discarded for the life of the job.
+const AttemptUnknown = -1

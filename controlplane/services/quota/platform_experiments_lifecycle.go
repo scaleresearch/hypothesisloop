@@ -36,14 +36,19 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := domain.ValidateStages(stages); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
+	hypothesisPolicy, err := domain.ParseSubmitterPolicy(req.HypothesisSubmitPolicy)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: hypothesis_submit_policy: %w", err)
+	}
+	jobPolicy, err := domain.ParseSubmitterPolicy(req.JobSubmitPolicy)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: job_submit_policy: %w", err)
+	}
 	pe := &domain.PlatformExperiment{
 		ID:                     "pe-" + uuid.New().String()[:8],
 		Name:                   req.Name,
 		Description:            req.Description,
 		BudgetAcceleratorHours: req.BudgetAcceleratorHours,
-		BudgetCPUCoreHours:     req.BudgetCPUCoreHours,
-		BudgetRAMGBHours:       req.BudgetRAMGBHours,
-		BudgetStorageGBHours:   req.BudgetStorageGBHours,
 		MaxAgents:              req.MaxAgents,
 		Metrics:                metrics,
 		ReportIntervalSeconds:  reportInterval,
@@ -52,6 +57,8 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Status:                 domain.PlatformExpOpen,
 		Stages:                 stages,
 		CurrentStage:           1,
+		HypothesisSubmitPolicy: hypothesisPolicy,
+		JobSubmitPolicy:        jobPolicy,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
@@ -98,29 +105,19 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 		// granularity rather than false-flagging every running-status edit as a schedule change.
 		const timePrecision = time.Minute
 		locked := (req.BudgetAcceleratorHours > 0 && req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours) ||
-			(req.BudgetCPUCoreHours > 0 && req.BudgetCPUCoreHours != pe.BudgetCPUCoreHours) ||
-			(req.BudgetRAMGBHours > 0 && req.BudgetRAMGBHours != pe.BudgetRAMGBHours) ||
-			(req.BudgetStorageGBHours > 0 && req.BudgetStorageGBHours != pe.BudgetStorageGBHours) ||
 			(req.MaxAgents > 0 && req.MaxAgents != pe.MaxAgents) ||
 			(req.Metrics != nil && !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics)) ||
 			(req.ReportIntervalSeconds > 0 && req.ReportIntervalSeconds != pe.ReportIntervalSeconds) ||
 			(!req.StartsAt.IsZero() && !req.StartsAt.Truncate(timePrecision).Equal(pe.StartsAt.Truncate(timePrecision))) ||
-			(!req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision)))
+			(!req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision))) ||
+			(req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy) ||
+			(req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy)
 		if locked {
 			return nil, fmt.Errorf("experiment_running: only name and description can be amended once running")
 		}
 	} else {
 		if req.BudgetAcceleratorHours > 0 {
 			pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
-		}
-		if req.BudgetCPUCoreHours > 0 {
-			pe.BudgetCPUCoreHours = req.BudgetCPUCoreHours
-		}
-		if req.BudgetRAMGBHours > 0 {
-			pe.BudgetRAMGBHours = req.BudgetRAMGBHours
-		}
-		if req.BudgetStorageGBHours > 0 {
-			pe.BudgetStorageGBHours = req.BudgetStorageGBHours
 		}
 		if req.MaxAgents > 0 {
 			pe.MaxAgents = req.MaxAgents
@@ -143,6 +140,20 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 		if !req.EndsAt.IsZero() {
 			pe.EndsAt = req.EndsAt
 		}
+		if req.HypothesisSubmitPolicy != "" {
+			policy, err := domain.ParseSubmitterPolicy(req.HypothesisSubmitPolicy)
+			if err != nil {
+				return nil, fmt.Errorf("platform_experiments.Update: hypothesis_submit_policy: %w", err)
+			}
+			pe.HypothesisSubmitPolicy = policy
+		}
+		if req.JobSubmitPolicy != "" {
+			policy, err := domain.ParseSubmitterPolicy(req.JobSubmitPolicy)
+			if err != nil {
+				return nil, fmt.Errorf("platform_experiments.Update: job_submit_policy: %w", err)
+			}
+			pe.JobSubmitPolicy = policy
+		}
 	}
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
@@ -150,8 +161,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 	return pe, nil
 }
 
-// Signup registers an agent for a platform experiment in a fixed role.
-func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole) error {
+// Signup registers an agent for a platform experiment in a fixed role. quotaTierOverride is the
+// signup-time explicit tier override ("" defers to domain.ResolveQuotaTier's kind default).
+func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTierOverride domain.QuotaTier) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return err
@@ -175,7 +187,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 		}
 	}
 
-	inserted, err := s.store.Signup(ctx, platformExpID, agentID, role)
+	inserted, err := s.store.Signup(ctx, platformExpID, agentID, role, quotaTierOverride)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
 	}
@@ -210,10 +222,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 
 	// Only the first stage's share of the budget is released now; each later stage releases its
 	// own share at the boundary it starts (see controller.applyCut). This is what stops one agent
-	// exhausting the whole budget before the ladder has cut anyone. Applied uniformly to every
-	// resource dimension the platform experiment tracks — Accelerator is always populated;
-	// CPU/RAM/storage budgets of 0 correctly allocate 0 (AllocateQuota(0, ...) returns 0,0),
-	// which is exactly "not tracked."
+	// exhausting the whole budget before the ladder has cut anyone.
 	exploreFrac := pe.Stages[0].LengthPct / 100.0
 	now := time.Now().UTC()
 
@@ -242,27 +251,17 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 			acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
 				pe.BudgetAcceleratorHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
-			cpuGuaranteed, cpuBurst := domain.AllocateQuota(
-				pe.BudgetCPUCoreHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
-			)
-			ramGuaranteed, ramBurst := domain.AllocateQuota(
-				pe.BudgetRAMGBHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
-			)
-			storageGuaranteed, storageBurst := domain.AllocateQuota(
-				pe.BudgetStorageGBHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
-			)
+			// The tier decides which column the share lands in, never how large it is: everyone
+			// is allocated the same way and a burst-only participant's guaranteed part is moved
+			// into burst, not taken away.
+			acceleratorGuaranteed, acceleratorBurst = domain.ApplyQuotaTier(
+				domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride), acceleratorGuaranteed, acceleratorBurst)
 			allocated = append(allocated, &domain.AgentQuota{
 				ID:                         uuid.New().String(),
 				AgentID:                    agentID,
 				PlatformExperimentID:       id,
 				GuaranteedAcceleratorHours: acceleratorGuaranteed,
 				BurstAcceleratorHours:      acceleratorBurst,
-				GuaranteedCPUCoreHours:     cpuGuaranteed,
-				BurstCPUCoreHours:          cpuBurst,
-				GuaranteedRAMGBHours:       ramGuaranteed,
-				BurstRAMGBHours:            ramBurst,
-				GuaranteedStorageGBHours:   storageGuaranteed,
-				BurstStorageGBHours:        storageBurst,
 				CreatedAt:                  now,
 			})
 		}

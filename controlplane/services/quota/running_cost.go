@@ -27,7 +27,6 @@ import (
 type runningCost struct {
 	hours float64
 	accH  float64
-	cpuH  float64
 	found bool
 }
 
@@ -62,7 +61,7 @@ func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (r
 	if !found {
 		return runningCost{}, nil
 	}
-	rc := runningCost{found: true, hours: hours, cpuH: hours * exp.RequestedCPUCores()}
+	rc := runningCost{found: true, hours: hours}
 	// accH uses the same rate source as settlement (domain.Experiment.RatedCost — the
 	// admission-time estimate's implied per-hour rate), not a live catalog lookup
 	// (AcceleratorType.LookupCost). That used to make live accounting and settlement price the
@@ -137,10 +136,8 @@ func (s *PlatformExperimentsService) addRunningActualCosts(ctx context.Context, 
 		}
 		if exp.CapacityTier == domain.CapacityGuaranteed {
 			q.UsedGuaranteedAccH += rc.accH
-			q.UsedGuaranteedCPUCoreH += rc.cpuH
 		} else {
 			q.UsedBurstAccH += rc.accH
-			q.UsedBurstCPUCoreH += rc.cpuH
 		}
 	}
 	return nil

@@ -29,7 +29,7 @@ import (
 // silence window, since a legitimately coarse eval cadence (metrics only every few report
 // intervals) must not be mistaken for a stuck process.
 func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, declaredMetricKeys []string) (bool, domain.EvictionReason, error) {
-	startedAt, observed, err := metricsdb.FirstObserved(ctx, c.metricsDBURL, exp.ID, exp.CreatedAt, now, c.observedGapCap())
+	startedAt, observed, err := c.observed.FirstObserved(ctx, exp.ID, exp.CreatedAt, now, c.observedGapCap())
 	if err != nil {
 		return false, "", fmt.Errorf("silence first observation: %w", err)
 	}
@@ -47,7 +47,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	if now.Sub(startedAt) < window {
 		return false, "", nil // hasn't even had one full window to report in yet
 	}
-	phase, found, err := metricsdb.LatestJobPhase(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, window)
+	phase, found, err := c.observed.LatestJobPhase(ctx, exp.ID, exp.ClusterName, window)
 	if err != nil {
 		return false, "", fmt.Errorf("silence job phase: %w", err)
 	}
@@ -56,7 +56,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	// cluster is reporting and this job is not in what it reports. Both branches need the same
 	// snapshot facts, and only these branches do — the common case above never pays for the query.
 	if !found || phase == workload.JobPhaseGone {
-		presence, err := metricsdb.ClusterSnapshotPresence(ctx, c.metricsDBURL, exp.ID, exp.ClusterName, exp.CreatedAt, now)
+		presence, err := c.observed.ClusterSnapshotPresence(ctx, exp.ID, exp.ClusterName, exp.CreatedAt, now)
 		if err != nil {
 			return false, "", fmt.Errorf("silence snapshot presence: %w", err)
 		}
@@ -108,7 +108,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		if now.Sub(startedAt) < 2*window {
 			return false, "", nil // give a coarse eval cadence room to post its first point
 		}
-		reported, changed, err := metricsdb.AnyDeclaredMetricChanged(ctx, c.metricsDBURL, exp.ID, declaredMetricKeys, 2*window)
+		reported, changed, err := c.observed.AnyDeclaredMetricChanged(ctx, exp.ID, declaredMetricKeys, 2*window)
 		if err != nil {
 			return false, "", fmt.Errorf("silence declared-metric progress: %w", err)
 		}
@@ -128,7 +128,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// fine an hour ago gets condemned as if it never reported. Asked with the "even one
 		// sample" reader, not the progress one: a single point is not enough to judge movement,
 		// but it is a complete answer to "did this job ever report".
-		everReported, err := metricsdb.AnyDeclaredMetricReported(ctx, c.metricsDBURL, exp.ID, declaredMetricKeys, now.Sub(startedAt))
+		everReported, err := c.observed.AnyDeclaredMetricReported(ctx, exp.ID, declaredMetricKeys, now.Sub(startedAt))
 		if err != nil {
 			return false, "", fmt.Errorf("silence declared-metric ever-reported: %w", err)
 		}
@@ -150,7 +150,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	// warn to stderr, that failure is otherwise completely silent, reaching an operator as
 	// "stuck job" with no hint the metrics path is at fault. Tell them apart here, where the
 	// evidence is, so the eviction reason names the actual problem.
-	reported, err := metricsdb.HasEverReportedMetric(ctx, c.metricsDBURL, exp.ID, exp.CreatedAt, now)
+	reported, err := c.observed.HasEverReportedMetric(ctx, exp.ID, exp.CreatedAt, now)
 	if err != nil {
 		return false, "", fmt.Errorf("silence ever-reported: %w", err)
 	}

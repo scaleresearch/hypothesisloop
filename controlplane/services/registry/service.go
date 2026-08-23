@@ -21,6 +21,10 @@ type Store interface {
 	// the existing row (and true) if one with equivalent normalized text already exists in
 	// that same platform experiment — the real uniqueness check.
 	FindOrCreateHypothesis(ctx context.Context, source domain.HypothesisSource, agentID, author, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error)
+	// GetPlatformExperimentSubmitPolicies is a narrow read of a platform experiment's
+	// HypothesisSubmitPolicy/JobSubmitPolicy, used to gate RegisterHypothesis without pulling
+	// the full row through this interface. found=false means id does not exist.
+	GetPlatformExperimentSubmitPolicies(ctx context.Context, platformExperimentID string) (hypothesisPolicy, jobPolicy domain.SubmitterPolicy, found bool, err error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*db.HypothesisListItem, error)
 	CountHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus) (int, error)

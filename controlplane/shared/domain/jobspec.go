@@ -9,6 +9,11 @@ import (
 // how a workload runs. It deliberately exposes no execution-engine concepts (no manifests, pod
 // templates, or CRDs): whatever backend is configured (k8s today; conceivably Slurm/Ray tomorrow)
 // compiles this down into its own native resource, deterministically, from the same desired state.
+// MaxResourceSentinel is the literal JobSpec.CPU/Memory/Storage value asking admission to resolve
+// the field to this job's exact proportional per-accelerator share of whatever node it lands on.
+// See JobSpec.CPU's doc comment.
+const MaxResourceSentinel = "max"
+
 type JobSpec struct {
 	// Image is the container image to run. Required.
 	Image string `json:"image" yaml:"image"`
@@ -23,6 +28,14 @@ type JobSpec struct {
 	// CPU/Memory/Storage are plain resource-quantity strings (e.g. "4", "16Gi") for the
 	// non-Accelerator resources each node gets. All three are required.
 	// Storage is ephemeral scratch space (k8s ephemeral-storage) — not a persistent volume.
+	//
+	// Any of the three may instead be the literal MaxResourceSentinel ("max"), independently —
+	// a job can mix cpu: "max" with memory: "16Gi" — meaning "give me my exact proportional
+	// share of whatever node I land on, for the accelerators I'm requesting". Resolved once this
+	// job is admitted onto a specific cluster (see scheduler.Loop.resolveClusterLocalResources),
+	// into domain.Experiment.ResolvedJob's copy of this field — Job itself is NEVER rewritten, so a
+	// GET always shows exactly what was submitted; every downstream consumer (Footprint, BuildJobs,
+	// cost estimation) reads domain.Experiment.EffectiveJob() instead of this field directly.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
@@ -337,6 +350,9 @@ func (j JobSpec) ValidateGroups() error {
 		if g.AcceleratorCount < 0 {
 			return fmt.Errorf("job.groups[%q].accelerator_count must not be negative", g.Name)
 		}
+		if g.AcceleratorCount == 0 && (g.CPU == MaxResourceSentinel || g.Memory == MaxResourceSentinel || g.Storage == MaxResourceSentinel) {
+			return fmt.Errorf("job.groups[%q].cpu/memory/storage cannot be \"max\" without a positive accelerator_count — there is no accelerator to compute a proportional share against", g.Name)
+		}
 		if g.AcceleratorType == "" {
 			continue
 		}
@@ -366,25 +382,37 @@ var groupNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 // ExperimentMeta holds the fields a submission needs to describe research intent and
 // bookkeeping around a run — never how it executes (that's JobSpec).
 type ExperimentMeta struct {
-	AgentID              string  `json:"agent_id" yaml:"agent_id"`
-	PlatformExperimentID string  `json:"platform_experiment_id" yaml:"platform_experiment_id"`
-	ProjectID            string  `json:"project_id" yaml:"project_id"`
-	ParentID             *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
+	AgentID              string `json:"agent_id" yaml:"agent_id"`
+	PlatformExperimentID string `json:"platform_experiment_id" yaml:"platform_experiment_id"`
+	// ProjectID is an optional free-text grouping tag (queryable via GET /experiments?project_id=)
+	// -- there is no Project entity anywhere in the domain, so this is a caller-chosen label, not
+	// a foreign key. Leave it empty if you have no grouping need.
+	ProjectID string  `json:"project_id,omitempty" yaml:"project_id,omitempty"`
+	ParentID  *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
 
 	// HypothesisID is required: the ID of a hypothesis previously registered (or retrieved,
 	// if equivalent text already existed) via POST /hypotheses.
 	HypothesisID string `json:"hypothesis_id" yaml:"hypothesis_id"`
-	Hypothesis   string `json:"hypothesis" yaml:"hypothesis"`
-	Objective    string `json:"objective" yaml:"objective"`
-	Theory       string `json:"theory,omitempty" yaml:"theory,omitempty"`
+	// Hypothesis is populated by the server (scheduler.Service.Submit denormalizes it from the
+	// registered hypothesis's own Text, looked up by HypothesisID) and is never read from the
+	// request — optional and ignored if a caller sends one. Kept only so an already-persisted
+	// Experiment can round-trip through this same struct on read paths.
+	Hypothesis string `json:"hypothesis,omitempty" yaml:"hypothesis,omitempty"`
+	Objective  string `json:"objective" yaml:"objective"`
+	Theory     string `json:"theory,omitempty" yaml:"theory,omitempty"`
 
-	CodeRef    string `json:"code_ref" yaml:"code_ref"`
-	ConfigHash string `json:"config_hash" yaml:"config_hash"`
-	DataRef    string `json:"data_ref" yaml:"data_ref"`
+	CodeRef string `json:"code_ref" yaml:"code_ref"`
+	// ConfigHash/DataRef are optional reproducibility pointers (a hash of the resolved
+	// hyperparameter config, where the input dataset lives) — pure bookkeeping, stored and
+	// returned verbatim, never validated or required by admission. Leave empty if you have
+	// nothing to point at.
+	ConfigHash string `json:"config_hash,omitempty" yaml:"config_hash,omitempty"`
+	DataRef    string `json:"data_ref,omitempty" yaml:"data_ref,omitempty"`
 
 	// CapacityTier picks guaranteed (FIFO, can preempt burst) vs. burst (best-effort,
 	// preemptable) scheduling, translated into the backend's native priority mechanism (a k8s
-	// PriorityClass today).
-	CapacityTier           CapacityTier `json:"capacity_tier" yaml:"capacity_tier"`
+	// PriorityClass today). Optional — scheduler.Service.Submit defaults an empty value to
+	// guaranteed.
+	CapacityTier           CapacityTier `json:"capacity_tier,omitempty" yaml:"capacity_tier,omitempty"`
 	EstimatedDurationHours float64      `json:"estimated_duration_hours" yaml:"estimated_duration_hours"`
 }

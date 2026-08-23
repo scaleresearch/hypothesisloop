@@ -250,11 +250,16 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, ma
 	if err != nil {
 		return nil, nil, fmt.Errorf("get live per-node resource capacity: %w", err)
 	}
+	nodeResourcesTotal, err := a.Executor.GetNodeTotalCapacity(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get per-node total resource capacity: %w", err)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
 		"accelerator_available_by_type": acceleratorAvail, "accelerator_total_by_type": acceleratorTotal,
 		"accelerator_available_by_node": acceleratorByNode,
 		"node_resources_by_node":        nodeResources,
+		"node_resources_total_by_node":  nodeResourcesTotal,
 		"node_labels_by_node":           nodeLabels,
 		"multi_node_capable":            a.Executor.SupportsMultiNodeJobs(),
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
@@ -303,6 +308,11 @@ type statusReportWire struct {
 	Reason                  string   `json:"reason,omitempty"`
 	Message                 string   `json:"message,omitempty"`
 	RestartCount            int32    `json:"restart_count,omitempty"`
+	// Attempt is the generation of the experiment this observation came from. A pointer so an
+	// executor that could not establish one (workload.AttemptUnknown) sends no field at all
+	// rather than a number: the control plane reads absence as "cannot fence" and accepts the
+	// report, and reads a number as a claim it will check against desired state.
+	Attempt *int `json:"attempt,omitempty"`
 }
 
 func (a *Agent) statusReportLoop(ctx context.Context) {
@@ -348,13 +358,14 @@ func (a *Agent) reportChangedStatuses(ctx context.Context) {
 // container is in the state it is in. ok is false when the job could not be observed coherently,
 // which costs the whole snapshot — see reportChangedStatuses for why a partial one is dangerous.
 func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWire, bool) {
-	// One combined poll keeps phase and UID from two different reads from being combined
+	// One combined poll keeps phase, UID and attempt from separate reads from being combined
 	// into an impossible observation during a delete/recreate race.
-	phase, _, err := a.Executor.PollJobPhaseAndUID(ctx, id)
+	observed, err := a.Executor.PollJobStatus(ctx, id)
 	if err != nil {
 		a.Log("poll job phase %s: %v", id, err)
 		return statusReportWire{}, false
 	}
+	phase := observed.Phase
 	// Attribution is reported when it can be resolved and left empty when it cannot. It says
 	// which accelerator the job landed on, not whether the job exists, so failing to read it is
 	// not grounds to withhold the phase — and withholding the phase costs the whole cluster's
@@ -399,8 +410,14 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		}
 	}
 
+	var attempt *int
+	if observed.Attempt != workload.AttemptUnknown {
+		attempt = &observed.Attempt
+	}
+
 	return statusReportWire{
 		ExperimentID:            id,
+		Attempt:                 attempt,
 		Phase:                   phase.String(),
 		AdmittedAcceleratorType: admittedAcceleratorType,
 		AdmittedNode:            admittedNode,

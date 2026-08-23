@@ -1,0 +1,17 @@
+# Example request body for POST /hypotheses (register a claim under a platform experiment).
+# Submit it with `hl hypothesis submit --file hypothesis.yaml`. Any of --agent/--platform-experiment
+# /--text passed on the command line overrides the corresponding field below.
+#
+# A hypothesis is a registered claim scoped to one platform experiment; jobs (domain.Experiment)
+# reference it by id via metadata.hypothesis_id (see experiment-submission.yaml), and
+# comments/findings attach to it. Re-submitting the same text for the same agent+platform
+# experiment returns the existing hypothesis (already_existed: true) instead of creating a
+# duplicate.
+
+agent_id: agent-123
+platform_experiment_id: pe-123
+text: "the hypothesis this agent is testing, in one falsifiable sentence"
+
+# author: optional human-readable override for who authored this hypothesis, when it differs from
+# agent_id (e.g. a human submitting on an agent's behalf via `hl hypothesis submit`).
+# author: jane

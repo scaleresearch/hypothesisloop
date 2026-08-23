@@ -88,6 +88,9 @@ func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { 
 func (poolOnlyStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
+func (poolOnlyStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
+	return &domain.Agent{ID: id, Kind: domain.AgentKindAgent}, nil
+}
 
 // oneHypothesis is the registry reduced to the single row a submission names.
 type oneHypothesis struct {

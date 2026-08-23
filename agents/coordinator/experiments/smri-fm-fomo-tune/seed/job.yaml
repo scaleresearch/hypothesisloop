@@ -1,58 +1,82 @@
-# FOMO task 3 (brain age), the secondary task. seed/job.task5.yaml is the ranking task (task 5)
-# and is the one to start from -- same image, same mounts, different TASK. Everything an agent
-# varies for a hypothesis is in `env` below; no rebuild is needed for any of it.
-#
-# L_VIS below is NOT measured for task 3's 494 subjects yet (task 5 was the priority) -- measure
-# it before running this, or omit L_VIS entirely and let the runner measure it (one host-side
-# transform pass over the dataset, a few minutes).
-#
-# Dataset access: host_mounts bind-mounts this node's already-fetched, already-unpacked copy of
-# the FOMO task data + the pinned checkpoint read-only at /data/fomo. seed/fetch_data.sh put it
-# there once, as node setup -- no job downloads or unzips anything (checklist item 11). This is a
-# node-local path, so a job that lands on a different node needs that node set up the same way
-# first; the platform fails admission (rather than starting and failing oddly) if the path is
-# missing.
-image: localhost/hypothesisloop-smri-fm-fomo-tune-workload:latest
+# This file is a full POST /experiments request body (id + metadata + job), not just the job
+# spec. id/metadata below are placeholders -- nothing here knows in advance which hypothesis or
+# platform experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id,
+# agent_id (and id, for a fresh submission) before/at submit time. The `job:` block below is the
+# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# for the fully-commented DSL reference.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
+  # project_id: optional free-text grouping tag (GET /experiments?project_id=) -- no Project entity exists, omit if unneeded.
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
+  # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
+  # validated. Omit both if you have nothing to point at.
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  estimated_duration_hours: 1.0
+job:
+  # FOMO task 3 (brain age), the secondary task. seed/job.task5.yaml is the ranking task (task 5)
+  # and is the one to start from -- same image, same mounts, different TASK. Everything an agent
+  # varies for a hypothesis is in `env` below; no rebuild is needed for any of it.
+  #
+  # L_VIS below is NOT measured for task 3's 494 subjects yet (task 5 was the priority) -- measure
+  # it before running this, or omit L_VIS entirely and let the runner measure it (one host-side
+  # transform pass over the dataset, a few minutes).
+  #
+  # Dataset access: host_mounts bind-mounts this node's already-fetched, already-unpacked copy of
+  # the FOMO task data + the pinned checkpoint read-only at /data/fomo. seed/fetch_data.sh put it
+  # there once, as node setup -- no job downloads or unzips anything (checklist item 11). This is a
+  # node-local path, so a job that lands on a different node needs that node set up the same way
+  # first; the platform fails admission (rather than starting and failing oddly) if the path is
+  # missing.
+  image: __WORKLOAD_IMAGE__
 
-command: ["/build/smri-fm-fomo-tune/seed/run_job.sh"]
+  command: ["/build/smri-fm-fomo-tune/seed/run_job.sh"]
 
-host_mounts:
-  /data/fomo: /home/ttuser/fomo-tune-data
+  host_mounts:
+    /data/fomo: /home/ttuser/fomo-tune-data
 
-# tt-quietbox: 16 cpu / ~233Gi allocatable, 4 chips, DaemonSets reserve ~0.335 cpu. Sized so 4
-# concurrent jobs (one per chip) fit with headroom: 4 * 3800m = 15200m, 4 * 48Gi = 192Gi.
-# Memory is the real constraint here, not cpu: the host-side transform holds a dense
-# 208x240x208 float volume plus its patchified copy while the device runs.
-cpu: "3800m"
-memory: "48Gi"
-# The dataset is mounted, not fetched, and outputs are a few MB of json/npz. This is headroom
-# for the ttnn kernel cache and any device dump, not for data.
-storage: "20Gi"
-# Deliberately low. The failures this job can have are overwhelmingly deterministic -- a wrong
-# checkpoint path, a subject exceeding L_VIS, a PCC gate failure -- and retrying those burns a
-# chip for the same answer. 1 retry covers a flaky device open at startup, nothing more.
-max_retries: 1
+  # tt-quietbox: 16 cpu / ~233Gi allocatable, 4 chips, DaemonSets reserve ~0.335 cpu. Sized so 4
+  # concurrent jobs (one per chip) fit with headroom: 4 * 3800m = 15200m, 4 * 48Gi = 192Gi.
+  # Memory is the real constraint here, not cpu: the host-side transform holds a dense
+  # 208x240x208 float volume plus its patchified copy while the device runs.
+  cpu: "3800m"
+  memory: "48Gi"
+  # The dataset is mounted, not fetched, and outputs are a few MB of json/npz. This is headroom
+  # for the ttnn kernel cache and any device dump, not for data.
+  storage: "20Gi"
+  # Deliberately low. The failures this job can have are overwhelmingly deterministic -- a wrong
+  # checkpoint path, a subject exceeding L_VIS, a PCC gate failure -- and retrying those burns a
+  # chip for the same answer. 1 retry covers a flaky device open at startup, nothing more.
+  max_retries: 1
 
-env:
-  # Must match seed/Dockerfile.workload's pinned base digest, Dockerfile.experimentator, and
-  # experiment.md. A drift between them means the agent read different source than the job ran,
-  # with no error anywhere.
-  TT_METAL_REF: "d9a68815f5fcf08a5bfbffb6f1f811823fba8edd"
-  # accelerator_count: 1 grants one /dev/tenstorrent/<N>; UMD then needs an explicit single-chip
-  # mesh descriptor rather than inferring one for the board type.
-  TT_MESH_GRAPH_DESC_PATH: "/build/smri-fm/tenstorrent/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto"
+  env:
+    # Must match seed/Dockerfile.workload's pinned base digest, Dockerfile.experimentator, and
+    # experiment.md. A drift between them means the agent read different source than the job ran,
+    # with no error anywhere.
+    TT_METAL_REF: "d9a68815f5fcf08a5bfbffb6f1f811823fba8edd"
+    # accelerator_count: 1 grants one /dev/tenstorrent/<N>; UMD then needs an explicit single-chip
+    # mesh descriptor rather than inferring one for the board type.
+    TT_MESH_GRAPH_DESC_PATH: "/build/smri-fm/tenstorrent/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto"
 
-  TASK: "task3"
-  DATA_ROOT: "/data/fomo"
-  OUTPUT_DIR: "/tmp/fomo-tune-out/task3"
-  # The correctness gate. Raising this is fine; lowering it voids the submission.
-  PCC_GATE: "0.999"
-  # L_VIS deliberately unset here: unset means the runner measures it over this task's own
-  # subjects at startup. Set it (satisfying (L_VIS + 1) % 32 == 0, and >= every subject's
-  # observed patch count) once measured, to skip that pass. A subject exceeding L_VIS fails the
-  # run loudly rather than being silently truncated.
+    TASK: "task3"
+    DATA_ROOT: "/data/fomo"
+    OUTPUT_DIR: "/tmp/fomo-tune-out/task3"
+    # The correctness gate. Raising this is fine; lowering it voids the submission.
+    PCC_GATE: "0.999"
+    # L_VIS deliberately unset here: unset means the runner measures it over this task's own
+    # subjects at startup. Set it (satisfying (L_VIS + 1) % 32 == 0, and >= every subject's
+    # observed patch count) once measured, to skip that pass. A subject exceeding L_VIS fails the
+    # run loudly rather than being silently truncated.
 
-accelerator_count: 1
-accelerator_type: tenstorrent.com/chipArch=blackhole
-accelerator_pod_resources:
-  hugepages-1Gi: 4Gi
+  accelerator_count: 1
+  accelerator_type: tenstorrent.com/chipArch=blackhole
+  accelerator_pod_resources:
+    hugepages-1Gi: 4Gi

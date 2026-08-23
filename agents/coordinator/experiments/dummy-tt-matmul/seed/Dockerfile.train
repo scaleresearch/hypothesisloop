@@ -4,7 +4,7 @@
 # before this Dockerfile was written). It already ships Python 3.10 + ttnn on $PATH
 # (/opt/venv/bin) with pre-compiled device firmware baked in, so no extra install step is
 # needed — just add train.py.
-FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:latest-rc
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0
 
 # This QuietBox's cards are p300 boards (2 ASICs/chips per physical board). DRA allocates one
 # ASIC per pod (accelerator_count: 1 in job.yaml) and only that one /dev/tenstorrent/N node is

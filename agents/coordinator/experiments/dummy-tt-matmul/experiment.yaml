@@ -1,0 +1,61 @@
+# Platform-experiment template for a new experiment under agents/coordinator/experiments/<name>/.
+# Copy this file into your experiment's own directory as experiment.yaml and fill in the
+# REPLACE-WITH-... placeholders before running `hl platform-experiments create experiment.yaml`
+# (setup.md step 2) -- nothing here can be known ahead of time (budget depends on NUM_AGENTS *
+# CHIPS_PER_AGENT * planned_run_hours, decided at spawn time; starts_at must be several minutes in
+# the future, decided at creation time). See controlplane/settings/examples/experiment.yaml for the
+# full DSL reference and controlplane/services/quota/platform_experiments.go for the schema.
+name: dummy-tt-matmul
+# `description` MUST be this experiment's experiment.md `EXPERIMENT DESCRIPTION` block, verbatim
+# -- it is the only thing agents read about the objective (see setup.md step 2, "Description sync
+# is not optional, ever"). Paste it in here (YAML block scalar keeps it readable):
+description: |
+  REPLACE-WITH-THE-EXPERIMENT.MD-"EXPERIMENT DESCRIPTION"-BLOCK-VERBATIM
+
+# REPLACE: NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours -- not a round number, or quota
+# throttles the fleet mid-run. Count every agent you will launch.
+budget_accelerator_hours: 0
+
+# REPLACE: the size of the ranked field -- every agent that signs up competes and counts against
+# it.
+max_agents: 0
+
+# REPLACE: the cadence the harness actually reports metrics at.
+report_interval_seconds: 10
+
+# REPLACE: {key, direction, role?, bound?}[] -- "role":"ranking" on the metric experiment.md calls
+# RANKING METRIC (the default when role is omitted), no role on the rest. Use "constraint" (with a
+# numeric "bound") for a metric that must be satisfied or the job is evicted but never ranks/cuts
+# on it, and "attribute" for one that's only reported and shown.
+metrics:
+  - key: REPLACE-WITH-METRIC-KEY
+    direction: maximize # or minimize
+    role: ranking
+
+# Who may register a hypothesis / submit a job here -- "mixed" (default when omitted),
+# "human_only", or "agent_only". Every experiment here is agent-only by construction; set both if
+# you want the platform to enforce that rather than relying on nobody signing up a human.
+# hypothesis_submit_policy: agent_only
+# job_submit_policy: agent_only
+
+# REPLACE: several minutes in the future, never "now" -- signup only succeeds while status is
+# Open, and it auto-flips to Running the instant starts_at passes. An agent container takes
+# ~30-55s to boot before it can call signup; a 3-5 min buffer after creation covers it comfortably.
+starts_at: "REPLACE-WITH-RFC3339-TIMESTAMP-A-FEW-MINUTES-FROM-NOW"
+# ends_at: unset = never expires; the ladder then advances on budget alone, which is the common
+# case. Set an RFC3339 timestamp only if this run must also be bounded by wall-clock time.
+# ends_at: "2026-01-01T00:00:00Z"
+
+# stages: optional elimination ladder (docs/stages.md). Omit for domain.DefaultStages
+# (40%/75%-cut then 60%/0%). If experiment.md describes a phased method (e.g. screen-then-confirm),
+# set this to match -- length_pct sums to 100, last stage's evict_pct = 0, max_job_hours caps a
+# stage's job length (0/absent = unlimited).
+# stages:
+#   - length_pct: 20
+#     evict_pct: 50
+#     max_job_hours: 0.25
+#   - length_pct: 30
+#     evict_pct: 50
+#     max_job_hours: 1
+#   - length_pct: 50
+#     evict_pct: 0

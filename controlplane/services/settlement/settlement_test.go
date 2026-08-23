@@ -57,7 +57,6 @@ func TestSettleBillsOverrunAtTheEstimatedRateWithNoCeiling(t *testing.T) {
 		CreatedAt:              now.Add(-3 * time.Hour),
 		EstimatedDurationHours: 1,
 		EstimatedCostAccH:      8,
-		EstimatedCPUCoreHours:  4,
 	}
 	if err := settler.Settle(context.Background(), exp); err != nil {
 		t.Fatalf("Settle: %v", err)
@@ -65,13 +64,6 @@ func TestSettleBillsOverrunAtTheEstimatedRateWithNoCeiling(t *testing.T) {
 
 	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 16.0; !approx(got, want) {
 		t.Errorf("accelerator settled at %v, want %v (2h at 8 AccH/h)", got, want)
-	}
-	if got, want := usage.amounts[domain.ResourceCPUCoreHours], 8.0; !approx(got, want) {
-		t.Errorf("cpu settled at %v, want %v (2h at 4 core-h/h)", got, want)
-	}
-	// A dimension nothing was reserved on has no series to settle.
-	if _, ok := usage.amounts[domain.ResourceRAMGBHours]; ok {
-		t.Errorf("ram settled despite no reservation: %v", usage.amounts)
 	}
 }
 
@@ -132,7 +124,6 @@ func TestAJobThatEndedEvictedOnAnInfrastructureFaultSettlesToAFullRefund(t *test
 		CreatedAt:              now.Add(-3 * time.Hour),
 		EstimatedDurationHours: 1,
 		EstimatedCostAccH:      8,
-		EstimatedCPUCoreHours:  4,
 		Status:                 domain.StatusEvicted,
 		EvictionReason:         string(domain.EvictionClusterUnreachable),
 	}
@@ -141,9 +132,6 @@ func TestAJobThatEndedEvictedOnAnInfrastructureFaultSettlesToAFullRefund(t *test
 	}
 	if got, want := usage.amounts[domain.ResourceAcceleratorHours], 0.0; !approx(got, want) {
 		t.Errorf("accelerator settled at got = %v, want %v", got, want)
-	}
-	if got, want := usage.amounts[domain.ResourceCPUCoreHours], 0.0; !approx(got, want) {
-		t.Errorf("cpu settled at got = %v, want %v", got, want)
 	}
 }
 

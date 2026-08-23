@@ -75,7 +75,11 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 // policy §1 established, and PollJobPhaseAndUID reports the SET's phase, so a failure anywhere
 // ends the experiment and takes every group's pods with it.
 func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement AcceleratorPlacement) ([]*batchv1.Job, error) {
-	spec := exp.Job
+	// EffectiveJob, never exp.Job directly: an admitted experiment's literal CPU/memory/storage
+	// live in exp.ResolvedJob (see domain.Experiment.ResolvedJob), because exp.Job may still carry
+	// the "max" sentinel the agent submitted — GET must keep returning exactly what was
+	// submitted, so nothing ever rewrites exp.Job in place.
+	spec := exp.EffectiveJob()
 	if spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
@@ -86,6 +90,14 @@ func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement Accelera
 	for _, group := range groups {
 		if group.CPU == "" || group.Memory == "" || group.Storage == "" {
 			return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
+		}
+		// Defense-in-depth: an admitted experiment must never reach BuildJobs with "max" still
+		// unresolved — the scheduler tick resolves it before admission ever writes SUBMITTED (see
+		// scheduler.Loop.resolveClusterLocalResources). Reaching here with a literal "max" is a
+		// control-plane bug, not a runtime concern, and must fail loudly rather than compile a Job
+		// that requests a "max" quantity string k8s would reject with an opaque parse error.
+		if group.CPU == domain.MaxResourceSentinel || group.Memory == domain.MaxResourceSentinel || group.Storage == domain.MaxResourceSentinel {
+			return nil, fmt.Errorf("workload: experiment %s reached BuildJobs with an unresolved %q sentinel still in its job spec — this is a control-plane bug, not a placement failure", exp.ID, domain.MaxResourceSentinel)
 		}
 	}
 	// One rendezvous for the whole job: node 0 of the FIRST group, named through the shared
@@ -156,7 +168,7 @@ type groupPlan struct {
 // same assembly with placement left out, without enumerating (and later forgetting) which fields
 // placement reaches.
 func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement AcceleratorPlacement, plan groupPlan) (*batchv1.Job, error) {
-	spec := exp.Job
+	spec := exp.EffectiveJob()
 	group := plan.group
 
 	// Parallelism is this GROUP's replica count; distributed is a property of the whole job. A
@@ -222,6 +234,15 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	resources := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{},
 		Limits:   corev1.ResourceList{},
+	}
+	// A "max" sentinel is always resolved to a plain literal once an experiment is admitted (see
+	// scheduler.Loop.resolveClusterLocalResources; EffectiveJob above reads exp.ResolvedJob), so it should
+	// never reach here — but resource.MustParse("max") panics with a cryptic k8s parser error
+	// rather than naming the actual problem, so guard explicitly and fail clearly instead.
+	for name, qty := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
+		if qty == domain.MaxResourceSentinel {
+			return nil, fmt.Errorf("workload: job.%s is still %q — it should have been resolved to a literal quantity at submission", name, domain.MaxResourceSentinel)
+		}
 	}
 	if group.CPU != "" {
 		resources.Requests[corev1.ResourceCPU] = resource.MustParse(group.CPU)
@@ -464,6 +485,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 				workloadkeys.ExperimentID: exp.ID,
 				workloadkeys.AgentID:      sanitizeLabel(exp.AgentID),
 				workloadkeys.CapacityTier: string(exp.CapacityTier),
+				workloadkeys.Attempt:      fmt.Sprintf("%d", exp.AttemptCount),
 			},
 			Annotations: map[string]string{
 				AcceleratorTypeAnnotation: string(exp.AcceleratorType),

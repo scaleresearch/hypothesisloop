@@ -12,10 +12,21 @@ LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
 # --kubelet-arg=cgroups-per-qos=false (+enforce-node-allocatable=) skips cgroup subtrees these
 # fake nodes don't need, since they only advertise capacity, not enforce real QoS limits.
 # Usage: lib_create_node <context> <name> <image> <server_url> <token> <cpus> <memory> [network] [ip]
+#
+# REGISTRY_HOST_IP (required, env) is the one address every node pulls images through — the
+# same host-LAN-IP `make render-settings` already resolves for data_store.endpoint (there is
+# exactly one place that detection happens; see Makefile's render-settings). k3s reads
+# registries.yaml at agent-process start, not on a later reload, so it must exist inside the
+# container's filesystem before `agent` runs — mounted in at `podman run` time, not added after.
 lib_create_node() {
   local context="$1" name="$2" image="$3" server_url="$4" token="$5" cpus="$6" memory="$7"
   local network="${8:-}" ip="${9:-}"
   local podman_cmd="${NODE_PODMAN:-podman}"
+
+  : "${REGISTRY_HOST_IP:?lib_create_node: REGISTRY_HOST_IP must be set (see Makefile render-settings target)}"
+  local registries_yaml
+  registries_yaml="$(mktemp)"
+  lib_write_registries_yaml "$registries_yaml" "$REGISTRY_HOST_IP"
 
   # Expanded below as ${net_args[@]+"${net_args[@]}"}: under `set -u`, macOS's bash 3.2 treats
   # an unset-because-empty array as an unbound variable.
@@ -27,14 +38,35 @@ lib_create_node() {
     --privileged --cgroupns=host \
     --cpus="$cpus" --memory="$memory" \
     -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /var/run \
+    -v "${registries_yaml}:/etc/rancher/k3s/registries.yaml:ro" \
     ${net_args[@]+"${net_args[@]}"} \
     -e K3S_URL="$server_url" -e K3S_TOKEN="$token" -e K3S_NODE_NAME="$name" \
     "$image" agent --kubelet-arg=feature-gates=KubeletInUserNamespace=true \
     "--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%" \
     --kubelet-arg=cgroups-per-qos=false --kubelet-arg=enforce-node-allocatable= \
     >/dev/null
+  rm -f "${registries_yaml}"
 
   lib_wait_node_ready "$context" "$name"
+}
+
+# Writes a k3s registries.yaml at <path> that mirrors the local registry at <registry_host_ip>:5000
+# as plain HTTP with no TLS verification -- matches docker-compose.yml's registry service, which
+# is dev-only and never TLS-terminated. A remote cluster's own containerd config is the
+# provisioner's responsibility (see runtime/k8s/infra/install.sh's REGISTRY_URL comment), not
+# something this repo generates.
+lib_write_registries_yaml() {
+  local path="$1" registry_host_ip="$2"
+  cat > "$path" <<EOF
+mirrors:
+  "${registry_host_ip}:5000":
+    endpoint:
+      - "http://${registry_host_ip}:5000"
+configs:
+  "${registry_host_ip}:5000":
+    tls:
+      insecure_skip_verify: true
+EOF
 }
 
 # Removes the container, its Node object, and its stale node-password Secret (else a later
@@ -89,20 +121,19 @@ lib_wait_node_ready() {
   kubectl --context "$context" wait "node/$name" --for=condition=Ready --timeout="${timeout}s" >/dev/null
 }
 
-# Imports prebuilt images into node <name>'s own containerd (always via plain podman: images
-# built by `make images` live in the rootless store, not a separate rootful NODE_PODMAN one).
+# lib_import_images loads locally-built images straight into <name>'s own containerd (k8s.io
+# namespace), bypassing the registry entirely. The node-agent/cluster-agent Deployments run with
+# imagePullPolicy: Never for local dev (see values.yaml), so the registries.yaml mirror
+# lib_create_node writes is irrelevant to them -- each fake node's containerd is its own isolated
+# store (unlike tt-quietbox, which shares the host's), so the image has to be pushed in directly.
+# Usage: lib_import_images <name> <image-ref>...  (each ref must already exist in the local podman
+# store, e.g. "localhost/hypothesisloop-node-agent:latest")
 lib_import_images() {
   local name="$1"; shift
-  local img
-  # A node that was just started (rather than freshly created) reaches Ready slightly before its
-  # containerd socket is accepting connections; without this the first import races and fails.
-  for _ in $(seq 1 30); do
-    ${NODE_PODMAN:-podman} exec "$name" test -S /run/k3s/containerd/containerd.sock &>/dev/null && break
-    sleep 2
-  done
-  for img in "$@"; do
-    podman image inspect "localhost/${img}:latest" &>/dev/null || continue
-    podman save "localhost/${img}:latest" | ${NODE_PODMAN:-podman} exec -i "$name" \
+  local podman_cmd=(${NODE_PODMAN:-podman})
+  local ref
+  for ref in "$@"; do
+    podman save "$ref" | "${podman_cmd[@]}" exec -i "$name" \
       ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import - >/dev/null
   done
 }

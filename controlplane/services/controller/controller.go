@@ -62,8 +62,8 @@ type Controller struct {
 	reconcileInterval time.Duration
 	logger            *zap.Logger
 
-	stagesStore  StagesStore
-	metricsDBURL string
+	stagesStore StagesStore
+	observed    ObservedState
 
 	silenceMultiplier     float64
 	defaultReportInterval time.Duration
@@ -133,7 +133,7 @@ func (c *Controller) WithClusterSilenceCeiling(d time.Duration) *Controller {
 // stage boundary. The ladder itself is per-platform-experiment config, not a controller knob.
 func (c *Controller) WithStagesStore(s StagesStore, metricsDBURL string) *Controller {
 	c.stagesStore = s
-	c.metricsDBURL = metricsDBURL
+	c.observed = metricsDBObserver{url: metricsDBURL}
 	return c
 }
 
@@ -149,7 +149,7 @@ func (c *Controller) Start(ctx context.Context) error {
 	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.logger == nil {
 		return fmt.Errorf("controller: store, quota, settler, stages store, and logger are required")
 	}
-	if c.metricsDBURL == "" {
+	if c.observed == nil {
 		return fmt.Errorf("controller: metrics DB URL is required")
 	}
 	if c.reconcileInterval <= 0 ||

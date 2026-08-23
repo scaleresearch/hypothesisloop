@@ -6,14 +6,19 @@
 # doc comment for why not a bare `k3s agent` process sharing the VM's netns).
 #
 # Sized to run the portable suite's concurrent scenarios fast rather than merely fit: default
-# NODE_COUNT=4/NODE_CPUS=4/NODE_MEMORY=6g comfortably covers tests/run.sh's default parallel
-# batch. Override via env for a smaller laptop.
+# NODE_COUNT=4/NODE_CPUS=4/NODE_MEMORY=6g comfortably covers the portable pytest suite's default
+# parallel batch (tests/e2e, `pytest -m "not exclusive and not slow and not hardware"`). Override
+# via env for a smaller laptop.
 #
 # Idempotent: safe to re-run against an already-provisioned cluster (existing node containers
 # are left alone). Tear down with dev-nodes-down.sh.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
+
+REGISTRY_HOST_IP="$(cat "${DIR}/../.registry-host-ip" 2>/dev/null || true)"
+: "${REGISTRY_HOST_IP:?run \`make render-settings\` (or \`make controlplane-up\`) first -- ${DIR}/../.registry-host-ip is missing}"
+export REGISTRY_HOST_IP
 
 CONTEXT_NAME="k3s-local"
 NODE_COUNT="${NODE_COUNT:-4}"
@@ -61,7 +66,6 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT_NAME}" "${name}"
 
-  lib_import_images "${name}" hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload
   # Real node capacity as reported by cAdvisor is the VM/host's full size, not this
   # container's cgroup quota — cap it down to what it can truly deliver (same reasoning as
   # localdev/lib/fake-gpu-node.sh's own doc comment) while also giving it fake GPU capacity.

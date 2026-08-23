@@ -246,10 +246,8 @@ func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*
 	if err != nil {
 		return nil, false, fmt.Errorf("%s: read query: %w", op, err)
 	}
-	if resp.StatusCode/100 != 2 {
-		return nil, false, fmt.Errorf("%s: greptimedb returned %d: %s", op, resp.StatusCode, body)
-	}
 	var result struct {
+		Code   int    `json:"code"`
 		Error  string `json:"error"`
 		Output []struct {
 			Records *struct {
@@ -259,6 +257,23 @@ func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, false, fmt.Errorf("%s: decode query: %w", op, err)
+	}
+	// A table that has never been written to (nothing has ever reported this series) reads as no
+	// rows, not a failure -- the same treatment querySQLRows already gives it (see that function's
+	// comment). ObserveSpan is the sole input to every quota-consumption calculation and UNIONs two
+	// series with independent lifecycles (the runtime's liveness heartbeat and a job's own reported
+	// training metric): a deployment whose jobs never report a training metric would otherwise never
+	// finalize a single experiment, forever re-erroring the same reconcile pass.
+	//
+	// GreptimeDB's SQL endpoint reports this same condition under different numeric codes depending
+	// on which HTTP method issued the query (4001 observed via POST /v1/sql, 3000 via the GET this
+	// function uses) -- matched on the message text for that reason, the same fallback
+	// GetLatestLogTail already uses, rather than trusting either code to stay the one in use here.
+	if result.Code == greptimeCodeTableNotFound || strings.Contains(result.Error, "Table not found") {
+		return nil, false, nil
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, false, fmt.Errorf("%s: greptimedb returned %d: %s", op, resp.StatusCode, body)
 	}
 	if result.Error != "" {
 		return nil, false, fmt.Errorf("%s: greptimedb query failed: %s", op, result.Error)

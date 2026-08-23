@@ -8,7 +8,83 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
+
+// ObservedState is everything the controller reads back from the metrics store: what has actually
+// been seen to happen. Postgres holds the desired state and answers what should exist; this
+// answers what does, and every eviction verdict this package reaches is a function of it.
+//
+// It is an interface for the same reason Store is — the controller states what it needs and the
+// datastore package supplies it. The alternative, and what this replaced, was a test that stood up
+// an HTTP server and hand-wrote GreptimeDB result JSON, routed by matching substrings of the SQL
+// the query layer happened to emit ("LAG(ts)", "CROSS JOIN present"). That fake could only answer
+// one way per query, which is why the branches below it — an unreachable cluster, a workload the
+// runtime confirms is gone, an absence not yet confirmed — had no tests at all.
+//
+// gapCap stays a parameter rather than moving into the implementation: unlike the scheduler's, the
+// controller's is derived from its own silence policy (observedGapCap), and the caller already has
+// it in hand at the point of the call.
+type ObservedState interface {
+	IsAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error)
+	ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error)
+	FirstObserved(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (time.Time, bool, error)
+	LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (workload.JobPhase, bool, error)
+	ClusterSnapshotPresence(ctx context.Context, experimentID, clusterName string, createdAt, now time.Time) (metricsdb.SnapshotPresence, error)
+	AnyDeclaredMetricChanged(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error)
+	AnyDeclaredMetricReported(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, error)
+	HasEverReportedMetric(ctx context.Context, experimentID string, createdAt, now time.Time) (bool, error)
+	TotalObservedAccH(ctx context.Context, platformExpStart time.Time, platformExpID string) (float64, error)
+	PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error
+	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error)
+}
+
+// metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
+type metricsDBObserver struct{ url string }
+
+func (o metricsDBObserver) IsAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error) {
+	return metricsdb.IsAlive(ctx, o.url, experimentID, window)
+}
+
+func (o metricsDBObserver) ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
+	return metricsdb.ObservedElapsedHours(ctx, o.url, experimentID, createdAt, now, gapCap)
+}
+
+func (o metricsDBObserver) FirstObserved(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (time.Time, bool, error) {
+	return metricsdb.FirstObserved(ctx, o.url, experimentID, createdAt, now, gapCap)
+}
+
+func (o metricsDBObserver) LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (workload.JobPhase, bool, error) {
+	return metricsdb.LatestJobPhase(ctx, o.url, experimentID, clusterName, window)
+}
+
+func (o metricsDBObserver) ClusterSnapshotPresence(ctx context.Context, experimentID, clusterName string, createdAt, now time.Time) (metricsdb.SnapshotPresence, error) {
+	return metricsdb.ClusterSnapshotPresence(ctx, o.url, experimentID, clusterName, createdAt, now)
+}
+
+func (o metricsDBObserver) AnyDeclaredMetricChanged(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, bool, error) {
+	return metricsdb.AnyDeclaredMetricChanged(ctx, o.url, experimentID, metricKeys, window)
+}
+
+func (o metricsDBObserver) AnyDeclaredMetricReported(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, error) {
+	return metricsdb.AnyDeclaredMetricReported(ctx, o.url, experimentID, metricKeys, window)
+}
+
+func (o metricsDBObserver) HasEverReportedMetric(ctx context.Context, experimentID string, createdAt, now time.Time) (bool, error) {
+	return metricsdb.HasEverReportedMetric(ctx, o.url, experimentID, createdAt, now)
+}
+
+func (o metricsDBObserver) TotalObservedAccH(ctx context.Context, platformExpStart time.Time, platformExpID string) (float64, error) {
+	return metricsdb.TotalObservedAccH(ctx, o.url, platformExpStart, platformExpID)
+}
+
+func (o metricsDBObserver) PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {
+	return metricsdb.PopulateUsage(ctx, o.url, platformExpStart, platformExpID, quotas)
+}
+
+func (o metricsDBObserver) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error) {
+	return metricsdb.BestPerAgentOnMetric(ctx, o.url, pe, metric)
+}
 
 // observedGapCap is the longest gap between two real observations that still counts as
 // continuous presence, so silence detection and observed-cost accounting agree.
@@ -20,7 +96,7 @@ func (c *Controller) observedGapCap() time.Duration {
 // metric) within `window` of now — a stateless GreptimeDB query, not an in-memory last-seen
 // map, so every process gets the same answer with no warm-up after a restart.
 func (c *Controller) isAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error) {
-	return metricsdb.IsAlive(ctx, c.metricsDBURL, experimentID, window)
+	return c.observed.IsAlive(ctx, experimentID, window)
 }
 
 // observedElapsedHours returns how long exp has been confirmed alive, in hours — see
@@ -28,7 +104,7 @@ func (c *Controller) isAlive(ctx context.Context, experimentID string, window ti
 // gap-capping; no stored StartedAt needed). GreptimeDB is the sole source of truth: a query
 // error is returned so the caller retries next reconcile, never papered over with a guess.
 func (c *Controller) observedElapsedHours(ctx context.Context, exp *domain.Experiment, now time.Time) (float64, error) {
-	return metricsdb.ObservedElapsedHours(ctx, c.metricsDBURL, exp.ID, exp.CreatedAt, now, c.observedGapCap())
+	return c.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now, c.observedGapCap())
 }
 
 // tickObservations is one reconcile pass's observed-elapsed reading, taken once per job and

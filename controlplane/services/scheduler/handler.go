@@ -381,10 +381,19 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	if exp.Status != domain.StatusQueued {
 		return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
 	}
+	// This manual admit path bypasses the ordinary tick's cluster-local "max" resolution (see
+	// loop_tick.go's resolveClusterLocalResources) entirely — it names a cluster directly rather
+	// than searching for one, so there is no tick-time placement search to hang resolution off of.
+	// Refuse rather than silently admit against a footprint that reads every "max" field as
+	// zero (see domain.Experiment.Footprint's doc comment): let the ordinary scheduler tick
+	// admit a job that still needs "max" resolved instead.
+	if jobNeedsMaxResolution(exp.Job) {
+		return nil, huma.Error409Conflict("experiment still has an unresolved job.cpu/memory/storage \"max\" sentinel — manual admission does not resolve it; wait for the ordinary scheduler tick to admit this experiment")
+	}
 
 	fp := exp.Footprint()
 	clusterActive := false
-	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, nil, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 		gAvail, _, err := h.svc.workload.GetFlavorCapacity(ctx)
 		if err != nil {
 			return false, err

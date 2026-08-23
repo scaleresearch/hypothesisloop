@@ -53,7 +53,11 @@ kubectl --context "${CONTEXT_NAME}" wait node --all --for=condition=Ready --time
 kubectl config use-context "${CONTEXT_NAME}" >/dev/null
 
 echo "==> Starting control plane..."
-bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" start
+podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" start
+wait_for 20 1 "control-service to accept connections" \
+  curl -sf -o /dev/null "http://localhost:8081/health"
+wait_for 20 1 "metrics-service to accept connections" \
+  curl -sf -o /dev/null "http://localhost:8084/health"
 
 echo "==> Local dev started. Context: ${CONTEXT_NAME}"
 kubectl --context "${CONTEXT_NAME}" get nodes

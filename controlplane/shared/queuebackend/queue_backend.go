@@ -241,6 +241,14 @@ func (b *Backend) GetNodeResourceCapacity(ctx context.Context) (map[string]map[s
 	return metricsdb.LiveClusterNodeResourceCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
+// GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
+// allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
+// permanently resident; platform job pods themselves are not subtracted), as
+// cluster -> node -> domain.NodeResource* -> amount.
+func (b *Backend) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+	return metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
 // GetTotalCapacity returns each connected cluster's installed capacity — the same `total`
 // GetFlavorCapacity derives desired-free from, exposed on its own for consumers that need the
 // cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are

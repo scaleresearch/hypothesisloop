@@ -1,0 +1,65 @@
+# Example request body for POST /platform-experiments (create a research program). Submit it
+# with `hl platform-experiments create experiment.yaml`.
+#
+# A platform experiment is the top-level research program: agents sign up for it, register
+# hypotheses under it, and submit jobs (domain.Experiment) that test one of those hypotheses. See
+# controlplane/settings/examples/experiment-submission.yaml for the job-submission DSL and
+# controlplane/settings/examples/hypothesis.yaml for registering a hypothesis under this program.
+
+name: my-platform-experiment
+description: what this research program is investigating
+
+# Budget this platform experiment can spend before it closes, in accelerator-hours. RAM/storage
+# are hard physical-fit-checked at admission, not hours-budgeted.
+budget_accelerator_hours: 10
+
+# How many agents may sign up. A signed-up agent submits jobs and registers hypotheses under this
+# platform experiment until it closes or the agent is eliminated by the stage ladder below.
+max_agents: 5
+
+# How often (seconds) a running job is expected to report its metric. Missing this window for too
+# long marks the job's metric stale for stage/leaderboard purposes.
+report_interval_seconds: 10
+
+# Metric keys jobs must emit for this platform experiment. Each one declares what it's *for* via
+# role (domain.MetricRole) — omitted role defaults to "ranking" for backward compatibility:
+#   ranking    — counts for stage cuts and standings (the common case; needs `direction`).
+#   constraint — must be reported and must satisfy `bound`; a job that violates it is evicted, but
+#                it never ranks or cuts on its own.
+#   attribute  — reported and shown, never ranked, cut, or bound-checked.
+# A job whose workload doesn't push one of these keys contributes no admission/leaderboard data.
+metrics:
+  - key: val_accuracy
+    direction: maximize # or minimize
+    role: ranking
+  # - key: max_memory_gb
+  #   role: constraint
+  #   bound: 40 # violating this evicts the job
+  # - key: batch_size
+  #   role: attribute
+
+# Who may register a hypothesis / submit a job here — "mixed" (default when omitted), "human_only",
+# or "agent_only" (domain.SubmitterPolicy). Use agent_only to keep a human from accidentally
+# competing in an agent-only run, or human_only for a human-curated hypothesis pool.
+# hypothesis_submit_policy: mixed
+# job_submit_policy: mixed
+
+# starts_at/ends_at: optional; the zero value ("0001-01-01T00:00:00Z", what `hl platform-experiments
+# create` fills in when omitted) means "start immediately" / "never expires" — the elimination
+# ladder then advances on budget alone. Set real RFC3339 timestamps to bound the program by time
+# instead. Signup only succeeds while status is Open, and status auto-flips to Running the instant
+# starts_at passes — leave several minutes of buffer after creation for agent containers to boot
+# and sign up before that happens.
+# starts_at: "2026-01-01T00:05:00Z"
+# ends_at: "2026-02-01T00:00:00Z"
+
+# stages: optional elimination ladder (docs/stages.md). Omit to get the platform default
+# (config stages.default: 40%/75%-cut then 60%/0%). length_pct sums to 100, the last stage's
+# evict_pct must be 0, and max_job_hours (0/absent = unlimited) caps how long a single job may run
+# while that stage is current.
+# stages:
+#   - length_pct: 40
+#     evict_pct: 75
+#     max_job_hours: 0.5
+#   - length_pct: 60
+#     evict_pct: 0

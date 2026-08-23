@@ -13,7 +13,7 @@ import {
   createPlatformExperiment,
   updatePlatformExperiment,
 } from '@/lib/api'
-import type { PlatformExperiment, AgentQuota, MetricDefinition, Experiment, Hypothesis } from '@/types'
+import type { PlatformExperiment, AgentQuota, MetricDefinition, Experiment, Hypothesis, SubmitterPolicy } from '@/types'
 import { PlatformExperimentStatus } from '@/types'
 import type { Stage } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
@@ -189,25 +189,6 @@ function ExperimentCard({
           </div>
         </div>
 
-        {(pe.budget_cpu_core_hours || pe.budget_ram_gb_hours || pe.budget_storage_gb_hours) ? (
-          <div className="text-dim" style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
-            {!!pe.budget_cpu_core_hours && <span>CPU: <span className="mono">{pe.budget_cpu_core_hours}</span> core-h</span>}
-            {/* RAM/storage are no longer hours-budgeted (physical fit-only check at admission now) —
-                a nonzero value here is a frozen legacy field from before this migration and has no
-                effect on scheduling. */}
-            {!!pe.budget_ram_gb_hours && (
-              <span title="Legacy value — RAM is now a physical fit-only check, not a tracked hours budget">
-                RAM: <span className="mono">{pe.budget_ram_gb_hours}</span> GB-h <em style={{ fontStyle: 'normal', opacity: 0.6 }}>(not tracked)</em>
-              </span>
-            )}
-            {!!pe.budget_storage_gb_hours && (
-              <span title="Legacy value — storage is now a physical fit-only check, not a tracked hours budget">
-                Storage: <span className="mono">{pe.budget_storage_gb_hours}</span> GB-h <em style={{ fontStyle: 'normal', opacity: 0.6 }}>(not tracked)</em>
-              </span>
-            )}
-          </div>
-        ) : null}
-
         {expanded && (
           <div onClick={e => e.stopPropagation()}>
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
@@ -283,6 +264,57 @@ interface FormState {
   metrics: MetricDefinition[]
   report_interval_seconds: number
   stages: StageDraft[]
+  hypothesis_submit_policy: SubmitterPolicy
+  job_submit_policy: SubmitterPolicy
+}
+
+const POLICY_OPTIONS: Array<{ value: SubmitterPolicy; label: string }> = [
+  { value: 'mixed', label: 'Anyone' },
+  { value: 'human_only', label: 'Humans' },
+  { value: 'agent_only', label: 'Agents' },
+]
+
+const POLICY_HINTS: Record<'hypothesis' | 'job', Record<SubmitterPolicy, string>> = {
+  hypothesis: {
+    mixed: 'Both humans and agents may propose hypotheses.',
+    human_only: 'Only human participants may propose hypotheses. An agent that tries is rejected with a clear error naming this policy.',
+    agent_only: 'Only agents may propose hypotheses — human-submitted ideas are rejected.',
+  },
+  job: {
+    mixed: 'Both humans and agents may submit jobs.',
+    human_only: 'Only human participants may submit jobs. An agent that fires one off — even accidentally, e.g. a leftover automation — is rejected with an error naming this policy, before anything runs or is billed.',
+    agent_only: 'Only agents may submit jobs — a human cannot run one directly.',
+  },
+}
+
+// SubmitterPolicySelect is a 3-way segmented control: only 3 mutually-exclusive options, so a
+// dropdown would just cost an extra click. Mirrors the visual language of the stage-ladder
+// preset buttons above (active = filled, accent border) rather than introducing a new pattern.
+function SubmitterPolicySelect({ value, onChange, disabled }: { value: SubmitterPolicy; onChange: (v: SubmitterPolicy) => void; disabled?: boolean }) {
+  return (
+    <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+      {POLICY_OPTIONS.map(opt => {
+        const active = value === opt.value
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(opt.value)}
+            style={{
+              padding: '6px 14px', fontSize: 12, fontWeight: active ? 700 : 400,
+              border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+              background: active ? semantic.accent : 'transparent',
+              color: active ? 'var(--background)' : disabled ? 'var(--muted-fg)' : 'var(--foreground)',
+              opacity: disabled ? 0.6 : 1,
+            }}
+          >
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 // Field wraps one input with its label and the one-line explanation of what it actually does.
@@ -555,12 +587,14 @@ function ExperimentModal({
     metrics: initial?.metrics ?? [],
     report_interval_seconds: initial?.report_interval_seconds ?? 30,
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
+    hypothesis_submit_policy: initial?.hypothesis_submit_policy ?? 'mixed',
+    job_submit_policy: initial?.job_submit_policy ?? 'mixed',
   })
   const [step, setStep] = useState<1 | 2>(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[]) {
+  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | SubmitterPolicy) {
     setForm(f => ({ ...f, [field]: value }))
   }
 
@@ -568,23 +602,22 @@ function ExperimentModal({
 
   function step1Error(): string | null {
     if (!form.name.trim()) return 'Name is required.'
-    if (Number(form.budget_accelerator_hours) <= 0) return 'Total compute budget must be greater than 0.'
     if (new Date(form.ends_at) <= new Date(form.starts_at)) return 'Ends At must be after Starts At.'
     return null
   }
 
-  function goNext() {
-    const err = step1Error()
-    if (err) { setError(err); return }
-    setError(null)
-    setStep(2)
+  // Lives on step 2 now (moved alongside Max participants), so it no longer gates the step 1→2
+  // transition — only the final submit, same as the ladder.
+  function step2BudgetError(): string | null {
+    return Number(form.budget_accelerator_hours) <= 0 ? 'Total compute budget must be greater than 0.' : null
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     // Both steps are validated here, not just the visible one — a bad ladder on step 2 must not
-    // be submittable just because step 1 passed.
-    const err = step1Error() ?? (isEdit ? null : ladderError)
+    // be submittable just because step 1 passed. Tab navigation itself is never gated — only
+    // submit is, so the user is free to jump between tabs while filling the form out of order.
+    const err = step1Error() ?? step2BudgetError() ?? (isEdit ? null : ladderError)
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
@@ -593,16 +626,11 @@ function ExperimentModal({
         name: form.name.trim(),
         description: form.description.trim() || '',
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
-        // Not settable in the form — echoed back unchanged so editing an older experiment that
-        // was created with a CPU budget does not silently zero it.
-        budget_cpu_core_hours: initial?.budget_cpu_core_hours ?? 0,
-        // RAM/storage hours budgets are deprecated/frozen — always submit untracked (0); the backend no
-        // longer debits or enforces these fields for new submissions.
-        budget_ram_gb_hours: 0,
-        budget_storage_gb_hours: 0,
         max_agents: Number(form.max_agents),
         metrics: form.metrics,
         report_interval_seconds: Number(form.report_interval_seconds),
+        hypothesis_submit_policy: form.hypothesis_submit_policy,
+        job_submit_policy: form.job_submit_policy,
         // Omitted when editing: the backend fixes the ladder at creation and silently ignores
         // it on update, so sending it would imply an edit that never happens.
         ...(isEdit ? {} : { stages: toStages(form.stages) }),
@@ -626,7 +654,7 @@ function ExperimentModal({
   const stepTab = (n: 1 | 2, label: string) => (
     <button
       type="button"
-      onClick={() => { if (n === 1) { setError(null); setStep(1) } else { goNext() } }}
+      onClick={() => { setError(null); setStep(n) }}
       style={{
         background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 8px', fontSize: 12,
         fontWeight: step === n ? 700 : 400,
@@ -681,20 +709,6 @@ function ExperimentModal({
                 </Field>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field
-                    label="Accelerator budget — AccH (GPU-hours) *"
-                    hint={lockedWhileRunning
-                      ? 'Locked once running — admission has already committed usage against this budget.'
-                      : <>This is the <strong>only</strong> budget: accelerator-hours, not CPU-hours. AccH is one normalized H100-equivalent hour, so you do not pick a hardware type here — every accelerator bills against this single unit at its own rate (H100 1.0, A100 0.375, L40 0.25). A budget of 100 buys 100 H100-hours <em>or</em> 400 L40-hours. CPU, RAM and storage are not budgeted; they are capped per job at admission so no agent can grab the whole machine.</>}
-                  >
-                    <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
-                  </Field>
-                  <Field label="Max agents" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
-                    <input style={INPUT_STYLE} type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
-                  </Field>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <Field label="Starts at" hint={lockedWhileRunning ? 'Locked once running.' : 'Signups close and quota is allocated at this moment.'}>
                     <input style={INPUT_STYLE} type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
                   </Field>
@@ -724,11 +738,25 @@ function ExperimentModal({
               </>
             ) : (
               <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field
+                    label="Accelerator budget — AccH (GPU-hours) *"
+                    hint={lockedWhileRunning
+                      ? 'Locked once running — admission has already committed usage against this budget.'
+                      : <>Normalized H100-equivalent hours — the <strong>only</strong> budget (H100 1.0, A100 0.375, L40 0.25/hr). CPU, RAM and storage are capped per job instead, not budgeted.</>}
+                  >
+                    <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
+                  </Field>
+                  <Field label="Max participants" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
+                    <input style={INPUT_STYLE} type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
+                  </Field>
+                </div>
+
                 <Field
                   label={isEdit ? 'Stage ladder (fixed at creation)' : 'Stage ladder'}
                   hint={isEdit
                     ? <>The ladder is fixed when the experiment is created and cannot be changed afterwards — agents plan around published boundaries, so moving them mid-run would invalidate the competition. Create a new platform experiment to use a different ladder.</>
-                    : <>The run is split into stages. When a stage ends, that share of the <em>surviving</em> agents with the worst metrics is cut: their jobs stop, they cannot resubmit, and their unspent budget is redistributed to the survivors. Lengths must total 100%, and the final stage always evicts 0% because nothing follows it. Cuts are skipped entirely while 4 or fewer agents remain, so a small roster advances without eliminations. <strong>Max job h</strong> caps how long any single job may run during a stage (leave empty for no limit): a short cap early forces agents to explore with many small runs, and lifting it later lets the surviving ideas be validated with long ones. It is enforced — over-long submissions are rejected, and a job that outruns the cap is evicted.</>}
+                    : <>Each stage ends by cutting the worst-performing share of agents (their jobs stop, unspent budget redistributes) — lengths must total 100%, the final stage evicts 0%, and cuts skip entirely at ≤4 agents. <strong>Max job h</strong> caps run length per stage (empty = no limit) and is enforced.</>}
                 >
                   {isEdit ? (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -754,6 +782,28 @@ function ExperimentModal({
                 >
                   <input style={INPUT_STYLE} type="number" min={1} step={5} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
                 </Field>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field label="Who can submit hypotheses?" hint={POLICY_HINTS.hypothesis[form.hypothesis_submit_policy]}>
+                    <SubmitterPolicySelect
+                      value={form.hypothesis_submit_policy}
+                      disabled={lockedWhileRunning}
+                      onChange={v => set('hypothesis_submit_policy', v)}
+                    />
+                  </Field>
+                  <Field label="Who can submit jobs?" hint={POLICY_HINTS.job[form.job_submit_policy]}>
+                    <SubmitterPolicySelect
+                      value={form.job_submit_policy}
+                      disabled={lockedWhileRunning}
+                      onChange={v => set('job_submit_policy', v)}
+                    />
+                  </Field>
+                </div>
+                {lockedWhileRunning && (
+                  <p className="text-dim" style={{ margin: '-8px 0 0', fontSize: 11, lineHeight: 1.5 }}>
+                    Locked once running — who may submit has already shaped who signed up.
+                  </p>
+                )}
               </>
             )}
 
@@ -762,7 +812,7 @@ function ExperimentModal({
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
               <Button type="button" onClick={onClose}>Cancel</Button>
               {step === 1 ? (
-                <Button type="button" variant="primary" onClick={goNext}>Next: competition settings</Button>
+                <Button type="button" variant="primary" onClick={() => { setError(null); setStep(2) }}>Next: competition settings</Button>
               ) : (
                 <>
                   <Button type="button" onClick={() => { setError(null); setStep(1) }}>Back</Button>

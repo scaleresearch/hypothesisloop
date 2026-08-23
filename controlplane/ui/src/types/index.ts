@@ -133,9 +133,6 @@ export interface Experiment {
   // Set once this terminal job's final usage has been durably written to the metrics DB. Absent
   // means settlement is still pending; meaningless for a non-terminal job.
   quota_settled_at?: string
-  estimated_cpu_core_hours?: number
-  estimated_ram_gb_hours?: number
-  estimated_storage_gb_hours?: number
   accelerator_type: AcceleratorType
   accelerator_count: number
   estimated_duration_hours?: number
@@ -171,20 +168,21 @@ export interface MetricDefinition {
   bound?: number
 }
 
+// SubmitterPolicy restricts who may submit a hypothesis or a job: a real person, an autonomous
+// agent, or both. Empty/absent means 'mixed' — every platform experiment created before this
+// field existed keeps accepting both, unchanged.
+export type SubmitterPolicy = 'mixed' | 'human_only' | 'agent_only'
+
 export interface PlatformExperiment {
   id: string
   name: string
   description?: string
   budget_accelerator_hours: number
-  // Optional additional resource budgets, tracked the same way as budget_accelerator_hours. 0/absent
-  // means that dimension isn't tracked for this platform experiment.
-  budget_cpu_core_hours?: number
-  /** @deprecated RAM is no longer an hours-billed budget dimension — it's a physical fit-only
-   * check at admission now. Kept for backward compat with old API responses; nothing debits or
-   * enforces this for new platform experiments. Do not render as a live budget figure. */
-  budget_ram_gb_hours?: number
-  /** @deprecated see budget_ram_gb_hours. */
-  budget_storage_gb_hours?: number
+  // Who may submit a hypothesis / a job in this platform experiment. Independent settings — an
+  // operator may want humans-only ideation with any agent free to run jobs against it, or the
+  // reverse. Locked once the experiment is running (see the create/edit form).
+  hypothesis_submit_policy?: SubmitterPolicy
+  job_submit_policy?: SubmitterPolicy
   max_agents: number
   starts_at?: string
   ends_at?: string
@@ -260,24 +258,6 @@ export interface AgentQuota {
   burst_accelerator_hours: number
   used_guaranteed_acch: number
   used_burst_acch: number
-  // Additional resource dimensions — 0/absent means the platform experiment doesn't track
-  // that dimension.
-  guaranteed_cpu_core_hours?: number
-  burst_cpu_core_hours?: number
-  used_guaranteed_cpu_core_h?: number
-  used_burst_cpu_core_h?: number
-  /** @deprecated RAM/storage guaranteed/burst/used fields below are frozen — RAM/storage are no
-   * longer hours-billed budget dimensions (physical fit-only check at admission now). Kept for
-   * backward compat with old API responses; nothing debits these for new submissions. Do not
-   * render as a live budget/usage figure. */
-  guaranteed_ram_gb_hours?: number
-  burst_ram_gb_hours?: number
-  used_guaranteed_ram_gb_h?: number
-  used_burst_ram_gb_h?: number
-  guaranteed_storage_gb_hours?: number
-  burst_storage_gb_hours?: number
-  used_guaranteed_storage_gb_h?: number
-  used_burst_storage_gb_h?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +268,9 @@ export interface AgentQuota {
 export interface Agent {
   id: string
   name: string
+  // "agent" (default) or "human" — see domain.AgentKind. Optional because older API responses
+  // predate the field; treat a missing value as "agent".
+  kind?: 'agent' | 'human'
   performance_score: number
   top3_count: number       // number of top-3 placements ever (drives +25% bonus)
   created_at: string

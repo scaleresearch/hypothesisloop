@@ -1,26 +1,50 @@
-# Starting-point job definition for sparse-sdpa, using the experiment's own pre-built, pre-tested
-# workload image (see Dockerfile.workload) rather than the generic dummy-tt-matmul one: it bakes
-# in torch, the pinned upstream sparse_sdpa test-utility modules harness.py imports, AND
-# harness.py itself, so a pure config/hyperparameter job needs no per-job setup at all --
-# `image` + `command: [python3, harness.py]` (the default ENTRYPOINT) + env vars is the whole
-# job. Re-run the smoke test (`make sparse-sdpa-workload-image` + a real job) against real
-# hardware any time TT_METAL_REF changes before trusting baseline numbers.
-# Still just a starting point, not a cap: it's your own job spec, raise cpu/memory/storage
-# further any time your workload needs it (a from-source build via build_and_run.sh especially
-# is real CPU+RAM heavy).
-image: localhost/hypothesisloop-sparse-sdpa-workload:latest
+# This file is a full POST /experiments request body (id + metadata + job), not just the job
+# spec. id/metadata below are placeholders -- nothing here knows in advance which hypothesis or
+# platform experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id,
+# agent_id (and id, for a fresh submission) before/at submit time. The `job:` block below is the
+# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# for the fully-commented DSL reference.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
+  # project_id: optional free-text grouping tag (GET /experiments?project_id=) -- no Project entity exists, omit if unneeded.
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
+  # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
+  # validated. Omit both if you have nothing to point at.
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  estimated_duration_hours: 1.0
+job:
+  # Starting-point job definition for sparse-sdpa, using the experiment's own pre-built, pre-tested
+  # workload image (see Dockerfile.workload) rather than the generic dummy-tt-matmul one: it bakes
+  # in torch, the pinned upstream sparse_sdpa test-utility modules harness.py imports, AND
+  # harness.py itself, so a pure config/hyperparameter job needs no per-job setup at all --
+  # `image` + `command: [python3, harness.py]` (the default ENTRYPOINT) + env vars is the whole
+  # job. Re-run the smoke test (`make sparse-sdpa-workload-image` + a real job) against real
+  # hardware any time TT_METAL_REF changes before trusting baseline numbers.
+  # Still just a starting point, not a cap: it's your own job spec, raise cpu/memory/storage
+  # further any time your workload needs it (a from-source build via build_and_run.sh especially
+  # is real CPU+RAM heavy).
+  image: localhost:5000/hypothesisloop-sparse-sdpa-workload:latest
 
-cpu: "8"
-memory: "32Gi"
-storage: "16Gi"  # from-source builds need real scratch space for build artifacts, not just 1Gi
-max_retries: 3
+  cpu: "8"
+  memory: "32Gi"
+  storage: "16Gi"  # from-source builds need real scratch space for build artifacts, not just 1Gi
+  max_retries: 3
 
-env:
-  # Must match this experiment's own Dockerfile.experimentator's TT_METAL_REF exactly, or build_and_run.sh
-  # builds against different source than what you read to form your hypothesis.
-  TT_METAL_REF: "e45135c5516c6ab18cf855c585d31da684fe64db"
+  env:
+    # Must match this experiment's own Dockerfile.experimentator's TT_METAL_REF exactly, or build_and_run.sh
+    # builds against different source than what you read to form your hypothesis.
+    TT_METAL_REF: "e45135c5516c6ab18cf855c585d31da684fe64db"
 
-accelerator_count: 1
-accelerator_type: tenstorrent.com/chipArch=blackhole
-accelerator_pod_resources:
-  hugepages-1Gi: 4Gi
+  accelerator_count: 1
+  accelerator_type: tenstorrent.com/chipArch=blackhole
+  accelerator_pod_resources:
+    hugepages-1Gi: 4Gi

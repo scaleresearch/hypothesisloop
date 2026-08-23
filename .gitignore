@@ -90,8 +90,11 @@ vendor/
 .claude/
 
 # Experiment working clones: each is its own upstream git repo (source, datasets,
-# vendored toolchains) cloned in place, not content of this repo. Only the coordinator's
-# own experiment.md/seed/ files under agents/coordinator/experiments/<name>/ are tracked.
-agents/coordinator/experiments/smri-fm/
-agents/coordinator/experiments/smri-fm-notes/
+# vendored toolchains) cloned in place, not content of this repo. Only template,
+# dummy-tt-matmul, and sparse-sdpa are tracked as reference/example experiments.
+agents/coordinator/experiments/*/
+!agents/coordinator/experiments/template/
+!agents/coordinator/experiments/dummy-tt-matmul/
+!agents/coordinator/experiments/sparse-sdpa/
 controlplane/settings/.hypothesisloop.rendered.yaml
+localdev/.registry-host-ip

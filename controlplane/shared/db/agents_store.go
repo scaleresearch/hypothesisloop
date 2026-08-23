@@ -21,11 +21,11 @@ func NewAgentsStore(pool *Pool) *AgentsStore {
 // CreateAgent inserts a new agent row.
 func (s *AgentsStore) CreateAgent(ctx context.Context, agent *domain.Agent) error {
 	const q = `
-INSERT INTO agents (id, name, performance_score, created_at)
-VALUES ($1, $2, $3, $4)`
+INSERT INTO agents (id, name, kind, performance_score, created_at)
+VALUES ($1, $2, $3, $4, $5)`
 
 	_, err := s.pool.pool.Exec(ctx, q,
-		agent.ID, agent.Name, agent.PerformanceScore, agent.CreatedAt,
+		agent.ID, agent.Name, agent.Kind, agent.PerformanceScore, agent.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("agents_store.CreateAgent: %w", err)
@@ -36,13 +36,13 @@ VALUES ($1, $2, $3, $4)`
 // GetAgent retrieves an agent by ID.
 func (s *AgentsStore) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
 	const q = `
-SELECT id, name, performance_score, created_at
+SELECT id, name, kind, performance_score, created_at
 FROM agents
 WHERE id = $1`
 
 	agent := &domain.Agent{}
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
-		&agent.ID, &agent.Name, &agent.PerformanceScore, &agent.CreatedAt,
+		&agent.ID, &agent.Name, &agent.Kind, &agent.PerformanceScore, &agent.CreatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -92,11 +92,11 @@ func (s *AgentsStore) ListAgents(ctx context.Context, limit, offset int) ([]*dom
 	}
 
 	const q = `
-SELECT a.id, a.name, a.performance_score, a.created_at,
+SELECT a.id, a.name, a.kind, a.performance_score, a.created_at,
        COUNT(t.agent_id) AS top3_count
 FROM agents a
 LEFT JOIN experiment_top3 t ON t.agent_id = a.id
-GROUP BY a.id, a.name, a.performance_score, a.created_at
+GROUP BY a.id, a.name, a.kind, a.performance_score, a.created_at
 ORDER BY a.created_at ASC
 LIMIT $1 OFFSET $2`
 
@@ -110,7 +110,7 @@ LIMIT $1 OFFSET $2`
 	for rows.Next() {
 		agent := &domain.Agent{}
 		if err := rows.Scan(
-			&agent.ID, &agent.Name, &agent.PerformanceScore, &agent.CreatedAt,
+			&agent.ID, &agent.Name, &agent.Kind, &agent.PerformanceScore, &agent.CreatedAt,
 			&agent.Top3Count,
 		); err != nil {
 			return nil, fmt.Errorf("agents_store.ListAgents: scan: %w", err)

@@ -61,9 +61,6 @@ func (c *Config) build() error {
 		seenNames[g.Name] = true
 		c.RateByName[g.Name] = g.AccHRate
 	}
-	if c.CPUCoreHourRate <= 0 || c.RAMGBHourRate <= 0 || c.StorageGBHourRate <= 0 {
-		return fmt.Errorf("all resource-hour rates must be positive")
-	}
 	if c.Quota.BurstFraction <= 0 {
 		return fmt.Errorf("quota burst_fraction must be positive")
 	}

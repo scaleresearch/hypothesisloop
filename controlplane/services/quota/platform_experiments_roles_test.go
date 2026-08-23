@@ -22,6 +22,12 @@ type signupStore struct {
 	pe          *domain.PlatformExperiment
 	byRole      map[domain.SignupRole]int
 	insertedFor domain.SignupRole
+	// refuseInsert makes the guarded insert report inserted=false, which the store returns both
+	// for a repeat signup and for an experiment that started since the status was read.
+	refuseInsert bool
+	// alreadySignedUp is what the follow-up read finds, and the only thing that tells those two
+	// cases apart.
+	alreadySignedUp bool
 }
 
 func (f *signupStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
@@ -32,9 +38,13 @@ func (f *signupStore) CountSignupsByRole(ctx context.Context, platformExpID stri
 	return f.byRole[role], nil
 }
 
-func (f *signupStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole) (bool, error) {
+func (f *signupStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
 	f.insertedFor = role
-	return true, nil
+	return !f.refuseInsert, nil
+}
+
+func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error) {
+	return f.alreadySignedUp, nil
 }
 
 func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
@@ -52,7 +62,7 @@ func TestMaxAgentsCountsCompetitorsOnly(t *testing.T) {
 	}
 	svc := newSignupTestService(t, store)
 
-	if err := svc.Signup(context.Background(), "pe-1", "agent-baseline", domain.SignupRoleBaseline); err != nil {
+	if err := svc.Signup(context.Background(), "pe-1", "agent-baseline", domain.SignupRoleBaseline, ""); err != nil {
 		t.Fatalf("baseline signup err = %v, want nil — max_agents is full of competitors, which must not block a baseline", err)
 	}
 	if got, want := store.insertedFor, domain.SignupRoleBaseline; got != want {
@@ -69,7 +79,7 @@ func TestMaxAgentsStillRejectsACompetitorOnceTheFieldIsFull(t *testing.T) {
 	}
 	svc := newSignupTestService(t, store)
 
-	err := svc.Signup(context.Background(), "pe-1", "agent-3", domain.SignupRoleCompetitor)
+	err := svc.Signup(context.Background(), "pe-1", "agent-3", domain.SignupRoleCompetitor, "")
 	if err == nil || !strings.Contains(err.Error(), "max_agents_reached") {
 		t.Fatalf("err = %v, want max_agents_reached", err)
 	}
@@ -91,6 +101,56 @@ func TestAbsentSignupRoleResolvesToCompetitor(t *testing.T) {
 	}
 	if got, want := role, domain.SignupRoleCompetitor; got != want {
 		t.Errorf("role = %v, want %v", got, want)
+	}
+}
+
+// An unrecognized submitter policy is rejected rather than defaulted: silently reading a typo as
+// "mixed" would open a restricted platform experiment to submitters the operator meant to
+// exclude.
+func TestUnknownSubmitterPolicyIsRejectedRatherThanDefaulted(t *testing.T) {
+	if _, err := domain.ParseSubmitterPolicy("human_onyl"); err == nil {
+		t.Fatalf("err = nil, want an error for an unrecognized submitter policy")
+	}
+}
+
+// An absent policy means every caller written before this field existed keeps meaning what it
+// meant: both humans and agents may submit.
+func TestAbsentSubmitterPolicyResolvesToMixed(t *testing.T) {
+	policy, err := domain.ParseSubmitterPolicy("")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if got, want := policy, domain.SubmitterPolicyMixed; got != want {
+		t.Errorf("policy = %v, want %v", got, want)
+	}
+	if !policy.AllowsHuman() || !policy.AllowsAgent() {
+		t.Errorf("mixed policy AllowsHuman()=%v AllowsAgent()=%v, want both true", policy.AllowsHuman(), policy.AllowsAgent())
+	}
+}
+
+func TestSubmitterPolicyHumanOnlyRejectsAgents(t *testing.T) {
+	policy, err := domain.ParseSubmitterPolicy("human_only")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if !policy.AllowsHuman() {
+		t.Errorf("human_only AllowsHuman() = false, want true")
+	}
+	if policy.AllowsAgent() {
+		t.Errorf("human_only AllowsAgent() = true, want false")
+	}
+}
+
+func TestSubmitterPolicyAgentOnlyRejectsHumans(t *testing.T) {
+	policy, err := domain.ParseSubmitterPolicy("agent_only")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if policy.AllowsHuman() {
+		t.Errorf("agent_only AllowsHuman() = true, want false")
+	}
+	if !policy.AllowsAgent() {
+		t.Errorf("agent_only AllowsAgent() = false, want true")
 	}
 }
 
@@ -151,4 +211,38 @@ func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	}))
+}
+
+// The guarded insert reports the same inserted=false for two different situations, and the caller
+// gets a different answer for each. An agent signing up twice has succeeded — it is in the
+// experiment, which is all it asked for — and returning an error there would fail a retry of a
+// request that already worked, the exact thing an idempotent signup exists to prevent.
+func TestARepeatSignupSucceedsRatherThanReportingTheExperimentClosed(t *testing.T) {
+	store := &signupStore{
+		pe:              &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
+		byRole:          map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1},
+		refuseInsert:    true,
+		alreadySignedUp: true,
+	}
+
+	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, ""); err != nil {
+		t.Fatalf("repeat signup err = %v, want nil — the agent is already in the experiment, which is what it asked for", err)
+	}
+}
+
+// The other cause of the same refusal: the experiment started between the status read and the
+// insert. This agent is genuinely not in it, and saying nothing would leave a caller believing it
+// had joined a run it will never receive quota in.
+func TestASignupThatLostTheRaceWithStartIsReportedClosed(t *testing.T) {
+	store := &signupStore{
+		pe:              &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
+		byRole:          map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1},
+		refuseInsert:    true,
+		alreadySignedUp: false,
+	}
+
+	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, "")
+	if err == nil || !strings.Contains(err.Error(), "signup_closed") {
+		t.Fatalf("err = %v, want signup_closed: this agent is not in the experiment and must not be told it is", err)
+	}
 }

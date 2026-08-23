@@ -11,7 +11,7 @@
 #               ...) that have nothing to do with how the job executes.
 #
 # See tests/workloads/generic/job.yaml for the minimal fixture the e2e smoke test submits
-# (just `job` — `metadata` is generated inline by tests/scenarios/stages-and-settlement.sh).
+# (just `job` — `metadata` is generated inline by tests/e2e/test_stages_and_settlement.py).
 
 job:
   # --- What to run -------------------------------------------------------------------
@@ -125,21 +125,28 @@ metadata:
   # run in the same platform experiment until its last COMPLETED run has a summary).
   agent_id: agent-007
   platform_experiment_id: pe-llm-finetune-2026-07
-  project_id: proj-alpha
+  # project_id: optional free-text grouping tag (queryable via GET /experiments?project_id=) —
+  # there is no Project entity in the domain, so this is a caller-chosen label, not a foreign
+  # key. Omit it entirely if you have no grouping need.
+  # project_id: proj-alpha
 
   # What this run is testing and why — used for novelty scoring and shown to other
   # agents so they can learn from completed runs without re-running the same idea.
   # hypothesis_id must reference a hypothesis already registered (or retrieved, if an
   # equivalent one already existed) via POST /hypotheses — that's the real
   # uniqueness check: registering equivalent text returns the existing ID instead of
-  # creating a duplicate. Never restate the hypothesis as free text here.
+  # creating a duplicate. The server denormalizes that hypothesis's own text onto the
+  # experiment row for you; there is no separate free-text "hypothesis" field to fill in here.
   hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"
   objective: "Minimize validation loss"
   theory: "Warmup steps > 500 reduces early-training loss spikes observed in run pe-...-003"
 
-  # Reproducibility pointers — not resource specs, just references the training code
-  # already knows how to resolve (git ref, hash of the resolved hyperparameter config,
-  # and wherever the input dataset actually lives). None of this is a k8s concept.
+  # code_ref: required, and format-validated (<git-remote-url>@<40-hex-commit-sha>) — the
+  # reproducibility pointer every lineage/summary read relies on.
+  # config_hash/data_ref: optional reproducibility pointers — not resource specs, just references
+  # the training code already knows how to resolve (a hash of the resolved hyperparameter config,
+  # wherever the input dataset actually lives). Pure bookkeeping: stored and returned verbatim,
+  # never validated. Omit either (or both) if you have nothing to point at.
   code_ref: "https://github.com/scaleresearch/agent-example@a1b2c3d4e5f6789012345678901234567890abcd"
   config_hash: "sha256:9f8e7d..."
   data_ref: "s3://research-datasets/finetune-corpus-v3"
@@ -147,7 +154,7 @@ metadata:
   # How this run is billed/scheduled relative to other agents' runs: "guaranteed" (FIFO,
   # can preempt burst jobs) or "burst" (best-effort, fairness-ordered, preemptable). The
   # backend translates this into whatever native priority mechanism it has (a k8s
-  # PriorityClass today).
+  # PriorityClass today). Optional — omitting it defaults to guaranteed.
   capacity_tier: guaranteed
 
   # Wall-clock budget this run is expected to need. Drives admission and cost estimation

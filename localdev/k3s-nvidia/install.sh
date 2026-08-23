@@ -17,14 +17,14 @@
 #     in all of NFD for one label.
 #   - cluster-agent bundle (runtime/k8s/infra/install.sh).
 #
-# Confirmed working end-to-end against a real RTX 4090 (see tests/scenarios/nvidia-hardware.sh's
+# Confirmed working end-to-end against a real RTX 4090 (see tests/e2e/test_nvidia_hardware.py's
 # k3s leg): 164+ TFLOPS fp16 matmul via a real k8s-scheduled pod, real device-plugin GPU
 # passthrough, real metrics.
 #
 # Required env vars (no defaults — this platform always runs the control plane on a different
 # host than the GPU node itself, so there's no "just use localhost" fallback):
 #   API_URL, METRICS_URL — reachable from this host (see
-#   localdev/tunnels/ if the control plane is local and this is a remote rented box).
+#   localdev/local-tunnels/ if the control plane is local and this is a remote rented box).
 #
 # Idempotent: safe to re-run.
 set -euo pipefail
@@ -32,8 +32,8 @@ set -euo pipefail
 CONTEXT_NAME="k3s-nvidia"
 CLUSTER_NAME="k3s-nvidia"
 
-: "${API_URL:?set API_URL (e.g. a localdev/tunnels/ URL reaching :8081)}"
-: "${METRICS_URL:?set METRICS_URL (e.g. a localdev/tunnels/ URL reaching :8084)}"
+: "${API_URL:?set API_URL (e.g. a localdev/local-tunnels/ URL reaching :8081)}"
+: "${METRICS_URL:?set METRICS_URL (e.g. a localdev/local-tunnels/ URL reaching :8084)}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"

@@ -25,6 +25,7 @@ const (
 	LabelMemoryBytes     = workloadkeys.MemoryBytes
 	LabelStorageBytes    = workloadkeys.StorageBytes
 	LabelGraceSeconds    = workloadkeys.GraceSeconds
+	LabelAttempt         = workloadkeys.Attempt
 	LabelCheckpointGrace = workloadkeys.CheckpointGraceSeconds
 
 	ManagedByValue = workloadkeys.ManagedByValue

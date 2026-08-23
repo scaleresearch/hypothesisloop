@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> Stopping control plane..."
-bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" stop
+podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" stop
 
 echo "==> Closing k3s API port-forward..."
 pkill -f "ssh.*6443:localhost:6443" 2>/dev/null || true

@@ -93,8 +93,8 @@ spec:
       serviceAccountName: hypothesisloop-cluster-agent
       containers:
         - name: cluster-agent
-          image: localhost/hypothesisloop-cluster-agent:latest
-          imagePullPolicy: Never
+          image: __REGISTRY__/hypothesisloop-cluster-agent:__TAG__
+          imagePullPolicy: IfNotPresent
           env:
             - name: CLUSTER_NAME
               value: "__CLUSTER_NAME__"

@@ -57,9 +57,6 @@ func main() {
 	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
-	domain.SetCPUCoreHourRate(pcfg.CPUCoreHourRate)
-	domain.SetRAMGBHourRate(pcfg.RAMGBHourRate)
-	domain.SetStorageGBHourRate(pcfg.StorageGBHourRate)
 
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction: pcfg.Quota.Top3BonusFraction,

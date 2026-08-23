@@ -22,9 +22,7 @@ type JobCost struct {
 	// the reporting cadence allows are not billed, and a job that never reported bills nothing.
 	ObservedHours     float64 `json:"observed_hours"`
 	AcceleratorHours  float64 `json:"accelerator_hours"`
-	CPUCoreHours      float64 `json:"cpu_core_hours"`
 	EstimatedCostAccH float64 `json:"estimated_cost_accelerator_hours"`
-	EstimatedCPUCoreH float64 `json:"estimated_cpu_core_hours"`
 	AcceleratorType   string  `json:"accelerator_type,omitempty"`
 	AcceleratorCount  int     `json:"accelerator_count,omitempty"`
 }
@@ -52,7 +50,6 @@ func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID s
 		ExperimentID:      exp.ID,
 		Status:            string(exp.Status),
 		EstimatedCostAccH: exp.EstimatedCostAccH,
-		EstimatedCPUCoreH: exp.EstimatedCPUCoreHours,
 		AcceleratorType:   string(exp.AcceleratorType),
 		AcceleratorCount:  exp.AcceleratorCount,
 	}
@@ -64,7 +61,6 @@ func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID s
 	if ok {
 		out.Settled = true
 		out.AcceleratorHours = settled[domain.ResourceAcceleratorHours]
-		out.CPUCoreHours = settled[domain.ResourceCPUCoreHours]
 	}
 
 	// Observed hours are worth reporting either way: for a settled job they are the window the
@@ -76,7 +72,6 @@ func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID s
 	out.ObservedHours = rc.hours
 	if !ok {
 		out.AcceleratorHours = rc.accH
-		out.CPUCoreHours = rc.cpuH
 	}
 	return out, nil
 }

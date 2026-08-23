@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
@@ -27,12 +26,32 @@ import (
 // telemetry as a violation. See docs at the bottom of this file for the usage-based refinement
 // and why it is not implemented yet.
 
-// DefaultDisbalanceTolerance is the multiple of a cluster's per-accelerator CPU/memory/storage
-// share a job may request before it counts as disbalanced. A job holding A of a cluster's N
-// accelerators is entitled to A/N of that cluster's CPU; three times that is already far past
-// any plausible data-loader or host-side need, so anything above it is treated as a
-// misconfigured request rather than a legitimately CPU-heavy accelerator job.
-const DefaultDisbalanceTolerance = 3.0
+// DefaultDisbalanceTolerance is the multiple of a node's per-accelerator CPU/memory/storage share
+// a job may request before it counts as disbalanced. A job holding A of its node's N accelerators
+// is entitled to A/N of that node's CPU; once the share is measured against the node the job
+// actually sits on (rather than a cluster-wide average that a heterogeneous cluster can get wrong
+// in either direction), a small margin over exactly proportionate is already implausible for any
+// legitimate data-loader or host-side need — so the tolerance is tightened from the old cluster-
+// wide-average default of 3.0x down to 1.0x (no margin at all beyond an exact proportionate
+// share).
+const DefaultDisbalanceTolerance = 1.0
+
+// nodeResourceName maps a fungible domain.ResourceKind to the domain.NodeResource* string key
+// the per-node capacity maps (nodeResources, nodeResourcesTotal) are keyed by — the reverse of
+// loop_tick.go's nodeResourceKind. Only CPU/memory/storage have a node-resource key; accelerators
+// are counted separately (see nodeInstalledAccelerators in selectDisbalanceVictims).
+func nodeResourceName(kind domain.ResourceKind) (string, bool) {
+	switch kind {
+	case domain.ResourceKindCPU:
+		return domain.NodeResourceCPUMillicores, true
+	case domain.ResourceKindMemory:
+		return domain.NodeResourceMemoryBytes, true
+	case domain.ResourceKindStorage:
+		return domain.NodeResourceStorageBytes, true
+	default:
+		return "", false
+	}
+}
 
 // disbalanceDimensions are the fungible per-node resources a disproportionate request can strand
 // accelerators with. Accelerators and extended resources are excluded on purpose: those are the
@@ -162,13 +181,14 @@ func (l *Loop) evictDisbalanced(
 	blocked *domain.Experiment,
 	cluster string,
 	avail, total domain.Footprint,
-	nodeAvail, nodeResources map[string]map[string]int64,
+	nodeResourcesTotal, nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 	blockedFP domain.Footprint,
 ) error {
-	// A cluster with no fresh total-capacity report has no per-accelerator share to measure
-	// against. Absent denominator, no verdict.
-	if len(total) == 0 {
+	// A cluster with no fresh cluster-wide or per-node total-capacity report has no denominator
+	// to measure a share against — checked here, before any I/O, so a stale/disconnected cluster
+	// costs nothing beyond this. selectDisbalanceVictims re-checks both once placement is known.
+	if len(total) == 0 || len(nodeResourcesTotal) == 0 {
 		return nil
 	}
 
@@ -202,7 +222,7 @@ func (l *Loop) evictDisbalanced(
 		if blocked.CapacityTier == domain.CapacityBurst && exp.CapacityTier != domain.CapacityBurst {
 			continue
 		}
-		node, found, err := metricsdb.LatestExperimentNode(ctx, l.metricsDBURL, exp.ID, exp.CreatedAt, time.Now().UTC())
+		node, found, err := l.observed.LatestExperimentNode(ctx, exp.ID, exp.CreatedAt, time.Now().UTC())
 		if err != nil {
 			// A failed attribution lookup is missing data, not an absent placement — abort the
 			// whole pass rather than proceed with a set of candidates we know is incomplete.
@@ -214,7 +234,7 @@ func (l *Loop) evictDisbalanced(
 		placed = append(placed, placedExperiment{experiment: exp, node: node})
 	}
 
-	victims := selectDisbalanceVictims(blocked, blockedFP, avail, total, nodeAvail, nodeResources, nodeLabels, placed, l.disbalanceTolerance)
+	victims := selectDisbalanceVictims(blocked, blockedFP, avail, total, nodeResourcesTotal, nodeAvail, nodeResources, nodeLabels, placed, l.disbalanceTolerance)
 	for _, victim := range victims {
 		explanation := victim.explain()
 		l.logger.Info("evicting resource-disbalanced job",
@@ -250,7 +270,7 @@ func (l *Loop) evictDisbalanced(
 			evictedAt:          now,
 			nodeFreeAtEviction: nodeFree,
 		}
-		obsmetrics.EvictedExperimentsTotal.WithLabelValues(string(domain.EvictionResourceDisbalance)).Inc()
+		obsmetrics.CountEviction(domain.EvictionResourceDisbalance)
 	}
 	return nil
 }
@@ -337,7 +357,10 @@ func disbalancePremisesHold(
 //     dimension is also short, the accelerators are genuinely busy and nothing is being stranded.
 //  2. Some node `blocked` is allowed to land on currently has enough free accelerators of its
 //     flavor. Without idle accelerators there is no harm to undo.
-//  3. The cluster reports installed accelerators, giving a per-accelerator CPU/memory share.
+//  3. The victim's own node reports installed CPU/memory/storage and installed accelerators,
+//     giving a per-accelerator share local to that node — not a cluster-wide average, which a
+//     heterogeneous cluster (nodes with different CPU-per-accelerator ratios) can get wrong in
+//     either direction: too lax on a CPU-heavy node, too strict on a CPU-light one.
 //  4. Candidate victims sit on one of those nodes, hold accelerators themselves, and request
 //     more than `tolerance` times their proportionate share of a short dimension.
 //  5. The selected victims jointly cover the entire shortage. A partial plan evicts jobs and
@@ -345,12 +368,12 @@ func disbalancePremisesHold(
 func selectDisbalanceVictims(
 	blocked *domain.Experiment,
 	blockedFP, clusterAvail, clusterTotal domain.Footprint,
-	nodeAvail, nodeResources map[string]map[string]int64,
+	nodeResourcesTotal, nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 	placed []placedExperiment,
 	tolerance float64,
 ) []disbalanceVictim {
-	if blocked.Job.TotalAccelerators() <= 0 || len(clusterTotal) == 0 {
+	if blocked.Job.TotalAccelerators() <= 0 || len(clusterTotal) == 0 || len(nodeResourcesTotal) == 0 {
 		return nil
 	}
 
@@ -361,17 +384,18 @@ func selectDisbalanceVictims(
 		return nil
 	}
 
-	// (3) Total installed accelerators across every flavor: a node's CPU is shared by all the
-	// accelerators plugged into it regardless of model, so the fair share is per device, not per
-	// device type.
-	var totalAccelerators int64
-	for key, count := range clusterTotal {
-		if key.Kind == domain.ResourceKindAccelerator && count > 0 {
-			totalAccelerators += count
+	// (3) Each node's own installed accelerator count: a node's CPU is shared by all the
+	// accelerators plugged into that node regardless of model, so the fair share is per device
+	// local to the node, not per device type and not averaged across the whole cluster. Installed
+	// = currently free (nodeAvail, every flavor) + already running there (placed).
+	nodeInstalledAccelerators := make(map[string]int64, len(nodeAvail))
+	for node, byFlavor := range nodeAvail {
+		for _, free := range byFlavor {
+			nodeInstalledAccelerators[node] += free
 		}
 	}
-	if totalAccelerators <= 0 {
-		return nil
+	for _, p := range placed {
+		nodeInstalledAccelerators[p.node] += int64(p.experiment.AcceleratorCount)
 	}
 
 	// (4) Score every candidate by how far past its proportionate share it reaches, in the
@@ -389,24 +413,41 @@ func selectDisbalanceVictims(
 		if strandedNodes[p.node] <= 0 || p.experiment.AcceleratorCount <= 0 {
 			continue
 		}
+		nodeTotalAccelerators := nodeInstalledAccelerators[p.node]
+		if nodeTotalAccelerators <= 0 {
+			continue
+		}
+		nodeTotal := nodeResourcesTotal[p.node]
+		if len(nodeTotal) == 0 {
+			continue
+		}
 		fp := p.experiment.Footprint()
 		worst := 0.0
 		evidence := disbalanceVictim{experiment: p.experiment, node: p.node, idleAccelerators: strandedNodes[p.node]}
 		for key := range shortage {
-			installed := clusterTotal[key]
+			resourceName, ok := nodeResourceName(key.Kind)
+			if !ok {
+				continue
+			}
+			// Installed on THIS node, not the cluster average — see (3) above.
+			installed := nodeTotal[resourceName]
 			if installed <= 0 {
 				continue
 			}
-			share := float64(installed) / float64(totalAccelerators) * float64(p.experiment.AcceleratorCount)
-			if share <= 0 {
+			// nodeTotalAccelerators > 0 is already guarded above, so FairShare's error return
+			// (installedAccelerators <= 0) is unreachable here — checked anyway, never ignored,
+			// since a pure scoring function has no evidence to condemn a victim on if the
+			// denominator it relied on somehow turned out invalid.
+			share, err := domain.FairShare(installed, int64(p.experiment.AcceleratorCount), nodeTotalAccelerators)
+			if err != nil || share <= 0 {
 				continue
 			}
-			ratio := float64(fp[key]) / share
+			ratio := float64(fp[key]) / float64(share)
 			if ratio <= worst {
 				continue
 			}
 			worst = ratio
-			evidence.dimension, evidence.requested, evidence.share = key.Kind, fp[key], share
+			evidence.dimension, evidence.requested, evidence.share = key.Kind, fp[key], float64(share)
 		}
 		if worst > tolerance {
 			byNode[p.node] = append(byNode[p.node], scoredVictim{victim: evidence, ratio: worst})

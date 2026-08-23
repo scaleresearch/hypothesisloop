@@ -24,7 +24,7 @@ func (s *concurrentAdmissionStore) GetExperiment(_ context.Context, id string) (
 	return &exp, nil
 }
 
-func (s *concurrentAdmissionStore) ClaimSubmitted(ctx context.Context, id, clusterName string, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *concurrentAdmissionStore) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.experiments[id].Status != domain.StatusQueued {
@@ -68,6 +68,16 @@ func (w *concurrentAdmissionWorkload) GetAcceleratorCapacityByNode(context.Conte
 }
 
 func (w *concurrentAdmissionWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{
+		"cluster-a": {"l40-node": {
+			domain.NodeResourceCPUMillicores: 64000,
+			domain.NodeResourceMemoryBytes:   1 << 40,
+			domain.NodeResourceStorageBytes:  1 << 40,
+		}},
+	}, nil
+}
+
+func (w *concurrentAdmissionWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
 	return map[string]map[string]map[string]int64{
 		"cluster-a": {"l40-node": {
 			domain.NodeResourceCPUMillicores: 64000,

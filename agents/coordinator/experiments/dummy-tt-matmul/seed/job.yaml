@@ -1,28 +1,52 @@
-# Starting-point job definition for the dummy-tt-matmul experiment: train.py opens the DRA-allocated
-# device via ttnn and runs real bf16 matmuls, submitted verbatim as the `job` field of
-# POST /experiments (see controlplane/settings/examples/experiment-submission.yaml for the
-# fully-commented DSL reference).
-#
-# The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
-# control plane's admission loop picks whichever registered cluster reports live capacity for
-# that flavor (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
-# allocation_mode: dra) — nothing here names a cluster directly.
-image: localhost/hypothesisloop-tenstorrent-workload:latest
+# This file is a full POST /experiments request body (id + metadata + job), not just the job
+# spec. id/metadata below are placeholders -- nothing here knows in advance which hypothesis or
+# platform experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id,
+# agent_id (and id, for a fresh submission) before/at submit time. The `job:` block below is the
+# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# for the fully-commented DSL reference.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
+  # project_id: optional free-text grouping tag (GET /experiments?project_id=) -- no Project entity exists, omit if unneeded.
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
+  # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
+  # validated. Omit both if you have nothing to point at.
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  estimated_duration_hours: 1.0
+job:
+  # Starting-point job definition for the dummy-tt-matmul experiment: train.py opens the DRA-allocated
+  # device via ttnn and runs real bf16 matmuls, submitted verbatim as the `job` field of
+  # POST /experiments (see controlplane/settings/examples/experiment-submission.yaml for the
+  # fully-commented DSL reference).
+  #
+  # The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
+  # control plane's admission loop picks whichever registered cluster reports live capacity for
+  # that flavor (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
+  # allocation_mode: dra) — nothing here names a cluster directly.
+  image: localhost:5000/hypothesisloop-tenstorrent-workload:latest
 
-# memory/cpu sized generously for the real tt-metal runtime: pre-compiled firmware/kernel JIT
-# loading, dispatch buffers, and (for tasks that build from source, e.g. sparse-sdpa) an in-pod
-# ninja build all measurably exceed a few hundred MiB, and real experiment shapes (e.g. sparse-sdpa's
-# prod-shape T=56320-scale tensors plus a host-side torch golden computed in the same pod)
-# reliably needed 6-16Gi and OOM'd at the old 4Gi default (see improvements.md). Set high here
-# since headroom is cheap on this QuietBox's 240GiB allocatable and OOM-kills are a wasted
-# iteration either way. These are just a starting point, not a cap: this is your own job spec —
-# raise cpu/memory/storage further in your own submissions any time your workload needs it.
-cpu: "8"
-memory: "32Gi"
-storage: "1Gi"
-max_retries: 3
+  # memory/cpu sized generously for the real tt-metal runtime: pre-compiled firmware/kernel JIT
+  # loading, dispatch buffers, and (for tasks that build from source, e.g. sparse-sdpa) an in-pod
+  # ninja build all measurably exceed a few hundred MiB, and real experiment shapes (e.g. sparse-sdpa's
+  # prod-shape T=56320-scale tensors plus a host-side torch golden computed in the same pod)
+  # reliably needed 6-16Gi and OOM'd at the old 4Gi default (see improvements.md). Set high here
+  # since headroom is cheap on this QuietBox's 240GiB allocatable and OOM-kills are a wasted
+  # iteration either way. These are just a starting point, not a cap: this is your own job spec —
+  # raise cpu/memory/storage further in your own submissions any time your workload needs it.
+  cpu: "8"
+  memory: "32Gi"
+  storage: "1Gi"
+  max_retries: 3
 
-accelerator_count: 1
-accelerator_type: tenstorrent.com/chipArch=blackhole
-accelerator_pod_resources:
-  hugepages-1Gi: 4Gi
+  accelerator_count: 1
+  accelerator_type: tenstorrent.com/chipArch=blackhole
+  accelerator_pod_resources:
+    hugepages-1Gi: 4Gi

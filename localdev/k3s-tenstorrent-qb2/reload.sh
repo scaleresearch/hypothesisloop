@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Counterpart to k3s-macos/reload.sh for this host: k3s runs natively on Linux here (no
-# podman-machine VM to hop into), so images just need `sudo k3s ctr images import -`
-# directly instead of an SSH round-trip. Rebuilds every image from current source, imports
-# the ones the cluster actually runs into k3s's containerd, force-recreates the
-# control-plane containers, and bounces the cluster-agent/node-agent pods so they pull the
-# freshly-imported image instead of running stale code.
+# Counterpart to k3s-macos/reload.sh for this host: rebuilds every image and pushes it to the
+# local registry under a fresh git-SHA tag, re-applies the node-agent/cluster-agent manifests
+# pinned to that new tag (so the pull actually happens under imagePullPolicy: IfNotPresent),
+# force-recreates the control-plane containers, and bounces the pods so they run current code.
 set -euo pipefail
 
 CONTEXT_NAME="k3s-tt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGES=(hypothesisloop-node-agent hypothesisloop-cluster-agent hypothesisloop-workload)
 
 wait_for() {
   local max="$1" delay="$2" desc="$3"; shift 3
@@ -22,33 +19,20 @@ wait_for() {
   done
 }
 
-echo "==> Rebuilding all images..."
+echo "==> Rebuilding and pushing all images..."
 (cd "${SCRIPT_DIR}/../.." && make images)
+TAG="$(cd "${SCRIPT_DIR}/../.." && git rev-parse --short HEAD)"
 
-echo "==> Importing images into k3s..."
-for img in "${IMAGES[@]}"; do
-  if podman image exists "localhost/${img}:latest" 2>/dev/null; then
-    podman save "localhost/${img}:latest" | sudo k3s ctr images import -
-  fi
-done
-
-# Each fake worker node runs its own containerd inside its own container, so the server-side
-# import above never reaches them: cluster-agent and node-agent run on those nodes and would keep
-# running whatever image they were created with, however many times this script is run. That is
-# not a cosmetic staleness — the control plane and its agents share a wire contract, so a reload
-# that updates only one side leaves the cluster talking to itself across two versions.
-if [[ -f "${SCRIPT_DIR}/../lib/node.sh" ]]; then
-  source "${SCRIPT_DIR}/../lib/node.sh"
-  export NODE_PODMAN="sudo podman"
-  for node in $(kubectl --context "${CONTEXT_NAME}" get nodes -o name | sed 's|node/||'); do
-    ${NODE_PODMAN} container exists "${node}" 2>/dev/null || continue
-    echo "    -> ${node}"
-    lib_import_images "${node}" "${IMAGES[@]}"
-  done
-fi
+HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
+REGISTRY_HOST_IP="$(cat "${SCRIPT_DIR}/../.registry-host-ip")"
+CLUSTER_NAME="tt-quietbox" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
+  API_URL="http://${HOST_IP}:8081" METRICS_URL="http://${HOST_IP}:8084" \
+  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG}" \
+  bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 
 echo "==> Recreating control-plane containers..."
-bash "${SCRIPT_DIR}/../../controlplane/infra/podman.sh" reload >/dev/null
+TAG="${TAG}" podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" \
+  up -d --force-recreate control-service metrics-service >/dev/null
 wait_for 20 1 "control-service to accept connections" \
   curl -sf -o /dev/null "http://localhost:8081/health"
 

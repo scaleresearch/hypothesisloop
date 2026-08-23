@@ -16,6 +16,11 @@ import (
 // emitted from a trigger rather than from a Go write path.
 const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
+// eventsTestPrefix namespaces every row these tests insert, so a developer looking at the shared
+// development database can tell test debris from real data — and so a cleanup that has to be done
+// by hand has something to match on.
+const eventsTestPrefix = "watch-test-"
+
 func testDSN() string {
 	if dsn := os.Getenv("HYPOTHESISLOOP_TEST_DATABASE_URL"); dsn != "" {
 		return dsn
@@ -175,12 +180,22 @@ func TestAChangeInARolledBackTransactionProducesNoEvent(t *testing.T) {
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
-	registerHypothesis(t, pool, "rollback", false)
+	_, peID, _ := registerHypothesis(t, pool, "rollback", false)
 
-	select {
-	case e := <-events:
-		t.Errorf("event after a rolled-back write: got = %v, want = %v", e.Kind, "no event")
-	case <-time.After(time.Second):
+	// Scoped to this test's own write, the same way the committed case is. The listener sees
+	// every event on the database, and the development database it runs against is shared with a
+	// control-service and with every other test in this package — "no event at all" is a claim
+	// about the whole system, not about the rollback.
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == EventHypothesisNew && e.PlatformExperimentID == peID {
+				t.Fatalf("event after a rolled-back write: got = %v, want = %v", e.Kind, "no event")
+			}
+		case <-deadline:
+			return
+		}
 	}
 }
 
@@ -575,5 +590,67 @@ func TestAnExplicitKindSetMeansExactlyWhatItNamesEvenWhenItNamesTheExcludedKind(
 	}
 	if filter.Matches(Event{Kind: EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
 		t.Errorf("experiment.status on a subscription that named only metric.point: got = %v, want = %v", true, false)
+	}
+}
+
+// An agent's own event never gets flagged as ambient, whether it is agent-owned (its job status)
+// or shared but authored by it (a comment it left on the pool).
+func TestAnnotateLeavesAnAgentsOwnEventUnmarked(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
+	for _, e := range []Event{
+		{Kind: EventExperimentStatus, Subject: "exp-1", Detail: "evicted for OOM", AgentID: "agent-a"},
+		{Kind: EventCommentNew, Subject: "hyp-1", Detail: "left a comment", AgentID: "agent-a"},
+	} {
+		got := filter.Annotate(e)
+		if got.Detail != e.Detail {
+			t.Errorf("Annotate(%+v).Detail = %q, want unchanged %q", e, got.Detail, e.Detail)
+		}
+	}
+}
+
+// A shared event authored by a different agent's job is ambient context, not this subscription's
+// own concern, and Annotate says so with the one word an agent's loop can grep for.
+func TestAnnotateFlagsAnotherAgentsSharedEventAsFYI(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
+	e := Event{Kind: EventStageBoundary, Subject: "pe-1", Value: "2", Detail: "cut", AgentID: "agent-b"}
+	got := filter.Annotate(e)
+	if got.Detail != "FYI: cut" {
+		t.Errorf("Annotate(%+v).Detail = %q, want %q", e, got.Detail, "FYI: cut")
+	}
+}
+
+// A subscription with no agent scope — watching a whole platform experiment or one experiment id
+// rather than one agent's slice of it — has no "own" to compare against, so Annotate leaves every
+// Detail as it found it rather than guessing.
+func TestAnnotateLeavesEverythingUnmarkedWithNoAgentScope(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1"}
+	e := Event{Kind: EventStageBoundary, Subject: "pe-1", Detail: "cut", AgentID: "agent-b"}
+	got := filter.Annotate(e)
+	if got.Detail != "cut" {
+		t.Errorf("Annotate(%+v).Detail = %q, want unchanged %q", e, got.Detail, "cut")
+	}
+}
+
+// hypothesis.new and most other kinds never carry Detail text at all (they're pointers, not
+// copies — see the package doc). An agent-scoped subscriber must still be able to tell another
+// agent's hypothesis.new apart from its own without a prefix to strip a non-existent string onto,
+// so an empty Detail becomes the bare word "FYI" rather than staying invisible.
+func TestAnnotateFlagsAnotherAgentsEmptyDetailEventAsFYI(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
+	e := Event{Kind: EventHypothesisNew, Subject: "hyp-1", AgentID: "agent-b"}
+	got := filter.Annotate(e)
+	if got.Detail != "FYI" {
+		t.Errorf("Annotate(%+v).Detail = %q, want %q", e, got.Detail, "FYI")
+	}
+}
+
+// The agent's own empty-Detail event is left exactly as it is — nothing to flag about your own
+// work.
+func TestAnnotateLeavesAnAgentsOwnEmptyDetailEmpty(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
+	e := Event{Kind: EventHypothesisNew, Subject: "hyp-1", AgentID: "agent-a"}
+	got := filter.Annotate(e)
+	if got.Detail != "" {
+		t.Errorf("Annotate(%+v).Detail = %q, want empty", e, got.Detail)
 	}
 }

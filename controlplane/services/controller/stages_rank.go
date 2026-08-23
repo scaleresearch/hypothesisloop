@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // ErrStageMetricsUnavailable signals that no configured metric query returned usable data, so
@@ -128,7 +127,7 @@ type ranked struct {
 
 // cutOnMetric returns the agents cut on one metric, and whether the metric produced usable data.
 func (c *Controller) cutOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, stage domain.Stage, survivors []string) ([]string, bool, error) {
-	if c.metricsDBURL == "" {
+	if c.observed == nil {
 		return nil, false, nil
 	}
 
@@ -136,7 +135,7 @@ func (c *Controller) cutOnMetric(ctx context.Context, pe *domain.PlatformExperim
 	// never rank the same field differently. Agents that only ever reported this metric on a
 	// non-"raw" basis come back flagged rather than ranked, and are treated here as no data on it
 	// — same as an agent that never reported it at all.
-	best, _, err := metricsdb.BestPerAgentOnMetric(ctx, c.metricsDBURL, pe, metric)
+	best, _, err := c.observed.BestPerAgentOnMetric(ctx, pe, metric)
 	if err != nil {
 		return nil, false, err
 	}

@@ -319,7 +319,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delivered[kind] = since
 	}
 	for _, e := range replayed {
-		if err := deliver(conn, e, delivered); err != nil {
+		if err := deliver(conn, filter.Annotate(e), delivered); err != nil {
 			return
 		}
 	}
@@ -331,7 +331,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case e := <-sub.events:
 			// Replay and the live stream overlap by construction — the subscription was open
 			// while the replay ran. The floor for that kind is what removes the overlap.
-			if err := deliver(conn, e, delivered); err != nil {
+			if err := deliver(conn, filter.Annotate(e), delivered); err != nil {
 				return
 			}
 		case payload := <-controls:
@@ -452,7 +452,7 @@ func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subs
 				return writeFrame(conn, watchFrame{Error: "could not replay the kinds you added; reconnect with since=<your last cursor>"})
 			}
 			for _, e := range events {
-				if err := deliver(conn, e, delivered); err != nil {
+				if err := deliver(conn, replayFilter.Annotate(e), delivered); err != nil {
 					return err
 				}
 			}

@@ -12,37 +12,23 @@ import (
 // ---- agent_quotas ----
 
 // UpsertAgentQuota creates or replaces an agent's quota allocation for a platform experiment.
-// Populates all 4 resource dimensions (Accelerator is always non-zero; CPU/RAM/storage are 0 = "not
-// tracked" for platform experiments that don't budget them). Only the allocation (capacity
-// setting) lives here — consumption (used_*) lives solely in the metrics DB, see
-// metricsdb.UsageTracker; Postgres never holds a copy of observed consumption.
+// Only the allocation (capacity setting) lives here — consumption (used_*) lives solely in the
+// metrics DB, see metricsdb.UsageTracker; Postgres never holds a copy of observed consumption.
 const upsertAgentQuotaSQL = `
 INSERT INTO agent_quotas (
 	id, agent_id, platform_experiment_id,
 	guaranteed_accelerator_hours, burst_accelerator_hours,
-	guaranteed_cpu_core_hours, burst_cpu_core_hours,
-	guaranteed_ram_gb_hours, burst_ram_gb_hours,
-	guaranteed_storage_gb_hours, burst_storage_gb_hours,
 	created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (agent_id, platform_experiment_id) DO UPDATE SET
 	guaranteed_accelerator_hours         = EXCLUDED.guaranteed_accelerator_hours,
-	burst_accelerator_hours              = EXCLUDED.burst_accelerator_hours,
-	guaranteed_cpu_core_hours   = EXCLUDED.guaranteed_cpu_core_hours,
-	burst_cpu_core_hours        = EXCLUDED.burst_cpu_core_hours,
-	guaranteed_ram_gb_hours     = EXCLUDED.guaranteed_ram_gb_hours,
-	burst_ram_gb_hours          = EXCLUDED.burst_ram_gb_hours,
-	guaranteed_storage_gb_hours = EXCLUDED.guaranteed_storage_gb_hours,
-	burst_storage_gb_hours      = EXCLUDED.burst_storage_gb_hours`
+	burst_accelerator_hours              = EXCLUDED.burst_accelerator_hours`
 
 func agentQuotaUpsertArgs(q *domain.AgentQuota) []any {
 	return []any{
 		q.ID, q.AgentID, q.PlatformExperimentID,
 		q.GuaranteedAcceleratorHours, q.BurstAcceleratorHours,
-		q.GuaranteedCPUCoreHours, q.BurstCPUCoreHours,
-		q.GuaranteedRAMGBHours, q.BurstRAMGBHours,
-		q.GuaranteedStorageGBHours, q.BurstStorageGBHours,
 		q.CreatedAt,
 	}
 }
@@ -61,9 +47,6 @@ func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *doma
 const agentQuotaColumns = `
 	id, agent_id, platform_experiment_id,
 	guaranteed_accelerator_hours, burst_accelerator_hours,
-	guaranteed_cpu_core_hours, burst_cpu_core_hours,
-	guaranteed_ram_gb_hours, burst_ram_gb_hours,
-	guaranteed_storage_gb_hours, burst_storage_gb_hours,
 	created_at
 `
 
@@ -72,9 +55,6 @@ func scanAgentQuota(row rowScanner) (*domain.AgentQuota, error) {
 	err := row.Scan(
 		&aq.ID, &aq.AgentID, &aq.PlatformExperimentID,
 		&aq.GuaranteedAcceleratorHours, &aq.BurstAcceleratorHours,
-		&aq.GuaranteedCPUCoreHours, &aq.BurstCPUCoreHours,
-		&aq.GuaranteedRAMGBHours, &aq.BurstRAMGBHours,
-		&aq.GuaranteedStorageGBHours, &aq.BurstStorageGBHours,
 		&aq.CreatedAt,
 	)
 	return aq, err
@@ -133,10 +113,7 @@ func (s *PlatformExperimentsStore) AddDesiredQuotaUsage(ctx context.Context, pla
 	}
 	const q = `
 SELECT agent_id, capacity_tier,
-       COALESCE(SUM(estimated_cost_acch), 0),
-       COALESCE(SUM(estimated_cpu_core_hours), 0),
-       COALESCE(SUM(estimated_ram_gb_hours), 0),
-       COALESCE(SUM(estimated_storage_gb_hours), 0)
+       COALESCE(SUM(estimated_cost_acch), 0)
 FROM experiments
 WHERE platform_experiment_id = $1
   AND (
@@ -156,8 +133,8 @@ GROUP BY agent_id, capacity_tier`
 	for rows.Next() {
 		var agentID string
 		var tier domain.CapacityTier
-		var accelerator, cpu, ram, storage float64
-		if err := rows.Scan(&agentID, &tier, &accelerator, &cpu, &ram, &storage); err != nil {
+		var accelerator float64
+		if err := rows.Scan(&agentID, &tier, &accelerator); err != nil {
 			return fmt.Errorf("platform_experiments_store.AddDesiredQuotaUsage: scan: %w", err)
 		}
 		quota := byAgent[agentID]
@@ -166,14 +143,8 @@ GROUP BY agent_id, capacity_tier`
 		}
 		if tier == domain.CapacityGuaranteed {
 			quota.UsedGuaranteedAccH += accelerator
-			quota.UsedGuaranteedCPUCoreH += cpu
-			quota.UsedGuaranteedRAMGBH += ram
-			quota.UsedGuaranteedStorageGBH += storage
 		} else {
 			quota.UsedBurstAccH += accelerator
-			quota.UsedBurstCPUCoreH += cpu
-			quota.UsedBurstRAMGBH += ram
-			quota.UsedBurstStorageGBH += storage
 		}
 	}
 	return rows.Err()
@@ -188,16 +159,10 @@ func (s *PlatformExperimentsStore) AddDesiredQuotaUsageOne(ctx context.Context, 
 }
 
 // resourceQuotaColumns returns the (guaranteed, burst) allocation column names backing one
-// resource dimension's quota bucket on agent_quotas. Accelerator-hours is the original/default
-// dimension. Consumption (used_*) has no Postgres column — see metricsdb.UsageTracker.
+// resource dimension's quota bucket on agent_quotas. Accelerator-hours is the only dimension.
+// Consumption (used_*) has no Postgres column — see metricsdb.UsageTracker.
 func resourceQuotaColumns(rt domain.ResourceType) (guaranteed, burst string) {
 	switch rt {
-	case domain.ResourceCPUCoreHours:
-		return "guaranteed_cpu_core_hours", "burst_cpu_core_hours"
-	case domain.ResourceRAMGBHours:
-		return "guaranteed_ram_gb_hours", "burst_ram_gb_hours"
-	case domain.ResourceStorageGBHours:
-		return "guaranteed_storage_gb_hours", "burst_storage_gb_hours"
 	default: // domain.ResourceAcceleratorHours
 		return "guaranteed_accelerator_hours", "burst_accelerator_hours"
 	}

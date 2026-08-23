@@ -146,9 +146,6 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 		amount       float64
 	}{
 		{domain.ResourceAcceleratorHours, exp.EstimatedCostAccH, rateCost(exp.EstimatedCostAccH)},
-		{domain.ResourceCPUCoreHours, exp.EstimatedCPUCoreHours, rateCost(exp.EstimatedCPUCoreHours)},
-		{domain.ResourceRAMGBHours, exp.EstimatedRAMGBHours, rateCost(exp.EstimatedRAMGBHours)},
-		{domain.ResourceStorageGBHours, exp.EstimatedStorageGBHours, rateCost(exp.EstimatedStorageGBHours)},
 	}
 	amounts := make(map[domain.ResourceType]float64, len(dims))
 	for _, d := range dims {

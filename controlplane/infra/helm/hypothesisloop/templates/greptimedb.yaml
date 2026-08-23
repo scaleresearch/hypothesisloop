@@ -1,0 +1,61 @@
+{{- if not .Values.greptimedb.external.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: greptimedb
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  selector:
+    app: hypothesisloop-greptimedb
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+    - name: grpc
+      port: 4001
+      targetPort: 4001
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hypothesisloop-greptimedb
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  serviceName: greptimedb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hypothesisloop-greptimedb
+  template:
+    metadata:
+      labels:
+        app: hypothesisloop-greptimedb
+    spec:
+      containers:
+        - name: greptimedb
+          image: {{ .Values.greptimedb.image }}
+          args:
+            - "standalone"
+            - "start"
+            - "--http-addr=0.0.0.0:4000"
+            - "--rpc-bind-addr=0.0.0.0:4001"
+          ports:
+            - containerPort: 4000
+            - containerPort: 4001
+          volumeMounts:
+            - name: data
+              mountPath: /tmp/greptimedb-data
+          resources:
+            {{- toYaml .Values.greptimedb.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.greptimedb.storageClassName }}
+        storageClassName: {{ .Values.greptimedb.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.greptimedb.storage }}
+{{- end }}

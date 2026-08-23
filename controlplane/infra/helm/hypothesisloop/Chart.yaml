@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hypothesisloop
+description: HypothesisLoop platform — control-service, metrics-service, Postgres, GreptimeDB, and the cluster-agent/node-agent bundle for a training cluster.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

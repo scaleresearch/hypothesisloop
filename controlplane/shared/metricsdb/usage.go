@@ -71,6 +71,13 @@ func (t *UsageTracker) SetObservedBatch(ctx context.Context, agentID, platformEx
 // which would spuriously hide a sample written in the same second.
 const minObservedLookback = time.Hour
 
+// maxObservedLookback ceilings the window. A row whose start time is the zero value — which dev
+// data actually contained, written before CreatedAt was populated — makes time.Since produce a
+// ~2000-year duration, and GreptimeDB's PromQL parser rejects the literal outright, 500ing every
+// quota and standings read for that experiment forever. A year covers any platform experiment
+// that will really run, so clamping loses nothing a real caller could have wanted.
+const maxObservedLookback = 365 * 24 * time.Hour
+
 // ObservedLookback turns a platform experiment's own start time into a last_over_time window
 // long enough to see every sample it could possibly have produced — never a fixed constant.
 // Each settled job writes its cost exactly once, as an absolute set against its own series (see
@@ -88,6 +95,9 @@ func ObservedLookback(start time.Time) string {
 	d := time.Since(start)
 	if d < minObservedLookback {
 		d = minObservedLookback
+	}
+	if d > maxObservedLookback {
+		d = maxObservedLookback
 	}
 	return fmt.Sprintf("%ds", int64(d.Seconds()))
 }
@@ -164,32 +174,12 @@ func SettledCostForJob(ctx context.Context, dbURL string, platformExpStart time.
 }
 
 func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier, value float64) {
-	guaranteed := tier == domain.CapacityGuaranteed
-	switch resourceType {
-	case domain.ResourceCPUCoreHours:
-		if guaranteed {
-			q.UsedGuaranteedCPUCoreH = value
-		} else {
-			q.UsedBurstCPUCoreH = value
-		}
-	case domain.ResourceRAMGBHours:
-		if guaranteed {
-			q.UsedGuaranteedRAMGBH = value
-		} else {
-			q.UsedBurstRAMGBH = value
-		}
-	case domain.ResourceStorageGBHours:
-		if guaranteed {
-			q.UsedGuaranteedStorageGBH = value
-		} else {
-			q.UsedBurstStorageGBH = value
-		}
-	default: // domain.ResourceAcceleratorHours
-		if guaranteed {
-			q.UsedGuaranteedAccH = value
-		} else {
-			q.UsedBurstAccH = value
-		}
+	// resourceType is always domain.ResourceAcceleratorHours now — it's the only ResourceType left.
+	_ = resourceType
+	if tier == domain.CapacityGuaranteed {
+		q.UsedGuaranteedAccH = value
+	} else {
+		q.UsedBurstAccH = value
 	}
 }
 

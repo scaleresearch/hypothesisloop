@@ -152,45 +152,6 @@ func (g AcceleratorType) LookupCost() (float64, bool) {
 	return r, ok
 }
 
-// cpuCoreHourRate is a flat per-unit rate (no hardware-tier variation), operator-overridable via
-// hypothesisloop.yaml.
-//
-// ramGBHourRate/storageGBHourRate: Deprecated, kept only so SetRAMGBHourRate/SetStorageGBHourRate
-// remain valid no-ops for old callers — nothing reads these to compute a bill anymore (RAM/storage
-// moved to Class B, hard-fit-checked only — see ResourceRAMGBHours' doc comment).
-var (
-	cpuCoreHourRate   = 1.0
-	ramGBHourRate     = 1.0
-	storageGBHourRate = 1.0
-)
-
-// SetCPUCoreHourRate registers the flat per-unit CPU-hour rate, loaded from config at startup.
-func SetCPUCoreHourRate(rate float64) {
-	if rate <= 0 {
-		panic("CPU core-hour rate must be positive")
-	}
-	cpuCoreHourRate = rate
-}
-
-// SetRAMGBHourRate/SetStorageGBHourRate: Deprecated — see ramGBHourRate's doc comment. Still
-// registers the value so old config keys don't error, but nothing reads it for billing anymore.
-func SetRAMGBHourRate(rate float64) {
-	if rate > 0 {
-		ramGBHourRate = rate
-	}
-}
-
-func SetStorageGBHourRate(rate float64) {
-	if rate > 0 {
-		storageGBHourRate = rate
-	}
-}
-
-// CPUCoreHourRate returns the current per-unit CPU-hour rate.
-func CPUCoreHourRate() float64   { return cpuCoreHourRate }
-func RAMGBHourRate() float64     { return ramGBHourRate }
-func StorageGBHourRate() float64 { return storageGBHourRate }
-
 // CapacityTier specifies whether a job uses guaranteed or burst capacity.
 type CapacityTier string
 
@@ -199,19 +160,11 @@ const (
 	CapacityBurst      CapacityTier = "burst"
 )
 
-// ResourceType identifies one quota-tracked resource dimension. Accelerator-hours is the original,
-// always-populated dimension (billed at AcceleratorType's tiered rate); CPU-hours is a flat
-// per-unit pool (see cpuCoreHourRate) checked/debited/refunded the same way on AgentQuota.
+// ResourceType identifies one quota-tracked resource dimension. Accelerator-hours is the only
+// one: RAM and ephemeral-storage are hard physical-fit-checked at admission
+// (domain.Experiment.Footprint()/domain.Fits), never hours-budgeted or debited.
 type ResourceType string
 
 const (
 	ResourceAcceleratorHours ResourceType = "accelerator_hours"
-	ResourceCPUCoreHours     ResourceType = "cpu_core_hours"
-
-	// ResourceRAMGBHours/ResourceStorageGBHours: Deprecated. RAM and ephemeral-storage are hard
-	// physical-fit-checked at admission (domain.Experiment.Footprint()/domain.Fits) but never
-	// hours-budgeted, debited, or preemption-rescaled. Kept as API identifiers for schema
-	// compatibility only — not live billing dimensions.
-	ResourceRAMGBHours     ResourceType = "ram_gb_hours"
-	ResourceStorageGBHours ResourceType = "storage_gb_hours"
 )

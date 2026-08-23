@@ -17,6 +17,9 @@ import (
 var (
 	ErrHypothesisNotFound = fmt.Errorf("hypothesis not found")
 	ErrHypothesisNotOwner = db.ErrNotOwner
+	// ErrHypothesisSubmitterNotAllowed is returned by RegisterHypothesis when the platform
+	// experiment's HypothesisSubmitPolicy forbids the submission's source (human or agent).
+	ErrHypothesisSubmitterNotAllowed = errors.New("hypothesis submitter not allowed by platform experiment's hypothesis_submit_policy")
 )
 
 // RegisterHypothesis registers a new hypothesis within a platform experiment, or returns the
@@ -33,6 +36,26 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 	if err != nil {
 		return nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
+
+	hypothesisPolicy, _, found, err := s.store.GetPlatformExperimentSubmitPolicies(ctx, platformExperimentID)
+	if err != nil {
+		return nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+	}
+	if found {
+		switch source {
+		case domain.HypothesisSourceHuman:
+			if !hypothesisPolicy.AllowsHuman() {
+				return nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from agents only — this is a human submission (author=%q); read the experiment's hypothesis_submit_policy before retrying, a human identity cannot submit hypotheses here",
+					ErrHypothesisSubmitterNotAllowed, platformExperimentID, author)
+			}
+		case domain.HypothesisSourceAgent:
+			if !hypothesisPolicy.AllowsAgent() {
+				return nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from humans only — this is an autonomous-agent submission (agent_id=%s); read the experiment's hypothesis_submit_policy before retrying, an agent identity cannot submit hypotheses here",
+					ErrHypothesisSubmitterNotAllowed, platformExperimentID, agentID)
+			}
+		}
+	}
+
 	h, alreadyExisted, err = s.store.FindOrCreateHypothesis(ctx, source, agentID, author, platformExperimentID, text)
 	if err != nil {
 		return nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)

@@ -339,6 +339,29 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
 }
 
+// Only shown when a policy narrows past the 'mixed' default, so the common case (anyone may
+// submit either) stays uncluttered — a restriction is the exceptional, worth-flagging state.
+function SubmitPolicyChips({ pe }: { pe: PlatformExperiment }) {
+  const chip = (label: string) => (
+    <span
+      key={label}
+      className="mono"
+      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted-fg)' }}
+    >
+      {label}
+    </span>
+  )
+  const chips: React.ReactNode[] = []
+  if (pe.hypothesis_submit_policy && pe.hypothesis_submit_policy !== 'mixed') {
+    chips.push(chip(`Hypotheses: ${pe.hypothesis_submit_policy === 'human_only' ? 'humans only' : 'agents only'}`))
+  }
+  if (pe.job_submit_policy && pe.job_submit_policy !== 'mixed') {
+    chips.push(chip(`Jobs: ${pe.job_submit_policy === 'human_only' ? 'humans only' : 'agents only'}`))
+  }
+  if (chips.length === 0) return null
+  return <>{chips}</>
+}
+
 // A agent's best-known value per metric key, e.g. { val_accuracy: 0.94, latency_ms: 120 }.
 type MetricBests = Record<string, number | null>
 
@@ -658,6 +681,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             <Link href={`/hypotheses?pe=${pe.id}`} className="text-link" style={{ fontSize: 12 }}>
               {(hypotheses?.length ?? 0)} Hypotheses →
             </Link>
+            <SubmitPolicyChips pe={pe} />
           </div>
         </div>
       </div>
@@ -1067,7 +1091,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <th>Guaranteed</th>
                   <th>Burst</th>
                   <th>Remaining</th>
-                  {!!pe.budget_cpu_core_hours && <th>CPU (core-h)</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1081,20 +1104,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <td className="mono" style={{ fontSize: 11, color: remaining > 0 ? semantic.success : semantic.danger }}>
                         {formatAccH(remaining)} AccH
                       </td>
-                      {!!pe.budget_cpu_core_hours && (
-                        <td className="mono" style={{ fontSize: 11 }}>
-                          {formatAccH((q.used_guaranteed_cpu_core_h ?? 0) + (q.used_burst_cpu_core_h ?? 0))} / {formatAccH((q.guaranteed_cpu_core_hours ?? 0) + (q.burst_cpu_core_hours ?? 0))}
-                        </td>
-                      )}
                     </tr>
                   )
                 })}
               </tbody>
             </table>
-            {/* RAM/storage quota columns intentionally omitted: those dimensions are no longer
-                hours-tracked (physical fit-only check at admission), so any guaranteed_ram_gb_hours/
-                burst_ram_gb_hours/etc. on AgentQuota are frozen legacy values with nothing debiting
-                them — showing them here would imply a live budget that no longer exists. */}
+            {/* RAM/storage quota columns intentionally omitted: those dimensions are hard
+                physical-fit-checked at admission, not hours-tracked, so AgentQuota carries no
+                RAM/storage fields at all. */}
           </PodContent>
         </Pod>
       )}

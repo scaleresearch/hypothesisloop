@@ -1,0 +1,25 @@
+# Hypothesis template for a new experiment under agents/coordinator/experiments/<name>/. Not
+# submitted by the coordinator itself -- this is what an agent copies/adapts and submits with
+# `hl hypothesis submit --file hypothesis.yaml` (system_prompt.md step 5). Kept here, alongside
+# experiment.yaml and seed/job.yaml, so an agent sees the full request shape for every stage of
+# the flow it's expected to drive, not just job submission. See
+# controlplane/settings/examples/hypothesis.yaml for the schema reference.
+#
+# agent_id/platform_experiment_id below are placeholders -- nothing here knows in advance which
+# agent or which run of this experiment a hypothesis belongs to (a fresh platform experiment gets
+# a fresh PLATFORM_EXPERIMENT_ID every time it's created, per setup.md step 2). Overwrite both
+# before/at submit time; agent code does this automatically from its own {agent_id}/
+# {platform_experiment_id} (see system_prompt.md's assignment block).
+agent_id: REPLACE-WITH-YOUR-AGENT-ID
+platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+# One falsifiable sentence: what you expect and *why*, grounded in something real (a paper, a
+# doc, a prior trial, another agent's finding) -- never a guess. Re-submitting the same
+# (normalized) text under the same agent_id + platform_experiment_id returns the existing
+# hypothesis (already_existed: true) instead of creating a duplicate.
+text: "REPLACE-WITH-YOUR-FALSIFIABLE-HYPOTHESIS-AND-WHY-YOU-EXPECT-IT"
+
+# author: optional, and mutually exclusive with agent_id -- exactly one of the two must be set
+# (domain.ClassifyHypothesisOrigin). Only relevant if this platform experiment's
+# hypothesis_submit_policy (see experiment.yaml) allows a human to register hypotheses too; leave
+# unset for an agent submission.
+# author: jane

@@ -1,37 +1,61 @@
-# Standalone job definition for the e2e test workload (tests/workloads/generic/train.py, built
-# as the hypothesisloop-workload image — see Dockerfile.train). This is a domain.JobSpec, the
-# platform's own DSL, never a raw Kubernetes manifest (see
-# controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
-# reference). tests/scenarios/stages-and-settlement.sh reads this file as-is and submits it
-# verbatim as the `job` field of every POST /experiments call — per-run bits (hypothesis,
-# agent, platform experiment) live in the request's `metadata`, not here, since this file
-# describes how the job runs, identical for every agent in the e2e run.
-#
-# Kept deliberately plain/single-node: scenarios/stages-and-settlement.sh sizes its platform-experiment budget
-# assuming exactly 1 accelerator per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
-# here would double the accelerator-hours cost per submission and starve the budget. The
-# distributed-training path (num_nodes, topology, acceptable_accelerator_types) is verified
-# separately via direct API calls, not through this shared smoke-test fixture.
-image: localhost/hypothesisloop-workload:latest
+# This file is a full POST /experiments request body (id + metadata + job), not just the job
+# spec. id/metadata below are placeholders -- nothing here knows in advance which hypothesis or
+# platform experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id,
+# agent_id (and id, for a fresh submission) before/at submit time. The `job:` block below is the
+# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# for the fully-commented DSL reference.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
+  # project_id: optional free-text grouping tag (GET /experiments?project_id=) -- no Project entity exists, omit if unneeded.
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
+  # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
+  # validated. Omit both if you have nothing to point at.
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  estimated_duration_hours: 1.0
+job:
+  # Standalone job definition for the e2e test workload (tests/workloads/generic/train.py, built
+  # as the hypothesisloop-workload image — see Dockerfile.train). This is a domain.JobSpec, the
+  # platform's own DSL, never a raw Kubernetes manifest (see
+  # controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
+  # reference). tests/e2e/test_stages_and_settlement.py reads this file as-is and submits it
+  # verbatim as the `job` field of every POST /experiments call — per-run bits (hypothesis,
+  # agent, platform experiment) live in the request's `metadata`, not here, since this file
+  # describes how the job runs, identical for every agent in the e2e run.
+  #
+  # Kept deliberately plain/single-node: scenarios/stages-and-settlement.sh sizes its platform-experiment budget
+  # assuming exactly 1 accelerator per agent (see JOB_HOURS/BUDGET in that script) — num_nodes > 1
+  # here would double the accelerator-hours cost per submission and starve the budget. The
+  # distributed-training path (num_nodes, topology, acceptable_accelerator_types) is verified
+  # separately via direct API calls, not through this shared smoke-test fixture.
+  image: localhost/hypothesisloop-workload:latest
 
-# Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster would
-# leave these unset for operator-set defaults. cpu is kept well above steady-state usage
-# because a too-tight limit starves the container during its startup handshake (a burst of
-# forks/execs), failing it outright rather than just slowing it down — see
-# node-agent-daemonset.yaml's resources comment for the full mechanism.
-cpu: "250m"
-memory: "128Mi"
-# storage is now a required explicit request — the control plane rejects submissions with
-# an unset resource request rather than resolving a cluster-side default pre-admission (see
-# admission must know the complete physical footprint before selecting a cluster).
-storage: "512Mi"
-max_retries: 3
+  # Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster would
+  # leave these unset for operator-set defaults. cpu is kept well above steady-state usage
+  # because a too-tight limit starves the container during its startup handshake (a burst of
+  # forks/execs), failing it outright rather than just slowing it down — see
+  # node-agent-daemonset.yaml's resources comment for the full mechanism.
+  cpu: "250m"
+  memory: "128Mi"
+  # storage is now a required explicit request — the control plane rejects submissions with
+  # an unset resource request rather than resolving a cluster-side default pre-admission (see
+  # admission must know the complete physical footprint before selecting a cluster).
+  storage: "512Mi"
+  max_retries: 3
 
-accelerator_count: 1
-accelerator_type: nvidia.com/gpu.product=NVIDIA-L40
-acceptable_accelerator_types:
-  - nvidia.com/gpu.product=Tesla-T4
-  - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
-  - nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
-  - nvidia.com/gpu.product=NVIDIA-H200
-accelerator_tolerations: [nvidia.com/gpu]
+  accelerator_count: 1
+  accelerator_type: nvidia.com/gpu.product=NVIDIA-L40
+  acceptable_accelerator_types:
+    - nvidia.com/gpu.product=Tesla-T4
+    - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+    - nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+    - nvidia.com/gpu.product=NVIDIA-H200
+  accelerator_tolerations: [nvidia.com/gpu]

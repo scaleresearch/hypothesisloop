@@ -53,7 +53,11 @@ type Executor interface {
 	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error)
 
 	PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error)
-	PollJobPhaseAndUID(ctx context.Context, experimentID string) (workload.JobPhase, string, error)
+	// PollJobStatus is one coherent read of a managed workload. Phase, identity and generation
+	// come from the same look at the same object on purpose: read separately, a
+	// delete-and-recreate landing between them pairs the old generation's phase with the new
+	// one's number, which is precisely the confusion JobStatus.Attempt exists to resolve.
+	PollJobStatus(ctx context.Context, experimentID string) (JobStatus, error)
 	ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, node string, consistent bool, err error)
 
 	GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error)
@@ -63,6 +67,13 @@ type Executor interface {
 	// domain.NodeResource*. The cluster-wide totals above cannot answer "does this job fit a
 	// node", and a job runs on one node — admission needs both views.
 	GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error)
+	// GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
+	// allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
+	// permanently resident; platform job pods themselves are not subtracted), as
+	// by domain.NodeResource* like GetLiveNodeResourceCapacity above — but total rather than free.
+	// Fair-share math needs a denominator that doesn't move every time something else is scheduled
+	// or freed, which the free/available view above cannot provide.
+	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error)
 	GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error)
 
 	// SupportsMultiNodeJobs reports whether this runtime can execute a job spanning more than one
@@ -77,4 +88,16 @@ type Executor interface {
 	SupportsMultiNodeJobs() bool
 
 	ProvisionAgent(ctx context.Context, agentID string) error
+}
+
+// JobStatus is what one poll of a managed workload observed.
+type JobStatus struct {
+	Phase workload.JobPhase
+	// UID changes whenever the underlying workload is replaced, so a caller can tell a job that
+	// has been recreated from one that has merely changed phase.
+	UID string
+	// Attempt is the generation of the experiment this workload was created for, as the control
+	// plane numbered it. workload.AttemptUnknown when the workload carries no attempt at all —
+	// one created by a runtime build that predates it, or one that is already gone.
+	Attempt int
 }

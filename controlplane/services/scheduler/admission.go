@@ -30,6 +30,7 @@ const (
 	ReasonRateLimited         = "rate_limited"
 	ReasonJobTooLong          = "job_too_long"
 	ReasonDataQuotaExceeded   = "data_quota_exceeded"
+	ReasonSubmitterNotAllowed = "submitter_not_allowed"
 )
 
 // AdmissionError is returned when an experiment cannot be admitted.
@@ -73,9 +74,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 	if exp.AgentID == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "agent_id is required"}
-	}
-	if exp.ProjectID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "project_id is required"}
 	}
 	if exp.HypothesisID == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required"}
@@ -133,6 +131,13 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	case exp.AcceleratorCount < 0:
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
 	case exp.AcceleratorCount == 0:
+		// "max" resolves to a proportional share of an accelerator this job isn't requesting, so
+		// it can never be resolved for a job with no accelerators — reject outright rather than
+		// let it queue forever unresolved (see loop_resolve.go's resolveClusterLocalResources,
+		// which only ever resolves a group with a positive accelerator count).
+		if exp.Job.CPU == domain.MaxResourceSentinel || exp.Job.Memory == domain.MaxResourceSentinel || exp.Job.Storage == domain.MaxResourceSentinel {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu/memory/storage cannot be \"max\" without a positive job.accelerator_count — there is no accelerator to compute a proportional share against"}
+		}
 		cores, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
@@ -171,6 +176,35 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 	if exp.EstimatedDurationHours <= 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must be positive"}
+	}
+
+	// A negative quantity parses cleanly — resource.ParseQuantity accepts "-100Gi" — and every
+	// check below is an upper bound, so nothing else stops one. It must be rejected here, at the
+	// only point that sees the request before anything acts on it, and per group: the cap checks
+	// sum over groups, where one group's negative silently cancels another's real demand.
+	//
+	// Downstream the two views of the same job disagree about it, which is what makes it dangerous
+	// rather than merely wrong. Footprint carries the negative through, so reserving the job
+	// *credits* the cluster capacity it never had and bills the agent for less than it used, while
+	// NodeShapes drops the dimension entirely, so placement never sees it at all.
+	for _, group := range exp.Job.NodeGroups() {
+		for _, dimension := range []struct {
+			field string
+			qty   string
+			parse func(string) (float64, error)
+		}{
+			{"job.cpu", group.CPU, workload.ParseCPUCores},
+			{"job.memory", group.Memory, workload.ParseMemoryGB},
+			{"job.storage", group.Storage, workload.ParseStorageGB},
+		} {
+			value, err := dimension.parse(dimension.qty)
+			if err != nil {
+				return &AdmissionError{Reason: ReasonMalformed, Message: dimension.field + ": " + err.Error()}
+			}
+			if value < 0 {
+				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("%s must not be negative (%q)", dimension.field, dimension.qty)}
+			}
+		}
 	}
 
 	if caps.MaxAcceleratorCountPerJob > 0 && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {

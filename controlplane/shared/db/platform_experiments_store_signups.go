@@ -22,7 +22,7 @@ import (
 // `WHERE EXISTS (... status='open')` predicate takes no lock at all, so it could read 'open'
 // under its own snapshot and still commit after the start had chosen the participants — landing
 // a durable signup with no quota row and no path to ever get one.
-func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole) (bool, error) {
+func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
@@ -40,9 +40,9 @@ func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, ag
 		return false, nil
 	}
 	tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role)
-VALUES ($1, $2, NOW(), $3)
-ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, agentID, string(role))
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier)
+VALUES ($1, $2, NOW(), $3, $4)
+ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, agentID, string(role), string(quotaTier))
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 	}

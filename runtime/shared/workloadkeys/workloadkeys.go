@@ -23,6 +23,12 @@ const (
 	// runtime deleting a workload has only its identity to go on, and the job's declaration is
 	// long gone from desired state by then.
 	CheckpointGraceSeconds = "hypothesisloop.io/checkpoint-grace-seconds"
+	// Attempt is the generation of the experiment this workload was created for
+	// (domain.Experiment.AttemptCount, also injected as HYPOTHESISLOOP_ATTEMPT). Reported back
+	// with the workload's phase so the control plane can tell an observation of the attempt it
+	// is waiting on from one of the attempt it just replaced — a retry that lands back on the
+	// cluster it failed on leaves the old workload terminating and still in the status snapshot.
+	Attempt = "hypothesisloop.io/attempt"
 	// JobGroup names which group of a heterogeneous job a workload belongs to (see
 	// domain.JobSpec.Groups). Absent on an ungrouped job, whose nodes are all the same thing.
 	JobGroup = "hypothesisloop.io/job-group"

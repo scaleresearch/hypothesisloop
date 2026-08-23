@@ -2,6 +2,7 @@
 how cluster-agent/node-agent are configured (see runtime/k8s/cmd/*/main.go)."""
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 
@@ -14,6 +15,20 @@ def _env(name: str, default: str = "") -> str:
 def _env_float(name: str, default: float) -> float:
     v = os.environ.get(name)
     return float(v) if v else default
+
+
+def _env_json_object(name: str, default: str = "{}") -> dict:
+    """Parses an env var as a small JSON object of hyperparameters. Malformed or non-object JSON
+    fails loudly at startup rather than silently handing the agent an empty dict — a sweep that
+    got its hyperparameters wrong should not run believing it got the defaults."""
+    raw = os.environ.get(name, default) or default
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"agent: {name} must be a JSON object, got {raw!r}: {e}")
+    if not isinstance(value, dict):
+        raise SystemExit(f"agent: {name} must be a JSON object, got {raw!r}")
+    return value
 
 
 @dataclass
@@ -36,13 +51,21 @@ class Config:
         "CODE_REPO_URL", "https://github.com/hypothesisloop-agents/experiments"))
     git_token: str = field(default_factory=lambda: _env("GIT_TOKEN"))
 
-    # What this agent was launched to do in its platform experiment: competitor, baseline or
-    # reviewer. The coordinator decides it and passes it in; the agent never picks its own role.
-    # It names the role brief the agent reads and is the role the agent signs up under, so the
-    # platform's record and the briefing can never disagree. Not validated here: the API rejects
-    # an unknown role at signup with a typed error, and a second list to keep in step with
-    # domain.SignupRole is a second enforcement point free to drift from it.
-    role: str = field(default_factory=lambda: _env("AGENT_ROLE", "competitor"))
+    # Which specialization this agent runs: the coordinator decides it and passes it in, the agent
+    # never picks its own. Every flavor competes identically — nothing here is a ranking axis — it
+    # only selects which brief the agent reads at $FLAVOR_BRIEFS/{flavor}.md
+    # (prompts/flavors/<flavor>.md), which holds the specialized approach: what kind of trial to
+    # run, what to vary, what "winning" looks like for that specialization.
+    flavor: str = field(default_factory=lambda: _env("AGENT_FLAVOR", "generalist"))
+
+    # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) the
+    # coordinator hands this one agent at launch, on top of its flavor — a sweep is a coordinator
+    # loop that starts N agents of the same flavor, each with its own AGENT_HYPERPARAMETERS,
+    # exactly like XManager's `experiment.add` loop. Pure env var: the control plane never sees or
+    # stores it, so there is no second record of what an agent was told to try that could drift
+    # from what it actually ran. The agent reads it back via {hyperparameters} in the system
+    # prompt and decides for itself what to do with it.
+    hyperparameters: dict = field(default_factory=lambda: _env_json_object("AGENT_HYPERPARAMETERS"))
 
     # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
     # experiment closes and submissions start getting rejected (see core.py's stop_reason).
