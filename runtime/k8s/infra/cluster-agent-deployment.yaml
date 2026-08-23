@@ -20,8 +20,14 @@ rules:
   - apiGroups: [""]
     # pods: cluster-wide list to compute actual per-node utilization (workload_client.go's
     # nodeCapacity/nodeUsage path) — same capacity-accounting feature as the nodes rule above.
+    #
+    # get+delete are what deliver a policy termination's checkpoint window. Deleting a Job hands
+    # its pods to the garbage collector, which uses the POD's own grace and cannot be told
+    # otherwise — so DeleteWorkload deletes the pods itself, with an explicit grace, before
+    # touching the Job. Without delete here every teardown 403s and the workload is never
+    # removed; without get it cannot read back the grace the pod was compiled with.
     resources: ["pods"]
-    verbs: ["list"]
+    verbs: ["get", "list", "delete"]
   - apiGroups: [""]
     # pods/log: FetchLogTail reads a job's own pod's current stdout/stderr to report alongside
     # its phase (see k8sexec.FetchLogTail, agentloop.LogTailer) — without this, GetLogs 403s and
