@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -80,4 +83,17 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.status = code
 	sr.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards to the wrapped writer so a WebSocket upgrade still works behind this
+// middleware. Embedding http.ResponseWriter promotes its methods but NOT the optional interfaces
+// the concrete server type also satisfies, so wrapping silently removes the ability to take over
+// the connection -- and the failure surfaces only at the upgrade, as "connection does not support
+// hijacking", in the deployed server and never in a test that mounts the handler directly.
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := sr.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("api: underlying %T cannot hijack the connection", sr.ResponseWriter)
+	}
+	return hijacker.Hijack()
 }
