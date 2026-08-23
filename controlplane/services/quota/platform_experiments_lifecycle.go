@@ -333,8 +333,8 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 // a platform experiment with no end time runs until someone calls Close explicitly.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	now := time.Now()
-	for _, status := range []string{string(domain.PlatformExpOpen), string(domain.PlatformExpRunning)} {
-		pes, err := s.store.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: status})
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
+		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
 		if err != nil {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)
 		}
@@ -372,7 +372,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 // since there's no scheduled moment to sweep against; only a non-zero, past StartsAt auto-fires.
 func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	now := time.Now()
-	pes, err := s.store.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: string(domain.PlatformExpOpen)})
+	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
 	if err != nil {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}

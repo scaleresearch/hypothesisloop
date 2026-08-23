@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
@@ -60,7 +59,7 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 // Self-healing complement to Close(): if close succeeded in the DB but pod termination or
 // refunds failed, the next reconcile tick finishes the cleanup automatically.
 func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
-	closedPEs, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "closed"})
+	closedPEs, err := c.stagesStore.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpClosed)
 	if err != nil {
 		return fmt.Errorf("reconcileClosedExperiments: list closed PEs: %w", err)
 	}

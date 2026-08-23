@@ -190,18 +190,7 @@ func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, 
 	clauses, args := platformExperimentFilterClauses(filter)
 	n := len(args) + 1
 
-	q := `
-SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
-       pe.metrics, pe.report_interval_seconds,
-       pe.starts_at, pe.ends_at, pe.status,
-       pe.stages, pe.current_stage, pe.summary,
-       pe.created_at, pe.updated_at,
-       COUNT(es.agent_id) AS signup_count
-FROM platform_experiments pe
-LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
-WHERE ` + strings.Join(clauses, " AND ") + `
-GROUP BY pe.id
-ORDER BY ` + platformExperimentOrderBy(filter.Sort)
+	q := platformExperimentSelect(clauses, filter.Sort)
 
 	if filter.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT $%d", n)
@@ -213,6 +202,38 @@ ORDER BY ` + platformExperimentOrderBy(filter.Sort)
 		args = append(args, filter.Offset)
 	}
 
+	return s.queryPlatformExperiments(ctx, q, args...)
+}
+
+// ListPlatformExperimentsByStatus returns EVERY platform experiment in one status, unpaginated.
+//
+// This is the control-plane loops' read, deliberately separate from ListPlatformExperiments.
+// That one is the agent-facing list and defaults to a small page on purpose; a reconciler that
+// borrowed it silently stopped reconciling at the page boundary — stage ladders past the first
+// twenty running platform experiments never advanced, and nothing anywhere said so. A control
+// loop acts on all of its subjects or on none of them, so it must never read them through a
+// paginated query.
+func (s *PlatformExperimentsStore) ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
+	clauses, args := platformExperimentFilterClauses(PlatformExperimentsFilter{Status: string(status)})
+	return s.queryPlatformExperiments(ctx, platformExperimentSelect(clauses, ""), args...)
+}
+
+func platformExperimentSelect(clauses []string, sort string) string {
+	return `
+SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.budget_cpu_core_hours, pe.budget_ram_gb_hours, pe.budget_storage_gb_hours, pe.max_agents,
+       pe.metrics, pe.report_interval_seconds,
+       pe.starts_at, pe.ends_at, pe.status,
+       pe.stages, pe.current_stage, pe.summary,
+       pe.created_at, pe.updated_at,
+       COUNT(es.agent_id) AS signup_count
+FROM platform_experiments pe
+LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
+WHERE ` + strings.Join(clauses, " AND ") + `
+GROUP BY pe.id
+ORDER BY ` + platformExperimentOrderBy(sort)
+}
+
+func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context, q string, args ...any) ([]*domain.PlatformExperiment, error) {
 	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.List: %w", err)

@@ -15,8 +15,10 @@ import (
 
 // StagesStore is the persistence interface for the stage ladder.
 type StagesStore interface {
-	// Platform experiment queries.
-	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
+	// Platform experiment queries. ListPlatformExperimentsByStatus, never the agent-facing paged
+	// list: a reconcile pass acts on every platform experiment in the status or on none of them,
+	// and a page boundary silently stops a ladder advancing (see the store's doc comment).
+	ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error)
 
 	// Stage boundaries.
 	// AdvanceStage atomically records the cut agents, redistributes each dimension's released

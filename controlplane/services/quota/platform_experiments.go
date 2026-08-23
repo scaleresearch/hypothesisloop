@@ -16,6 +16,9 @@ type PlatformExperimentsStore interface {
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
+	// ListPlatformExperimentsByStatus is the unpaginated read the sweeps use. A sweep that
+	// borrowed the paged list above silently stopped at its default page — see the store.
+	ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error)
 	CountPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) (int, error)
 	UpdatePlatformExperimentStatus(ctx context.Context, id string, status domain.PlatformExperimentStatus) error
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db

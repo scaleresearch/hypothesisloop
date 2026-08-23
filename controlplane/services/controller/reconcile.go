@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
@@ -42,7 +41,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	// Only the stage ladder needs these maps. Silence and quota-exhaustion checks below do
 	// not, so an unreadable platform-experiment list must not stop them from running — that
 	// turned one failing query into a pass where nothing at all was reconciled.
-	pes, err := c.stagesStore.ListPlatformExperiments(ctx, db.PlatformExperimentsFilter{Status: "running"})
+	pes, err := c.stagesStore.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
 	if err != nil {
 		c.logger.Error("stages: list platform experiments; continuing without stage maps", zap.Error(err))
 		errs = append(errs, fmt.Errorf("stages: list platform experiments: %w", err))
