@@ -239,7 +239,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string `json:"agent_id"`
-			Role    string `json:"role" doc:"competitor (default), baseline or reviewer. Fixed at signup."`
+			// required:"false" is load-bearing: huma makes a body field required unless told
+			// otherwise, and a required role would reject every signup written before roles
+			// existed -- the exact opposite of "competitor is the default, so every existing
+			// signup still means what it meant".
+			Role string `json:"role,omitempty" required:"false" doc:"competitor (default), baseline or reviewer. Fixed at signup."`
 		}
 	}) (*struct {
 		Body struct {

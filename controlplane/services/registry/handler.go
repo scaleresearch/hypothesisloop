@@ -224,8 +224,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"under the same dedup, but a human row owns no job, holds no quota and is in no standings.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			AgentID              string `json:"agent_id"`
-			Author               string `json:"author" doc:"The name a human types in the UI. There is no auth: this is a claim, not an identity, exactly as agent_id is. Set this instead of agent_id, never both."`
+			// Neither is schema-required, and that is deliberate: exactly one of them must be
+			// set, which is a rule about the PAIR that no per-field "required" can express.
+			// Marking either one required rejects the other half of the very rule -- a required
+			// author refuses every agent-submitted hypothesis, which is how every caller written
+			// before humans could post one would break. domain.ClassifyHypothesisOrigin owns it.
+			AgentID              string `json:"agent_id,omitempty" required:"false"`
+			Author               string `json:"author,omitempty" required:"false" doc:"The name a human types in the UI. There is no auth: this is a claim, not an identity, exactly as agent_id is. Set this instead of agent_id, never both."`
 			PlatformExperimentID string `json:"platform_experiment_id"`
 			Text                 string `json:"text"`
 		}
@@ -363,8 +368,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
-			AgentID string `json:"agent_id"`
-			Author  string `json:"author" doc:"The name a human types in the UI. Set this instead of agent_id, never both."`
+			// See the register-hypothesis body above: exactly-one-of is a rule about the pair,
+			// so neither field can be schema-required without rejecting the other's valid case.
+			AgentID string `json:"agent_id,omitempty" required:"false"`
+			Author  string `json:"author,omitempty" required:"false" doc:"The name a human types in the UI. Set this instead of agent_id, never both."`
 			Text    string `json:"text"`
 		}
 	}) (*struct {
