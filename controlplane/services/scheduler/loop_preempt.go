@@ -212,7 +212,11 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 // models; equal resource names alone do not mean evicting one model makes another available.
 func preemptionContribution(victim, preemptor *domain.Experiment) domain.Footprint {
 	contribution := victim.Footprint()
-	if preemptor.Job.AcceleratorCount <= 0 {
+	// Whether the preemptor wants accelerators at all is a question about the whole job, and a
+	// grouped one carries its counts on its groups — the top-level field is empty there, which
+	// read literally credited a grouped preemptor with a victim's accelerators even when the
+	// victim held a different flavor entirely, over-counting what the eviction would free.
+	if preemptor.Job.TotalAccelerators() <= 0 {
 		return contribution
 	}
 	// Accelerator capacity is keyed by the driver-published type, so "does evicting this victim

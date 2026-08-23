@@ -272,7 +272,11 @@ func disbalancePremises(
 	nodeAvail, nodeResources map[string]map[string]int64,
 	nodeLabels map[string]map[string]string,
 ) (domain.Footprint, map[string]int64, bool) {
-	if blocked.Job.AcceleratorCount <= 0 {
+	// A grouped job carries its accelerator counts on its groups, so the top-level field is empty
+	// for one however many devices it wants. Read literally it excluded every heterogeneous job
+	// from this pass — the jobs most likely to be blocked by a neighbour's disproportion, since
+	// their own shapes differ node to node.
+	if blocked.Job.TotalAccelerators() <= 0 {
 		return nil, nil, false
 	}
 	// preemptionShortfall — the same function the tick's own fit check uses at the call site that
@@ -292,7 +296,11 @@ func disbalancePremises(
 	}
 
 	flavor := strings.ToLower(string(blocked.AcceleratorType))
-	perRank := int64(blocked.Job.AcceleratorCount)
+	// Per NODE, not per job: the question is whether some single node is stranding enough free
+	// devices to host one of blocked's nodes. hardestNodeShape is the same one-shape summary the
+	// shortfall vector uses, and covering the hardest node is what unblocks the job; for an
+	// ungrouped job every shape is identical, so this is its per-node count exactly as before.
+	perRank := hardestNodeShape(blocked).AcceleratorCount
 	// Value, not just presence: how many accelerators a node is stranding is the whole cost of
 	// the disproportion, and the agent is told it verbatim (see disbalanceVictim.explain).
 	strandedNodes := make(map[string]int64, len(nodeAvail))
@@ -342,7 +350,7 @@ func selectDisbalanceVictims(
 	placed []placedExperiment,
 	tolerance float64,
 ) []disbalanceVictim {
-	if blocked.Job.AcceleratorCount <= 0 || len(clusterTotal) == 0 {
+	if blocked.Job.TotalAccelerators() <= 0 || len(clusterTotal) == 0 {
 		return nil
 	}
 

@@ -219,8 +219,8 @@ func (l *Loop) tick(ctx context.Context) error {
 		// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it
 		// has a new flavor to persist.
 		persistedFlavor := exp.AcceleratorType
-		candidates := eligibleClusters(gAvail, multiNodeCapable, exp)
-		if len(candidates) == 0 {
+		candidates, narrowed := eligibleClusters(gAvail, multiNodeCapable, exp)
+		if len(candidates) == 0 && narrowed {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedNoMultiNodeCluster); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark no multi-node cluster: %w", err))
@@ -372,8 +372,8 @@ func (l *Loop) tick(ctx context.Context) error {
 
 	for _, exp := range burst {
 		persistedFlavor := exp.AcceleratorType
-		candidates := eligibleClusters(bAvail, multiNodeCapable, exp)
-		if len(candidates) == 0 {
+		candidates, narrowed := eligibleClusters(bAvail, multiNodeCapable, exp)
+		if len(candidates) == 0 && narrowed {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedNoMultiNodeCluster); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark no multi-node cluster: %w", err))
@@ -477,9 +477,15 @@ func notAdmittedReasonFor(fitAtTickStart bool, footprint domain.Footprint, short
 // in-place reservations admission makes against the returned view are the same numbers every
 // later job in this tick reads. A copy here would let a job admitted through the narrowed view
 // be double-booked by one placed through the full one.
-func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[string]bool, exp *domain.Experiment) map[string]domain.Footprint {
+//
+// narrowed says whether this filter is what emptied the result, and it is the only thing that
+// makes an empty result diagnosable. A single-node job is returned avail untouched, so an empty
+// set for one means no cluster reported capacity at all — a heartbeat gap, not a missing
+// capability. Reporting that as "no multi-node cluster" told a plain one-node job it had been
+// refused for spanning hosts it never asked to span.
+func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[string]bool, exp *domain.Experiment) (clusters map[string]domain.Footprint, narrowed bool) {
 	if exp.Job.Nodes() <= 1 {
-		return avail
+		return avail, false
 	}
 	out := make(map[string]domain.Footprint, len(avail))
 	for cluster, footprint := range avail {
@@ -487,7 +493,7 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 			out[cluster] = footprint
 		}
 	}
-	return out
+	return out, true
 }
 
 func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
@@ -690,8 +696,13 @@ func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType 
 // saturated land on a free AcceptableAcceleratorTypes alternative instead of sitting QUEUED with
 // idle capacity elsewhere. If nothing fits outright, falls back to the requested flavor's own
 // best-fit cluster so the caller's preemption path still runs.
+// TotalAccelerators, not the top-level per-node count: a grouped job states its counts on its
+// groups and leaves the top-level field empty, so reading it literally said every heterogeneous
+// job wanted no accelerators at all. Such a job then took the CPU-only shortcut below — no flavor
+// substitution and, worse, no placeAtFlavor, so it was placed on scalar fit alone and could be
+// handed a cluster whose nodes had not one free device of the hardware it asked for.
 func resolveClusterAndFootprint(avail map[string]domain.Footprint, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
-	if exp.Job.AcceleratorCount <= 0 {
+	if exp.Job.TotalAccelerators() <= 0 {
 		fp := exp.Footprint()
 		return clusterWithBestFit(avail, fp), fp
 	}
@@ -963,8 +974,23 @@ func nodeResourceKind(resource string) (domain.ResourceKind, bool) {
 // avail (iterated in stable, sorted-by-name order for determinism):
 //  1. the first cluster where footprint already Fits — a job that fits outright always beats
 //     one that would need preemption; cluster name order is the tiebreak among those
-//  2. otherwise, the cluster with the smallest total shortage (sum across dimensions of
-//     max(0, need-have)) — the best candidate for preempt() to free room on
+//  2. otherwise, among the clusters that could ever host the request, the one with the smallest
+//     total shortage (sum across dimensions of max(0, need-have)) — the best candidate for
+//     preempt() to free room on
+//
+// "Could ever host it" is the load-bearing half of step 2, and it is not the same question as
+// step 1's. A cluster that has never reported a dimension the job asks for — an accelerator
+// flavor it does not own — has a shortage equal to the whole request, which ties with a cluster
+// that owns exactly that hardware and is merely full of preemptible burst work. The tie used to
+// go to whichever name sorted first, and when it went to the cluster without the hardware the
+// guaranteed job was handed a preemption target where no victim could ever free what it needs:
+// preemption is scoped to the chosen cluster, found nothing to take there, and the job stayed
+// QUEUED tick after tick while the real hardware sat under evictable burst jobs.
+//
+// Returning "" when no cluster reports the request is the honest answer and needs no special
+// case at the call sites: the absent footprint fails every fit check, so the job is marked
+// capacity_unavailable, which is exactly what "no cluster on this platform has this hardware"
+// means.
 func clusterWithBestFit(avail map[string]domain.Footprint, footprint domain.Footprint) string {
 	names := make([]string, 0, len(avail))
 	for c := range avail {
@@ -981,6 +1007,9 @@ func clusterWithBestFit(avail map[string]domain.Footprint, footprint domain.Foot
 	best := ""
 	var bestShortage int64 = -1
 	for _, c := range names {
+		if !reportsEveryDimension(avail[c], footprint) {
+			continue
+		}
 		var shortage int64
 		for _, v := range shortfall(avail[c], footprint) {
 			shortage += v
@@ -991,6 +1020,22 @@ func clusterWithBestFit(avail map[string]domain.Footprint, footprint domain.Foot
 		}
 	}
 	return best
+}
+
+// reportsEveryDimension reports whether capacity has an entry for every dimension footprint asks
+// for — present, not necessarily sufficient. Zero free of a flavor the cluster owns is a cluster
+// preemption can unblock; no entry at all is a cluster that does not have the hardware, and no
+// eviction there will ever produce it.
+func reportsEveryDimension(capacity domain.Footprint, footprint domain.Footprint) bool {
+	for key, need := range footprint {
+		if need <= 0 {
+			continue
+		}
+		if _, reported := capacity[key]; !reported {
+			return false
+		}
+	}
+	return true
 }
 
 // cloneNodeAvailByCluster deep-copies a cluster -> node -> resource capacity map, so a snapshot

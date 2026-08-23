@@ -309,3 +309,43 @@ func victimIDs(victims []disbalanceVictim) []string {
 	}
 	return ids
 }
+
+// groupedDisbalanceJob is a heterogeneous blocked job: a learner and an actor, one chip each,
+// with its counts on the groups where a grouped submission requires them and the top-level
+// accelerator_count therefore empty.
+func groupedDisbalanceJob(id, cpu string) *domain.Experiment {
+	return &domain.Experiment{
+		ID:               id,
+		ClusterName:      "cluster-a",
+		Status:           domain.StatusQueued,
+		AcceleratorType:  disbalanceFlavor,
+		AcceleratorCount: 2,
+		Job: domain.JobSpec{
+			AcceleratorType: disbalanceFlavor,
+			Topology:        &domain.TopologySpec{SpreadAcrossHosts: new(bool)},
+			Groups: []domain.JobGroup{
+				{Name: "learner", Replicas: 1, CPU: cpu, Memory: "8Gi", AcceleratorCount: 1},
+				{Name: "actor", Replicas: 1, CPU: cpu, Memory: "8Gi", AcceleratorCount: 1},
+			},
+		},
+	}
+}
+
+// The disbalance pass exists for exactly the job a neighbour's disproportionate request has
+// stranded, and a heterogeneous job is the likeliest such victim — its nodes differ, so it is
+// hardest to fit around a hog. Keying its entry condition on the top-level accelerator_count,
+// which a grouped submission rejects and the store never back-fills, excluded every one of them:
+// they were read as CPU-only work with no accelerators to be stranded from, and sat queued while
+// the idle devices they needed stayed idle.
+func TestAGroupedJobBlockedByAHogIsStillSeenByTheDisbalancePass(t *testing.T) {
+	blocked := groupedDisbalanceJob("blocked", "1")
+	hog := disbalanceJob("hog", "14", 1) // 14 cores for 1 of 4 chips = 3.5x its 4-core share
+	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
+
+	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
+		disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+
+	if len(got) != 1 || got[0].experiment.ID != "hog" {
+		t.Fatalf("victims = %v, want the hog stranding the accelerators a grouped job is waiting for", victimIDs(got))
+	}
+}

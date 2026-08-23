@@ -334,14 +334,16 @@ BOGUS_OUT="${TMPDIR_T}/watch-bogus.jsonl"
 start_watch "$BOGUS_OUT" --platform-experiment "$PE_ID" --kinds not.a.real.kind --timeout 5
 await_watch "$WATCH_PID" "the unknown-kind subscription to be refused" 15
 BOGUS_RC=$WATCH_RC
-# Matched on the refused handshake and its status line, not on the server's message: hl-watch
-# prints the response's status line and headers and discards the JSON body, so the "unknown kind
-# X" text the API actually returns never reaches the client's output. Nor does the refusal change
-# its exit code — with no --until, hl-watch retries a permanently-refused subscription until the
-# timeout and then exits 0. Both are recorded here because a scenario asserting on either would be
-# asserting something the CLI does not currently give it.
-if grep -q 'handshake refused' "${BOGUS_OUT}.err" && grep -q '400' "${BOGUS_OUT}.err"; then
-  pass "an unknown kind is refused at the handshake (HTTP 400), not served an empty stream"
+# Three things have to be true at once, and each one alone is satisfiable by a broken client:
+# the exit code is 2 (fatal, not retried to the timeout and then reported as success), the status
+# line says 400, and the platform's own message naming the offending kind reached the caller. A
+# client that printed the refusal but exited 0 would leave an agent branching on success; one that
+# exited 2 with a bare "400" would leave it guessing which of kind, id or agent was wrong.
+if [[ "$BOGUS_RC" == "2" ]] \
+  && grep -q 'refused this subscription' "${BOGUS_OUT}.err" \
+  && grep -q '400' "${BOGUS_OUT}.err" \
+  && grep -q 'not.a.real.kind' "${BOGUS_OUT}.err"; then
+  pass "an unknown kind is refused at the handshake (HTTP 400, exit 2, offending kind named), not served an empty stream"
 else
   fail "unknown kind was not visibly refused (exit $BOGUS_RC); stderr: $(<"${BOGUS_OUT}.err")"
 fi
