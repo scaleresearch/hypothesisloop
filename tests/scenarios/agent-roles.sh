@@ -114,8 +114,15 @@ CUT_STAGES='[{"length_pct":20,"evict_pct":50},{"length_pct":30,"evict_pct":25},{
 # the boundary it is measured against (see stage-ladder-cut.sh for the full reasoning).
 CUT_JOB_HOURS=0.0028   # ~10s reserved, = 0.0028 AccH at H100's rate of 1.0
 CUT_RUN_SECONDS=30     # ~3x that actually consumed
-CUT_ENV_HIGH="{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${CUT_RUN_SECONDS}\", \"HYPOTHESISLOOP_BASELINE\": \"${HIGH_ANCHOR}\"}"
 CUT_ENV_LOW="{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${CUT_RUN_SECONDS}\", \"HYPOTHESISLOOP_BASELINE\": \"${LOW_ANCHOR}\"}"
+# One anchor per competitor, never a shared one. train.py floors its target at baseline+0.15 and
+# clamps the reported value at 1.0, so a high shared anchor drives every competitor to the same
+# saturated number -- and a cut whose whole field ties is legitimately allowed to take fewer than
+# its percentage, or nobody. The assertion below is about WHICH agents the cut draws from, so a
+# tie makes it prove nothing while still passing. These five are spaced 0.10 apart and low enough
+# that none saturates, which makes the ranking total and the cut size exact.
+CUT_ANCHORS=(0.30 0.40 0.50 0.60 0.70)
+cut_env_for() { echo "{\"HYPOTHESISLOOP_DURATION_SECONDS\": \"${CUT_RUN_SECONDS}\", \"HYPOTHESISLOOP_BASELINE\": \"$1\"}"; }
 # Budget arithmetic. Six jobs (5 competitors + 1 baseline), each 1 accelerator for ~27 observed
 # seconds at acch_rate 1.0, consume roughly 6 x 27/3600 = 0.045 AccH. The ladder advances on
 # budget consumed, so the first boundary sits at 20% of the budget: 0.10 puts it at 0.020 AccH,
@@ -134,8 +141,9 @@ declare -a CUT_JOBS
 # The baseline runs on the LOW anchor and every competitor on the HIGH one, so the baseline holds
 # the single worst value in the run — the agent the cut would take first if role were ignored.
 CUT_JOBS+=("$(submit_job_ext "$CUT_PE" "$CUT_BASELINE" "guaranteed" "$CUT_JOB_HOURS" "$JOB_FILE" "$CUT_ENV_LOW" "$ACCELERATOR_TYPE" "1")")
-for a in "${CUT_COMPETITORS[@]}"; do
-  CUT_JOBS+=("$(submit_job_ext "$CUT_PE" "$a" "guaranteed" "$CUT_JOB_HOURS" "$JOB_FILE" "$CUT_ENV_HIGH" "$ACCELERATOR_TYPE" "1")")
+for i in "${!CUT_COMPETITORS[@]}"; do
+  CUT_JOBS+=("$(submit_job_ext "$CUT_PE" "${CUT_COMPETITORS[$i]}" "guaranteed" "$CUT_JOB_HOURS" "$JOB_FILE" \
+    "$(cut_env_for "${CUT_ANCHORS[$i]}")" "$ACCELERATOR_TYPE" "1")")
 done
 echo "  cut-experiment jobs submitted: ${CUT_JOBS[*]}"
 
@@ -329,7 +337,7 @@ CUT_N=$(echo "$ST" | py "import sys,json; print(len(json.load(sys.stdin)['cut_ag
 echo "  after the boundary: cut=[${CUT_LIST}] active=[${ACTIVE_LIST}]"
 
 BASELINE_WORST=$(metric_max "${CUT_JOBS[0]}" val_accuracy)
-echo "  cut-experiment baseline best value: ${BASELINE_WORST:-<none>} (competitors anchored at ${HIGH_ANCHOR})"
+echo "  cut-experiment baseline best value: ${BASELINE_WORST:-<none>} (competitors anchored at ${CUT_ANCHORS[*]})"
 
 [[ " $CUT_LIST " != *" $CUT_BASELINE "* ]] \
   && pass "the baseline was not cut despite holding the worst value in the run" \
@@ -350,9 +358,12 @@ if [[ "$CUT_N" -gt 0 ]]; then
     || fail "$STRAYS cut agent(s) are not competitors — the cut was drawn from the wrong field"
   # floor(50% x 5 competitors) = 2. Counting the baseline as a survivor would make the field 6 and
   # the cut 3, so a cut larger than 2 is exactly the symptom of the roster including non-competitors.
-  [[ "$CUT_N" -le 2 ]] \
-    && pass "cut $CUT_N agent(s), never more than floor(50% x ${#CUT_COMPETITORS[@]} competitors) = 2" \
-    || fail "cut $CUT_N agents — more than the 5-competitor field allows, so the guardrails counted non-competitors"
+  # Exactly 2, not at-most-2. Every competitor has its own anchor so no tie group can straddle
+  # the line, which makes floor(50% x 5) an exact expectation: 3 would mean the baseline was
+  # counted into the field, and 1 would mean the cut was drawn from fewer agents than the five.
+  [[ "$CUT_N" -eq 2 ]] \
+    && pass "cut exactly $CUT_N agent(s) = floor(50% x ${#CUT_COMPETITORS[@]} competitors)" \
+    || fail "cut $CUT_N agents, want exactly 2 — a larger cut means non-competitors were counted into the field, a smaller one means the field was not the five competitors"
 else
   # Legitimate only if a tie group straddled the line. Reported, never silently passed over: with
   # no cut at all the "baseline was not cut" assertion above proved nothing.
