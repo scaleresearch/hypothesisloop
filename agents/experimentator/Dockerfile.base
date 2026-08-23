@@ -63,6 +63,10 @@ COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked
 
 COPY agents/experimentator/src/ src/
+# The role briefs the agent reads for itself: the system prompt names $ROLE_BRIEFS/$AGENT_ROLE.md
+# rather than hardcoding this layout, the same way WORKLOAD_SAMPLES is pointed at above, so moving
+# the tree cannot leave the briefing pointing at a path that is no longer there.
+ENV ROLE_BRIEFS=/agent/src/hypothesisloop_agent/prompts/roles
 # No docs/ copy: the API contract is fetched live from each service's /llms.txt at runtime
 # (see api_client.PlatformClient.fetch_api_guide), not baked into the image.
 RUN mkdir -p /agent/workspace && chown -R agent:agent /agent

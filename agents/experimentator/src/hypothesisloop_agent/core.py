@@ -23,16 +23,12 @@ log = logging.getLogger("llm_agent")
 # agent the moment the service serves it. Every path written here instead would be a second,
 # silently-drifting copy of a contract this file cannot see.
 #
-# One briefing per role, and the role is the only thing that selects it. The differentiation that
-# matters between a competitor, a baseline and a reviewer is what each is asked to do, not what
-# the platform lets it do — every role's jobs are admitted, billed and settled identically.
+# One briefing for every role. The differentiation that matters between a competitor, a baseline
+# and a reviewer is what each is asked to do, not what the platform lets it do — every role's jobs
+# are admitted, billed and settled identically. So the capability content lives here once and the
+# role delta lives in prompts/roles/<role>.md, which the agent reads itself at $ROLE_BRIEFS: three
+# parallel prompts drifted apart within hours of the first capability being added to one of them.
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_PROMPT_FILES = {
-    "competitor": "system_prompt.md",
-    "baseline": "system_prompt_baseline.md",
-    "reviewer": "system_prompt_reviewer.md",
-}
-
 
 
 def install_signal_handler() -> list:
@@ -79,11 +75,11 @@ def prepare() -> RunSetup:
     client = api_client.PlatformClient(cfg.api_url)
 
     # The API contract, fetched live from the running services rather than checked in anywhere:
-    # this is the prompt's only source of endpoints (see the role prompts), so it is
+    # this is the prompt's only source of endpoints (see system_prompt.md), so it is
     # required, not decorative — fetch_api_guide raises rather than briefing an agent without it.
     api_guide = client.fetch_api_guide()
 
-    template = (_PROMPTS_DIR / _PROMPT_FILES[cfg.role]).read_text()
+    template = (_PROMPTS_DIR / "system_prompt.md").read_text()
     system_prompt = template.format(
         api_guide=api_guide, agent_id=cfg.agent_id, role=cfg.role,
         platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,

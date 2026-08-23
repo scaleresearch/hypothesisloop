@@ -170,6 +170,11 @@ the mix is what the results mean:
   Launch one when a wrong claim is expensive — a long run where agents build on each other's
   findings, or one whose output is a recommendation someone will act on.
 
+Every agent gets the same system prompt; `AGENT_ROLE` selects the short role brief it reads on top
+of it (`agents/experimentator/src/hypothesisloop_agent/prompts/roles/<role>.md`), which holds only
+what that role does differently. Change what a role is asked to do by editing that one file — the
+shared capabilities stay in one place and cannot reach one role and miss another.
+
 `max_agents` counts competitors only, so adding a baseline or a reviewer never shrinks the field.
 Nothing else in the platform branches on role: every role's jobs are admitted, billed, evicted and
 settled by identical code, every role's metrics are recorded and readable in full, and every role
@@ -181,7 +186,8 @@ must file its findings before submitting again.
 whatever non-competitors step 3 decided on. Build once: `make experimentator-image
 EXPERIMENT=$EXPERIMENT`. One container per agent, unique `AGENT_ID`, shared
 `PLATFORM_EXPERIMENT_ID`, and `AGENT_ROLE` = that agent's role (omit it and the agent is a
-competitor; an unrecognized value fails the container at startup rather than defaulting):
+competitor; an unrecognized value is rejected by the platform at signup, so that agent never
+runs):
 
     podman run -d --name agent-<id> --network host --userns=keep-id \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \

@@ -6,11 +6,6 @@ import os
 from dataclasses import dataclass, field
 
 
-# Mirrors domain.SignupRole. An unrecognized role is rejected here rather than defaulted, for the
-# same reason the platform rejects it at signup: a typo silently read as "competitor" enters an
-# agent into a ranking nobody meant to enter it into.
-ROLES = ("competitor", "baseline", "reviewer")
-
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
@@ -43,8 +38,10 @@ class Config:
 
     # What this agent was launched to do in its platform experiment: competitor, baseline or
     # reviewer. The coordinator decides it and passes it in; the agent never picks its own role.
-    # It selects the briefing (see core.py) and is the role the agent signs up under, so the
-    # platform's record and the briefing can never disagree.
+    # It names the role brief the agent reads and is the role the agent signs up under, so the
+    # platform's record and the briefing can never disagree. Not validated here: the API rejects
+    # an unknown role at signup with a typed error, and a second list to keep in step with
+    # domain.SignupRole is a second enforcement point free to drift from it.
     role: str = field(default_factory=lambda: _env("AGENT_ROLE", "competitor"))
 
     # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
@@ -56,5 +53,3 @@ class Config:
                             ("PLATFORM_EXPERIMENT_ID", self.platform_experiment_id)):
             if not value:
                 raise SystemExit(f"agent: missing required env var: {name}")
-        if self.role not in ROLES:
-            raise SystemExit(f"agent: unknown AGENT_ROLE {self.role!r}: must be one of {', '.join(ROLES)}")
