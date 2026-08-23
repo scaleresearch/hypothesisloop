@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -263,15 +265,42 @@ func writeEvent(conn *wsConn, e db.Event) error {
 // knownKinds is the closed set a subscription may name. An unrecognised one is rejected rather
 // than ignored: a client filtering on a kind that does not exist would wait forever on a stream
 // that looks healthy, which is exactly the failure /watch exists to end.
-var knownKinds = map[string]bool{
-	db.EventExperimentStatus:  true,
-	db.EventExperimentBlocked: true,
-	db.EventQuotaChanged:      true,
-	db.EventStageBoundary:     true,
-	db.EventHypothesisNew:     true,
-	db.EventFindingNew:        true,
-	db.EventCommentNew:        true,
-	db.EventMetricPoint:       true,
+//
+// It is built from db.EventKinds, which is also what GET /watch/kinds serves, so the set the
+// server accepts and the set it advertises are one set. A second list written by hand here would
+// be wrong the first time a kind was added, and wrong in the worst direction: a caller told a kind
+// exists, then refused when it asks for it.
+var knownKinds = func() map[string]bool {
+	kinds := make(map[string]bool, len(db.EventKinds))
+	for _, k := range db.EventKinds {
+		kinds[k.Kind] = true
+	}
+	return kinds
+}()
+
+// RegisterWatchHuma documents the change stream in the one place an agent already looks. The
+// socket itself cannot be a Huma operation — an upgrade needs the raw connection, and Huma owns
+// the response of everything registered with it — so its vocabulary is served as an ordinary GET
+// beside it. That makes it discoverable from /explore, which an agent loads into its own prompt at
+// startup, instead of folklore an agent could only learn by being told.
+//
+// The body is db.EventKinds itself, the same slice parseWatchQuery validates against, so this
+// cannot describe a stream the server does not serve.
+func RegisterWatchHuma(doc *apidocs.Doc) {
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
+		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
+		Description: "GET /watch is a WebSocket that pushes small typed records — kind, subject, value, detail, cursor — " +
+			"so you can wait on a change instead of polling for it. Every event is a pointer, never a copy: follow one " +
+			"with the ordinary GET when you want detail.\n\n" +
+			"Scope a subscription with `platform_experiment_id` or `experiment_id` (one is required), narrow it with " +
+			"`agent` and a comma-separated `kinds`, and resume it with `since=<cursor of the last event you saw>`. " +
+			"An `agent` filter narrows only the kinds marked agent_owned below; shared kinds still reach you whoever " +
+			"wrote them. An unknown kind is refused rather than ignored.\n\n" +
+			"Hold the socket with `hl-watch`, which exits on a condition or a timeout — a tool call cannot keep one open.",
+	}, func(context.Context, *struct{}) (*struct{ Body []db.EventKindDoc }, error) {
+		return &struct{ Body []db.EventKindDoc }{Body: db.EventKinds}, nil
+	})
 }
 
 func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {

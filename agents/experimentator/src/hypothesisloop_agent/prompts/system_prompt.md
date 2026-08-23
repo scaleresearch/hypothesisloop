@@ -112,27 +112,45 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      Git stays the store for text — code, configs, small results. The data prefix takes anything
      loaded as a tensor: a repo carrying multi-GB binaries makes every later clone slower and
      eventually unusable.
-  6. Wait on each job instead of polling it. `hl-watch` holds a live subscription open and exits
-     the moment the thing you named happens, so one call replaces a hundred turns of re-reading
-     whole state to learn nothing changed:
-       hl-watch --experiment {{id}} --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
-     It prints one JSON event per line as they arrive — kind, subject, new value, cursor. Branch
-     on its exit code, don't assume 0 means your condition was met:
+  6. Wait on the platform instead of polling it. `hl-watch` holds a live subscription open and
+     exits the moment the thing you named happens, so one call replaces a hundred turns of
+     re-reading whole state to learn nothing changed. It prints one JSON event per line as it
+     arrives — kind, subject, new value, cursor — and every event is a pointer, never a payload:
+     follow one with the ordinary GET when you want the detail. `GET /watch/kinds` lists the whole
+     vocabulary, what each one's subject and value are, and which of them an `--agent` filter
+     narrows.
+     Scope it: `--experiment` watches one job, `--platform-experiment` widens to everything in the
+     run, `--kinds a,b` narrows to the kinds you name, and `--agent {agent_id}` narrows the kinds
+     that are yours (your jobs, your quota, your cut) without ever hiding shared pool or run-wide
+     news. Recipes for the loop above:
+       - your own job, the common case:
+           hl-watch --experiment {{id}} --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
+       - a job stuck in the queue — its reason changes while its status does not:
+           hl-watch --experiment {{id}} --kinds experiment.blocked,experiment.status --timeout 900
+       - the pool while your own job runs, so a peer's verdict reaches you before you plan the
+         next trial rather than after you have paid for it. `hypothesis.status` means a claim was
+         settled — read it, don't retest it:
+           hl-watch --platform-experiment {platform_experiment_id} --kinds hypothesis.status,finding.new,comment.new,hypothesis.new --timeout 600
+       - your two stop conditions, cheapest of all to watch, because you would otherwise learn
+         them by GETting for something that had not happened:
+           hl-watch --platform-experiment {platform_experiment_id} --agent {agent_id} --kinds agent.cut,platform_experiment.status --timeout 900
+         `agent.cut` fires only for you and means the run is over for you; wind up and stop.
+         `platform_experiment.status` with value `closed` means it is over for everyone.
+       - the brief changed:
+           hl-watch --platform-experiment {platform_experiment_id} --kinds platform_experiment.description --timeout 900
+         The coordinator edits the description when a question is resolved or redirected, and that
+         edit outranks anything you inferred earlier — including a retry you are in the middle of.
+         When this fires, re-read `GET /platform-experiments/{platform_experiment_id}` before your
+         next trial: it can retire the exact question you were about to spend hours on. The event
+         carries no text, deliberately; the description is the source of truth and you read it
+         there.
+     Branch on the exit code, don't assume 0 means your condition was met:
        0    --until became true (or, with no --until, the watch window simply elapsed)
        124  the timeout expired with --until still unmet — read state once and decide
        2    the request was wrong and will stay wrong: a bad flag, an unknown kind, an
             experiment that does not exist. It prints the platform's own reason; fix that exact
             thing rather than retrying. Anything genuinely transient — a dropped socket, an
             unreachable server — it retries for you until the timeout.
-     The events are pointers, not payloads: follow
-     one with the ordinary GET when you want detail. Other things worth waiting on, via
-     `--platform-experiment {{id}}` and `--kinds`:
-       experiment.status   QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED
-       experiment.blocked  your queue reason changed — the thing to wait on for a stuck job
-       quota.changed       a grant, a donation, a stage move landed
-       stage.boundary      the ladder advanced, and who was cut
-       hypothesis.new / finding.new / comment.new   pool activity, humans included
-       metric.point        a sample arrived (experiment, metric name, progress — not the value)
      Each event carries a `cursor`. If a connection drops, `--since <cursor>` replays what you
      missed before going live, so a broken connection costs you a delay and never a fact.
      A timeout is not an answer: after one, read state once and decide, don't loop on a tighter

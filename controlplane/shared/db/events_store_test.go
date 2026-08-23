@@ -151,6 +151,7 @@ VALUES ($1, $2, $3, $3) RETURNING id`, agentID, peID, "watch test claim "+suffix
 		defer cleanupCancel()
 		for _, q := range []string{
 			`DELETE FROM experiments WHERE platform_experiment_id = $1`,
+			`DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`,
 			`DELETE FROM hypotheses WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiments WHERE id = $1`,
 		} {
@@ -290,5 +291,210 @@ func TestReplayReturnsOnlyWhatHappenedAfterTheGivenCursor(t *testing.T) {
 	}
 	if rest[0].Value != all[len(all)-1].Value {
 		t.Errorf("event after the second-to-last cursor: got = %v, want = %v", rest[0].Value, all[len(all)-1].Value)
+	}
+}
+
+// awaitEvent returns the first event of the given kind and subject, ignoring everything else on
+// the channel — the tests share one database, so a stream carrying another test's rows is the
+// ordinary case and not a failure.
+func awaitEvent(t *testing.T, events <-chan Event, kind, subject string) Event {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == kind && e.Subject == subject {
+				return e
+			}
+		case <-deadline:
+			t.Fatalf("%s for %s: got = %v, want = one event", kind, subject, "no event")
+		}
+	}
+}
+
+func exec(t *testing.T, pool *Pool, query string, args ...any) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := pool.pool.Exec(ctx, query, args...); err != nil {
+		t.Fatalf("exec %q: got = %v, want = nil", query, err)
+	}
+}
+
+// A settled claim is the one pool change nothing announced: hypothesis.new carried the idea, and
+// the verdict on it arrived silently. Without this event an agent spends real device time
+// re-testing what a peer already confirmed or refuted, which is the most expensive mistake its own
+// prompt warns it about.
+func TestSettlingAHypothesisAnnouncesItsNewVerdictToThePool(t *testing.T) {
+	pool := eventsTestDB(t)
+	_, _, hypothesisID := registerHypothesis(t, pool, "verdict", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `UPDATE hypotheses SET status = 'refuted' WHERE id = $1`, hypothesisID)
+
+	if got := awaitEvent(t, events, EventHypothesisStatus, hypothesisID).Value; got != "refuted" {
+		t.Errorf("announced verdict: got = %v, want = %v", got, "refuted")
+	}
+}
+
+// The description is the question every agent in the run is working on, and it is edited mid-run.
+// The event says only that it changed: a description is unbounded, and copying it onto the stream
+// would make the event a second copy of a row anyone can already GET — the one thing this stream
+// is built never to be.
+func TestEditingTheDescriptionAnnouncesThatItChangedAndCarriesNoneOfItsText(t *testing.T) {
+	pool := eventsTestDB(t)
+	_, peID, _ := registerHypothesis(t, pool, "brief", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `UPDATE platform_experiments SET description = $2 WHERE id = $1`, peID,
+		"the question, restated at some length after the coordinator resolved it")
+
+	e := awaitEvent(t, events, EventPlatformExperimentDescription, peID)
+	if e.Value != "" || e.Detail != "" {
+		t.Errorf("description event payload: got = %v/%v, want = empty, a pointer only", e.Value, e.Detail)
+	}
+}
+
+// An agent is told to stop when the run closes, and nothing told it the run had closed: a closed
+// platform experiment looked exactly like a quiet one, so the agent kept spending on a competition
+// that had already finished.
+func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
+	pool := eventsTestDB(t)
+	_, peID, _ := registerHypothesis(t, pool, "closed", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
+
+	if got := awaitEvent(t, events, EventPlatformExperimentStatus, peID).Value; got != "closed" {
+		t.Errorf("announced run status: got = %v, want = %v", got, "closed")
+	}
+}
+
+// One cut row says two different things to two different audiences: the ladder moved, which is
+// news for everyone, and this agent is done, which only that agent can act on. Emitting only the
+// boundary left every agent GETting to find out whether the cut was its own — the poll this event
+// exists to remove.
+func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, _ := registerHypothesis(t, pool, "cut", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
+VALUES ($1, $2, 1)`, peID, agentID)
+
+	if got := awaitEvent(t, events, EventStageBoundary, peID).Detail; got != "cut" {
+		t.Errorf("boundary detail: got = %v, want = %v", got, "cut")
+	}
+	if got := awaitEvent(t, events, EventAgentCut, agentID).PlatformExperimentID; got != peID {
+		t.Errorf("agent.cut platform experiment: got = %v, want = %v", got, peID)
+	}
+}
+
+// The rollback guarantee has to hold for every kind, not only the one it was first written for.
+// These four are emitted by triggers added later, and a trigger added later is exactly where a
+// notify outside the writing transaction would creep in — announcing a verdict, a closure or a cut
+// the database then threw away, with no later event to correct it.
+func TestTheNewKindsEmitNothingWhenTheirTransactionRollsBack(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, hypothesisID := registerHypothesis(t, pool, "newkinds-rollback", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := pool.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: got = %v, want = nil", err)
+	}
+	for _, q := range []string{
+		`UPDATE hypotheses SET status = 'confirmed' WHERE id = '` + hypothesisID + `'`,
+		`UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = '` + peID + `'`,
+		`INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
+VALUES ('` + peID + `', '` + agentID + `', 1)`,
+	} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatalf("exec in transaction: got = %v, want = nil", err)
+		}
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("rollback: got = %v, want = nil", err)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.PlatformExperimentID == peID {
+				t.Errorf("event after a rolled-back write: got = %v, want = %v", e.Kind, "no event")
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// Replay is what makes a dropped connection a delay rather than a gap, and it has to cover the
+// whole vocabulary: a kind that is only ever live is a kind an agent silently misses across every
+// reconnect, which puts it straight back to polling for exactly that thing. These four are derived
+// from the changed row's own timestamps, with no event log to fall back on.
+func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnTimestamps(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, hypothesisID := registerHypothesis(t, pool, "newkinds-replay", true)
+	before := NewCursor(time.Now().UTC().Add(-time.Second))
+
+	exec(t, pool, `UPDATE hypotheses SET status = 'confirmed' WHERE id = $1`, hypothesisID)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
+VALUES ($1, $2, 1)`, peID, agentID)
+
+	events, err := NewEventsStore(pool).Replay(context.Background(), EventFilter{PlatformExperimentID: peID}, before)
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	seen := map[string]string{}
+	for _, e := range events {
+		seen[e.Kind] = e.Subject
+	}
+	for kind, wantSubject := range map[string]string{
+		EventHypothesisStatus:              hypothesisID,
+		EventPlatformExperimentStatus:      peID,
+		EventPlatformExperimentDescription: peID,
+		EventAgentCut:                      agentID,
+	} {
+		if seen[kind] != wantSubject {
+			t.Errorf("replayed subject for %v: got = %v, want = %v", kind, seen[kind], wantSubject)
+		}
+	}
+}
+
+// The cursor is the whole contract of a reconnect: hand back the last one seen and be told what
+// happened after it, nothing before. A run-wide kind derived from a column rather than from a row
+// per event is where an off-by-one shows up as an agent being told the run closed every single
+// time it reconnects.
+func TestReplayDoesNotReturnARunWideChangeThatHappenedBeforeTheGivenCursor(t *testing.T) {
+	pool := eventsTestDB(t)
+	_, peID, _ := registerHypothesis(t, pool, "newkinds-cursor", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
+
+	store := NewEventsStore(pool)
+	all, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
+		Kinds: map[string]bool{EventPlatformExperimentStatus: true}}, NewCursor(time.Now().UTC().Add(-time.Second)))
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("replayed run status changes: got = %v, want = %v", len(all), 1)
+	}
+	rest, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
+		Kinds: map[string]bool{EventPlatformExperimentStatus: true}}, all[0].Cursor)
+	if err != nil {
+		t.Fatalf("replay from the last cursor: got = %v, want = nil", err)
+	}
+	if len(rest) != 0 {
+		t.Errorf("events after the last cursor: got = %v, want = %v", len(rest), 0)
 	}
 }

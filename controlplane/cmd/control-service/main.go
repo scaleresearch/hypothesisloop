@@ -190,6 +190,9 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)
+	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
+	// an agent reading /explore learns what the stream carries rather than having to be told.
+	registry.RegisterWatchHuma(doc)
 	// /explore is what a research agent fetches into its own system prompt at startup — it must
 	// contain nothing an agent isn't permitted to call, so it's the agent-only digest.
 	// /explore/coordinator is the same registrations' operator/dashboard-admin-only view.

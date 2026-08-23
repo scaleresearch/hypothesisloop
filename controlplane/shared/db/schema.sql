@@ -475,6 +475,18 @@ CREATE TABLE IF NOT EXISTS platform_experiment_stage_advances (
 -- The cursor is the changed row's own timestamp in microseconds. Replay (see db.EventsStore)
 -- re-derives events from those same timestamp columns, so a live event and its replayed twin
 -- carry the identical cursor and a reconnecting client can pick up exactly where it stopped.
+--
+-- The columns below exist for that second half and live here, beside the triggers that maintain
+-- them, because that is the only thing they are for. Each records WHEN one field of its own row
+-- last moved — a row timestamp, not a second copy of the field: the value itself is still read
+-- from the one column that holds it, and these say nothing a reader could disagree with it about.
+-- Without them a rewritten-in-place row carries no evidence it ever changed, and a reconnecting
+-- watcher could not tell a verdict settled an hour ago from one settled while it was away. They
+-- are NULL until the field first moves — a row still holding what it was created with has no such
+-- moment — and no Go writer sets them: one clock per column, and no write path can forget it.
+ALTER TABLE hypotheses            ADD COLUMN IF NOT EXISTS status_changed_at      TIMESTAMPTZ;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS status_changed_at      TIMESTAMPTZ;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_at TIMESTAMPTZ;
 
 CREATE OR REPLACE FUNCTION hypothesisloop_notify_event(
     kind TEXT, subject TEXT, new_value TEXT, detail TEXT,
@@ -556,6 +568,78 @@ DROP TRIGGER IF EXISTS hypotheses_notify ON hypotheses;
 CREATE TRIGGER hypotheses_notify AFTER INSERT ON hypotheses
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_notify();
 
+CREATE OR REPLACE FUNCTION hypothesisloop_hypotheses_touch() RETURNS trigger AS $$
+BEGIN
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+        NEW.status_changed_at := now();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hypotheses_touch ON hypotheses;
+CREATE TRIGGER hypotheses_touch BEFORE UPDATE ON hypotheses
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_touch();
+
+-- A claim being settled is the one pool signal an agent could not be told about: hypothesis.new
+-- announces the idea, and nothing announced the verdict. Without it an agent spends a run
+-- re-testing what a peer already confirmed or refuted — the most expensive mistake available in
+-- this platform. Pool-scoped, like every other event about the shared notebook: the verdict
+-- concerns everyone competing, not only whoever wrote it.
+CREATE OR REPLACE FUNCTION hypothesisloop_hypotheses_status_notify() RETURNS trigger AS $$
+BEGIN
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+        PERFORM hypothesisloop_notify_event('hypothesis.status', NEW.id, NEW.status::text, '',
+            NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''), NEW.status_changed_at);
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hypotheses_status_notify ON hypotheses;
+CREATE TRIGGER hypotheses_status_notify AFTER UPDATE ON hypotheses
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_status_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_platform_experiments_touch() RETURNS trigger AS $$
+BEGIN
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+        NEW.status_changed_at := now();
+    END IF;
+    IF NEW.description IS DISTINCT FROM OLD.description THEN
+        NEW.description_changed_at := now();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS platform_experiments_touch ON platform_experiments;
+CREATE TRIGGER platform_experiments_touch BEFORE UPDATE ON platform_experiments
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_platform_experiments_touch();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_platform_experiments_notify() RETURNS trigger AS $$
+BEGIN
+    -- The run opening, closing or moving to running is a stop condition for every agent in it,
+    -- and nothing told them: a closed platform experiment looked exactly like a quiet one.
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text, '',
+            NEW.id, '', NEW.status_changed_at);
+    END IF;
+    -- The brief is the question every agent is working on, and it is edited mid-run when the
+    -- coordinator resolves or redirects something. The new text is deliberately NOT carried: a
+    -- description is unbounded, and an event is a pointer — a subscriber re-reads it with the
+    -- ordinary GET, exactly as it would have anyway.
+    IF NEW.description IS DISTINCT FROM OLD.description THEN
+        PERFORM hypothesisloop_notify_event('platform_experiment.description', NEW.id, '', '',
+            NEW.id, '', NEW.description_changed_at);
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS platform_experiments_notify ON platform_experiments;
+CREATE TRIGGER platform_experiments_notify AFTER UPDATE ON platform_experiments
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_platform_experiments_notify();
+
 -- Findings and comments both name the hypothesis they hang off as their subject, not their own
 -- id: the hypothesis is what a reader would GET, and it is what the pool is organised around.
 CREATE OR REPLACE FUNCTION hypothesisloop_findings_notify() RETURNS trigger AS $$
@@ -604,6 +688,12 @@ CREATE OR REPLACE FUNCTION hypothesisloop_cuts_notify() RETURNS trigger AS $$
 BEGIN
     PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
         NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id, NEW.cut_at);
+    -- The same row, said the other way round. stage.boundary is about the ladder and reaches
+    -- everyone; agent.cut is about one agent and is the only event that tells it, without a GET,
+    -- that the run is over for IT. It is agent-owned, so an agent's own subscription receives its
+    -- own cut and is not woken by every rival's.
+    PERFORM hypothesisloop_notify_event('agent.cut', NEW.agent_id,
+        NEW.stage_index::text, '', NEW.platform_experiment_id, NEW.agent_id, NEW.cut_at);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

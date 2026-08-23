@@ -439,3 +439,105 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 		t.Errorf("hl-watch exit code after retrying an unreachable server: got = %v, want = %v (stderr: %s)", code, 124, stderr)
 	}
 }
+
+// agent.cut is the one new kind that is agent-owned, and that is the whole reason it exists: an
+// agent watching for its own stop condition must not be woken by every rival's elimination, and
+// must never conclude from one that it was cut itself. Getting this wrong turns a stop condition
+// into a false one.
+func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+	})
+
+	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-a", Value: "1",
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+
+	if got := client.next(t).Subject; got != "agent-a" {
+		t.Errorf("first delivered cut: got = %v, want = %v", got, "agent-a")
+	}
+}
+
+// The other three new kinds are shared, and an agent-scoped subscription is the case that would
+// hide them: a verdict, a closure and a brief change concern everyone in the run whoever wrote the
+// row. An agent narrowing to its own jobs and thereby going blind to the run closing would be back
+// to polling for the very thing it stopped polling for.
+func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+	})
+
+	source.live <- db.Event{Kind: db.EventHypothesisStatus, Subject: "hyp-1", Value: "refuted",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+	source.live <- db.Event{Kind: db.EventPlatformExperimentDescription, Subject: "pe-1",
+		PlatformExperimentID: "pe-1", Cursor: 200}
+	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
+		PlatformExperimentID: "pe-1", Cursor: 300}
+
+	for _, want := range []string{db.EventHypothesisStatus, db.EventPlatformExperimentDescription, db.EventPlatformExperimentStatus} {
+		if got := client.next(t).Kind; got != want {
+			t.Errorf("delivered kind: got = %v, want = %v", got, want)
+		}
+	}
+}
+
+// A job subscribes by its own experiment id and gets its own job's events — that scope is what
+// makes it safe for a workload to watch at all. Widening it silently to run-wide news would hand a
+// job information it has no business acting on, and the platform's rule is that a runtime acts on
+// desired state and on nothing else.
+func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{"experiment_id": {"exp-1"}})
+
+	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
+		PlatformExperimentID: "pe-1", Cursor: 100}
+	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-a", Value: "1",
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
+
+	if got := client.next(t).Kind; got != db.EventExperimentStatus {
+		t.Errorf("first delivered kind: got = %v, want = %v", got, db.EventExperimentStatus)
+	}
+}
+
+// The vocabulary is published so a subscriber can discover it instead of being told it, and that
+// is only worth anything if what is published is what is accepted. A kind advertised but refused
+// is the worse of the two failures: the caller does exactly what the documentation said and is
+// turned away with a 400 it cannot act on.
+func TestEveryAdvertisedKindIsAKindASubscriptionMayName(t *testing.T) {
+	for _, kind := range db.EventKinds {
+		request := httptest.NewRequest(http.MethodGet,
+			"/watch?platform_experiment_id=pe-1&kinds="+url.QueryEscape(kind.Kind), nil)
+		filter, _, err := parseWatchQuery(request)
+		if err != nil {
+			t.Errorf("subscribing to the advertised kind %v: got = %v, want = nil", kind.Kind, err)
+			continue
+		}
+		if !filter.Kinds[kind.Kind] {
+			t.Errorf("filter for the advertised kind %v: got = %v, want = it admitted", kind.Kind, filter.Kinds)
+		}
+	}
+}
+
+// The other direction of the same rule. A kind the server accepts but never advertises is folklore
+// — an agent can only use it if someone tells it, which is exactly the state publishing the
+// vocabulary was meant to end.
+func TestEveryKindASubscriptionMayNameIsAlsoAdvertised(t *testing.T) {
+	advertised := map[string]bool{}
+	for _, kind := range db.EventKinds {
+		advertised[kind.Kind] = true
+	}
+	for kind := range knownKinds {
+		if !advertised[kind] {
+			t.Errorf("accepted kind %v: got = %v, want = listed by GET /watch/kinds", kind, "unlisted")
+		}
+	}
+}

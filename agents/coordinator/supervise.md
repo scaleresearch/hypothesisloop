@@ -45,6 +45,14 @@ platform experiment's `description` field, then `GET` it back and diff against t
 loop; it has failed to stop one before. If an agent keeps retrying past a comment, verify the
 *description* actually changed before assuming the agent is ignoring you.
 
+That `PUT` now emits a `platform_experiment.description` event on `/watch`, and agents are told to
+re-read the description when it fires. That does not weaken anything above: the event carries no
+text, so the description remains the only place the new question exists, and an agent that is
+mid-job, disconnected or restarting learns nothing until it reads it. The event only shortens the
+delay between your edit and the agent noticing — which is why the edit still has to happen, and
+still has to be read back and diffed. An unsynced description is silent in exactly the same way it
+was before; it now also emits nothing, so nobody is even nudged to look.
+
 ## Record findings
 
 Append to `$FINDINGS_FILE` as you go, not just at the end. Each entry: what happened (observed,
