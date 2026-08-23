@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode"
 
@@ -190,8 +191,7 @@ func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformE
 	return out, nil
 }
 
-// GetTimeseries queries GreptimeDB (via its Prometheus-compatible PromQL API) for the
-// latest metric values for an experiment.
+// GetTimeseries returns the metric samples an experiment recorded, as recorded.
 func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*domain.MetricDataPoint, error) {
 	// The window is the experiment's own lifetime, read from Postgres — never a constant. A fixed
 	// lookback silently truncates: this endpoint reads *finished* experiments' results, which
@@ -208,30 +208,31 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 	end := time.Now().UTC()
 	start := exp.CreatedAt
 
-	valueSeries, err := s.queryRange(ctx, fmt.Sprintf(`%s{job_id=%q}`, metricsdb.ExperimentMetricValue, experimentID), start, end)
+	// The samples as recorded, never a grid resampling of them. Every node of a distributed job
+	// reports under one label set, so its ranks' samples land microseconds apart in one series;
+	// a range query keeps only the last one in each step and repeats it, which turned three
+	// ranks reporting three different values into one value reported all run long.
+	recorded, err := metricsdb.ExperimentMetricSamples(ctx, s.metricsDBURL, experimentID, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}
-	fractionSeries, err := s.queryRange(ctx, fmt.Sprintf(`%s{job_id=%q}`, metricsdb.ExperimentMetricFraction, experimentID), start, end)
-	if err != nil {
-		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
-	}
+	valueSeries := seriesByLabels(recorded.Values)
 	// Index fraction samples by (agent_id, metric_name, timestamp) rather than by timestamp
 	// alone: RecordMetric writes both gauges for the same labels at the same instant, so this
 	// recovers the per-attempt, per-metric fraction alongside each value sample without
 	// collapsing distinct agent_id/metric_name label-sets (distinct retry attempts, or a job
 	// reporting more than one metric_name in the same second) onto one shared timestamp map.
+	// Keyed to the millisecond, which is the resolution the pair was written at: at second
+	// resolution two ranks reporting different fractions inside one second overwrite each other.
 	fractionByAgentTS := make(map[string]map[int64]float64)
-	for _, r := range fractionSeries {
-		key := r.Labels["agent_id"] + "\x00" + r.Labels["metric_name"]
+	for _, sample := range recorded.Fractions {
+		key := sample.Labels["agent_id"] + "\x00" + sample.Labels["metric_name"]
 		m, ok := fractionByAgentTS[key]
 		if !ok {
 			m = make(map[int64]float64)
 			fractionByAgentTS[key] = m
 		}
-		for _, p := range r.Points {
-			m[p.Time.Unix()] = p.Value
-		}
+		m[sample.At.UnixMilli()] = sample.Value
 	}
 
 	out := latestAttemptOnly(experimentID, valueSeries, fractionByAgentTS)
@@ -273,7 +274,7 @@ func latestAttemptOnly(experimentID string, valueResult []metricsdb.RangeSeries,
 
 		sr := &series{agentID: agentID, metricName: metricName}
 		for _, p := range r.Points {
-			ts := p.Time.Unix()
+			ts := p.Time.UnixMilli()
 			if len(sr.points) == 0 {
 				sr.firstTS = ts
 			}
@@ -324,18 +325,37 @@ func latestAttemptOnly(experimentID string, valueResult []metricsdb.RangeSeries,
 	return out
 }
 
-// queryRange runs a PromQL range query against GreptimeDB on the metric-store's own client, which
-// checks the transport status and the Prometheus envelope's status/resultType. A hand-rolled
-// client here used to decode a backend error into an empty successful matrix, so "the metrics
-// store rejected this query" reached the API as "this run produced no measurements".
-// queryRange reads one series over [start, end) at a step sized to the window, the same cap
-// GetPlatformExperimentTimeseries uses. A fixed 5s step is fine for a short run and absurd for a
-// long one: a fortnight of samples is a quarter of a million points per series, on an endpoint a
-// dashboard calls.
-func (s *Service) queryRange(ctx context.Context, query string, start, end time.Time) ([]metricsdb.RangeSeries, error) {
-	step := end.Sub(start) / 500 // ~500 points/series regardless of window size
-	if step < 5*time.Second {
-		step = 5 * time.Second
+// seriesByLabels folds recorded samples back into one series per distinct label combination —
+// the same shape a range query hands back, and the shape latestAttemptOnly reasons about, but
+// built from the samples themselves so nothing is dropped or repeated on the way. Series appear
+// in the order their first sample did, and each keeps its samples in the order they were taken.
+func seriesByLabels(samples []metricsdb.VectorSample) []metricsdb.RangeSeries {
+	byKey := make(map[string]*metricsdb.RangeSeries, len(samples))
+	var order []string
+	for _, sample := range samples {
+		names := make([]string, 0, len(sample.Labels))
+		for name := range sample.Labels {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		var key strings.Builder
+		for _, name := range names {
+			key.WriteString(name)
+			key.WriteByte('=')
+			key.WriteString(sample.Labels[name])
+			key.WriteByte('\x00')
+		}
+		series, ok := byKey[key.String()]
+		if !ok {
+			series = &metricsdb.RangeSeries{Labels: sample.Labels}
+			byKey[key.String()] = series
+			order = append(order, key.String())
+		}
+		series.Points = append(series.Points, metricsdb.RangePoint{Time: sample.At, Value: sample.Value})
 	}
-	return metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, step)
+	out := make([]metricsdb.RangeSeries, 0, len(order))
+	for _, key := range order {
+		out = append(out, *byKey[key])
+	}
+	return out
 }

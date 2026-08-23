@@ -53,20 +53,33 @@ ORDER BY id`
 	return collectExperiments(rows)
 }
 
-// ListRecentlyUndesiredWorkloads returns every experiment on clusterName that has left the
-// desired set within the last `within` — the rows a termination decision was just written to.
+// recentlyUndesiredWorkloadsQuery is a package-level constant so its shape can be asserted on
+// without a database: the one thing it must never do is narrow by a column the very write it is
+// looking for has just cleared.
+const recentlyUndesiredWorkloadsQuery = `SELECT` + experimentColumns + `FROM experiments
+WHERE status <> ALL($1) AND updated_at > now() - $2::interval
+ORDER BY id`
+
+// ListRecentlyUndesiredWorkloads returns every experiment that has left the desired set within
+// the last `within` — the rows a termination decision was just written to.
 // It exists so the reconcile feed can say which of the workloads about to be deleted earned a
 // checkpoint window, without any new table, column or lifecycle state to hold that fact: the
 // termination is already recorded on the experiment (its status and its eviction reason), and
 // `within` is what makes the answer expire on its own instead of needing to be cleared.
 //
-// Bounded rather than unbounded deliberately. Every experiment this cluster has ever finished is
-// "not desired"; only the ones that stopped being desired moments ago are still being torn down.
-func (s *ClusterQueueStore) ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error) {
-	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE cluster_name = $1 AND status <> ALL($2) AND updated_at > now() - $3::interval
-ORDER BY id`
-	rows, err := s.pool.pool.Query(ctx, q, clusterName, desiredStatuses, within.String())
+// Bounded rather than unbounded deliberately. Every experiment ever finished is "not desired";
+// only the ones that stopped being desired moments ago are still being torn down.
+//
+// Deliberately NOT narrowed to one cluster, and this is the whole point of the query. A
+// termination writes the row's new status and clears its cluster_name in the same statement —
+// the job holds no capacity any more, so the next admission tick may place it anywhere — which
+// means that by the time a termination is recorded the row no longer names the cluster whose
+// pods are still running it. Asking "which of MY workloads just became undesired" of a row that
+// has forgotten its cluster returns nothing, every time. The reconcile feed therefore asks the
+// question the data can answer, and scoping happens where the facts are: the agent looks each
+// id up among the workloads it actually holds and ignores every one it does not.
+func (s *ClusterQueueStore) ListRecentlyUndesiredWorkloads(ctx context.Context, within time.Duration) ([]*domain.Experiment, error) {
+	rows, err := s.pool.pool.Query(ctx, recentlyUndesiredWorkloadsQuery, desiredStatuses, within.String())
 	if err != nil {
 		return nil, fmt.Errorf("db.ListRecentlyUndesiredWorkloads: %w", err)
 	}

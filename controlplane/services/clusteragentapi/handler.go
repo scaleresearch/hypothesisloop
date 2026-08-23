@@ -36,9 +36,11 @@ import (
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
 	// ListRecentlyUndesiredWorkloads returns the experiments that have just stopped being
-	// desired here — the ones the agent is about to delete — so the reconcile response can name
-	// which of them earned a checkpoint window.
-	ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error)
+	// desired — the ones an agent is about to delete — so the reconcile response can name which
+	// of them earned a checkpoint window. Not per-cluster: a termination clears the row's
+	// cluster_name in the same statement that records it, so the cluster is no longer on the row
+	// to filter by (see db.ListRecentlyUndesiredWorkloads).
+	ListRecentlyUndesiredWorkloads(ctx context.Context, within time.Duration) ([]*domain.Experiment, error)
 	// ClusterNameByID resolves many experiments' assigned clusters at once — a status push is a
 	// whole-cluster snapshot, so this is asked once per push rather than once per job.
 	ClusterNameByID(ctx context.Context, ids []string) (map[string]string, error)
@@ -260,7 +262,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		//
 		// Derived from the termination that is already recorded on the experiment, and expiring
 		// with maxCheckpointGrace, so there is no terminating state to write, advance or clear.
-		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, clusterName, h.maxCheckpointGrace)
+		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, h.maxCheckpointGrace)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

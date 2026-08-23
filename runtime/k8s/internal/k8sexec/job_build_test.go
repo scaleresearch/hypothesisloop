@@ -1,6 +1,7 @@
 package k8sexec
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -846,5 +847,81 @@ func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 			AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 			CheckpointGraceSeconds: checkpointGrace,
 		},
+	}
+}
+
+// A grouped job's global rank is the group's offset plus the pod's own index within the group,
+// and the two terms have to combine into 0..N-1 across the WHOLE job. If the offset were not
+// per-group — or if the index were a fixed value rather than a real per-pod fieldRef — every
+// group after the first would repeat ranks the first group already used, which is a hang or a
+// corrupt all-reduce and never an error anyone sees. Enumerating the pairs the way a pod would
+// is the only way to assert the sum rather than the two halves separately.
+func TestEveryPodOfATwoGroupJobComputesADistinctGlobalRank(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "grouped-rank-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", MaxRetries: intPtr(0),
+			Groups: []domain.JobGroup{
+				{Name: "writer", Replicas: 1, CPU: "250m", Memory: "128Mi", Storage: "512Mi", AcceleratorCount: 1},
+				{Name: "helper", Replicas: 2, CPU: "100m", Memory: "64Mi", Storage: "256Mi"},
+			},
+		},
+	}
+
+	jobs, err := c.BuildJobs(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]string{}
+	for _, job := range jobs {
+		var offset, replicas int
+		var indexFieldPath string
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			switch env.Name {
+			case "HYPOTHESISLOOP_RANK_OFFSET":
+				if _, err := fmt.Sscanf(env.Value, "%d", &offset); err != nil {
+					t.Fatalf("%s: unreadable rank offset %q", job.Name, env.Value)
+				}
+			case "HYPOTHESISLOOP_GROUP_REPLICAS":
+				if _, err := fmt.Sscanf(env.Value, "%d", &replicas); err != nil {
+					t.Fatalf("%s: unreadable group replicas %q", job.Name, env.Value)
+				}
+			case "HYPOTHESISLOOP_GROUP_RANK":
+				if env.ValueFrom == nil || env.ValueFrom.FieldRef == nil {
+					t.Fatalf("%s: group rank is a fixed value, so every pod of the group would read the same one", job.Name)
+				}
+				indexFieldPath = env.ValueFrom.FieldRef.FieldPath
+			}
+		}
+		if indexFieldPath == "" {
+			t.Fatalf("%s: no group rank published, so a pod has no index term to add", job.Name)
+		}
+		// The per-pod half must come from the completion index Kubernetes stamps on the pod;
+		// anything else is the same number for every replica.
+		if indexFieldPath != "metadata.annotations['batch.kubernetes.io/job-completion-index']" {
+			t.Fatalf("%s: group rank reads %q, not the pod's completion index", job.Name, indexFieldPath)
+		}
+		if replicas == 0 {
+			t.Fatalf("%s: group publishes 0 replicas", job.Name)
+		}
+		for index := 0; index < replicas; index++ {
+			rank := offset + index
+			if other, duplicate := seen[rank]; duplicate {
+				t.Fatalf("%s index %d and %s both compute global rank %d", job.Name, index, other, rank)
+			}
+			seen[rank] = job.Name
+		}
+	}
+	for rank := 0; rank < 3; rank++ {
+		if _, ok := seen[rank]; !ok {
+			t.Fatalf("no pod computes global rank %d; the job's ranks are %v", rank, seen)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("3 replicas compute %d ranks: %v", len(seen), seen)
 	}
 }
