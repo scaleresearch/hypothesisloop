@@ -218,8 +218,13 @@ func acceleratorNodeAffinity(placement AcceleratorPlacement) *corev1.NodeAffinit
 
 // resolvePlacementFor resolves exp's accelerator placement, or the zero placement for a job that
 // requests no accelerator.
+//
+// "Requests no accelerator" is the job's TOTAL, the same figure BuildJobs guards on. A grouped
+// job states its accelerators per group and leaves the top-level count at zero, so keying this on
+// the top-level count skipped resolution for every grouped job and then failed it at the guard —
+// the job was admitted, reserved capacity, and never compiled into a single Job object.
 func (c *JobWorkloadClient) resolvePlacementFor(ctx context.Context, exp *domain.Experiment) (AcceleratorPlacement, error) {
-	if exp.Job.AcceleratorCount <= 0 {
+	if exp.Job.TotalAccelerators() <= 0 {
 		return AcceleratorPlacement{}, nil
 	}
 	return c.ResolveAcceleratorPlacement(ctx, exp.AcceleratorType)

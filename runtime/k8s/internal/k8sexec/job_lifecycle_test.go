@@ -1,11 +1,14 @@
 package k8sexec
 
 import (
+	"context"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func TestExistingJobMatchesDesiredRequiresHashAndIdentity(t *testing.T) {
@@ -70,5 +73,55 @@ func TestAPodWithNoReadableShutdownGraceIsAnErrorRatherThanAGuess(t *testing.T) 
 	}
 	if _, err := podDeleteGrace(pod, false); err == nil {
 		t.Fatal("a pod with no recorded shutdown grace was silently assigned one")
+	}
+}
+
+// A grouped job states its accelerators per group and leaves the top-level accelerator_count at
+// zero -- the spec REJECTS a top-level count alongside groups. Keying "does this job want an
+// accelerator?" on that top-level number therefore skipped placement resolution for every
+// grouped job, handed BuildJobs the empty placement, and failed it at the guard that reads the
+// group totals: the job was admitted, held its reservation, and never compiled into a single
+// Job object. Resolution has to be attempted, which here surfaces as the type's own validation
+// error rather than a silent empty placement.
+func TestAGroupedJobResolvesPlacementFromItsGroupsNotItsEmptyTopLevelCount(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		ID:              "grouped-placement",
+		AcceleratorType: "unqualified-type",
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", MaxRetries: intPtr(0),
+			AcceleratorType: "unqualified-type",
+			Groups: []domain.JobGroup{
+				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi", AcceleratorCount: 1},
+				{Name: "actor", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+			},
+		},
+	}
+	if _, err := c.resolvePlacementFor(context.Background(), exp); err == nil {
+		t.Fatal("a grouped job asking for an accelerator was given the empty placement without any resolution attempt — it can never be compiled into a Job")
+	}
+}
+
+// The other half of the same rule: a job that genuinely asks for no accelerator must still take
+// the zero placement without touching the cluster, so an ordinary CPU job neither reads DRA
+// inventory nor fails on an accelerator type it never named.
+func TestAJobWithNoAcceleratorsInAnyGroupTakesTheZeroPlacement(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		ID:              "cpu-only",
+		AcceleratorType: "unqualified-type",
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", MaxRetries: intPtr(0),
+			Groups: []domain.JobGroup{
+				{Name: "worker", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+			},
+		},
+	}
+	placement, err := c.resolvePlacementFor(context.Background(), exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if placement.ResourceName != "" || placement.DeviceClassName != "" {
+		t.Fatalf("placement = %+v, want the zero placement: a job requesting no accelerator must not be placed on one", placement)
 	}
 }

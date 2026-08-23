@@ -359,7 +359,12 @@ func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) (
 // function of live device probes plus current container labels, recomputed every call: no
 // reservation ledger (different-backend.md §4.4).
 func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experiment) (Placement, error) {
-	if exp.Job.AcceleratorCount <= 0 {
+	// The job's TOTAL, not its top-level count: a grouped job states its accelerators per group
+	// and leaves the top-level count at zero, so keying on that resolved no devices and then
+	// failed the job in BuildContainerSpec for a placement nobody had been asked to make. This
+	// runtime only ever runs a one-node job, so the total is that node's own count.
+	count := exp.Job.TotalAccelerators()
+	if count <= 0 {
 		return Placement{}, nil
 	}
 	devices, err := probeAccelerators(ctx)
@@ -371,7 +376,7 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 	// which changes its spec hash, makes reconcile drift-delete it, and terminalizes real work.
 	if current, err := e.currentDevicesFor(ctx, exp.ID); err != nil {
 		return Placement{}, err
-	} else if int64(len(current)) == int64(exp.Job.AcceleratorCount) {
+	} else if int64(len(current)) == int64(count) {
 		return Placement{DevicePaths: current}, nil
 	}
 
@@ -394,15 +399,15 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 				continue // already claimed by a running container
 			}
 			freeDevices = append(freeDevices, d.DevicePath)
-			if int64(len(freeDevices)) == int64(exp.Job.AcceleratorCount) {
+			if int64(len(freeDevices)) == int64(count) {
 				break
 			}
 		}
-		if int64(len(freeDevices)) == int64(exp.Job.AcceleratorCount) {
+		if int64(len(freeDevices)) == int64(count) {
 			return Placement{DevicePaths: freeDevices}, nil
 		}
 	}
-	return Placement{}, fmt.Errorf("podexec: no free devices match accelerator type %q (or acceptable alternatives) for %d requested", exp.AcceleratorType, exp.Job.AcceleratorCount)
+	return Placement{}, fmt.Errorf("podexec: no free devices match accelerator type %q (or acceptable alternatives) for %d requested", exp.AcceleratorType, count)
 }
 
 func hasLabel(labels []string, want string) bool {
