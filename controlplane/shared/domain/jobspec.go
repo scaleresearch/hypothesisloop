@@ -28,7 +28,14 @@ type JobSpec struct {
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
 
 	// AcceleratorCount is accelerators requested per node (not the job total — see TotalAccelerators).
-	AcceleratorCount int `json:"accelerator_count" yaml:"accelerator_count"`
+	//
+	// required:"false" without omitempty: the schema must accept its absence, because a grouped
+	// job REJECTS this field (each group carries its own count) and so cannot send it — but the
+	// zero value must still serialize, since a CPU-only job asking for 0 accelerators is saying
+	// something, not omitting it. Whether it is required is a rule about the whole spec, which
+	// ValidateGroups and ValidateExperiment own; huma's per-field default of "required" cannot
+	// express "required unless groups is set" and, left alone, refused every grouped submission.
+	AcceleratorCount int `json:"accelerator_count" required:"false" yaml:"accelerator_count"`
 
 	// AcceleratorType names the hardware this job wants, as the driver itself publishes it —
 	// e.g. "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3" or "tenstorrent.com/chipArch=blackhole".

@@ -119,3 +119,40 @@ func digSchema(t *testing.T, post map[string]any) map[string]any {
 	}
 	return schema
 }
+
+// The same trap one level down, in the job spec. A grouped job REJECTS the top-level per-node
+// resource fields -- each group carries its own -- so it cannot send accelerator_count, and huma
+// requiring it refused every grouped submission with a validation error naming a field the
+// submitter was right to omit.
+//
+// "Required unless groups is set" is a rule about the whole spec, which ValidateGroups and
+// ValidateExperiment own. No per-field "required" can express it, and asserting it here is what
+// stops the next field added to JobSpec from quietly re-imposing the ungrouped shape on everyone.
+func TestGroupedJobSpecFieldsAreNotSchemaRequired(t *testing.T) {
+	spec := openAPISpec(t)
+
+	components, _ := spec["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	jobSpec, ok := schemas["JobSpec"].(map[string]any)
+	if !ok {
+		t.Fatal("openapi.json has no JobSpec schema")
+	}
+	raw, _ := jobSpec["required"].([]any)
+
+	// max_retries stays required: it is required of EVERY job, grouped or not, and the design
+	// says so deliberately -- an unset retry budget is not a default anyone should inherit.
+	forbidden := map[string]string{
+		"accelerator_count": "a grouped job rejects the top-level per-node fields, so it omits this",
+		"cpu":               "same -- each group carries its own",
+		"memory":            "same -- each group carries its own",
+		"storage":           "same -- each group carries its own",
+		"num_nodes":         "a grouped job rejects num_nodes outright",
+		"groups":            "an ungrouped job -- every existing submission -- omits it",
+	}
+	for _, entry := range raw {
+		name, _ := entry.(string)
+		if why, bad := forbidden[name]; bad {
+			t.Errorf("JobSpec requires %q — %s", name, why)
+		}
+	}
+}
