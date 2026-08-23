@@ -11,5 +11,9 @@ COPY train_distributed.py .
 # with its own SigV4 signer because this image has no SDK and no aws/mc binary — and adding one
 # would mean the chain scenario proved a client library rather than the platform's scoping.
 COPY data_stage.py .
+# The termination-policy fixture (tests/scenarios/preemption-requeue.sh). It imports data_stage's
+# signer rather than carrying a second one — one prefix, one credential shape, one place a signing
+# mistake can live.
+COPY checkpoint_train.py .
 
 ENTRYPOINT ["python", "train.py"]

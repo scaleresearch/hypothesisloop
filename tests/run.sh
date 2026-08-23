@@ -176,6 +176,14 @@ scenario_timeout() {
     # cost or the teardown of the one gang it submitted, so none of them can share a window with
     # another — and dropping one would drop the guarantee it covers.
     distributed-jobs) echo 900 ;;
+    # Five preemptions, each of which is serial by construction: a burst job has to be admitted
+    # and running before a guaranteed job can take its capacity, and the requeued job cannot come
+    # back until that preemptor finishes -- there is no width for which the two fit side by side,
+    # or the preemption would never have happened. Parts 3-5 add three more such cycles (a gang,
+    # a grouped job, and one that checkpoints and resumes), and the last of them deliberately runs
+    # deep into its step series before being preempted, because resuming from step 1 would not
+    # separate "resumed" from "started over" in either wall clock or cost.
+    preemption-requeue) echo 1500 ;;
     *) if is_slow "$1"; then echo "$SLOW_SCENARIO_TIMEOUT_SECONDS"; else echo "$SCENARIO_TIMEOUT_SECONDS"; fi ;;
   esac
 }
