@@ -498,3 +498,82 @@ func TestReplayDoesNotReturnARunWideChangeThatHappenedBeforeTheGivenCursor(t *te
 		t.Errorf("events after the last cursor: got = %v, want = %v", len(rest), 0)
 	}
 }
+
+// The default subscription exists so an agent does not have to know the vocabulary to stop polling.
+// It therefore has to carry every signal its loop would otherwise poll for — and the loop polls for
+// all of them: its jobs, why they are stuck, its allocation, its two stop conditions, the ladder,
+// the brief and the pool. Only the metric pointer is left out, and that exclusion is the one thing
+// this has to keep honest, because a firehose in the default would cost every subscriber its buffer
+// and be the one kind a reconnect could not replay.
+func TestTheDefaultKindSetIsEveryKindOnTheStreamExceptTheMetricPointer(t *testing.T) {
+	kinds := DefaultKinds()
+	if kinds[EventMetricPoint] {
+		t.Errorf("metric.point in the default set: got = %v, want = %v", true, false)
+	}
+	for _, kind := range EventKinds {
+		if kind.Kind == EventMetricPoint {
+			continue
+		}
+		if !kinds[kind.Kind] {
+			t.Errorf("%v in the default set: got = %v, want = %v", kind.Kind, false, true)
+		}
+	}
+}
+
+// The advertised vocabulary is the only list of the stream, and that has to include which kinds a
+// subscription naming none receives. A default flag served by GET /watch/kinds that disagreed with
+// the set the server applies is the same failure a hand-kept second list produces: an agent told it
+// will be woken by something that never reaches it.
+func TestTheAdvertisedDefaultFlagIsTheSetTheServerWouldApply(t *testing.T) {
+	kinds := DefaultKinds()
+	for _, kind := range EventKinds {
+		if kind.Default != kinds[kind.Kind] {
+			t.Errorf("advertised default for %v: got = %v, want = %v", kind.Kind, kind.Default, kinds[kind.Kind])
+		}
+	}
+}
+
+// The default set is wide, and wide is exactly where the agent scoping rule is easiest to lose: it
+// admits every agent-owned kind at once. An agent's default subscription reading a rival's job
+// timeline or allocation would hand it a competitor's private state, and being woken by a rival's
+// cut would fire its own stop condition on someone else's elimination.
+func TestADefaultSubscriptionScopedToAnAgentAdmitsItsOwnAgentOwnedEventsAndNoRivals(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
+	for _, kind := range []string{EventExperimentStatus, EventExperimentBlocked, EventQuotaChanged, EventAgentCut} {
+		mine := Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1", AgentID: "agent-a"}
+		if !filter.Matches(mine) {
+			t.Errorf("own %v on a default subscription: got = %v, want = %v", kind, false, true)
+		}
+		theirs := Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1", AgentID: "agent-b"}
+		if filter.Matches(theirs) {
+			t.Errorf("another agent's %v on a default subscription: got = %v, want = %v", kind, true, false)
+		}
+	}
+}
+
+// The shared half of the same filter. A default subscription that hid the pool because the rows
+// carry someone else's name would leave an agent watching a competition it can no longer see —
+// the settled claim it must not retest, and the closure it must stop on, are both written by others.
+func TestADefaultSubscriptionScopedToAnAgentStillCarriesTheSharedKindsWhoeverWroteThem(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
+	for _, kind := range []string{EventHypothesisNew, EventHypothesisStatus, EventFindingNew,
+		EventCommentNew, EventStageBoundary, EventPlatformExperimentStatus, EventPlatformExperimentDescription} {
+		e := Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1", AgentID: "agent-b"}
+		if !filter.Matches(e) {
+			t.Errorf("another agent's %v on a default subscription: got = %v, want = %v", kind, false, true)
+		}
+	}
+}
+
+// A default that could not be overridden would put the excluded kind out of reach. Naming kinds has
+// to mean exactly those kinds — including naming the one the default leaves out, which is how an
+// agent watching a single job's progress sees its samples arrive at all.
+func TestAnExplicitKindSetMeansExactlyWhatItNamesEvenWhenItNamesTheExcludedKind(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", Kinds: map[string]bool{EventMetricPoint: true}}
+	if !filter.Matches(Event{Kind: EventMetricPoint, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
+		t.Errorf("metric.point on a subscription that named it: got = %v, want = %v", false, true)
+	}
+	if filter.Matches(Event{Kind: EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
+		t.Errorf("experiment.status on a subscription that named only metric.point: got = %v, want = %v", true, false)
+	}
+}

@@ -137,8 +137,38 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 	return &watchClient{conn: conn, r: r}
 }
 
+// sendText sends one masked text frame, which is how a client asks about or re-scopes its own
+// subscription. A client must mask everything it sends, so this does.
+func (c *watchClient) sendText(t *testing.T, text string) {
+	t.Helper()
+	payload := []byte(text)
+	if len(payload) > 125 {
+		t.Fatalf("control frame length: got = %v, want = a short frame this helper can encode", len(payload))
+	}
+	frame := []byte{0x80 | wsOpText, byte(0x80 | len(payload)), 1, 2, 3, 4}
+	for i, b := range payload {
+		frame = append(frame, b^frame[2+i%4])
+	}
+	if _, err := c.conn.Write(frame); err != nil {
+		t.Fatalf("write control frame: got = %v, want = nil", err)
+	}
+}
+
 // next returns the next event the server sent, skipping the pings that keep an idle stream alive.
 func (c *watchClient) next(t *testing.T) db.Event {
+	t.Helper()
+	var e db.Event
+	payload := c.nextRaw(t)
+	if err := json.Unmarshal(payload, &e); err != nil {
+		t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
+	}
+	return e
+}
+
+// nextRaw returns the next text frame's bytes. The stream carries two shapes — an event, and the
+// server's answer to a control frame — and a test about the second cannot go through a decoder
+// that assumes the first.
+func (c *watchClient) nextRaw(t *testing.T) []byte {
 	t.Helper()
 	for {
 		if err := c.conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -170,11 +200,7 @@ func (c *watchClient) next(t *testing.T) db.Event {
 		if head[0]&0x0F != wsOpText {
 			continue
 		}
-		var e db.Event
-		if err := json.Unmarshal(payload, &e); err != nil {
-			t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
-		}
-		return e
+		return payload
 	}
 }
 
@@ -539,5 +565,342 @@ func TestEveryKindASubscriptionMayNameIsAlsoAdvertised(t *testing.T) {
 		if !advertised[kind] {
 			t.Errorf("accepted kind %v: got = %v, want = listed by GET /watch/kinds", kind, "unlisted")
 		}
+	}
+}
+
+// The default is the whole point of the feature: an agent that has to name kinds has to know them,
+// and an agent that names them wrong waits on a healthy socket forever. A subscription that names
+// none must therefore carry every signal the agent's loop would otherwise poll for — its jobs and
+// why they are stuck, its allocation, its two stop conditions, the ladder, the brief and the pool.
+func TestASubscriptionNamingNoKindsCarriesEverythingTheAgentLoopWouldOtherwisePollFor(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+	})
+
+	wanted := []string{
+		db.EventExperimentStatus, db.EventExperimentBlocked, db.EventQuotaChanged,
+		db.EventAgentCut, db.EventPlatformExperimentStatus, db.EventPlatformExperimentDescription,
+		db.EventStageBoundary, db.EventHypothesisNew, db.EventHypothesisStatus,
+		db.EventFindingNew, db.EventCommentNew,
+	}
+	for i, kind := range wanted {
+		source.live <- db.Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1",
+			AgentID: "agent-a", Cursor: int64(100 + i)}
+	}
+	for _, want := range wanted {
+		if got := client.next(t).Kind; got != want {
+			t.Errorf("delivered kind on the default subscription: got = %v, want = %v", got, want)
+		}
+	}
+}
+
+// The one deliberate exclusion. metric.point fires per sample for every job in the run and carries
+// no value, only a pointer, so defaulting it on would spend a run-wide subscriber's whole buffer on
+// news it did not ask for and get the connection dropped for lagging — and it is the one kind a
+// reconnect cannot replay, which would make the default the only subscription with a hole in it.
+func TestTheDefaultSubscriptionLeavesOutTheMetricPointerFirehose(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
+
+	source.live <- db.Event{Kind: db.EventMetricPoint, Subject: "exp-1", Value: "loss",
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 100}
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
+
+	if got := client.next(t).Kind; got != db.EventExperimentStatus {
+		t.Errorf("first delivered kind on the default subscription: got = %v, want = %v", got, db.EventExperimentStatus)
+	}
+}
+
+// A default that could not be overridden would make the excluded kind unreachable. Naming kinds
+// means exactly those kinds, including when what is named is the one the default leaves out —
+// otherwise an agent watching one job's progress could never see its samples arrive.
+func TestNamingMetricPointExplicitlyStillDeliversItAndNothingElse(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"kinds":                  {"metric.point"},
+	})
+
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 100)
+	source.live <- db.Event{Kind: db.EventMetricPoint, Subject: "exp-1", Value: "loss",
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+
+	if got := client.next(t).Kind; got != db.EventMetricPoint {
+		t.Errorf("first delivered kind for an explicit kinds=metric.point: got = %v, want = %v", got, db.EventMetricPoint)
+	}
+}
+
+// readSubscription reads frames until the server's answer to a control frame arrives, and returns
+// it. Events keep flowing while a control frame is in flight, so an answer is something to wait
+// for among them rather than the next thing on the wire.
+func readSubscription(t *testing.T, client *watchClient) WatchSubscription {
+	t.Helper()
+	for i := 0; i < 32; i++ {
+		var frame watchFrame
+		payload := client.nextRaw(t)
+		if err := json.Unmarshal(payload, &frame); err != nil {
+			t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
+		}
+		if frame.Error != "" {
+			t.Fatalf("server answer to a control frame: got = %v, want = a subscription", frame.Error)
+		}
+		if frame.Subscription != nil {
+			return *frame.Subscription
+		}
+	}
+	t.Fatalf("server answer to a control frame: got = %v, want = a subscription frame", "none in 32 frames")
+	return WatchSubscription{}
+}
+
+// An agent that cannot see what it is subscribed to is back to believing what it asked for. The
+// answer has to be read from the filter the server is matching against — including the kinds it
+// filled in itself when the client named none — or "I am subscribed" means nothing.
+func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidNotName(t *testing.T) {
+	server := watchServer(t, newFakeEvents())
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+	})
+
+	client.sendText(t, "{}")
+	got := readSubscription(t, client)
+
+	if got.PlatformExperimentID != "pe-1" || got.AgentID != "agent-a" {
+		t.Errorf("reported scope: got = %v/%v, want = pe-1/agent-a", got.PlatformExperimentID, got.AgentID)
+	}
+	if len(got.Kinds) != len(db.DefaultKinds()) {
+		t.Errorf("reported kinds: got = %v, want = the %v default kinds", got.Kinds, len(db.DefaultKinds()))
+	}
+	for _, kind := range got.Kinds {
+		if kind == db.EventMetricPoint {
+			t.Errorf("reported kinds: got = %v, want = one without metric.point", got.Kinds)
+		}
+	}
+}
+
+// The two halves of a filter change, in the order that makes them one guarantee. Narrowing must
+// stop the kinds it dropped, and widening must deliver the added kind from where this connection
+// last stood — a widen that only went live from the moment of the change would leave the client's
+// cursor claiming it had seen events it never received, which is a gap no reconnect would ever
+// repair.
+func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThanGoingLiveOnly(t *testing.T) {
+	source := newFakeEvents(
+		db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 150},
+	)
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"kinds":                  {"experiment.status"},
+		"since":                  {"100"},
+	})
+
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
+	if got := client.next(t).Value; got != "RUNNING" {
+		t.Fatalf("first delivered status: got = %v, want = %v", got, "RUNNING")
+	}
+
+	client.sendText(t, `{"kinds": "experiment.status,hypothesis.new"}`)
+
+	// The pool event predates the last status this connection saw, and is delivered anyway:
+	// nothing carried that kind before, so nothing has served it.
+	if got := client.next(t); got.Kind != db.EventHypothesisNew || got.Cursor != 150 {
+		t.Errorf("first frame after widening: got = %v at %v, want = hypothesis.new at 150", got.Kind, got.Cursor)
+	}
+	if got := readSubscription(t, client); len(got.Kinds) != 2 {
+		t.Errorf("reported kinds after widening: got = %v, want = the two named", got.Kinds)
+	}
+}
+
+// The other side of the same invariant, and the one that would be silent: an event the pre-change
+// filter would have delivered must survive the change. A filter change that quietly swallowed
+// whatever was in flight would make re-scoping more dangerous than reconnecting, and an agent would
+// be right never to use it.
+func TestAFilterChangeDoesNotDropAnEventThePreChangeFilterWouldHaveDelivered(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"kinds":                  {"experiment.status"},
+		"since":                  {"100"},
+	})
+
+	// Queued under the old filter, and the change is sent without waiting for it to be written:
+	// whichever order the server sees them in, the status is owed to this client.
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
+	client.sendText(t, `{"kinds": "experiment.status,quota.changed"}`)
+
+	for i := 0; i < 32; i++ {
+		var frame watchFrame
+		payload := client.nextRaw(t)
+		if err := json.Unmarshal(payload, &frame); err != nil {
+			t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
+		}
+		if frame.Subscription != nil {
+			continue
+		}
+		var e db.Event
+		if err := json.Unmarshal(payload, &e); err != nil {
+			t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
+		}
+		if e.Kind == db.EventExperimentStatus && e.Value == "RUNNING" {
+			return
+		}
+	}
+	t.Errorf("the status queued under the pre-change filter: got = %v, want = delivered across the change", "never delivered")
+}
+
+// Narrowing has to actually narrow, and has to leave the rest alone. A change reported as applied
+// but not applied is the worst answer of the three, because the client stops watching for what it
+// believes it has already dropped.
+func TestNarrowingAFilterStopsTheDroppedKindAndKeepsTheOnesLeft(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
+
+	client.sendText(t, `{"kinds": "experiment.status"}`)
+	if got := readSubscription(t, client); len(got.Kinds) != 1 || got.Kinds[0] != db.EventExperimentStatus {
+		t.Fatalf("reported kinds after narrowing: got = %v, want = [experiment.status]", got.Kinds)
+	}
+
+	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1", Value: "agent",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
+
+	if got := client.next(t).Kind; got != db.EventExperimentStatus {
+		t.Errorf("first delivered kind after narrowing: got = %v, want = %v", got, db.EventExperimentStatus)
+	}
+}
+
+// A kind that does not exist is refused in a control frame for the same reason it is refused in the
+// query string: a client whose change was ignored would go on waiting on a filter it does not have.
+// The connection survives — the request was wrong, not the socket.
+func TestAControlFrameNamingAnUnknownKindIsRefusedAndLeavesTheFilterAlone(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"kinds":                  {"experiment.status"},
+	})
+
+	client.sendText(t, `{"kinds": "experiment.finished"}`)
+	var frame watchFrame
+	payload := client.nextRaw(t)
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
+	}
+	if !strings.Contains(frame.Error, "experiment.finished") {
+		t.Errorf("answer to a control frame naming an unknown kind: got = %v, want = one naming it", string(payload))
+	}
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
+	if got := client.next(t).Value; got != "RUNNING" {
+		t.Errorf("stream after a refused control frame: got = %v, want = still carrying %v", got, "RUNNING")
+	}
+}
+
+// Listing subscriptions reads the live connections and nothing else. That is what keeps it from
+// being a subscriber registry: an entry exists for exactly as long as its socket does, so a
+// watcher that died is not listed — which is the true answer, not a missing one.
+func TestListingSubscriptionsReportsTheLiveConnectionsAndForgetsThemWhenTheyClose(t *testing.T) {
+	handler := NewWatchHandler(newFakeEvents(),
+		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.Start(ctx)
+	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
+	defer server.Close()
+
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+		"kinds":                  {"experiment.status"},
+	})
+	client.sendText(t, "{}")
+	readSubscription(t, client)
+
+	listed := handler.hub.list("pe-1", "agent-a")
+	if len(listed) != 1 {
+		t.Fatalf("live subscriptions for agent-a: got = %v, want = %v", len(listed), 1)
+	}
+	if len(listed[0].Kinds) != 1 || listed[0].Kinds[0] != db.EventExperimentStatus {
+		t.Errorf("listed kinds: got = %v, want = [experiment.status]", listed[0].Kinds)
+	}
+	if got := handler.hub.list("pe-1", "agent-b"); len(got) != 0 {
+		t.Errorf("live subscriptions for an agent with none: got = %v, want = %v", len(got), 0)
+	}
+
+	client.conn.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(handler.hub.list("pe-1", "agent-a")) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("live subscriptions after the socket closed: got = %v, want = %v", len(handler.hub.list("pe-1", "agent-a")), 0)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The default subscription is the one every agent will use, so the scoping rule has to hold on it
+// and not only on the hand-written filters it was first tested with. An agent whose default
+// subscription carried a rival's job status or quota would be reading a competitor's timeline, and
+// would also be woken by every event in the run rather than by its own.
+func TestTheDefaultSubscriptionScopedToAnAgentStillNeverCarriesAnotherAgentsOwnEvents(t *testing.T) {
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"agent":                  {"agent-a"},
+	})
+
+	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)
+	source.live <- db.Event{Kind: db.EventQuotaChanged, Subject: "agent-b", Value: "9",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 150}
+	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 175}
+	source.live <- db.Event{Kind: db.EventQuotaChanged, Subject: "agent-a", Value: "4",
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+
+	got := client.next(t)
+	if got.Kind != db.EventQuotaChanged || got.Subject != "agent-a" {
+		t.Errorf("first delivered event: got = %v for %v, want = quota.changed for agent-a", got.Kind, got.Subject)
+	}
+}
+
+// The default set is served as part of the vocabulary rather than kept beside it, for the same
+// reason the accepted set is: a default an agent is told about but does not get, or gets but is
+// never told about, is the failure a second hand-kept list produces.
+func TestTheDefaultTheServerAppliesIsTheDefaultGETWatchKindsAdvertises(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1", nil)
+	filter, _, err := parseWatchQuery(request)
+	if err != nil {
+		t.Fatalf("subscribing without naming kinds: got = %v, want = nil", err)
+	}
+	for _, kind := range db.EventKinds {
+		if filter.Kinds[kind.Kind] != kind.Default {
+			t.Errorf("kind %v on a subscription naming none: got = %v, want = %v (as advertised)",
+				kind.Kind, filter.Kinds[kind.Kind], kind.Default)
+		}
+	}
+}
+
+// The inspect path end to end, through the real script. hl-watch masks what it sends and the
+// server unmasks it, and those two agreeing separately is not the same as them agreeing with each
+// other — if they do not, an agent asking what it is subscribed to gets a dropped socket instead of
+// an answer, which is worse than not being able to ask.
+func TestHLWatchPrintsWhatTheServerSaysThisConnectionIsSubscribedTo(t *testing.T) {
+	server := watchServer(t, newFakeEvents())
+
+	_, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
+		"--kinds", "experiment.status", "--show-subscription", "--timeout", "5")
+
+	if !strings.Contains(output, `"subscription"`) {
+		t.Errorf("hl-watch --show-subscription output: got = %v, want = a subscription line (stderr: %s)", output, stderr)
+	}
+	if !strings.Contains(output, `"experiment.status"`) {
+		t.Errorf("hl-watch --show-subscription output: got = %v, want = one naming the kind in force", output)
 	}
 }

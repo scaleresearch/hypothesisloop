@@ -63,6 +63,10 @@ type EventKindDoc struct {
 	// table below: it is filled in from isAgentOwned, which is what the filter actually consults,
 	// so the documented scope cannot describe a rule the server does not apply.
 	AgentOwned bool `json:"agent_owned"`
+	// Default is true when a subscription that names no kinds carries this one. Like AgentOwned it
+	// is filled in from the predicate the server actually consults (isDefaultKind), so the default
+	// set cannot be advertised here and be a different set on the wire.
+	Default bool `json:"default"`
 }
 
 // EventKinds is the vocabulary of the stream, and the only list of it. The server validates a
@@ -99,7 +103,34 @@ var EventKinds = []EventKindDoc{
 func init() {
 	for i := range EventKinds {
 		EventKinds[i].AgentOwned = isAgentOwned(EventKinds[i].Kind)
+		EventKinds[i].Default = isDefaultKind(EventKinds[i].Kind)
 	}
+}
+
+// isDefaultKind reports what a subscription naming no kinds carries: everything an agent's loop
+// would otherwise poll for — its jobs and why they are stuck, its allocation, its two stop
+// conditions, the ladder, the brief, and the shared pool.
+//
+// metric.point is the one exclusion, and it is deliberate. It is by far the highest-volume kind,
+// it fires for every sample of every job in the run rather than for the subscriber's own, and it
+// carries no value — only a pointer to the metrics store. On a run-wide subscription that is a
+// firehose whose only effect is to push the connection past its buffer and get it dropped, and a
+// stream that drops is worse than one that says less. It is also the single kind Replay cannot
+// return, so defaulting it on would make the default subscription the only one with a hole in its
+// reconnect. An agent watching one job's progress asks for it by name, which costs one flag and
+// says exactly what it means.
+func isDefaultKind(kind string) bool { return kind != EventMetricPoint }
+
+// DefaultKinds is the kind set of a subscription that names none, derived from EventKinds so that
+// the served vocabulary and the applied default are one list.
+func DefaultKinds() map[string]bool {
+	kinds := make(map[string]bool, len(EventKinds))
+	for _, k := range EventKinds {
+		if k.Default {
+			kinds[k.Kind] = true
+		}
+	}
+	return kinds
 }
 
 // eventsChannel is the single Postgres NOTIFY channel every event is emitted on, by the AFTER

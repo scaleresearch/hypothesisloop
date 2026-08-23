@@ -126,7 +126,27 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      Scope it: `--experiment` watches one job, `--platform-experiment` widens to everything in the
      run, `--kinds a,b` narrows to the kinds you name, and `--agent {agent_id}` narrows the kinds
      that are yours (your jobs, your quota, your cut) without ever hiding shared pool or run-wide
-     news. Recipes for the loop above:
+     news.
+     You do not have to name kinds. With no `--kinds` you are subscribed to everything this loop
+     would otherwise make you poll for: your jobs and why they are stuck, your quota, your two stop
+     conditions, the ladder, the brief, and the shared pool. The one kind left out is
+     `metric.point` — it fires for every sample of every job in the run and carries only a pointer,
+     so it is noise unless you are watching one job's progress, and then you name it
+     (`--kinds metric.point`). A `--kinds` you write out means exactly what it says and nothing
+     more; `GET /watch/kinds` marks which kinds are in the default.
+     Ask what you are subscribed to rather than assuming. `--show-subscription` prints the filter
+     the server is actually serving you — scope, kinds, and the cursor you opened at — as a
+     `{{"subscription": ...}}` line, told apart from an event by having no `kind`.
+     `GET /watch/subscriptions` lists the watches open right now, narrowable by
+     `platform_experiment_id` and `agent`; if your watcher died it is simply not listed, because
+     nothing about a subscription is stored — a watch exists for exactly as long as its socket
+     does, and `--since <cursor>` is what makes reconnecting lossless.
+     The socket is otherwise one-way: the only thing you may send is a frame about your OWN
+     subscription (`{{}}` to ask, `{{"kinds":"a,b"}}` to re-scope, `{{"kinds":""}}` to restore the
+     default). It changes nothing on the platform. Widening replays the kinds you added from where
+     you last saw them, so re-scoping costs you nothing you were entitled to; narrowing just stops
+     delivery. A connection opened without a cursor has no history, so widening it starts the added
+     kinds live. Recipes for the loop above:
        - your own job, the common case:
            hl-watch --experiment {{id}} --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
        - a job stuck in the queue — its reason changes while its status does not:

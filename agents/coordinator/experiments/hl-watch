@@ -24,7 +24,14 @@ retried until the timeout instead, because that retry is the feature.
 A dropped connection is a delay, never a gap: this reconnects with the cursor of the last event it
 saw, and the server replays what was missed before going live again.
 
-Read-only. Nothing sent up this socket does anything, and no event arriving on it instructs a job
+Without --kinds you get the default subscription: everything an agent's loop would otherwise poll
+for — your jobs and why they are stuck, your quota, your two stop conditions, the ladder, the
+brief, and the shared pool. The one kind left out is metric.point, the highest-volume kind and a
+pointer with no value in it; name it in --kinds when you are watching one job's progress.
+
+Read-only. The only frame this sends up the socket asks about or re-scopes THIS connection's own
+subscription (--show-subscription prints what the server says it is serving you), which changes
+nothing on the platform. Nothing else sent up this socket does anything, and no event arriving on it instructs a job
 to do anything — the control plane's decisions reach a runtime as desired state and by no other
 path. A job may watch its own experiment; that is receiving, not self-reporting, so the rule that
 a job pushes metrics and nothing else is untouched.
@@ -89,6 +96,9 @@ class WebSocket:
             header += bytes([0x80 | 127]) + struct.pack("!Q", length)
         masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
         self.sock.sendall(header + mask + masked)
+
+    def send_text(self, text: str) -> None:
+        self._send_frame(0x1, text.encode("utf-8"))
 
     def next_text(self) -> str:
         """Returns the next text frame, answering pings and skipping everything else."""
@@ -233,7 +243,11 @@ def main() -> int:
                         help="watch one job (defaults to $HYPOTHESISLOOP_EXPERIMENT_ID)")
     parser.add_argument("--platform-experiment", default="", help="watch a whole platform experiment")
     parser.add_argument("--agent", default="", help="narrow job and quota events to this agent")
-    parser.add_argument("--kinds", default="", help="comma-separated event kinds; default is all of them")
+    parser.add_argument("--kinds", default="",
+                        help="comma-separated event kinds; default is every kind marked default by "
+                             "GET /watch/kinds (all but metric.point)")
+    parser.add_argument("--show-subscription", action="store_true",
+                        help="ask the server what this connection is actually subscribed to and print its answer")
     parser.add_argument("--until", default="",
                         help="stop when true; one form only: 'status in COMPLETED,FAILED,EVICTED'")
     parser.add_argument("--timeout", type=float, default=900.0, help="give up after this many seconds")
@@ -281,6 +295,8 @@ def main() -> int:
             time.sleep(RECONNECT_DELAY_S)
             continue
         try:
+            if args.show_subscription:
+                ws.send_text("{}")
             while time.monotonic() < deadline:
                 ws.sock.settimeout(min(READ_TIMEOUT_S, max(0.1, deadline - time.monotonic())))
                 line = ws.next_text()
@@ -289,7 +305,11 @@ def main() -> int:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                cursor = event.get("cursor", cursor)
+                # A widened subscription replays the kinds it added, and those carry cursors older
+                # than ones already seen. The cursor to resume from is the highest, never the last:
+                # handing back a lower one on reconnect would replay what is already in this
+                # transcript.
+                cursor = max(cursor, event.get("cursor") or 0)
                 if satisfied and satisfied(event):
                     return 0
         except (OSError, Closed) as err:
