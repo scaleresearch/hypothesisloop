@@ -116,8 +116,15 @@ reads the same one and is ranked on the same declared metrics. Roughly, not a ri
      the moment the thing you named happens, so one call replaces a hundred turns of re-reading
      whole state to learn nothing changed:
        hl-watch --experiment {{id}} --until 'status in COMPLETED,FAILED,EVICTED' --timeout 900
-     It prints one JSON event per line as they arrive — kind, subject, new value, cursor — and
-     exits 0 on the condition, 124 on the timeout. The events are pointers, not payloads: follow
+     It prints one JSON event per line as they arrive — kind, subject, new value, cursor. Branch
+     on its exit code, don't assume 0 means your condition was met:
+       0    --until became true (or, with no --until, the watch window simply elapsed)
+       124  the timeout expired with --until still unmet — read state once and decide
+       2    the request was wrong and will stay wrong: a bad flag, an unknown kind, an
+            experiment that does not exist. It prints the platform's own reason; fix that exact
+            thing rather than retrying. Anything genuinely transient — a dropped socket, an
+            unreachable server — it retries for you until the timeout.
+     The events are pointers, not payloads: follow
      one with the ordinary GET when you want detail. Other things worth waiting on, via
      `--platform-experiment {{id}}` and `--kinds`:
        experiment.status   QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED

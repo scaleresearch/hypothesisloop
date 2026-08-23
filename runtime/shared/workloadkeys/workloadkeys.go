@@ -18,6 +18,11 @@ const (
 	MemoryBytes      = "hypothesisloop.io/memory-bytes"
 	StorageBytes     = "hypothesisloop.io/storage-bytes"
 	GraceSeconds     = "hypothesisloop.io/grace-seconds"
+	// CheckpointGraceSeconds is the window a policy-class termination gives this workload to
+	// write a checkpoint, already capped by configuration. Stamped on at creation because the
+	// runtime deleting a workload has only its identity to go on, and the job's declaration is
+	// long gone from desired state by then.
+	CheckpointGraceSeconds = "hypothesisloop.io/checkpoint-grace-seconds"
 	// JobGroup names which group of a heterogeneous job a workload belongs to (see
 	// domain.JobSpec.Groups). Absent on an ungrouped job, whose nodes are all the same thing.
 	JobGroup = "hypothesisloop.io/job-group"

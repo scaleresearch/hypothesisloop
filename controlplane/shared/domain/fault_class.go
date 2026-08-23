@@ -92,6 +92,38 @@ func IsInfrastructureFault(reason EvictionReason) bool {
 	return ok && class == FaultInfrastructure
 }
 
+// IsPolicyFault reports whether an eviction reason names the platform's own decision — the one
+// class where the job was fine and its work is worth saving, and so the one class that earns a
+// checkpoint window before the workload is deleted.
+func IsPolicyFault(reason EvictionReason) bool {
+	class, ok := Classify(reason)
+	return ok && class == FaultPolicy
+}
+
+// CheckpointWindowGrants picks, out of the experiments that have just left a cluster's desired
+// set, the ids whose termination was the platform's own decision and which therefore get their
+// declared checkpoint window before the workload is deleted.
+//
+// This is the entire content of what crosses the control-plane/runtime boundary for §9: a set of
+// ids, not a class and not a rule. The runtime is told WHICH workloads should still exist for
+// their declared window — a decision — and is never handed the taxonomy to interpret for itself,
+// which would be a decision we could no longer revoke (important.md #8). How long the window is
+// stays where every other execution-shaped bound already lives: declared on the JobSpec, capped
+// by configuration, and compiled into the workload by the runtime that built it.
+func CheckpointWindowGrants(exps []*Experiment) []string {
+	ids := make([]string, 0, len(exps))
+	for _, exp := range exps {
+		if exp == nil || exp.ID == "" {
+			continue
+		}
+		if !IsPolicyFault(EvictionReason(exp.EvictionReason)) {
+			continue
+		}
+		ids = append(ids, exp.ID)
+	}
+	return ids
+}
+
 // ClassifyCounts folds a by-reason tally into a by-class one. Derived at read time from the
 // counts the stats path already produces rather than stored alongside them: a class is a pure
 // function of a reason, so persisting both would be two records of one fact, free to disagree the

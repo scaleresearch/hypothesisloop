@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func (c *JobWorkloadClient) createJob(ctx context.Context, exp *domain.Experimen
 			return nil
 		}
 		if existing.DeletionTimestamp == nil {
-			if deleteErr := c.DeleteWorkload(ctx, exp.ID); deleteErr != nil {
+			if deleteErr := c.DeleteWorkload(ctx, exp.ID, false); deleteErr != nil {
 				return fmt.Errorf("workload: delete mismatched existing job %s: %w", job.Name, deleteErr)
 			}
 		}
@@ -587,8 +588,70 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 	return available, total, byNode, nodeLabels, nil
 }
 
-func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID string) error {
+// podDeleteGrace is how long this pod may take between SIGTERM and SIGKILL for this termination:
+// its own TerminationGracePeriodSeconds, which compileJob widened to hold the checkpoint window
+// the job declared, when the control plane granted this termination that window — and the
+// ordinary shutdown grace recorded alongside it otherwise.
+//
+// A pod with no readable shutdown grace is an error rather than a guess. The two numbers are
+// only ever different for a job that declared a checkpoint window, and guessing there would mean
+// silently handing an infrastructure failure minutes of hardware it has nothing to do with.
+func podDeleteGrace(pod *corev1.Pod, grantCheckpointWindow bool) (int64, error) {
+	if grantCheckpointWindow {
+		if pod.Spec.TerminationGracePeriodSeconds == nil {
+			return 0, fmt.Errorf("workload: pod %s declares no termination grace period", pod.Name)
+		}
+		return *pod.Spec.TerminationGracePeriodSeconds, nil
+	}
+	ordinary, err := strconv.ParseInt(pod.Annotations[GraceSecondsAnnotation], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("workload: pod %s has no readable shutdown grace: %w", pod.Name, err)
+	}
+	return ordinary, nil
+}
+
+// signalPods deletes every pod of the experiment with an explicit grace period, which is what
+// actually delivers SIGTERM and starts the clock — the whole gang at once, before any Job object
+// is touched, so no rank is killed while another is still being told.
+//
+// grantCheckpointWindow chooses the clock: the pod's own TerminationGracePeriodSeconds, which
+// compileJob widened to hold the checkpoint window the job declared, or the ordinary shutdown
+// grace recorded alongside it. Both are stated explicitly rather than left to the pod's default,
+// because the Job deletion that follows hands these pods to Kubernetes' garbage collector, and a
+// collector delete may only ever SHORTEN a grace period that is already running — so the window
+// has to be in flight, at its full length, before the Job goes.
+func (c *JobWorkloadClient) signalPods(ctx context.Context, experimentID string, grantCheckpointWindow bool) error {
+	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
+	})
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		grace, graceErr := podDeleteGrace(pod, grantCheckpointWindow)
+		if graceErr != nil {
+			errs = append(errs, graceErr)
+			continue
+		}
+		delErr := c.kube.CoreV1().Pods(HypothesisLoopNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{
+			GracePeriodSeconds: &grace,
+		})
+		if delErr != nil && !errors.IsNotFound(delErr) {
+			// One rank failing to be signalled must not leave the rest unsignalled
+			// (important.md #19).
+			errs = append(errs, delErr)
+		}
+	}
+	return stderrors.Join(errs...)
+}
+
+func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error {
 	prop := metav1.DeletePropagationBackground
+	// Before the Job objects go, so the pods are already counting down their own grace rather
+	// than the garbage collector's.
+	signalErr := c.signalPods(ctx, experimentID, grantCheckpointWindow)
 	// Every Job carrying this experiment's identity, not one computed name: a grouped experiment
 	// has one Job per group, and deleting only the one whose name happens to be derivable would
 	// leave the rest of the gang running while the control plane believed the workload was gone.
@@ -616,7 +679,7 @@ func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID str
 	// allocation_mode here. The kubelet-derived ResourceClaim(s) are owned by the pod and
 	// cleaned up natively by k8s; this only removes the template object itself.
 	claimErr := c.deleteDRAResource(ctx, experimentID)
-	return stderrors.Join(append(jobErrs, listErr, svcErr, claimErr)...)
+	return stderrors.Join(append(jobErrs, signalErr, listErr, svcErr, claimErr)...)
 }
 
 func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error {

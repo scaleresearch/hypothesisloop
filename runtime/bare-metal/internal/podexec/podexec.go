@@ -25,6 +25,7 @@ const (
 	LabelMemoryBytes     = workloadkeys.MemoryBytes
 	LabelStorageBytes    = workloadkeys.StorageBytes
 	LabelGraceSeconds    = workloadkeys.GraceSeconds
+	LabelCheckpointGrace = workloadkeys.CheckpointGraceSeconds
 
 	ManagedByValue = workloadkeys.ManagedByValue
 
@@ -41,6 +42,9 @@ type Config struct {
 	// k8sexec.Config exactly — see there for meaning.
 	DefaultTerminationGracePeriodSeconds int
 	MaxTerminationGracePeriodSeconds     int
+	// MaxCheckpointGraceSeconds caps job.checkpoint_grace_seconds — mirrors
+	// k8sexec.Config.MaxCheckpointGraceSeconds exactly.
+	MaxCheckpointGraceSeconds int
 	// PricedAcceleratorTypes bounds which accelerator types capacity reporting names (see
 	// hypothesisloop.yaml accelerator_types) — identical role to k8sexec.Config.
 	PricedAcceleratorTypes []string
@@ -59,6 +63,7 @@ type Executor struct {
 	apiURL                               string
 	defaultTerminationGracePeriodSeconds int64
 	maxTerminationGracePeriodSeconds     int64
+	maxCheckpointGraceSeconds            int64
 	pricedAcceleratorTypes               map[string]bool
 	scratchDir                           string
 	nodeLabels                           map[string]string
@@ -83,7 +88,8 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("podexec: APIURL is required")
 	}
-	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 {
+	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 ||
+		cfg.MaxCheckpointGraceSeconds <= 0 {
 		return nil, fmt.Errorf("podexec: termination settings must be positive")
 	}
 	if cfg.ScratchDir == "" {
@@ -118,6 +124,7 @@ func New(cfg Config) (*Executor, error) {
 		apiURL:                               cfg.APIURL,
 		defaultTerminationGracePeriodSeconds: int64(cfg.DefaultTerminationGracePeriodSeconds),
 		maxTerminationGracePeriodSeconds:     int64(cfg.MaxTerminationGracePeriodSeconds),
+		maxCheckpointGraceSeconds:            int64(cfg.MaxCheckpointGraceSeconds),
 		pricedAcceleratorTypes:               priced,
 		scratchDir:                           cfg.ScratchDir,
 		nodeLabels:                           labels,

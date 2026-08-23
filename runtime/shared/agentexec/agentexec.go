@@ -23,7 +23,14 @@ type Executor interface {
 	SetupCluster(ctx context.Context) error
 
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
-	DeleteWorkload(ctx context.Context, experimentID string) error
+	// DeleteWorkload removes the experiment's workload. grantCheckpointWindow says whether the
+	// control plane granted this termination the checkpoint window the job declared: true for a
+	// policy-class termination (the platform decided and the job was fine), false for everything
+	// else — an infrastructure or workload failure, or the runtime replacing its own drifted
+	// resource. It is a decision fetched from desired state, never a rule the runtime evaluates:
+	// the runtime is told which workloads get their window, and knows how long that window is
+	// only because it compiled the job's own declaration into the workload when it created it.
+	DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error
 	WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error
 
 	ListManagedJobs(ctx context.Context) ([]string, error)

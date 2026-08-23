@@ -59,7 +59,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 // stopped IS the "gone" record until pruneTerminal removes it (different-backend.md §4.6).
 // A naive remove-on-delete would mean WaitForJobDeletion / status reporting could never observe
 // a "gone" phase for a container that no longer exists to be listed.
-func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string) error {
+func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error {
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return err
@@ -68,13 +68,30 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string) erro
 		if c.Labels[LabelExperimentID] != experimentID {
 			continue
 		}
-		grace := e.defaultTerminationGracePeriodSeconds
-		if g, err := strconv.ParseInt(c.Labels[LabelGraceSeconds], 10, 64); err == nil && g > 0 {
-			grace = g
-		}
-		return e.stopContainer(ctx, c.name(), grace)
+		return e.stopContainer(ctx, c.name(), e.stopGrace(c.Labels, grantCheckpointWindow))
 	}
 	return nil // nothing to delete
+}
+
+// stopGrace is how long this container gets between SIGTERM and SIGKILL for this stop: the
+// checkpoint window it declared when the control plane granted this termination that window, and
+// the ordinary shutdown grace otherwise.
+//
+// A granted window only ever lengthens the grace. Everything else -- an infrastructure or
+// workload failure, a drift replacement -- stops on the ordinary grace whatever the job
+// declared, because there is nothing to save or nothing left to save it with.
+func (e *Executor) stopGrace(labels map[string]string, grantCheckpointWindow bool) int64 {
+	grace := e.defaultTerminationGracePeriodSeconds
+	if g, err := strconv.ParseInt(labels[LabelGraceSeconds], 10, 64); err == nil && g > 0 {
+		grace = g
+	}
+	if !grantCheckpointWindow {
+		return grace
+	}
+	if w, err := strconv.ParseInt(labels[LabelCheckpointGrace], 10, 64); err == nil && w > grace {
+		grace = w
+	}
+	return grace
 }
 
 // WaitForJobDeletion blocks until experimentID's container reports JobPhaseGone (stopped and no

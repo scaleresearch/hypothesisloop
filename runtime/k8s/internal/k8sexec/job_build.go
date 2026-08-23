@@ -36,6 +36,11 @@ const AcceleratorCountAnnotation = workloadkeys.AcceleratorCount
 
 const DesiredSpecHashAnnotation = workloadkeys.DesiredSpecHash
 
+// GraceSecondsAnnotation carries the pod's ordinary shutdown grace onto the pod template, so a
+// termination that earned no checkpoint window can be deleted with it even though the pod's own
+// TerminationGracePeriodSeconds may have been widened to hold that window.
+const GraceSecondsAnnotation = workloadkeys.GraceSeconds
+
 // BuildJob deterministically compiles exp's complete JobSpec DSL into a native batch/v1 Job —
 // the only place the DSL vocabulary (image, command, env, cpu/memory/accelerator, num_nodes,
 // max_retries, acceptable_accelerator_types) is translated into k8s concepts (containers,
@@ -168,6 +173,27 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	}
 	if terminationGrace > c.maxTerminationGracePeriodSeconds {
 		terminationGrace = c.maxTerminationGracePeriodSeconds
+	}
+
+	// The pod's grace is the longer of its ordinary shutdown grace and the checkpoint window it
+	// declared, because the window has to be a property of the pod for the kubelet to honour it:
+	// when the Job is deleted it is Kubernetes' garbage collector that deletes these pods, and
+	// it uses whatever the pod itself declares. Capped separately from the shutdown grace —
+	// 30 seconds does not checkpoint a serious model, and minutes is not a sane default for
+	// every other kill.
+	//
+	// Which terminations actually get to spend that window is not decided here and is not a rule
+	// the runtime is handed: DeleteWorkload shortens the pod back to graceSeconds below whenever
+	// the control plane did not grant this termination its window.
+	podGrace := terminationGrace
+	if spec.CheckpointGraceSeconds != nil {
+		checkpointGrace := *spec.CheckpointGraceSeconds
+		if checkpointGrace > c.maxCheckpointGraceSeconds {
+			checkpointGrace = c.maxCheckpointGraceSeconds
+		}
+		if checkpointGrace > podGrace {
+			podGrace = checkpointGrace
+		}
 	}
 
 	priorityClass := PriorityClassGuaranteed
@@ -455,6 +481,11 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 						// Also on the pod, not just the Job: ResolveAdmittedAcceleratorType
 						// reads it off the scheduled pod to report what the job really landed on.
 						AcceleratorTypeAnnotation: string(exp.AcceleratorType),
+						// The ordinary shutdown grace, recorded because the pod's own
+						// TerminationGracePeriodSeconds may have been widened to hold a
+						// checkpoint window. A termination that earned no window is deleted
+						// with this instead — see DeleteWorkload.
+						GraceSecondsAnnotation: fmt.Sprintf("%d", terminationGrace),
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -465,7 +496,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 					Affinity:                      c.buildAffinity(exp.ID, spec, placement, distributed),
 					Tolerations:                   acceleratorTolerations(group.AcceleratorCount, spec.AcceleratorTolerations),
 					NodeSelector:                  spec.NodeSelector,
-					TerminationGracePeriodSeconds: &terminationGrace,
+					TerminationGracePeriodSeconds: &podGrace,
 				},
 			},
 		},

@@ -134,6 +134,26 @@ type JobSpec struct {
 	// regardless of what's requested here.
 	TerminationGracePeriodSeconds *int64 `json:"termination_grace_period_seconds,omitempty" yaml:"termination_grace_period_seconds,omitempty"`
 
+	// CheckpointGraceSeconds is how long the job asks for, after it is told termination is
+	// coming, to write a checkpoint it can resume from. It applies only to a policy-class
+	// termination (see FaultClass) — preemption, a stage cut, quota exhaustion, the duration cap
+	// — because those are the only ones where the job is fine and there is something left to
+	// save. An infrastructure or workload failure gets no window: there is nothing to save, or
+	// nothing left to save it with.
+	//
+	// Unset means today's behaviour unchanged: the job is stopped with the ordinary shutdown
+	// grace above. Capped at the configured max_checkpoint_grace_seconds regardless of what is
+	// requested here, and that cap is the whole reason this is safe to offer — without it a job
+	// could hold contended accelerators indefinitely by claiming it was still saving.
+	//
+	// Nothing about the window tells the job what to do with it. It is told termination is
+	// coming (SIGTERM, delivered to every rank of every group at once) and then has this long
+	// before it is killed. Resuming needs no new platform concept: the job's data prefix is
+	// keyed on its experiment id and a requeue keeps that id, so a checkpoint written here is at
+	// the same URI when the job starts again — it reads its own prefix and continues, or finds
+	// it empty and begins.
+	CheckpointGraceSeconds *int64 `json:"checkpoint_grace_seconds,omitempty" yaml:"checkpoint_grace_seconds,omitempty"`
+
 	// Topology controls where a distributed (NumNodes > 1) job's nodes land relative to
 	// each other. Only meaningful when NumNodes > 1; ignored otherwise. See TopologySpec.
 	Topology *TopologySpec `json:"topology,omitempty" yaml:"topology,omitempty"`

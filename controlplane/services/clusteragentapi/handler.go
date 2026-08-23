@@ -35,6 +35,10 @@ import (
 // Store is the desired-state persistence interface the handler needs.
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
+	// ListRecentlyUndesiredWorkloads returns the experiments that have just stopped being
+	// desired here — the ones the agent is about to delete — so the reconcile response can name
+	// which of them earned a checkpoint window.
+	ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error)
 	// ClusterNameByID resolves many experiments' assigned clusters at once — a status push is a
 	// whole-cluster snapshot, so this is asked once per push rather than once per job.
 	ClusterNameByID(ctx context.Context, ids []string) (map[string]string, error)
@@ -55,13 +59,19 @@ type Handler struct {
 	// loses write access mid-run, so this is sized against the longest job the ladder allows,
 	// not against the reconcile cadence.
 	dataSessionDuration time.Duration
+	// maxCheckpointGrace is how far back a reconcile pass looks for workloads that have just
+	// left the desired set. It is the configured ceiling on a checkpoint window, which is the
+	// longest a granted window can possibly still be running: past it, the grant has expired on
+	// its own and there is nothing to hold or clear.
+	maxCheckpointGrace time.Duration
 }
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, dataSessionDuration time.Duration, logger *zap.Logger) *Handler {
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, dataSessionDuration time.Duration, maxCheckpointGrace time.Duration, logger *zap.Logger) *Handler {
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL,
-		dataStore: dataStore, dataSessionDuration: dataSessionDuration, logger: logger}
+		dataStore: dataStore, dataSessionDuration: dataSessionDuration,
+		maxCheckpointGrace: maxCheckpointGrace, logger: logger}
 }
 
 // attachDataAccess computes each workload's durable-data address from the experiment's own
@@ -155,11 +165,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
-		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, then returns the complete PostgreSQL desired workload set for this cluster.",
+		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window.",
 	}, func(ctx context.Context, in *reconcileInput) (*struct {
-		Body struct {
-			Experiments []*domain.Experiment `json:"experiments"`
-		}
+		Body reconcileBody
 	}, error) {
 		clusterName := in.Name
 
@@ -244,10 +252,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		// The other half of the same view: what should NO LONGER exist, and for how much longer
+		// it may. A job the platform itself decided to stop -- preempted, cut, out of quota, out
+		// of time -- is fine and its work is worth saving, so it is told termination is coming
+		// and gets the window it declared before it is killed. A job the environment or its own
+		// code ended gets no window; it simply never appears here.
+		//
+		// Derived from the termination that is already recorded on the experiment, and expiring
+		// with maxCheckpointGrace, so there is no terminating state to write, advance or clear.
+		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, clusterName, h.maxCheckpointGrace)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		resp := &struct {
-			Body struct {
-				Experiments []*domain.Experiment `json:"experiments"`
-			}
+			Body reconcileBody
 		}{}
 		// A workload without usable credentials is not returned at all: the pass fails and the
 		// cluster-agent retries in a couple of seconds, leaving every running job untouched.
@@ -256,6 +274,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		resp.Body.Experiments = exps
+		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
 		return resp, nil
 	})
 
@@ -354,6 +373,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		resp.Body.Status = "ok"
 		return resp, nil
 	})
+}
+
+// reconcileBody is one reconcile pass's whole answer: what should exist here, and which of the
+// things that should no longer exist are entitled to their checkpoint window on the way out.
+type reconcileBody struct {
+	Experiments []*domain.Experiment `json:"experiments"`
+	// CheckpointWindow names the experiments whose termination was the platform's own decision.
+	// Deliberately ids and nothing else: the runtime is told which workloads still have a window
+	// coming, never the fault class or the rule that produced it. How long each window is was
+	// declared on the job's own spec and compiled into the workload when the runtime created it.
+	CheckpointWindow []string `json:"checkpoint_window"`
 }
 
 type reconcileInput struct {

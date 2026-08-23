@@ -716,3 +716,135 @@ func envSourceOf(job *batchv1.Job, name string) *corev1.EnvVarSource {
 	}
 	return nil
 }
+
+func int64Ptr(v int64) *int64 { return &v }
+
+// A job that declares nothing is a job whose behaviour must not have changed: the pod still gets
+// the ordinary shutdown grace it has always had. The checkpoint window is opt-in precisely so
+// that every existing submission keeps dying in five seconds rather than in ten minutes.
+func TestPodGraceIsTheOrdinaryShutdownGraceWhenNoCheckpointWindowIsDeclared(t *testing.T) {
+	c := &JobWorkloadClient{
+		apiURL:                               APIURLDefault,
+		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		maxCheckpointGraceSeconds: 600,
+	}
+	exp := checkpointWindowExperiment(nil)
+
+	job, err := c.BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 5 {
+		t.Fatalf("pod grace = %d, want 5: a job that declared no checkpoint window must shut down exactly as it did before", got)
+	}
+}
+
+// The window a job declares is the window its pod actually gets, because it is the pod's own
+// TerminationGracePeriodSeconds that the kubelet honours -- and when the Job is deleted it is
+// Kubernetes' garbage collector, not this code, that deletes these pods, using whatever the pod
+// declares. A window recorded anywhere else would be a window the job never receives.
+func TestPodGraceIsTheDeclaredCheckpointWindow(t *testing.T) {
+	c := &JobWorkloadClient{
+		apiURL:                               APIURLDefault,
+		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		maxCheckpointGraceSeconds: 600,
+	}
+	exp := checkpointWindowExperiment(int64Ptr(300))
+
+	job, err := c.BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 300 {
+		t.Fatalf("pod grace = %d, want 300: the declared checkpoint window is what the kubelet must wait", got)
+	}
+}
+
+// The cap is what keeps the promise honest. Without it a job could hold contended accelerators
+// for as long as it liked simply by claiming it was still saving, which is worse than the lost
+// work the window exists to prevent.
+func TestDeclaredCheckpointWindowIsCappedAtTheConfiguredMaximum(t *testing.T) {
+	c := &JobWorkloadClient{
+		apiURL:                               APIURLDefault,
+		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		maxCheckpointGraceSeconds: 600,
+	}
+	exp := checkpointWindowExperiment(int64Ptr(86400))
+
+	job, err := c.BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 600 {
+		t.Fatalf("pod grace = %d, want 600: a job must not be able to hold hardware indefinitely by asking for a longer window", got)
+	}
+}
+
+// The ordinary shutdown grace has to survive on the pod even when the pod's own grace has been
+// widened to hold a checkpoint window, because that is the only number left to shorten the pod
+// back to when a termination earns no window. Losing it would mean an infrastructure failure
+// spending the full checkpoint window on hardware it has nothing to save on.
+func TestPodRecordsItsOrdinaryShutdownGraceAlongsideAWidenedCheckpointWindow(t *testing.T) {
+	c := &JobWorkloadClient{
+		apiURL:                               APIURLDefault,
+		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		maxCheckpointGraceSeconds: 600,
+	}
+	exp := checkpointWindowExperiment(int64Ptr(300))
+	exp.Job.TerminationGracePeriodSeconds = int64Ptr(20)
+
+	job, err := c.BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Annotations[GraceSecondsAnnotation]; got != "20" {
+		t.Fatalf("recorded shutdown grace = %q, want %q: without it there is nothing to shorten a widened pod back to", got, "20")
+	}
+}
+
+// A gang is signalled as a gang. Every rank of a distributed job and every group of a
+// heterogeneous one runs from a pod template built here, so the window has to be on every one of
+// them -- one rank still holding its accelerators after the others were killed is the stranding
+// this platform already refuses to do on failure.
+func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
+	c := &JobWorkloadClient{
+		apiURL:                               APIURLDefault,
+		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		maxCheckpointGraceSeconds: 600,
+	}
+	exp := checkpointWindowExperiment(int64Ptr(300))
+	exp.Job.AcceleratorCount = 0
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = "", "", ""
+	exp.Job.Groups = []domain.JobGroup{
+		{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi", AcceleratorCount: 1},
+		{Name: "actors", Replicas: 3, CPU: "1", Memory: "2Gi", Storage: "1Gi"},
+	}
+
+	jobs, err := c.BuildJobs(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("built %d Jobs, want 2 (one per group)", len(jobs))
+	}
+	for _, job := range jobs {
+		if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 300 {
+			t.Fatalf("group %q pod grace = %d, want 300: every rank of the gang gets the window, not just the first group", job.Labels["hypothesisloop.io/job-group"], got)
+		}
+	}
+}
+
+func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
+	return &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "checkpoint-window", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			MaxRetries: intPtr(0), AcceleratorCount: 1,
+			AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+			CheckpointGraceSeconds: checkpointGrace,
+		},
+	}
+}

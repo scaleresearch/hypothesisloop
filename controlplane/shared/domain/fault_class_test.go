@@ -283,3 +283,31 @@ func TestClassifyCountsFoldsDetailedReasonsIntoTheirClass(t *testing.T) {
 		t.Errorf("%d failure(s) landed in unclassified — the detail suffix was not stripped", got)
 	}
 }
+
+// The checkpoint window is granted to exactly one class. A job the platform itself decided to
+// stop was doing nothing wrong and its work is worth saving; a job the environment killed has
+// nothing left to save it with, and a job its own code killed has nothing to save. Granting the
+// window on class rather than on status is what keeps a preempted job (requeued, still holding
+// its accelerators for a moment) apart from a job whose node vanished.
+func TestOnlyAPolicyTerminationGrantsACheckpointWindow(t *testing.T) {
+	exps := []*Experiment{
+		{ID: "preempted", EvictionReason: string(EvictionPreemptedForGuaranteed)},
+		{ID: "node-gone", EvictionReason: string(EvictionWorkloadGone)},
+		{ID: "bad-image", EvictionReason: string(EvictionUnschedulable)},
+		{ID: "stage-cut", EvictionReason: string(EvictionStageCut)},
+	}
+	granted := CheckpointWindowGrants(exps)
+	if len(granted) != 2 || granted[0] != "preempted" || granted[1] != "stage-cut" {
+		t.Fatalf("granted = %v, want [preempted stage-cut]: only the platform's own decisions earn a window", granted)
+	}
+}
+
+// An experiment that ended with no eviction reason at all -- it simply completed -- is not a
+// termination and must not be handed a window. It reaches this list only because it stopped
+// being desired, which every finished job does.
+func TestAnExperimentWithNoEvictionReasonGrantsNoCheckpointWindow(t *testing.T) {
+	granted := CheckpointWindowGrants([]*Experiment{{ID: "completed"}})
+	if len(granted) != 0 {
+		t.Fatalf("granted = %v, want none: a job that finished on its own was never terminated", granted)
+	}
+}

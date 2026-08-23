@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -47,6 +48,27 @@ ORDER BY id`
 	rows, err := s.pool.pool.Query(ctx, q, clusterName, desiredStatuses)
 	if err != nil {
 		return nil, fmt.Errorf("db.ListDesiredWorkloads: %w", err)
+	}
+	defer rows.Close()
+	return collectExperiments(rows)
+}
+
+// ListRecentlyUndesiredWorkloads returns every experiment on clusterName that has left the
+// desired set within the last `within` — the rows a termination decision was just written to.
+// It exists so the reconcile feed can say which of the workloads about to be deleted earned a
+// checkpoint window, without any new table, column or lifecycle state to hold that fact: the
+// termination is already recorded on the experiment (its status and its eviction reason), and
+// `within` is what makes the answer expire on its own instead of needing to be cleared.
+//
+// Bounded rather than unbounded deliberately. Every experiment this cluster has ever finished is
+// "not desired"; only the ones that stopped being desired moments ago are still being torn down.
+func (s *ClusterQueueStore) ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error) {
+	q := `SELECT` + experimentColumns + `FROM experiments
+WHERE cluster_name = $1 AND status <> ALL($2) AND updated_at > now() - $3::interval
+ORDER BY id`
+	rows, err := s.pool.pool.Query(ctx, q, clusterName, desiredStatuses, within.String())
+	if err != nil {
+		return nil, fmt.Errorf("db.ListRecentlyUndesiredWorkloads: %w", err)
 	}
 	defer rows.Close()
 	return collectExperiments(rows)

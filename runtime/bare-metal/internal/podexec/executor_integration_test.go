@@ -24,6 +24,7 @@ func newTestExecutor(t *testing.T) *Executor {
 		APIURL:                               "http://example.invalid:8083",
 		DefaultTerminationGracePeriodSeconds: 5,
 		MaxTerminationGracePeriodSeconds:     30,
+		MaxCheckpointGraceSeconds:            600,
 		ScratchDir:                           dir,
 		NodeName:                             "integration-test-node",
 	})
@@ -60,7 +61,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 		t.Fatalf("CreateWorkload: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = e.DeleteWorkload(context.Background(), exp.ID)
+		_ = e.DeleteWorkload(context.Background(), exp.ID, false)
 		_ = e.removeContainer(context.Background(), containerName(exp.ID))
 	})
 
@@ -102,7 +103,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 		t.Fatalf("expected phase succeeded, got %v", phase)
 	}
 
-	if err := e.DeleteWorkload(ctx, exp.ID); err != nil {
+	if err := e.DeleteWorkload(ctx, exp.ID, false); err != nil {
 		t.Fatalf("DeleteWorkload: %v", err)
 	}
 	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{}); err != nil {

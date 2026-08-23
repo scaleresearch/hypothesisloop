@@ -45,6 +45,7 @@ func main() {
 		APIURL:                               apiURL,
 		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
 		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
+		MaxCheckpointGraceSeconds:            pcfg.Scheduler.MaxCheckpointGraceSeconds,
 		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
 	})
 	if err != nil {

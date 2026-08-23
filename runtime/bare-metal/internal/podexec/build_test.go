@@ -298,3 +298,78 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 		t.Fatalf("command = %v, want the group's own — a grouped job's process is stated per group", cs.Command)
 	}
 }
+
+func checkpointGracePtr(v int64) *int64 { return &v }
+
+// The window a job declares is recorded on the container it will be stopped with, because the
+// only thing DeleteWorkload is given is an experiment id -- the job's declaration is long gone
+// from desired state by the time the platform decides to stop it.
+func TestContainerRecordsTheDeclaredCheckpointWindow(t *testing.T) {
+	e := &Executor{
+		apiURL:                               "http://example.invalid:8083",
+		defaultTerminationGracePeriodSeconds: 5,
+		maxTerminationGracePeriodSeconds:     30,
+		maxCheckpointGraceSeconds:            600,
+	}
+	cs, err := e.BuildContainerSpec(checkpointWindowExperiment(checkpointGracePtr(300)), Placement{DevicePaths: []string{"/dev/tenstorrent/0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cs.Labels[LabelCheckpointGrace]; got != "300" {
+		t.Fatalf("recorded checkpoint window = %q, want %q", got, "300")
+	}
+}
+
+// The cap is what keeps the promise honest: without it a job could hold this node's accelerators
+// for as long as it liked simply by claiming it was still saving.
+func TestDeclaredCheckpointWindowIsCappedAtTheConfiguredMaximum(t *testing.T) {
+	e := &Executor{
+		apiURL:                               "http://example.invalid:8083",
+		defaultTerminationGracePeriodSeconds: 5,
+		maxTerminationGracePeriodSeconds:     30,
+		maxCheckpointGraceSeconds:            600,
+	}
+	cs, err := e.BuildContainerSpec(checkpointWindowExperiment(checkpointGracePtr(86400)), Placement{DevicePaths: []string{"/dev/tenstorrent/0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cs.Labels[LabelCheckpointGrace]; got != "600" {
+		t.Fatalf("recorded checkpoint window = %q, want %q: a job must not hold hardware indefinitely by asking for longer", got, "600")
+	}
+}
+
+// A policy-class termination is the platform's own decision about a job that was fine, so the
+// container is signalled and then given the window it declared instead of the ordinary grace.
+func TestAPolicyTerminationStopsTheContainerOnTheCheckpointWindow(t *testing.T) {
+	e := &Executor{defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30, maxCheckpointGraceSeconds: 600}
+	labels := map[string]string{LabelGraceSeconds: "5", LabelCheckpointGrace: "300"}
+	if got := e.stopGrace(labels, true); got != 300 {
+		t.Fatalf("stop grace = %d, want 300: a job the platform chose to stop must get its checkpoint window", got)
+	}
+}
+
+// An infrastructure or workload failure gets no window -- there is nothing to save, or nothing
+// left to save it with -- and neither does a drift replacement, which is not a termination at
+// all and would only be delaying its own recreation.
+func TestANonPolicyTerminationStopsTheContainerOnTheOrdinaryGrace(t *testing.T) {
+	e := &Executor{defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30, maxCheckpointGraceSeconds: 600}
+	labels := map[string]string{LabelGraceSeconds: "5", LabelCheckpointGrace: "300"}
+	if got := e.stopGrace(labels, false); got != 5 {
+		t.Fatalf("stop grace = %d, want 5: only a policy termination may spend the checkpoint window", got)
+	}
+}
+
+func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
+	return &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "checkpoint-window", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			MaxRetries: maxRetriesPtr(0), AcceleratorCount: 1,
+			AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
+			CheckpointGraceSeconds: checkpointGrace,
+		},
+	}
+}

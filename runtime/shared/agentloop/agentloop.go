@@ -94,7 +94,7 @@ func (a *Agent) reconcileLoop(ctx context.Context) {
 }
 
 func (a *Agent) reconcileOnce(ctx context.Context) error {
-	desired, err := a.fetchDesiredState(ctx)
+	desired, checkpointWindow, err := a.fetchDesiredState(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch desired state: %w", err)
 	}
@@ -138,7 +138,11 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 				continue
 			}
 			if !matches {
-				if err := a.Executor.DeleteWorkload(ctx, id); err != nil {
+				// No checkpoint window: this is not a termination at all. The workload is
+				// being replaced with the one desired state now asks for, and the next pass
+				// recreates it — making the job save a checkpoint it is about to be restarted
+				// past would only delay its own replacement.
+				if err := a.Executor.DeleteWorkload(ctx, id, false); err != nil {
 					a.Log("delete drifted workload %s: %v", id, err)
 					reconcileErrors = append(reconcileErrors, fmt.Errorf("delete drifted workload %s: %w", id, err))
 					continue
@@ -186,7 +190,10 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		if desiredByID[id] != nil {
 			continue
 		}
-		if err := a.Executor.DeleteWorkload(ctx, id); err != nil {
+		// The one place a checkpoint window can apply: this workload is no longer desired, so
+		// something ended it, and the control plane has already said which endings earn a
+		// window. A workload absent from the grant list is deleted as it always has been.
+		if err := a.Executor.DeleteWorkload(ctx, id, checkpointWindow[id]); err != nil {
 			a.Log("delete workload %s: %v", id, err)
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("delete workload %s: %w", id, err))
 			continue
@@ -194,7 +201,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("deleted workload %s (no longer desired)", id)
 	}
 	for _, id := range orphanAuxiliaryIDs(desiredByID, actualSet, auxiliary) {
-		if err := a.Executor.DeleteWorkload(ctx, id); err != nil {
+		if err := a.Executor.DeleteWorkload(ctx, id, false); err != nil {
 			a.Log("delete orphan auxiliary resources %s: %v", id, err)
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("delete orphan auxiliary resources %s: %w", id, err))
 			continue
@@ -219,26 +226,29 @@ func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[st
 	return orphans
 }
 
-func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, error) {
+// fetchDesiredState returns this cluster's desired workloads and the set of experiment ids whose
+// termination the control plane granted a checkpoint window — the two halves of one pass's view:
+// what should exist, and which of the things that should not may still exist for a moment.
+func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, map[string]bool, error) {
 	cpuAvail, cpuTotal, err := a.Executor.GetLiveCPUCapacity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get live CPU capacity: %w", err)
+		return nil, nil, fmt.Errorf("get live CPU capacity: %w", err)
 	}
 	acceleratorAvail, acceleratorTotal, acceleratorByNode, nodeLabels, err := a.Executor.GetLiveAcceleratorCapacitySnapshot(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get live accelerator capacity: %w", err)
+		return nil, nil, fmt.Errorf("get live accelerator capacity: %w", err)
 	}
 	ramAvail, ramTotal, err := a.Executor.GetLiveRAMCapacity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get live RAM capacity: %w", err)
+		return nil, nil, fmt.Errorf("get live RAM capacity: %w", err)
 	}
 	storageAvail, storageTotal, err := a.Executor.GetLiveStorageCapacity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get live storage capacity: %w", err)
+		return nil, nil, fmt.Errorf("get live storage capacity: %w", err)
 	}
 	nodeResources, err := a.Executor.GetLiveNodeResourceCapacity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get live per-node resource capacity: %w", err)
+		return nil, nil, fmt.Errorf("get live per-node resource capacity: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
@@ -251,29 +261,37 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, er
 		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("encode reconcile snapshot: %w", err)
+		return nil, nil, fmt.Errorf("encode reconcile snapshot: %w", err)
 	}
 	url := fmt.Sprintf("%s/internal/clusters/%s/reconcile", a.APIURL, a.ClusterName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	var body struct {
 		Experiments []*domain.Experiment `json:"experiments"`
+		// CheckpointWindow is the ids the control plane decided are entitled to their declared
+		// checkpoint window on the way out. A plain grant list, not a class or a rule: this loop
+		// hands each id straight to DeleteWorkload and interprets nothing.
+		CheckpointWindow []string `json:"checkpoint_window"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return body.Experiments, nil
+	granted := make(map[string]bool, len(body.CheckpointWindow))
+	for _, id := range body.CheckpointWindow {
+		granted[id] = true
+	}
+	return body.Experiments, granted, nil
 }
 
 type statusReportWire struct {

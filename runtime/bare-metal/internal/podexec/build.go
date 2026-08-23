@@ -243,6 +243,20 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	}
 	cs.Labels[LabelGraceSeconds] = fmt.Sprintf("%d", grace)
 
+	// The checkpoint window, capped, recorded separately from the shutdown grace above rather
+	// than folded into it: only a policy-class termination gets to spend it, and every other
+	// stop of this container -- a drift replacement, an infrastructure failure -- must still
+	// take the ordinary grace. DeleteWorkload picks between them from what the control plane
+	// granted, and cannot pick a window the job never declared.
+	checkpointGrace := int64(0)
+	if spec.CheckpointGraceSeconds != nil {
+		checkpointGrace = *spec.CheckpointGraceSeconds
+		if checkpointGrace > e.maxCheckpointGraceSeconds {
+			checkpointGrace = e.maxCheckpointGraceSeconds
+		}
+	}
+	cs.Labels[LabelCheckpointGrace] = fmt.Sprintf("%d", checkpointGrace)
+
 	hash, err := hashContainerSpec(cs)
 	if err != nil {
 		return containerSpec{}, err

@@ -81,7 +81,7 @@ func (e *captureExecutor) GetLiveStorageCapacity(context.Context) (int64, int64,
 func (e *captureExecutor) GetLiveAcceleratorCapacitySnapshot(context.Context) (map[string]int64, map[string]int64, map[string]map[string]int64, map[string]map[string]string, error) {
 	return map[string]int64{}, map[string]int64{}, map[string]map[string]int64{}, map[string]map[string]string{}, nil
 }
-func (e *captureExecutor) DeleteWorkload(_ context.Context, id string) error {
+func (e *captureExecutor) DeleteWorkload(_ context.Context, id string, _ bool) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deleted = append(e.deleted, id)

@@ -103,6 +103,15 @@ type SchedulerConfig struct {
 	DefaultTerminationGracePeriodSeconds int `yaml:"default_termination_grace_period_seconds"`
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
 	MaxTerminationGracePeriodSeconds int `yaml:"max_termination_grace_period_seconds"`
+	// MaxCheckpointGraceSeconds caps job.checkpoint_grace_seconds — the window a job gets, after
+	// being told a policy-class termination is coming, to write a checkpoint it can resume from.
+	// Deliberately NOT the same knob as MaxTerminationGracePeriodSeconds: that one bounds an
+	// ordinary container shutdown and is measured in seconds, while this one has to be long
+	// enough to serialise a real model, and letting one number serve both would either make
+	// every kill wait minutes or leave a checkpoint half-written. Required and positive; it is
+	// what keeps the promise honest, since a job must not be able to hold contended accelerators
+	// indefinitely by claiming it is still saving.
+	MaxCheckpointGraceSeconds int `yaml:"max_checkpoint_grace_seconds"`
 	// MaxInfrastructureRequeues bounds how many times one experiment may be returned to the
 	// queue for free after an infrastructure-class eviction reason (see domain.FaultClass) —
 	// the environment failed it, so it costs no max_retries attempt and no accelerator-hours.

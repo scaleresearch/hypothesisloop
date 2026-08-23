@@ -60,6 +60,7 @@ func main() {
 		APIURL:                               apiURL,
 		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
 		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
+		MaxCheckpointGraceSeconds:            pcfg.Scheduler.MaxCheckpointGraceSeconds,
 		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
 		ScratchDir:                           scratchDir,
 		NodeLabels:                           parseNodeLabels(os.Getenv("NODE_LABELS")),

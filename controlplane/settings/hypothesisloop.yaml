@@ -151,6 +151,13 @@ scheduler:
   default_termination_grace_period_seconds: 5
   max_termination_grace_period_seconds: 30
 
+  # The cap on job.checkpoint_grace_seconds: how long a job may be given, after it is told a
+  # policy-class termination (preemption, a stage cut, quota exhaustion, the duration cap) is
+  # coming, to write a checkpoint it can resume from. Separate from the shutdown grace above
+  # because 30s does not checkpoint a serious model -- and capped, because a job must not hold
+  # contended accelerators indefinitely by claiming it is still saving.
+  max_checkpoint_grace_seconds: 600
+
   # One line of a job's reported log tail is split (never truncated/dropped) above this many
   # characters -- large enough to keep a real compiler error or stack frame intact, small enough
   # that one pathological line can't blow up a single status push.

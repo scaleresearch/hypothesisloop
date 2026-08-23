@@ -48,6 +48,8 @@ const (
 	DefaultTerminationGracePeriodSeconds = int64(5)
 	// DefaultMaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
 	DefaultMaxTerminationGracePeriodSeconds = int64(30)
+	// DefaultMaxCheckpointGraceSeconds caps job.checkpoint_grace_seconds.
+	DefaultMaxCheckpointGraceSeconds = int64(600)
 )
 
 type Config struct {
@@ -58,6 +60,10 @@ type Config struct {
 	DefaultTerminationGracePeriodSeconds int
 	// MaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
 	MaxTerminationGracePeriodSeconds int
+	// MaxCheckpointGraceSeconds caps job.checkpoint_grace_seconds — the window a policy-class
+	// termination gives a job to write a checkpoint. Separate from the shutdown grace above
+	// because it is measured in minutes, not seconds.
+	MaxCheckpointGraceSeconds int
 	// PricedAcceleratorTypes are the accelerator types the operator's catalog attaches a rate
 	// to (hypothesisloop.yaml accelerator_types). Capacity reporting is limited to these — see
 	// GetLiveAcceleratorCapacitySnapshot.
@@ -70,6 +76,7 @@ type JobWorkloadClient struct {
 	apiURL                               string
 	defaultTerminationGracePeriodSeconds int64
 	maxTerminationGracePeriodSeconds     int64
+	maxCheckpointGraceSeconds            int64
 	// pricedAcceleratorTypes bounds what capacity reporting names — see Config.PricedAcceleratorTypes.
 	pricedAcceleratorTypes map[string]bool
 }
@@ -78,7 +85,8 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("workload: APIURL is required")
 	}
-	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 {
+	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 ||
+		cfg.MaxCheckpointGraceSeconds <= 0 {
 		return nil, fmt.Errorf("workload: termination settings must be positive")
 	}
 	restCfg, err := buildRestConfig(cfg.KubeconfigPath, cfg.KubeContext)
@@ -113,6 +121,7 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 		apiURL:                               reg,
 		defaultTerminationGracePeriodSeconds: defaultGrace,
 		maxTerminationGracePeriodSeconds:     maxGrace,
+		maxCheckpointGraceSeconds:            int64(cfg.MaxCheckpointGraceSeconds),
 		pricedAcceleratorTypes:               priced,
 	}, nil
 }
