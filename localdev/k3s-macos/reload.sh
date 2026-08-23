@@ -49,13 +49,21 @@ fi
 # nothing, every agent kept running the previous image, and the first symptom was the control
 # plane rejecting a stale agent's reports minutes later.
 
+# One image per archive, deliberately. `podman save a b c -o one.tar` writes a multi-image
+# docker-archive whose tags all collapse onto a single digest when containerd imports it — so
+# every tag resolved to whichever image happened to win, job pods ran the cluster-agent binary and
+# died with "NODE_NAME is required", nothing ever reported a metric, and settlement then failed for
+# want of a metrics table. Three unrelated-looking symptoms, one archive.
+
 # A native k3s server keeps its own containerd store, and the cluster-agent runs there — so
 # the server needs the images too, not only the fake worker containers.
 if command -v k3s >/dev/null 2>&1; then
   echo "==> Importing images into the k3s server..."
   SERVER_TARBALL="/tmp/reload-images-server.tar"
-  podman save "${IMAGES[@]/#/localhost/}" -o "${SERVER_TARBALL}"
-  sudo k3s ctr images import "${SERVER_TARBALL}" >/dev/null
+  for img in "${IMAGES[@]}"; do
+    podman save "localhost/${img}:latest" -o "${SERVER_TARBALL}"
+    sudo k3s ctr images import "${SERVER_TARBALL}" >/dev/null
+  done
   rm -f "${SERVER_TARBALL}"
   echo "    k3s server: synced"
 fi
@@ -94,13 +102,15 @@ fi
 if [[ "${#FAKE_NODES[@]}" -gt 0 ]]; then
   echo "==> Importing images into ${#FAKE_NODES[@]} fake node container(s) (${PODMAN_CMD})..."
   TARBALL="/tmp/reload-images.tar"
-  podman save "${IMAGES[@]/#/localhost/}" -o "${TARBALL}"
   for node in "${FAKE_NODES[@]}"; do
-    ${PODMAN_CMD} cp "${TARBALL}" "${node}:/tmp/reload-images.tar"
-    # Explicit --address: bare `ctr` (and `k3s ctr`) default to the container's own
-    # containerd socket, not the k3s-embedded one the kubelet actually reads from.
-    ${PODMAN_CMD} exec "${node}" ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import /tmp/reload-images.tar >/dev/null
-    ${PODMAN_CMD} exec "${node}" rm -f /tmp/reload-images.tar
+    for img in "${IMAGES[@]}"; do
+      podman save "localhost/${img}:latest" -o "${TARBALL}"
+      ${PODMAN_CMD} cp "${TARBALL}" "${node}:/tmp/reload-image.tar"
+      # Explicit --address: bare `ctr` (and `k3s ctr`) default to the container's own
+      # containerd socket, not the k3s-embedded one the kubelet actually reads from.
+      ${PODMAN_CMD} exec "${node}" ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import /tmp/reload-image.tar >/dev/null
+    done
+    ${PODMAN_CMD} exec "${node}" rm -f /tmp/reload-image.tar
     echo "    ${node}: synced"
   done
   rm -f "${TARBALL}"

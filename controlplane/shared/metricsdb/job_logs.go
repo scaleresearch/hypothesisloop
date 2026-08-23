@@ -3,6 +3,7 @@ package metricsdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -106,7 +107,17 @@ type greptimeSQLResponse struct {
 		} `json:"records"`
 	} `json:"output"`
 	Error string `json:"error"`
+	Code  int    `json:"code"`
 }
+
+// greptimeCodeTableNotFound is GreptimeDB's typed code for a query naming a table that does not
+// exist. Matched on the code, never on the message text, for the same reason the fault taxonomy
+// is: a message is free to be reworded and a code is not.
+const greptimeCodeTableNotFound = 4001
+
+// errTableNotFound lets querySQLRows recognise that specific failure without re-inspecting the
+// response, and lets any other caller opt in explicitly rather than by accident.
+var errTableNotFound = errors.New("metricsdb: table does not exist yet")
 
 // execSQL runs a SQL statement against GreptimeDB with no result rows expected (DDL/DML).
 func execSQL(ctx context.Context, dbURL, sql string) error {
@@ -115,9 +126,21 @@ func execSQL(ctx context.Context, dbURL, sql string) error {
 }
 
 // querySQLRows runs a SQL query and returns its result rows.
+//
+// A table that does not exist yet reads as no rows, not as a failure. Metric tables are created
+// by the first write to them, so on a deployment where no job has reported yet EVERY read of one
+// is a table-not-found — and treating that as an error meant settlement could not compute
+// observed hours, so no job's quota was ever refunded until some unrelated job happened to post
+// the first metric. "Nothing has been written" and "this job wrote nothing" are the same answer,
+// and it is zero rows.
+//
+// Deliberately not applied to execSQL: a DDL statement naming a missing table is a real fault.
 func querySQLRows(ctx context.Context, dbURL, sql string) ([][]any, error) {
 	resp, err := doSQL(ctx, dbURL, sql)
 	if err != nil {
+		if errors.Is(err, errTableNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if len(resp.Output) == 0 || resp.Output[0].Records == nil {
@@ -147,6 +170,9 @@ func doSQL(ctx context.Context, dbURL, sql string) (*greptimeSQLResponse, error)
 		return nil, fmt.Errorf("decode response: %w (body=%s)", err, string(body))
 	}
 	if out.Error != "" {
+		if out.Code == greptimeCodeTableNotFound {
+			return nil, fmt.Errorf("greptimedb: %s: %w", out.Error, errTableNotFound)
+		}
 		return nil, fmt.Errorf("greptimedb: %s", out.Error)
 	}
 	return &out, nil
