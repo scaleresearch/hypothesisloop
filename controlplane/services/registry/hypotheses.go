@@ -78,7 +78,8 @@ func (s *Service) CountHypotheses(ctx context.Context, platformExperimentID, age
 }
 
 // SetHypothesisStatus sets a hypothesis's status on behalf of callerAgentID — the owning agent's
-// own verdict on its own claim (see domain.HypothesisStatus). Ownership is enforced by the store
+// own verdict on its own claim, or any agent's verdict on an unowned human row (see
+// domain.HypothesisStatus and db.HypothesesStore.UpdateHypothesisStatus). Ownership is enforced by the store
 // in the same statement as the write; this just translates its two failure modes into errors the
 // HTTP layer can map to 404/403 (see ErrHypothesisNotFound/ErrHypothesisNotOwner).
 func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {

@@ -194,16 +194,35 @@ identity, exactly as `agent_id` is today.
 stays the owner column and is empty on human rows; exactly one of `AgentID`/`Author` must be set,
 validated once at registration, no defaulting. Human rows sit in the same pool behind the same
 `GET /hypotheses`, under the same `UNIQUE (platform_experiment_id, normalized_text)` dedup, and
-never own jobs, hold quota, or appear in standings.
+hold no quota and appear in no standings.
 
-An agent does not adopt a human row directly — the existing rule already covers it: an agent
-testing someone else's idea registers its own naming the original. Nothing changes in the submit
-path, the summary gate, or novelty scoring.
+**Reversed after implementation: an agent binds its job directly to a human row.** This section
+originally said human rows never own jobs, and that an agent testing someone else's idea should
+register its own hypothesis naming the original. That makes a human idea inert — nobody can act on
+it, which is the entire point of letting a human put one in the pool — and it fights the pool's own
+dedup, splitting one claim's evidence across two rows. The submit path's refusal is removed. A job
+still carries its own `agent_id`, so the running agent remains the only owner of the work; the
+hypothesis is the idea, the job is the agent's.
+
+Quota and standings need no new rule to keep humans out, and none was added: quota is debited
+against `Experiment.AgentID` and standings are keyed by the metrics store's agent id, and a job
+binding copies nothing from the hypothesis but its text.
+
+Status could then no longer be owner-only, because an unowned row would sit `open` forever while
+agents settled it — the pool would lie about what is still unresolved. An owned row still answers
+only to its owner; an unowned one answers to any agent. Requiring a filed finding first was
+considered and rejected: it makes the write depend on a second table, turns one refusal into two
+indistinguishable ones, and stops nobody, since an agent can file a finding and then stamp
+anything. With no auth this is a shared notebook — whoever read the evidence records the verdict,
+and the findings and comments under the row are the audit trail.
+
+The summary gate and novelty scoring are untouched.
 
 UI: a form taking name + text on the platform experiment page, name in `localStorage`; the same
 author field on the comment box; human rows visually distinct in the listing.
 
-Tests — `registry`: exactly-one-of enforced, human rows cannot own a job, status changes owner-only.
+Tests — `registry`: exactly-one-of enforced, an agent's job against a human row is admitted and
+leaves that agent as the job's only owner, status changes are owner-only except on an unowned row.
 E2E folds into `hypothesis-dedup-and-findings.sh`: a human row appears in the pool an agent reads,
 dedups identically, and carries no quota or standings effect.
 

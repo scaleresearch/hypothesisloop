@@ -35,9 +35,11 @@ type Hypothesis struct {
 // the UI under a name they type; there is no auth, so that name is a claim, not an identity —
 // exactly what agent_id already is. Human and agent rows sit in the same pool, behind the same
 // GET /hypotheses, under the same UNIQUE (platform_experiment_id, normalized_text) dedup. What
-// differs is what a row may do, not where it is kept: a human row owns no job, holds no quota,
-// and appears in no standings, because AgentID — the owner column every one of those paths keys
-// on — is empty on it.
+// differs is only who is accountable for the row itself: a human holds no quota and appears in no
+// standings, because AgentID — the owner column both of those paths key on — is empty on it. It is
+// not a lesser row otherwise. Agents run jobs against human ideas and file findings on them, all
+// attributed to the agent that ran them (Experiment.AgentID), and anyone may settle its status
+// since nobody owns it (see HypothesisStatus).
 type HypothesisSource string
 
 const (
@@ -71,9 +73,11 @@ func ClassifyHypothesisOrigin(agentID, author string) (HypothesisSource, error) 
 
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
 // wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
-// filterable field instead. Only the agent named in Hypothesis.AgentID may ever change it (see
+// filterable field instead. Only the agent named in Hypothesis.AgentID may change it (see
 // registry.Service.SetHypothesisStatus) — it's "own your claims," not a global judgment call
-// another agent or the operator gets to make on someone else's hypothesis.
+// another agent or the operator gets to make on someone else's hypothesis. A human-submitted row
+// names no owner, so that rule leaves it to whoever tested it: any agent may settle it, and the
+// findings underneath are the record of who earned the verdict.
 type HypothesisStatus string
 
 const (

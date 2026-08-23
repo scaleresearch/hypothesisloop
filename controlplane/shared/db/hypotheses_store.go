@@ -351,10 +351,19 @@ var ErrNotOwner = fmt.Errorf("hypotheses_store: caller does not own this hypothe
 // read-then-check) so there's no TOCTOU window. Returns ErrNotOwner if the hypothesis exists but
 // belongs to a different agent, or a "not found" nil/nil if no such hypothesis exists at all —
 // callers distinguish the two with a preceding existence check if they need a different message.
-// A human-submitted row has a NULL agent_id, so no caller ever matches it and its status stays
-// where it was registered — no separate rule, the owner column simply names nobody.
+// A human-submitted row has a NULL agent_id — nobody owns it, so any agent may settle it. That is
+// the whole rule: `agent_id = $2 OR agent_id IS NULL`, one predicate, still a single statement.
+// The alternative considered was to let an agent settle a human row only once it had filed a
+// finding against it. It is rejected as more machinery for a weaker guarantee: it makes the write
+// depend on a second table, turns one refusal into two indistinguishable ones (not owner / no
+// finding yet), and still stops nobody determined — an agent can file a finding and then stamp
+// whatever it likes. This is a shared lab notebook with no auth (important.md #14), so the honest
+// model is a wiki page: whoever read the evidence records the verdict, and the findings and
+// comments hanging off the row are the audit trail if the verdict is wrong. Leaving it unsettable
+// is not an option — agents can now run jobs against a human row, and one that stays `open` after
+// being settled makes the pool lie about what is still unresolved.
 func (s *HypothesesStore) UpdateHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
-	const q = `UPDATE hypotheses SET status = $3 WHERE id = $1 AND agent_id = $2 RETURNING ` + hypothesisColumns
+	const q = `UPDATE hypotheses SET status = $3 WHERE id = $1 AND (agent_id = $2 OR agent_id IS NULL) RETURNING ` + hypothesisColumns
 	row := s.pool.pool.QueryRow(ctx, q, id, callerAgentID, status)
 	h, err := scanHypothesis(row)
 	if err != nil {

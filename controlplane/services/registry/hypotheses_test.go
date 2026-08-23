@@ -36,18 +36,28 @@ func (s *poolStore) FindOrCreateHypothesis(_ context.Context, source domain.Hypo
 	return h, false, nil
 }
 
-// UpdateHypothesisStatus mirrors the store's single-statement ownership check: the update names
-// the owner in its WHERE clause, and a row whose agent_id is empty is owned by nobody.
+// UpdateHypothesisStatus mirrors the store's single-statement predicate,
+// `agent_id = $2 OR agent_id IS NULL`: an owned row answers only to its owner, and a row nobody
+// owns answers to whoever tested it.
 func (s *poolStore) UpdateHypothesisStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
 	h, ok := s.rows[id]
 	if !ok {
 		return nil, nil
 	}
-	if h.AgentID == "" || h.AgentID != callerAgentID {
+	if h.AgentID != "" && h.AgentID != callerAgentID {
 		return nil, db.ErrNotOwner
 	}
 	h.Status = status
 	return h, nil
+}
+
+// CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
+// beyond its id — a note is attached to a row, not authorised against its owner.
+func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
+	return &domain.HypothesisComment{
+		ID: "c-1", HypothesisID: hypothesisID, Source: source,
+		AgentID: agentID, Author: author, Text: text,
+	}, nil
 }
 
 func poolService(store Store) *Service {
@@ -123,23 +133,26 @@ func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *te
 	}
 }
 
-// A hypothesis's status is its owner's verdict on its own claim. A human row has no owner, so
-// nobody may set it — otherwise any agent could stamp "refuted" on an idea someone else put in
-// the pool and take it out of circulation without running anything.
-func TestSetHypothesisStatusRefusesAnAgentSettingAHumanRowsStatus(t *testing.T) {
-	store := newPoolStore()
-	svc := poolService(store)
+// Agents run jobs against human ideas, so a human idea gets settled — and with no owner to settle
+// it, the row would sit open forever and the pool would lie about what is still unresolved. The
+// rule is therefore the owner predicate read literally: nobody owns it, so whoever tested it may
+// record the verdict, with the findings underneath as the record of who earned it.
+func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
+	svc := poolService(newPoolStore())
 	human, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps")
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	_, err = svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", domain.HypothesisRefuted)
-	if !errors.Is(err, ErrHypothesisNotOwner) {
-		t.Fatalf("SetHypothesisStatus on a human row: got = %v, want %v", err, ErrHypothesisNotOwner)
+	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", domain.HypothesisRefuted)
+	if err != nil {
+		t.Fatalf("SetHypothesisStatus on a human row: got = %v, want nil", err)
 	}
-	if human.Status != domain.HypothesisOpen {
-		t.Errorf("status after the refused write: got = %v, want %v", human.Status, domain.HypothesisOpen)
+	if settled.Status != domain.HypothesisRefuted {
+		t.Errorf("status: got = %v, want %v", settled.Status, domain.HypothesisRefuted)
+	}
+	if settled.AgentID != "" {
+		t.Errorf("agent_id after settling: got = %v, want it to stay unowned", settled.AgentID)
 	}
 }
 
@@ -157,6 +170,30 @@ func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testi
 	}
 	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-1", domain.HypothesisRefuted); err != nil {
 		t.Fatalf("SetHypothesisStatus by the owner: got = %v, want nil", err)
+	}
+}
+
+// Discussion of an idea has to reach the row the idea is on. If an agent could not comment on a
+// human's hypothesis, its observations would have to land somewhere else, and the evidence for one
+// claim would end up split across two rows — the same fragmentation that refusing to run jobs
+// against human rows caused. Nothing about the hypothesis's source is consulted when a note is
+// attached, and this test holds that open.
+func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.T) {
+	svc := poolService(newPoolStore())
+	human, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps")
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+
+	c, err := svc.AddHypothesisComment(context.Background(), human.ID, "agent-1", "", "retested at 500 steps")
+	if err != nil {
+		t.Fatalf("AddHypothesisComment on a human row: got = %v, want nil", err)
+	}
+	if c.AgentID != "agent-1" || c.Source != domain.HypothesisSourceAgent {
+		t.Errorf("comment attribution: got = (%v, %v), want (agent-1, %v)", c.AgentID, c.Source, domain.HypothesisSourceAgent)
+	}
+	if c.HypothesisID != human.ID {
+		t.Errorf("comment hypothesis_id: got = %v, want %v", c.HypothesisID, human.ID)
 	}
 }
 

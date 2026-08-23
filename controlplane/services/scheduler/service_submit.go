@@ -118,17 +118,14 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Message: fmt.Sprintf("hypothesis %s not found — register it first via POST /hypotheses", exp.HypothesisID),
 		}
 	}
-	// A human-submitted idea is in the pool to be read, not to be run: it has no owner, so no
-	// quota to spend and no standing to earn. An agent that wants to test one registers its own
-	// hypothesis naming the original — the same rule that already covers testing another agent's
-	// idea. This is where "a human row cannot own a job" is enforced, because this is the one
-	// place a job is bound to a hypothesis.
-	if hyp.Source == domain.HypothesisSourceHuman {
-		return &AdmissionError{
-			Reason:  ReasonMalformed,
-			Message: fmt.Sprintf("hypothesis %s is a human-submitted idea (author %q) and cannot own a job — register your own hypothesis naming it, and submit against that", exp.HypothesisID, hyp.Author),
-		}
-	}
+	// A human-submitted idea is testable like any other: any agent may bind a job to it. The
+	// hypothesis is the idea, the job is the agent's — exp.AgentID is the owner every accounting
+	// path keys on, so quota is debited from the running agent and its result lands in that
+	// agent's standings, exactly as for a hypothesis it registered itself. Nothing here has to
+	// know the row's source. Refusing instead (the earlier rule) made a human idea inert and
+	// pushed agents into registering a near-duplicate claim to test one, which fights the pool's
+	// own dedup and splits one claim's evidence across two rows.
+	//
 	// The hypothesis must belong to the same platform experiment this job is submitted under.
 	// Without this check an agent could point a job at a hypothesis registered under a different
 	// program, contaminating cross-program scope/ranking (invariant #7).

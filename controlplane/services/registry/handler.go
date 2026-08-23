@@ -221,7 +221,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"returned id is metadata.hypothesis_id for the job testing it; every job must reference a " +
 			"hypothesis from its own platform experiment. Exactly one of agent_id (an agent's row) " +
 			"or author (a human's, submitted from the UI) must be set; both sit in the same pool " +
-			"under the same dedup, but a human row owns no job, holds no quota and is in no standings.",
+			"under the same dedup, and any agent may submit a job against either. What a human " +
+			"author does not get is quota or a place in the standings — those key on agent_id, " +
+			"and a job's quota and result belong to the agent that ran it.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			// Neither is schema-required, and that is deliberate: exactly one of them must be
@@ -403,7 +405,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
 		Description: "open (default) / confirmed (validated as a real improvement) / refuted " +
 			"(confidently established as not working) / inconclusive (noisy or not worth drilling " +
-			"into). Only the registering agent_id may set it; anyone else gets 403.",
+			"into). Only the registering agent_id may set it; anyone else gets 403. A " +
+			"human-submitted row has no registering agent, so any agent may settle it — an idea " +
+			"nobody owns would otherwise sit open forever however much evidence it collected.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {

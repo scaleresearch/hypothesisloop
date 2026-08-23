@@ -64,11 +64,20 @@ func TestSubmitAdmitsAnAgentUnderItsDurableDataCeiling(t *testing.T) {
 	}
 }
 
-// poolOnlyStore answers just the lookups Submit makes before it reaches the hypothesis check.
-// It embeds Store so anything Submit reaches afterwards panics rather than silently succeeding —
-// a human-owned hypothesis must never get that far.
+// errReachedScoring is returned by the first store call Submit makes *after* the hypothesis
+// binding. A test getting it back has proved the binding admitted the job, without standing up
+// quota, novelty and persistence to watch a row be written.
+var errReachedScoring = errors.New("submit reached novelty scoring")
+
+// poolOnlyStore answers just the lookups Submit makes before it reaches the hypothesis binding,
+// then stops the pass at scoring. It embeds Store so anything else Submit reaches panics rather
+// than silently answering zero.
 type poolOnlyStore struct {
 	Store
+}
+
+func (poolOnlyStore) GetRunningAndQueued(_ context.Context) ([]*domain.Experiment, error) {
+	return nil, errReachedScoring
 }
 
 func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
@@ -93,7 +102,7 @@ func humanIdeaSubmission() *domain.Experiment {
 	retries := 0
 	return &domain.Experiment{
 		ID: "human-idea-job", AgentID: "agent-1", ProjectID: "proj", PlatformExperimentID: "pe-1",
-		HypothesisID: "h-human", Theory: "t", Objective: "o",
+		HypothesisID: "h-human", Theory: "t", Objective: "o", EstimatedDurationHours: 1,
 		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40),
 		Job: domain.JobSpec{
 			Image: "img", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
@@ -101,23 +110,55 @@ func humanIdeaSubmission() *domain.Experiment {
 	}
 }
 
-// A human's idea is in the pool to be read, not to be run: it has no owner, so there is no quota
-// to spend against it and no standing for its result to land in. Binding a job to one would put
-// an unowned row into every accounting path that keys on agent_id. The refusal belongs here
-// because this is the one place a job is bound to a hypothesis.
-func TestSubmitRefusesAJobOwnedByAHumanSubmittedHypothesis(t *testing.T) {
-	s := &Service{
-		store: poolOnlyStore{},
-		hypotheses: oneHypothesis{h: &domain.Hypothesis{
-			ID: "h-human", Source: domain.HypothesisSourceHuman, Author: "Ada",
-			PlatformExperimentID: "pe-1", Text: "warmup helps",
-		}},
+// humanHypothesis is the one human-submitted row a submission names, in platformExperimentID.
+func humanHypothesis(platformExperimentID string) oneHypothesis {
+	return oneHypothesis{h: &domain.Hypothesis{
+		ID: "h-human", Source: domain.HypothesisSourceHuman, Author: "Ada",
+		PlatformExperimentID: platformExperimentID, Text: "warmup helps",
+	}}
+}
+
+// An idea nobody can test is inert, and the whole point of a human putting one in the pool is
+// that the fleet can act on it. Forcing an agent to register its own near-duplicate instead
+// fights the pool's dedup and splits one claim's evidence across two rows, so the binding must
+// admit a job against a human row exactly as it does against an agent's.
+func TestSubmitAdmitsAnAgentsJobAgainstAHumanSubmittedHypothesis(t *testing.T) {
+	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+
+	err := s.Submit(context.Background(), humanIdeaSubmission())
+	if !errors.Is(err, errReachedScoring) {
+		t.Fatalf("Submit against a human-submitted hypothesis: got = %v, want it to pass the binding and reach scoring", err)
 	}
+}
+
+// Quota is debited from, and standings are ranked by, the experiment's own agent_id. Nothing
+// about the hypothesis reaches those paths except its text, so a human author cannot acquire a
+// budget or a placement by having an agent run its idea — the run is the agent's.
+func TestSubmitAgainstAHumanHypothesisLeavesTheRunningAgentAsTheJobsOnlyOwner(t *testing.T) {
+	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	exp := humanIdeaSubmission()
+
+	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("Submit: got = %v, want it to reach scoring", err)
+	}
+	if exp.AgentID != "agent-1" {
+		t.Errorf("job owner: got = %v, want %v", exp.AgentID, "agent-1")
+	}
+	if exp.Hypothesis != "warmup helps" {
+		t.Errorf("denormalized hypothesis text: got = %v, want %v", exp.Hypothesis, "warmup helps")
+	}
+}
+
+// Dropping the human-row refusal must not loosen the check next to it: a hypothesis still has to
+// belong to the job's own platform experiment, or a job could point at another program's idea
+// pool and contaminate that program's scope and ranking.
+func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t *testing.T) {
+	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-other")}
 
 	err := s.Submit(context.Background(), humanIdeaSubmission())
 	var admission *AdmissionError
 	if !errors.As(err, &admission) {
-		t.Fatalf("Submit against a human-submitted hypothesis: got = %v, want an AdmissionError", err)
+		t.Fatalf("Submit against a cross-experiment hypothesis: got = %v, want an AdmissionError", err)
 	}
 	if admission.Reason != ReasonMalformed {
 		t.Errorf("reason: got = %v, want %v", admission.Reason, ReasonMalformed)

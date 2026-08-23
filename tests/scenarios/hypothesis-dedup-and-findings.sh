@@ -10,8 +10,11 @@
 #      reads the same hypothesis afterward — the cross-agent evidence trail is a real read
 #      path, not just a same-agent bookkeeping detail.
 #   3. the pool is shared with humans: an idea posted from the UI under a typed name lands in the
-#      same listing agents read, dedups against agent rows under the same unique index, and owns
-#      nothing — no job, no quota, no standings, no status an agent can set.
+#      same listing agents read, dedups against agent rows under the same unique index, and is
+#      testable like any other — an agent runs a real job against it, the finding lands on the
+#      human's row attributed to that agent, and any agent may settle the unowned row's status.
+#      What the human author never gets is quota or a place in the standings: both key on
+#      agent_id, and the job's agent_id is the agent that ran it.
 # API-only, parallel-safe (its own platform experiment).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,8 +72,10 @@ else
 fi
 
 echo "  -- a human-submitted idea joins the same pool, under the same dedup, owning nothing --"
-# Costs no hardware: every assertion below is API-only, and the one job submission here is one the
-# platform must REFUSE, so it debits nothing. The platform experiment's budget is unchanged.
+# Budget: this section used to be free, because its one submission was a job the platform had to
+# REFUSE and a refused job debits nothing. It now runs that job for real, at the same 0.02 h as
+# the findings job above — so this scenario spends 0.04 accelerator-hours of the platform
+# experiment's 1.0 h budget instead of 0.02. Every other assertion here is still API-only.
 HUMAN_NAME="dana-ops-${RUN_ID}"
 HUMAN_TEXT="Warmup for the first 500 steps stabilizes task_success_rate at batch size 512"
 HUMAN_RESP=$(post_hypothesis "" "$HUMAN_NAME" "$PE_ID" "$HUMAN_TEXT")
@@ -108,15 +113,35 @@ NEITHER_CODE=$(post_hypothesis_code "" "" "$PE_ID" "neither-set probe ${RUN_ID}"
   && pass "registering with NEITHER agent_id nor author is refused (HTTP 400)" \
   || fail "registering with neither agent_id nor author returned HTTP $NEITHER_CODE, expected 400"
 
-# A human row is in the pool to be read, not to be run: it has no owner, so no quota to spend.
-read -r HUMAN_JOB_CODE HUMAN_JOB_ID <<< "$(submit_job_expect_code "$PE_ID" "$AGENT_B" "guaranteed" "0.01" "" "$JOB_FILE" "$HUMAN_ID")"
-[[ "$HUMAN_JOB_CODE" == "400" ]] \
-  && pass "a job submitted against a human-owned hypothesis is refused at admission (HTTP 400)" \
-  || fail "job against a human-owned hypothesis returned HTTP $HUMAN_JOB_CODE, expected 400"
-HUMAN_JOB_LOOKUP=$(experiment_http_code "$HUMAN_JOB_ID")
-[[ "$HUMAN_JOB_LOOKUP" == "404" ]] \
-  && pass "the refused job was never created (GET /experiments/$HUMAN_JOB_ID is 404)" \
-  || fail "a job refused for naming a human hypothesis still exists (GET /experiments/$HUMAN_JOB_ID is $HUMAN_JOB_LOOKUP)"
+# A human idea is in the pool to be TESTED. An agent binds a real job to the human's row and the
+# resulting finding lands on that row, attributed to the agent that ran it — the hypothesis is the
+# idea, the job is the agent's. An idea nobody could run would be inert, and making agents restate
+# it as their own row would fight the dedup asserted just above.
+read -r HUMAN_JOB_CODE HUMAN_JOB <<< "$(submit_job_expect_code "$PE_ID" "$AGENT_B" "guaranteed" "0.02" "" "$JOB_FILE" "$HUMAN_ID")"
+[[ "$HUMAN_JOB_CODE" == "202" ]] \
+  && pass "a job submitted by $AGENT_B against the human-owned hypothesis is admitted (HTTP 202)" \
+  || fail "job against a human-owned hypothesis returned HTTP $HUMAN_JOB_CODE, expected 202"
+HUMAN_JOB_OWNER=$(get_field "$HUMAN_JOB" "agent_id")
+[[ "$HUMAN_JOB_OWNER" == "$AGENT_B" ]] \
+  && pass "the job on the human's idea is owned by $AGENT_B — the run is the agent's, the idea is the human's" \
+  || fail "job on the human hypothesis is attributed to '$HUMAN_JOB_OWNER', expected $AGENT_B"
+
+HUMAN_S=$(wait_for_completion_after_running "$HUMAN_JOB" "0.02" "$ADMISSION_BUDGET_SECONDS" || true)
+if [[ "$HUMAN_S" == "COMPLETED" ]]; then
+  HUMAN_FINDING="Warmup held task_success_rate steady — filed by $AGENT_B on the human's idea"
+  file_finding "$HUMAN_JOB" "$HUMAN_FINDING"
+  FINDING_ROW=$(curl -sf "$API_URL/hypotheses/${HUMAN_ID}" | py "
+import sys, json
+for f in json.load(sys.stdin).get('findings') or []:
+    if '$HUMAN_FINDING' in (f.get('summary') or ''):
+        print(f.get('agent_id'))
+")
+  [[ "$FINDING_ROW" == "$AGENT_B" ]] \
+    && pass "the finding hangs off the human's hypothesis, attributed to $AGENT_B" \
+    || fail "finding missing or mis-attributed on the human row: expected agent_id=$AGENT_B, got '$FINDING_ROW'"
+else
+  fail "the job testing the human's idea never reached COMPLETED (status=$HUMAN_S)"
+fi
 
 # No quota, no standings: the typed name is attribution in the pool and nothing else. The holder
 # count is the two signed-up agents, unchanged by the human row existing.
@@ -152,15 +177,24 @@ for c in json.load(sys.stdin).get('comments') or []:
   && pass "the human comment is readable on the hypothesis carrying source=human author=$HUMAN_NAME" \
   || fail "human comment missing or mis-attributed on GET /hypotheses/{id}: expected 'human $HUMAN_NAME', got '$COMMENT_ROW'"
 
-# Status is the owner's verdict, and a human row names no owner — so no agent can set it.
+# Status is the owner's verdict — read literally, a row with no owner answers to whoever tested it.
+# Agents now run jobs against human ideas, so a human row that could never be settled would sit
+# open forever and the pool would lie about what is still unresolved.
 STATUS_CODE=$(set_hypothesis_status_code "$HUMAN_ID" "$AGENT_A" "confirmed")
-[[ "$STATUS_CODE" == "403" ]] \
-  && pass "an agent cannot set the status of a human-owned hypothesis (HTTP 403)" \
-  || fail "setting the status of a human-owned hypothesis as $AGENT_A returned HTTP $STATUS_CODE, expected 403"
+[[ "$STATUS_CODE" == "200" ]] \
+  && pass "an agent may settle the unowned human row (HTTP 200)" \
+  || fail "setting the status of the human hypothesis as $AGENT_A returned HTTP $STATUS_CODE, expected 200"
 HUMAN_STATUS=$(curl -sf "$API_URL/hypotheses/${HUMAN_ID}" | py "import sys,json; print(json.load(sys.stdin)['status'])")
-[[ "$HUMAN_STATUS" == "open" ]] \
-  && pass "the human row's status is still open after the refused write" \
-  || fail "the human row's status changed to $HUMAN_STATUS despite the write being refused"
+[[ "$HUMAN_STATUS" == "confirmed" ]] \
+  && pass "the human row's status is now confirmed — a settled idea reads as settled in the pool" \
+  || fail "the human row's status is $HUMAN_STATUS after an accepted write, expected confirmed"
+
+# The other half of the same predicate: an OWNED row is still its owner's alone. Permissiveness
+# applies only where the owner column names nobody, not wherever it is inconvenient.
+OWNED_STATUS_CODE=$(set_hypothesis_status_code "$FIRST_ID" "$AGENT_B" "refuted")
+[[ "$OWNED_STATUS_CODE" == "403" ]] \
+  && pass "$AGENT_B cannot set the status of ${AGENT_A}'s own hypothesis (HTTP 403)" \
+  || fail "a non-owner setting an agent-owned hypothesis's status returned HTTP $OWNED_STATUS_CODE, expected 403"
 
 close_platform_experiment "$PE_ID"
 finish
