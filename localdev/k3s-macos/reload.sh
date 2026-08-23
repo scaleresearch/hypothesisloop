@@ -61,6 +61,10 @@ if command -v k3s >/dev/null 2>&1; then
   echo "==> Importing images into the k3s server..."
   SERVER_TARBALL="/tmp/reload-images-server.tar"
   for img in "${IMAGES[@]}"; do
+    # rm first: podman save refuses to write over an existing archive
+    # ("docker-archive doesn't support modifying existing images"), which under set -e aborts
+    # the reload on the SECOND image of the loop.
+    rm -f "${SERVER_TARBALL}"
     podman save "localhost/${img}:latest" -o "${SERVER_TARBALL}"
     sudo k3s ctr images import "${SERVER_TARBALL}" >/dev/null
   done
@@ -104,6 +108,7 @@ if [[ "${#FAKE_NODES[@]}" -gt 0 ]]; then
   TARBALL="/tmp/reload-images.tar"
   for node in "${FAKE_NODES[@]}"; do
     for img in "${IMAGES[@]}"; do
+      rm -f "${TARBALL}"
       podman save "localhost/${img}:latest" -o "${TARBALL}"
       ${PODMAN_CMD} cp "${TARBALL}" "${node}:/tmp/reload-image.tar"
       # Explicit --address: bare `ctr` (and `k3s ctr`) default to the container's own
