@@ -36,6 +36,15 @@ func (l *Loop) speculativeCandidates(
 	gang := requiresDistinctHosts(exp) || len(exp.Job.Groups) > 0 || exp.Job.Nodes() > 1
 	now := time.Now()
 
+	// Cross-job half of the tried-cluster backoff (autoscaler.md line 109): a cluster any job
+	// failed over from within the TTL is excluded here too, not just this job's own tried-list —
+	// otherwise every queued job lines up behind the same dead node group in turn instead of
+	// skipping it together.
+	recentlyTried, err := l.store.RecentlyTriedClusters(ctx, l.triedClusterTTL)
+	if err != nil {
+		return nil, err
+	}
+
 	type candidate struct {
 		cluster   string
 		clusterID string
@@ -49,6 +58,9 @@ func (l *Loop) speculativeCandidates(
 			continue
 		}
 		if triedRecently(exp.TriedClusters, clusterID, l.triedClusterTTL, now) {
+			continue
+		}
+		if recentlyTried[clusterID] {
 			continue
 		}
 		if !fitsLargestNode(exp, nodeAvail[cluster], nodeResourcesTotal[cluster], nodeLabels[cluster]) {

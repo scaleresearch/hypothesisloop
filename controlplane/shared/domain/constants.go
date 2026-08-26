@@ -175,6 +175,13 @@ const (
 	// that this job has already executed once, which is what forbids re-admitting it onto a
 	// different accelerator flavor (see candidateAcceleratorTypes).
 	EvictionPreemptedForGuaranteed EvictionReason = "preempted_for_guaranteed"
+	// EvictionScaleUpTimeout marks a job whose gang never fully bound (scheduled_nodes < Nodes())
+	// within its placement deadline on an autoscaler-enabled cluster — either the deadline
+	// passed, or the runtime reported a terminal scheduling_reason (e.g. "NotTriggerScaleUp: max
+	// node group size reached") before that. An infrastructure fault, requeued for free, but
+	// recorded as a tried_clusters failover rather than spending infra_requeue_count — see
+	// ResolveTermination's triedClusterID and autoscaler.md.
+	EvictionScaleUpTimeout EvictionReason = "scale_up_timeout"
 )
 
 // PhaseDetail is what a runtime observed about why a job's container hasn't started (or
@@ -188,6 +195,14 @@ type PhaseDetail struct {
 	Reason       string `json:"reason,omitempty"`
 	Message      string `json:"message,omitempty"`
 	RestartCount int32  `json:"restart_count,omitempty"`
+	// ScheduledNodes is the count of this experiment's pods with condition PodScheduled=True, as
+	// last reported by the runtime — see autoscaler.md's gang-readiness design. 0 on a runtime
+	// that doesn't yet report it, or genuinely zero pods placed.
+	ScheduledNodes int32 `json:"scheduled_nodes,omitempty"`
+	// SchedulingReason is a best-effort, runtime-supplied explanation for a still-Pending pod
+	// (an autoscaler event message like "TriggeredScaleUp" or "NotTriggerScaleUp: max node group
+	// size reached").
+	SchedulingReason string `json:"scheduling_reason,omitempty"`
 }
 
 const (

@@ -40,13 +40,33 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 		domain.StatusAdmitted,
 		domain.StatusRunning,
 	}
+	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
+	// WithScaleUpTimeout — mirrors Loop.tick's own opt-in gate for the same reason: a backend
+	// that has not implemented these two methods must not be asked to. A fetch failure degrades
+	// this pass to today's stuckPendingTimeout-only behaviour rather than aborting the whole
+	// scan — an eviction pass for every other experiment must survive one infrastructure hiccup.
+	var autoscalerEnabled map[string]bool
+	var clusterIDs map[string]string
+	if w.scaleUpTimeout > 0 {
+		var err error
+		autoscalerEnabled, err = w.backend.GetAutoscalerCapability(ctx)
+		if err != nil {
+			w.logger.Warn("job_watcher: autoscaler capability unavailable, deferring to stuck_pending timeout this pass", zap.Error(err))
+			autoscalerEnabled = nil
+		}
+		clusterIDs, err = w.backend.GetClusterIDs(ctx)
+		if err != nil {
+			w.logger.Warn("job_watcher: cluster ids unavailable, deferring to stuck_pending timeout this pass", zap.Error(err))
+			clusterIDs = nil
+		}
+	}
 	for _, status := range statuses {
 		exps, err := w.store.ListExperimentsWithStatus(ctx, status)
 		if err != nil {
 			return err
 		}
 		for _, exp := range exps {
-			if err := w.reconcileOne(ctx, exp); err != nil {
+			if err := w.reconcileOne(ctx, exp, autoscalerEnabled, clusterIDs); err != nil {
 				w.logger.Error("job_watcher: reconcile experiment",
 					zap.String("experiment_id", exp.ID), zap.Error(err))
 			}
@@ -55,13 +75,13 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	return nil
 }
 
-func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) error {
+func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, autoscalerEnabled map[string]bool, clusterIDs map[string]string) error {
 	// Checked regardless of exp.Status, including RUNNING: a Kubernetes Job's Active count
 	// (what PollJobPhase treats as Running, see k8sexec.PollJobPhaseAndUID) includes a pod
 	// stuck in ImagePullBackOff — the desired-state Job "exists and isn't finished" long
 	// before its container ever actually starts. A never-self-heals reason means it never
 	// will, whatever exp.Status currently says.
-	reason, message, _, found, err := w.backend.PollPhaseDetail(ctx, exp)
+	reason, message, _, scheduledNodes, schedulingReason, found, err := w.backend.PollPhaseDetail(ctx, exp)
 	if err != nil {
 		return fmt.Errorf("poll phase detail: %w", err)
 	}
@@ -70,11 +90,28 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) e
 		return nil
 	}
 
-	// The phase is polled before any deadline is applied, so every decision below is made against
-	// what the runtime reports right now rather than against how long a Postgres row has sat in a
-	// pre-RUNNING status. Keying "stuck pending" on status alone evicted pods that were plainly
-	// Running — they were merely blocked from being *marked* RUNNING, which is a different fault
-	// with a different remedy, and refunding them as never-started billed nobody for real hardware.
+	// Placement-deadline check, run before the phase switch and independent of it: a gang whose
+	// pods haven't all bound is the same "still can't tell / still waiting on capacity" state
+	// whether the aggregate phase currently reads Pending, Gone, or (one landed rank) Running —
+	// see autoscaler.md's "Gang scheduling" section. Skipped once every rank has bound
+	// (scheduledNodes >= Nodes()), which is also true for every non-gang job whose one pod has
+	// bound — the general case degenerating, not a special one.
+	if scheduledNodes < int32(exp.Job.Nodes()) {
+		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
+		if err != nil {
+			return fmt.Errorf("check scale-up deadline: %w", err)
+		}
+		if evicted {
+			return nil
+		}
+	}
+
+	// The phase is polled before any further deadline is applied, so every decision below is made
+	// against what the runtime reports right now rather than against how long a Postgres row has
+	// sat in a pre-RUNNING status. Keying "stuck pending" on status alone evicted pods that were
+	// plainly Running — they were merely blocked from being *marked* RUNNING, which is a different
+	// fault with a different remedy, and refunding them as never-started billed nobody for real
+	// hardware.
 	phase, err := w.backend.PollJobPhase(ctx, exp)
 	if err != nil {
 		return fmt.Errorf("poll actual phase: %w", err)
@@ -94,14 +131,14 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) e
 		case runningMarked, runningLeftState:
 			return nil
 		case runningTypeMismatch:
-			w.evictNotYetRunning(ctx, exp, domain.EvictionFlavorMismatch)
+			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, clusterIDs[exp.ClusterName])
 			return nil
 		case runningTypeUnobservable:
 			return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionAcceleratorTypeUnobservable)
 		default:
 			return fmt.Errorf("unknown running outcome %d", outcome)
 		}
-	case workload.JobPhaseGone, workload.JobPhasePending:
+	case workload.JobPhaseGone:
 		if exp.Status == domain.StatusRunning {
 			// Desired state remains authoritative and the cluster agent independently retries
 			// creation. A RUNNING job whose workload has genuinely vanished is the controller's
@@ -109,7 +146,15 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment) e
 			// an absent cluster (see controller.checkSilence).
 			return nil
 		}
+		// Gone keeps its own existing handling, unchanged: the placement-deadline check above
+		// only fires while scheduledNodes < Nodes(), so a fully-bound job that then vanishes
+		// (scheduledNodes already caught up before Gone was observed) still needs this bound.
 		return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending)
+	case workload.JobPhasePending:
+		// Superseded by the placement-deadline check above, which now runs unconditionally
+		// before this switch and covers exactly this case (plus the ones that check used to
+		// miss — Running with a partial gang, and Gone before scheduledNodes catches up).
+		return nil
 	default:
 		return fmt.Errorf("unknown actual phase %q", phase)
 	}

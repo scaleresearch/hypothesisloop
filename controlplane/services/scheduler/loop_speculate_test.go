@@ -76,6 +76,10 @@ func (s *speculationStore) GetClusterSettings(_ context.Context, clusterID strin
 	return s.settings[clusterID], nil
 }
 
+func (s *speculationStore) RecentlyTriedClusters(_ context.Context, _ time.Duration) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 func speculationLoop(store LoopStore) *Loop {
 	l := NewLoop(store, tickQuota{}, nil, zap.NewNop())
 	return l.WithSpeculation(15 * time.Minute)

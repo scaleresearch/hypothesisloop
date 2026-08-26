@@ -77,8 +77,12 @@ func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (wor
 // hasn't started (or has been restarting). found=false means nothing has been reported yet —
 // distinct from an empty reason, which just means the runtime has nothing notable to say.
 // Implements scheduler.PhaseDetailer.
-func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, found bool, err error) {
-	return metricsdb.GetLatestPhaseDetail(ctx, b.metricsDBURL, exp.ID)
+func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error) {
+	row, found, err := metricsdb.GetLatestPhaseDetailFull(ctx, b.metricsDBURL, exp.ID)
+	if err != nil || !found {
+		return "", "", 0, 0, "", found, err
+	}
+	return row.Reason, row.Message, row.RestartCount, row.ScheduledNodes, row.SchedulingReason, true, nil
 }
 
 // GetAdmittedAcceleratorType reads the latest observed type metric for exp's current admission.

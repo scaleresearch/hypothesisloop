@@ -51,6 +51,9 @@ type JobStatusStore interface {
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
+	// GetClusterSettings returns clusterID's operator overrides (scale_up_timeout_seconds,
+	// max_speculative_accelerators), or nil if none were ever set.
+	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage across every
@@ -66,8 +69,15 @@ type JobBackendClient interface {
 	PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error)
 	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error)
 	// PollPhaseDetail is the runtime's latest explanation for why a job has not started (see
-	// domain.PhaseDetail). found=false means no runtime has reported one yet.
-	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, found bool, err error)
+	// domain.PhaseDetail), plus the gang-readiness facts checkScaleUpDeadline needs.
+	// found=false means no runtime has reported one yet.
+	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
+	// GetAutoscalerCapability reports, per cluster (by cluster_name), whether it sits behind a
+	// native autoscaler — see queuebackend.Backend.GetAutoscalerCapability.
+	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
+	// GetClusterIDs reports each connected cluster's runtime-derived stable identity, keyed by
+	// cluster_name — see queuebackend.Backend.GetClusterIDs.
+	GetClusterIDs(ctx context.Context) (map[string]string, error)
 }
 
 // JobWatcher performs periodic stateless passes over durable desired state and drives lifecycle
@@ -87,6 +97,15 @@ type JobWatcher struct {
 	// uses. GreptimeDB is a required dependency: no fallback if unset or unreachable.
 	metricsDBURL   string
 	observedGapCap time.Duration
+
+	// scaleUpTimeout is the global default deadline (scheduler.scale_up_timeout_seconds) for an
+	// incomplete gang (scheduled_nodes < Nodes()) on an autoscaler-enabled cluster with no
+	// per-cluster override in cluster_settings. Zero (WithScaleUpTimeout never called) disables
+	// the autoscaler-aware deadline entirely: every incomplete gang falls back to
+	// stuckPendingTimeout, exactly today's behaviour — the same opt-in shape as
+	// Loop.WithSpeculation, for the same reason (a deployment/test fake that never wired the new
+	// capability calls must not be asked to answer them).
+	scaleUpTimeout time.Duration
 }
 
 // NewJobWatcher constructs a JobWatcher.
@@ -121,5 +140,13 @@ func (w *JobWatcher) WithStuckPendingTimeout(d time.Duration) *JobWatcher {
 func (w *JobWatcher) WithObservedTimeConfig(metricsDBURL string, gapCap time.Duration) *JobWatcher {
 	w.metricsDBURL = metricsDBURL
 	w.observedGapCap = gapCap
+	return w
+}
+
+// WithScaleUpTimeout enables the autoscaler-aware placement deadline (autoscaler.md) and sets its
+// global default. d must be under domain.MaxScaleUpTimeoutSeconds (the rendezvous-timeout
+// invariant) — config load-time validation already enforces this on scheduler.scale_up_timeout_seconds.
+func (w *JobWatcher) WithScaleUpTimeout(d time.Duration) *JobWatcher {
+	w.scaleUpTimeout = d
 	return w
 }

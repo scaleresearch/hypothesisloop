@@ -28,8 +28,10 @@ type Backend interface {
 	PollJobPhase(ctx context.Context, exp *domain.Experiment) (JobPhase, error)
 
 	// PollPhaseDetail is the runtime's latest explanation for why a job has not started (see
-	// domain.PhaseDetail). found=false means no runtime has reported one yet.
-	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, found bool, err error)
+	// domain.PhaseDetail), plus the gang-readiness facts the scale-up-timeout watcher needs
+	// (scheduledNodes, schedulingReason — autoscaler.md). found=false means no runtime has
+	// reported one yet.
+	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
 
 	// GetAdmittedAcceleratorType reports which accelerator type the job actually ran on. Backends that can
 	// substitute a different flavor than requested should read that back here.

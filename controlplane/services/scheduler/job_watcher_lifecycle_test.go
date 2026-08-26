@@ -25,6 +25,7 @@ type lifecycleStore struct {
 	attemptCount    int
 	terminalReasons []string
 	requeuedReasons []string
+	triedClusters   []string
 	markedSettled   int
 }
 
@@ -43,18 +44,33 @@ func (s *lifecycleStore) TransitionStatusFromNonTerminal(context.Context, string
 	s.transitioned = true
 	return true, nil
 }
-func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ domain.ExperimentStatus, reason string, _ string) (domain.Termination, error) {
+func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error) {
 	s.transitioned = true
-	if domain.IsInfrastructureFault(domain.EvictionReason(reason)) && s.infraRequeues < s.infraCeiling {
-		s.infraRequeues++
-		s.attemptCount++
-		s.requeuedReasons = append(s.requeuedReasons, reason)
-		return domain.TerminationRequeued, nil
+	if domain.IsInfrastructureFault(domain.EvictionReason(reason)) {
+		// Mirrors the real store: a scale-up/flavor_mismatch failover (triedClusterID set)
+		// spends a tried_clusters entry instead of infra_requeue_count, and is never bounded by
+		// infraCeiling — see ResolveTermination's doc comment.
+		if triedClusterID != "" {
+			s.attemptCount++
+			s.requeuedReasons = append(s.requeuedReasons, reason)
+			s.triedClusters = append(s.triedClusters, triedClusterID)
+			return domain.TerminationRequeued, nil
+		}
+		if s.infraRequeues < s.infraCeiling {
+			s.infraRequeues++
+			s.attemptCount++
+			s.requeuedReasons = append(s.requeuedReasons, reason)
+			return domain.TerminationRequeued, nil
+		}
 	}
 	s.terminalReasons = append(s.terminalReasons, reason)
 	return domain.TerminationWritten, nil
 }
 func (*lifecycleStore) UpdateEvictionReason(context.Context, string, string) error { return nil }
+func (s *lifecycleStore) GetClusterSettings(context.Context, string) (*domain.ClusterSettings, error) {
+	return nil, nil
+}
+
 func (s *lifecycleStore) MarkQuotaSettled(context.Context, string) error {
 	s.markedSettled++
 	return nil

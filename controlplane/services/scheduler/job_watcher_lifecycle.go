@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,6 +40,90 @@ func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *doma
 	return nil
 }
 
+// checkScaleUpDeadline evicts exp if its gang has not fully bound (called only while
+// scheduledNodes < Nodes()) past its placement deadline, or if the runtime's latest
+// schedulingReason names a terminal scale-up refusal. See autoscaler.md's "Watching" section.
+//
+// On a cluster reporting autoscaler_enabled, the deadline is scale_up_timeout (per-cluster
+// override from cluster_settings, else the global default) and the eviction reason is
+// scale_up_timeout — an infrastructure fault recorded as a tried_clusters failover rather than
+// spending infra_requeue_count, so a run of slow clusters cannot exhaust a job's environment-fault
+// budget. On every other cluster (or when this deployment never called WithScaleUpTimeout), the
+// deadline and reason are exactly today's stuckPendingTimeout/EvictionStuckPending.
+func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
+	if exp.SubmittedAt == nil {
+		// Every SUBMITTED/ADMITTED row is written with submitted_at (ClaimSubmitted sets it in
+		// the same UPDATE); a RUNNING row keeps whatever the current attempt's submitted_at was.
+		return false, fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
+	}
+
+	timeout := w.stuckPendingTimeout
+	evictionReason := domain.EvictionStuckPending
+	triedClusterID := ""
+	onAutoscalerCluster := w.scaleUpTimeout > 0 && autoscalerEnabled[exp.ClusterName]
+	if onAutoscalerCluster {
+		timeout = w.scaleUpTimeout
+		evictionReason = domain.EvictionScaleUpTimeout
+		triedClusterID = clusterIDs[exp.ClusterName]
+		cs, err := w.store.GetClusterSettings(ctx, triedClusterID)
+		if err != nil {
+			return false, err
+		}
+		if cs != nil && cs.ScaleUpTimeoutSeconds != nil {
+			timeout = time.Duration(*cs.ScaleUpTimeoutSeconds) * time.Second
+		}
+
+		// Early exit: the autoscaler itself already said no, so waiting out the rest of the
+		// deadline only spends time — "the deadline is the guarantee, the event is the
+		// accelerator" (autoscaler.md). Best-effort string match; a schedulingReason that doesn't
+		// match anything just falls through to the deadline, same as no reason at all.
+		if isTerminalSchedulingRefusal(schedulingReason) {
+			w.logger.Warn("job_watcher: autoscaler refused to scale up, evicting early",
+				zap.String("id", exp.ID), zap.String("cluster_id", triedClusterID),
+				zap.String("scheduling_reason", schedulingReason))
+			w.evictNotYetRunningWithFailover(ctx, exp, evictionReason, triedClusterID)
+			return true, nil
+		}
+	}
+	if timeout <= 0 {
+		return false, nil
+	}
+	if time.Since(*exp.SubmittedAt) <= timeout {
+		return false, nil
+	}
+	w.logger.Warn("job_watcher: placement deadline passed, evicting",
+		zap.String("id", exp.ID),
+		zap.String("reason", string(evictionReason)),
+		zap.Duration("timeout", timeout),
+	)
+	w.evictNotYetRunningWithFailover(ctx, exp, evictionReason, triedClusterID)
+	return true, nil
+}
+
+// isTerminalSchedulingRefusal reports whether schedulingReason names a scale-up attempt the
+// autoscaler has already given up on, rather than one still in flight. Deliberately a small,
+// best-effort set of substrings covering cluster-autoscaler and Karpenter's own refusal
+// vocabulary — an unrecognised reason (including "TriggeredScaleUp", "still waiting", or empty)
+// falls through to the deadline, never the other way around: missing a refusal costs one bounded
+// wait, misreading "still trying" as "gave up" would evict work the autoscaler was about to land.
+func isTerminalSchedulingRefusal(schedulingReason string) bool {
+	if schedulingReason == "" {
+		return false
+	}
+	reason := strings.ToLower(schedulingReason)
+	for _, marker := range []string{
+		"nottriggerscaleup",
+		"max node group size reached",
+		"incompatible with nodepool",
+		"nodeclaim failure",
+	} {
+		if strings.Contains(reason, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // onUnschedulable evicts a job whose runtime reported a phase-detail reason in
 // domain.NeverSelfHealsPhaseReasons — a bad image or a malformed container config that will
 // never resolve itself — well before the generic stuckPendingTimeout would otherwise catch it.
@@ -62,7 +147,15 @@ func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment
 // row that Settle refunds in full. The decision is not repeated here: this function reports
 // whichever outcome ResolveTermination produced.
 func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
-	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), "")
+	w.evictNotYetRunningWithFailover(ctx, exp, reason, "")
+}
+
+// evictNotYetRunningWithFailover is evictNotYetRunning plus a cluster to record as a speculative
+// scale-up failover — see ResolveTermination's triedClusterID doc. Used by the scale-up-timeout
+// and flavor_mismatch paths (autoscaler.md), which name the specific cluster that just failed to
+// deliver capacity rather than the environment in general.
+func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, triedClusterID string) {
+	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), triedClusterID)
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
 		return

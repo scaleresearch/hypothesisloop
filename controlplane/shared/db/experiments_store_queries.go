@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -266,6 +267,38 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("experiments_store.PlacementByID: %w", err)
+	}
+	return out, nil
+}
+
+// RecentlyTriedClusters reports the set of cluster_ids ANY experiment failed a speculative
+// scale-up attempt on within the last ttl — not just this job's own tried_clusters. autoscaler.md
+// (line 109): "don't line up other jobs behind the same dead node group" needs no state of its
+// own, since every failover is already recorded on the failing job's row; this reads across all
+// of them rather than adding a second per-cluster ledger.
+func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error) {
+	if ttl <= 0 {
+		return map[string]bool{}, nil
+	}
+	since := time.Now().UTC().Add(-ttl)
+	rows, err := s.pool.pool.Query(ctx, `
+		SELECT DISTINCT t.entry->>'cluster_id'
+		FROM experiments, jsonb_array_elements(tried_clusters) AS t(entry)
+		WHERE (t.entry->>'at')::timestamptz > $1`, since)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var clusterID string
+		if err := rows.Scan(&clusterID); err != nil {
+			return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: scan: %w", err)
+		}
+		out[clusterID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)
 	}
 	return out, nil
 }

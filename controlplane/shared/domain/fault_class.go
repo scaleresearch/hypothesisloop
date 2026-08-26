@@ -62,6 +62,11 @@ var faultClasses = map[EvictionReason]FaultClass{
 	// EvictionUnschedulable above precisely so that what is left here is the environment failing
 	// to deliver placement it had already been credited with.
 	EvictionStuckPending: FaultInfrastructure,
+	// A speculative gang never fully bound within its deadline, or the autoscaler refused
+	// outright — the environment's autoscaler failed to deliver, not the job's doing. Requeued
+	// as a tried_clusters failover rather than spending infra_requeue_count; see
+	// ResolveTermination.
+	EvictionScaleUpTimeout: FaultInfrastructure,
 
 	// --- policy: the platform decided, and the job was fine -----------------------------------
 	EvictionStageCut:               FaultPolicy,

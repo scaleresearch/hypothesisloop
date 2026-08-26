@@ -238,7 +238,8 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, e
 	watcher := scheduler.NewJobWatcher(store, jwc, settler, logger).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap)
+		WithObservedTimeConfig(metricsDBURL, observedGapCap).
+		WithScaleUpTimeout(time.Duration(pcfg.Scheduler.ScaleUpTimeoutSeconds) * time.Second)
 
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store, settler, metricsDBURL, logger).
