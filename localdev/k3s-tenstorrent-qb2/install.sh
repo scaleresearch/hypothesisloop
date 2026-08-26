@@ -51,11 +51,16 @@ if [[ -z "${REGISTRY_HOST_IP}" ]]; then
 fi
 
 # Matches localdev/k3s-macos/install.sh's pin so both profiles track the same tested k8s
-# minor version — deliberately not "latest". DRA (resource.k8s.io/v1) is GA
-# from k8s 1.34; this is comfortably past that, so no DRA feature-gate flags
-# are needed on the apiserver/kubelet (they would be required at 1.33, per
-# tt-dra-driver's own stated minimum).
-K3S_VERSION="v1.36.2+k3s1"
+# minor version. DRA (resource.k8s.io/v1) is GA from k8s 1.34; this is comfortably past
+# that, so no DRA feature-gate flags are needed on the apiserver/kubelet (they would be
+# required at 1.33, per tt-dra-driver's own stated minimum).
+K3S_VERSION="v1.36.3+k3s1"
+
+# Same gang-scheduling gates as localdev/k3s-macos/install.sh — see that file's comment for
+# what each one does. This host is currently single-node (jobset/kubepmix disabled below), so
+# gang scheduling has nothing to admit yet, but the flags cost nothing to carry and keep both
+# profiles' k3s config identical rather than silently diverging.
+K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-apiserver-arg=runtime-config=scheduling.k8s.io/v1alpha2=true --kube-controller-manager-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-scheduler-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true"
 
 TT_OPERATOR_NAMESPACE="${TT_OPERATOR_NAMESPACE:-tt-operator-system}"
 TT_OPERATOR_CHART="oci://ghcr.io/tenstorrent/helm/tt-operator"
@@ -132,7 +137,7 @@ if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; t
   echo "    Installing/upgrading k3s..."
   sudo systemctl stop k3s 2>/dev/null || true
   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" \
-    INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+    INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644 ${K3S_GANG_SCHEDULING_FLAGS}" sh -
 else
   echo "    k3s ${K3S_VERSION} already installed."
   sudo systemctl is-active --quiet k3s || sudo systemctl start k3s

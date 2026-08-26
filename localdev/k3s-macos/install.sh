@@ -35,13 +35,17 @@ configs:
 # binds the whole gang atomically for parallelism==completions Indexed Jobs, which is exactly
 # the shape workload_client.go:BuildJob already produces for multi-node distributed jobs. No
 # control-plane code change needed to use it — just these cluster-level feature gates. See
-# runtime/docs/execution-layer.md.
+# autoscaler.md's "Future swap-in" note.
 #
 # Three gates, not two: GenericWorkload (base Workload API) and WorkloadWithJob (Job controller
 # auto-creates Workload/PodGroup for qualifying Jobs) only get the objects created — the actual
 # atomic gang admission/binding in kube-scheduler is gated separately by GangScheduling. Without
 # it the PodGroup exists but the scheduler still admits its pods one at a time.
-K3S_VERSION="v1.36.2+k3s1"
+#
+# PodGroup itself is still v1alpha2 here (v1beta1 needs k8s 1.37, which k3s hasn't shipped yet —
+# checked update.k3s.io/v1-release/channels, latest is 1.36.x). Bump this pin to a 1.37 release
+# once one exists, to pick up the beta API and drop the alpha runtime-config line below.
+K3S_VERSION="v1.36.3+k3s1"
 K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-apiserver-arg=runtime-config=scheduling.k8s.io/v1alpha2=true --kube-controller-manager-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true --kube-scheduler-arg=feature-gates=GenericWorkload=true,WorkloadWithJob=true,GangScheduling=true"
 
 # This VM's root disk is shared with whatever else podman/podman-machine is running on the
