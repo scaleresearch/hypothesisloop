@@ -33,6 +33,10 @@ func (l *Loop) tick(ctx context.Context) error {
 	// per cluster per tick, shared by both admission passes. See its call sites for why.
 	disbalanceRan := map[string]bool{}
 
+	// autoscaler.md's backlog signal (secondary path, for clusters with no native autoscaler to
+	// react to a Pending pod). Published once at the end of this tick, whatever else happens.
+	backlog := newBacklogAggregator()
+
 	// Amortizes the running-experiment node-attribution lookups tick-time "max" resolution needs
 	// (see loop_resolve.go) across every queued job this tick considers, in both passes.
 	resolveCache := newResolutionCache(l)
@@ -436,6 +440,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+			backlog.record(start, cluster, "guaranteed", exp, shortage)
 			reason := ""
 			switch {
 			case waitingForScaleUp:
@@ -548,6 +553,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
+			backlog.record(start, cluster, "burst", exp, shortage)
 			fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
 				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(fitAtTickStart, fp, shortage)); err != nil {
@@ -568,6 +574,8 @@ func (l *Loop) tick(ctx context.Context) error {
 		reservePlacement(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "admitted").Inc()
 	}
+
+	backlog.publish(speculativeFootprintByCluster)
 
 	return errors.Join(tickErrs...)
 }

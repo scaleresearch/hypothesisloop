@@ -59,6 +59,24 @@ var (
 		Name: "hypothesisloop_failovers_total",
 		Help: "Total speculative-submit failovers (cluster added to a job's tried_clusters), labeled by reason.",
 	}, []string{"reason"})
+
+	// SchedulerUnmetDemand is autoscaler.md's backlog signal for clusters with no native
+	// autoscaler to react to a Pending pod: capacity-blocked shortfall per (cluster, flavor,
+	// tier), minus outstanding speculative footprint already being served. Feeds an external
+	// autoscaler (bare-metal power-on, cloud API script) — secondary path, nothing in the
+	// control plane consumes it.
+	SchedulerUnmetDemand = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hypothesisloop_scheduler_unmet_demand",
+		Help: "Capacity-blocked accelerator shortfall per cluster/flavor/tier, net of outstanding speculative submits.",
+	}, []string{"cluster", "flavor", "tier"})
+
+	// SchedulerUnmetDemandOldestWaitSeconds is the same bucketing as SchedulerUnmetDemand, but
+	// the longest a still-blocked job in that bucket has been queued — how urgently an external
+	// autoscaler should react, not just whether it should.
+	SchedulerUnmetDemandOldestWaitSeconds = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hypothesisloop_scheduler_unmet_demand_oldest_wait_seconds",
+		Help: "Age of the longest-waiting still-blocked job per cluster/flavor/tier bucket.",
+	}, []string{"cluster", "flavor", "tier"})
 )
 
 // CountEviction is the only way to increment EvictedExperimentsTotal. Reasons carry a per-job
@@ -71,5 +89,6 @@ func CountEviction(reason domain.EvictionReason) {
 
 func init() {
 	prometheus.MustRegister(EvictedExperimentsTotal, AdmissionTickDuration, AdmissionTickResultsTotal,
-		StaleDesiredStateExperiments, SpeculativeSubmitsTotal, FailoversTotal)
+		StaleDesiredStateExperiments, SpeculativeSubmitsTotal, FailoversTotal,
+		SchedulerUnmetDemand, SchedulerUnmetDemandOldestWaitSeconds)
 }
