@@ -109,6 +109,14 @@ type insufficientQuotaError struct{ message string }
 func (e *insufficientQuotaError) Error() string           { return e.message }
 func (e *insufficientQuotaError) InsufficientQuota() bool { return true }
 
+// concurrencyCapError signals autoscaler.md's max_concurrent_accelerators rejection specifically,
+// distinct from a quota (accelerator-hours) rejection, so the scheduler can set
+// domain.NotAdmittedConcurrencyCap rather than the generic quota reason.
+type concurrencyCapError struct{}
+
+func (e *concurrencyCapError) Error() string                { return domain.NotAdmittedConcurrencyCap }
+func (e *concurrencyCapError) ConcurrencyCapExceeded() bool { return true }
+
 // AdmitExperiment atomically validates every quota dimension and inserts the PostgreSQL desired
 // state under one per-agent advisory lock. No provisional row is exposed and no cleanup race is
 // possible: concurrent submissions observe a strict before-or-after ordering.
@@ -139,10 +147,11 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 	return decision, nil
 }
 
-// ReserveAdmittedFlavor revalidates quota before persisting a scheduler-selected accelerator
-// flavor whose rate differs from the originally requested flavor.
-func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64) error {
-	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost,
+// ReserveAdmittedFlavor revalidates quota and the platform experiment's concurrency cap
+// (autoscaler.md's spend-rate control) before persisting the selected accelerator flavor.
+// acceleratorCount is the job's total accelerator footprint (0 for jobs with none).
+func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error {
+	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost, acceleratorCount, s.cfg.DefaultMaxConcurrentAccelerators,
 		func(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 			aq := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID}
 			pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
@@ -159,6 +168,9 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 		})
 	if err != nil {
 		return err
+	}
+	if reason == domain.NotAdmittedConcurrencyCap {
+		return &concurrencyCapError{}
 	}
 	if reason != "" {
 		return &insufficientQuotaError{message: reason}

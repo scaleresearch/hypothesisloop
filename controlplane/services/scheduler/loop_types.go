@@ -68,7 +68,7 @@ type LoopStore interface {
 // figures together always cover the whole job.
 type LoopQuotaStore interface {
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
-	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64) error
+	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
 }
 
 // ObservedState is the actual state the loop reads back from the metrics store: how long a job has

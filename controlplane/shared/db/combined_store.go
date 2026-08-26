@@ -238,9 +238,13 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	return AdmitInserted, "", nil
 }
 
-// ReserveAdmittedFlavorTx rechecks the selected flavor's estimate and persists it under the
-// same cross-replica quota lock used by initial admission.
-func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, observe func(context.Context, string, string) (*domain.AgentQuota, error)) (string, error) {
+// ReserveAdmittedFlavorTx rechecks the selected flavor's estimate, enforces the platform
+// experiment's max_concurrent_accelerators spend-rate cap (autoscaler.md's concurrency cap:
+// Σ accelerator_count over this pool's SUBMITTED+RUNNING rows + this job's count must not exceed
+// the cap), and persists the flavor — all under the same cross-replica quota lock used by initial
+// admission. defaultMaxConcurrent is quota.default_max_concurrent_accelerators, used when the
+// platform experiment has no override.
+func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(context.Context, string, string) (*domain.AgentQuota, error)) (string, error) {
 	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: begin: %w", err)
@@ -283,6 +287,27 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 	projected := used + desired - oldCost + estimatedCost
 	if projected > limit {
 		return fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, have %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, limit-(used+desired-oldCost)), nil
+	}
+	if acceleratorCount > 0 {
+		var maxConcurrent *int
+		if err := tx.QueryRow(ctx, `SELECT max_concurrent_accelerators FROM platform_experiments WHERE id=$1`, platformExpID).Scan(&maxConcurrent); err != nil {
+			return "", fmt.Errorf("reserve admitted flavor: platform experiment cap: %w", err)
+		}
+		cap := defaultMaxConcurrent
+		if maxConcurrent != nil {
+			cap = *maxConcurrent
+		}
+		if cap > 0 {
+			var inFlight int
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(accelerator_count),0) FROM experiments
+				WHERE agent_id=$1 AND platform_experiment_id=$2 AND id!=$3 AND status IN ('SUBMITTED','RUNNING')`,
+				agentID, platformExpID, experimentID).Scan(&inFlight); err != nil {
+				return "", fmt.Errorf("reserve admitted flavor: in-flight accelerators: %w", err)
+			}
+			if inFlight+acceleratorCount > cap {
+				return domain.NotAdmittedConcurrencyCap, nil
+			}
+		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE experiments SET accelerator_type=$2, estimated_cost_acch=$3, updated_at=NOW() WHERE id=$1`, experimentID, string(acceleratorType), estimatedCost); err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: update: %w", err)

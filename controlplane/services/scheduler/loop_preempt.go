@@ -15,6 +15,25 @@ import (
 
 var errAdmissionCapacityChanged = errors.New("capacity changed during admission")
 
+// concurrencyCapExceeded is implemented by the quota package's concurrencyCapError; checked via
+// errors.As so submitJob's callers can distinguish autoscaler.md's max_concurrent_accelerators
+// rejection from a generic submit failure without importing the quota package's concrete type.
+type concurrencyCapExceeded interface{ ConcurrencyCapExceeded() bool }
+
+// notAdmittedReasonForSubmitError maps a submitJob/submitJobTo error to the not_admitted_reason
+// the row should carry. Order matters: check the most specific error first.
+func notAdmittedReasonForSubmitError(err error) string {
+	var capErr concurrencyCapExceeded
+	switch {
+	case errors.As(err, &capErr):
+		return domain.NotAdmittedConcurrencyCap
+	case errors.Is(err, errAdmissionCapacityChanged):
+		return domain.NotAdmittedCapacityUnavailable
+	default:
+		return domain.NotAdmittedWorkloadCreation
+	}
+}
+
 // preempt selects and requeues burst victims sufficient to cover needed, a shortage Footprint
 // that may span multiple dimensions (e.g. CPU+accelerator both short). The whole victim set is
 // planned and verified before anything is evicted (see the fill-back pass below) — vector
@@ -288,13 +307,23 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 }
 
 func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType, speculative bool) error {
-	if exp.AcceleratorCount > 0 && exp.AcceleratorType != persistedFlavor {
-		rate, ok := exp.AcceleratorType.LookupCost()
-		if !ok {
-			return fmt.Errorf("submitJob: unknown accelerator flavor %q for experiment %s", exp.AcceleratorType, exp.ID)
+	// ReserveAdmittedFlavor is called on every submit now, not only on a flavor substitution: it
+	// is also where the max_concurrent_accelerators cap (autoscaler.md's concurrency cap) is
+	// enforced atomically against this pool's live SUBMITTED+RUNNING accelerator count, and
+	// speculation makes live capacity appear on demand — the cap is the only thing left bounding
+	// concurrency once that gate is open.
+	if exp.AcceleratorCount > 0 {
+		newEstCost := exp.EstimatedCostAccH
+		flavor := persistedFlavor
+		if exp.AcceleratorType != persistedFlavor {
+			rate, ok := exp.AcceleratorType.LookupCost()
+			if !ok {
+				return fmt.Errorf("submitJob: unknown accelerator flavor %q for experiment %s", exp.AcceleratorType, exp.ID)
+			}
+			newEstCost = rate * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+			flavor = exp.AcceleratorType
 		}
-		newEstCost := rate * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
-		if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, exp.AcceleratorType, newEstCost); err != nil {
+		if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, flavor, newEstCost, exp.AcceleratorCount); err != nil {
 			return fmt.Errorf("reserve selected accelerator flavor: %w", err)
 		}
 		exp.EstimatedCostAccH = newEstCost

@@ -72,7 +72,7 @@ func (w *liveWorkload) CreateWorkload(context.Context, *domain.Experiment) error
 
 type submitQuota struct{ LoopQuotaStore }
 
-func (submitQuota) ReserveAdmittedFlavor(context.Context, string, domain.AcceleratorType, float64) error {
+func (submitQuota) ReserveAdmittedFlavor(context.Context, string, domain.AcceleratorType, float64, int) error {
 	return nil
 }
 

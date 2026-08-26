@@ -62,7 +62,7 @@ type QuotaService interface {
 	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) (db.AdmitDecision, error)
-	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64) error
+	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
 }
 
 // WorkloadClient manages backend-executed workloads, potentially across multiple target

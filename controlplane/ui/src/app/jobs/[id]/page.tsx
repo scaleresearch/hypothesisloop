@@ -12,7 +12,7 @@ import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
-import { evictionLabel } from '@/lib/eviction'
+import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
 
 function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
   return (
@@ -182,7 +182,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           }}
         >
           <strong style={{ color: semantic.accent }}>Not admitted:</strong>{' '}
-          <span className="mono text-muted" style={{ fontSize: 12 }}>{j.not_admitted_reason}</span>
+          <span className="mono text-muted" style={{ fontSize: 12 }}>{notAdmittedLabel(j.not_admitted_reason)}</span>
         </div>
       )}
 

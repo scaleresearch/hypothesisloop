@@ -37,6 +37,11 @@ type QuotaConfig struct {
 	MaxCPUCoresPerJob         float64 `json:"max_cpu_cores_per_job,omitempty"`
 	MaxRAMGBPerJob            float64 `json:"max_ram_gb_per_job,omitempty"`
 	MaxStorageGBPerJob        float64 `json:"max_storage_gb_per_job,omitempty"`
+
+	// DefaultMaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING) per
+	// platform experiment when it does not set its own MaxConcurrentAccelerators. See
+	// config.QuotaConfig for the operator-facing doc.
+	DefaultMaxConcurrentAccelerators int `json:"default_max_concurrent_accelerators,omitempty"`
 }
 
 // DefaultQuotaConfig returns fallback quota constants used in tests and local runs

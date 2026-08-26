@@ -54,6 +54,11 @@ const (
 	// nothing either — the job is not stranded, it will be reconsidered once an entry expires or
 	// live capacity changes.
 	NotAdmittedNoScalableCapacity = "no_scalable_capacity"
+	// NotAdmittedConcurrencyCap means the experiment's platform-experiment pool already holds
+	// max_concurrent_accelerators (or the global default) accelerators in flight (SUBMITTED+
+	// RUNNING); admitting this job would exceed that spend-rate control (autoscaler.md's
+	// concurrency cap).
+	NotAdmittedConcurrencyCap = "concurrency_cap"
 )
 
 // IsTerminal reports whether the status is a final lifecycle state that no further execution

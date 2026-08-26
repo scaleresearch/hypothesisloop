@@ -346,10 +346,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				if err := l.submitJobTo(ctx, exp, specCluster, persistedFlavor, true); err != nil {
 					l.logger.Error("speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
 					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-					reason := domain.NotAdmittedWorkloadCreation
-					if errors.Is(err, errAdmissionCapacityChanged) {
-						reason = domain.NotAdmittedCapacityUnavailable
-					}
+					reason := notAdmittedReasonForSubmitError(err)
 					if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 						l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 					}
@@ -458,10 +455,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
 			l.logger.Error("submit guaranteed job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-			reason := domain.NotAdmittedWorkloadCreation
-			if errors.Is(err, errAdmissionCapacityChanged) {
-				reason = domain.NotAdmittedCapacityUnavailable
-			}
+			reason := notAdmittedReasonForSubmitError(err)
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
@@ -564,10 +558,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
 			l.logger.Error("submit burst job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			reason := domain.NotAdmittedWorkloadCreation
-			if errors.Is(err, errAdmissionCapacityChanged) {
-				reason = domain.NotAdmittedCapacityUnavailable
-			}
+			reason := notAdmittedReasonForSubmitError(err)
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}

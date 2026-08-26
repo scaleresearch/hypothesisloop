@@ -16,6 +16,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
 import { formatAccH, relTime } from '@/lib/format'
+import { notAdmittedLabel } from '@/lib/eviction'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -247,7 +248,7 @@ function JobsPageContent() {
 					  <Badge status={status}>{status}</Badge>
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3 }}>
-                          {j.not_admitted_reason}
+                          {notAdmittedLabel(j.not_admitted_reason)}
                         </div>
                       )}
                     </td>

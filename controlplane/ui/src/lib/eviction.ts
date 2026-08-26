@@ -17,6 +17,32 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
   // Historical rows from before the stage ladder replaced the two-phase mechanism.
   phase2_hold: 'Held for Phase 2',
   stuck_pending: 'Stuck pending admission',
+  scale_up_timeout: 'Autoscaler did not deliver capacity in time',
+  flavor_mismatch: 'Landed on a different accelerator type than reserved',
+}
+
+// Human-readable labels for domain.NotAdmittedReason (shared/domain/constants.go) — why a QUEUED
+// job hasn't started yet. Same "code: detail" convention and same fallback-to-raw-code behavior as
+// eviction reasons; use notAdmittedLabel to render.
+const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
+  capacity_unavailable: 'No capacity available',
+  outranked: 'Outranked by a higher-priority job',
+  summary_gate: 'Waiting on summary gate',
+  stage_cut: 'Cut at stage boundary',
+  job_too_long: 'Would run past the stage job-length limit',
+  workload_creation_failed: 'Workload creation failed',
+  no_multi_node_cluster: 'No connected cluster can run a multi-node job of this shape',
+  'waiting-for-scale-up': 'Waiting for an autoscaler node already booting on this cluster',
+  no_scalable_capacity: 'No autoscaler cluster had room to try — will retry as clusters free up',
+  concurrency_cap: 'At its experiment’s max concurrent accelerators',
+}
+
+export function notAdmittedLabel(reason?: string | null): string {
+  if (!reason) return ''
+  const code = evictionCode(reason)
+  const label = NOT_ADMITTED_REASON_LABELS[code] ?? code
+  const detail = evictionDetail(reason)
+  return detail ? `${label} — ${detail}` : label
 }
 
 // A reason may carry an explanation after its code, in the same "code: detail" shape the scheduler

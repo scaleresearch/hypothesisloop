@@ -605,6 +605,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const hypothesisProgress = hypothesisProgressCounts(hypotheses ?? [], experiments ?? [])
 
+  // Accelerators currently in flight (SUBMITTED+RUNNING) against max_concurrent_accelerators —
+  // autoscaler.md's concurrency cap. Summed over the bounded experiments page like the scoreboard
+  // above, not a whole-experiment aggregate: acceptable here since the cap itself only ever
+  // compares against a live, similarly-scoped SUM in ReserveAdmittedFlavorTx server-side — this is
+  // a display, not the enforcement.
+  const inFlightAccelerators = (experiments ?? [])
+    .filter(e => e.status === 'SUBMITTED' || e.status === 'RUNNING')
+    .reduce((s, e) => s + (e.accelerator_count ?? 0), 0)
+
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
   const running = (experiments ?? []).filter(e => e.status === 'RUNNING')
@@ -826,8 +835,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stats row */}
       <Pod>
         <PodContent>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 16 }}>
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
+            <StatTile
+              label="Accelerators In Flight"
+              value={`${inFlightAccelerators} / ${pe.max_concurrent_accelerators ?? 'default'}`}
+              color={pe.max_concurrent_accelerators != null && inFlightAccelerators >= pe.max_concurrent_accelerators ? semantic.accent : undefined}
+            />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
             <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
             <StatTile label="Jobs" value={(stats?.total ?? 0).toString()} href={`/jobs?platform_experiment_id=${pe.id}`} />

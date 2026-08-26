@@ -82,14 +82,15 @@ func main() {
 	domain.SetAcceleratorRates(pcfg.RateByName)
 
 	quotaCfg := domain.QuotaConfig{
-		Top3BonusFraction:         pcfg.Quota.Top3BonusFraction,
-		BurstFraction:             pcfg.Quota.BurstFraction,
-		DefaultStages:             pcfg.Stages.Default,
-		MaxSubmissionsPerHour:     pcfg.Quota.MaxSubmissionsPerHour,
-		MaxAcceleratorCountPerJob: pcfg.Quota.MaxAcceleratorCountPerJob,
-		MaxCPUCoresPerJob:         pcfg.Quota.MaxCPUCoresPerJob,
-		MaxRAMGBPerJob:            pcfg.Quota.MaxRAMGBPerJob,
-		MaxStorageGBPerJob:        pcfg.Quota.MaxStorageGBPerJob,
+		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
+		BurstFraction:                    pcfg.Quota.BurstFraction,
+		DefaultStages:                    pcfg.Stages.Default,
+		MaxSubmissionsPerHour:            pcfg.Quota.MaxSubmissionsPerHour,
+		MaxAcceleratorCountPerJob:        pcfg.Quota.MaxAcceleratorCountPerJob,
+		MaxCPUCoresPerJob:                pcfg.Quota.MaxCPUCoresPerJob,
+		MaxRAMGBPerJob:                   pcfg.Quota.MaxRAMGBPerJob,
+		MaxStorageGBPerJob:               pcfg.Quota.MaxStorageGBPerJob,
+		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 	}
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
