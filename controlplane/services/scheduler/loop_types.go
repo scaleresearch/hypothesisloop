@@ -117,6 +117,9 @@ type LoopWorkloadClient interface {
 	// GetMultiNodeCapability reports which clusters can run a job spanning more than one node.
 	// A cluster absent from the map is treated as single-node only.
 	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
+	// GetAutoscalerCapability reports which clusters sit behind a native autoscaler.
+	// A cluster absent from the map is treated as not-autoscaled.
+	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
 	// GetTotalCapacity reports each cluster's installed capacity — the per-accelerator
 	// CPU/memory share the disbalance evictor measures requests against. Clusters without a
 	// fresh report are absent, never zero-filled. Only read when that evictor is enabled.

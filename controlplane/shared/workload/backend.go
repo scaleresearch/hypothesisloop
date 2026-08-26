@@ -65,6 +65,11 @@ type Backend interface {
 	// is treated as incapable.
 	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
 
+	// GetAutoscalerCapability reports, per cluster, whether it sits behind a native autoscaler
+	// (cluster-autoscaler / Karpenter) that reacts to Pending pods. Operator-set, fail-closed: a
+	// cluster absent from the map has no fresh report and is treated as not-autoscaled.
+	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
+
 	// GetTotalCapacity reports each cluster's installed (not free) capacity as a canonical
 	// domain.Footprint — the denominator for "how much CPU/memory does one accelerator on this
 	// cluster come with", which GetFlavorCapacity's availability numbers cannot answer. A

@@ -34,19 +34,30 @@ type ClusterCapacitySnapshot struct {
 	// fair-share math needs, since free capacity fluctuates with what's running.
 	NodeResourcesTotalByNode map[string]map[string]int64
 	NodeLabelsByNode         map[string]map[string]string
+	// ClusterID is the runtime-derived stable fingerprint (kube-system namespace UID / machine-id)
+	// sent on every reconcile. Carried as a label on the heartbeat sample so LiveClusterIDs can
+	// join a display name to the identity everything else keys on. Empty on runtimes that have not
+	// been upgraded to send it yet — callers must not assume presence.
+	ClusterID string
 	// MultiNodeCapable is the cluster's own report of whether its runtime can execute a job
 	// spanning more than one node. A capability, not a capacity, but reported and read on the
 	// same snapshot for the same reason: it is a live fact about the cluster that goes stale the
 	// moment the cluster stops reporting.
-	MultiNodeCapable               bool
+	MultiNodeCapable bool
+	// AutoscalerEnabled is the cluster's own report of whether its runtime sits behind a native
+	// autoscaler (cluster-autoscaler / Karpenter) that will react to Pending pods. Absent/false is
+	// the fail-closed default — a false positive here costs a wasted scale-up deadline per job, so
+	// it is operator-set, not heuristically detected.
+	AutoscalerEnabled              bool
 	RAMAvailable, RAMTotal         int64
 	StorageAvailable, StorageTotal int64
 }
 
 func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot ClusterCapacitySnapshot) error {
 	labels := map[string]string{"cluster_name": snapshot.ClusterName}
+	heartbeatLabels := map[string]string{"cluster_name": snapshot.ClusterName, "cluster_id": snapshot.ClusterID}
 	samples := []GaugeSample{
-		{MetricName: clusterHeartbeatMetric, Labels: labels, Value: 1, At: snapshot.At},
+		{MetricName: clusterHeartbeatMetric, Labels: heartbeatLabels, Value: 1, At: snapshot.At},
 		{MetricName: clusterCPUAvailableMetric, Labels: labels, Value: snapshot.CPUAvailable, At: snapshot.At},
 		{MetricName: clusterCPUTotalMetric, Labels: labels, Value: snapshot.CPUTotal, At: snapshot.At},
 		{MetricName: clusterRAMAvailableMetric, Labels: labels, Value: float64(snapshot.RAMAvailable), At: snapshot.At},
@@ -54,6 +65,7 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 		{MetricName: clusterStorageAvailableMetric, Labels: labels, Value: float64(snapshot.StorageAvailable), At: snapshot.At},
 		{MetricName: clusterStorageTotalMetric, Labels: labels, Value: float64(snapshot.StorageTotal), At: snapshot.At},
 		{MetricName: clusterMultiNodeCapableMetric, Labels: labels, Value: boolGauge(snapshot.MultiNodeCapable), At: snapshot.At},
+		{MetricName: clusterAutoscalerEnabledMetric, Labels: labels, Value: boolGauge(snapshot.AutoscalerEnabled), At: snapshot.At},
 	}
 	for acceleratorType, available := range snapshot.AcceleratorAvailable {
 		samples = append(samples, GaugeSample{MetricName: clusterAcceleratorAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "accelerator_type": acceleratorType}, Value: float64(available), At: snapshot.At})
@@ -93,6 +105,27 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 // credited with a capability it can no longer be asked about.
 const clusterMultiNodeCapableMetric = "cluster_multi_node_capable"
 
+// clusterAutoscalerEnabledMetric is a cluster's operator-set report of whether it sits behind a
+// native autoscaler that reacts to Pending pods: 1 yes, 0 no. Written on every reconcile exchange
+// like clusterMultiNodeCapableMetric beside it, so it ages out with the same freshness window.
+const clusterAutoscalerEnabledMetric = "cluster_autoscaler_enabled"
+
+// LiveClusterAutoscalerCapability returns, per cluster with a fresh report, whether it sits behind
+// a native autoscaler. A cluster absent from the map has not reported recently and must be treated
+// as not-autoscaled by the caller — never assumed capable, since the cost of the assumption is a
+// speculative submit that Pends forever.
+func LiveClusterAutoscalerCapability(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
+	values, err := lastValuePerCluster(ctx, dbURL, clusterAutoscalerEnabledMetric, window)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LiveClusterAutoscalerCapability: %w", err)
+	}
+	out := make(map[string]bool, len(values))
+	for cluster, value := range values {
+		out[cluster] = value != 0
+	}
+	return out, nil
+}
+
 func boolGauge(value bool) float64 {
 	if value {
 		return 1
@@ -112,6 +145,39 @@ func LiveClusterMultiNodeCapability(ctx context.Context, dbURL string, window ti
 	out := make(map[string]bool, len(values))
 	for cluster, value := range values {
 		out[cluster] = value != 0
+	}
+	return out, nil
+}
+
+// LiveClusterIDs returns each connected cluster's runtime-derived identity (kube-system namespace
+// UID / machine-id), as reported alongside its most recent heartbeat within window. A cluster
+// absent from the map has either not reported recently or is running a runtime build that does not
+// yet send cluster_id — callers must treat absence as "identity unknown", not as an error.
+func LiveClusterIDs(ctx context.Context, dbURL string, window time.Duration) (map[string]string, error) {
+	if window <= 0 {
+		return nil, fmt.Errorf("metricsdb.LiveClusterIDs: freshness window must be positive")
+	}
+	seconds := int64(math.Ceil(window.Seconds()))
+	query := fmt.Sprintf(
+		`WITH latest_heartbeat AS (`+
+			`SELECT cluster_name, MAX(greptime_timestamp) AS snapshot_at FROM %s `+
+			`WHERE greptime_timestamp >= NOW() - INTERVAL '%d seconds' GROUP BY cluster_name`+
+			`) SELECT metric.* FROM %s metric JOIN latest_heartbeat heartbeat `+
+			`ON metric.cluster_name = heartbeat.cluster_name AND metric.greptime_timestamp = heartbeat.snapshot_at`,
+		clusterHeartbeatMetric, seconds, clusterHeartbeatMetric,
+	)
+	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LiveClusterIDs: %w", err)
+	}
+	out := make(map[string]string, len(samples))
+	for _, sample := range samples {
+		cluster := sample.Labels["cluster_name"]
+		clusterID := sample.Labels["cluster_id"]
+		if cluster == "" || clusterID == "" {
+			continue
+		}
+		out[cluster] = clusterID
 	}
 	return out, nil
 }

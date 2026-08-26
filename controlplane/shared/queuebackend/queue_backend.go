@@ -300,6 +300,14 @@ func (b *Backend) GetMultiNodeCapability(ctx context.Context) (map[string]bool, 
 	return metricsdb.LiveClusterMultiNodeCapability(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
+// GetAutoscalerCapability reports which clusters say they sit behind a native autoscaler
+// (cluster-autoscaler / Karpenter) that reacts to Pending pods. A cluster with no fresh report is
+// absent, and speculative admission reads absence as "no autoscaler" — the same fail-closed rule
+// GetMultiNodeCapability follows.
+func (b *Backend) GetAutoscalerCapability(ctx context.Context) (map[string]bool, error) {
+	return metricsdb.LiveClusterAutoscalerCapability(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
 func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
 	return metricsdb.LiveClusterNodeLabels(ctx, b.metricsDBURL, b.connectedWithin)
 }

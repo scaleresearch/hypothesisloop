@@ -100,6 +100,12 @@ spec:
               value: "__CLUSTER_NAME__"
             - name: API_URL
               value: "__API_URL__"
+            # Operator-set claim that this cluster sits behind a native autoscaler
+            # (cluster-autoscaler / Karpenter) that reacts to Pending pods. Fail-closed default
+            # false: a false positive here costs a job a wasted scale-up deadline, so this is
+            # never heuristically detected. See autoscaler.md.
+            - name: AUTOSCALER_ENABLED
+              value: "__AUTOSCALER_ENABLED__"
           resources:
             requests:
               cpu: "10m"

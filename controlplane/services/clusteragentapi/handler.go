@@ -131,6 +131,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		clusterIDs, err := metricsdb.LiveClusterIDs(ctx, h.metricsDBURL, h.connectedWithin)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		names := make([]string, 0, len(heartbeats))
 		for name := range heartbeats {
 			names = append(names, name)
@@ -151,6 +155,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 			out[i] = clusterInfo{
 				ClusterName:      name,
+				ClusterID:        clusterIDs[name],
 				LastSeenAt:       lastSeen,
 				Connected:        connected,
 				AcceleratorBusy:  busySum,
@@ -263,6 +268,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			NodeResourcesTotalByNode:   report.NodeResourcesTotalByNode,
 			NodeLabelsByNode:           report.NodeLabelsByNode,
 			MultiNodeCapable:           report.MultiNodeCapable,
+			AutoscalerEnabled:          report.AutoscalerEnabled,
+			ClusterID:                  report.ClusterID,
 			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
 			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
 		}); err != nil {
@@ -373,8 +380,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// runtime actually has something to say about why this job's container hasn't
 			// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
 			// prior explanation with silence.
-			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 {
-				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, now); err != nil {
+			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
+				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, now); err != nil {
 					return nil, huma.Error500InternalServerError(err.Error())
 				}
 			}
@@ -435,18 +442,33 @@ type capacityReport struct {
 	// see agentexec.Executor.SupportsMultiNodeJobs. Absent (false) means single-node only, which
 	// is the safe reading: a cluster that has not said it can run distributed work does not get
 	// distributed work.
-	MultiNodeCapable      bool  `json:"multi_node_capable"`
-	RAMAvailableBytes     int64 `json:"ram_available_bytes"`
-	RAMTotalBytes         int64 `json:"ram_total_bytes"`
-	StorageAvailableBytes int64 `json:"storage_available_bytes"`
-	StorageTotalBytes     int64 `json:"storage_total_bytes"`
+	MultiNodeCapable bool `json:"multi_node_capable"`
+	// AutoscalerEnabled is whether this cluster sits behind a native autoscaler (cluster-autoscaler
+	// / Karpenter) that reacts to Pending pods. Operator-set on the agent deployment
+	// (AUTOSCALER_ENABLED), fail-closed: absent (false) means the scheduler never speculatively
+	// submits onto this cluster.
+	AutoscalerEnabled bool `json:"autoscaler_enabled"`
+	// ClusterID is a stable fingerprint the runtime derives live and never persists itself: the
+	// kube-system namespace UID on k8s, /etc/machine-id on bare metal. Unlike ClusterName (an
+	// operator-typed label that can be renamed or duplicated), this identifies the cluster across
+	// a rename — everything scheduler-side that must survive a rename (cluster_settings,
+	// tried_clusters) keys on it instead of the name.
+	ClusterID             string `json:"cluster_id"`
+	RAMAvailableBytes     int64  `json:"ram_available_bytes"`
+	RAMTotalBytes         int64  `json:"ram_total_bytes"`
+	StorageAvailableBytes int64  `json:"storage_available_bytes"`
+	StorageTotalBytes     int64  `json:"storage_total_bytes"`
 }
 
 // clusterInfo is one row of GET /internal/clusters.
 type clusterInfo struct {
-	ClusterName string    `json:"cluster_name"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
-	Connected   bool      `json:"connected"`
+	ClusterName string `json:"cluster_name"`
+	// ClusterID is the runtime-derived stable fingerprint (kube-system namespace UID /
+	// machine-id), empty for a cluster whose agent has not reported it (older runtime build, or
+	// no heartbeat within the freshness window).
+	ClusterID  string    `json:"cluster_id"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	Connected  bool      `json:"connected"`
 	// AcceleratorBusy/AcceleratorTotal are the cluster's most recently reported occupancy,
 	// summed across every accelerator flavor — actual busy-vs-idle chip counts from the last
 	// reconcile snapshot, not a budget-consumption ratio. Zero/absent when no live snapshot is
@@ -468,6 +490,13 @@ type statusReport struct {
 	Reason                  string   `json:"reason,omitempty"`
 	Message                 string   `json:"message,omitempty"`
 	RestartCount            int32    `json:"restart_count,omitempty"`
+	// ScheduledNodes is the count of this report's pods with condition PodScheduled=True — see
+	// PhaseDetailRow.ScheduledNodes. Absent (0) on runtimes that don't yet compute it or for a
+	// report where nothing has bound.
+	ScheduledNodes int32 `json:"scheduled_nodes,omitempty"`
+	// SchedulingReason is a best-effort explanation for a still-Pending pod (autoscaler event
+	// message) — see PhaseDetailRow.SchedulingReason.
+	SchedulingReason string `json:"scheduling_reason,omitempty"`
 	// Attempt is the generation of the workload this observation came from, as the control plane
 	// numbered it (domain.Experiment.AttemptCount, handed to the runtime and carried on the
 	// workload it created). A pointer because absent and zero are different answers — see

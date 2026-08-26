@@ -3,6 +3,7 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/moby/moby/client"
@@ -152,3 +153,14 @@ func (e *Executor) Engine() string { return e.engineName }
 func (e *Executor) SetupCluster(_ context.Context) error { return nil }
 
 func (e *Executor) ProvisionAgent(_ context.Context, _ string) error { return nil }
+
+// GetClusterID returns the host's /etc/machine-id: set once at OS install, stable for the
+// machine's life, the bare-metal equivalent of the k8s runtime's kube-system namespace UID. See
+// autoscaler.md's "Cluster identity".
+func (e *Executor) GetClusterID(_ context.Context) (string, error) {
+	raw, err := os.ReadFile("/etc/machine-id")
+	if err != nil {
+		return "", fmt.Errorf("podexec: read /etc/machine-id: %w", err)
+	}
+	return strings.TrimSpace(string(raw)), nil
+}

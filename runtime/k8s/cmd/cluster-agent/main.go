@@ -40,6 +40,9 @@ func main() {
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines, _ := strconv.Atoi(os.Getenv("LOG_TAIL_LINES"))
+	// Optional: whether this cluster sits behind a native autoscaler. Fail-closed default false —
+	// see autoscaler.md's "Cluster capability".
+	autoscalerEnabled, _ := strconv.ParseBool(os.Getenv("AUTOSCALER_ENABLED"))
 
 	jwc, err := k8sexec.New(k8sexec.Config{
 		APIURL:                               apiURL,
@@ -77,6 +80,7 @@ func main() {
 		StatusInterval:    statusInterval,
 		LogTailLines:      logTailLines,
 		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
+		AutoscalerEnabled: autoscalerEnabled,
 		Log:               log,
 	}
 	a.Run(ctx)

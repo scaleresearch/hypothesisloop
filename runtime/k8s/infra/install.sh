@@ -18,6 +18,10 @@
 #                       (default: http://host.containers.internal:8081)
 #   METRICS_URL       — outbound URL node-agents push observations to
 #                       (default: http://host.containers.internal:8084)
+#   AUTOSCALER_ENABLED — set true only if this cluster runs a native autoscaler
+#                       (cluster-autoscaler / Karpenter) that reacts to Pending pods. Operator
+#                       claim, not detected: a false positive costs a job a wasted scale-up
+#                       deadline. See autoscaler.md (default: false)
 #   REGISTRY_URL      — registry host:port these images are pulled from. Must already be
 #                       reachable from every node in this cluster — provisioning that
 #                       reachability (a registry mirror, VPC peering, whatever the cluster's own
@@ -32,6 +36,7 @@ set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:-local}"
 API_URL="${API_URL:-http://host.containers.internal:8081}"
+AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"
 METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
 REGISTRY_URL="${REGISTRY_URL:-localhost:5000}"
 TAG="${TAG:-latest}"
@@ -72,7 +77,8 @@ sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__METRICS_URL__|${METRICS_URL}|g; \
 # back — the control plane itself never opens a connection into this cluster.
 echo "==> Applying cluster-agent Deployment (API: ${API_URL})..."
 sed "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g; s|__API_URL__|${API_URL}|g; \
-     s|__REGISTRY__|${REGISTRY_URL}|g; s|__TAG__|${TAG}|g" \
+     s|__REGISTRY__|${REGISTRY_URL}|g; s|__TAG__|${TAG}|g; \
+     s|__AUTOSCALER_ENABLED__|${AUTOSCALER_ENABLED}|g" \
   "${SCRIPT_DIR}/cluster-agent-deployment.yaml" \
   | kctl apply -f -
 

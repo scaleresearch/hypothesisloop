@@ -66,7 +66,12 @@ type Agent struct {
 	// MaxLogLineChars is hypothesisloop.yaml's scheduler.max_log_tail_line_chars — required
 	// (config validation already enforces > 0), not defaulted here.
 	MaxLogLineChars int
-	Log             func(format string, args ...any)
+	// AutoscalerEnabled is the operator's own claim that this cluster sits behind a native
+	// autoscaler (cluster-autoscaler / Karpenter) reacting to Pending pods — AUTOSCALER_ENABLED
+	// env var, default false (fail-closed: a false positive costs a job a wasted scale-up
+	// deadline, so this is never heuristically detected). See autoscaler.md.
+	AutoscalerEnabled bool
+	Log               func(format string, args ...any)
 }
 
 // Run starts the reconcile and status-report loops and blocks until ctx is cancelled.
@@ -254,6 +259,15 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, ma
 	if err != nil {
 		return nil, nil, fmt.Errorf("get per-node total resource capacity: %w", err)
 	}
+	clusterID, err := a.Executor.GetClusterID(ctx)
+	if err != nil {
+		// Identity is not on the critical path of "what can run where" -- a cluster whose
+		// identity read failed this tick still has real capacity to report. Logged and sent
+		// empty; the control plane's per-cluster settings/tried-history simply won't resolve for
+		// this cluster until the next successful read.
+		a.Log("get cluster id: %v", err)
+		clusterID = ""
+	}
 	payload, err := json.Marshal(map[string]any{
 		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
 		"accelerator_available_by_type": acceleratorAvail, "accelerator_total_by_type": acceleratorTotal,
@@ -262,6 +276,8 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, ma
 		"node_resources_total_by_node":  nodeResourcesTotal,
 		"node_labels_by_node":           nodeLabels,
 		"multi_node_capable":            a.Executor.SupportsMultiNodeJobs(),
+		"autoscaler_enabled":            a.AutoscalerEnabled,
+		"cluster_id":                    clusterID,
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
 		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,
 	})
@@ -308,6 +324,10 @@ type statusReportWire struct {
 	Reason                  string   `json:"reason,omitempty"`
 	Message                 string   `json:"message,omitempty"`
 	RestartCount            int32    `json:"restart_count,omitempty"`
+	// ScheduledNodes/SchedulingReason carry the gang-readiness facts PollPhaseDetail computes —
+	// see agentexec.Executor.PollPhaseDetail.
+	ScheduledNodes   int32  `json:"scheduled_nodes,omitempty"`
+	SchedulingReason string `json:"scheduling_reason,omitempty"`
 	// Attempt is the generation of the experiment this observation came from. A pointer so an
 	// executor that could not establish one (workload.AttemptUnknown) sends no field at all
 	// rather than a number: the control plane reads absence as "cannot fence" and accepts the
@@ -391,7 +411,8 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 	// source, not because reading it failed.
 	var logTail []string
 	var reason, message string
-	var restartCount int32
+	var restartCount, scheduledNodes int32
+	var schedulingReason string
 	if phase != workload.JobPhaseGone {
 		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
 		// not stop this batch reporting phase for every other job (important.md #19), so it is
@@ -403,10 +424,10 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		} else {
 			logTail = splitLongLines(logTail, a.MaxLogLineChars)
 		}
-		reason, message, restartCount, err = a.Executor.PollPhaseDetail(ctx, id)
+		reason, message, restartCount, scheduledNodes, schedulingReason, err = a.Executor.PollPhaseDetail(ctx, id)
 		if err != nil {
 			a.Log("poll phase detail %s: %v", id, err)
-			reason, message, restartCount = "", "", 0
+			reason, message, restartCount, scheduledNodes, schedulingReason = "", "", 0, 0, ""
 		}
 	}
 
@@ -425,6 +446,8 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		Reason:                  reason,
 		Message:                 message,
 		RestartCount:            restartCount,
+		ScheduledNodes:          scheduledNodes,
+		SchedulingReason:        schedulingReason,
 	}, true
 }
 

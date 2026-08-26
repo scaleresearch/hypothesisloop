@@ -16,10 +16,10 @@ import (
 // generic stuck-pending timeout rather than a runtime-side cache of the launch failure, which
 // would be exactly the in-RAM state important.md #4 rules out. Returns empty reason/message and
 // nil error when there is nothing notable to report.
-func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error) {
+func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, 0, "", err
 	}
 	for _, c := range containers {
 		if c.Labels[LabelExperimentID] != experimentID {
@@ -27,21 +27,25 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string) (re
 		}
 		resp, err := e.docker.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
 		if err != nil {
-			return "", "", 0, fmt.Errorf("podexec: inspect container %s: %w", c.ID, err)
+			return "", "", 0, 0, "", fmt.Errorf("podexec: inspect container %s: %w", c.ID, err)
 		}
 		restartCount = int32(resp.Container.RestartCount)
+		// Bare metal has no autoscaler and no gang concept -- one experiment, one container, on a
+		// host that either exists or doesn't. scheduledNodes reports 1 once the container exists
+		// (Docker created it, it has landed), matching how a k8s pod that has bound is counted.
+		scheduledNodes = 1
 		if resp.Container.State == nil {
-			return "", "", restartCount, nil
+			return "", "", restartCount, scheduledNodes, "", nil
 		}
 		if resp.Container.State.Error != "" {
-			return podexecPhaseReason(resp.Container.State.Error), resp.Container.State.Error, restartCount, nil
+			return podexecPhaseReason(resp.Container.State.Error), resp.Container.State.Error, restartCount, scheduledNodes, "", nil
 		}
 		if resp.Container.State.ExitCode != 0 {
-			return "", fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, nil
+			return "", fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
 		}
-		return "", "", restartCount, nil
+		return "", "", restartCount, scheduledNodes, "", nil
 	}
-	return "", "", 0, nil
+	return "", "", 0, 0, "", nil
 }
 
 // podexecPhaseReason classifies a container engine's own error text into the control plane's

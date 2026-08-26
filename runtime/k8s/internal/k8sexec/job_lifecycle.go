@@ -773,8 +773,13 @@ func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID strin
 // like "no change" to a phase-only comparison. Comparing UID alongside phase (see cluster-agent's
 // reportChangedStatuses) catches that, since UID always changes on delete+recreate.
 //
-// A grouped experiment has one Job per group, and this is where they are read as ONE thing. The
-// group Jobs can and will disagree, so the aggregation is stated as a precedence, worst first:
+// A grouped experiment has one Job per group, and this is where they are read as ONE thing. This
+// hand-rolled aggregation is what k8s's own Workload/PodGroup API (scheduling.k8s.io, alpha since
+// 1.36 — GenericWorkload/WorkloadWithJob feature gates, off by default, not even exposed on our
+// k3s v1.36.2) is meant to replace with native gang status. Not adopted yet: alpha, and Job
+// controller integration is only "phase 1" upstream. Revisit once it's GA and commonly enabled.
+//
+// The group Jobs can and will disagree, so the aggregation is stated as a precedence, worst first:
 //
 //   - nothing present at all -> Gone. A partial set is NOT Gone: some of the gang is still there.
 //   - any group Failed -> Failed. A gang is one unit, so one group failing has already ended the
@@ -959,6 +964,20 @@ func (c *JobWorkloadClient) ProvisionAgent(_ context.Context, _ string) error { 
 // plane on every reconcile so admission places distributed work here and not on a single-node
 // runtime.
 func (c *JobWorkloadClient) SupportsMultiNodeJobs() bool { return true }
+
+// GetClusterID returns the kube-system namespace's UID: created with the cluster, immutable for
+// its life, globally unique, and readable with the credentials the agent already holds. The
+// community-standard cluster fingerprint (Karpenter, Prometheus "cluster" relabeling, kubecost
+// all use it) — chosen over generating and storing our own because the runtime's config file is
+// read-only and shared with the control plane, so there is nowhere to persist a generated one.
+// See autoscaler.md's "Cluster identity".
+func (c *JobWorkloadClient) GetClusterID(ctx context.Context) (string, error) {
+	ns, err := c.kube.CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("workload: get kube-system namespace: %w", err)
+	}
+	return string(ns.UID), nil
+}
 
 // ReapTerminal has nothing to do here. A finished k8s Job is removed by the reconcile pass that
 // finds it undesired; unlike a container engine, k8s keeps no separate terminal record behind it.

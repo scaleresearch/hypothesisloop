@@ -24,15 +24,20 @@ var k8sPhaseReasons = map[string]string{
 }
 
 // PollPhaseDetail inspects experimentID's currently-scheduled pod(s) for a waiting or
-// terminated container state and reports it. Read live on every call — no caching
-// (important.md #4). Returns empty reason/message and nil error when nothing notable is
-// happening (pod not scheduled yet, or every container running cleanly).
-func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error) {
+// terminated container state and reports it, plus the gang-readiness facts the control plane's
+// scale-up-timeout watcher needs: scheduledNodes (pods with condition PodScheduled=True) and
+// schedulingReason (the PodScheduled=False condition's message on a still-Pending pod — this is
+// where CA's "0/1 nodes are available" / Karpenter's "incompatible with nodepool" messages
+// surface; a Pending pod already carries this on its own status, so no separate Events read is
+// needed). Read live on every call — no caching (important.md #4). Returns empty reason/message
+// and nil error when nothing notable is happening (pod not scheduled yet, or every container
+// running cleanly).
+func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
 	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
 	})
 	if err != nil {
-		return "", "", 0, fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
+		return "", "", 0, 0, "", fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
 	}
 
 	var maxRestarts int32
@@ -40,6 +45,11 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 	var firstTerminated *corev1.ContainerStateTerminated
 	for i := range pods.Items {
 		p := &pods.Items[i]
+		if scheduled, unscheduledReason := podScheduledCondition(p); scheduled {
+			scheduledNodes++
+		} else if unscheduledReason != "" && schedulingReason == "" {
+			schedulingReason = unscheduledReason
+		}
 		for _, cs := range p.Status.ContainerStatuses {
 			if cs.RestartCount > maxRestarts {
 				maxRestarts = cs.RestartCount
@@ -55,12 +65,30 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 
 	switch {
 	case firstWaiting != nil:
-		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, nil
+		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
 	case firstTerminated != nil:
-		return terminatedPhaseDetail(firstTerminated, maxRestarts)
+		r, m, rc, tErr := terminatedPhaseDetail(firstTerminated, maxRestarts)
+		return r, m, rc, scheduledNodes, schedulingReason, tErr
 	default:
-		return "", "", maxRestarts, nil
+		return "", "", maxRestarts, scheduledNodes, schedulingReason, nil
 	}
+}
+
+// podScheduledCondition reports whether p's PodScheduled condition is True, and when it is
+// explicitly False, the condition's message — the autoscaler's own refusal text when one exists
+// (e.g. "0/3 nodes are available: 3 Insufficient nvidia.com/gpu"), empty otherwise (condition not
+// yet reported, or scheduling simply hasn't been attempted).
+func podScheduledCondition(p *corev1.Pod) (scheduled bool, unscheduledMessage string) {
+	for _, cond := range p.Status.Conditions {
+		if cond.Type != corev1.PodScheduled {
+			continue
+		}
+		if cond.Status == corev1.ConditionTrue {
+			return true, ""
+		}
+		return false, cond.Message
+	}
+	return false, ""
 }
 
 // terminatedPhaseDetail describes a container that exited non-zero. The exit code and

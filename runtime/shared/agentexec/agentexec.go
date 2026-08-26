@@ -50,7 +50,12 @@ type Executor interface {
 	// FetchLogTail and PollPhaseDetail are how a job explains itself: the runtime watching the
 	// job relays its output and its non-start reason, never the job process (important.md #16).
 	FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error)
-	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, err error)
+	// PollPhaseDetail also reports the gang-readiness facts the control plane's scale-up-timeout
+	// watcher needs: scheduledNodes is the count of this experiment's pods/containers that have
+	// actually landed (k8s: PodScheduled=True; bare metal: the container exists), and
+	// schedulingReason is a best-effort explanation for why a pod is still Pending (autoscaler
+	// refusal/acceptance text), empty when there is nothing to report.
+	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error)
 
 	PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error)
 	// PollJobStatus is one coherent read of a managed workload. Phase, identity and generation
@@ -86,6 +91,13 @@ type Executor interface {
 	// reservation, and failed at workload creation — an admission-time question answered at
 	// execution time.
 	SupportsMultiNodeJobs() bool
+
+	// GetClusterID returns a stable fingerprint for this cluster that the runtime derives live
+	// and never persists itself: the kube-system namespace UID on k8s, /etc/machine-id on bare
+	// metal. Unlike ClusterName (an operator-typed label that can be renamed or duplicated), this
+	// is what the control plane keys per-cluster settings and failover history on — it survives a
+	// rename. Sent on every reconcile and status push. See autoscaler.md's "Cluster identity".
+	GetClusterID(ctx context.Context) (string, error)
 
 	ProvisionAgent(ctx context.Context, agentID string) error
 }
