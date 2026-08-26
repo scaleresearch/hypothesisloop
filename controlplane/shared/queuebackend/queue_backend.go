@@ -164,7 +164,10 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 
 	guaranteed = make(map[string]domain.Footprint, len(heartbeats))
 	burst = make(map[string]domain.Footprint, len(heartbeats))
-	for cluster := range heartbeats {
+	for cluster, connected := range heartbeats {
+		if !connected {
+			continue
+		}
 		totalAccelerators := acceleratorTotal[cluster]
 		availableAccelerators := acceleratorAvailable[cluster]
 		total := domain.CapacityFootprint(cpuTotal[cluster], totalAccelerators, ramTotal[cluster], storageTotal[cluster])
