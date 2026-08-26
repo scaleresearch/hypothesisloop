@@ -44,3 +44,27 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 		t.Fatal("Load accepted an unknown configuration field")
 	}
 }
+
+// A scale_up_timeout at or past PyTorch's default 30-minute rendezvous store timeout would let a
+// partial gang's landed ranks time out and fail the job for real before job_watcher's own
+// scale_up_timeout eviction ever fires — turning a scheduling failure into a charged retry.
+func TestLoadRejectsScaleUpTimeoutAtOrAboveRendezvousLimit(t *testing.T) {
+	text := strings.Replace(productionConfig(t), "  scale_up_timeout_seconds: 600", "  scale_up_timeout_seconds: 1800", 1)
+	if err := loadText(t, text); err == nil {
+		t.Fatal("Load accepted scale_up_timeout_seconds >= 1800")
+	}
+}
+
+func TestLoadAcceptsScaleUpTimeoutBelowRendezvousLimit(t *testing.T) {
+	text := strings.Replace(productionConfig(t), "  scale_up_timeout_seconds: 600", "  scale_up_timeout_seconds: 1799", 1)
+	if err := loadText(t, text); err != nil {
+		t.Fatalf("Load rejected a valid scale_up_timeout_seconds: %v", err)
+	}
+}
+
+func TestLoadRejectsZeroDefaultMaxConcurrentAccelerators(t *testing.T) {
+	text := strings.Replace(productionConfig(t), "  default_max_concurrent_accelerators: 64", "  default_max_concurrent_accelerators: 0", 1)
+	if err := loadText(t, text); err == nil {
+		t.Fatal("Load accepted default_max_concurrent_accelerators: 0")
+	}
+}

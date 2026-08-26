@@ -74,6 +74,9 @@ func (c *Config) build() error {
 		c.Quota.MaxCPUCoresPerJob < 0 || c.Quota.MaxRAMGBPerJob < 0 || c.Quota.MaxStorageGBPerJob < 0 {
 		return fmt.Errorf("quota per-job and per-hour limits must not be negative (0 means unlimited)")
 	}
+	if c.Quota.DefaultMaxConcurrentAccelerators <= 0 {
+		return fmt.Errorf("quota default_max_concurrent_accelerators must be positive")
+	}
 	s := c.Scheduler
 	if s.LoopHeartbeatSeconds <= 0 || s.JobPollIntervalSeconds <= 0 ||
 		s.StuckPendingTimeoutSeconds <= 0 || s.ClusterUnreachableAfterSeconds <= 0 ||
@@ -82,8 +85,11 @@ func (c *Config) build() error {
 		s.DefaultTerminationGracePeriodSeconds <= 0 || s.MaxTerminationGracePeriodSeconds <= 0 || s.DefaultReportIntervalSeconds <= 0 ||
 		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 || s.MaxLogTailLineChars <= 0 ||
 		s.MaxInfrastructureRequeues <= 0 || s.MaxCheckpointGraceSeconds <= 0 ||
-		s.ResourceDisbalanceTolerance <= 0 {
+		s.ResourceDisbalanceTolerance <= 0 || s.ScaleUpTimeoutSeconds <= 0 || s.TriedClusterTTLSeconds <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
+	}
+	if s.ScaleUpTimeoutSeconds >= MaxScaleUpTimeoutSeconds {
+		return fmt.Errorf("scheduler scale_up_timeout_seconds must be less than %d (PyTorch's default rendezvous timeout)", MaxScaleUpTimeoutSeconds)
 	}
 	// Required, not optional: every job is handed a data address, so a deployment without a
 	// store would hand out an address that resolves to nothing.

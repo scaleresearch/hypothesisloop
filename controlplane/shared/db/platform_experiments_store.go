@@ -42,8 +42,8 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // CreatePlatformExperiment inserts a new platform experiment.
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
+INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -64,7 +64,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 		pe.StartsAt, pe.EndsAt, string(pe.Status),
 		stages, 1,
 		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
-		pe.CreatedAt, pe.UpdatedAt,
+		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -75,7 +75,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at
+SELECT id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators
 FROM platform_experiments
 WHERE id = $1`
 
@@ -88,7 +88,7 @@ WHERE id = $1`
 		&pe.StartsAt, &pe.EndsAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
 		&hypothesisPolicy, &jobPolicy,
-		&pe.CreatedAt, &pe.UpdatedAt,
+		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -244,7 +244,7 @@ SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agent
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
        pe.hypothesis_submit_policy, pe.job_submit_policy,
-       pe.created_at, pe.updated_at,
+       pe.created_at, pe.updated_at, pe.max_concurrent_accelerators,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
 LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
@@ -271,7 +271,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&pe.StartsAt, &pe.EndsAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&hypothesisPolicy, &jobPolicy,
-			&pe.CreatedAt, &pe.UpdatedAt,
+			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators,
 			&pe.SignupCount,
 		); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: scan: %w", err)
@@ -341,12 +341,14 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	}
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
-    report_interval_seconds=$7, starts_at=$8, ends_at=$9, hypothesis_submit_policy=$10, job_submit_policy=$11, updated_at=NOW()
+    report_interval_seconds=$7, starts_at=$8, ends_at=$9, hypothesis_submit_policy=$10, job_submit_policy=$11, updated_at=NOW(),
+    max_concurrent_accelerators=$13
 WHERE id=$1 AND status=$12`
 	tag, err := s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
 		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy), expectedStatus,
+		pe.MaxConcurrentAccelerators,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)

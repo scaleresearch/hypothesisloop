@@ -1,14 +1,76 @@
 'use client'
 
+import { useState } from 'react'
 import useSWR from 'swr'
-import { fetchClusters, fetchResourceCapacity } from '@/lib/api'
-import type { ClustersResponse } from '@/types'
+import { fetchClusters, fetchResourceCapacity, fetchClusterSettings, putClusterSettings } from '@/lib/api'
+import type { ClustersResponse, ClusterInfo } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
+
+// Inline editor for one cluster's cluster_settings row (scale_up_timeout_seconds,
+// max_speculative_accelerators). Only rendered for autoscaler-enabled clusters — a non-autoscaler
+// cluster never speculates, so its settings would have nothing to affect.
+function ClusterSettingsEditor({ clusterID }: { clusterID: string }) {
+  const { data, isLoading, mutate } = useSWR(
+    clusterID ? ['cluster-settings', clusterID] : null,
+    () => fetchClusterSettings(clusterID),
+  )
+  const [timeout_, setTimeout_] = useState('')
+  const [cap, setCap] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState(false)
+
+  if (!clusterID) return <span className="text-muted" style={{ fontSize: 12 }}>no cluster_id reported</span>
+  if (isLoading) return <Loading />
+
+  if (!editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span className="mono text-muted" style={{ fontSize: 12 }}>
+          timeout: {data?.scale_up_timeout_seconds ?? 'default'}s · cap: {data?.max_speculative_accelerators ?? 'none'}
+        </span>
+        <Button size="sm" onClick={() => {
+          setTimeout_(data?.scale_up_timeout_seconds != null ? String(data.scale_up_timeout_seconds) : '')
+          setCap(data?.max_speculative_accelerators != null ? String(data.max_speculative_accelerators) : '')
+          setEditing(true)
+        }}>Edit</Button>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <input
+        style={{ width: 110, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, background: 'var(--surface-2)', color: 'var(--foreground)' }}
+        placeholder="timeout s (< 1800)" value={timeout_}
+        onChange={e => setTimeout_(e.target.value)}
+      />
+      <input
+        style={{ width: 80, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, background: 'var(--surface-2)', color: 'var(--foreground)' }}
+        placeholder="max accel" value={cap}
+        onChange={e => setCap(e.target.value)}
+      />
+      <Button size="sm" disabled={saving} onClick={async () => {
+        setSaving(true)
+        try {
+          await putClusterSettings(clusterID, {
+            scale_up_timeout_seconds: timeout_ === '' ? null : Number(timeout_),
+            max_speculative_accelerators: cap === '' ? null : Number(cap),
+          })
+          await mutate()
+          setEditing(false)
+        } finally {
+          setSaving(false)
+        }
+      }}>Save</Button>
+      <Button size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+    </div>
+  )
+}
 
 function ConnectedClusters() {
   const { data, error, isLoading, mutate } = useSWR<ClustersResponse>(
@@ -57,12 +119,17 @@ function ConnectedClusters() {
                   <th>Cluster</th>
                   <th>Status</th>
                   <th>Last Seen</th>
+                  <th>Autoscaler</th>
+                  <th>Speculation Settings</th>
                 </tr>
               </thead>
               <tbody>
-                {data.clusters.map(c => (
+                {data.clusters.map((c: ClusterInfo) => (
                   <tr key={c.cluster_name}>
-                    <td className="mono" style={{ fontWeight: 600 }}>{c.cluster_name}</td>
+                    <td className="mono" style={{ fontWeight: 600 }}>
+                      {c.cluster_name}
+                      {c.cluster_id && <div className="text-muted" style={{ fontSize: 11 }}>{c.cluster_id}</div>}
+                    </td>
                     <td>
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -77,6 +144,16 @@ function ConnectedClusters() {
                       </span>
                     </td>
                     <td className="mono text-muted">{new Date(c.last_seen_at).toLocaleString()}</td>
+                    <td>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: c.autoscaler_enabled ? semantic.success : undefined }}>
+                        {c.autoscaler_enabled ? 'Enabled' : 'Off'}
+                      </span>
+                    </td>
+                    <td>
+                      {c.autoscaler_enabled
+                        ? <ClusterSettingsEditor clusterID={c.cluster_id} />
+                        : <span className="text-muted" style={{ fontSize: 12 }}>n/a</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

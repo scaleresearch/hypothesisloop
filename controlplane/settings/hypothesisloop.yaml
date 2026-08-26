@@ -118,6 +118,11 @@ quota:
   # experiment. Prevents queue flooding. 0 = unlimited.
   max_submissions_per_hour: 100
 
+  # Accelerators-in-flight (SUBMITTED+RUNNING) a platform experiment may hold at once when it
+  # does not set its own max_concurrent_accelerators. Speculative submission makes capacity
+  # appear on demand, so this is the concurrency ceiling that live capacity used to provide.
+  default_max_concurrent_accelerators: 64
+
   # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is
   # independent of (and on top of) budget sizing: size these relative to your smallest
@@ -179,6 +184,17 @@ scheduler:
   # accelerator-hours -- the environment failed the job, not the agent. Past this ceiling the
   # job stops and stays EVICTED with the reason that kept ending it.
   max_infrastructure_requeues: 3
+
+  # Global default deadline for an autoscaler-enabled cluster to deliver capacity for a
+  # SUBMITTED/RUNNING job's incomplete gang before job_watcher evicts it (reason
+  # scale_up_timeout) and fails it over to the next candidate cluster. Overridable per cluster
+  # via cluster_settings. Must be < 1800: PyTorch's default rendezvous store timeout is 30
+  # minutes, and waiting past that turns a scheduling failure into a real job failure.
+  scale_up_timeout_seconds: 600
+
+  # How long a cluster stays excluded from a job's speculative candidates after that job failed
+  # over off it. Past the TTL the cluster is eligible again for that job.
+  tried_cluster_ttl_seconds: 900
 
   # Age-bucket width for guaranteed-tier admission fairness: jobs queued within this window of
   # each other are ordered by least-used-quota agent first instead of exact FIFO timestamp,

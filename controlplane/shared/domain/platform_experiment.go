@@ -127,16 +127,22 @@ func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
 
 // PlatformExperiment is the operator-defined compute envelope agents compete within.
 type PlatformExperiment struct {
-	ID                     string                   `json:"id"`
-	Name                   string                   `json:"name"`
-	Description            string                   `json:"description"`
-	BudgetAcceleratorHours float64                  `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
-	MaxAgents              int                      `json:"max_agents"`
-	Metrics                []MetricDefinition       `json:"metrics"`                 // metrics jobs must emit; used for ranking
-	ReportIntervalSeconds  int                      `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
-	StartsAt               time.Time                `json:"starts_at"`
-	EndsAt                 time.Time                `json:"ends_at"`
-	Status                 PlatformExperimentStatus `json:"status"`
+	ID                     string  `json:"id"`
+	Name                   string  `json:"name"`
+	Description            string  `json:"description"`
+	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
+	MaxAgents              int     `json:"max_agents"`
+	// MaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING, summed across
+	// this platform experiment's agents' jobs) at any moment. Nil defers to
+	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on
+	// demand and removes the live-capacity ceiling that used to bound concurrency implicitly —
+	// this is the explicit replacement, enforced in ReserveAdmittedFlavorTx on every submit.
+	MaxConcurrentAccelerators *int                     `json:"max_concurrent_accelerators,omitempty"`
+	Metrics                   []MetricDefinition       `json:"metrics"`                 // metrics jobs must emit; used for ranking
+	ReportIntervalSeconds     int                      `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
+	StartsAt                  time.Time                `json:"starts_at"`
+	EndsAt                    time.Time                `json:"ends_at"`
+	Status                    PlatformExperimentStatus `json:"status"`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.

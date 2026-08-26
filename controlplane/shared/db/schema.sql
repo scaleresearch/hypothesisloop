@@ -159,6 +159,19 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_submit_policy        TEXT NOT NULL DEFAULT 'mixed';
 
+-- Accelerators this platform experiment may hold in flight (SUBMITTED+RUNNING) at once, across
+-- all its agents' jobs. NULL = use the config default (quota.default_max_concurrent_accelerators).
+-- Speculative submission (see cluster_settings below) makes capacity appear on demand and removes
+-- the live-capacity ceiling that used to bound concurrency implicitly — this is the replacement.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_concurrent_accelerators INTEGER;
+
+DO $$ BEGIN
+    ALTER TABLE platform_experiments ADD CONSTRAINT platform_experiments_max_concurrent_accelerators
+        CHECK (max_concurrent_accelerators IS NULL OR max_concurrent_accelerators > 0);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
 -- Per-agent CPU-hours and RAM/storage-hours quota tracking were never reachable through the UI
 -- and are fully deleted: no code reads or writes these columns any more.
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_cpu_core_hours;
@@ -509,6 +522,30 @@ CREATE TABLE IF NOT EXISTS platform_experiment_stage_advances (
     stage_index            INTEGER     NOT NULL,
     advanced_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (platform_experiment_id, stage_index)
+);
+
+-- ---------------------------------------------------------------------------
+-- cluster_settings — per-cluster operator overrides for autoscaler speculation. Keyed by
+-- cluster_id (kube-system namespace UID / machine-id — see runtime/k8s cluster-agent), not
+-- cluster_name: a rename or a duplicate display name must not split or merge these settings.
+-- Settings only, nothing observed: cluster liveness, autoscaler_enabled and the rest live in the
+-- metrics store (see queuebackend.GetAutoscalerCapability) and are never duplicated here. A row
+-- exists only once an operator sets a value; absent = global scheduler.scale_up_timeout_seconds
+-- and no per-cluster speculative cap.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS cluster_settings (
+    cluster_id                   TEXT        PRIMARY KEY,
+    scale_up_timeout_seconds     INTEGER,
+    max_speculative_accelerators INTEGER,
+    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT cluster_settings_scale_up_timeout CHECK (
+        scale_up_timeout_seconds IS NULL OR
+        (scale_up_timeout_seconds > 0 AND scale_up_timeout_seconds < 1800)
+    ),
+    CONSTRAINT cluster_settings_max_speculative_accelerators CHECK (
+        max_speculative_accelerators IS NULL OR max_speculative_accelerators > 0
+    )
 );
 
 -- ---------------------------------------------------------------------------

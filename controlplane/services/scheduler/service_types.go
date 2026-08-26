@@ -49,6 +49,10 @@ type Store interface {
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
 	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
+	// GetClusterSettings/PutClusterSettings back PUT /clusters/{id}/settings — see
+	// db.ClusterSettingsStore.
+	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
+	PutClusterSettings(ctx context.Context, cs *domain.ClusterSettings) error
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource

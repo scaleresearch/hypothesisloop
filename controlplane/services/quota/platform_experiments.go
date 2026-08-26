@@ -111,14 +111,18 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 
 // CreatePlatformExperimentRequest is the input for Create.
 type CreatePlatformExperimentRequest struct {
-	Name                   string                    `json:"name"`
-	Description            string                    `json:"description"`
-	BudgetAcceleratorHours float64                   `json:"budget_accelerator_hours"`
-	MaxAgents              int                       `json:"max_agents"`
-	Metrics                []domain.MetricDefinition `json:"metrics"`                 // metric keys jobs must emit
-	ReportIntervalSeconds  int                       `json:"report_interval_seconds"` // expected reporting cadence
-	StartsAt               time.Time                 `json:"starts_at"`
-	EndsAt                 time.Time                 `json:"ends_at"`
+	Name                   string  `json:"name"`
+	Description            string  `json:"description"`
+	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
+	MaxAgents              int     `json:"max_agents"`
+	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
+	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
+	// change" on update; a present zero is rejected by domain validation, not treated as unset.
+	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
+	Metrics                   []domain.MetricDefinition `json:"metrics"`                 // metric keys jobs must emit
+	ReportIntervalSeconds     int                       `json:"report_interval_seconds"` // expected reporting cadence
+	StartsAt                  time.Time                 `json:"starts_at"`
+	EndsAt                    time.Time                 `json:"ends_at"`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`

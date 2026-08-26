@@ -342,6 +342,60 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		out.Body.Status = "ok"
 		return out, nil
 	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "get-cluster-settings", Method: "GET", Path: "/clusters/{cluster_id}/settings",
+		Summary: "Read a cluster's autoscaler-speculation overrides", Tags: []string{"clusters"},
+		Description: "Null fields mean the cluster uses the global scheduler defaults.",
+	}, func(ctx context.Context, in *struct {
+		ClusterID string `path:"cluster_id"`
+	}) (*struct {
+		Body domain.ClusterSettings
+	}, error) {
+		cs, err := h.svc.GetClusterSettings(ctx, in.ClusterID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		out := &struct {
+			Body domain.ClusterSettings
+		}{}
+		if cs != nil {
+			out.Body = *cs
+		} else {
+			out.Body = domain.ClusterSettings{ClusterID: in.ClusterID}
+		}
+		return out, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "put-cluster-settings", Method: "PUT", Path: "/clusters/{cluster_id}/settings",
+		Summary: "Set a cluster's autoscaler-speculation overrides", Tags: []string{"clusters"},
+		Description: "scale_up_timeout_seconds overrides the global deadline for this cluster (must be < 1800s — " +
+			"PyTorch's default rendezvous timeout). max_speculative_accelerators caps this cluster's outstanding " +
+			"speculative footprint. Omit a field (null) to fall back to the global default / no cap.",
+	}, func(ctx context.Context, in *struct {
+		ClusterID string `path:"cluster_id"`
+		Body      struct {
+			ScaleUpTimeoutSeconds      *int `json:"scale_up_timeout_seconds,omitempty"`
+			MaxSpeculativeAccelerators *int `json:"max_speculative_accelerators,omitempty"`
+		}
+	}) (*struct {
+		Body domain.ClusterSettings
+	}, error) {
+		cs := &domain.ClusterSettings{
+			ClusterID:                  in.ClusterID,
+			ScaleUpTimeoutSeconds:      in.Body.ScaleUpTimeoutSeconds,
+			MaxSpeculativeAccelerators: in.Body.MaxSpeculativeAccelerators,
+		}
+		if err := h.svc.PutClusterSettings(ctx, cs); err != nil {
+			return nil, huma.Error400BadRequest(err.Error())
+		}
+		out := &struct {
+			Body domain.ClusterSettings
+		}{}
+		out.Body = *cs
+		return out, nil
+	})
 }
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {

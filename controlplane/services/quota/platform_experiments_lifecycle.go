@@ -44,23 +44,27 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: job_submit_policy: %w", err)
 	}
+	if req.MaxConcurrentAccelerators != nil && *req.MaxConcurrentAccelerators <= 0 {
+		return nil, fmt.Errorf("platform_experiments.Create: max_concurrent_accelerators must be positive")
+	}
 	pe := &domain.PlatformExperiment{
-		ID:                     "pe-" + uuid.New().String()[:8],
-		Name:                   req.Name,
-		Description:            req.Description,
-		BudgetAcceleratorHours: req.BudgetAcceleratorHours,
-		MaxAgents:              req.MaxAgents,
-		Metrics:                metrics,
-		ReportIntervalSeconds:  reportInterval,
-		StartsAt:               req.StartsAt,
-		EndsAt:                 req.EndsAt,
-		Status:                 domain.PlatformExpOpen,
-		Stages:                 stages,
-		CurrentStage:           1,
-		HypothesisSubmitPolicy: hypothesisPolicy,
-		JobSubmitPolicy:        jobPolicy,
-		CreatedAt:              now,
-		UpdatedAt:              now,
+		ID:                        "pe-" + uuid.New().String()[:8],
+		Name:                      req.Name,
+		Description:               req.Description,
+		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,
+		MaxAgents:                 req.MaxAgents,
+		Metrics:                   metrics,
+		ReportIntervalSeconds:     reportInterval,
+		StartsAt:                  req.StartsAt,
+		EndsAt:                    req.EndsAt,
+		Status:                    domain.PlatformExpOpen,
+		Stages:                    stages,
+		CurrentStage:              1,
+		HypothesisSubmitPolicy:    hypothesisPolicy,
+		JobSubmitPolicy:           jobPolicy,
+		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}
 	if pe.MaxAgents <= 0 {
 		pe.MaxAgents = 100
@@ -111,7 +115,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 			(!req.StartsAt.IsZero() && !req.StartsAt.Truncate(timePrecision).Equal(pe.StartsAt.Truncate(timePrecision))) ||
 			(!req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision))) ||
 			(req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy) ||
-			(req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy)
+			(req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy) ||
+			(req.MaxConcurrentAccelerators != nil && (pe.MaxConcurrentAccelerators == nil || *req.MaxConcurrentAccelerators != *pe.MaxConcurrentAccelerators))
 		if locked {
 			return nil, fmt.Errorf("experiment_running: only name and description can be amended once running")
 		}
@@ -153,6 +158,12 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 				return nil, fmt.Errorf("platform_experiments.Update: job_submit_policy: %w", err)
 			}
 			pe.JobSubmitPolicy = policy
+		}
+		if req.MaxConcurrentAccelerators != nil {
+			if *req.MaxConcurrentAccelerators <= 0 {
+				return nil, fmt.Errorf("platform_experiments.Update: max_concurrent_accelerators must be positive")
+			}
+			pe.MaxConcurrentAccelerators = req.MaxConcurrentAccelerators
 		}
 	}
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {

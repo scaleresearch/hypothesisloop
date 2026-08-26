@@ -37,6 +37,13 @@ type QuotaConfig struct {
 	// submission from blowing through an entire budget in one debit. 0 means unlimited.
 	// Operators must size these sanely relative to burst-pool sizing: a cap alone doesn't
 	// replace correct budget sizing, it only bounds a single job's blast radius.
+	// DefaultMaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING) per
+	// platform experiment when it does not set its own max_concurrent_accelerators. Required
+	// and positive: speculative submission (see scheduler.ScaleUpTimeoutSeconds) makes capacity
+	// appear on demand, removing the live-capacity ceiling that otherwise bounded concurrency —
+	// "unlimited" is not offered, this default is what "I don't care" means.
+	DefaultMaxConcurrentAccelerators int `yaml:"default_max_concurrent_accelerators"`
+
 	MaxAcceleratorCountPerJob int     `yaml:"max_accelerator_count_per_job"`
 	MaxCPUCoresPerJob         float64 `yaml:"max_cpu_cores_per_job"`
 	MaxRAMGBPerJob            float64 `yaml:"max_ram_gb_per_job"`
@@ -124,7 +131,24 @@ type SchedulerConfig struct {
 	// stack frame intact, small enough that one pathological line can't blow up a status push.
 	// Lines over this are split, never truncated/dropped.
 	MaxLogTailLineChars int `yaml:"max_log_tail_line_chars"`
+	// ScaleUpTimeoutSeconds is the global default deadline a SUBMITTED/RUNNING job with an
+	// incomplete gang (scheduled_nodes < Nodes()) is given on an autoscaler-enabled cluster
+	// before job_watcher evicts it with reason scale_up_timeout and fails it over to the next
+	// candidate cluster (see cluster_settings for the per-cluster override). Must be < 1800:
+	// PyTorch's default rendezvous store timeout is 30 minutes, and a scale-up wait past that
+	// makes landed ranks time out and fail the job for real, charging a retry for what was only
+	// a scheduling failure.
+	ScaleUpTimeoutSeconds int `yaml:"scale_up_timeout_seconds"`
+	// TriedClusterTTLSeconds bounds how long a cluster stays excluded from a job's speculative
+	// candidates after that job failed over off it (see experiments.tried_clusters). Past the
+	// TTL the cluster is eligible again — the deadline+failover loop is the anti-thrash
+	// mechanism, this just lets it retry after the TTL rather than being excluded forever.
+	TriedClusterTTLSeconds int `yaml:"tried_cluster_ttl_seconds"`
 }
+
+// MaxScaleUpTimeoutSeconds is the hard ceiling both the global default and any per-cluster
+// scale_up_timeout_seconds override must stay under. See SchedulerConfig.ScaleUpTimeoutSeconds.
+const MaxScaleUpTimeoutSeconds = 1800
 
 // StagesConfig holds the platform-wide default elimination ladder.
 type StagesConfig struct {

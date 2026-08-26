@@ -1,5 +1,6 @@
 import type {
   ClustersResponse,
+  ClusterSettings,
   Agent,
   Experiment,
   MetricDataPoint,
@@ -54,6 +55,26 @@ async function apiFetchPage<T>(url: string): Promise<Page<T>> {
 // (has polled desired-state recently). The control plane never dials a cluster itself.
 export function fetchClusters(): Promise<ClustersResponse> {
   return apiFetch<ClustersResponse>(`${API_URL}/internal/clusters`)
+}
+
+// Per-cluster autoscaler-speculation overrides — null fields mean "use the global scheduler
+// default." Keyed by cluster_id (survives a rename), not cluster_name.
+export function fetchClusterSettings(clusterID: string): Promise<ClusterSettings> {
+  return apiFetch<ClusterSettings>(`${API_URL}/clusters/${clusterID}/settings`)
+}
+
+export async function putClusterSettings(
+  clusterID: string,
+  req: { scale_up_timeout_seconds?: number | null; max_speculative_accelerators?: number | null },
+): Promise<ClusterSettings> {
+  const res = await fetch(`${API_URL}/clusters/${clusterID}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`update cluster settings failed: ${res.status}`)
+  return res.json()
 }
 
 
@@ -236,6 +257,9 @@ export interface CreatePlatformExperimentRequest {
   description?: string
   budget_accelerator_hours: number
   max_agents: number
+  /** Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Omitted uses
+   *  the platform default (quota.default_max_concurrent_accelerators). */
+  max_concurrent_accelerators?: number
   metrics?: MetricDefinition[]
   report_interval_seconds?: number
   /** Elimination ladder; omitted means the platform default. See docs/stages.md. */

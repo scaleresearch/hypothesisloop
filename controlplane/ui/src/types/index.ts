@@ -184,6 +184,9 @@ export interface PlatformExperiment {
   hypothesis_submit_policy?: SubmitterPolicy
   job_submit_policy?: SubmitterPolicy
   max_agents: number
+  // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
+  // platform default (quota.default_max_concurrent_accelerators).
+  max_concurrent_accelerators?: number
   starts_at?: string
   ends_at?: string
   status: PlatformExperimentStatus
@@ -282,6 +285,11 @@ export interface Agent {
 // from it recently," not "we can reach it."
 export interface ClusterInfo {
   cluster_name: string
+  // Stable fingerprint the runtime derives live (kube-system namespace UID / machine-id) —
+  // unlike cluster_name, survives a rename. Empty for a cluster whose agent build predates this
+  // or that hasn't reported within the freshness window. Everything scheduler-side that must
+  // survive a rename (cluster_settings, tried_clusters) keys on this, never on cluster_name.
+  cluster_id: string
   last_seen_at: string
   connected: boolean
   // Actual busy-vs-idle chip counts from the cluster's most recent reconcile snapshot, summed
@@ -290,10 +298,22 @@ export interface ClusterInfo {
   // window (e.g. a disconnected cluster).
   accelerator_busy: number
   accelerator_total: number
+  // Whether this cluster sits behind a native autoscaler (cluster-autoscaler / Karpenter),
+  // operator-set via AUTOSCALER_ENABLED on the agent deployment. Fail-closed: false means the
+  // scheduler never speculatively submits onto this cluster.
+  autoscaler_enabled: boolean
 }
 
 export interface ClustersResponse {
   clusters: ClusterInfo[]
+}
+
+// Operator overrides for one cluster's autoscaler-speculation behaviour — see PUT
+// /clusters/{cluster_id}/settings. Null fields mean "use the global scheduler default."
+export interface ClusterSettings {
+  cluster_id: string
+  scale_up_timeout_seconds?: number | null
+  max_speculative_accelerators?: number | null
 }
 
 // ---------------------------------------------------------------------------

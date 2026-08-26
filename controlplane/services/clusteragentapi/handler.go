@@ -135,6 +135,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		autoscalerEnabled, err := metricsdb.LiveClusterAutoscalerCapability(ctx, h.metricsDBURL, h.connectedWithin)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		names := make([]string, 0, len(heartbeats))
 		for name := range heartbeats {
 			names = append(names, name)
@@ -154,12 +158,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				busySum += t - available[name][flavor]
 			}
 			out[i] = clusterInfo{
-				ClusterName:      name,
-				ClusterID:        clusterIDs[name],
-				LastSeenAt:       lastSeen,
-				Connected:        connected,
-				AcceleratorBusy:  busySum,
-				AcceleratorTotal: totalSum,
+				ClusterName:       name,
+				ClusterID:         clusterIDs[name],
+				LastSeenAt:        lastSeen,
+				Connected:         connected,
+				AcceleratorBusy:   busySum,
+				AcceleratorTotal:  totalSum,
+				AutoscalerEnabled: autoscalerEnabled[name],
 			}
 		}
 		resp := &struct {
@@ -475,6 +480,10 @@ type clusterInfo struct {
 	// within the connectedWithin freshness window (e.g. a disconnected cluster).
 	AcceleratorBusy  int64 `json:"accelerator_busy"`
 	AcceleratorTotal int64 `json:"accelerator_total"`
+	// AutoscalerEnabled mirrors the cluster's own most recent capacityReport — see
+	// capacityReport.AutoscalerEnabled. False (the fail-closed default) for a cluster whose agent
+	// has never reported it or is not within the freshness window.
+	AutoscalerEnabled bool `json:"autoscaler_enabled"`
 }
 
 // statusReport is one job-status push from a cluster-agent. Reason/Message/RestartCount are the

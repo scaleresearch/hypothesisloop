@@ -259,6 +259,9 @@ interface FormState {
   // bounded per job by the platform's max_*_per_job admission caps instead — a second budget to
   // size and split buys nothing the caps don't already give.
   max_agents: number
+  // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Empty string
+  // means "use the platform default" — see quota.default_max_concurrent_accelerators.
+  max_concurrent_accelerators: string
   starts_at: string
   ends_at: string
   metrics: MetricDefinition[]
@@ -582,6 +585,7 @@ function ExperimentModal({
     description: initial?.description ?? '',
     budget_accelerator_hours: initial?.budget_accelerator_hours ?? 1000,
     max_agents: initial?.max_agents ?? 20,
+    max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : localDatetime(1),
     ends_at: !isZeroDate(initial?.ends_at) ? new Date(initial!.ends_at!).toISOString().slice(0, 16) : localDatetime(8),
     metrics: initial?.metrics ?? [],
@@ -627,6 +631,7 @@ function ExperimentModal({
         description: form.description.trim() || '',
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
         max_agents: Number(form.max_agents),
+        ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
         report_interval_seconds: Number(form.report_interval_seconds),
         hypothesis_submit_policy: form.hypothesis_submit_policy,
@@ -751,6 +756,15 @@ function ExperimentModal({
                     <input style={INPUT_STYLE} type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
                   </Field>
                 </div>
+
+                <Field
+                  label="Max concurrent accelerators"
+                  hint={lockedWhileRunning
+                    ? 'Locked once running.'
+                    : 'Accelerators this experiment may hold in flight (submitted + running) at once, across all agents\' jobs. Empty = platform default. Bounds spend rate now that a job can trigger a cluster scale-up on demand.'}
+                >
+                  <input style={INPUT_STYLE} type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={lockedWhileRunning} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
+                </Field>
 
                 <Field
                   label={isEdit ? 'Stage ladder (fixed at creation)' : 'Stage ladder'}
