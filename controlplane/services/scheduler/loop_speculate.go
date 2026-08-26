@@ -116,7 +116,19 @@ func negativeInDimension(avail domain.Footprint, flavor domain.AcceleratorType) 
 		return false
 	}
 	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(string(flavor))}
-	return avail[key] < 0
+	v, ok := avail[key]
+	if !ok {
+		// A flavor this footprint never mentions is not "waiting for scale-up" — that is the
+		// zero-value default doing the talking, not an observed desired-free of zero.
+		return false
+	}
+	// <= 0, not < 0: a job needs at least one accelerator, so desired-free landing at exactly
+	// zero (a speculative claim that exactly exhausted this flavor, not overdrew it) already
+	// means "nothing here for the next guaranteed job either" -- codex review caught the
+	// strictly-negative version as a boundary a speculative submit can legitimately land on
+	// without ever going negative, which would have let preemption through right when the
+	// skip-preemption rule exists to stop it.
+	return v <= 0
 }
 
 // allSpeculativeCandidatesTried reports whether at least one autoscaler-enabled, connected
@@ -142,12 +154,17 @@ func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, co
 	return sawCandidate
 }
 
-// fitsLargestNode proves every rank of exp could fit SOME node in this cluster's own pool, so a
-// speculative submit is never made against a request no node the autoscaler could add would ever
-// satisfy — that would Pend forever instead of triggering a useful scale-up. Judged against the
-// largest node currently known to the cluster in each dimension independently (an autoscaler adds
-// nodes matching its existing node-group templates, so an existing node is the best available
-// proxy for "what a new node looks like"). A cluster reporting zero nodes never speculates.
+// fitsLargestNode proves every rank of exp could fit SOME single node in this cluster's own pool,
+// so a speculative submit is never made against a request no node the autoscaler could add would
+// ever satisfy — that would Pend forever instead of triggering a useful scale-up. Judged per
+// candidate node — a rank must fit one real node in every dimension at once, not a synthetic
+// shape assembled from one node's CPU and another's accelerators — because an autoscaler adds
+// nodes matching its existing node-group templates, and no template looks like a maximum-of-every-
+// dimension composite unless some single node actually has that shape. Codex review caught the
+// earlier per-dimension-max version as exactly this: it could pass a job that fits neither a
+// CPU-heavy node nor a GPU-heavy node, onto a cluster with only those two, and the job would Pend
+// forever since no addable node matches the synthesized shape. A cluster reporting zero nodes
+// never speculates.
 //
 // Per-node accelerator ceilings use nodeAvail (currently FREE devices) rather than an installed
 // total, because the control plane has no per-node installed-accelerator metric (see
@@ -160,33 +177,22 @@ func fitsLargestNode(exp *domain.Experiment, accelByNode, resourcesByNode map[st
 		return false
 	}
 	flavor := string(exp.AcceleratorType)
-	maxAccel := int64(0)
-	maxResources := map[string]int64{}
 	sawLabelMatch := false
-	for node, resources := range resourcesByNode {
-		if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			continue
-		}
-		sawLabelMatch = true
-		for key, amount := range resources {
-			if amount > maxResources[key] {
-				maxResources[key] = amount
+	for _, shape := range exp.NodeShapes() {
+		fitsSomeNode := false
+		for node, resources := range resourcesByNode {
+			if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+				continue
+			}
+			sawLabelMatch = true
+			if shape.AcceleratorCount <= accelByNode[node][flavor] && nodeHasRoom(resources, shape.Resources) {
+				fitsSomeNode = true
+				break
 			}
 		}
-		if a := accelByNode[node][flavor]; a > maxAccel {
-			maxAccel = a
-		}
-	}
-	if !sawLabelMatch {
-		return false
-	}
-	for _, shape := range exp.NodeShapes() {
-		if shape.AcceleratorCount > maxAccel {
-			return false
-		}
-		if !nodeHasRoom(maxResources, shape.Resources) {
+		if !fitsSomeNode {
 			return false
 		}
 	}
-	return true
+	return sawLabelMatch
 }

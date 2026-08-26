@@ -96,7 +96,12 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// see autoscaler.md's "Gang scheduling" section. Skipped once every rank has bound
 	// (scheduledNodes >= Nodes()), which is also true for every non-gang job whose one pod has
 	// bound — the general case degenerating, not a special one.
-	if scheduledNodes < int32(exp.Job.Nodes()) {
+	// Gated on found: no phase-detail row yet (a transient metrics-store gap, or the very first
+	// scan before the agent's first push lands) must never read as "0 ranks placed" and start
+	// counting toward eviction for a job that may already be fully bound and running — codex
+	// review caught this as a real hazard (a missing/stale row could evict a healthy job). Absent
+	// data means "we don't know yet", not "nothing is placed"; the next scan tries again.
+	if found && scheduledNodes < int32(exp.Job.Nodes()) {
 		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)
