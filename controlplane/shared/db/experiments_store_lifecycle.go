@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -93,9 +94,17 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: desired placements: %w", err)
 	}
-	available, err := capacityAvailable(ctx, desired)
-	if err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: capacity: %w", err)
+	// A nil callback is a speculative submit: there is no node yet for a live-fit predicate to
+	// check, and the capacity being claimed is the SUBMITTED row itself (already fenced against
+	// GetFlavorCapacity's desired-free by the caller's own footprint accounting). The lock and
+	// the status='QUEUED' predicate below still fully serialize the claim.
+	available := true
+	if capacityAvailable != nil {
+		var err error
+		available, err = capacityAvailable(ctx, desired)
+		if err != nil {
+			return false, fmt.Errorf("experiments_store.ClaimSubmitted: capacity: %w", err)
+		}
 	}
 	if !available {
 		return false, nil
@@ -253,22 +262,54 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 //
 // Returns false when the ceiling is reached or another writer got there first — both mean the
 // caller must terminate instead.
-func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id string, from domain.ExperimentStatus, reason string, maxInfraRequeues int) (bool, error) {
-	const q = `UPDATE experiments SET
+// triedClusterID, when non-empty, names a cluster this job's speculative attempt just gave up on
+// (scale_up_timeout / flavor_mismatch on an autoscaler cluster). Appending it to tried_clusters
+// AND skipping the infra_requeue_count spend happen in the same guarded UPDATE this function
+// already had: a failover is scheduler policy, not an environment fault charged against the
+// job's infrastructure-requeue budget, and the tried-list itself is what bounds how many
+// clusters a job can cycle through — see autoscaler.md's decisions log. Called with an empty
+// triedClusterID, behavior is byte-identical to before this parameter existed.
+func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id string, from domain.ExperimentStatus, reason string, maxInfraRequeues int, triedClusterID string) (bool, error) {
+	if triedClusterID == "" {
+		const q = `UPDATE experiments SET
+			status = 'QUEUED',
+			eviction_reason = $3,
+			attempt_count = attempt_count + 1,
+			infra_requeue_count = infra_requeue_count + 1,
+			submitted_at = NULL,
+			-- clear cluster_name: the failed attempt holds no capacity, and the next admission tick
+			-- must be free to place this somewhere other than the cluster that just failed it.
+			cluster_name = '',
+			queued_at = COALESCE(queued_at, NOW()),
+			not_admitted_reason = 'capacity_unavailable',
+			quota_settled_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1 AND status = $2 AND infra_requeue_count < $4`
+		tag, err := s.pool.pool.Exec(ctx, q, id, string(from), reason, maxInfraRequeues)
+		if err != nil {
+			return false, fmt.Errorf("experiments_store.RequeueInfrastructureFault: %w", err)
+		}
+		return tag.RowsAffected() > 0, nil
+	}
+	entry, err := json.Marshal(domain.TriedCluster{ClusterID: triedClusterID, At: time.Now().UTC()})
+	if err != nil {
+		return false, fmt.Errorf("experiments_store.RequeueInfrastructureFault: marshal tried-cluster entry: %w", err)
+	}
+	const qFailover = `UPDATE experiments SET
 		status = 'QUEUED',
 		eviction_reason = $3,
 		attempt_count = attempt_count + 1,
-		infra_requeue_count = infra_requeue_count + 1,
+		-- infra_requeue_count deliberately NOT incremented: a scale-up failover spends no
+		-- infrastructure-requeue budget, it spends one entry in tried_clusters instead.
 		submitted_at = NULL,
-		-- clear cluster_name: the failed attempt holds no capacity, and the next admission tick
-		-- must be free to place this somewhere other than the cluster that just failed it.
 		cluster_name = '',
 		queued_at = COALESCE(queued_at, NOW()),
 		not_admitted_reason = 'capacity_unavailable',
 		quota_settled_at = NULL,
+		tried_clusters = tried_clusters || $4::jsonb,
 		updated_at = NOW()
-	WHERE id = $1 AND status = $2 AND infra_requeue_count < $4`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), reason, maxInfraRequeues)
+	WHERE id = $1 AND status = $2`
+	tag, err := s.pool.pool.Exec(ctx, qFailover, id, string(from), reason, entry)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueInfrastructureFault: %w", err)
 	}

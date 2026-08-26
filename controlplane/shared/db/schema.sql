@@ -283,6 +283,13 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- hardware never spends the budget meant for its own bugs — while attempt_count still
     -- advances, which is what makes each requeue a distinct desired state the runtime rebuilds.
     infra_requeue_count      INTEGER           NOT NULL DEFAULT 0,
+    -- tried_clusters: this job's own speculative-failover history, as a JSON array of
+    -- {"cluster_id": ..., "at": <RFC3339>}. Appended by RequeueInfrastructureFault when a
+    -- scale-up attempt times out or a scheduling event terminally refuses it (scale_up_timeout,
+    -- flavor_mismatch); read at candidate selection to exclude a cluster this job already failed
+    -- over from within scheduler.tried_cluster_ttl_seconds. No separate failover_count: the
+    -- list itself is the cap on attempts, one entry per cluster per TTL window.
+    tried_clusters           JSONB             NOT NULL DEFAULT '[]'::jsonb,
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
@@ -292,6 +299,7 @@ CREATE TABLE IF NOT EXISTS experiments (
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resolved_job_spec JSONB;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS tried_clusters JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
 -- nothing else, so a job could never report its own files; the real bytes live in the object

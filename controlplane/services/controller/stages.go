@@ -42,7 +42,7 @@ type StagesStore interface {
 	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	// ResolveTermination atomically transitions status and records the reason. Does not write
 	// usage; the caller settles separately (see Controller.settleAndMark).
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)
 	// MarkQuotaSettled records that a terminal experiment's final usage was durably written.
 	MarkQuotaSettled(ctx context.Context, id string) error
 }

@@ -53,6 +53,9 @@ type LoopStore interface {
 	// just RUNNING — see resolutionCache.loadClaimed for why the narrower RUNNING-only view
 	// undercounts "installed" capacity during tick-time "max" resolution.
 	ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error)
+	// GetClusterSettings returns the operator overrides for clusterID (scale_up_timeout_seconds,
+	// max_speculative_accelerators), or nil if none were ever set — see domain.ClusterSettings.
+	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without
@@ -120,6 +123,9 @@ type LoopWorkloadClient interface {
 	// GetAutoscalerCapability reports which clusters sit behind a native autoscaler.
 	// A cluster absent from the map is treated as not-autoscaled.
 	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
+	// GetClusterIDs reports each connected cluster's runtime-derived stable identity, keyed by
+	// cluster_name. A cluster absent from the map has not yet reported one.
+	GetClusterIDs(ctx context.Context) (map[string]string, error)
 	// GetTotalCapacity reports each cluster's installed capacity — the per-accelerator
 	// CPU/memory share the disbalance evictor measures requests against. Clusters without a
 	// fresh report are absent, never zero-filled. Only read when that evictor is enabled.
@@ -198,6 +204,13 @@ type Loop struct {
 	// enough for the underlying node/agent to report the freed accelerator back across a few
 	// ticks, short enough that a genuinely stuck report doesn't mask real capacity forever.
 	evictionTTL time.Duration
+
+	// triedClusterTTL bounds how long a cluster this job already failed a speculative attempt on
+	// stays excluded from that job's candidate list — see speculativeCandidates. Zero (the
+	// zero-value default) disables speculative submission entirely: WithSpeculation must be
+	// called to opt a deployment in, so a control plane that never wires it keeps today's
+	// live-fit-only admission behaviour exactly.
+	triedClusterTTL time.Duration
 }
 
 // DefaultEvictionTTL is evictionTTL's default: several scheduler heartbeats at the default
@@ -224,6 +237,15 @@ func NewLoop(store LoopStore, quota LoopQuotaStore, workloadClient LoopWorkloadC
 // observed usage at requeue time.
 func (l *Loop) WithQuotaSettler(s LoopQuotaSettler) *Loop {
 	l.settler = s
+	return l
+}
+
+// WithSpeculation opts the loop into speculative submission (autoscaler.md): guaranteed jobs
+// that fit nowhere live may be submitted to an autoscaler-enabled cluster with no capacity yet,
+// ahead of preemption. triedClusterTTL is scheduler.tried_cluster_ttl_seconds — how long a
+// cluster a job already failed over from stays excluded from that job's next candidate search.
+func (l *Loop) WithSpeculation(triedClusterTTL time.Duration) *Loop {
+	l.triedClusterTTL = triedClusterTTL
 	return l
 }
 

@@ -164,7 +164,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			continue
 		}
 		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
-			string(domain.EvictionQuotaExhaustion))
+			string(domain.EvictionQuotaExhaustion), "")
 		if err != nil {
 			c.logger.Error("quota exhaustion evict", zap.String("id", exp.ID), zap.Error(err))
 			continue
@@ -189,7 +189,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			continue
 		}
 		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusAdmitted, domain.StatusEvicted,
-			string(domain.EvictionQuotaExhaustion))
+			string(domain.EvictionQuotaExhaustion), "")
 		if err != nil {
 			c.logger.Error("quota exhaustion evict admitted", zap.String("id", exp.ID), zap.Error(err))
 			continue
@@ -228,7 +228,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			}
 			prevStatus := exp.Status
 			outcome, err := c.store.ResolveTermination(ctx, exp.ID, prevStatus, finalStatus,
-				string(domain.EvictionQuotaExhaustion))
+				string(domain.EvictionQuotaExhaustion), "")
 			if err != nil {
 				c.logger.Error("quota exhaustion cancel pre-run", zap.String("id", exp.ID), zap.Error(err))
 				continue

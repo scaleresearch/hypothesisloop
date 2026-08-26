@@ -251,7 +251,8 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, e
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap).
 		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance).
-		WithQuotaSettler(settler)
+		WithQuotaSettler(settler).
+		WithSpeculation(time.Duration(pcfg.Scheduler.TriedClusterTTLSeconds) * time.Second)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 
 	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run

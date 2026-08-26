@@ -53,7 +53,7 @@ const experimentColumns = `
 	estimated_duration_hours, estimated_cost_acch,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
-	quota_settled_at, attempt_count, infra_requeue_count,
+	quota_settled_at, attempt_count, infra_requeue_count, tried_clusters,
 	created_at, updated_at
 `
 

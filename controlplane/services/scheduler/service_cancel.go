@@ -37,7 +37,7 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 
 		switch exp.Status {
 		case domain.StatusQueued, domain.StatusSubmitted:
-			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
+			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled), "")
 			if err != nil {
 				return fmt.Errorf("cancel: update status: %w", err)
 			}
@@ -53,7 +53,7 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			return nil
 
 		case domain.StatusAdmitted, domain.StatusRunning:
-			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
+			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled), "")
 			if err != nil {
 				return fmt.Errorf("cancel: update status: %w", err)
 			}
@@ -93,7 +93,7 @@ func (s *Service) EvictExperiment(ctx context.Context, id string, reason domain.
 	default:
 		return nil
 	}
-	outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(reason))
+	outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(reason), "")
 	if err != nil {
 		return fmt.Errorf("evict: update status: %w", err)
 	}

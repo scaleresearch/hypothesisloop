@@ -62,7 +62,7 @@ func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment
 // row that Settle refunds in full. The decision is not repeated here: this function reports
 // whichever outcome ResolveTermination produced.
 func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
-	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
+	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), "")
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
 		return

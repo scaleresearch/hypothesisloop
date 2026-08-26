@@ -7,6 +7,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// TriedCluster records one speculative-submit failover for a job: the cluster it gave up on
+// (by runtime-derived cluster_id, never cluster_name) and when. See Experiment.TriedClusters.
+type TriedCluster struct {
+	ClusterID string    `json:"cluster_id"`
+	At        time.Time `json:"at"`
+}
+
 // Experiment is an agent-submitted job within a platform experiment.
 type Experiment struct {
 	ID                   string  `json:"id"`
@@ -83,6 +90,12 @@ type Experiment struct {
 	// (RetriesUsed): AttemptCount is the generation counter that makes each attempt a distinct
 	// desired state, so it must advance on every requeue, while the budget must not.
 	InfraRequeueCount int `json:"infra_requeue_count"`
+	// TriedClusters is this job's own speculative-failover history: every cluster (by
+	// runtime-derived cluster_id) a scale-up attempt for this job timed out or was terminally
+	// refused on, with the time it was appended. Candidate selection excludes any entry still
+	// within scheduler.tried_cluster_ttl_seconds — this is the failover budget; there is no
+	// separate counter. Never cleared, only grown; stale entries simply age out of the TTL check.
+	TriedClusters []TriedCluster `json:"tried_clusters,omitempty"`
 
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`

@@ -92,7 +92,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 	}
 	for _, exp := range running {
 		outcome, err := c.stagesStore.ResolveTermination(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
-			string(domain.EvictionStageCut))
+			string(domain.EvictionStageCut), "")
 		if err != nil {
 			c.logger.Error("stage cut: evict running", zap.String("id", exp.ID), zap.Error(err))
 			continue
@@ -124,7 +124,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 			to = domain.StatusEvicted
 		}
 		outcome, err := c.stagesStore.ResolveTermination(ctx, exp.ID, exp.Status, to,
-			string(domain.EvictionStageCut))
+			string(domain.EvictionStageCut), "")
 		if err != nil {
 			c.logger.Error("stage cut: reject queued", zap.String("id", exp.ID), zap.Error(err))
 			continue

@@ -70,6 +70,12 @@ type Backend interface {
 	// cluster absent from the map has no fresh report and is treated as not-autoscaled.
 	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
 
+	// GetClusterIDs reports each connected cluster's runtime-derived stable identity
+	// (kube-system namespace UID / machine-id), keyed by cluster_name. Speculative admission's
+	// tried-cluster bookkeeping keys on cluster_id so a rename can't split or merge history; a
+	// cluster whose agent has not yet started sending cluster_id is absent from the map.
+	GetClusterIDs(ctx context.Context) (map[string]string, error)
+
 	// GetTotalCapacity reports each cluster's installed (not free) capacity as a canonical
 	// domain.Footprint — the denominator for "how much CPU/memory does one accelerator on this
 	// cluster come with", which GetFlavorCapacity's availability numbers cannot answer. A

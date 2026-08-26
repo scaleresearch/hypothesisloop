@@ -19,7 +19,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
 	var acceleratorType, capacityTier, status string
 	var evictionReason, notAdmittedReason *string
-	var jobSpec, resolvedJobSpec []byte
+	var jobSpec, resolvedJobSpec, triedClusters []byte
 
 	if err := row.Scan(
 		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ProjectID, &exp.ClusterName,
@@ -29,10 +29,15 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
-		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount,
+		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &triedClusters,
 		&exp.CreatedAt, &exp.UpdatedAt,
 	); err != nil {
 		return nil, err
+	}
+	if len(triedClusters) > 0 {
+		if err := json.Unmarshal(triedClusters, &exp.TriedClusters); err != nil {
+			return nil, fmt.Errorf("scan experiment: unmarshal tried_clusters: %w", err)
+		}
 	}
 
 	if len(jobSpec) > 0 {

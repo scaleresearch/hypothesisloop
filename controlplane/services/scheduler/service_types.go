@@ -46,7 +46,7 @@ type Store interface {
 	// TransitionStatus atomically updates status only when current status matches from.
 	// Returns true if updated, false if already changed by a concurrent request.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
 	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
 	// GetClusterSettings/PutClusterSettings back PUT /clusters/{id}/settings — see

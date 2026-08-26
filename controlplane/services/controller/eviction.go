@@ -17,7 +17,7 @@ import (
 // EVICTED and settles to a full refund — see db.Store.ResolveTermination and settlement.Settle.
 // Nothing here decides that; this function only reports the outcome and settles either way.
 func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, now time.Time) error {
-	outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
+	outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), "")
 	if err != nil {
 		return fmt.Errorf("evict: %w", err)
 	}
@@ -84,7 +84,7 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 			} else {
 				// QUEUED or SUBMITTED: cancel — never started, so Settle refunds it to 0.
 				outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusRejected,
-					string(domain.EvictionExperimentClosed))
+					string(domain.EvictionExperimentClosed), "")
 				if err != nil {
 					c.logger.Error("reconcileClosedExperiments: cancel pre-run job",
 						zap.String("exp", exp.ID), zap.Error(err))

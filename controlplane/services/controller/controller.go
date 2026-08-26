@@ -33,7 +33,7 @@ type Store interface {
 	// ResolveTermination atomically transitions status and records the reason in one DB
 	// transaction — see db.Store.ResolveTermination. Does not write usage; the caller settles
 	// separately (see Controller.settleAndMark) so that write can be retried independently.
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error

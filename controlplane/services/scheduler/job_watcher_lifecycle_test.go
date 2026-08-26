@@ -43,7 +43,7 @@ func (s *lifecycleStore) TransitionStatusFromNonTerminal(context.Context, string
 	s.transitioned = true
 	return true, nil
 }
-func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ domain.ExperimentStatus, reason string) (domain.Termination, error) {
+func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ domain.ExperimentStatus, reason string, _ string) (domain.Termination, error) {
 	s.transitioned = true
 	if domain.IsInfrastructureFault(domain.EvictionReason(reason)) && s.infraRequeues < s.infraCeiling {
 		s.infraRequeues++

@@ -279,7 +279,15 @@ func (l *Loop) settleStint(ctx context.Context, exp *domain.Experiment) {
 // tick 2 re-picks the originally requested A, the requested-flavor comparison sees no
 // substitution and writes nothing, and the row says B for the rest of the job's life while the
 // scheduler reserves and fit-checks A.
+// speculative marks a submit made against a cluster with no live capacity — the SUBMITTED row
+// itself is the scale-up request, so there is no fresh node to re-check a live-fit predicate
+// against at claim time. See ClaimSubmitted: a nil capacityAvailable callback skips that check
+// and relies on the lock plus the status='QUEUED' predicate alone.
 func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType) error {
+	return l.submitJobTo(ctx, exp, clusterName, persistedFlavor, false)
+}
+
+func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType, speculative bool) error {
 	if exp.AcceleratorCount > 0 && exp.AcceleratorType != persistedFlavor {
 		rate, ok := exp.AcceleratorType.LookupCost()
 		if !ok {
@@ -292,32 +300,36 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 		exp.EstimatedCostAccH = newEstCost
 	}
 	fp := exp.Footprint()
-	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, exp.ResolvedJob, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-		guaranteed, burst, err := l.workload.GetFlavorCapacity(ctx)
-		if err != nil {
-			return false, err
+	var capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)
+	if !speculative {
+		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+			guaranteed, burst, err := l.workload.GetFlavorCapacity(ctx)
+			if err != nil {
+				return false, err
+			}
+			available := guaranteed
+			if exp.CapacityTier == domain.CapacityBurst {
+				available = burst
+			}
+			if !domain.Fits(available[clusterName], fp) {
+				return false, nil
+			}
+			nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
+			if err != nil {
+				return false, err
+			}
+			nodeResources, err := l.workload.GetNodeResourceCapacity(ctx)
+			if err != nil {
+				return false, err
+			}
+			nodeLabels, err := l.workload.GetNodeLabels(ctx)
+			if err != nil {
+				return false, err
+			}
+			return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp), nil
 		}
-		available := guaranteed
-		if exp.CapacityTier == domain.CapacityBurst {
-			available = burst
-		}
-		if !domain.Fits(available[clusterName], fp) {
-			return false, nil
-		}
-		nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
-		if err != nil {
-			return false, err
-		}
-		nodeResources, err := l.workload.GetNodeResourceCapacity(ctx)
-		if err != nil {
-			return false, err
-		}
-		nodeLabels, err := l.workload.GetNodeLabels(ctx)
-		if err != nil {
-			return false, err
-		}
-		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp), nil
-	})
+	}
+	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, exp.ResolvedJob, capacityAvailable)
 	if err != nil {
 		return err
 	}

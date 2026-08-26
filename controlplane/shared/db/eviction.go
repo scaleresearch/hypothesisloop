@@ -23,9 +23,13 @@ import (
 // shared transaction, so callers settle usage afterward via services/settlement.Settler, whose
 // idempotent absolute-set writes can retry until quota_settled_at is set. Settle is what turns an
 // infrastructure fault into a refund; see its doc comment.
-func (s *Store) ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error) {
+// triedClusterID, when non-empty, is the cluster (runtime-derived cluster_id) this attempt just
+// gave up on — appended to the job's tried_clusters instead of spending infra_requeue_count
+// budget. Pass "" for every eviction path unrelated to speculative scale-up failover; existing
+// callers are unaffected.
+func (s *Store) ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error) {
 	if domain.IsInfrastructureFault(domain.EvictionReason(reason)) {
-		requeued, err := s.ExperimentsStore.RequeueInfrastructureFault(ctx, id, from, reason, s.maxInfraRequeues)
+		requeued, err := s.ExperimentsStore.RequeueInfrastructureFault(ctx, id, from, reason, s.maxInfraRequeues, triedClusterID)
 		if err != nil {
 			return domain.TerminationSkipped, err
 		}

@@ -312,6 +312,14 @@ func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[
 	return metricsdb.LiveClusterNodeLabels(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
+// GetClusterIDs reports each connected cluster's runtime-derived stable identity (kube-system
+// namespace UID / machine-id), keyed by cluster_name — the routing key everything else here uses.
+// Speculative admission's tried-cluster bookkeeping keys on cluster_id (a rename must not split
+// or merge it); a cluster whose agent has not yet started sending cluster_id is simply absent.
+func (b *Backend) GetClusterIDs(ctx context.Context) (map[string]string, error) {
+	return metricsdb.LiveClusterIDs(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
 func minimumFootprint(a, b domain.Footprint) domain.Footprint {
 	out := domain.NewFootprint()
 	for resource, av := range a {

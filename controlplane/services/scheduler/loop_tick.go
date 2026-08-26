@@ -73,6 +73,47 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("multi-node capability: %w", err)
 	}
+	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
+	// WithSpeculation — a LoopWorkloadClient that has not implemented these two methods (every
+	// pre-autoscaler test fake, and any deployment that never calls WithSpeculation) must not be
+	// asked to.
+	var autoscalerEnabled map[string]bool
+	var clusterIDs map[string]string
+	if l.triedClusterTTL > 0 {
+		autoscalerEnabled, err = l.workload.GetAutoscalerCapability(ctx)
+		if err != nil {
+			return fmt.Errorf("autoscaler capability: %w", err)
+		}
+		clusterIDs, err = l.workload.GetClusterIDs(ctx)
+		if err != nil {
+			return fmt.Errorf("cluster ids: %w", err)
+		}
+	}
+	// gAvail only has entries for clusters GetFlavorCapacity's heartbeat read found connected
+	// (see queuebackend.Backend.GetFlavorCapacity) — reusing its key set here is the same
+	// "unreachable cluster is never a speculative candidate" rule the doc calls out as a
+	// pre-existing bug fixed in step 0, applied to the speculative path too.
+	connectedClusters := make(map[string]bool, len(gAvail))
+	for cluster := range gAvail {
+		connectedClusters[cluster] = true
+	}
+	// speculativeFootprintByCluster approximates each cluster's outstanding speculative
+	// accelerator footprint as its whole SUBMITTED footprint — a job's live-fit-vs-speculative
+	// distinction lives in the metrics store (scheduled_nodes), which the loop does not read per
+	// job. Counting every SUBMITTED accelerator here makes clusterSpeculativeCap strictly more
+	// conservative than the design's exact definition, never less — the safe direction for a cap.
+	speculativeFootprintByCluster := map[string]int{}
+	if l.triedClusterTTL > 0 {
+		submitted, err := l.store.ListSubmittedExperiments(ctx)
+		if err != nil {
+			return fmt.Errorf("list submitted for speculative footprint: %w", err)
+		}
+		for _, s := range submitted {
+			if autoscalerEnabled[s.ClusterName] {
+				speculativeFootprintByCluster[s.ClusterName] += s.AcceleratorCount
+			}
+		}
+	}
 	// Installed (not free) capacity — evidence for one decision, the disbalance eviction, and an
 	// input to nothing else in this tick. Unlike the three reads above it, admission never
 	// consults it.
@@ -283,6 +324,40 @@ func (l *Loop) tick(ctx context.Context) error {
 		// are evaluated separately rather than or-ed into one condition.
 		scalarFits := domain.Fits(gAvail[cluster], fp)
 		if !scalarFits || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
+			// Speculative submit (autoscaler.md): before spending a guaranteed job's preemption
+			// power, try every autoscaler-enabled cluster this job hasn't already failed over
+			// from. A candidate has no live capacity by definition (that's why we're here) — the
+			// SUBMITTED row itself is the scale-up request the native autoscaler reacts to.
+			// Live-fit always wins over speculating (this branch only runs on live no-fit), and
+			// speculating anywhere always wins over preempting a burst job (this runs first).
+			candidates, cerr := l.speculativeCandidates(ctx, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvail, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster)
+			if cerr != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
+				continue
+			}
+			if len(candidates) > 0 {
+				specCluster := candidates[0]
+				if err := l.submitJobTo(ctx, exp, specCluster, persistedFlavor, true); err != nil {
+					l.logger.Error("speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
+					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+					reason := domain.NotAdmittedWorkloadCreation
+					if errors.Is(err, errAdmissionCapacityChanged) {
+						reason = domain.NotAdmittedCapacityUnavailable
+					}
+					if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+						l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
+					}
+					continue
+				}
+				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "submitted").Inc()
+				speculativeFootprintByCluster[specCluster] += exp.AcceleratorCount
+				// The claimed footprint is not subtracted from gAvail/bAvail/nodeAvail here: a
+				// speculative claim has no live node to subtract from, and GetFlavorCapacity
+				// already carries desired-free negative for this cluster starting next tick via
+				// SumDesiredFootprintByCluster. Nothing else in this tick reads gAvail[specCluster]
+				// again for a decision this job's SUBMITTED row should have already influenced.
+				continue
+			}
 			// Try to preempt that cluster's own burst jobs to make room; scoped to this cluster
 			// since freeing a burst job elsewhere wouldn't help here.
 			if !runningLoaded {
