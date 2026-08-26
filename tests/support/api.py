@@ -194,7 +194,7 @@ class API:
     def list_internal_clusters(self) -> list[dict]:
         """`GET /internal/clusters` -- id/name/autoscaler_enabled for every cluster the control
         plane has heard from, per autoscaler.md's cluster-identity design."""
-        return self.get_json("/internal/clusters")
+        return self.get_json("/internal/clusters")["clusters"]
 
     def cluster_id_for_name(self, cluster_name: str) -> str | None:
         for c in self.list_internal_clusters():
