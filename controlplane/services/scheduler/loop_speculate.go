@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -104,6 +105,41 @@ func triedRecently(tried []domain.TriedCluster, clusterID string, ttl time.Durat
 		}
 	}
 	return false
+}
+
+// negativeInDimension reports whether avail already carries a negative desired-free value for
+// flavor — i.e. someone already has a SUBMITTED row outstanding against this cluster's capacity
+// in this dimension. domain.Footprint.Sub never clamps at zero, so GetFlavorCapacity's own
+// output already answers this with no second query.
+func negativeInDimension(avail domain.Footprint, flavor domain.AcceleratorType) bool {
+	if avail == nil {
+		return false
+	}
+	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(string(flavor))}
+	return avail[key] < 0
+}
+
+// allSpeculativeCandidatesTried reports whether at least one autoscaler-enabled, connected
+// cluster exists for exp, and every one of them is within exp's own tried-list TTL window — i.e.
+// speculation has nowhere left to go right now, not because no autoscaler cluster exists at all.
+// Used only to pick the not-admitted reason (no_scalable_capacity vs the ordinary
+// capacity_unavailable/outranked reasons); it does not gate any admission decision.
+func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, connected map[string]bool, clusterIDs map[string]string, ttl time.Duration) bool {
+	if ttl <= 0 {
+		return false
+	}
+	now := time.Now()
+	sawCandidate := false
+	for cluster, clusterID := range clusterIDs {
+		if clusterID == "" || !autoscalerEnabled[cluster] || !connected[cluster] {
+			continue
+		}
+		sawCandidate = true
+		if !triedRecently(exp.TriedClusters, clusterID, ttl, now) {
+			return false
+		}
+	}
+	return sawCandidate
 }
 
 // fitsLargestNode proves every rank of exp could fit SOME node in this cluster's own pool, so a

@@ -44,6 +44,16 @@ const (
 	// because waiting will not fix it: this is not a busy platform, it is a platform with no
 	// runtime for this shape of job.
 	NotAdmittedNoMultiNodeCluster = "no_multi_node_cluster"
+	// NotAdmittedWaitingForScaleUp means this cluster's desired-free already went negative for a
+	// speculative submit in this job's accelerator dimension — a scale-up is outstanding there.
+	// Preemption is skipped rather than evicting a burst job to cover a shortage the incoming
+	// node is already going to fill (autoscaler.md's skip-preemption rule).
+	NotAdmittedWaitingForScaleUp = "waiting-for-scale-up"
+	// NotAdmittedNoScalableCapacity means every autoscaler-enabled candidate has already been
+	// tried (and failed over) within the tried-cluster TTL, and live preemption/disbalance found
+	// nothing either — the job is not stranded, it will be reconsidered once an entry expires or
+	// live capacity changes.
+	NotAdmittedNoScalableCapacity = "no_scalable_capacity"
 )
 
 // IsTerminal reports whether the status is a final lifecycle state that no further execution

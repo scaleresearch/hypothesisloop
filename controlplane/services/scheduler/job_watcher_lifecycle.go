@@ -155,6 +155,9 @@ func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experim
 // and flavor_mismatch paths (autoscaler.md), which name the specific cluster that just failed to
 // deliver capacity rather than the environment in general.
 func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, triedClusterID string) {
+	if triedClusterID != "" {
+		obsmetrics.FailoversTotal.WithLabelValues(string(reason.Code())).Inc()
+	}
 	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), triedClusterID)
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))

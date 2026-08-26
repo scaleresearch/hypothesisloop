@@ -3,7 +3,9 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -221,6 +223,91 @@ func (layoutShortWorkload) GetMultiNodeCapability(context.Context) (map[string]b
 }
 func (layoutShortWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
 	return map[string]domain.Footprint{}, nil
+}
+
+// --- Tick-level: preemption must not run when the cluster is already waiting for a scale-up ---
+
+// scaleUpWaitingStore adds the two speculativeCandidates store methods on top of
+// noRunningListStore, both answering "nothing to see here" so this test proves the skip is driven
+// by the negative desired-free dimension alone, not by tried-cluster/cap machinery.
+type scaleUpWaitingStore struct{ noRunningListStore }
+
+func (s *scaleUpWaitingStore) GetClusterSettings(context.Context, string) (*domain.ClusterSettings, error) {
+	return nil, nil
+}
+func (s *scaleUpWaitingStore) RecentlyTriedClusters(context.Context, time.Duration) (map[string]bool, error) {
+	return nil, nil
+}
+func (s *scaleUpWaitingStore) ListSubmittedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+// scaleUpWaitingWorkload reports cluster-a as autoscaler-enabled with desired-free already
+// negative in the job's accelerator dimension (a SUBMITTED row is already outstanding there) —
+// live fit fails, and this job's own request is oversized for the only known node, so it never
+// becomes a speculative candidate itself; it must fall through to preemption and be skipped there.
+type scaleUpWaitingWorkload struct{ LoopWorkloadClient }
+
+func (scaleUpWaitingWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	fp := domain.NewFootprint()
+	// GetFlavorCapacity's real implementations always build this via CapacityFootprint, which
+	// lowercases the flavor key — matched here so negativeInDimension's lookup (keyed off
+	// exp.AcceleratorType, lowercased) finds it, exactly as it would against real capacity.
+	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}, -2)
+	return map[string]domain.Footprint{"cluster-a": fp}, map[string]domain.Footprint{"cluster-a": domain.NewFootprint()}, nil
+}
+func (scaleUpWaitingWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
+	// installedAcceleratorsByNode needs a positive count here to resolve the job's proportionate
+	// share, independent of whether that's enough to actually admit — live fit is decided by
+	// GetFlavorCapacity's (negative) desired-free above, not by this per-node view.
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 1}}}, nil
+}
+func (scaleUpWaitingWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}}, nil
+}
+func (scaleUpWaitingWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}}, nil
+}
+func (scaleUpWaitingWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
+	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}}, nil
+}
+func (scaleUpWaitingWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (scaleUpWaitingWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
+	return map[string]domain.Footprint{}, nil
+}
+func (scaleUpWaitingWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{"cluster-a": true}, nil
+}
+func (scaleUpWaitingWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{"cluster-a": "cid-a"}, nil
+}
+
+func TestTickSkipsPreemptionWhenClusterIsAlreadyWaitingForScaleUp(t *testing.T) {
+	exp := distributedExperiment(1, 2) // needs more accelerators than the only known node has
+	exp.ID = "exp-1"
+	exp.AgentID = "agent-1"
+	exp.PlatformExperimentID = "pe-1"
+	exp.CapacityTier = domain.CapacityGuaranteed
+	exp.ClusterName = "cluster-a"
+
+	store := &scaleUpWaitingStore{noRunningListStore{t: t, queued: []*domain.Experiment{exp}}}
+	l := NewLoop(store, tickQuota{}, scaleUpWaitingWorkload{}, zap.NewNop())
+	l.evictor = noopEvictor{}
+	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.reprioritizer = noopReprioritizer{}
+	l.WithSpeculation(15 * time.Minute)
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatalf("tick() = %v, want nil", err)
+	}
+	if store.requeuePreemptedCall {
+		t.Fatal("preemption must not run against a cluster whose desired-free is already negative for this dimension — a scale-up is outstanding, not a shortage preemption could fix")
+	}
+	if got := store.notAdmitted[exp.ID]; got != domain.NotAdmittedWaitingForScaleUp {
+		t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedWaitingForScaleUp)
+	}
 }
 
 func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {

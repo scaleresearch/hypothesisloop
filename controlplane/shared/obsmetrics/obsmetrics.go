@@ -41,6 +41,24 @@ var (
 		Name: "hypothesisloop_stale_desired_state_experiments",
 		Help: "Count of SUBMITTED/ADMITTED/RUNNING experiments with no recent cluster job report, from the last GC sweep pass.",
 	})
+
+	// SpeculativeSubmitsTotal counts every SUBMITTED row created against a cluster with no live
+	// fit — autoscaler.md's speculative-submit path (loop_speculate.go). Answers "how often are we
+	// asking a native autoscaler to boot a node."
+	SpeculativeSubmitsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hypothesisloop_speculative_submits_total",
+		Help: "Total speculative (no-live-fit) submits to autoscaler-enabled clusters.",
+	})
+
+	// FailoversTotal counts every time a speculative attempt is abandoned and the cluster is
+	// appended to the job's tried_clusters list — labeled by why (autoscaler.md's
+	// scale_up_timeout / flavor_mismatch paths). A steady failover rate on one cluster is the
+	// signal the design doc's "fan-out is not adopted, revisit if failover is common" call
+	// depends on.
+	FailoversTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hypothesisloop_failovers_total",
+		Help: "Total speculative-submit failovers (cluster added to a job's tried_clusters), labeled by reason.",
+	}, []string{"reason"})
 )
 
 // CountEviction is the only way to increment EvictedExperimentsTotal. Reasons carry a per-job
@@ -53,5 +71,5 @@ func CountEviction(reason domain.EvictionReason) {
 
 func init() {
 	prometheus.MustRegister(EvictedExperimentsTotal, AdmissionTickDuration, AdmissionTickResultsTotal,
-		StaleDesiredStateExperiments)
+		StaleDesiredStateExperiments, SpeculativeSubmitsTotal, FailoversTotal)
 }

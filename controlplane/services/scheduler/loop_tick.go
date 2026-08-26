@@ -335,6 +335,12 @@ func (l *Loop) tick(ctx context.Context) error {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
 				continue
 			}
+			// waitingForScaleUp: this cluster's own desired-free already went negative in this
+			// job's accelerator dimension (a SUBMITTED row is already outstanding here, possibly
+			// this same job a moment ago). Preempting a burst job to cover that shortage would be
+			// a wrong eviction for a shortage the incoming node is already going to fill; the
+			// deadline in job_watcher_scan.go bounds the wait (autoscaler.md's skip-preemption rule).
+			waitingForScaleUp := autoscalerEnabled[cluster] && negativeInDimension(gAvail[cluster], exp.AcceleratorType)
 			if len(candidates) > 0 {
 				specCluster := candidates[0]
 				if err := l.submitJobTo(ctx, exp, specCluster, persistedFlavor, true); err != nil {
@@ -350,6 +356,7 @@ func (l *Loop) tick(ctx context.Context) error {
 					continue
 				}
 				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "submitted").Inc()
+				obsmetrics.SpeculativeSubmitsTotal.Inc()
 				speculativeFootprintByCluster[specCluster] += exp.AcceleratorCount
 				// The claimed footprint is not subtracted from gAvail/bAvail/nodeAvail here: a
 				// speculative claim has no live node to subtract from, and GetFlavorCapacity
@@ -396,10 +403,14 @@ func (l *Loop) tick(ctx context.Context) error {
 			// The disbalance pass below is node-aware and still runs.
 			var committed bool
 			var err error
-			if scalarFits {
+			switch {
+			case scalarFits:
 				l.logger.Info("skipping preemption: cluster has the capacity, the layout does not fit",
 					zap.String("exp", exp.ID), zap.String("cluster", cluster))
-			} else {
+			case waitingForScaleUp:
+				l.logger.Info("skipping preemption: cluster is autoscaler-enabled and already waiting for scale-up",
+					zap.String("exp", exp.ID), zap.String("cluster", cluster))
+			default:
 				committed, err = l.preempt(ctx, shortage, burstRunning, exp)
 				if err != nil {
 					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
@@ -428,9 +439,18 @@ func (l *Loop) tick(ctx context.Context) error {
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-			fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
-				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(fitAtTickStart, fp, shortage)); err != nil {
+			reason := ""
+			switch {
+			case waitingForScaleUp:
+				reason = domain.NotAdmittedWaitingForScaleUp
+			case allSpeculativeCandidatesTried(exp, autoscalerEnabled, connectedClusters, clusterIDs, l.triedClusterTTL):
+				reason = domain.NotAdmittedNoScalableCapacity
+			default:
+				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
+					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+				reason = notAdmittedReasonFor(fitAtTickStart, fp, shortage)
+			}
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue

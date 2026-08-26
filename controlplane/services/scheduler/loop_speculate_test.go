@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,6 +267,48 @@ func TestSubmitJobLiveFitPassesNonNilCapacityCallback(t *testing.T) {
 	}
 	if store.sawNilCallback {
 		t.Fatal("an ordinary live-fit submit must still re-check fresh capacity at claim time")
+	}
+}
+
+func TestNegativeInDimension(t *testing.T) {
+	avail := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: -2}
+	if !negativeInDimension(avail, domain.AcceleratorType(h100)) {
+		t.Fatal("a negative desired-free entry for this flavor must be detected regardless of case")
+	}
+	if negativeInDimension(avail, "a100") {
+		t.Fatal("a different flavor's negative entry must not match")
+	}
+	if negativeInDimension(nil, domain.AcceleratorType(h100)) {
+		t.Fatal("a nil footprint (e.g. cluster absent from gAvail) must not be treated as negative")
+	}
+}
+
+func TestAllSpeculativeCandidatesTried(t *testing.T) {
+	exp := distributedExperiment(1, 2)
+	autoscaler := map[string]bool{"cluster-a": true, "cluster-b": true}
+	connected := map[string]bool{"cluster-a": true, "cluster-b": true}
+	clusterIDs := map[string]string{"cluster-a": "cid-a", "cluster-b": "cid-b"}
+
+	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 10*time.Minute) {
+		t.Fatal("neither cluster has been tried yet")
+	}
+
+	exp.TriedClusters = []domain.TriedCluster{{ClusterID: "cid-a", At: time.Now()}}
+	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 10*time.Minute) {
+		t.Fatal("cluster-b is still untried")
+	}
+
+	exp.TriedClusters = append(exp.TriedClusters, domain.TriedCluster{ClusterID: "cid-b", At: time.Now()})
+	if !allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 10*time.Minute) {
+		t.Fatal("every autoscaler-enabled candidate has been tried within the TTL")
+	}
+
+	if allSpeculativeCandidatesTried(exp, map[string]bool{}, connected, clusterIDs, 10*time.Minute) {
+		t.Fatal("no autoscaler-enabled cluster exists at all — this is not the no_scalable_capacity case")
+	}
+
+	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 0) {
+		t.Fatal("speculation not opted into (ttl<=0) must never claim candidates were tried")
 	}
 }
 
