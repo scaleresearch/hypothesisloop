@@ -212,6 +212,14 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     assert reason.startswith("capacity_unavailable"), (
         f"reduced-capacity job has wrong not_admitted_reason={reason!r}"
     )
+    # A cordoned node is still a connected cluster, so this also proves the cordon itself doesn't
+    # get read as "scale me up" -- the reason must never be the autoscaler-path ones
+    # (autoscaler.md's candidate step additionally requires connected, but cordon isn't
+    # disconnection; this cluster has AUTOSCALER_ENABLED unset anyway, so it should never be a
+    # speculative candidate at all).
+    assert reason.split(":", 1)[0] not in ("waiting-for-scale-up", "no_scalable_capacity"), (
+        f"not_admitted_reason={reason} implies a cordoned/non-autoscaler cluster was speculated on"
+    )
 
     uncordon_node(node)
     shrink_status = eventually(

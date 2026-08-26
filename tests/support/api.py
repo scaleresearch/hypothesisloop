@@ -142,6 +142,9 @@ class API:
     def post(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
         return self.session.post(self._url(path), json=json_body, timeout=30, **kw)
 
+    def put(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
+        return self.session.put(self._url(path), json=json_body, timeout=30, **kw)
+
     def get_json(self, path: str, **kw) -> Any:
         r = self.get(path, **kw)
         r.raise_for_status()
@@ -167,6 +170,7 @@ class API:
         report_interval_seconds: int = 10,
         metrics: list[dict] | None = None,
         stages: list[dict] | None = None,
+        max_concurrent_accelerators: int | None = None,
     ) -> str:
         body: dict[str, Any] = {
             "name": name,
@@ -180,8 +184,45 @@ class API:
         }
         if stages is not None:
             body["stages"] = stages
+        if max_concurrent_accelerators is not None:
+            body["max_concurrent_accelerators"] = max_concurrent_accelerators
         out = self.hl("platform-experiments", "create", "-", input=yaml.safe_dump(body, sort_keys=False))
         return json.loads(out)["id"]
+
+    # ---- clusters (autoscaler.md) -----------------------------------------------------------
+
+    def list_internal_clusters(self) -> list[dict]:
+        """`GET /internal/clusters` -- id/name/autoscaler_enabled for every cluster the control
+        plane has heard from, per autoscaler.md's cluster-identity design."""
+        return self.get_json("/internal/clusters")
+
+    def cluster_id_for_name(self, cluster_name: str) -> str | None:
+        for c in self.list_internal_clusters():
+            if c.get("cluster_name") == cluster_name:
+                return c.get("cluster_id") or None
+        return None
+
+    def put_cluster_settings(
+        self, cluster_id: str, *, scale_up_timeout_seconds: int | None = None,
+        max_speculative_accelerators: int | None = None,
+    ) -> requests.Response:
+        body: dict[str, Any] = {}
+        if scale_up_timeout_seconds is not None:
+            body["scale_up_timeout_seconds"] = scale_up_timeout_seconds
+        if max_speculative_accelerators is not None:
+            body["max_speculative_accelerators"] = max_speculative_accelerators
+        return self.put(f"/clusters/{cluster_id}/settings", body)
+
+    def put_cluster_settings_ok(
+        self, cluster_id: str, *, scale_up_timeout_seconds: int | None = None,
+        max_speculative_accelerators: int | None = None,
+    ) -> None:
+        r = self.put_cluster_settings(
+            cluster_id,
+            scale_up_timeout_seconds=scale_up_timeout_seconds,
+            max_speculative_accelerators=max_speculative_accelerators,
+        )
+        r.raise_for_status()
 
     def signup(self, pe_id: str, agent_id: str, role: str | None = None, quota_tier: str | None = "guaranteed") -> requests.Response:
         # Default "guaranteed", not the server's own kind-based default: an e2e-registered agent

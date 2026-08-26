@@ -203,6 +203,32 @@ def uncordon_node(node: str) -> None:
     subprocess.run(["kubectl", "uncordon", node], capture_output=True, text=True, timeout=15)
 
 
+def cordon_node(node: str) -> None:
+    subprocess.run(["kubectl", "cordon", node], capture_output=True, text=True, timeout=15)
+
+
+def set_cluster_agent_autoscaler_enabled(enabled: bool) -> None:
+    """Patches AUTOSCALER_ENABLED on the live cluster-agent Deployment and waits for the rollout
+    -- test_autoscaler_failover.py's only way to exercise the speculative-submit/scale-up-deadline
+    paths without a real cluster-autoscaler/Karpenter installed (autoscaler.md's design: the
+    operator sets this per cluster, the agent never infers it)."""
+    value = "true" if enabled else "false"
+    patch = json.dumps({
+        "spec": {"template": {"spec": {"containers": [
+            {"name": "cluster-agent", "env": [{"name": "AUTOSCALER_ENABLED", "value": value}]},
+        ]}}},
+    })
+    subprocess.run(
+        ["kubectl", "-n", CLUSTER_NS, "patch", "deployment/hypothesisloop-cluster-agent",
+         "--type=strategic", "-p", patch],
+        capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run(
+        ["kubectl", "-n", CLUSTER_NS, "rollout", "status", "deployment/hypothesisloop-cluster-agent", "--timeout=60s"],
+        capture_output=True, text=True, timeout=65,
+    )
+
+
 def restart_node_agent_daemonset() -> None:
     """Rolling-restarts the per-node metrics DaemonSet and waits for it to come back. Ported from
     tests/lib/cluster.sh::restart_node_agent_daemonset."""

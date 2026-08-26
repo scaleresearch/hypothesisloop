@@ -314,6 +314,10 @@ def test_gang_admission_is_all_or_nothing(api, experiment, run_id, deadline):
     exp = api.experiment(job_id)
     # The reason may carry a detail suffix ("capacity_unavailable: short {...}") -- the code is
     # everything before the first ':', matching how the platform's own .Code() reads it.
+    # AUTOSCALER_ENABLED is unset on every local cluster here, so no cluster is ever a
+    # speculative candidate for this job -- the reason must stay the pre-autoscaler
+    # capacity_unavailable, never no_scalable_capacity (that reason only fires when at least
+    # one autoscaler-enabled candidate existed and every one of them was tried and expired).
     reason = exp.get("not_admitted_reason") or ""
     assert reason.split(":", 1)[0] == "capacity_unavailable", f"not_admitted_reason={reason}, want capacity_unavailable"
 
