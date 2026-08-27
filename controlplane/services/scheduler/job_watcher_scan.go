@@ -136,7 +136,17 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		case runningMarked, runningLeftState:
 			return nil
 		case runningTypeMismatch:
-			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, clusterIDs[exp.ClusterName])
+			// Only feed this into cross-job tried_clusters backoff on a cluster the autoscaler
+			// path actually cares about — an ordinary live-fit cluster reporting the wrong
+			// flavor is a ClaimSubmitted resolution bug, not evidence the cluster's autoscaler
+			// failed to deliver capacity, and must not bar other jobs from speculating there
+			// (codex review caught this: it also silently skipped infra_requeue_count for a
+			// fault that isn't a speculative failover).
+			triedClusterID := ""
+			if autoscalerEnabled[exp.ClusterName] {
+				triedClusterID = clusterIDs[exp.ClusterName]
+			}
+			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, triedClusterID)
 			return nil
 		case runningTypeUnobservable:
 			return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionAcceleratorTypeUnobservable)

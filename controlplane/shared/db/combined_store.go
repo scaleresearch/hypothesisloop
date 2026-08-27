@@ -298,10 +298,19 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 			cap = *maxConcurrent
 		}
 		if cap > 0 {
+			// The cap is defined on the platform experiment across ALL of its agents' jobs
+			// (autoscaler.md, schema.sql's max_concurrent_accelerators comment), not per agent —
+			// so both the lock and the SUM below are scoped to platformExpID alone. A second,
+			// distinctly-salted advisory lock is used here (rather than reusing the agent-scoped
+			// `key` lock above) so two different agents under the same platform experiment still
+			// serialize against each other instead of racing past this check independently.
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, platformExpID); err != nil {
+				return "", fmt.Errorf("reserve admitted flavor: concurrency lock: %w", err)
+			}
 			var inFlight int
 			if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(accelerator_count),0) FROM experiments
-				WHERE agent_id=$1 AND platform_experiment_id=$2 AND id!=$3 AND status IN ('SUBMITTED','RUNNING')`,
-				agentID, platformExpID, experimentID).Scan(&inFlight); err != nil {
+				WHERE platform_experiment_id=$1 AND id!=$2 AND status IN ('SUBMITTED','RUNNING')`,
+				platformExpID, experimentID).Scan(&inFlight); err != nil {
 				return "", fmt.Errorf("reserve admitted flavor: in-flight accelerators: %w", err)
 			}
 			if inFlight+acceleratorCount > cap {

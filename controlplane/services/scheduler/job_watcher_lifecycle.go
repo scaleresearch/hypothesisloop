@@ -60,7 +60,13 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	timeout := w.stuckPendingTimeout
 	evictionReason := domain.EvictionStuckPending
 	triedClusterID := ""
-	onAutoscalerCluster := w.scaleUpTimeout > 0 && autoscalerEnabled[exp.ClusterName]
+	// clusterIDs[exp.ClusterName] can be legitimately empty either because this cluster isn't
+	// autoscaler-enabled, or because GetClusterIDs failed this pass while GetAutoscalerCapability
+	// still succeeded (the two are fetched independently in scanAndWatch). The two failure modes
+	// must not be conflated: treating the latter as "not an autoscaler cluster" would spend
+	// infra_requeue_count and skip tried_clusters for a job whose real fault is scheduler-policy,
+	// not the job's environment (codex review caught this).
+	onAutoscalerCluster := w.scaleUpTimeout > 0 && autoscalerEnabled[exp.ClusterName] && clusterIDs[exp.ClusterName] != ""
 	if onAutoscalerCluster {
 		timeout = w.scaleUpTimeout
 		evictionReason = domain.EvictionScaleUpTimeout

@@ -303,10 +303,10 @@ func (l *Loop) settleStint(ctx context.Context, exp *domain.Experiment) {
 // against at claim time. See ClaimSubmitted: a nil capacityAvailable callback skips that check
 // and relies on the lock plus the status='QUEUED' predicate alone.
 func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType) error {
-	return l.submitJobTo(ctx, exp, clusterName, persistedFlavor, false)
+	return l.submitJobTo(ctx, exp, clusterName, "", persistedFlavor, false)
 }
 
-func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType, speculative bool) error {
+func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName, clusterID string, persistedFlavor domain.AcceleratorType, speculative bool) error {
 	// ReserveAdmittedFlavor is called on every submit now, not only on a flavor substitution: it
 	// is also where the max_concurrent_accelerators cap (autoscaler.md's concurrency cap) is
 	// enforced atomically against this pool's live SUBMITTED+RUNNING accelerator count, and
@@ -330,7 +330,32 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	}
 	fp := exp.Footprint()
 	var capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)
-	if !speculative {
+	if speculative {
+		// There is no live node to re-check a fit predicate against (that's why this is
+		// speculative), but ClaimSubmitted's per-cluster advisory lock and its `desired` read
+		// (every SUBMITTED/ADMITTED row on clusterName) are still the one place a fresh,
+		// serialized-across-replicas view of this cluster's speculative footprint exists —
+		// reuse them to recheck max_speculative_accelerators here rather than trusting the
+		// tick-local snapshot speculativeCandidates saw a moment ago (a snapshot other replicas
+		// could have raced past concurrently).
+		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+			if clusterID == "" {
+				return true, nil
+			}
+			cap, err := l.clusterSpeculativeCap(ctx, clusterID)
+			if err != nil {
+				return false, err
+			}
+			if cap == nil {
+				return true, nil
+			}
+			footprint := exp.AcceleratorCount
+			for _, d := range desired {
+				footprint += d.AcceleratorCount
+			}
+			return footprint <= *cap, nil
+		}
+	} else {
 		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 			guaranteed, burst, err := l.workload.GetFlavorCapacity(ctx)
 			if err != nil {

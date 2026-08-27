@@ -347,7 +347,34 @@ func (l *Loop) tick(ctx context.Context) error {
 			waitingForScaleUp := autoscalerEnabled[cluster] && negativeInDimension(gAvail[cluster], exp.AcceleratorType)
 			if len(candidates) > 0 {
 				specCluster := candidates[0]
-				if err := l.submitJobTo(ctx, exp, specCluster, persistedFlavor, true); err != nil {
+				// The "max" CPU/memory/storage resolution above ran against whichever cluster
+				// looked live-fit-eligible before this job fell through to speculation -- a
+				// different cluster than specCluster, or none at all if every candidate failed
+				// that pre-check. Re-resolve against the actual speculative target now that
+				// it's chosen: a stale resolution would either persist a "max" share sized for
+				// the wrong cluster's nodes, or (if never resolved at all) leave the literal
+				// "max" sentinel in the submitted spec -- codex review caught this as a real
+				// hazard.
+				if specCluster != cluster {
+					resolvedJob, fitsSpecCluster, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvail[specCluster], nodeLabels[specCluster])
+					if rerr != nil {
+						l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources for speculative target: %w", rerr))
+						continue
+					}
+					if !fitsSpecCluster {
+						// This job's own request (post-"max"-resolution) cannot fit even the
+						// speculative target's largest node -- speculativeCandidates' own
+						// fitsLargestNode check used the unresolved request, so this can still
+						// happen. Nothing else to try this tick.
+						obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+						if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedCapacityUnavailable); err != nil {
+							l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
+						}
+						continue
+					}
+					exp.ResolvedJob = resolvedJob
+				}
+				if err := l.submitJobTo(ctx, exp, specCluster, clusterIDs[specCluster], persistedFlavor, true); err != nil {
 					l.logger.Error("speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
 					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 					reason := notAdmittedReasonForSubmitError(err)

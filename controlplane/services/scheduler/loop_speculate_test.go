@@ -224,35 +224,84 @@ func TestSpeculativeCandidatesRespectsMaxSpeculativeAccelerators(t *testing.T) {
 	}
 }
 
-// nilCallbackClaimStore asserts submitJobTo's speculative path claims with a nil
-// capacityAvailable callback — ClaimSubmitted (the real store implementation) treats that as "no
-// live-fit predicate", relying on the advisory lock plus the status='QUEUED' predicate alone.
+// nilCallbackClaimStore captures submitJobTo's capacityAvailable callback so tests can both
+// distinguish "no recheck at all" from "rechecks something" and drive the callback itself against
+// a chosen `desired` set — ClaimSubmitted (the real store implementation) passes it the
+// SUBMITTED/ADMITTED rows on the target cluster, read fresh under its own per-cluster advisory
+// lock.
 type nilCallbackClaimStore struct {
 	LoopStore
 	sawNilCallback bool
 	claimed        bool
+	capacityCheck  func(context.Context, []*domain.Experiment) (bool, error)
+	settings       map[string]*domain.ClusterSettings
 }
 
 func (s *nilCallbackClaimStore) ClaimSubmitted(_ context.Context, _, _ string, _ *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	s.sawNilCallback = capacityAvailable == nil
+	s.capacityCheck = capacityAvailable
 	s.claimed = true
 	return true, nil
 }
 
-func TestSubmitJobSpeculativePassesNilCapacityCallback(t *testing.T) {
+func (s *nilCallbackClaimStore) GetClusterSettings(_ context.Context, clusterID string) (*domain.ClusterSettings, error) {
+	return s.settings[clusterID], nil
+}
+
+// A speculative submit with no clusterID (e.g. GetClusterIDs unavailable this tick) has nothing
+// to recheck a per-cluster speculative cap against and must still claim — the ID, not the
+// speculative-ness, decides whether there's a recheck to run.
+func TestSubmitJobSpeculativeWithNoClusterIDSkipsCapRecheck(t *testing.T) {
 	exp := distributedExperiment(1, 1)
 	exp.ID = "exp-1"
 	store := &nilCallbackClaimStore{}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
 
-	if err := l.submitJobTo(context.Background(), exp, "cluster-a", exp.AcceleratorType, true); err != nil {
+	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true) = %v, want nil", err)
 	}
 	if !store.claimed {
 		t.Fatal("ClaimSubmitted was never invoked")
 	}
-	if !store.sawNilCallback {
-		t.Fatal("a speculative submit must claim with a nil capacityAvailable callback — there is no live node to re-check")
+	ok, err := store.capacityCheck(context.Background(), nil)
+	if err != nil || !ok {
+		t.Fatalf("capacityCheck with no clusterID = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
+// A speculative submit's capacityAvailable callback re-reads max_speculative_accelerators against
+// ClaimSubmitted's own fresh, lock-serialized `desired` set — not the tick-local snapshot
+// speculativeCandidates saw, which another scheduler replica could have raced past concurrently
+// (codex review caught this: the tick-local-only check let concurrent replicas overshoot the
+// per-cluster cap by the sum of all their jobs, not just a few accelerators).
+func TestSubmitJobSpeculativeReChecksClusterCapAgainstFreshDesired(t *testing.T) {
+	exp := distributedExperiment(1, 1)
+	exp.ID = "exp-1"
+	exp.AcceleratorCount = 2
+	cap := 3
+	store := &nilCallbackClaimStore{settings: map[string]*domain.ClusterSettings{
+		"cid-a": {MaxSpeculativeAccelerators: &cap},
+	}}
+	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
+
+	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true); err != nil {
+		t.Fatalf("submitJobTo(speculative=true) = %v, want nil", err)
+	}
+	if store.sawNilCallback {
+		t.Fatal("a speculative submit with a clusterID must still recheck the per-cluster cap at claim time")
+	}
+
+	// 0 already-desired + this job's 2 is within the cap of 3.
+	ok, err := store.capacityCheck(context.Background(), nil)
+	if err != nil || !ok {
+		t.Fatalf("capacityCheck with room = (%v, %v), want (true, nil)", ok, err)
+	}
+	// A concurrently-claimed 2 more (now reflected in ClaimSubmitted's fresh `desired` read) plus
+	// this job's 2 is 4 > cap 3 — this is exactly the race the tick-local snapshot could miss.
+	racing := []*domain.Experiment{{AcceleratorCount: 2}}
+	ok, err = store.capacityCheck(context.Background(), racing)
+	if err != nil || ok {
+		t.Fatalf("capacityCheck once a concurrent claim fills the cap = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 
@@ -262,7 +311,7 @@ func TestSubmitJobLiveFitPassesNonNilCapacityCallback(t *testing.T) {
 	store := &nilCallbackClaimStore{}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
 
-	if err := l.submitJobTo(context.Background(), exp, "cluster-a", exp.AcceleratorType, false); err != nil {
+	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, false); err != nil {
 		t.Fatalf("submitJobTo(speculative=false) = %v, want nil", err)
 	}
 	if store.sawNilCallback {

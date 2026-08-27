@@ -100,6 +100,40 @@ func TestReserveAdmittedFlavorTxRejectsOverCap(t *testing.T) {
 	}
 }
 
+// TestReserveAdmittedFlavorTxCapIsAcrossAllAgents covers a real bug codex review found: the
+// in-flight SUM and its serializing advisory lock were both scoped to (agent_id,
+// platform_experiment_id), so max_concurrent_accelerators was actually enforced per agent, not
+// across the whole platform experiment as schema.sql documents it and autoscaler.md's concurrency
+// cap requires. Two different agents under the same platform experiment must share one cap.
+func TestReserveAdmittedFlavorTxCapIsAcrossAllAgents(t *testing.T) {
+	pool, store, agentA, peID := setupCapTestPool(t, 3)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	agentB := "agent-cap-b-" + suffix
+	createTestAgent(t, pool, agentB, domain.AgentKindHuman)
+	pes := NewPlatformExperimentsStore(pool)
+	if _, err := pes.Signup(ctx, peID, agentB, domain.SignupRoleCompetitor, ""); err != nil {
+		t.Fatalf("signup agent B: got = %v, want = nil", err)
+	}
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO agent_quotas (id, agent_id, platform_experiment_id, guaranteed_accelerator_hours, burst_accelerator_hours, created_at)
+		VALUES ($1, $2, $3, 1000, 1000, NOW())`, uuid.New().String(), agentB, peID); err != nil {
+		t.Fatalf("seed agent B quota: got = %v, want = nil", err)
+	}
+
+	seedExperimentForCapTest(t, pool, "exp-a-"+suffix, agentA, peID, 2, domain.StatusSubmitted)
+	seedExperimentForCapTest(t, pool, "exp-b-"+suffix, agentB, peID, 2, domain.StatusQueued)
+
+	// agentA already holds 2 in flight; agentB's own submit of 2 more is fine in isolation
+	// (2 <= cap 3) but 2+2=4 exceeds the platform experiment's shared cap of 3.
+	reason, err := store.ReserveAdmittedFlavorTx(ctx, "exp-b-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
+	if err != nil {
+		t.Fatalf("agent B reserve: got err = %v, want nil", err)
+	}
+	if reason != domain.NotAdmittedConcurrencyCap {
+		t.Fatalf("agent B reserve against agent A's 2 in-flight on the same platform experiment: reason = %q, want %q", reason, domain.NotAdmittedConcurrencyCap)
+	}
+}
+
 // TestReserveAdmittedFlavorTxCapSerializesAgainstAnAlreadyCommittedBaseline demonstrates the part
 // of the cap that is genuinely race-free: once a reservation is reflected in a SUBMITTED/RUNNING
 // row (the state ClaimSubmitted writes right after a successful reservation in production), every
