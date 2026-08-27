@@ -19,6 +19,7 @@ import (
 // candidates[0].
 func (l *Loop) speculativeCandidates(
 	ctx context.Context,
+	resolveCache *resolutionCache,
 	exp *domain.Experiment,
 	autoscalerEnabled map[string]bool,
 	connected map[string]bool,
@@ -64,17 +65,54 @@ func (l *Loop) speculativeCandidates(
 		if recentlyTried[clusterID] {
 			continue
 		}
-		if !fitsLargestNode(exp, nodeAvail[cluster], nodeResourcesTotal[cluster], nodeLabels[cluster]) {
+		accelCeiling := nodeAvail[cluster]
+		if len(nodeResourcesTotal[cluster]) > 0 {
+			// A live node's FREE count is the wrong ceiling for this check (see fitsLargestNode's
+			// doc comment) — reconstruct each node's INSTALLED count (free plus what the scheduler
+			// itself has already claimed there) so a fully-saturated node still reports its real
+			// capacity instead of the 0 that would wrongly reject the exact scenario this feature
+			// exists for.
+			installed, ierr := resolveCache.installedAcceleratorsByNode(ctx, cluster, exp.AcceleratorType, nodeAvail[cluster])
+			if ierr != nil {
+				return nil, ierr
+			}
+			accelCeiling = map[string]map[string]int64{}
+			flavor := string(exp.AcceleratorType)
+			for node, count := range installed {
+				accelCeiling[node] = map[string]int64{flavor: count}
+			}
+		}
+		if !fitsLargestNode(exp, accelCeiling, nodeResourcesTotal[cluster], nodeLabels[cluster]) {
 			continue
 		}
-		if cap, err := l.clusterSpeculativeCap(ctx, clusterID); err != nil {
+		cap, err := l.clusterSpeculativeCap(ctx, clusterID)
+		if err != nil {
 			return nil, err
-		} else if cap != nil && speculativeFootprintByCluster[cluster]+exp.AcceleratorCount > *cap {
+		}
+		if cap == nil && len(nodeResourcesTotal[cluster]) == 0 {
+			// Zero live nodes means fitsLargestNode above accepted this cluster blind, with no
+			// data at all backing the guess. Absent an operator-set cap, bound the exposure to one
+			// job's own footprint rather than leaving it unbounded — once a real attempt lands
+			// there (success or a tracked failover), the operator has empirical grounds to raise
+			// max_speculative_accelerators if they want more concurrent bets on this cluster.
+			oneJob := exp.AcceleratorCount
+			cap = &oneJob
+		}
+		if cap != nil && speculativeFootprintByCluster[cluster]+exp.AcceleratorCount > *cap {
 			continue
 		}
 		candidates = append(candidates, candidate{cluster: cluster, clusterID: clusterID})
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].clusterID < candidates[j].clusterID })
+	// Fewest currently-pending speculative jobs first: spreads bets across eligible clusters
+	// instead of piling every guaranteed job with nothing to fit onto the same one, using data
+	// already computed this tick — no new state, no live-node dependency for the tiebreak either.
+	sort.Slice(candidates, func(i, j int) bool {
+		fi, fj := speculativeFootprintByCluster[candidates[i].cluster], speculativeFootprintByCluster[candidates[j].cluster]
+		if fi != fj {
+			return fi < fj
+		}
+		return candidates[i].clusterID < candidates[j].clusterID
+	})
 	out := make([]string, len(candidates))
 	for i, c := range candidates {
 		out[i] = c.cluster
@@ -154,27 +192,36 @@ func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, co
 	return sawCandidate
 }
 
-// fitsLargestNode proves every rank of exp could fit SOME single node in this cluster's own pool,
-// so a speculative submit is never made against a request no node the autoscaler could add would
-// ever satisfy — that would Pend forever instead of triggering a useful scale-up. Judged per
+// fitsLargestNode proves every rank of exp could plausibly land on SOME node this cluster's
+// autoscaler could add, so a speculative submit is never made against a request no addable node
+// would ever satisfy — that would Pend forever instead of triggering a useful scale-up. Judged per
 // candidate node — a rank must fit one real node in every dimension at once, not a synthetic
 // shape assembled from one node's CPU and another's accelerators — because an autoscaler adds
 // nodes matching its existing node-group templates, and no template looks like a maximum-of-every-
 // dimension composite unless some single node actually has that shape. Codex review caught the
 // earlier per-dimension-max version as exactly this: it could pass a job that fits neither a
 // CPU-heavy node nor a GPU-heavy node, onto a cluster with only those two, and the job would Pend
-// forever since no addable node matches the synthesized shape. A cluster reporting zero nodes
-// never speculates.
+// forever since no addable node matches the synthesized shape.
 //
-// Per-node accelerator ceilings use nodeAvail (currently FREE devices) rather than an installed
-// total, because the control plane has no per-node installed-accelerator metric (see
-// autoscaler.md's fact table: only accelerator_available_by_node is reported). This
-// under-estimates a node whose accelerators are entirely in use, which can only make this check
-// too strict, never too lenient — the failure direction that matters here is never speculating
-// onto a node shape that could not actually exist.
+// A cluster reporting zero live nodes (most commonly one already scaled to zero) has no shape data
+// at all to check against — rather than excluding it forever (the old behaviour, and the reason
+// the whole feature never fired for the scaled-to-zero and fully-saturated cases it exists for),
+// it is accepted as a candidate blind. A bad guess here is bounded and self-healing: the very next
+// tick's tried_clusters/infra_requeue_count backoff takes over the moment a speculative attempt
+// there fails, and speculativeCandidates additionally defaults the per-cluster cap to one job's
+// footprint for exactly this no-data case so a single bad guess can't pile up before it is proven
+// wrong (see clusterSpeculativeCap's caller).
+//
+// For a cluster that DOES report live nodes, accelByNode must already carry each node's INSTALLED
+// count (free plus whatever the scheduler itself has already claimed there), not raw free capacity
+// — the caller (speculativeCandidates) reconstructs this via resolutionCache.
+// installedAcceleratorsByNode before calling in. Gating on raw FREE count was the actual bug: a
+// fully-saturated node (every device already in use, which is exactly the state that should
+// trigger a scale-up bet) always reads free=0, so the old check rejected the one scenario the
+// feature exists for.
 func fitsLargestNode(exp *domain.Experiment, accelByNode, resourcesByNode map[string]map[string]int64, labelsByNode map[string]map[string]string) bool {
 	if len(resourcesByNode) == 0 {
-		return false
+		return true
 	}
 	flavor := string(exp.AcceleratorType)
 	sawLabelMatch := false
