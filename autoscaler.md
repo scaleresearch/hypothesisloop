@@ -1,0 +1,256 @@
+# Scheduler / Autoscaling
+
+## Problem
+
+The scheduler only sees **live, currently-connected capacity**. Nothing represents "capacity that is coming".
+
+- Capacity = dimension-wise min(desired-free, actual-free) per cluster over heartbeating clusters: `controlplane/shared/queuebackend/queue_backend.go:123-184` (`GetFlavorCapacity`). Per-node shapes come from `GetAcceleratorCapacityByNode`/`GetNodeResourceCapacity`/`GetNodeTotalCapacity`/`GetNodeLabels` (`:234-302`).
+- Consumed per tick: `controlplane/services/scheduler/loop_tick.go:52-100`.
+- On no-fit the only fallbacks are burst preemption (`loop_tick.go:285-361`, `loop_preempt.go`) and disbalance eviction (`loop_disbalance.go`); otherwise the job stays `QUEUED` until a node heartbeats in.
+- The per-job shortfall vector is already computed (`shortfall`, `preemptionShortfall`, `notAdmittedReasonFor` in `loop_tick.go:506-707`) — it goes to a log line and the `not_admitted_reason` string.
+
+Impact: scale-up is decoupled from admission, and worse, a guaranteed job will **preempt burst jobs** even when a node that would fit it is 3 minutes away.
+
+## Goal
+
+Some clusters run a native autoscaler (cluster-autoscaler / Karpenter), some don't. When a job fits nowhere live:
+1. get it running **fast** by using a native autoscaler where one exists;
+2. if that cluster does not deliver capacity within a deadline, **move the job to the next candidate cluster**, and so on;
+3. never strand the job, never thrash it, never double-book capacity, never let a slow cluster spend the job's retry budget.
+
+## What the code actually does today (verified against source, 2026-08-26)
+
+| Fact | Where | Consequence |
+|---|---|---|
+| `CreateWorkload` is a **no-op**; the cluster agent *pulls* the desired set (`SUBMITTED`/`ADMITTED`/`RUNNING`) every 2 s via `POST /internal/clusters/{name}/reconcile` and creates the k8s Job itself | `queue_backend.go:62`; `runtime/shared/agentloop/agentloop.go:80-94`; `clusteragentapi/handler.go:170-296`; `db/cluster_queue_store.go:35-54` | A `SUBMITTED` row **is** a Pending pod on the cluster → the native autoscaler reacts to it. A `QUEUED` row is a DB row only — invisible. "Submit" is the trigger. The reconcile path has **no fit gate** of its own (the `desiredPlacementFits` call in `scheduler/handler.go:418` is the manual-admit API, not reconcile). |
+| `ADMITTED` is vestigial: read everywhere, **written nowhere**. The real transition is `SUBMITTED → RUNNING`, made control-plane-side by the job watcher off the agent's pushed phase (`MarkStarted`) | `db/experiments_store_lifecycle.go:132-140`; `job_watcher_lifecycle.go:128+` | Design below speaks only of `SUBMITTED` and `RUNNING`. |
+| Admission submits only if `domain.Fits` + `topologyFits` pass against **live** free capacity, and `ClaimSubmitted` re-checks both inside a per-cluster advisory lock (`cluster-admission/<name>`) with predicate `status='QUEUED'` | `loop_tick.go:284-285`; `loop_preempt.go:282-336` (caller); `db/experiments_store_lifecycle.go:76-125` (the function) | A cluster with 0 free GPUs can never receive the pod that would make it scale. This is the one gate to open. |
+| desired-free = reported total − Σ footprints of `SUBMITTED/ADMITTED/RUNNING` rows with `cluster_name != ''` | `queue_backend.go:157-173`; `db/experiments_store_queries.go:56-76` | A speculatively-submitted job is **already subtracted** from its cluster's capacity. Nothing else can double-book it. Desired-free goes negative → `Fits` is false for everyone else there — the correct reading of "oversubscribed until the node lands". |
+| `GetFlavorCapacity`'s main loop iterates `heartbeats` **without checking the connected bool** (`for cluster := range heartbeats`), unlike `validateCapacitySnapshot` and `GetTotalCapacity` which skip `!connected` | `queue_backend.go:167` vs `:192`, `:279` | Pre-existing inconsistency. Fix as pre-work (skip `!connected`); an unreachable cluster must never be a speculative candidate. |
+| Watcher: phase `Pending` **or `Gone`** → `evictIfPastAdmissionDeadline` after `stuck_pending_timeout_seconds` (300), reason `stuck_pending`; deadline is `submitted_at + timeout`; **hard error if `submitted_at` is nil**; timeout ≤ 0 disables it | `job_watcher_scan.go:104-112`; `job_watcher_lifecycle.go:20-40`; `settings/hypothesisloop.yaml:161` | The deadline is already derived from `submitted_at` + a config value. No new deadline column is needed — only a per-cluster timeout to read. |
+| Watcher reads phase from the **metrics store** (GreptimeDB), not k8s: `LatestJobPhase` with the liveness window; not-found is an **error**, not Pending | `job_watcher_scan.go:78`; `queue_backend.go:64-74` | Any new fact the watcher needs must arrive by the same status push. |
+| `stuck_pending` is `FaultInfrastructure` → `ResolveTermination` requeues for free: `status='QUEUED'`, `attempt_count+1`, `infra_requeue_count+1`, `submitted_at=NULL`, `cluster_name=''`, guard `infra_requeue_count < max_infrastructure_requeues` (3). `RetriesUsed = attempt_count − infra_requeue_count` keeps `max_retries` unspent | `domain/fault_class.go:64`; `db/eviction.go:26-33`; `db/experiments_store_lifecycle.go:~255-275`; `config/types.go:115-121` | Failover exists in embryo: timeout → `QUEUED` → next tick re-places. Missing: memory of *which* cluster failed, a separate budget, and an early-exit signal. |
+| Requeued job has `cluster_name=''`, so the next tick picks freely — possibly the **same** cluster | `loop_tick.go:244-249` | Ping-pong risk without a tried-set. |
+| Agent status push: `POST /internal/clusters/{name}/status`, fields `experiment_id, phase, admitted_accelerator_type, admitted_node, log_tail, reason, message, restart_count, attempt`. Lands in GreptimeDB: phase as a metric series (`RecordJobStatuses`), reason/message/restart_count in the SQL table `job_phase_detail` (`RecordPhaseDetail`). Postgres is only **read** there (ownership/attempt fencing) | `clusteragentapi/handler.go:302-397, 462-476`; `metricsdb/job_phase_detail.go:17-52` | New observed facts (`scheduling_reason`, scheduled-node count) are **columns on `job_phase_detail`** — same push, same table, same reader (`PollPhaseDetail`). No `scheduling_reason` exists today (repo-wide grep: zero hits). |
+| `PollPhaseDetail` (k8s side) lists the experiment's pods and reads **container** `Waiting.Reason` / `Terminated` exit codes only; maps 4 reasons | `runtime/k8s/internal/k8sexec/phase_detail.go:19-24, 30-64` | Pod-level `PodScheduled=False` and autoscaler events (`TriggeredScaleUp`, `NotTriggerScaleUp`) are not surfaced. We wait the full deadline even when the autoscaler said "no" in 10 s. The pod list is already fetched — the gang counter and `scheduling_reason` ride on it, no new k8s read. |
+| Cluster capabilities (`multi_node_capable`) ride in the reconcile body's `capacityReport`, are written as the metric series `cluster_multi_node_capable`, read fail-closed | `clusteragentapi/handler.go:415-443`; `metricsdb/cluster_capacity.go:94-110`; `queue_backend.go:293-298` | `autoscaler_enabled` is one more field in `capacityReport`, one more metric series, same fail-closed read. |
+| Cluster identity is the `{name}` path param = operator-typed `CLUSTER_NAME` env var. **No stable ID exists.** The runtime loads the **same** `hypothesisloop.yaml` (ConfigMap-mounted, read-only, nothing writes it) | `runtime/k8s/cmd/cluster-agent/main.go:32-49`; `runtime/k8s/infra/cluster-agent-deployment.yaml:99-100`; `config/load.go` | "Generate an ID once and persist it in the runtime's config" has **no write path** and would violate the one-config-file rule. See the design below for the fix. |
+| Per-cluster config: **none**, anywhere (yaml or Postgres). UI `cluster/page.tsx` is read-only; the only UI-editable entity is the platform experiment (`PUT /platform-experiments/{id}`) | `controlplane/ui/src/app/cluster/page.tsx`; `ui/src/lib/api.ts:340-342` | A per-cluster timeout needs a new `cluster_settings` row in Postgres and a new PUT — there is no shortcut. |
+| Multi-node job = one **Indexed** k8s Job per group (`Completions=Parallelism=Replicas`), required pod anti-affinity when `spread_across_hosts`, headless Service for rendezvous. **No PodGroup, no coscheduling, no custom `schedulerName`.** Pods bind independently | `runtime/k8s/internal/k8sexec/job_build.go:69-113, 174-178, 540-560`; `job_affinity.go` | **There is no gang guarantee today.** Live admission only avoids partial gangs because `topologyFits` requires every rank to fit before submit. Speculation removes that guard, so partial binding becomes the *expected* transient state and must be handled — see "Gang scheduling" below. |
+| `PollJobStatus` aggregates group Jobs: any Failed → Failed; all Succeeded → Succeeded; any group `Status.Ready > 0` → **Running**; else Pending; none present → Gone | `job_lifecycle.go:795-873` | One landed rank flips the whole job to `Running`, and the watcher's `Running` branch never looks at the pending deadline. The gang counter must be evaluated **independent of phase**. |
+| `DeleteWorkload` deletes every group's Job, the headless Service and the DRA template unconditionally | `job_lifecycle.go:710-743` | Whole-gang teardown already exists. |
+| `flavor_mismatch` (`onRunning`, observed type ≠ reserved type) evicts immediately, no deadline; `FaultInfrastructure` | `job_watcher_scan.go:94-97`; `job_watcher_lifecycle.go:140-144`; `fault_class.go:59` | Reused as-is; add the cluster to the tried list on this path too. |
+| Quota is per `(agent_id, platform_experiment_id)`; `ReserveAdmittedFlavor` runs in one tx under `pg_advisory_xact_lock` + `SELECT … FOR UPDATE` with a live `SUM(estimated_cost_acch)`; `Settle` bills observed metrics only | `services/quota/platform_experiments_quota.go:142-153`; `db/combined_store.go:239-291`; `job_watcher_lifecycle.go:63-90` | Pending time costs 0. The concurrency cap has an existing transaction to live in. |
+| Control plane knows each node's **installed** shape (`node_resources_total_by_node`, `accelerator_available_by_node`, labels) | `clusteragentapi/handler.go:421-431`; `queue_backend.go:248-250` | The "largest known node shape" check is implementable now; the earlier "needs the agent to report node shapes" caveat was stale. |
+
+## How others do it (prior art)
+
+| System | Trigger | Pending capacity | Anti-thrash |
+|---|---|---|---|
+| K8s cluster-autoscaler | unschedulable pods, simulated against node-group templates | "upcoming nodes" counted so the same pod doesn't trigger twice | scale-down after N min unneeded; max-node-provision-time gives up on nodes that never register |
+| Karpenter | pending pods → NodeClaim created *before* pod binds | NodeClaim is a first-class object with TTL | consolidation with cooldowns; claim expires if node never joins |
+| Slurm elastic | job needs `CLOUD` nodes → `ResumeProgram` | powered-off nodes are **schedulable**; job is allocated, node booted, job waits in the alloc | `ResumeTimeout` marks node DOWN; `SuspendTime` idle before power-off |
+| Ray autoscaler | resource demand vector from unplaced tasks, bin-packed | pending/launching nodes subtracted from demand | upscaling-speed rate limit, idle timeout |
+| Kueue | `ProvisioningRequest` admission check: quota reserved, then wait for provisioning | workload holds quota while provisioning | retry backoff, request expiry |
+| Kueue MultiKueue | workload mirrored to N clusters; first to admit wins, others deleted | — | one-at-a-time or fan-out configurable |
+
+Shared patterns: the **scheduler** decides *what* is missing, an autoscaler decides *how*; an explicit **pending record with a TTL** prevents double-scaling and "node never arrived" hangs. Our `SUBMITTED` row with `submitted_at` **is already that record** — it is subtracted from desired-free and it has a deadline. We don't need a second ledger.
+
+## Independent review
+
+- Codex first round (unbiased prompt): ranked backlog-signal > intent ledger > scheduler-initiated provisioning > placeholder nodes. Strong warning: **do not fold pending nodes into `GetFlavorCapacity`**. Honoured throughout — nothing below changes the capacity read.
+- Codex second round: not obtained (timeouts / usage limit). The decisions below are final calls from the code read.
+- Claude review (this revision): re-verified every fact-table row against source; corrected line refs, the `ADMITTED` transition, the gang unit (pods, not groups), the cluster-ID persistence story, where status-push facts land (SQL table vs metric series), the pre-existing `heartbeats` bool bug, and added the rendezvous-timeout hazard and the gang-scheduling analysis.
+
+## Design
+
+### Cluster capability, identity, per-cluster timeout
+
+**Capability.** Add to `capacityReport` next to `multi_node_capable`: one bool, `autoscaler_enabled`, absent = false (fail-closed, same rule). That is the entire report — no headroom, no timeout, no per-cluster cap. The agent can't know its own node-group limits reliably across CA/Karpenter/vendor setups, and a number we'd then trust is a second source of truth to reconcile. Written as metric series `cluster_autoscaler_enabled`, read by a new `GetAutoscalerCapability` mirroring `GetMultiNodeCapability`. Source on the k8s runtime: an env var on the agent deployment (`AUTOSCALER_ENABLED=true`), operator-set — the runtime can detect CA/Karpenter heuristically but the operator knows for certain, and a false positive here costs a wasted deadline per job.
+
+**Cluster identity.** Today the only identity is `CLUSTER_NAME` — a human label. Renaming a cluster, or two clusters sharing a name, splits or merges whatever is keyed on it. The runtime's config file is read-only and shared with the control plane, so "generate an ID and persist it in config" is not implementable and would add a write path to a file that has none.
+
+**Decision: the cluster ID is a fact the runtime already owns, read live, never generated or stored by us.**
+- k8s runtime: the UID of the `kube-system` namespace (`kubectl get ns kube-system -o jsonpath={.metadata.uid}`). It is created with the cluster, immutable for the cluster's life, globally unique, and the agent already has the credentials to read it. This is the community-standard cluster fingerprint (used by Karpenter, Prometheus `cluster` relabeling, kubecost).
+- bare-metal runtime: `/etc/machine-id` of the host.
+- Sent as `cluster_id` alongside `name` on every reconcile and status push. `GET /internal/clusters` exposes both.
+
+Everything scheduler-side that keys on "this cluster" — per-cluster settings, tried-cluster history — uses `cluster_id`. `cluster_name` on the experiments row stays the *routing* key (the agent pulls by name; capacity metrics are labelled by name) — one rename mid-flight is already handled by the existing unreachable path and is not made worse.
+
+**Per-cluster timeout.** New Postgres table `cluster_settings(cluster_id PK, scale_up_timeout_seconds, max_speculative_accelerators)` — settings only, nothing else. No name, no seen-at, no capability: those are observed facts the metrics store already answers (`GET /internal/clusters` lists live clusters by id+name from heartbeats, and the UI joins settings onto that list by id). A row exists only once an operator sets a value via `PUT /clusters/{cluster_id}/settings`; absent row = global `scheduler.scale_up_timeout_seconds` (default 600). The watcher reads it live (deadline = `submitted_at + timeout(cluster)`), so an edit applies to in-flight attempts on the next scan. The reconcile handler never writes Postgres for this — one direction, one owner.
+
+### Speculative submit with deadline and failover
+
+The `SUBMITTED` row is the scale-up request. Open the one gate that blocks it.
+
+**Admission (`loop_tick.go`, guaranteed pass, after the live no-fit is established at L285):**
+1. Try live fit exactly as today. If it fits anywhere, nothing changes — this path stays fastest.
+2. Else, before `preempt`: compute `speculativeCandidates` = autoscaler-enabled ∧ connected ∧ not in this job's unexpired tried-list ∧ every rank's shape (`exp.NodeShapes()`) fits the cluster's **largest installed node** in every per-node dimension, judged on `GetNodeTotalCapacity` + `GetAcceleratorCapacityByNode`-derived per-node accelerator totals + labels (a request no node in the pool could ever host must not be speculated — it would Pend forever). Gang jobs additionally require `multi_node_capable`, as now. Also skipped when the cluster's outstanding speculative footprint already exceeds its `max_speculative_accelerators` (if set); the platform-experiment concurrency cap below is the backstop against runaway spend.
+3. If non-empty: pick the first candidate by `cluster_id` order and `submitJob` with a nil capacity callback. `ClaimSubmitted` treats nil as "no live-fit predicate" (there is no node yet); the advisory lock, the `status='QUEUED'` predicate, `submitted_at=NOW()` and `cluster_name` write stay. **No `speculative` column**: "this job is waiting for capacity that does not exist yet" is fully derivable at read time — cluster is autoscaler-enabled ∧ `scheduled_nodes < Nodes()` — and a stored flag would have to be kept in sync with that fact.
+4. If empty: fall through to the existing preemption/disbalance path, unchanged.
+
+**Ordering of candidates: no ranking machinery.** No config priority list (rots), no measured-history ranking (retained state solving a problem the deadline+failover loop already solves — a reliably slow cluster fails over quickly and drops out of rotation for that job via the tried-list). Stable order by `cluster_id`. Live-fit clusters always beat speculative ones; speculating anywhere beats preempting a burst job.
+
+**Gang readiness — an observed fact, one counter, stored where observed facts already live.**
+The k8s runtime's `PollPhaseDetail` already lists the experiment's pods. Add one number to the same status push: `scheduled_nodes` = pods with condition `PodScheduled=True`. The control plane already knows the total (`exp.Job.Nodes()`), so there is no second counter to keep consistent. The unit is **pods, not groups**: a group is an Indexed Job of `Replicas` pods, and 2 of 3 replicas bound is exactly the partial state we need to see. Lands as a column on `job_phase_detail`; `PollPhaseDetail` returns it. For a single-node job it is 0 or 1 — the general case degenerating, not a special one.
+
+Phase aggregation (`any group Ready → Running`) is **kept exactly as-is**: a landed rank is executing and billable even while siblings Pend. That is a billing decision, not a bug.
+
+**Future swap-in, not now (k8s-side only, same one-number shape reaches the control plane):**
+- `PodGroup` (`scheduling.k8s.io`, alpha in 1.36, feature-gated, off by default, not on our k3s) — would give gang-or-nothing placement natively. Not adopted: breaks "plug in any cluster tomorrow", and `PodGroupInitiallyScheduled` covers initial placement only.
+- Cluster Autoscaler `ProvisioningRequest` (`best-effort-atomic-scale-up`) — reserves the whole gang's capacity atomically before any pod exists. Not adopted: CA-only (no Karpenter equivalent), needs CRD + RBAC + CA ≥ 1.30.1 per cluster.
+
+**Watching (`job_watcher_scan.go`):**
+- One placement-deadline check, run **before** the phase switch for every `SUBMITTED`/`RUNNING` row with `scheduled_nodes < exp.Job.Nodes()`: deadline = `submitted_at + scale_up_timeout(cluster)` if the cluster reports `autoscaler_enabled`, else `submitted_at + stuck_pending_timeout` (today's rule, now phase-independent too — a partial gang on a non-autoscaler cluster was previously invisible behind `Running`). Past it → evict with reason `scale_up_timeout` on autoscaler clusters, `stuck_pending` otherwise. This **replaces** the `Pending`/`Gone` branch's call to `evictIfPastAdmissionDeadline` rather than adding a second one (`Gone` keeps its own existing handling). A gang is one unit for scheduling as it already is for failure — past its deadline, a partial gang is a whole-experiment scheduling failure, and `DeleteWorkload` already tears down every group. Once `scheduled_nodes == Nodes()` the check is simply false; nothing to clear.
+- **Early exit:** the status push gains `scheduling_reason`, filled from the pod's `PodScheduled=False` condition message and the pod's Events (`NotTriggerScaleUp` / `max node group size reached` from CA; Karpenter's "incompatible with nodepool"/NodeClaim failure). If it names a terminal refusal → evict now with `scale_up_timeout`, don't wait. Best-effort: the deadline is the guarantee, the event is the accelerator.
+- **No grace period.** "A node just joined, wait a bit more" is what the timeout itself is for: the operator sets it per cluster with that cluster's boot time in mind. A grace knob plus a ceiling plus a "did the total rise" comparison is three pieces of machinery for one minute of edge.
+- On deadline / early-exit on an autoscaler cluster: reason `scale_up_timeout`, class `FaultInfrastructure` (free requeue, `max_retries` untouched) **but it must not count against `infra_requeue_count`** — otherwise three slow clusters permanently evict a good job. `RequeueInfrastructureFault` gains one parameter: the cluster to append as `{cluster_id, at}` to `tried_clusters` (jsonb); when that is set, `infra_requeue_count` is not incremented and the cap is not checked. No `failover_count`: the cap on failover attempts *is* the tried-list — a job that has tried every candidate has nowhere to go until entries expire, which is the same guarantee a counter would give with one less column.
+- **Rendezvous hazard (must hold, not optional):** landed ranks of a partial gang sit at `init_process_group`/torchrun rendezvous. PyTorch's default store timeout is 30 min. If our scale-up timeout exceeds that, the landed ranks exit non-zero, the k8s Job goes `Failed`, and the job is **charged a real retry** for what was a scheduling failure. Enforce at config load and on the PUT: `scale_up_timeout_seconds < 1800`.
+- **Backoff needs no separate state.** "Don't line up other jobs behind the same dead node group" falls out of a live read across other jobs' `tried_clusters`: candidate step 2 excludes a cluster any job failed over from within the last `tried_cluster_ttl_seconds` (default 900) — one `EXISTS` over `experiments.tried_clusters` jsonb, no per-cluster table.
+- Next tick: step 2 excludes this job's tried clusters → next candidate. When every candidate is tried: the job falls through to today's preemption/disbalance path unchanged and, if that finds nothing, waits `QUEUED` with `no_scalable_capacity`; tried entries expire after the TTL so it cycles again. No `speculate_before_preempt` toggle — speculate-then-preempt is the one order.
+
+**Interaction with preemption:** a speculating job is `SUBMITTED`, so it is out of the guaranteed pass and cannot preempt anyone — the hold is free. The reverse case (guaranteed job B queued behind speculative job A on the same cluster): B sees desired-free negative, does not fit, and either speculates elsewhere or waits; B must **not** preempt burst to cover a shortage caused by A's reservation. **Decision: skip preemption on an autoscaler-enabled cluster whose desired-free is negative in the job's accelerator dimension**, reason `waiting-for-scale-up`. Both inputs are already in the tick (`gAvail` before clamping — expose the unclamped desired-free from `GetFlavorCapacity`, or check `SumDesiredFootprintByCluster > total`); negative desired-free on such a cluster means exactly "a scale-up is outstanding". No query, no flag. Rationale: `preemptionShortfall` already refuses node-level guesses; a node is arriving within one timeout, so the cost of waiting is bounded while the cost of a wrong eviction is not. The rule expires with the attempt.
+
+**Capacity accounting:** none needed. Desired-free already subtracts the `SUBMITTED` footprint. The backlog gauge must subtract outstanding speculative jobs so demand already being served is not re-reported.
+
+**Concurrency cap — the control that keeps a 2-day experiment from being squeezed into 1 hour.**
+Quota bounds *total* accelerator-hours, not how many accelerators run at once. Today concurrency is capped by live capacity; speculation makes capacity appear on demand and removes that limiter. A rate limit and a concurrency limit are the same thing for accelerator-hours (N accelerators for 1 h = N AccH), so the cap is stated in the unit people think in — **accelerators in flight** — and needs no window or history.
+
+- `max_concurrent_accelerators` on the **platform experiment** (next to `budget_accelerator_hours` and `max_agents`, same create/PUT/UI path), applied per agent quota row. The natural reading: "this experiment may hold at most N accelerators at any moment, across all its agents' jobs". Default from `quota.default_max_concurrent_accelerators` in `hypothesisloop.yaml`; the platform-experiment field overrides it. Required to be > 0 — an unlimited setting is not offered, the global default is what "I don't care" means.
+- Enforced at **every** submit (live and speculative) inside `ReserveAdmittedFlavorTx`, which already holds the pool's advisory lock and a live `SUM` over the same rows: reject if `Σ accelerator_count over this pool's SUBMITTED+RUNNING rows + this job's count > cap`, `not_admitted_reason = concurrency_cap`. `submitJob` calls it on every submit, not only on a flavor change as today (`loop_preempt.go:283`).
+- Per-cluster side of the same intent: speculation on a cluster is also skipped when the cluster's outstanding speculative footprint already exceeds `max_speculative_accelerators` from `cluster_settings` (NULL = no per-cluster limit). Second column on the same two-column table, same PUT, same UI field group — operators asked for "limit nodes per cluster" and this is it, without a new table.
+
+### Backlog signal for clusters *without* a native autoscaler
+Aggregate the capacity-blocked shortfall per (cluster, flavor, tier) at the end of each tick into `scheduler_unmet_demand` + oldest-wait-age, minus outstanding speculative. Feeds an external autoscaler (bare-metal power-on, cloud API script) for clusters that can't see Pending pods. Secondary path.
+
+### Not in the design
+- **A pending-capacity ledger table.** The `SUBMITTED` row + `submitted_at` + per-cluster timeout is the ledger, already in the capacity math.
+- **Fan-out (MultiKueue-style) submit to several autoscaler clusters at once.** Every loser boots a node for nothing (~10 min of GPU cost per loser under CA scale-down delay) and desired-free is charged on N clusters simultaneously. **Not even as opt-in.** Revisit only if the `failovers_total` metric shows failover is common.
+- **Placeholder/phantom nodes counted as schedulable.** High blast radius.
+- **Scheduler-initiated provisioning.** Clusters own their autoscaler.
+- **Scheduling gates / hold-all-ranks-until-all-fit.** Tempting for gangs, but CA and Karpenter ignore gated pods, so gating the gang removes the very signal that triggers the scale-up. See below.
+
+## Gang scheduling: "2 nodes free, 3 more needed"
+
+The concrete case: a 5-node job, the cluster has 2 free nodes, autoscaler enabled.
+
+**Today (no speculation):** `topologyFits` fails (only 2 of 5 ranks place) → preempt/disbalance → job sits `QUEUED`. The autoscaler never learns 3 nodes are wanted, because nothing Pending exists. The 2 free nodes idle or go to a smaller job.
+
+**With this design:**
+1. Tick: live no-fit → cluster is a speculative candidate (5 ranks each fit the largest node) → `ClaimSubmitted(speculative)` → row `SUBMITTED`, `submitted_at=now`, footprint of all 5 ranks subtracted from desired-free (goes negative: nothing else is placed here until the 3 nodes land or the attempt ends). **The 2 free nodes are fenced for this gang from this instant** — no smaller job takes them on a later tick.
+2. Agent pulls, creates the Indexed Job(s). kube-scheduler binds 2 pods (anti-affinity: one per host), 3 stay Pending. Those 3 Pending pods **are** the "3 more" request — CA/Karpenter bin-packs them against node-group templates and asks for exactly 3 nodes (anti-affinity forces one per node). We never compute the ask; the pods are the ask, in the autoscaler's own units.
+3. The 2 landed ranks start and block at rendezvous. Aggregate phase → `Running` (one group Ready). Billing: the observed metrics of those 2 pods are billed by `Settle` — a few minutes of idle GPU while waiting; bounded and accepted (see cost note).
+4. Status push every 3 s: `scheduled_nodes=2`, `scheduling_reason` from the pending pods' events (`TriggeredScaleUp` → keep waiting; `NotTriggerScaleUp: max node group size reached` → early exit).
+5. Watcher, each scan: `scheduled_nodes(2) < Nodes()(5)` on an autoscaler cluster → scale-up deadline live. Nodes join → pods bind → `scheduled_nodes=5` → the check is false; the job is ordinary from here.
+6. Deadline hit (or early exit) with `scheduled_nodes < 5`: evict **the whole gang** (`DeleteWorkload` removes all groups), reason `scale_up_timeout`, cluster appended to `tried_clusters`, row back to `QUEUED`. Next tick tries the next autoscaler cluster (again fully speculative — it will place whatever fits live there and Pend the rest). The 2 nodes freed on cluster A are live capacity for the next queued job.
+
+**Why partial binding is allowed rather than held back:** the only k8s-native ways to hold a gang (scheduling gates, coscheduling plugin, `PodGroup`) either remove the Pending signal the autoscaler needs (gated pods are invisible to CA/Karpenter) or require per-cluster components not every cluster has. The cost of partial binding is bounded: at most one timeout of idle time on the landed ranks, per attempt, per job, with the tried-list capping attempts to one per cluster per TTL. The cost of holding is unbounded: the scale-up never triggers.
+
+**Why the scheduler's own shortfall math is not used to size the ask:** `preemptionShortfall` already computes "3 ranks missing" — but that number would only matter if *we* were provisioning. The autoscaler sizes from Pending pods, which is more precise than anything we could send it (it knows its node-group shapes; we don't). The backlog gauge uses our shortfall only for clusters with no autoscaler at all.
+
+**Two gangs competing on one cluster:** A binds 2 and Pends 3; B (submitted next tick to the same cluster — allowed, its desired-free is already negative so only speculation gets it there, and A's outstanding attempt only blocks *preemption*, not further speculation) Pends all 5. The autoscaler sees 8 Pending pods and scales for both, up to its max. If the max is hit, `NotTriggerScaleUp` early-exits the later one (B) first only if its pods carry the event; otherwise both run to their deadline. No deadlock is possible: every partial hold has a deadline, and eviction frees real nodes. `max_speculative_accelerators` on the cluster bounds how much can be held this way per cluster; `max_concurrent_accelerators` bounds how many gangs one experiment can have in this state at once.
+
+**Cost note:** idle GPU time on landed ranks is charged to the agent because `Settle` bills observed consumption and the pods *are* consuming (allocated devices, running process). Deliberate: the alternative — special-casing "waiting at rendezvous" as free — needs the runtime to know what the process is doing, which it cannot. The bound (the timeout) is the operator's knob, per cluster.
+
+## Edge cases and how each is handled
+
+| Case | Handling |
+|---|---|
+| Double-scaling (same demand triggers two scale-ups) | The pod is the only request the autoscaler sees; CA/Karpenter count their own upcoming nodes. backlog gauge subtracts speculative. |
+| Node arrives right after we gave up | Accepted loss, bounded to one boot time; the operator's per-cluster timeout is the knob. **No pull-back** of a job already speculating on cluster B when A's late node lands: rare race, one boot time saved, a third transition to maintain; the idle node on A serves the next queued job. |
+| Ping-pong between two clusters | Per-job `tried_clusters` with TTL: each cluster is tried at most once per TTL window; when all are tried, ordinary preemption then queue wait with `no_scalable_capacity`. |
+| Multi-node job partially scheduled | `scheduled_nodes < Nodes()` keeps the deadline live regardless of phase (on every cluster, autoscaler or not); past deadline, whole gang evicted. See "Gang scheduling". |
+| Landed ranks time out at rendezvous before our deadline | Prevented by the invariant `scale_up_timeout < 1800 s`. If a workload sets a shorter torch timeout itself, its ranks fail and the job is charged a retry — the workload's own choice, documented on the job-spec field. |
+| Cluster reconnects after a restart/outage | Reconnects under its `cluster_id` (kube-system UID / machine-id), so it picks its `cluster_settings` row back up; a rename or a duplicate display name can no longer split or merge settings or tried-history. |
+| Quota / billing while pending | Reservation at estimate, settle from metrics: Pending time costs 0. Landed ranks of a partial gang are billed as observed (see cost note). |
+| Other jobs double-booking the incoming node | Impossible: desired-free already carries the speculative footprint; when the node lands, actual-free rises and desired-free absorbs it. |
+| Node leaves before the pod binds | Pod stays Pending → deadline → failover. If the *cluster* goes silent, existing `cluster_unreachable` handling wins (it is checked first in the scan). |
+| All clusters exhausted | `no_scalable_capacity` reason (UI/API), backlog gauge fires, tried-set TTL retries. Never evicted for this cause — a failover consumes neither `max_retries` nor `max_infrastructure_requeues`. |
+| Autoscaler at max (pod Pending forever) | Early exit on `NotTriggerScaleUp` / `max node group size reached`; else deadline. The next job sees this cluster in the live tried-cluster read (same flavor, within TTL) and skips it. |
+| Autoscaler adds the wrong flavor / job lands on other flavor | Existing `flavor_mismatch` eviction (`onRunning`), infrastructure fault; add cluster to `tried_clusters` on that path too. |
+| Burst-tier jobs | Speculation is a guaranteed-pass step only; the burst pass is untouched. A burst job should not boot a node it can be preempted off. Not configurable. |
+| Job cancelled while speculative | Existing cancel path deletes the Job(s); CA scales the node down. Nothing new. |
+| Control-plane restart mid-attempt | `tried_clusters` is on the job's row; `scheduled_nodes`/`scheduling_reason`/`autoscaler_enabled` in the metrics store; the timeout in `cluster_settings`. Nothing in memory; next scan recomputes. |
+| Job oversized for any node the autoscaler could add | Largest-installed-node check in step 2 using `GetNodeTotalCapacity`; never speculate on a cluster with zero reported nodes. |
+| Unreachable cluster still listed in `heartbeats` | Pre-work fix to `GetFlavorCapacity:167` (skip `!connected`); candidate step 2 also requires connected. |
+| Manual admit API (`scheduler/handler.go`) | Unchanged — it stays live-fit only; speculation is a tick decision. |
+
+## Minimal state to persist
+
+Exactly this and nothing more:
+
+- **On the job's row (Postgres):** one column, `tried_clusters jsonb` (`[{cluster_id, at}]`). No `speculative` flag (derived: autoscaler cluster ∧ `scheduled_nodes < Nodes()`), no `failover_count` (the list is the cap), no deadline column (`submitted_at + timeout(cluster)`).
+- **New `cluster_settings` table (Postgres):** `cluster_id`, `scale_up_timeout_seconds`, `max_speculative_accelerators`. Rows exist only where an operator set a value.
+- **On the platform experiment (Postgres):** `max_concurrent_accelerators`.
+- **In the metrics store (observed facts):** metric series `cluster_autoscaler_enabled`; two columns on `job_phase_detail`: `scheduled_nodes`, `scheduling_reason`.
+- **Cluster identity:** derived live by the runtime (kube-system UID / machine-id), sent on every call, stored nowhere on the runtime.
+- **Global config (`hypothesisloop.yaml`):** `scheduler.scale_up_timeout_seconds` (600), `scheduler.tried_cluster_ttl_seconds` (900), `quota.default_max_concurrent_accelerators`. Invariant: `scale_up_timeout_seconds < 1800`.
+- **Nothing in memory anywhere.**
+
+## UI and settings
+
+- **Cluster page** (`ui/src/app/cluster/page.tsx`, read-only today): list rows by `cluster_id` joined onto the live cluster list; show `autoscaler_enabled`, and two editable fields — `scale_up_timeout_seconds` (validated `< 1800`, blank = global default) and `max_speculative_accelerators` (blank = none). One `PUT /clusters/{cluster_id}/settings`. Show per cluster: outstanding speculative jobs and oldest `submitted_at` among them.
+- **Platform-experiment create/edit** (existing form + `PUT /platform-experiments/{id}`): `max_concurrent_accelerators` field with the global default pre-filled; the detail page shows "in flight / cap" next to the quota bar.
+- **Jobs page**: `not_admitted_reason` already renders; new values `no_scalable_capacity`, `waiting-for-scale-up`, `concurrency_cap`, and eviction reason `scale_up_timeout` need labels; a job with `scheduled_nodes < Nodes()` shows "N/M ranks placed" and the `scheduling_reason` text.
+- **Settings**: new `hypothesisloop.yaml` keys `scheduler.scale_up_timeout_seconds` (600), `scheduler.tried_cluster_ttl_seconds` (900), `quota.default_max_concurrent_accelerators`; mirrored in the Helm `files/` copy; load-time validation of the `< 1800` invariant. Agent deployment/bundle gains `AUTOSCALER_ENABLED` (default false).
+
+## Tests
+
+**Unit (Go).**
+- `loop_tick`: candidate selection (autoscaler ∧ connected ∧ untried ∧ fits-largest-node ∧ multi-node for gangs), stable order, burst pass never speculates, skip-preemption rule on negative desired-free, fall-through to preemption when all tried; property test that speculation never changes a live-fit decision (`loop_placement_oracle_test.go` pattern).
+- `ClaimSubmitted` with nil callback: lock + `status='QUEUED'` predicate still hold; concurrency test in the `handler_admission_concurrency_test.go` style.
+- Watcher: phase-independent deadline (Pending, Running-with-partial-gang, Gone), per-cluster vs global timeout, early-exit on terminal `scheduling_reason`, tried-list append, `infra_requeue_count` untouched, whole-gang teardown; `flavor_mismatch` appends too.
+- Store: `tried_clusters` TTL exclusion query, `cluster_settings` read/PUT, `RequeueInfrastructureFault` with tried-cluster parameter.
+- Quota tx: concurrency cap enforced atomically (two concurrent submits, one rejected), `concurrency_cap` reason, called on every submit.
+- Runtime (`k8sexec`): `scheduled_nodes` from `PodScheduled`, `scheduling_reason` from conditions/events (CA and Karpenter fixtures), `cluster_id` from kube-system UID; bare-metal from machine-id.
+- `GetFlavorCapacity` skips `!connected`.
+
+**Integration (control plane + Postgres + GreptimeDB, existing harness).** Full loop with a fake agent: speculative submit → status pushes with partial `scheduled_nodes` → deadline → requeue with tried-list → second cluster → success; early-exit path; restart of the control plane mid-attempt loses nothing.
+
+**Existing e2e review (`tests/e2e`).** The localdev k3s has no autoscaler, so with `AUTOSCALER_ENABLED` unset every existing test keeps today's semantics. Two tests are sensitive and must be re-read, not just re-run: `test_distributed_jobs_gang_scheduling.py::test_gang_admission_is_all_or_nothing` (asserts zero pods for an unplaceable gang — still true on a non-autoscaler cluster, and the *new* behaviour on an autoscaler cluster is a different test, below) and `test_capacity_safety.py::test_desired_usage_stable_across_scheduler_ticks` (desired-free may now go negative on autoscaler clusters; assert the invariant per cluster mode). `test_connectivity_loss.py` and `test_node_and_daemonset_faults.py` should gain one assertion each that an unreachable/cordoned cluster is never a speculative candidate.
+
+**New e2e (`test_autoscaler_failover.py`).** Run the localdev agent with `AUTOSCALER_ENABLED=true` and no real autoscaler — that exercises every control-plane path without cloud infra:
+1. oversized single-node job → `SUBMITTED` immediately, one Pending pod, desired-free negative, a second job on the same flavor is not admitted and does **not** preempt burst (`waiting-for-scale-up`);
+2. short per-cluster timeout via the PUT → `scale_up_timeout` requeue, `tried_clusters` populated, `infra_requeue_count` and `max_retries` unchanged, `no_scalable_capacity` once all clusters tried, job later admitted when capacity is freed;
+3. gang: N ranks with N−1 hosts free → N−1 pods bind and a partial gang shows `scheduled_nodes = N−1`; uncordon a node (`support.cluster.uncordon_node`) before the deadline → gang completes and `world_reduced_sum` proves it; same setup past the deadline → **all** pods deleted, none left running;
+4. concurrency cap: platform experiment with `max_concurrent_accelerators = 2` and three 1-GPU jobs → third waits with `concurrency_cap`, admitted when one finishes;
+5. cluster identity: rename `CLUSTER_NAME` and restart the agent → the `cluster_settings` row and tried-history still apply.
+The two-cluster failover itself is covered by the integration test with a fake second agent; the e2e lane has one cluster.
+
+## Readiness
+
+This document is the plan another agent implements from. Every fact it relies on was verified against source on 2026-08-26 (table above); every decision is closed in the log below; the state it adds is enumerated exactly; UI, settings, and tests are in scope. Nothing is deferred.
+
+## Decisions log (final calls)
+| Question | Call | Why |
+|---|---|---|
+| Preemption on a cluster with a speculative job | **Skip it** for that flavor while the attempt is live | Preemption already refuses node-level guesses; waiting is bounded by the deadline, a wrong eviction is not |
+| Pull a speculating job back when a late node lands elsewhere | **No** | Rare race, one boot time saved, third transition to maintain; the idle node serves the next job |
+| Failover budget vs `max_infrastructure_requeues` | **Separate, and no counter**: a failover appends to `tried_clusters` and does not touch `infra_requeue_count`; exhaustion = every candidate tried, job stays `QUEUED` | Failover is scheduler policy, not an environment fault; the tried-list already bounds attempts to one per cluster per TTL |
+| Fan-out submit | **No** (not even opt-in) | Guaranteed idle GPU node per loser; early-exit signal buys most of the latency back |
+| Cluster ordering | **No ranking** — stable order by `cluster_id` over untried candidates | History ranking is retained machinery solving a problem the deadline+failover loop already solves |
+| Per-cluster speculative cap | **Optional** `max_speculative_accelerators` in `cluster_settings` | Operators asked for a per-cluster node limit; same table, same PUT, no new machinery |
+| Gang: hold all ranks until all fit vs. let ranks bind | **Let them bind**, bounded by deadline, evict whole gang on timeout | Gated/held pods are invisible to CA/Karpenter — holding removes the trigger; partial-bind cost is bounded, hold cost is unbounded |
+| Gang-readiness unit | **Pods** (`scheduled_nodes`), one counter; total comes from `Job.Nodes()` | A group is N pods; group-level counting hides 2-of-3; a second "total" counter is a duplicate of a fact Postgres already holds |
+| Where gang-readiness/scheduling_reason live | **`job_phase_detail` columns** in the metrics store | Same push, same table, same reader as `reason`/`message` today |
+| Deadline column | **None** — `submitted_at + timeout(cluster)` | Both inputs already exist and are read live; a stored deadline could disagree with an edited timeout |
+| `speculative` flag on the row | **None** — derived from `autoscaler_enabled` ∧ `scheduled_nodes < Nodes()` | A stored flag duplicates a fact the metrics store answers live and must be cleared on bind |
+| Grace extension | **None** | The per-cluster timeout is the knob; grace is a second knob for the same thing |
+| Cluster identity | **kube-system namespace UID / machine-id**, read live | The runtime's config is read-only and shared; a generated ID has nowhere to live; these are stable, unique, and already readable |
+| Per-cluster timeout storage | **New `cluster_settings` table**, two columns | No per-cluster entity exists; the UI needs a row to PUT against; name/liveness stay in the metrics store, never duplicated |
+| Spend-rate control | **`max_concurrent_accelerators` per platform experiment** (+ optional per-cluster speculative cap), enforced in `ReserveAdmittedFlavorTx` on every submit | Rate = concurrency for accelerator-hours; an accelerator count is the unit operators reason in; the tx already holds the lock and the live SUM |
+| Rendezvous vs. deadline | **Invariant** `scale_up_timeout < 1800 s` | Otherwise a scheduling failure is charged as a job failure |
+| Native `PodGroup` / CA `ProvisioningRequest` | **Not now** | Per-cluster opt-in not every cluster will have; `PodGroup` covers initial placement only; noted as k8s-side swap-ins |
+| Burst tier | **Never speculates**, not configurable | A burst job should not boot a node it can be preempted off |
+| Concurrency-cap race at the cap boundary (two submits racing while both are still `QUEUED`, neither yet reflected as `SUBMITTED`) | **Accept it, bounded and narrow** — no cross-tx reservation ledger | At the cap, the only thing that must happen is new jobs stop being submitted and stay `QUEUED`; that already holds. A transient overshoot of a few accelerators from replicas racing in the same tick is tolerable and self-heals (nothing above cap gets admitted on the *next* tick); a reservation ledger to close it is real complexity for a cost nobody asked to avoid |
+
+## Implementation order
+0. Pre-work: `GetFlavorCapacity` skips `!connected` heartbeats (`queue_backend.go:167`).
+1. Agent side: `autoscaler_enabled` (env → `capacityReport` → metric series → `GetAutoscalerCapability`); `cluster_id` on reconcile/status; `scheduled_nodes` + `scheduling_reason` in the status push and `job_phase_detail`.
+2. Control plane: `cluster_settings` table (`scale_up_timeout_seconds`, `max_speculative_accelerators`) + `PUT /clusters/{id}/settings` + cluster page fields; `max_concurrent_accelerators` on the platform experiment + form field; global `scale_up_timeout_seconds` / `tried_cluster_ttl_seconds` with the `< 1800` invariant.
+3. Admission: candidate step, nil-callback `ClaimSubmitted`, `tried_clusters` column, tried-cluster parameter on `RequeueInfrastructureFault`.
+4. Watcher: phase-independent placement-deadline check replacing the Pending-branch call, early-exit, `scale_up_timeout` reason, tried-list append (also on `flavor_mismatch`).
+5. Skip-preemption rule + `no_scalable_capacity` reason + obsmetrics counters (`speculative_submits_total`, `failovers_total{reason}`).
+6. Concurrency cap inside `ReserveAdmittedFlavorTx`; `submitJob` calls it on every submit; jobs-page reason labels.
+7. Backlog gauge for non-autoscaler clusters.
+8. Tests as listed, including the e2e review; new e2e lane runs with `AUTOSCALER_ENABLED=true`.
