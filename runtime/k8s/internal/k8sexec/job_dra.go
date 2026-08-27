@@ -91,6 +91,7 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 	}
 
 	out := make(map[string]draLiveCapacity)
+	sawSliceForDriver := make(map[string]bool, len(drivers))
 	for driver := range drivers {
 		for _, slice := range slices.Items {
 			sliceDriver, found, err := unstructured.NestedString(slice.Object, "spec", "driver")
@@ -100,6 +101,12 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 			if sliceDriver != driver {
 				continue
 			}
+			// Recorded before the schedulable filter below: a node going offline legitimately
+			// drops that node's devices from capacity, but the driver having reported zero
+			// ResourceSlices at all this listing is a different, suspicious condition (a listing
+			// race during republish, an API hiccup) that must not be read as "this hardware no
+			// longer exists" — see the error below.
+			sawSliceForDriver[driver] = true
 			node, _, err := unstructured.NestedString(slice.Object, "spec", "nodeName")
 			if err != nil {
 				return nil, fmt.Errorf("workload: ResourceSlice %q has invalid spec.nodeName", slice.GetName())
@@ -141,6 +148,18 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 					out[key] = entry
 				}
 			}
+		}
+	}
+	for driver := range drivers {
+		if !sawSliceForDriver[driver] {
+			// A configured DeviceClass with zero matching ResourceSlices this observation is
+			// almost certainly a transient listing gap (informer republish, API hiccup), not the
+			// driver's hardware actually vanishing — see the field comment above. Reporting empty
+			// capacity here would make the caller publish a snapshot with the whole flavor
+			// missing, which the scheduler cannot tell apart from "no cluster has this hardware"
+			// (see reportsEveryDimension in controlplane/services/scheduler/loop_tick.go) and
+			// wrongly denies burst admission with capacity_unavailable despite real free chips.
+			return nil, fmt.Errorf("workload: DRA driver %q has a configured DeviceClass but reported no ResourceSlices this observation", driver)
 		}
 	}
 	return out, nil
