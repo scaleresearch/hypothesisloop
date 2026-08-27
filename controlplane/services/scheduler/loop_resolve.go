@@ -163,15 +163,6 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		if g.AcceleratorCount <= 0 {
 			continue
 		}
-		if g.CPU != domain.MaxResourceSentinel && g.Memory != domain.MaxResourceSentinel && g.Storage != domain.MaxResourceSentinel {
-			// Nothing to resolve: every dimension is already an explicit number, so this group
-			// needs no cluster-local fair share at all. Requiring one anyway would wrongly tie an
-			// already-fully-specified job to "does some live node here match this flavor" — the
-			// same live-node dependency the speculative-scheduling fix just removed one level up
-			// (speculativeCandidates), for a cluster that may simply have the matching node group
-			// at zero nodes right now (see loop_speculate.go's fitsLargestNode doc comment).
-			continue
-		}
 		var cpuShare, memShare, storageShare int64
 		haveBound := false
 		for node, total := range nodeResourcesTotal {

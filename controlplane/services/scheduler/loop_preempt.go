@@ -303,10 +303,15 @@ func (l *Loop) settleStint(ctx context.Context, exp *domain.Experiment) {
 // against at claim time. See ClaimSubmitted: a nil capacityAvailable callback skips that check
 // and relies on the lock plus the status='QUEUED' predicate alone.
 func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType) error {
-	return l.submitJobTo(ctx, exp, clusterName, "", persistedFlavor, false)
+	return l.submitJobTo(ctx, exp, clusterName, "", persistedFlavor, false, false)
 }
 
-func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName, clusterID string, persistedFlavor domain.AcceleratorType, speculative bool) error {
+// provenFit mirrors speculativeCandidates' own signal for this cluster (false for a non-speculative
+// submit, where it is unused) — the claim-time recheck below must apply the exact same default cap
+// speculativeCandidates applied a moment ago, or a cluster with no live proof and no operator cap
+// stays unbounded at the one place multiple concurrent scheduler replicas actually serialize
+// against each other (codex review: the tick-local snapshot alone cannot close this).
+func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName, clusterID string, persistedFlavor domain.AcceleratorType, speculative, provenFit bool) error {
 	// ReserveAdmittedFlavor is called on every submit now, not only on a flavor substitution: it
 	// is also where the max_concurrent_accelerators cap (autoscaler.md's concurrency cap) is
 	// enforced atomically against this pool's live SUBMITTED+RUNNING accelerator count, and
@@ -345,6 +350,16 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 			cap, err := l.clusterSpeculativeCap(ctx, clusterID)
 			if err != nil {
 				return false, err
+			}
+			if cap == nil && !provenFit {
+				// Same default speculativeCandidates applied at selection time: no live proof and
+				// no operator override means bound the exposure to this one job's own footprint,
+				// not leave it unbounded — otherwise many concurrent replicas, each seeing a
+				// tick-local snapshot with zero footprint, could each independently land their own
+				// "one job's worth" on the same unproven cluster before any single failure ever
+				// triggers tried_clusters backoff.
+				oneJob := exp.AcceleratorCount
+				cap = &oneJob
 			}
 			if cap == nil {
 				return true, nil

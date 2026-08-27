@@ -334,7 +334,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			// SUBMITTED row itself is the scale-up request the native autoscaler reacts to.
 			// Live-fit always wins over speculating (this branch only runs on live no-fit), and
 			// speculating anywhere always wins over preempting a burst job (this runs first).
-			candidates, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvail, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
+			candidates, provenFitByCluster, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvail, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
 			if cerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
 				continue
@@ -374,7 +374,7 @@ func (l *Loop) tick(ctx context.Context) error {
 					}
 					exp.ResolvedJob = resolvedJob
 				}
-				if err := l.submitJobTo(ctx, exp, specCluster, clusterIDs[specCluster], persistedFlavor, true); err != nil {
+				if err := l.submitJobTo(ctx, exp, specCluster, clusterIDs[specCluster], persistedFlavor, true, provenFitByCluster[specCluster]); err != nil {
 					l.logger.Error("speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
 					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 					reason := notAdmittedReasonForSubmitError(err)

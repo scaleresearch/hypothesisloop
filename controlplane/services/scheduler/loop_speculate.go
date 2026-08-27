@@ -30,11 +30,11 @@ func (l *Loop) speculativeCandidates(
 	nodeLabels map[string]map[string]map[string]string,
 	speculativeFootprintByCluster map[string]int,
 	desiredFreeByCluster map[string]domain.Footprint,
-) ([]string, error) {
+) ([]string, map[string]bool, error) {
 	if l.triedClusterTTL <= 0 {
 		// WithSpeculation was never called: this deployment has not opted in, so admission keeps
 		// today's live-fit-only behaviour exactly (see loop_types.go's triedClusterTTL doc).
-		return nil, nil
+		return nil, nil, nil
 	}
 	gang := requiresDistinctHosts(exp) || len(exp.Job.Groups) > 0 || exp.Job.Nodes() > 1
 	now := time.Now()
@@ -45,7 +45,7 @@ func (l *Loop) speculativeCandidates(
 	// skipping it together.
 	recentlyTried, err := l.store.RecentlyTriedClusters(ctx, l.triedClusterTTL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	type candidate struct {
@@ -84,7 +84,7 @@ func (l *Loop) speculativeCandidates(
 			// exists for.
 			installed, ierr := resolveCache.installedAcceleratorsByNode(ctx, cluster, exp.AcceleratorType, nodeAvail[cluster])
 			if ierr != nil {
-				return nil, ierr
+				return nil, nil, ierr
 			}
 			accelCeiling = map[string]map[string]int64{}
 			flavor := string(exp.AcceleratorType)
@@ -102,7 +102,7 @@ func (l *Loop) speculativeCandidates(
 		provenFit := fitsLargestNode(exp, accelCeiling, nodeResourcesTotal[cluster], nodeLabels[cluster])
 		cap, err := l.clusterSpeculativeCap(ctx, clusterID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if cap == nil && !provenFit {
 			// No live evidence backs this guess (either zero nodes, or live nodes that don't prove
@@ -132,10 +132,12 @@ func (l *Loop) speculativeCandidates(
 		return candidates[i].clusterID < candidates[j].clusterID
 	})
 	out := make([]string, len(candidates))
+	provenFitByCluster := make(map[string]bool, len(candidates))
 	for i, c := range candidates {
 		out[i] = c.cluster
+		provenFitByCluster[c.cluster] = c.provenFit
 	}
-	return out, nil
+	return out, provenFitByCluster, nil
 }
 
 // clusterSpeculativeCap reads max_speculative_accelerators from cluster_settings, nil meaning no
