@@ -84,6 +84,27 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 		}
 		drivers[driver] = true
 	}
+	// A DeviceClasses listing that transiently comes back empty (or missing one that's actually
+	// installed) is the same failure mode one level up from the per-driver ResourceSlice check
+	// below: `drivers` would then simply not contain that domain, the per-driver loops below
+	// iterate zero times for it, and no error would ever fire — silently reporting zero capacity
+	// for a flavor that is actually fully installed, exactly the incident this whole function
+	// exists to prevent (see fix-later.md). The ResourceSlices listing (fetched separately above,
+	// so a glitch has to hit both calls to go undetected) is independent proof of which drivers
+	// are actually installed: any driver publishing a slice must have a matching DeviceClass.
+	slicesDrivers := make(map[string]bool)
+	for _, slice := range slices.Items {
+		driver, found, err := unstructured.NestedString(slice.Object, "spec", "driver")
+		if err != nil || !found {
+			return nil, fmt.Errorf("workload: ResourceSlice %q has no valid spec.driver", slice.GetName())
+		}
+		slicesDrivers[driver] = true
+	}
+	for driver := range slicesDrivers {
+		if !drivers[driver] {
+			return nil, fmt.Errorf("workload: driver %q publishes ResourceSlices but has no matching DeviceClass this observation", driver)
+		}
+	}
 
 	allocated, err := allocatedDRADevices(claims.Items)
 	if err != nil {

@@ -192,3 +192,24 @@ func TestLiveDRACapacitySnapshotsUnrelatedDriverUnaffected(t *testing.T) {
 		t.Fatalf("liveDRACapacitySnapshots error = %v, want it to name the specific driver with no ResourceSlices (tenstorrent.com)", err)
 	}
 }
+
+// TestLiveDRACapacitySnapshotsRejectsMissingDeviceClass is the regression test for the second,
+// symmetric half of the same bug class: a DeviceClasses listing that transiently comes back
+// empty (or just missing the installed driver's entry) leaves `drivers` without that domain, so
+// the per-driver loops iterate zero times for it and — before this fix — silently returned zero
+// capacity for real, currently-installed hardware, with no error at all (the sawSliceForDriver
+// check only guards drivers DeviceClasses DID discover). Live incident: pe-e11aa080,
+// smri11-heterofrofastacked-local-v2 stuck QUEUED ~2026-08-27T17:59-18:05Z with
+// cluster_unresolved=true despite GreptimeDB and kubectl both confirming 3/4 blackhole chips free
+// and no error logged from the first (ResourceSlices-side) fix — see fix-later.md.
+func TestLiveDRACapacitySnapshotsRejectsMissingDeviceClass(t *testing.T) {
+	c := newDRATestClient(tenstorrentResourceSlice("slice-a", "worker-a", "chip-0"))
+
+	_, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true})
+	if err == nil {
+		t.Fatal("liveDRACapacitySnapshots silently reported zero capacity for a driver with real ResourceSlices but no matching DeviceClass; want an error")
+	}
+	if !strings.Contains(err.Error(), "tenstorrent.com") || !strings.Contains(err.Error(), "no matching DeviceClass") {
+		t.Fatalf("liveDRACapacitySnapshots error = %v, want it to name the driver and the missing-DeviceClass condition", err)
+	}
+}
