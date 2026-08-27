@@ -497,6 +497,13 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						workloadkeys.ExperimentID: exp.ID,
+						// Also on the pod, not just the Job: PollPhaseDetail lists PODS filtered
+						// by experiment-id+attempt to fence scheduledNodes to this generation
+						// (see its doc comment) — without this, that selector matched zero pods
+						// every time, permanently reading scheduledNodes=0 for a genuinely
+						// running, progressing pod and evicting it as stuck_pending once the
+						// deadline passed regardless of real health.
+						workloadkeys.Attempt: fmt.Sprintf("%d", exp.AttemptCount),
 					},
 					Annotations: map[string]string{
 						AcceleratorCountAnnotation: fmt.Sprintf("%d", group.AcceleratorCount),

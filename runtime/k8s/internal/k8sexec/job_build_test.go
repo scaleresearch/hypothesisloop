@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -36,6 +37,42 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 	}
 	if got := resources.Limits["hugepages-1Gi"]; got.Cmp(want) != 0 {
 		t.Fatalf("hugepages limit = %s, want %s", got.String(), want.String())
+	}
+}
+
+// TestBuildJobPodTemplateCarriesTheAttemptLabel is the regression test for a live incident:
+// PollPhaseDetail lists PODS filtered by "experiment-id=X,attempt=N" to fence scheduledNodes to
+// the current generation (see its doc comment), but the attempt label was only ever set on the
+// parent Job's own ObjectMeta, never on the pod template — so that selector matched zero pods,
+// every tick, for every job. scheduledNodes stayed permanently 0 regardless of true pod health,
+// and a genuinely running, progressing job (real log lines, real embed progress) was evicted as
+// stuck_pending once job_watcher's scale-up deadline passed. Live: pe-e11aa080,
+// smri11-heterofrofastacked-local (v1/v2/v4/v5), see fix-later.md.
+func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	exp := &domain.Experiment{
+		Data: testDataAccess(),
+		ID:   "attempt-label-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		AttemptCount:           2,
+		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+
+	job, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	podAttempt := job.Spec.Template.ObjectMeta.Labels[workloadkeys.Attempt]
+	if podAttempt != "2" {
+		t.Fatalf("pod template attempt label = %q, want %q (PollPhaseDetail's pod selector needs this to ever match a pod)", podAttempt, "2")
+	}
+	jobAttempt := job.ObjectMeta.Labels[workloadkeys.Attempt]
+	if jobAttempt != "2" {
+		t.Fatalf("Job attempt label = %q, want %q", jobAttempt, "2")
 	}
 }
 
