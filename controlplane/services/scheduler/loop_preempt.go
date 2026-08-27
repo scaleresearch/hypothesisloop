@@ -349,6 +349,15 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 			if cap == nil {
 				return true, nil
 			}
+			// desired is every SUBMITTED/ADMITTED row on this cluster, not only the speculative
+			// ones — the doc's "None: derived from autoscaler_enabled ∧ scheduled_nodes <
+			// Nodes()" decision means whether a given row is still riding on a scale-up or has
+			// since landed on live capacity is metrics-store state, unavailable inside this
+			// Postgres transaction. Counting every SUBMITTED row here is deliberately
+			// conservative: it can delay a legitimate speculative submit behind a cluster's
+			// live-fit traffic (retried next tick, nothing lost), which is the safe direction to
+			// err in for an optional operator-set cap — the opposite (undercounting) is the
+			// unbounded-overshoot failure mode this recheck exists to close (codex review).
 			footprint := exp.AcceleratorCount
 			for _, d := range desired {
 				footprint += d.AcceleratorCount
