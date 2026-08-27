@@ -163,6 +163,15 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		if g.AcceleratorCount <= 0 {
 			continue
 		}
+		if g.CPU != domain.MaxResourceSentinel && g.Memory != domain.MaxResourceSentinel && g.Storage != domain.MaxResourceSentinel {
+			// Nothing to resolve: every dimension is already an explicit number, so this group
+			// needs no cluster-local fair share at all. Requiring one anyway would wrongly tie an
+			// already-fully-specified job to "does some live node here match this flavor" — the
+			// same live-node dependency the speculative-scheduling fix just removed one level up
+			// (speculativeCandidates), for a cluster that may simply have the matching node group
+			// at zero nodes right now (see loop_speculate.go's fitsLargestNode doc comment).
+			continue
+		}
 		var cpuShare, memShare, storageShare int64
 		haveBound := false
 		for node, total := range nodeResourcesTotal {
@@ -197,10 +206,19 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 			haveBound = true
 		}
 		if !haveBound {
-			// No node in `cluster` is currently eligible to resolve or validate this group
-			// against — treat this cluster as not fitting this tick rather than silently letting
-			// an unresolved "max" survive (Footprint() would read it as a zero-contribution
-			// dimension, not a rejection) or judging an explicit number against nothing.
+			if g.CPU != domain.MaxResourceSentinel && g.Memory != domain.MaxResourceSentinel && g.Storage != domain.MaxResourceSentinel {
+				// No node in `cluster` is currently eligible to validate this group's EXPLICIT
+				// numbers against — this is exactly the speculative-blind case (a candidate with no
+				// live proof of fit, or no live nodes at all: see fitsLargestNode/speculativeCandidates).
+				// There's nothing to over-fit here since nothing is being resolved, only validated;
+				// refusing to even attempt the submission would repeat the bug this fix addresses one
+				// layer deeper. Leave the group exactly as submitted and let the real cluster-local
+				// fair share (once a node actually appears there) catch an oversized explicit request
+				// on the next tick via the ordinary scalar/topology capacity check.
+				continue
+			}
+			// An unresolved "max" genuinely cannot be guessed without any live node to measure a
+			// share against — this is the one case still folded into "doesn't fit this cluster/tick".
 			return nil, false, nil
 		}
 		cpu, err := resolveOrValidateDimension(g.CPU, domain.NodeResourceCPUMillicores, cpuShare)

@@ -334,7 +334,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			// SUBMITTED row itself is the scale-up request the native autoscaler reacts to.
 			// Live-fit always wins over speculating (this branch only runs on live no-fit), and
 			// speculating anywhere always wins over preempting a burst job (this runs first).
-			candidates, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvail, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster)
+			candidates, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvail, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
 			if cerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
 				continue
