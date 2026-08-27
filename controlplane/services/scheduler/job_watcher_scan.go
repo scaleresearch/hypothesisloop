@@ -96,12 +96,18 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// see autoscaler.md's "Gang scheduling" section. Skipped once every rank has bound
 	// (scheduledNodes >= Nodes()), which is also true for every non-gang job whose one pod has
 	// bound — the general case degenerating, not a special one.
-	// Gated on found: no phase-detail row yet (a transient metrics-store gap, or the very first
-	// scan before the agent's first push lands) must never read as "0 ranks placed" and start
-	// counting toward eviction for a job that may already be fully bound and running — codex
-	// review caught this as a real hazard (a missing/stale row could evict a healthy job). Absent
-	// data means "we don't know yet", not "nothing is placed"; the next scan tries again.
-	if found && scheduledNodes < int32(exp.Job.Nodes()) {
+	// found=false now means "no phase-detail row for this experiment's current cluster+attempt",
+	// which after fencing GetLatestPhaseDetailFull to (cluster_name, attempt) is exactly "not
+	// placed yet" — a permanent metrics-store gap and a genuinely never-started pod are the same
+	// state from here: neither can be told apart from "we don't know", and both must still be
+	// bounded by the deadline below, or a job that never gets a row written (quota-blocked pod,
+	// or an agent whose PollPhaseDetail errors every poll) holds its reservation forever. This
+	// used to be gated on found to dodge a *different* hazard — a stale row from a previous
+	// attempt misread as "0 ranks placed" for the new one — which the attempt fence above now
+	// closes at the source, so treating not-found as unplaced no longer risks evicting a healthy
+	// job on a one-off metrics-store hiccup: it still only evicts once the deadline, measured from
+	// submitted_at, has actually passed.
+	if !found || scheduledNodes < int32(exp.Job.Nodes()) {
 		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)

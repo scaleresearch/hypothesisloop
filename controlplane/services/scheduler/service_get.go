@@ -20,7 +20,7 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if exp == nil {
 		return nil, nil
 	}
-	reason, message, restartCount, found, err := metricsdb.GetLatestPhaseDetail(ctx, s.metricsDBURL, id)
+	reason, message, restartCount, found, err := metricsdb.GetLatestPhaseDetail(ctx, s.metricsDBURL, id, exp.ClusterName, exp.AttemptCount)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: phase detail: %w", err)
 	}

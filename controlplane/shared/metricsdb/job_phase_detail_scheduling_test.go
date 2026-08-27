@@ -31,7 +31,7 @@ func TestRecordPhaseDetailInsertsScheduledNodesAndSchedulingReason(t *testing.T)
 	}))
 	defer server.Close()
 
-	err := RecordPhaseDetail(context.Background(), server.URL, "exp-1", "cluster-a", "", "", 0, 2, "TriggeredScaleUp", time.Now())
+	err := RecordPhaseDetail(context.Background(), server.URL, "exp-1", "cluster-a", "", "", 0, 2, "TriggeredScaleUp", 0, time.Now())
 	if err != nil {
 		t.Fatalf("RecordPhaseDetail: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestGetLatestPhaseDetailFullDecodesSchedulingColumns(t *testing.T) {
 	}))
 	defer server.Close()
 
-	row, found, err := GetLatestPhaseDetailFull(context.Background(), server.URL, "exp-1")
+	row, found, err := GetLatestPhaseDetailFull(context.Background(), server.URL, "exp-1", "cluster-a", 0)
 	if err != nil {
 		t.Fatalf("GetLatestPhaseDetailFull: %v", err)
 	}

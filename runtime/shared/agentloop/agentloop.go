@@ -424,7 +424,7 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		} else {
 			logTail = splitLongLines(logTail, a.MaxLogLineChars)
 		}
-		reason, message, restartCount, scheduledNodes, schedulingReason, err = a.Executor.PollPhaseDetail(ctx, id)
+		reason, message, restartCount, scheduledNodes, schedulingReason, err = a.Executor.PollPhaseDetail(ctx, id, observed.Attempt)
 		if err != nil {
 			a.Log("poll phase detail %s: %v", id, err)
 			reason, message, restartCount, scheduledNodes, schedulingReason = "", "", 0, 0, ""

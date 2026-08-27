@@ -78,7 +78,7 @@ func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (wor
 // distinct from an empty reason, which just means the runtime has nothing notable to say.
 // Implements scheduler.PhaseDetailer.
 func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error) {
-	row, found, err := metricsdb.GetLatestPhaseDetailFull(ctx, b.metricsDBURL, exp.ID)
+	row, found, err := metricsdb.GetLatestPhaseDetailFull(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount)
 	if err != nil || !found {
 		return "", "", 0, 0, "", found, err
 	}

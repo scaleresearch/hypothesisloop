@@ -20,6 +20,10 @@ type scaleUpBackend struct {
 	autoscalerEnabled map[string]bool
 	clusterIDs        map[string]string
 	admittedType      domain.AcceleratorType
+	// phaseDetailFound defaults to true (found) when the zero value is used by every existing
+	// test; set to false to simulate no phase-detail row ever having been written for this
+	// experiment's current cluster/attempt (see TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound).
+	phaseDetailFound *bool
 }
 
 func (b *scaleUpBackend) PollJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, error) {
@@ -29,7 +33,11 @@ func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Exp
 	return b.admittedType, nil
 }
 func (b *scaleUpBackend) PollPhaseDetail(context.Context, *domain.Experiment) (reason, message string, restartCount, scheduledNodes int32, schedulingReason string, found bool, err error) {
-	return "", "", 0, b.scheduledNodes, b.schedulingReason, true, nil
+	found = true
+	if b.phaseDetailFound != nil {
+		found = *b.phaseDetailFound
+	}
+	return "", "", 0, b.scheduledNodes, b.schedulingReason, found, nil
 }
 func (b *scaleUpBackend) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
 	return b.autoscalerEnabled, nil
@@ -192,6 +200,55 @@ func TestScaleUpDeadlineDisabledWithoutOptIn(t *testing.T) {
 	}
 	if len(store.terminalReasons) != 0 {
 		t.Fatalf("terminalReasons = %v, want none — stuckPendingTimeout not yet passed", store.terminalReasons)
+	}
+}
+
+// A job whose phase-detail row was never written (quota-blocked pod, or an agent whose
+// PollPhaseDetail has errored every poll) must still be bounded by the placement deadline — not
+// held forever. found=false used to be read as "we don't know, skip the check entirely", which
+// made such a job immortal: this proves not-found now degenerates to "not placed yet" and the
+// deadline still fires once it has genuinely passed.
+func TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound(t *testing.T) {
+	notFound := false
+	store := &lifecycleStore{}
+	backend := &scaleUpBackend{
+		phase: workload.JobPhasePending, phaseDetailFound: &notFound,
+		autoscalerEnabled: map[string]bool{"cluster-a": true},
+		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
+	}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
+		WithStuckPendingTimeout(10 * time.Minute).
+		WithScaleUpTimeout(1 * time.Minute)
+	exp := scaleUpExperiment(1, 2*time.Minute)
+
+	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
+		t.Fatalf("requeuedReasons = %v, want [scale_up_timeout] — a never-reported job must still hit the deadline", store.requeuedReasons)
+	}
+}
+
+// The mirror case: not yet past the deadline, and no phase-detail row has arrived yet. This must
+// not evict early just because found=false — only once the deadline has actually passed.
+func TestScaleUpDeadlineNotYetPastWhenPhaseDetailNeverFound(t *testing.T) {
+	notFound := false
+	store := &lifecycleStore{}
+	backend := &scaleUpBackend{
+		phase: workload.JobPhasePending, phaseDetailFound: &notFound,
+		autoscalerEnabled: map[string]bool{"cluster-a": true},
+		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
+	}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
+		WithStuckPendingTimeout(10 * time.Minute).
+		WithScaleUpTimeout(5 * time.Minute)
+	exp := scaleUpExperiment(1, 1*time.Minute)
+
+	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.terminalReasons) != 0 || len(store.requeuedReasons) != 0 {
+		t.Fatalf("terminalReasons=%v requeuedReasons=%v, want none — deadline not yet passed", store.terminalReasons, store.requeuedReasons)
 	}
 }
 

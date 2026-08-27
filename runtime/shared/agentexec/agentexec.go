@@ -55,7 +55,10 @@ type Executor interface {
 	// actually landed (k8s: PodScheduled=True; bare metal: the container exists), and
 	// schedulingReason is a best-effort explanation for why a pod is still Pending (autoscaler
 	// refusal/acceptance text), empty when there is nothing to report.
-	PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error)
+	// attempt is the generation this poll should count pods for (workload.AttemptUnknown when the
+	// executor cannot resolve one), so a still-terminating pod from a superseded attempt is never
+	// counted toward the current attempt's scheduled_nodes.
+	PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error)
 
 	PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error)
 	// PollJobStatus is one coherent read of a managed workload. Phase, identity and generation

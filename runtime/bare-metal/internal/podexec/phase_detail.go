@@ -16,7 +16,7 @@ import (
 // generic stuck-pending timeout rather than a runtime-side cache of the launch failure, which
 // would be exactly the in-RAM state important.md #4 rules out. Returns empty reason/message and
 // nil error when there is nothing notable to report.
-func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
+func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return "", "", 0, 0, "", err

@@ -22,6 +22,7 @@ const ensureJobPhaseDetailTableSQL = `CREATE TABLE IF NOT EXISTS job_phase_detai
 	restart_count BIGINT,
 	scheduled_nodes BIGINT,
 	scheduling_reason STRING,
+	attempt BIGINT,
 	ts TIMESTAMP TIME INDEX,
 	PRIMARY KEY(experiment_id)
 ) WITH(ttl='30d')`
@@ -33,14 +34,18 @@ const ensureJobPhaseDetailTableSQL = `CREATE TABLE IF NOT EXISTS job_phase_detai
 var ensureJobPhaseDetailColumnsSQL = []string{
 	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduled_nodes BIGINT`,
 	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduling_reason STRING`,
+	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS attempt BIGINT`,
 }
 
 // RecordPhaseDetail stores the runtime's current explanation for experimentID's phase — why its
 // container hasn't started, or why it has been restarting — plus the gang-readiness facts the
 // scale-up-timeout watcher needs: scheduledNodes (pods with PodScheduled=True) and
-// schedulingReason (the autoscaler's own refusal/acceptance signal, best-effort). Replaces
-// whatever was previously stored, same "latest snapshot" idiom as RecordLogTail.
-func RecordPhaseDetail(ctx context.Context, dbURL, experimentID, clusterName, reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, at time.Time) error {
+// schedulingReason (the autoscaler's own refusal/acceptance signal, best-effort). attempt is the
+// generation this observation belongs to (domain.Experiment.AttemptCount at submit time), stored
+// so a reader can fence out a still-latest-by-timestamp row left behind by a superseded attempt
+// on a cluster this job has since failed over from. Replaces whatever was previously stored, same
+// "latest snapshot" idiom as RecordLogTail.
+func RecordPhaseDetail(ctx context.Context, dbURL, experimentID, clusterName, reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, attempt int, at time.Time) error {
 	if experimentID == "" {
 		return fmt.Errorf("metricsdb.RecordPhaseDetail: experiment_id is required")
 	}
@@ -53,8 +58,8 @@ func RecordPhaseDetail(ctx context.Context, dbURL, experimentID, clusterName, re
 		}
 	}
 	insertSQL := fmt.Sprintf(
-		`INSERT INTO job_phase_detail (experiment_id, cluster_name, reason, phase_message, restart_count, scheduled_nodes, scheduling_reason, ts) VALUES (%s, %s, %s, %s, %d, %d, %s, %d)`,
-		sqlQuote(experimentID), sqlQuote(clusterName), sqlQuote(reason), sqlQuote(message), restartCount, scheduledNodes, sqlQuote(schedulingReason), at.UnixMilli(),
+		`INSERT INTO job_phase_detail (experiment_id, cluster_name, reason, phase_message, restart_count, scheduled_nodes, scheduling_reason, attempt, ts) VALUES (%s, %s, %s, %s, %d, %d, %s, %d, %d)`,
+		sqlQuote(experimentID), sqlQuote(clusterName), sqlQuote(reason), sqlQuote(message), restartCount, scheduledNodes, sqlQuote(schedulingReason), attempt, at.UnixMilli(),
 	)
 	if err := execSQL(ctx, dbURL, insertSQL); err != nil {
 		return fmt.Errorf("metricsdb.RecordPhaseDetail: insert: %w", err)
@@ -62,10 +67,10 @@ func RecordPhaseDetail(ctx context.Context, dbURL, experimentID, clusterName, re
 	return nil
 }
 
-// GetLatestPhaseDetail returns experimentID's most recently reported phase detail. found=false
-// (not an error) means nothing has ever been reported for this experiment.
-func GetLatestPhaseDetail(ctx context.Context, dbURL, experimentID string) (reason, message string, restartCount int32, found bool, err error) {
-	row, found, err := GetLatestPhaseDetailFull(ctx, dbURL, experimentID)
+// GetLatestPhaseDetail returns experimentID's most recently reported phase detail for the given
+// cluster/attempt. found=false (not an error) means nothing has been reported for this attempt.
+func GetLatestPhaseDetail(ctx context.Context, dbURL, experimentID, clusterName string, attempt int) (reason, message string, restartCount int32, found bool, err error) {
+	row, found, err := GetLatestPhaseDetailFull(ctx, dbURL, experimentID, clusterName, attempt)
 	if err != nil || !found {
 		return "", "", 0, found, err
 	}
@@ -73,15 +78,22 @@ func GetLatestPhaseDetail(ctx context.Context, dbURL, experimentID string) (reas
 }
 
 // GetLatestPhaseDetailFull is GetLatestPhaseDetail plus the gang-readiness columns
-// (ScheduledNodes/SchedulingReason) the scale-up-timeout watcher needs. found=false means nothing
-// has ever been reported for this experiment.
-func GetLatestPhaseDetailFull(ctx context.Context, dbURL, experimentID string) (PhaseDetailRow, bool, error) {
+// (ScheduledNodes/SchedulingReason) the scale-up-timeout watcher needs.
+//
+// The read is fenced to clusterName and attempt, the same current placement PollJobPhase already
+// checks: without this, "latest by ts" can return a row a previous attempt left behind on a
+// cluster this job has since failed over from — an old terminal scheduling_reason or an old
+// scheduled_nodes count would then be misread as the fresh attempt's own state. found=false means
+// nothing has been reported for this specific attempt on this cluster yet, which is
+// indistinguishable from "not placed yet" — exactly the deadline-still-applies case callers want.
+func GetLatestPhaseDetailFull(ctx context.Context, dbURL, experimentID, clusterName string, attempt int) (PhaseDetailRow, bool, error) {
 	if experimentID == "" {
 		return PhaseDetailRow{}, false, fmt.Errorf("metricsdb.GetLatestPhaseDetailFull: experiment_id is required")
 	}
 	querySQL := fmt.Sprintf(
-		`SELECT reason, phase_message, restart_count, scheduled_nodes, scheduling_reason FROM job_phase_detail WHERE experiment_id = %s ORDER BY ts DESC LIMIT 1`,
-		sqlQuote(experimentID),
+		`SELECT reason, phase_message, restart_count, scheduled_nodes, scheduling_reason FROM job_phase_detail `+
+			`WHERE experiment_id = %s AND cluster_name = %s AND attempt = %d ORDER BY ts DESC LIMIT 1`,
+		sqlQuote(experimentID), sqlQuote(clusterName), attempt,
 	)
 	rows, err := querySQLRows(ctx, dbURL, querySQL)
 	if err != nil {

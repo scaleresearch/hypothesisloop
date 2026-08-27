@@ -386,7 +386,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
 			// prior explanation with silence.
 			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
-				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, now); err != nil {
+				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
 					return nil, huma.Error500InternalServerError(err.Error())
 				}
 			}

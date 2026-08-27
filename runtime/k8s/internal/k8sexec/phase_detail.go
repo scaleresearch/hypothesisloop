@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -32,9 +33,21 @@ var k8sPhaseReasons = map[string]string{
 // needed). Read live on every call — no caching (important.md #4). Returns empty reason/message
 // and nil error when nothing notable is happening (pod not scheduled yet, or every container
 // running cleanly).
-func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
+//
+// attempt scopes the pod list to the current generation: a pod from a superseded attempt
+// (recreated after a failover, or an Indexed Job's replaced index) still lists under
+// experimentID by label alone, and would otherwise inflate scheduledNodes with a pod this
+// attempt never created — reading, for example, a genuinely 0-of-2-bound gang as fully bound
+// because attempt N-1's terminating pods are still around. workload.AttemptUnknown (the executor
+// could not resolve one) falls back to counting every pod under the experiment, today's
+// behaviour, rather than filtering on a label value that doesn't exist.
+func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
+	selector := fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID)
+	if attempt != workload.AttemptUnknown {
+		selector = fmt.Sprintf("%s,%s=%d", selector, workloadkeys.Attempt, attempt)
+	}
 	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
+		LabelSelector: selector,
 	})
 	if err != nil {
 		return "", "", 0, 0, "", fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
