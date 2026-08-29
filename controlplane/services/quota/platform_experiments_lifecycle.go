@@ -47,6 +47,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if req.MaxConcurrentAccelerators != nil && *req.MaxConcurrentAccelerators <= 0 {
 		return nil, fmt.Errorf("platform_experiments.Create: max_concurrent_accelerators must be positive")
 	}
+	if req.EndsAt.IsZero() {
+		return nil, fmt.Errorf("platform_experiments.Create: ends_at is required")
+	}
 	pe := &domain.PlatformExperiment{
 		ID:                        "pe-" + uuid.New().String()[:8],
 		Name:                      req.Name,

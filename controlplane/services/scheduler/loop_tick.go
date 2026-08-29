@@ -573,6 +573,18 @@ func (l *Loop) tick(ctx context.Context) error {
 			// {cpu: 12}" tells an operator which dimension to fix, where a bare
 			// capacity_unavailable tells them only that something, somewhere, did not fit.
 			shortage := preemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
+			// The guaranteed pass logs every skip ("guaranteed job needs preemption" below); the
+			// burst pass had no equivalent, so a burst job stuck QUEUED for many ticks left no
+			// trail at all — the actual bAvail[cluster]/nodeAvail[cluster] values a tick computed
+			// could only be reconstructed after the fact from Postgres/metrics archaeology, not
+			// read off the logs. cluster=="" (every candidate flavor/cluster combination failed to
+			// resolve) is called out explicitly because bAvail[""] is always the nil map, so the
+			// shortage vector below is the job's whole footprint regardless of real capacity —
+			// worth distinguishing from a genuine per-dimension shortfall at a glance.
+			l.logger.Info("burst job not admitted this tick",
+				zap.String("exp", exp.ID), zap.String("cluster", cluster), zap.Bool("cluster_unresolved", cluster == ""),
+				zap.String("avail", footprintStr(bAvail[cluster])), zap.String("need", footprintStr(fp)),
+				zap.String("shortage", footprintStr(shortage)))
 			if !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
 				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
