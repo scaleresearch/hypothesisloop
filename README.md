@@ -1,32 +1,48 @@
 # HypothesisLoop
 
-A platform for running autonomous ML research agents against a shared compute budget. Each platform experiment accumulates its own shared, deduplicated pool of hypotheses; agents register (or reuse) a hypothesis, submit training/eval jobs tied to it, spend metered accelerator-hours against an operator-set quota, and file a finding — a short write-up attached to the hypothesis, not the job — for every completed run.
+**The control plane for autonomous ML research.** Lets your research team
+
+- Define experiments: objective, success criteria, metrics
+- Set metrics as targets to optimize, constraints to enforce, or attributes to track
+- Engage researchers and research agents to produce hypotheses
+- Let agents and researchers verify those hypotheses and drive the experiment forward
+- Persist metrics and artifacts, making every hypothesis and job reproducible and verifiable
+- Proven in pushing post-training to SOTA levels autonomously with agents
+
+It includes a multi-cluster scheduler that splits accelerator capacity between researchers and agents by quota, and hides the underlying scheduling complexity. On top of that you can run:
+
+- Single-job local/cloud runs
+- Hyperparameter sweeps
+- Adaptive/Bayesian search
+- RL experiments, including Ray/RLlib clusters
+- Distributed multi-worker training, with rank/rendezvous wiring handled for you
+- A range of accelerators — TPU training, PyTorch/XLA, Tenstorrent, and more
 
 ## What it does
 
 - **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (accelerator-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
-- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool (agents register hypothesis text once via `POST /hypotheses`; registering equivalent text again returns the existing row instead of a duplicate). A completed run requires a written finding — attached to the hypothesis it tested — before the same agent can submit again.
-- **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler distinguishes "job is mid-reschedule" from "job actually hung" before evicting for silence, and billing settles against observed usage across the gap.
-- **Inspectable eviction reasons.** Jobs are evicted with a specific reason (`silent`, `never_reported_metrics`, `quota_exhaustion`, `stuck_pending`, ...) rather than disappearing silently. `COMPLETED`/`FAILED`/`EVICTED` are terminal.
-- **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting — and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors (see `the stage ladder`). Anyone watching a run can add an idea to the same pool from the UI under a name they type, and it dedups against the agents' own exactly as theirs do.
-- **Agent roles.** A signup is a `competitor` by default. A `baseline` or a `reviewer` runs jobs, spends quota and reports metrics identically, but is not ranked, not cut, and does not count against `max_agents` — so a measured control can compete on the same hardware without competing for the same places.
-- **Gangs that fail as gangs.** A distributed job is one unit: all its nodes are admitted together or none is, any rank failing stops the whole set rather than stranding the survivors in a collective, and `max_retries` restarts the gang. A job whose nodes are *not* identical — a learner alongside many small actors — is expressed as `groups` and stays one experiment: one quota holder, one eviction, one rendezvous.
-- **Durable data between jobs.** Each job is handed a writable prefix of its own and a readable prefix spanning the platform experiment, addressed over the network rather than attached to a cluster, so a later stage reads what an earlier one produced wherever either was placed. The credentials are scoped by the store itself: no agent can overwrite another's evidence.
-- **Fault attribution.** Every terminal outcome is classified from its typed reason as `workload`, `infrastructure`, or `policy`. Only infrastructure changes anything — refunded, requeued without spending a retry, and reported apart from the agent's own failures — so an agent cannot be eliminated by a bad node, and a stage-cut job stops reading as a failed one.
-- **Live updates instead of polling.** `GET /watch` streams typed events over a WebSocket, emitted inside the transaction that wrote the change and replayable from a cursor, so a dropped connection is a delay rather than a gap. An `hl-watch` CLI in the agent images turns that into a wait primitive an agent can actually call.
-- **No cluster credentials in the control plane.** Agents talk to a REST API; the control plane never holds a kubeconfig or dials into a target cluster.
-- **Runs on plain Kubernetes.** Jobs are scheduled as native Kubernetes `Job` objects with `PriorityClass` for admission/preemption — no external queueing operator (Kueue, Volcano, etc.) required, though the scheduling backend is pluggable if you want one.
+- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool — register the same idea twice and you get back the original, not a duplicate. A completed run requires a written finding, attached to the hypothesis it tested, before the same agent can submit again.
+- **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler tells "mid-reschedule" apart from "actually hung" before evicting for silence, and billing settles against observed usage across the gap.
+- **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, and evicted runs are always distinguishable and explainable.
+- **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting — and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same pool from the UI, and it dedups against the agents' own exactly as theirs do.
+- **Agent roles.** Most signups compete for a ranked spot. A baseline or a reviewer runs jobs, spends quota, and reports metrics identically, but isn't ranked and isn't cut — so a measured control can run on the same hardware without competing for the same places.
+- **Gangs that fail as gangs.** A distributed job is one unit: all its nodes are admitted together or none is, any one failing stops the whole set rather than stranding the survivors, and it restarts as a gang on failure. A job whose nodes aren't identical — a learner alongside many small actors — stays one experiment too: one quota holder, one eviction, one rendezvous.
+- **Durable data between jobs.** Each job gets a writable space of its own and a readable one spanning the whole platform experiment, so a later stage reads what an earlier one produced no matter where either ran. No agent can overwrite another's evidence.
+- **Fault attribution.** Every terminal outcome is classified as a workload failure, an infrastructure failure, or a policy decision. Only infrastructure failures get refunded and retried for free — so an agent is never eliminated by a bad node, and a stage cut never reads as a failure.
+- **Live updates instead of polling.** Agents get a live stream of events as they happen, so a dropped connection costs a delay, never a gap.
+- **No cluster credentials in the control plane.** Agents talk to a plain API; the control plane never holds credentials for, or dials into, a target cluster.
+- **Runs on plain Kubernetes.** Jobs are scheduled with native Kubernetes primitives — no external queueing operator required, though the scheduling backend is pluggable if you want one.
 
-The agent-facing API reference is served by the control plane itself, at `/explore` — generated from the live API, so it cannot drift from it.
+The agent-facing API reference is served by the control plane itself, generated from the live API so it can't drift from it.
 
 ## How it works
 
 - **Platform experiment** — an operator-created compute envelope: a budget, a set of metrics to optimize, a max agent count, a reporting cadence, and its own shared pool of hypotheses. Agents sign up, then submit jobs against it once it starts.
-- **Hypothesis** — a registered research claim, scoped to one platform experiment. Agents register (or retrieve, if equivalent text already exists in the same platform experiment) a hypothesis before submitting any job against it; a job's `platform_experiment_id` must match its hypothesis's.
-- **Job** — one training/eval run, submitted with a hypothesis reference, a theory, and the platform's own resource DSL (accelerator type/count, optional distributed `num_nodes` or heterogeneous `groups`, CPU/RAM/storage) — never a raw Kubernetes manifest.
-- **Quota tiers** — `guaranteed` (high scheduling priority, never preempted) and `burst` (lower priority, preemptable by any guaranteed job needing the same accelerator flavor). Preempted burst jobs return to the queue and re-admit later; cancellations are terminal and refund unused reservation.
-- **Durable data** — `HYPOTHESISLOOP_DATA_URI` is the job's own writable prefix and `HYPOTHESISLOOP_DATA_SHARED` the platform experiment's readable one. Git stays the store for anything read as text (code, configs, small results); the data prefix takes anything loaded as a tensor. A requeued job keeps its experiment id, so a checkpoint written before a preemption is at the same address when it starts again.
-- **Lineage and findings** — jobs can chain parent → child. Every completed (or failed/evicted) job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one — the hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
+- **Hypothesis** — a registered research claim, scoped to one platform experiment. Agents register (or retrieve, if the same idea already exists) a hypothesis before submitting any job against it.
+- **Job** — one training/eval run, submitted with a hypothesis reference, a theory, and a resource description (accelerator type/count, optional distributed or heterogeneous topology, CPU/RAM/storage) — never a raw cluster manifest.
+- **Quota tiers** — guaranteed capacity that's never preempted, and burst capacity that can be preempted by a guaranteed job that needs the same accelerator. Preempted burst jobs return to the queue and re-admit later; cancellations refund unused reservation.
+- **Durable data** — each job gets its own writable space and a readable one shared across the platform experiment. Git stays the store for anything read as text (code, configs, small results); the data space takes anything loaded as a tensor. A requeued job keeps its identity, so a checkpoint written before a preemption is at the same place when it starts again.
+- **Lineage and findings** — jobs can chain parent to child. Every completed, failed, or evicted job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one — the hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
 
 ## UI
 
@@ -65,6 +81,22 @@ The control plane ships a Next.js dashboard for observing agents, platform exper
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+<img src="docs/screenshots/platform-experiments-list.png" width="100%" alt="Platform experiments list">
+
+**Platform experiments** — every compute envelope an operator has opened, its budget, agent count, and ladder, at a glance.
+
+</td>
+<td width="50%">
+
+<img src="docs/screenshots/hypotheses-list.png" width="100%" alt="Hypothesis registry">
+
+**Hypotheses** — the shared idea pool for a platform experiment: who registered each claim, and its status.
+
+</td>
+</tr>
 </table>
 
 ```bash
@@ -75,36 +107,38 @@ cd controlplane/ui && npm install && npm run dev   # → http://localhost:3000
 
 HypothesisLoop is split into two kinds of deployable things:
 
-- **Control plane** — one instance, runs anywhere (postgres, control-service,
+- **Control plane** — one instance, runs anywhere (Postgres, control-service,
   metrics-service, GreptimeDB — all in `controlplane/infra/`, a plain Docker
-  Compose stack). It never connects to a target Kubernetes cluster directly —
-  no kubeconfig, no cluster credentials anywhere in this stack.
-  `control-service` hosts quota-service + scheduler-service together;
-  `metrics-service` hosts registry-service + metric-controller together —
-  each pair shares a Postgres pool and was merged from four separate binaries
-  purely to cut deploy units, with no change to either's HTTP surface (still
-  listening on their historical ports).
-- **Cluster agent** — installed once per *target* Kubernetes cluster where
-  training jobs actually run (`runtime/k8s/infra/`): the node-agent DaemonSet
-  (per-node CPU metrics) and the cluster-agent Deployment, which is the
-  only component with real k8s credentials anywhere in this system. It
-  calls the control plane's `/internal/clusters/{name}/reconcile`
-  endpoint for which experiments should currently have a Job running,
-  reconciles its local Jobs to match (create/delete), and pushes job status
-  back — the same pull-desired-state/reconcile/report-status loop a kubelet
-  runs, just one level up. No external queueing operator: admission,
-  priority, and preemption are plain Kubernetes primitives (Job +
-  PriorityClass), applied locally by cluster-agent. Install one cluster
-  agent per target cluster; the control plane coordinates all of them
-  through Postgres, never a live cluster connection.
+  Compose stack). It never connects to a target cluster directly — no
+  credentials for one anywhere in this stack. `control-service` is the
+  entire agent- and UI-facing API — quota, scheduling, and registry all
+  behind one listener, one address to know. `metrics-service` is internal
+  only: it takes the metric pushes and runs the reconcile/eviction loop that
+  turns accumulated samples into stage boundaries and evictions. Nothing it
+  does is agent- or UI-facing.
+- **Runtime agent** — installed once per *target* environment where jobs
+  actually run, and the only place that holds real credentials for that
+  environment. Two runtimes exist today, sharing one backend-agnostic
+  reconcile loop (fetch desired state, diff against actual, converge, report
+  back — the same loop a kubelet runs, one level up):
+  - **Kubernetes** (`runtime/k8s/`) — a cluster-agent Deployment plus a
+    node-agent DaemonSet for per-node metrics. Admission, priority, and
+    preemption are plain Kubernetes primitives; no external queueing
+    operator required.
+  - **Bare metal** (`runtime/bare-metal/`) — a single bare-agent process for
+    a node with nothing but a container engine on it, no cluster at all.
+    Useful for on-demand hardware you don't want to join to Kubernetes.
 
-The scheduling mechanism itself is pluggable: `controlplane/shared/workload.Backend`
-is the interface `services/scheduler`, `services/controller`, and `services/quota`
-actually depend on. `queuebackend.Backend` (PostgreSQL desired state plus metrics actual
-state, with no cluster dialing) is the production implementation.
-A team that wants Kueue, Volcano, or something else implements `Backend` in its own
-package and swaps one constructor call in `cmd/control-service` / `cmd/metrics-service`
-— no other code changes.
+  Install one runtime agent per target environment; the control plane
+  coordinates all of them through Postgres, never a live connection into any
+  of them.
+
+The scheduling mechanism itself is pluggable behind one interface
+(`controlplane/shared/workload.Backend`) that the quota, scheduler, and
+controller services all depend on. The production implementation is plain
+Postgres desired-state plus metrics actual-state, with no cluster dialing.
+A team that wants Kueue, Volcano, or something else implements that one
+interface and swaps a constructor call — no other code changes.
 
 ## Setup
 
@@ -149,7 +183,7 @@ Compose runs.
 ## Testing
 
 All e2e tests live under `tests/e2e/` as pytest, driven by the API client and wait helpers in
-`tests/support/` (see `tests/improve.md` for the full design). Almost all are portable (fake
+`tests/support/`. Almost all are portable (fake
 accelerator types, run on any k3s); the two `hardware`-marked tests are the exception — they need
 real silicon, so they're excluded by default and only included with `-m hardware` (run
 automatically by `localdev/k3s-tenstorrent-qb2/run-e2e.sh` and `localdev/k3s-nvidia/run-e2e.sh`
@@ -187,7 +221,7 @@ cluster access. Start here: `GET /explore` on a running control plane
 | ↳ Operator-facing digest           | http://localhost:8081/explore/coordinator |
 | metrics-service: metric-controller (internal) | http://localhost:8084 |
 | UI                                 | http://localhost:3000  |
-| GreptimeDB                         | http://localhost:4000  |
+| GreptimeDB                         | http://localhost:4010  |
 
 The whole public API — quota, scheduling and registry operations — is served from that one
 port, with one OpenAPI document describing all of it. There is no per-service base URL to pick
