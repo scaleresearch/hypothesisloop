@@ -377,6 +377,8 @@ CONSTRAINTS
     only, never for ranking) and report if it collapses; prefer a mechanistically-motivated,
     simple config within the pool's noise band over the historical maximum; state how many configs
     were tried on a given axis alongside any reported "best," so search breadth is visible.
+  - **Ideally keep at least one job queued** so it can be picked up the moment capacity frees up,
+    instead of leaving the cluster idle while you decide what to run next.
 
 KNOWN CONFOUND IN TASK_5'S 48-SUBJECT PUBLIC SET, AND ITS FIX (read before trusting any new score)
   - **The confound.** PMG-positive scans in this dataset have systematically larger physical head
