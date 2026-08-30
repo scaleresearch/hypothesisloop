@@ -4,8 +4,9 @@ import { Fragment, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import {
   fetchPlatformExperiment,
@@ -27,13 +28,13 @@ import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
-import { AddIdeaForm } from '@/components/human-idea'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -42,7 +43,66 @@ const CHART_TOOLTIP_STYLE: React.CSSProperties = {
   borderRadius: 6, color: 'var(--foreground)',
 }
 
-function JobMetricMini({ jobId, metricName }: { jobId: string; metricName?: string }) {
+// Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
+// hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
+// Kept as a simple name check rather than a generic auto-scaling heuristic.
+const BOUNDED_METRIC_RE = /auroc|accuracy|precision|recall|f1|auc/i
+
+function isBoundedMetric(name: string): boolean {
+  return BOUNDED_METRIC_RE.test(name)
+}
+
+const METRIC_COLORS = agentPalette
+
+// Shared chart body for both the mini card and the expanded dialog view. `trackedMetrics`
+// scopes the plot to the experiment's official tracked/ranking metrics rather than every
+// ad-hoc metric_name a job happens to report.
+function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDataPoint[]; trackedMetrics: string[]; height: number }) {
+  const trackedSet = new Set(trackedMetrics)
+  const filtered = points.filter((p) => trackedSet.has(p.metric_name))
+  const metricNames = Array.from(new Set(filtered.map((p) => p.metric_name))).sort()
+  // One row per point; a point only sets its own metric's key, so unrelated metrics are left
+  // undefined for that row (a gap in their line, not a fake zero) rather than merged by time.
+  const chartData = filtered
+    .map((p) => ({
+      t: new Date(p.recorded_at as string).getTime(),
+      [p.metric_name]: p.metric_value,
+    }))
+    .sort((a, b) => a.t - b.t)
+  if (chartData.length === 0) {
+    return <EmptyState>No data yet</EmptyState>
+  }
+  const hasBounded = metricNames.some(isBoundedMetric)
+  const hasUnbounded = metricNames.some((n) => !isBoundedMetric(n))
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={CHART_TICK} />
+        {hasBounded && <YAxis yAxisId="left" domain={[0, 1]} tick={CHART_TICK} width={28} />}
+        {hasUnbounded && <YAxis yAxisId="right" orientation="right" tick={CHART_TICK} width={28} />}
+        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={CHART_TOOLTIP_STYLE} />
+        <Legend wrapperStyle={{ fontSize: 10 }} />
+        {metricNames.map((name, i) => (
+          <Line
+            key={name}
+            yAxisId={isBoundedMetric(name) ? 'left' : 'right'}
+            dataKey={name}
+            name={name}
+            stroke={METRIC_COLORS[i % METRIC_COLORS.length]}
+            dot={{ r: 2 }}
+            strokeWidth={1.5}
+            type="monotone"
+            connectNulls
+            isAnimationActive={false}
+          />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetrics: string[] }) {
   // 48h-scale experiments move slowly enough that 10s polling here just repeats the same
   // full per-job history over and over; 30s keeps mini-charts fresh without redundant load
   // when dozens of these mount at once (one per running/expanded job).
@@ -51,26 +111,131 @@ function JobMetricMini({ jobId, metricName }: { jobId: string; metricName?: stri
     () => fetchExperimentMetrics(jobId),
     { refreshInterval: 30_000 },
   )
-  const chartData = (metrics ?? [])
-    .filter((p) => p.recorded_at && (!metricName || p.metric_name === metricName))
-    .map((p) => ({
-      t: new Date(p.recorded_at as string).getTime(),
-      value: p.metric_value,
-    }))
-    .sort((a, b) => a.t - b.t)
-  if (chartData.length === 0) {
-    return <EmptyState>No data yet</EmptyState>
-  }
+  const [expanded, setExpanded] = useState(false)
+  const points = (metrics ?? []).filter((p) => p.recorded_at)
   return (
-    <ResponsiveContainer width="100%" height={110}>
-      <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={CHART_TICK} />
-        <YAxis tick={CHART_TICK} />
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={CHART_TOOLTIP_STYLE} />
-        <Line dataKey="value" name={metricName ?? 'metric'} stroke={semantic.accent} dot={false} strokeWidth={1.5} type="monotone" />
-      </LineChart>
-    </ResponsiveContainer>
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        title="Expand chart"
+        aria-label="Expand chart"
+        className="wa-chart-expand-btn"
+        style={{
+          position: 'absolute', top: 0, right: 0, zIndex: 1, border: '1px solid var(--border)',
+          background: 'var(--surface)', borderRadius: 4, width: 20, height: 20, lineHeight: '18px',
+          fontSize: 12, cursor: 'pointer', color: 'var(--muted-fg)',
+        }}
+      >
+        ⤢
+      </button>
+      <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={400} />
+      <Dialog open={expanded} onClose={() => setExpanded(false)} className="wa-dialog">
+        <div className="wa-dialog-backdrop" aria-hidden="true" />
+        <div className="wa-dialog-container">
+          <DialogPanel className="wa-dialog-panel" style={{ maxWidth: '90vw', width: '90vw' }}>
+            <DialogTitle style={{ fontWeight: 600, marginBottom: 10 }} className="mono">{jobId}</DialogTitle>
+            <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={640} />
+          </DialogPanel>
+        </div>
+      </Dialog>
+    </div>
+  )
+}
+
+// Lets the user inspect any job belonging to this platform experiment (not just currently
+// running ones) and pick which of that job's actually-reported metrics to chart, rather than
+// being limited to the experiment's tracked/ranking subset like the per-agent panel above.
+function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
+  // Most-recently-active first, keyed by whichever timestamp is freshest for that job — updated_at
+  // moves as a running job reports progress, submitted_at/created_at anchor jobs that haven't.
+  const sorted = useMemo(
+    () => [...jobs].sort((a, b) => {
+      const tA = new Date(a.updated_at ?? a.submitted_at ?? a.created_at ?? 0).getTime()
+      const tB = new Date(b.updated_at ?? b.submitted_at ?? b.created_at ?? 0).getTime()
+      return tB - tA
+    }),
+    [jobs],
+  )
+  const [jobId, setJobId] = useState<string | null>(sorted[0]?.id ?? null)
+  const selectedJob = sorted.find(j => j.id === jobId) ?? sorted[0]
+  const effectiveJobId = selectedJob?.id
+
+  const { data: metrics } = useSWR<MetricDataPoint[]>(
+    effectiveJobId ? `metrics-${effectiveJobId}` : null,
+    () => fetchExperimentMetrics(effectiveJobId as string),
+    { refreshInterval: 30_000 },
+  )
+  const points = (metrics ?? []).filter((p) => p.recorded_at)
+  const availableMetrics = useMemo(
+    () => Array.from(new Set(points.map((p) => p.metric_name))).sort(),
+    [points],
+  )
+
+  // Selected metric set defaults to all metrics the job actually reports, but is keyed per-job
+  // so switching jobs doesn't carry over a selection the new job may not even report.
+  const [selectedByJob, setSelectedByJob] = useState<Map<string, Set<string>>>(new Map())
+  const selected = selectedByJob.get(effectiveJobId ?? '') ?? new Set(availableMetrics)
+  const setSelected = (next: Set<string>) => {
+    if (!effectiveJobId) return
+    setSelectedByJob(prev => new Map(prev).set(effectiveJobId, next))
+  }
+
+  if (!selectedJob) return null
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 12 }}>
+        <div>
+          <div className="uppercase-label" style={{ marginBottom: 6 }}>Job</div>
+          <SearchableSelect
+            options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${j.status} · ${j.agent_id}` }))}
+            value={selectedJob.id}
+            onChange={v => { if (v) setJobId(v) }}
+            placeholder="Search jobs…"
+            className="mono"
+            style={{ minWidth: 320 }}
+            hideAllOption
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div className="uppercase-label" style={{ marginBottom: 6 }}>Metrics</div>
+          {availableMetrics.length === 0 ? (
+            <span className="text-dim" style={{ fontSize: 12 }}>No metrics reported yet</span>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {availableMetrics.map(name => {
+                const isOn = selected.has(name)
+                return (
+                  <label
+                    key={name}
+                    className="mono"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, cursor: 'pointer',
+                      padding: '3px 8px', borderRadius: 999, border: `1px solid ${isOn ? 'var(--accent)' : 'var(--border)'}`,
+                      background: isOn ? 'rgba(124,108,240,0.14)' : 'var(--surface-2)', color: isOn ? 'var(--foreground)' : 'var(--muted-fg)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isOn}
+                      onChange={() => {
+                        const next = new Set(selected)
+                        isOn ? next.delete(name) : next.add(name)
+                        setSelected(next)
+                      }}
+                      style={{ margin: 0 }}
+                    />
+                    {name}
+                  </label>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
+    </div>
   )
 }
 
@@ -316,19 +481,19 @@ function CompetingAgentsChart({
   )
 }
 
-function AgentJobsPanel({ agentId, jobs, metricName }: { agentId: string; jobs: Experiment[]; metricName?: string }) {
+function AgentJobsPanel({ agentId, jobs, trackedMetrics }: { agentId: string; jobs: Experiment[]; trackedMetrics: string[] }) {
   if (jobs.length === 0) {
     return <EmptyState>No jobs from {agentId} yet.</EmptyState>
   }
   return (
-    <div style={{ padding: '10px 0 4px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+    <div style={{ padding: '10px 0 4px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 10 }}>
       {jobs.map(job => (
         <div key={job.id} className="wa-mini-card">
           <div style={{ fontSize: 11, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Link href={`/jobs/${job.id}`} className="mono text-link" style={{ fontWeight: 600 }}>{job.id.slice(0, 8)}…</Link>
             <StatusBadge status={job.status} />
           </div>
-          <JobMetricMini jobId={job.id} metricName={metricName} />
+          <JobMetricMini jobId={job.id} trackedMetrics={trackedMetrics} />
         </div>
       ))}
     </div>
@@ -532,7 +697,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  const { data: hypothesesPage, error: hypothesesError, mutate: mutateHypotheses } = useSWR(
+  const { data: hypothesesPage, error: hypothesesError } = useSWR(
     ['pe-hypotheses', id],
     () => fetchHypothesesPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
@@ -546,10 +711,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // cheap fetches above: a 48h-scale run doesn't meaningfully change within any 10s window,
   // and re-fetching/re-sorting the full history that often is pure waste.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
+  // lookback must cover the whole run, not a fixed window: this platform experiment runs for
+  // 48h+, so a fixed 24h default would silently drop the run's early data.
+  const lookbackHours = pe?.starts_at
+    ? Math.max(24, Math.ceil((Date.now() - new Date(pe.starts_at).getTime()) / 3_600_000))
+    : 24
   const { data: allMetricSeries, error: metricSeriesError } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
-    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(',')] : null,
+    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), lookbackHours] : null,
     () => Promise.all(peMetricKeys.map(k =>
-      fetchPlatformExperimentTimeseries(id, k).then(r => ({ key: k, series: r.series })),
+      fetchPlatformExperimentTimeseries(id, k, lookbackHours).then(r => ({ key: k, series: r.series })),
     )),
     { refreshInterval: 30_000 },
   )
@@ -583,6 +753,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
   const primaryMetric = pe.metrics?.[0]
   const primaryDir = primaryMetric?.direction ?? 'maximize'
+  const trackedMetricKeys = (pe.metrics ?? []).map((m) => m.key)
   const metrics = pe.metrics ?? []
 
   // Per-agent best value for each metric, built from the metrics' full timeseries. Agents whose
@@ -785,23 +956,29 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
             {/* The ladder itself: one segment per stage, sized by its share of the experiment. */}
             <div style={{ display: 'flex', gap: 3, marginTop: 12 }}>
-              {stagesStatus.stages.map((stage, i) => {
+              {stagesStatus.stages.reduce<{ start: number; nodes: JSX.Element[] }>((acc, stage, i) => {
                 const stageNo = i + 1
-                const done = stageNo < stagesStatus.current_stage
+                const end = acc.start + stage.length_pct / 100
                 const current = stageNo === stagesStatus.current_stage
-                return (
+                const filled = Math.max(0, Math.min(1, (stagesStatus.progress - acc.start) / (end - acc.start)))
+                acc.nodes.push(
                   <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
                     <div style={{
-                      height: 8, borderRadius: 2,
-                      background: current ? semantic.accent : done ? 'rgba(124,108,240,0.55)' : 'var(--border)',
+                      height: 8, borderRadius: 2, background: 'var(--border)', overflow: 'hidden',
                       boxShadow: current ? '0 0 8px rgba(124,108,240,0.6)' : undefined,
-                    }} />
+                    }}>
+                      <div style={{
+                        height: '100%', width: `${filled * 100}%`,
+                        background: current ? semantic.accent : 'rgba(124,108,240,0.55)',
+                      }} />
+                    </div>
                     <div className="mono text-dim" style={{ fontSize: 10, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}{stage.max_job_hours ? ` · ≤${stage.max_job_hours}h/job` : ''}
                     </div>
                   </div>
                 )
-              })}
+                return { start: end, nodes: acc.nodes }
+              }, { start: 0, nodes: [] }).nodes}
             </div>
 
             <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -839,8 +1016,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile
               label="Accelerators In Flight"
-              value={`${inFlightAccelerators} / ${pe.max_concurrent_accelerators ?? 'default'}`}
+              value={`${inFlightAccelerators} / ${pe.max_concurrent_accelerators ?? 'uncapped'}`}
               color={pe.max_concurrent_accelerators != null && inFlightAccelerators >= pe.max_concurrent_accelerators ? semantic.accent : undefined}
+              sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
             <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
@@ -866,14 +1044,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               href={`/hypotheses?pe=${pe.id}`}
             />
           </div>
-        </PodContent>
-      </Pod>
-
-      {/* Add an idea to the pool */}
-      <Pod>
-        <PodHeader>Add an idea to the hypothesis pool</PodHeader>
-        <PodContent>
-          <AddIdeaForm platformExperimentID={pe.id} onAdded={() => mutateHypotheses()} />
         </PodContent>
       </Pod>
 
@@ -965,7 +1135,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                             <AgentJobsPanel
                               agentId={entry.agentId}
                               jobs={jobsByAgent.get(entry.agentId) ?? []}
-                              metricName={primaryMetric?.key}
+                              trackedMetrics={trackedMetricKeys}
                             />
                           </td>
                         </tr>
@@ -1013,24 +1183,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       )}
 
       {/* Live job metrics */}
-      {running.length > 0 && (
+      {(experiments ?? []).length > 0 && (
         <Pod>
           <PodHeader>
-            Live Metrics — {primaryMetric?.key ?? 'metric'}
+            Live Metrics
             <span className="text-dim" style={{ marginLeft: 8 }}>auto-refreshes every 30 s</span>
           </PodHeader>
           <PodContent>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-              {running.map(exp => (
-                <div key={exp.id} className="wa-mini-card">
-                  <div style={{ fontSize: 11, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Link href={`/jobs/${exp.id}`} className="mono text-link" style={{ fontWeight: 600 }}>{exp.id.slice(0, 8)}…</Link>
-                    <span className="mono text-dim">{exp.agent_id}</span>
-                  </div>
-                  <JobMetricMini jobId={exp.id} metricName={primaryMetric?.key} />
-                </div>
-              ))}
-            </div>
+            <LiveMetricsPicker jobs={experiments ?? []} />
           </PodContent>
         </Pod>
       )}

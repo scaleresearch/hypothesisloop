@@ -15,8 +15,8 @@ export function StatTile({ label, value, sub, color, href }: StatTileProps) {
   const content = (
     <>
       <div className="uppercase-label" style={{ marginBottom: 4 }}>{label}</div>
-      <div className="mono stat-tile-value" style={color ? { color } : undefined}>{value}</div>
-      {sub && <div className="stat-tile-sub">{sub}</div>}
+      <div className="mono stat-tile-value" style={color ? { color } : undefined} title={typeof value === 'string' ? value : undefined}>{value}</div>
+      {sub && <div className="stat-tile-sub" title={sub}>{sub}</div>}
     </>
   )
   if (href) {

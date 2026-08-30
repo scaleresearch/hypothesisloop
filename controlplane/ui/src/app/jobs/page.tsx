@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { fetchExperimentsPage, fetchExperimentStats, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
 import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -17,6 +17,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
 import { formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
+import { useQueryParam } from '@/lib/query-state'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -48,10 +49,9 @@ export default function JobsPage() {
 
 function JobsPageContent() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [agentFilter, setAgentFilter] = useState('')
-  const [peFilter, setPEFilter] = useState(() => searchParams.get('platform_experiment_id') ?? '')
-  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') ?? '')
+  const [peFilter, setPEFilter] = useQueryParam('platform_experiment_id')
+  const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [sortKey, setSortKey] = useState<SortKey>('created_at')

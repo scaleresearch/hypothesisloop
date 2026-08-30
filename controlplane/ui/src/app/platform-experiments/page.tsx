@@ -1,8 +1,9 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { Suspense, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
+import { useQueryParam } from '@/lib/query-state'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react'
 import {
   fetchPlatformExperimentsPage,
@@ -893,9 +894,17 @@ function SortListbox({ value, onChange }: { value: string; onChange: (v: string)
 }
 
 export default function PlatformExperimentsPage() {
-  const [statusFilter, setStatusFilter] = useState('')
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState('-starts_at')
+  return (
+    <Suspense fallback={<Loading />}>
+      <PlatformExperimentsPageContent />
+    </Suspense>
+  )
+}
+
+function PlatformExperimentsPageContent() {
+  const [statusFilter, setStatusFilter] = useQueryParam('status')
+  const [search, setSearch] = useQueryParam('q')
+  const [sort, setSort] = useQueryParam('sort', '-starts_at')
   const [page, setPage] = useState(0)
   const [modal, setModal] = useState<{ open: boolean; editing?: PlatformExperiment | null }>({ open: false })
 

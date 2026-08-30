@@ -15,6 +15,9 @@ interface SearchableSelectProps {
   placeholder?: string
   allLabel?: string
   className?: string
+  style?: React.CSSProperties
+  /** Omit the leading "All" row — for pickers where one option must always be selected. */
+  hideAllOption?: boolean
 }
 
 const FIELD_STYLE: React.CSSProperties = {
@@ -41,7 +44,7 @@ function optionRowStyle(focus: boolean, selected: boolean): React.CSSProperties 
  * raw <select> when the option list can grow long enough that scanning it beats scrolling it.
  * Options are shown in the order passed in, so callers control sort (e.g. newest first).
  */
-export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className }: SearchableSelectProps) {
+export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, style, hideAllOption }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
 
   const selected = options.find(o => o.value === value) ?? null
@@ -55,7 +58,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
       onChange={(v: string | null) => { onChange(v ?? ''); setQuery('') }}
       as="div"
       className={className}
-      style={{ position: 'relative', minWidth: 180 }}
+      style={{ position: 'relative', minWidth: 180, ...style }}
     >
       <ComboboxInput
         className="mono"
@@ -71,9 +74,11 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
           background: 'var(--surface-raised)', boxShadow: 'var(--shadow-lg)', padding: 4,
         }}
       >
-        <ComboboxOption value="" className="mono">
-          {({ focus }: { focus: boolean }) => <div style={optionRowStyle(focus, value === '')}>{allLabel}</div>}
-        </ComboboxOption>
+        {!hideAllOption && (
+          <ComboboxOption value="" className="mono">
+            {({ focus }: { focus: boolean }) => <div style={optionRowStyle(focus, value === '')}>{allLabel}</div>}
+          </ComboboxOption>
+        )}
         {filtered.length === 0 ? (
           <div className="text-dim" style={{ fontSize: 12, padding: '6px 8px' }}>No matches</div>
         ) : filtered.map(o => (

@@ -1,25 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { registerHumanHypothesis, addHumanHypothesisComment } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-
-const STORAGE_KEY = 'hl.author-name'
-
-// The typed name is remembered locally so a person adding a second idea does not retype it. It is
-// deliberately only ever a browser value: there is no auth, so the name is a claim, not an
-// identity, and nothing on the server treats it as one.
-export function useAuthorName(): [string, (next: string) => void] {
-  const [name, setName] = useState('')
-  useEffect(() => {
-    setName(window.localStorage.getItem(STORAGE_KEY) ?? '')
-  }, [])
-  return [name, (next: string) => {
-    setName(next)
-    window.localStorage.setItem(STORAGE_KEY, next)
-  }]
-}
 
 const INPUT_STYLE: CSSProperties = {
   width: '100%', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 6,
@@ -47,7 +31,6 @@ export function PoolAuthor({ source, agentID, author }: { source?: string; agent
 // steering channel was rewriting the platform experiment's description — which rewrites the brief
 // for every agent at once, and has already failed to stop an in-flight retry loop.
 export function AddIdeaForm({ platformExperimentID, onAdded }: { platformExperimentID: string; onAdded: () => void }) {
-  const [author, setAuthor] = useAuthorName()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -58,7 +41,7 @@ export function AddIdeaForm({ platformExperimentID, onAdded }: { platformExperim
     setError('')
     setResult('')
     try {
-      await registerHumanHypothesis(platformExperimentID, author.trim(), text.trim())
+      await registerHumanHypothesis(platformExperimentID, 'human', text.trim())
       setText('')
       setResult('Added to the pool. Agents read it alongside their own.')
       onAdded()
@@ -74,15 +57,9 @@ export function AddIdeaForm({ platformExperimentID, onAdded }: { platformExperim
       <p className="text-muted" style={{ fontSize: 12 }}>
         Your idea joins the same pool the agents read and write, under the same duplicate check.
         It is an idea, not an instruction: no job runs against it, and an agent that wants to test
-        it registers its own hypothesis naming yours. There is no login — the name is just how the
-        pool is read.
+        it registers its own hypothesis naming yours. There is no login — it is registered under
+        "human".
       </p>
-      <input
-        style={{ ...INPUT_STYLE, maxWidth: 260 }}
-        value={author}
-        onChange={e => setAuthor(e.target.value)}
-        placeholder="Your name"
-      />
       <textarea
         style={{ ...INPUT_STYLE, minHeight: 70, resize: 'vertical' }}
         value={text}
@@ -90,7 +67,7 @@ export function AddIdeaForm({ platformExperimentID, onAdded }: { platformExperim
         placeholder="e.g. the retry loop is masking a bad learning-rate schedule — try a linear warmup instead"
       />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Button size="sm" disabled={busy || author.trim() === '' || text.trim() === ''} onClick={submit}>
+        <Button size="sm" disabled={busy || text.trim() === ''} onClick={submit}>
           {busy ? 'Adding…' : 'Add idea'}
         </Button>
         {result && <span className="text-muted" style={{ fontSize: 12 }}>{result}</span>}
@@ -102,7 +79,6 @@ export function AddIdeaForm({ platformExperimentID, onAdded }: { platformExperim
 
 /** The same author field on a note against one hypothesis. */
 export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string; onAdded: () => void }) {
-  const [author, setAuthor] = useAuthorName()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -111,7 +87,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
     setBusy(true)
     setError('')
     try {
-      await addHumanHypothesisComment(hypothesisID, author.trim(), text.trim())
+      await addHumanHypothesisComment(hypothesisID, 'human', text.trim())
       setText('')
       onAdded()
     } catch (e) {
@@ -123,12 +99,6 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
 
   return (
     <div style={{ display: 'grid', gap: 8, maxWidth: 760, marginTop: 12 }}>
-      <input
-        style={{ ...INPUT_STYLE, maxWidth: 260 }}
-        value={author}
-        onChange={e => setAuthor(e.target.value)}
-        placeholder="Your name"
-      />
       <textarea
         style={{ ...INPUT_STYLE, minHeight: 60, resize: 'vertical' }}
         value={text}
@@ -136,7 +106,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
         placeholder="A note on this claim — amend it, cross-reference a finding, say why you'd drop it."
       />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Button size="sm" disabled={busy || author.trim() === '' || text.trim() === ''} onClick={submit}>
+        <Button size="sm" disabled={busy || text.trim() === ''} onClick={submit}>
           {busy ? 'Adding…' : 'Add comment'}
         </Button>
         {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}

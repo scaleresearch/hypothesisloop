@@ -5,6 +5,7 @@ import { Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { useMemo, useState } from 'react'
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { fetchHypothesesPage, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
 import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
 import { relTime } from '@/lib/format'
@@ -15,7 +16,8 @@ import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Pagination } from '@/components/ui/pagination'
-import { PoolAuthor } from '@/components/human-idea'
+import { PoolAuthor, AddIdeaForm } from '@/components/human-idea'
+import { useQueryParam } from '@/lib/query-state'
 
 const PAGE_SIZE = 25
 
@@ -39,8 +41,9 @@ function HypothesesPageContent() {
   const searchParams = useSearchParams()
   const peID = searchParams.get('pe') ?? ''
   const [agentFilter, setAgentFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<HypothesisStatus | ''>('')
+  const [statusFilter, setStatusFilter] = useQueryParam('status') as [HypothesisStatus | '', (v: HypothesisStatus | '') => void]
   const [page, setPage] = useState(0)
+  const [addIdeaOpen, setAddIdeaOpen] = useState(false)
 
   const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
 
@@ -90,7 +93,12 @@ function HypothesesPageContent() {
       <PageHeader
         title="Hypotheses"
         description="Registered research claims, scoped per platform experiment — every platform experiment accumulates its own shared idea pool, and every job must reference a hypothesis registered under the same one it's submitted into. Registering text equivalent to an existing hypothesis within the same platform experiment returns the existing row instead of creating a duplicate."
-        actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
+        actions={
+          <>
+            {peID && <Button size="sm" onClick={() => setAddIdeaOpen(true)}>+ Add idea</Button>}
+            <Button size="sm" onClick={() => mutate()}>Refresh</Button>
+          </>
+        }
       />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -122,6 +130,18 @@ function HypothesesPageContent() {
           options={STATUS_FILTERS.filter(f => f.value !== '').map(f => ({ value: f.value, label: f.label }))}
         />
       </div>
+
+      {peID && (
+        <Dialog open={addIdeaOpen} onClose={() => setAddIdeaOpen(false)} className="wa-dialog">
+          <div className="wa-dialog-backdrop" aria-hidden="true" />
+          <div className="wa-dialog-container">
+            <DialogPanel className="wa-dialog-panel">
+              <DialogTitle style={{ fontWeight: 600, marginBottom: 10 }}>Add an idea to the hypothesis pool</DialogTitle>
+              <AddIdeaForm platformExperimentID={peID} onAdded={() => { mutate(); setAddIdeaOpen(false) }} />
+            </DialogPanel>
+          </div>
+        </Dialog>
+      )}
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
