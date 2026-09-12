@@ -99,7 +99,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	// context window, not a browser scrolling a table. See db.defaultAgentListLimit.
 	const (
 		defaultExperimentListLimit = 20
-		maxExperimentListLimit     = 200
+		// Lowered from 200 (2026-09-11): each experiment record duplicates its full job/
+		// resolved_job env and repeats hypothesis/theory/objective text, so even a max-size page
+		// was ~580KB raw -- too large for an agent to read into context in one call regardless of
+		// how it's asked for. 50 caps a raw page at roughly a tenth of that.
+		maxExperimentListLimit = 50
 	)
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

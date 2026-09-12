@@ -15,10 +15,6 @@ Every 5-10 min at first, widen once behavior looks steady.
 - `podman ps` / `$API_URL` job status — stuck/crashed containers, pending jobs (capacity
   starvation, image pull failure).
 
-  **NEVER read an unpaginated `GET .../experiments?...` listing raw into context** — it grows
-  with every job ever submitted (can hit 1MB+). Always page it and pipe through `jq`/`python3`
-  for just `id`+`status` first.
-
 ## Revisit the flavor mix at stage boundaries
 
 `setup.md` step 3 is not a one-time decision — every `GET .../stages` poll that shows a stage
