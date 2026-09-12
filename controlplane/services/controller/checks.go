@@ -144,13 +144,16 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// ~1.5s before the eviction fired — well inside plausible ingestion lag, not a dead
 		// reporting path. One bounded re-check after a short pause absorbs that lag; a genuinely
 		// broken reporting path stays negative on both reads, so real detection is unaffected.
-		time.Sleep(c.neverReportedRecheckDelay())
-		everReported, err = c.observed.AnyDeclaredMetricReported(ctx, exp.ID, declaredMetricKeys, now.Sub(startedAt)+c.neverReportedRecheckDelay())
-		if err != nil {
-			return false, "", fmt.Errorf("silence declared-metric ever-reported recheck: %w", err)
-		}
-		if everReported {
-			return false, "", nil
+		for attempt := 1; attempt <= c.neverReportedRecheckAttempts(); attempt++ {
+			time.Sleep(c.neverReportedRecheckDelay())
+			elapsed := now.Sub(startedAt) + time.Duration(attempt)*c.neverReportedRecheckDelay()
+			everReported, err = c.observed.AnyDeclaredMetricReported(ctx, exp.ID, declaredMetricKeys, elapsed)
+			if err != nil {
+				return false, "", fmt.Errorf("silence declared-metric ever-reported recheck: %w", err)
+			}
+			if everReported {
+				return false, "", nil
+			}
 		}
 		// Alive, past its grace period, and has never once emitted a metric its own platform
 		// experiment declared. It cannot be ranked, cut, or compared — there is nothing to judge

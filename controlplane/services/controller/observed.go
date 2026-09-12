@@ -92,12 +92,23 @@ func (c *Controller) observedGapCap() time.Duration {
 	return time.Duration(c.silenceMultiplier * float64(c.defaultReportInterval))
 }
 
-// neverReportedRecheckDelay is how long checkSilence pauses before re-querying a job's declared
-// metrics one last time before evicting it as never_reported_metrics. Fixed and small: this is a
-// read-after-write ingestion-lag guard (see checkSilence), not a tunable per platform experiment
-// — every job pays it at most once, only on the rare tick where eviction is otherwise imminent.
+// neverReportedRecheckDelay is the poll interval checkSilence sleeps between re-queries of a
+// job's declared metrics before evicting it as never_reported_metrics. Fixed and small: this is
+// a read-after-write ingestion-lag guard (see checkSilence), not a tunable per platform
+// experiment — every job pays it at most neverReportedRecheckAttempts times, only on the rare
+// tick where eviction is otherwise imminent.
 func (c *Controller) neverReportedRecheckDelay() time.Duration {
 	return 2 * time.Second
+}
+
+// neverReportedRecheckAttempts bounds how many times checkSilence re-polls before trusting a
+// negative result. A single 2s recheck missed a real sample that landed ~2.7s after the job's
+// last write under fleet-scale GreptimeDB write contention (confirmed live on pe-37f991f5,
+// commit 8eaf831's follow-up) — ingestion lag isn't reliably sub-2s under contention, so poll
+// repeatedly (up to neverReportedRecheckAttempts * neverReportedRecheckDelay = 10s total) and
+// exit as soon as a fresh sample appears, rather than betting everything on one fixed pause.
+func (c *Controller) neverReportedRecheckAttempts() int {
+	return 5
 }
 
 // isAlive reports whether experimentID has a real observation (heartbeat or job-reported
