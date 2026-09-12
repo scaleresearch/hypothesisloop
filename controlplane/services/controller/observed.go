@@ -92,6 +92,14 @@ func (c *Controller) observedGapCap() time.Duration {
 	return time.Duration(c.silenceMultiplier * float64(c.defaultReportInterval))
 }
 
+// neverReportedRecheckDelay is how long checkSilence pauses before re-querying a job's declared
+// metrics one last time before evicting it as never_reported_metrics. Fixed and small: this is a
+// read-after-write ingestion-lag guard (see checkSilence), not a tunable per platform experiment
+// — every job pays it at most once, only on the rare tick where eviction is otherwise imminent.
+func (c *Controller) neverReportedRecheckDelay() time.Duration {
+	return 2 * time.Second
+}
+
 // isAlive reports whether experimentID has a real observation (heartbeat or job-reported
 // metric) within `window` of now — a stateless GreptimeDB query, not an in-memory last-seen
 // map, so every process gets the same answer with no warm-up after a restart.

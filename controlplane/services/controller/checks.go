@@ -135,6 +135,23 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		if everReported {
 			return false, "", nil
 		}
+		// A negative result here is about to become an irreversible eviction, so it must survive
+		// one re-check before it's trusted. GreptimeDB's remote-write ingestion is not guaranteed
+		// visible to a query the instant WriteGaugesAt's HTTP call returns — under write
+		// contention (many jobs posting at once, the normal case at fleet scale) a sample written
+		// a second or two ago can still miss this exact query. Confirmed live on pe-37f991f5:
+		// kl_shampoo jobs evicted as never_reported_metrics with a real "step" sample landing
+		// ~1.5s before the eviction fired — well inside plausible ingestion lag, not a dead
+		// reporting path. One bounded re-check after a short pause absorbs that lag; a genuinely
+		// broken reporting path stays negative on both reads, so real detection is unaffected.
+		time.Sleep(c.neverReportedRecheckDelay())
+		everReported, err = c.observed.AnyDeclaredMetricReported(ctx, exp.ID, declaredMetricKeys, now.Sub(startedAt)+c.neverReportedRecheckDelay())
+		if err != nil {
+			return false, "", fmt.Errorf("silence declared-metric ever-reported recheck: %w", err)
+		}
+		if everReported {
+			return false, "", nil
+		}
 		// Alive, past its grace period, and has never once emitted a metric its own platform
 		// experiment declared. It cannot be ranked, cut, or compared — there is nothing to judge
 		// it by — while it holds an accelerator and bills for it. The reporting path is broken
