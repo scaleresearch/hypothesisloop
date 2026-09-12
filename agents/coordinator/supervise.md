@@ -15,6 +15,10 @@ Every 5-10 min at first, widen once behavior looks steady.
 - `podman ps` / `$API_URL` job status — stuck/crashed containers, pending jobs (capacity
   starvation, image pull failure).
 
+  **NEVER read an unpaginated `GET .../experiments?...` listing raw into context** — it grows
+  with every job ever submitted (can hit 1MB+). Always page it and pipe through `jq`/`python3`
+  for just `id`+`status` first.
+
 ## Revisit the flavor mix at stage boundaries
 
 `setup.md` step 3 is not a one-time decision — every `GET .../stages` poll that shows a stage
@@ -66,9 +70,10 @@ was before; it now also emits nothing, so nobody is even nudged to look.
 
 ## Record findings
 
-Append to `$FINDINGS_FILE` as you go, not just at the end. Each entry: what happened (observed,
-not paraphrased), what you changed and why, resolved or still open. Bias toward what speeds up the
-*next* run, not what's already obvious from the experiment's own metrics.
+Append to `$FINDINGS_FILE` only for a real new fact, change, or decision — NEVER a "routine poll,
+nothing new" working-log entry. It's read in full by every future agent, so every line costs all
+of them. Once it exceeds ~200 lines, archive resolved entries to `fix-later-archive-<date>.md` and
+keep only what's still open.
 
 ## End the run
 
