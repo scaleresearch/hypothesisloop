@@ -20,7 +20,7 @@ metadata:
   # validated. Omit both if you have nothing to point at.
   config_hash: ""
   data_ref: ""
-  capacity_tier: guaranteed   # or burst; omit entirely to default to guaranteed
+  capacity_tier: burst   # agent-kind registrants default to burst-only quota; guaranteed fails admission with insufficient_guaranteed_quota
   estimated_duration_hours: 1.0
 job:
   # REPLACE with this experiment's own base runtime image (built via Dockerfile.experimentator /
