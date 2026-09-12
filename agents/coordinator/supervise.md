@@ -15,6 +15,17 @@ Every 5-10 min at first, widen once behavior looks steady.
 - `podman ps` / `$API_URL` job status — stuck/crashed containers, pending jobs (capacity
   starvation, image pull failure).
 
+  **Never pipe a raw `GET .../experiments?platform_experiment_id=...` listing straight into your
+  context.** That endpoint returns every job's full `job`/`resolved_job`/hypothesis/theory/
+  objective text, unpaginated defaults grow with every job ever submitted, and it gets bigger
+  every single poll for the life of the experiment (a mature run's full listing is commonly
+  >1MB, i.e. several hundred thousand tokens if read raw). Always pipe through `jq`/`python3` and
+  extract only `id`+`status` (add `updated_at`/one metric field only when you specifically need
+  it) before it reaches your context — the same discipline applies to `fix-later.md`: read only
+  the tail/recent entries, not the whole file, once it's grown past a page or two, and archive
+  resolved entries out of it promptly (see "Record findings" below) instead of letting it grow
+  unbounded — a large shared findings file costs every future agent that's told to consult it.
+
 ## Revisit the flavor mix at stage boundaries
 
 `setup.md` step 3 is not a one-time decision — every `GET .../stages` poll that shows a stage
@@ -66,10 +77,15 @@ was before; it now also emits nothing, so nobody is even nudged to look.
 
 ## Record findings
 
-Append to `$FINDINGS_FILE` only for a real new fact, change, or decision — NEVER a "routine poll,
-nothing new" working-log entry. It's read in full by every future agent, so every line costs all
-of them. Once it exceeds ~200 lines, archive resolved entries to `fix-later-archive-<date>.md` and
-keep only what's still open.
+Append to `$FINDINGS_FILE` as you go, not just at the end. Each entry: what happened (observed,
+not paraphrased), what you changed and why, resolved or still open. Bias toward what speeds up the
+*next* run, not what's already obvious from the experiment's own metrics. Skip a "routine poll,
+nothing new" entry entirely rather than appending one — every entry costs every future agent told
+to read this file, forever; only append when there's an actual new fact, change, or decision.
+
+If `$FINDINGS_FILE` has grown past a couple hundred lines, archive its resolved entries to
+`fix-later-archive-<date>.md` and leave only what's still open/actionable in the live file before
+continuing — do this as routine housekeeping, not just when someone complains it's slow.
 
 ## End the run
 
