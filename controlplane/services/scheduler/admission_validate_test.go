@@ -254,3 +254,22 @@ func TestPerJobCapsCountEveryReplicaNotOneOfThem(t *testing.T) {
 		t.Fatalf("err = %v, want it to name job.cpu", err)
 	}
 }
+
+// capacity_tier has a same-named-but-different sibling enum (domain.QuotaTier, "guaranteed" or
+// "burst_only", used at signup) that every experiment's job.yaml template used to mislabel this
+// field with — a submission carrying that value must be rejected here, not reach Postgres and
+// surface as a raw enum SQLSTATE.
+func TestCapacityTierAcceptsOnlyItsOwnEnum(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{"", domain.CapacityGuaranteed, domain.CapacityBurst} {
+		exp := validSubmission()
+		exp.CapacityTier = tier
+		if err := validate(t, exp); err != nil {
+			t.Fatalf("capacity_tier = %q was rejected: %v", tier, err)
+		}
+	}
+	for _, tier := range []domain.CapacityTier{"burst_only", "guaranteed ", "Burst"} {
+		exp := validSubmission()
+		exp.CapacityTier = tier
+		mustReject(t, exp, "capacity_tier")
+	}
+}

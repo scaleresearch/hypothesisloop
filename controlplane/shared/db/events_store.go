@@ -49,6 +49,13 @@ const (
 	// arrived — a subscriber that wants the number reads it from there. It is the one kind
 	// Replay cannot return, because Postgres never saw it (see Replay).
 	EventMetricPoint = "metric.point"
+	// EventJobUnderperforming says only that, right now, this job trails its cohort on the
+	// platform experiment's ranking metric by enough margin to be worth a look — an opinion, not
+	// an instruction. Like metric.point it has no backing row: nothing about "trailing" is
+	// desired state anyone stores, it is recomputed from the metrics store at the moment a
+	// sample makes it true, and it is never stored itself. The agent decides; the existing
+	// cancel-experiment call is the only path that ever ends the job.
+	EventJobUnderperforming = "job.underperforming"
 )
 
 // EventKindDoc describes one kind well enough to subscribe to it without reading this file: what
@@ -98,6 +105,8 @@ var EventKinds = []EventKindDoc{
 		Description: "The brief changed. A description is unbounded and is never copied into an event: re-read it with GET /platform-experiments/{id}."},
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
+	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
+		Description: "This job just started trailing its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Fires once per stretch of underperformance, never replayed, and never sent twice for the same stretch."},
 }
 
 func init() {
@@ -150,7 +159,7 @@ type EventFilter struct {
 // ones an ExperimentID filter can meaningfully narrow to.
 func isExperimentSubject(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventJobUnderperforming:
 		return true
 	default:
 		return false
@@ -166,7 +175,7 @@ func isExperimentSubject(kind string) bool {
 // agent's subscription.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventJobUnderperforming:
 		return true
 	default:
 		return false
@@ -302,10 +311,15 @@ func cursorTime(cursor int64) time.Time { return time.UnixMicro(cursor).UTC() }
 // subject that changed — it may only be told the latest of two values instead of both. That is
 // the honest limit of deriving history from state, and it is the trade important.md asks for.
 //
-// since <= 0 means "start live": there is nothing to catch up on.
+// since <= 0 means the caller has no cursor at all, not that there is nothing to catch up on --
+// treated as the epoch, it replays the current state of every row this filter admits, which is
+// exactly the snapshot a first-time watcher needs (including one connecting to an already-terminal
+// job, which would otherwise see nothing but pings until its own timeout). The result is still one
+// event per row, not one per historical transition, so its size is bounded by how many rows this
+// platform experiment has, never by how long it has been running.
 func (s *EventsStore) Replay(ctx context.Context, filter EventFilter, since int64) ([]Event, error) {
-	if since <= 0 {
-		return nil, nil
+	if since < 0 {
+		since = 0
 	}
 	if filter.PlatformExperimentID == "" {
 		return nil, fmt.Errorf("events_store.Replay: platform_experiment_id is required")

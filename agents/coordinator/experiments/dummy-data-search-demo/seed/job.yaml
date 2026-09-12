@@ -1,0 +1,41 @@
+# Full POST /experiments request body -- id/metadata below are placeholders, overwrite
+# hypothesis_id, platform_experiment_id, agent_id (and id) before/at submit time.
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed
+  estimated_duration_hours: 0.02
+job:
+  # Pinned image, built and pushed once by build_and_push.sh -- config-only sweeps never rebuild it.
+  image: 192.168.1.76:5000/hypothesisloop-dummy-data-search-demo-workload:v2
+  cpu: "1"
+  memory: "512Mi"
+  storage: "256Mi"
+  max_retries: 2
+  accelerator_count: 1
+  # Fake accelerator type (see `hl resource-catalog capacity`) -- exercises real scheduling/quota
+  # without needing real hardware; the workload itself is plain numpy on CPU.
+  accelerator_type: nvidia.com/gpu.product=NVIDIA-L40
+  env:
+    # Architecture axis
+    HIDDEN_LAYERS: "16"
+    ACTIVATION: "relu"
+    # Hyperparameter axis
+    LR: "0.05"
+    BATCH_SIZE: "32"
+    EPOCHS: "40"
+    L2: "0.0"
+    # Data axis
+    N_SAMPLES: "800"
+    NOISE: "0.25"
+    N_FEATURES: "2"
+    CLASS_SEP: "1.0"
+    CURRICULUM: "0"

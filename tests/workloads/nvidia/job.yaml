@@ -19,7 +19,7 @@ metadata:
   # validated. Omit both if you have nothing to point at.
   config_hash: ""
   data_ref: ""
-  capacity_tier: guaranteed   # or burst_only; omit entirely to default to guaranteed
+  capacity_tier: guaranteed   # or burst; omit entirely to default to guaranteed
   estimated_duration_hours: 1.0
 job:
   # Standalone job definition for the NVIDIA real-hardware e2e test (see

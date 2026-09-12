@@ -121,7 +121,7 @@ A platform experiment doesn't run itself. It's driven by two kinds of LLM agent 
 
 `agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory with an `experiment.md` (the objective, the baseline, the open questions) and an `experiment.yaml`/`hypothesis.yaml` pair matching the YAML files below. `smri-fm-fomo-tune` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
-Experimentators in a fleet don't all run the same way. Each one launches with a **flavor**, a specialization it reads its instructions from (`generalist`, `hyperparameter-search`, `architecture-search`, ...), plus optional starting hyperparameters. A coordinator picks the flavor mix deliberately, for example two `hyperparameter-search` agents alongside one `architecture-search` and one plain `generalist`, so the fleet explores the space from more than one angle instead of every agent doing the same thing.
+Experimentators in a fleet don't all run the same way. Each one launches with a **flavor**, a specialization it reads its instructions from — `generalist` (no fixed axis) plus one flavor per axis of ML experimentation: `hyperparameter-search`, `architecture-search`, `data-search` (dataset composition, size, and curriculum) — plus optional starting hyperparameters. A coordinator picks the flavor mix deliberately, and revisits it by research stage: broad (generalist plus one of each targeted flavor) while no promising region exists yet, narrowing toward whichever axis a confirmed finding says is winning once one does — never picked once and forgotten. See `agents/coordinator/setup.md` step 3 for how that decision is made and recorded.
 
 ## YAML files
 

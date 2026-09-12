@@ -198,6 +198,19 @@ FILE is a YAML file shaped exactly like the POST /platform-experiments body. Min
     - key: val_accuracy
       direction: maximize
 
+To create several platform experiments in one call, use an experiments: list -- fields set
+alongside the list (e.g. a shared budget_accelerator_hours) default onto every item that
+doesn't set its own:
+
+  budget_accelerator_hours: 10
+  experiments:
+    - name: my-first-platform-experiment
+      description: ...
+    - name: my-second-platform-experiment
+      description: ...
+
+A bare top-level YAML list of mappings works the same way, without shared defaults.
+
 See controlplane/settings/examples/experiment.yaml for the full DSL reference.`)
 	}
 	if err := fs.Parse(args); err != nil {
@@ -207,22 +220,30 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`)
 	if fs.NArg() > 0 {
 		path = fs.Arg(0)
 	}
-	body, err := readYAMLBody(path)
+	items, err := readYAMLItems(path, "experiments")
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: %s\n", err)
 		return 2
 	}
-	if _, ok := body["starts_at"]; !ok {
-		body["starts_at"] = "0001-01-01T00:00:00Z"
+	results := make([]any, 0, len(items))
+	for _, body := range items {
+		if _, ok := body["starts_at"]; !ok {
+			body["starts_at"] = "0001-01-01T00:00:00Z"
+		}
+		if _, ok := body["ends_at"]; !ok {
+			body["ends_at"] = "0001-01-01T00:00:00Z"
+		}
+		var out any
+		if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
+			return fail(stderr, err)
+		}
+		results = append(results, out)
 	}
-	if _, ok := body["ends_at"]; !ok {
-		body["ends_at"] = "0001-01-01T00:00:00Z"
+	if len(results) == 1 {
+		printJSON(stdout, results[0])
+	} else {
+		printJSON(stdout, results)
 	}
-	var out any
-	if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
-		return fail(stderr, err)
-	}
-	printJSON(stdout, out)
 	return 0
 }
 
@@ -306,7 +327,7 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 		agent := fs.String("agent", "", "agent id (required unless set in --file)")
 		pe := fs.String("platform-experiment", "", "platform experiment id (required unless set in --file)")
 		text := fs.String("text", "", "hypothesis text (required unless set in --file)")
-		file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body (see controlplane/settings/examples/hypothesis.yaml); flags above override its fields")
+		file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body (see controlplane/settings/examples/hypothesis.yaml); flags above override its fields. May also hold a top-level list, or a `hypotheses:` list, to submit many in one call")
 		fs.Usage = func() {
 			fmt.Fprintln(stderr, `usage: hl hypothesis submit --agent AGENT --platform-experiment PE --text TEXT
    or: hl hypothesis submit --file hypothesis.yaml [--agent AGENT] [--platform-experiment PE] [--text TEXT]
@@ -317,43 +338,71 @@ FILE is a YAML file shaped like the POST /hypotheses body. Minimal shape:
   platform_experiment_id: pe-123
   text: "the hypothesis this agent is testing"
 
-Any flag given on the command line overrides the corresponding field in FILE.
+To submit several hypotheses in one call, use a hypotheses: list -- fields set alongside the
+list (e.g. a shared agent_id/platform_experiment_id) default onto every item that doesn't set
+its own:
+
+  agent_id: agent-123
+  platform_experiment_id: pe-123
+  hypotheses:
+    - text: "idea one"
+    - text: "idea two"
+
+A bare top-level YAML list of mappings works the same way, without shared defaults.
+
+Any flag given on the command line overrides the corresponding field in every item from FILE.
 See controlplane/settings/examples/hypothesis.yaml for the full DSL reference.`)
 		}
 		if err := fs.Parse(rest); err != nil {
 			return 2
 		}
-		body := map[string]string{}
+		var items []map[string]any
 		if *file != "" {
-			raw, err := readYAMLBody(*file)
+			raw, err := readYAMLItems(*file, "hypotheses")
 			if err != nil {
 				fmt.Fprintf(stderr, "hl: %s\n", err)
 				return 2
 			}
+			items = raw
+		} else {
+			items = []map[string]any{{}}
+		}
+		results := make([]any, 0, len(items))
+		for i, raw := range items {
+			body := map[string]string{}
 			for _, key := range []string{"agent_id", "platform_experiment_id", "text", "author"} {
 				if v, ok := raw[key].(string); ok && v != "" {
 					body[key] = v
 				}
 			}
+			if *agent != "" {
+				body["agent_id"] = *agent
+			}
+			if *pe != "" {
+				body["platform_experiment_id"] = *pe
+			}
+			if *text != "" {
+				body["text"] = *text
+			}
+			if body["agent_id"] == "" || body["platform_experiment_id"] == "" || body["text"] == "" {
+				prefix := "hl: hypothesis submit: "
+				if len(items) > 1 {
+					prefix = fmt.Sprintf("hl: hypothesis submit: item %d: ", i)
+				}
+				fmt.Fprintln(stderr, prefix+"agent_id, platform_experiment_id and text are required (via --agent/--platform-experiment/--text or --file)")
+				return 2
+			}
+			var out any
+			if err := c.Do("POST", "/hypotheses", body, &out); err != nil {
+				return fail(stderr, err)
+			}
+			results = append(results, out)
 		}
-		if *agent != "" {
-			body["agent_id"] = *agent
+		if len(results) == 1 {
+			printJSON(stdout, results[0])
+		} else {
+			printJSON(stdout, results)
 		}
-		if *pe != "" {
-			body["platform_experiment_id"] = *pe
-		}
-		if *text != "" {
-			body["text"] = *text
-		}
-		if body["agent_id"] == "" || body["platform_experiment_id"] == "" || body["text"] == "" {
-			fmt.Fprintln(stderr, "hl: hypothesis submit: agent_id, platform_experiment_id and text are required (via --agent/--platform-experiment/--text or --file)")
-			return 2
-		}
-		var out any
-		if err := c.Do("POST", "/hypotheses", body, &out); err != nil {
-			return fail(stderr, err)
-		}
-		printJSON(stdout, out)
 		return 0
 	case "list":
 		fs := flag.NewFlagSet("hypothesis list", flag.ContinueOnError)
@@ -535,6 +584,75 @@ func readYAMLBody(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("expected a YAML mapping at the top level, got nothing")
 	}
 	return body, nil
+}
+
+// readYAMLItems reads FILE (or stdin for "-") and returns one map per item to submit, so a single
+// file can describe either one item (the historical shape) or many. Three top-level shapes are
+// accepted:
+//
+//   - a bare mapping: one item, exactly like readYAMLBody.
+//   - a bare list of mappings: each element is one item.
+//   - a mapping with a listKey (e.g. "hypotheses") holding a list of mappings: each element is one
+//     item, and every *other* top-level key is a default merged into any item that does not set
+//     that key itself -- e.g. a shared platform_experiment_id/agent_id above a list of ideas.
+func readYAMLItems(path, listKey string) ([]map[string]any, error) {
+	var raw []byte
+	var err error
+	if path == "-" {
+		raw, err = io.ReadAll(os.Stdin)
+	} else {
+		raw, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var doc any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("not valid YAML: %w", err)
+	}
+	switch v := doc.(type) {
+	case []any:
+		return toMapSlice(v)
+	case map[string]any:
+		if list, ok := v[listKey].([]any); ok {
+			items, err := toMapSlice(list)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", listKey, err)
+			}
+			defaults := make(map[string]any, len(v))
+			for k, val := range v {
+				if k != listKey {
+					defaults[k] = val
+				}
+			}
+			for _, item := range items {
+				for k, val := range defaults {
+					if _, exists := item[k]; !exists {
+						item[k] = val
+					}
+				}
+			}
+			return items, nil
+		}
+		if len(v) == 0 {
+			return nil, fmt.Errorf("expected a YAML mapping or list at the top level, got nothing")
+		}
+		return []map[string]any{v}, nil
+	default:
+		return nil, fmt.Errorf("expected a YAML mapping or list at the top level")
+	}
+}
+
+func toMapSlice(list []any) ([]map[string]any, error) {
+	out := make([]map[string]any, 0, len(list))
+	for i, e := range list {
+		m, ok := e.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("item %d: expected a YAML mapping, got %T", i, e)
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // --- watch -----------------------------------------------------------------------------------------

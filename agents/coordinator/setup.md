@@ -168,10 +168,32 @@ What differs between agents is two independent things, both decided here and set
 
 - `AGENT_FLAVOR` picks which specialization the agent reads from
   `agents/experimentator/src/hypothesisloop_agent/prompts/flavors/<flavor>.md` — what kind of
-  trial it runs and what it varies (`generalist`, `hyperparameter-search`, `architecture-search`;
-  add a new file for a new specialization). Decide the flavor mix before spawning — e.g. 2
-  hyperparameter-search + 1 architecture-search + 1 generalist — and write the reason into the
-  run's notes, since it's what the results mean.
+  trial it runs and what it varies (`generalist`, `hyperparameter-search`, `architecture-search`,
+  `data-search`; add a new file for a new specialization). Decide the flavor mix before spawning
+  and write the reason into the run's notes, since it's what the results mean.
+- **The mix is a per-stage decision, not a one-time one.** Pick it deliberately for where the
+  research actually is, not once at launch and then forgotten:
+  - **Early / no promising region yet** (before the first stage cut, or whenever the pool has no
+    finding worth converging on): bias toward breadth — `generalist` agents plus one of each
+    targeted flavor, so the fleet explores hyperparameters, architecture, and data at once instead
+    of guessing which axis matters before any evidence exists. E.g. for 4 agents: 1 generalist + 1
+    hyperparameter-search + 1 architecture-search + 1 data-search.
+  - **Once a promising region is found** (a hypothesis confirmed, or a clear leader in the pool
+    the coordinator can name with a hypothesis_id) — narrow: spawn the *next* wave's agents
+    weighted toward the axis that region's own finding says moved the metric, and drop or reduce
+    `generalist` slots. If the leading result was a data change, the next wave is mostly
+    `data-search` (plus a `hyperparameter-search` or two to harden it), not another blind spread.
+  - Re-decide at every stage boundary (`GET .../stages` — see supervise.md), not just once:
+    a stage cut is a checkpoint to look at what's actually in the pool and adjust the *next*
+    wave's flavor mix accordingly, the same way it decides who gets cut.
+  - You cannot change a running agent's flavor (it's read once at launch) — narrowing means new
+    agents spawned with a different mix, or letting a cut thin out the earlier, broader wave
+    rather than retroactively editing it. Existing agents keep competing under their original
+    flavor until they finish or are cut.
+  - Record every mix decision (initial and any narrowing) in the run's notes with the reasoning —
+    what evidence prompted it, which hypothesis or finding motivated a narrower slate — since
+    that reasoning is what makes the results interpretable afterward, exactly like the flavor mix
+    itself.
 - `AGENT_HYPERPARAMETERS` is a small JSON object handed to an agent on top of its flavor (batch
   size, a specific point in a search space, ...). A sweep is several agents of the same flavor
   launched with different hyperparameter values, same as XManager's `experiment.add` loop.

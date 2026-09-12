@@ -1,0 +1,116 @@
+# Platform-experiment template for a new experiment under agents/coordinator/experiments/<name>/.
+# Copy this file into your experiment's own directory as experiment.yaml and fill in the
+# REPLACE-WITH-... placeholders before running `hl platform-experiments create experiment.yaml`
+# (setup.md step 2) -- nothing here can be known ahead of time (budget depends on NUM_AGENTS *
+# CHIPS_PER_AGENT * planned_run_hours, decided at spawn time; starts_at must be several minutes in
+# the future, decided at creation time). Every field the schema accepts is shown below, uncommented
+# -- delete an optional one only once you've deliberately decided you don't want it, never because
+# you didn't know it existed. See controlplane/settings/examples/experiment.yaml for prose on each
+# and controlplane/services/quota/platform_experiments.go (CreatePlatformExperimentRequest) for the
+# authoritative schema.
+name: dummy-data-search-demo
+# `description` MUST be this experiment's experiment.md `EXPERIMENT DESCRIPTION` block, verbatim
+# -- it is the only thing agents read about the objective (see setup.md step 2, "Description sync
+# is not optional, ever"). Paste it in here (YAML block scalar keeps it readable):
+description: |
+  OBJECTIVE
+  Maximize held-out validation accuracy (val_accuracy) on a small synthetic two-class dataset. This
+  is a fast, self-contained shakedown of the coordinator's stage-aware flavor mix and the platform's
+  three experimentator flavors (hyperparameter-search, architecture-search, data-search) — not a
+  real research problem. Every job completes in well under a minute.
+
+  STARTING POINT
+  Your shared code repo already contains a working numpy MLP + synthetic-dataset generator
+  (seed/train.py) and a ready-to-submit job spec (seed/job.yaml, image already built and pushed).
+  Clone it, branch, and iterate — this is a config-only task: every knob you vary is a job.yaml env
+  var, never a code change. Submit `hl job submit --agent <id> job.yaml` directly; no build step.
+
+  THREE INDEPENDENT AXES — hold two fixed, vary the third, per your flavor brief
+    ARCHITECTURE   HIDDEN_LAYERS (comma-separated hidden-layer widths, e.g. "32,16"),
+                   ACTIVATION (relu|tanh)
+    HYPERPARAMS    LR, BATCH_SIZE, EPOCHS, L2
+    DATA           N_SAMPLES, NOISE, N_FEATURES, CLASS_SEP, CURRICULUM (0|1 — easy-to-hard
+                   training-set ordering; only meaningful together with epochs > ~10)
+  Every job.yaml env var not in your flavor's axis must stay at whatever value the pool has already
+  converged on (or the BASELINE's, before anything has converged) — that is what "hold fixed" means
+  concretely here.
+
+  METRICS TO REPORT
+    val_accuracy (maximize, RANKING METRIC) — held-out accuracy, reported as a running max.
+    train_loss   — final-epoch mean training loss (attribute, not ranked).
+
+  CONSTRAINTS
+    - Runs on one fake accelerator per pod (accelerator_type
+      nvidia.com/gpu.product=NVIDIA-L40, accelerator_count 1) — the workload itself is plain numpy
+      on CPU; the accelerator_type exists only to exercise real scheduling/quota.
+    - Report metrics at a steady cadence while the job runs, not once at the end.
+    - Never fabricate or inflate a metric; nothing checks this server-side.
+    - The dataset generator and training loop in seed/train.py ARE the correctness gate — do not
+      change the loss function, the accuracy definition, or the train/val split (first 80%/last
+      20% of the generated, pre-shuffled samples) to make a number look better.
+
+  FACTS ABOUT THE PROBLEM
+    - The task is a noisy two-moons-style binary classification problem; N_FEATURES > 2 adds pure
+      noise columns (a real data axis: more noise columns without more capacity or more signal
+      should hurt, not help).
+    - The run is short and cheap by design (EPOCHS default 40, N_SAMPLES default 800) so a fleet
+      can run dozens of jobs in minutes — prefer many small trials over few large ones.
+
+  BASELINE
+    config:    seed/job.yaml shipped defaults (HIDDEN_LAYERS=16, ACTIVATION=relu, LR=0.05,
+               BATCH_SIZE=32, EPOCHS=40, L2=0.0, N_SAMPLES=800, NOISE=0.25, N_FEATURES=2,
+               CLASS_SEP=1.0, CURRICULUM=0), one fake NVIDIA-L40 accelerator per pod
+    code_ref:  the seeded repo's `main` branch, seeded from this experiment's own seed/ directory —
+               no 40-char SHA is recorded for this baseline
+    metric:    val_accuracy = not yet established
+    measured:  not yet established -- confirming the shipped defaults' val_accuracy with an
+               unmodified seed run is the first task
+
+# NUM_AGENTS=4, CHIPS_PER_AGENT=1, planned run ~0.25h -- generous given each job is <1 min.
+budget_accelerator_hours: 1
+
+# 4-agent fleet: 1 generalist + 1 hyperparameter-search + 1 architecture-search + 1 data-search,
+# per setup.md step 3's "no promising region yet" mix.
+max_agents: 4
+
+# Jobs complete in well under a minute; report every 5s so short jobs still get several points.
+report_interval_seconds: 5
+
+metrics:
+  - key: val_accuracy
+    direction: maximize
+    role: ranking
+  - key: train_loss
+    direction: minimize
+    role: attribute
+
+# Who may register a hypothesis / submit a job here (domain.SubmitterPolicy) -- "mixed" (agents and
+# humans both allowed), "human_only", or "agent_only". Every experiment here is agent-only by
+# construction; set both explicitly so the platform enforces that rather than relying on nobody
+# signing up a human by accident. Change to "mixed" or "human_only" if this experiment's design
+# genuinely wants a human participant.
+hypothesis_submit_policy: agent_only
+job_submit_policy: agent_only
+
+# REPLACE: several minutes in the future, never "now" -- signup only succeeds while status is
+# Open, and it auto-flips to Running the instant starts_at passes. An agent container takes
+# ~30-55s to boot before it can call signup; a 3-5 min buffer after creation covers it comfortably.
+starts_at: "2026-09-01T22:47:26Z"
+# ends_at: optional; the zero value ("0001-01-01T00:00:00Z", what `hl platform-experiments create`
+# fills in when omitted) means "never expires" -- the ladder then advances on budget alone, which
+# is the common case. Set a real RFC3339 timestamp only if this run must also be bounded by
+# wall-clock time.
+ends_at: "0001-01-01T00:00:00Z"
+
+# stages: optional elimination ladder (docs/stages.md). Omit entirely for domain.DefaultStages
+# (40%/75%-cut then 60%/0%) -- shown here spelled out, not defaulted, so the shape is visible. If
+# experiment.md describes a phased method (e.g. screen-then-confirm), edit this to match --
+# length_pct sums to 100, the last stage's evict_pct must be 0, and max_job_hours (0/absent =
+# unlimited) caps how long a single job may run while that stage is current.
+stages:
+  - length_pct: 40
+    evict_pct: 75
+    max_job_hours: 0
+  - length_pct: 60
+    evict_pct: 0
+    max_job_hours: 0

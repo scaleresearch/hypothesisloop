@@ -1,0 +1,51 @@
+# Full POST /experiments request body. id/metadata are placeholders -- overwrite hypothesis_id,
+# platform_experiment_id, agent_id, code_ref (and id) before/at submit time (see
+# controlplane/settings/examples/experiment-submission.yaml for the full DSL reference).
+id: replace-with-a-unique-job-id
+metadata:
+  agent_id: REPLACE-WITH-YOUR-AGENT-ID
+  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
+  hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID
+  project_id: ""
+  objective: "describe what this run is optimizing for"
+  theory: "your specific prediction for this run"
+  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  config_hash: ""
+  data_ref: ""
+  capacity_tier: guaranteed
+  estimated_duration_hours: 0.25
+job:
+  # Config-only starting point: train.py entrypoint, every hyperparameter an env var (see
+  # experiment.md's "USE seed/train.py" section). This is the fast path -- no build, no source
+  # checkout -- swap OPT_NAME/OPT_LR/etc below for a sweep; only a change to optimizers.py itself
+  # needs a code_ref that isn't this seed's own commit.
+  image: localhost:5000/hypothesisloop-shampoo-family-optimizers-workload:latest
+
+  command: ["python3", "train.py"]
+  env:
+    OPT_NAME: adamw
+    OPT_LR: "1e-3"
+    OPT_PRECOND_FREQ: "10"
+    BATCH_SIZE: "1024"
+    STEPS: "3000"
+    TARGET_LOSS: "0.012"
+    SEED: "0"
+    TRAIN_DEVICE: cpu
+    DATA_DIR: /tmp/fashion-mnist
+    REPORT_EVERY_STEPS: "25"
+
+  # Optimizer math (matrix roots/eigendecomps) runs CPU-side always; forward/backward for this
+  # tiny ~470k-param model is also CPU-bound today (see experiment.md TENSTORRENT INTEGRATION
+  # STATUS) -- generous CPU/memory, modest storage (no checkpoints, dataset auto-downloads to
+  # /tmp and is <100MB). accelerator_count is still 1 so every job occupies real hardware capacity
+  # the same way every other experiment on this cluster does, and so a future --device tt run
+  # needs no job.yaml change once the ttnn forward/backward wiring lands.
+  cpu: "4"
+  memory: "8Gi"
+  storage: "2Gi"
+  max_retries: 3
+
+  accelerator_count: 1
+  accelerator_type: tenstorrent.com/chipArch=blackhole
+  accelerator_pod_resources:
+    hugepages-1Gi: 4Gi

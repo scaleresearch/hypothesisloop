@@ -91,10 +91,13 @@ vendor/
 
 # Experiment working clones: each is its own upstream git repo (source, datasets,
 # vendored toolchains) cloned in place, not content of this repo. Only template,
-# dummy-tt-matmul, and sparse-sdpa are tracked as reference/example experiments.
+# dummy-tt-matmul, dummy-data-search-demo, sparse-sdpa, and shampoo-family-optimizers are
+# tracked as reference/example/active experiments.
 agents/coordinator/experiments/*/
 !agents/coordinator/experiments/template/
 !agents/coordinator/experiments/dummy-tt-matmul/
+!agents/coordinator/experiments/dummy-data-search-demo/
 !agents/coordinator/experiments/sparse-sdpa/
+!agents/coordinator/experiments/shampoo-family-optimizers/
 controlplane/settings/.hypothesisloop.rendered.yaml
 localdev/.registry-host-ip

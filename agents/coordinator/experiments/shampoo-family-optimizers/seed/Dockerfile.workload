@@ -1,0 +1,26 @@
+# Same base as dummy-tt-matmul: Tenstorrent's own official tt-metal/ttnn release build, confirmed
+# working against this cluster's Blackhole cards. This experiment's optimizer comparison itself
+# runs entirely on CPU (see experiment.md's TENSTORRENT INTEGRATION STATUS -- no eigh/matrix-power
+# op exists on-device), but the job still runs inside this image so a future ttnn forward/backward
+# wiring is a train.py change, not a new image family, and so `--device tt`'s ttnn import check in
+# train.py has something real to check against.
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0
+
+# Same single-ASIC-of-a-p300-board mesh workaround as dummy-tt-matmul/seed/Dockerfile.train --
+# ttnn's default fabric init expects both chips of a p300 board; one DRA-allocated device sees
+# only one. Only exercised once --device tt's forward/backward wiring lands (see experiment.md);
+# harmless to set now.
+ENV TT_MESH_GRAPH_DESC_PATH=/opt/venv/lib/python3.10/site-packages/ttnn/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto
+
+# No pip in this venv (uv-managed) -- `uv pip install --python ...` is the working invocation
+# (confirmed by sparse-sdpa/dummy-tt-matmul). CPU-only torch index: the release image has no CUDA
+# and the default PyPI index resolves a multi-GB CUDA build even with no GPU present. torchvision
+# for Fashion-MNIST loading/download.
+RUN uv pip install --python /opt/venv/bin/python3 --index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision
+
+WORKDIR /app
+
+COPY optimizers.py train.py metrics.py loglines.py .
+
+ENTRYPOINT ["python3", "train.py"]

@@ -123,6 +123,24 @@ func (s *PlatformExperimentsStore) GetPlatformExperimentSubmitPolicies(ctx conte
 	return domain.SubmitterPolicy(h), domain.SubmitterPolicy(j), true, nil
 }
 
+// GetPlatformExperimentMetrics is a narrow read of just the declared MetricDefinitions, used to
+// tell a ranking metric's direction apart from a constraint or attribute one (registry.Service's
+// underperformance check) without pulling the whole row through that service's Store interface.
+func (s *PlatformExperimentsStore) GetPlatformExperimentMetrics(ctx context.Context, id string) (metrics []domain.MetricDefinition, found bool, err error) {
+	const q = `SELECT metrics FROM platform_experiments WHERE id = $1`
+	var raw []byte
+	if err := s.pool.pool.QueryRow(ctx, q, id).Scan(&raw); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("platform_experiments_store.GetPlatformExperimentMetrics: %w", err)
+	}
+	if err := json.Unmarshal(raw, &metrics); err != nil {
+		return nil, false, fmt.Errorf("platform_experiments_store.GetPlatformExperimentMetrics: unmarshal metrics: %w", err)
+	}
+	return metrics, true, nil
+}
+
 // PlatformExperimentsFilter constrains ListPlatformExperiments/CountPlatformExperiments.
 // Zero values are ignored.
 type PlatformExperimentsFilter struct {

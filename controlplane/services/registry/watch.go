@@ -240,9 +240,11 @@ func (h *WatchHandler) Start(ctx context.Context) {
 }
 
 // ServeHTTP upgrades to a WebSocket and streams events: first everything missed since the
-// caller's cursor, then everything as it happens. The subscription is opened before the replay
-// runs, so an event committed between the two is buffered rather than lost — which is what makes
-// a dropped connection a delay and never a gap.
+// caller's cursor, then everything as it happens. A caller with no cursor (`since` omitted or 0)
+// gets the current snapshot of everything its filter admits, so watching a job that is already
+// terminal answers immediately instead of waiting on a live event that will never come. The
+// subscription is opened before the replay runs, so an event committed between the two is
+// buffered rather than lost — which is what makes a dropped connection a delay and never a gap.
 //
 // Exactly one thing may be sent up this socket, and it is not a command to the platform: a client
 // may inspect and re-scope ITS OWN subscription — see watchControl. That touches nothing but the
@@ -406,9 +408,10 @@ type watchFrame struct {
 // overlap between that replay and what the widened filter has been buffering is removed by the
 // same per-kind floor that removes it at handshake time.
 //
-// The honest limits, and they are the ones already true of this stream: a connection opened with
-// no cursor (`since=0`) claimed no history, so widening it starts the added kinds live; and
-// metric.point has no rows behind it, so widening onto it can only ever start live.
+// The honest limit here is metric.point and job.underperforming: neither has a row behind it, so
+// widening onto either can only ever start live. Every other kind widens the same way a fresh
+// connection opens -- a connection that carried no floor for it yet is treated as `since=0`,
+// which Replay answers with that kind's current snapshot, not silence.
 func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subscriber, payload []byte, delivered map[string]int64) error {
 	var control watchControl
 	if err := json.Unmarshal(payload, &control); err != nil {
@@ -503,6 +506,9 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 			"with the ordinary GET when you want detail.\n\n" +
 			"Scope a subscription with `platform_experiment_id` or `experiment_id` (one is required), narrow it with " +
 			"`agent` and a comma-separated `kinds`, and resume it with `since=<cursor of the last event you saw>`. " +
+			"Omit `since` (or pass 0) and you get the current snapshot of everything your filter admits before going " +
+			"live — watching a job that already finished answers right away instead of waiting on an event that will " +
+			"never come. " +
 			"An `agent` filter narrows only the kinds marked agent_owned below; shared kinds still reach you whoever " +
 			"wrote them. An unknown kind is refused rather than ignored.\n\n" +
 			"Omit `kinds` and you get every kind marked `default` below — everything an agent's loop would otherwise " +

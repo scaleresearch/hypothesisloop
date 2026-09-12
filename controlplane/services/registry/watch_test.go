@@ -39,8 +39,8 @@ func newFakeEvents(stored ...db.Event) *fakeEvents {
 
 func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int64) ([]db.Event, error) {
 	var out []db.Event
-	if since <= 0 {
-		return nil, nil
+	if since < 0 {
+		since = 0
 	}
 	for _, e := range f.stored {
 		if e.Cursor > since && filter.Matches(e) {
@@ -234,6 +234,25 @@ func TestAReconnectWithTheLastCursorReplaysExactlyTheEventsMissedWhileDisconnect
 	source.live <- statusEvent("exp-1", "COMPLETED", "agent-a", 400)
 	if got := client.next(t).Value; got != "COMPLETED" {
 		t.Errorf("live status after replay: got = %v, want = %v", got, "COMPLETED")
+	}
+}
+
+// A client with no cursor at all is not asking to skip history -- it has none to give. Treating
+// that the same as an empty subscription used to mean watching a job that was already terminal
+// got nothing but pings until the client's own timeout, because a finished job emits no further
+// live event. since=0 must answer with the current snapshot, exactly as if the caller's cursor
+// predated every row it matches.
+func TestNoCursorAtAllGetsTheCurrentSnapshotInsteadOfWaitingOnALiveEventThatWillNeverCome(t *testing.T) {
+	source := newFakeEvents(
+		statusEvent("exp-1", "COMPLETED", "agent-a", 300),
+	)
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+	})
+
+	if got := client.next(t).Value; got != "COMPLETED" {
+		t.Fatalf("snapshot on connect with no cursor: got = %v, want = %v", got, "COMPLETED")
 	}
 }
 

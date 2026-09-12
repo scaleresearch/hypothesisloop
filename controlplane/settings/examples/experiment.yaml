@@ -63,3 +63,14 @@ metrics:
 #     max_job_hours: 0.5
 #   - length_pct: 60
 #     evict_pct: 0
+
+# To create several platform experiments in one call, wrap entries in an experiments: list --
+# one POST /platform-experiments per entry, fields above the list default onto entries that don't
+# set their own:
+#
+# experiments:
+#   - name: my-first-platform-experiment
+#     description: what this one is investigating
+#   - name: my-second-platform-experiment
+#     description: what this other one is investigating
+#     budget_accelerator_hours: 20 # overrides the shared default above

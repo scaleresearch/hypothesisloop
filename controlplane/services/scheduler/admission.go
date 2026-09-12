@@ -123,6 +123,11 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries is required and must be non-negative"}
 	}
+	switch exp.CapacityTier {
+	case "", domain.CapacityGuaranteed, domain.CapacityBurst:
+	default:
+		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("capacity_tier must be %q, %q, or omitted, got %q", domain.CapacityGuaranteed, domain.CapacityBurst, exp.CapacityTier)}
+	}
 
 	// AcceleratorCount == 0 is a legitimate CPU-only job as long as it requests positive CPU —
 	// zero accelerators and no CPU requests nothing at all. An accelerator job must name a type,

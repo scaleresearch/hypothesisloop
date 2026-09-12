@@ -1,0 +1,8 @@
+# Job image for dummy-data-search-demo: pure numpy, no accelerator runtime needed at all — the
+# accelerator_type in job.yaml is a fake type (nvidia.com/gpu.product=NVIDIA-L40) purely to
+# exercise real scheduling/quota, not because the workload touches a device.
+FROM python:3.13-slim
+RUN pip install --no-cache-dir numpy
+WORKDIR /app
+COPY train.py .
+ENTRYPOINT ["python3", "train.py"]

@@ -1,0 +1,4 @@
+# dummy-data-search-demo has nothing extra for the agent to read (config-only numpy task, no
+# framework source pin) -- this overlay exists only so `make experimentator-image` has a file to
+# build, per experiment-checklist.md item 1.
+FROM localhost/hypothesisloop-experimentator-base

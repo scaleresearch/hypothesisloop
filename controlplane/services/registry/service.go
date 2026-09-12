@@ -25,6 +25,10 @@ type Store interface {
 	// HypothesisSubmitPolicy/JobSubmitPolicy, used to gate RegisterHypothesis without pulling
 	// the full row through this interface. found=false means id does not exist.
 	GetPlatformExperimentSubmitPolicies(ctx context.Context, platformExperimentID string) (hypothesisPolicy, jobPolicy domain.SubmitterPolicy, found bool, err error)
+	// GetPlatformExperimentMetrics is a narrow read of a platform experiment's declared
+	// MetricDefinitions, used by the underperformance check to find the ranking metric's
+	// direction without pulling the full row through this interface.
+	GetPlatformExperimentMetrics(ctx context.Context, platformExperimentID string) (metrics []domain.MetricDefinition, found bool, err error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*db.HypothesisListItem, error)
 	CountHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus) (int, error)

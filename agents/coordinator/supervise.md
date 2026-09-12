@@ -15,6 +15,17 @@ Every 5-10 min at first, widen once behavior looks steady.
 - `podman ps` / `$API_URL` job status — stuck/crashed containers, pending jobs (capacity
   starvation, image pull failure).
 
+## Revisit the flavor mix at stage boundaries
+
+`setup.md` step 3 is not a one-time decision — every `GET .../stages` poll that shows a stage
+boundary crossed (or a hypothesis newly `confirmed` with a clear metric lead) is also a checkpoint
+to ask whether the *next* wave of agents should still be spawned with the same flavor mix. Broad
+(`generalist` + one of each targeted flavor) while no region is promising yet; narrowed toward
+whichever axis the pool's own findings say is winning once one is. This never touches an agent
+already running — it only changes what flavor the next `podman run` uses — so check the pool
+before every new wave, not just at kickoff, and log the mix and its reasoning in `$FINDINGS_FILE`
+each time it changes, the same way the initial mix is logged.
+
 ## When something actually blocks research
 
 Not a style nit, not a hypothetical. Go to `setup.md`'s "Fixing a blocker" section and fix it

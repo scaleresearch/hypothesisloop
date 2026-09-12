@@ -1,0 +1,83 @@
+# Platform-experiment template for a new experiment under agents/coordinator/experiments/<name>/.
+# Copy this file into your experiment's own directory as experiment.yaml and fill in the
+# REPLACE-WITH-... placeholders before running `hl platform-experiments create experiment.yaml`
+# (setup.md step 2) -- nothing here can be known ahead of time (budget depends on NUM_AGENTS *
+# CHIPS_PER_AGENT * planned_run_hours, decided at spawn time; starts_at must be several minutes in
+# the future, decided at creation time). Every field the schema accepts is shown below, uncommented
+# -- delete an optional one only once you've deliberately decided you don't want it, never because
+# you didn't know it existed. See controlplane/settings/examples/experiment.yaml for prose on each
+# and controlplane/services/quota/platform_experiments.go (CreatePlatformExperimentRequest) for the
+# authoritative schema.
+name: REPLACE-WITH-EXPERIMENT-NAME
+# `description` MUST be this experiment's experiment.md `EXPERIMENT DESCRIPTION` block, verbatim
+# -- it is the only thing agents read about the objective (see setup.md step 2, "Description sync
+# is not optional, ever"). Paste it in here (YAML block scalar keeps it readable):
+description: |
+  REPLACE-WITH-THE-EXPERIMENT.MD-"EXPERIMENT DESCRIPTION"-BLOCK-VERBATIM
+
+# REPLACE: NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours -- not a round number, or quota
+# throttles the fleet mid-run. Count every agent you will launch here.
+budget_accelerator_hours: 0
+# Accelerator-hours is the only budgeted dimension -- CPU/RAM/storage are hard
+# physical-fit-checked at admission, never hours-budgeted.
+
+# REPLACE: the size of the ranked field -- every agent that signs up competes and counts against
+# it.
+max_agents: 0
+
+# REPLACE: the cadence the harness actually reports metrics at.
+report_interval_seconds: 10
+
+# REPLACE (at least the key): {key, direction, role?, bound?}[]. role (domain.MetricRole) defaults
+# to "ranking" when omitted:
+#   ranking    -- counts for stage cuts and standings; needs `direction` ("maximize"/"minimize").
+#   constraint -- must be reported and must satisfy `bound`; a job that violates it is evicted, but
+#                 it never ranks or cuts on its own.
+#   attribute  -- reported and shown, never ranked, cut, or bound-checked.
+# A job whose workload doesn't push one of these keys contributes no admission/leaderboard data.
+metrics:
+  - key: REPLACE-WITH-RANKING-METRIC-KEY
+    direction: maximize # or minimize
+    role: ranking
+  # Delete these two if this experiment has no hard constraint / no extra attribute to record —
+  # they're here so both roles are visible, not because every experiment needs them. `direction`
+  # is required on every metric regardless of role (domain.ValidateMetricDefinitions), even though
+  # only a ranking metric's direction actually orders anything.
+  - key: REPLACE-WITH-CONSTRAINT-METRIC-KEY-OR-DELETE-THIS-ENTRY
+    direction: minimize
+    role: constraint
+    bound: 0 # violating this evicts the job
+  - key: REPLACE-WITH-ATTRIBUTE-METRIC-KEY-OR-DELETE-THIS-ENTRY
+    direction: maximize
+    role: attribute
+
+# Who may register a hypothesis / submit a job here (domain.SubmitterPolicy) -- "mixed" (agents and
+# humans both allowed), "human_only", or "agent_only". Every experiment here is agent-only by
+# construction; set both explicitly so the platform enforces that rather than relying on nobody
+# signing up a human by accident. Change to "mixed" or "human_only" if this experiment's design
+# genuinely wants a human participant.
+hypothesis_submit_policy: agent_only
+job_submit_policy: agent_only
+
+# REPLACE: several minutes in the future, never "now" -- signup only succeeds while status is
+# Open, and it auto-flips to Running the instant starts_at passes. An agent container takes
+# ~30-55s to boot before it can call signup; a 3-5 min buffer after creation covers it comfortably.
+starts_at: "REPLACE-WITH-RFC3339-TIMESTAMP-A-FEW-MINUTES-FROM-NOW"
+# ends_at: optional; the zero value ("0001-01-01T00:00:00Z", what `hl platform-experiments create`
+# fills in when omitted) means "never expires" -- the ladder then advances on budget alone, which
+# is the common case. Set a real RFC3339 timestamp only if this run must also be bounded by
+# wall-clock time.
+ends_at: "0001-01-01T00:00:00Z"
+
+# stages: optional elimination ladder (docs/stages.md). Omit entirely for domain.DefaultStages
+# (40%/75%-cut then 60%/0%) -- shown here spelled out, not defaulted, so the shape is visible. If
+# experiment.md describes a phased method (e.g. screen-then-confirm), edit this to match --
+# length_pct sums to 100, the last stage's evict_pct must be 0, and max_job_hours (0/absent =
+# unlimited) caps how long a single job may run while that stage is current.
+stages:
+  - length_pct: 40
+    evict_pct: 75
+    max_job_hours: 0
+  - length_pct: 60
+    evict_pct: 0
+    max_job_hours: 0

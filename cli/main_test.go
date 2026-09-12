@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -169,6 +170,158 @@ func TestHypothesisSubmitAndList(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "H2 dissociates faster at high T") {
 		t.Fatalf("submitted text did not round-trip through list: %s", stdout.String())
+	}
+}
+
+func TestHypothesisSubmitManyFromYAMLList(t *testing.T) {
+	var submittedBodies []map[string]string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/hypotheses":
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			submittedBodies = append(submittedBodies, body)
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": fmt.Sprintf("hyp-%d", len(submittedBodies)), "text": body["text"]})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	setAPIURL(t, url)
+
+	dir := t.TempDir()
+	file := dir + "/hypotheses.yaml"
+	yamlContent := "agent_id: jane\n" +
+		"platform_experiment_id: pe-1\n" +
+		"hypotheses:\n" +
+		"  - text: idea one\n" +
+		"  - text: idea two\n" +
+		"    agent_id: bob\n"
+	if err := os.WriteFile(file, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "submit", "--file", file}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(submittedBodies) != 2 {
+		t.Fatalf("expected 2 POSTs, got %d: %+v", len(submittedBodies), submittedBodies)
+	}
+	if submittedBodies[0]["text"] != "idea one" || submittedBodies[0]["agent_id"] != "jane" {
+		t.Fatalf("item 0 unexpected: %+v", submittedBodies[0])
+	}
+	if submittedBodies[1]["text"] != "idea two" || submittedBodies[1]["agent_id"] != "bob" {
+		t.Fatalf("item 1 (override) unexpected: %+v", submittedBodies[1])
+	}
+	if !strings.Contains(stdout.String(), "idea one") || !strings.Contains(stdout.String(), "idea two") {
+		t.Fatalf("stdout missing both results: %s", stdout.String())
+	}
+}
+
+func TestHypothesisSubmitManyFromBareYAMLList(t *testing.T) {
+	var submittedBodies []map[string]string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		submittedBodies = append(submittedBodies, body)
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": fmt.Sprintf("hyp-%d", len(submittedBodies))})
+	})
+	setAPIURL(t, url)
+
+	dir := t.TempDir()
+	file := dir + "/hypotheses.yaml"
+	yamlContent := "- agent_id: jane\n" +
+		"  platform_experiment_id: pe-1\n" +
+		"  text: idea one\n" +
+		"- agent_id: jane\n" +
+		"  platform_experiment_id: pe-1\n" +
+		"  text: idea two\n"
+	if err := os.WriteFile(file, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "submit", "--file", file}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(submittedBodies) != 2 {
+		t.Fatalf("expected 2 POSTs, got %d: %+v", len(submittedBodies), submittedBodies)
+	}
+}
+
+func TestHypothesisSubmitFileMissingFieldReportsItemIndex(t *testing.T) {
+	// Item 0 is valid and submits fine before item 1's missing text is caught.
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "hyp-1"})
+	})
+	setAPIURL(t, url)
+
+	dir := t.TempDir()
+	file := dir + "/hypotheses.yaml"
+	yamlContent := "agent_id: jane\n" +
+		"platform_experiment_id: pe-1\n" +
+		"hypotheses:\n" +
+		"  - text: idea one\n" +
+		"  - agent_id: bob\n" // missing text
+	if err := os.WriteFile(file, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "submit", "--file", file}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "item 1") {
+		t.Fatalf("expected error to name item 1, got: %s", stderr.String())
+	}
+}
+
+func TestPlatformExperimentsCreateManyFromYAMLList(t *testing.T) {
+	var submittedBodies []map[string]any
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		submittedBodies = append(submittedBodies, body)
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": fmt.Sprintf("pe-%d", len(submittedBodies))})
+	})
+	setAPIURL(t, url)
+
+	dir := t.TempDir()
+	file := dir + "/experiments.yaml"
+	yamlContent := "budget_accelerator_hours: 10\n" +
+		"experiments:\n" +
+		"  - name: first\n" +
+		"  - name: second\n" +
+		"    budget_accelerator_hours: 20\n"
+	if err := os.WriteFile(file, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"platform-experiments", "create", file}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(submittedBodies) != 2 {
+		t.Fatalf("expected 2 POSTs, got %d: %+v", len(submittedBodies), submittedBodies)
+	}
+	if submittedBodies[0]["name"] != "first" || submittedBodies[0]["budget_accelerator_hours"] != float64(10) {
+		t.Fatalf("item 0 unexpected: %+v", submittedBodies[0])
+	}
+	if submittedBodies[1]["name"] != "second" || submittedBodies[1]["budget_accelerator_hours"] != float64(20) {
+		t.Fatalf("item 1 (override) unexpected: %+v", submittedBodies[1])
+	}
+	for i, body := range submittedBodies {
+		if body["starts_at"] == nil || body["ends_at"] == nil {
+			t.Fatalf("item %d missing defaulted starts_at/ends_at: %+v", i, body)
+		}
 	}
 }
 

@@ -96,7 +96,189 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 		return fmt.Errorf("registry.RecordMetric: %w", err)
 	}
 	s.notifyMetricArrived(ctx, experimentID, exp.PlatformExperimentID, exp.AgentID, metricName, fractionComplete)
+	s.checkUnderperformance(ctx, exp, metricName, fractionComplete, value, at)
 	return nil
+}
+
+const (
+	// underperformCheckpointWidth throttles the cohort comparison to roughly every 10% of
+	// progress instead of every sample. It costs one range query against the metrics store, so
+	// running it on every high-cadence sample would turn a reactive check into the metrics
+	// store's biggest caller; a job reports fraction_complete monotonically, so checkpoints
+	// this coarse are still frequent enough to catch a stretch of underperformance early.
+	underperformCheckpointWidth = 0.1
+	underperformCheckpointEps   = 0.01
+	// underperformMinFraction skips the noisiest part of a run, where one or two early samples
+	// can rank last by chance alone.
+	underperformMinFraction = 0.2
+	// underperformCohortMinSize is how many *other* jobs must have reported for the comparison
+	// to mean anything; a "cohort" of one sibling is a coin flip, not a signal.
+	underperformCohortMinSize = 3
+	// underperformSeparation is how far below the cohort's worst-of-the-rest a job must fall,
+	// expressed as a fraction of the cohort's own spread (best minus worst-of-the-rest), before
+	// it is called out. This is scale-free — it never assumes what units the metric is in — and
+	// it demands the job be clearly cut off from the pack, not merely last by a hair.
+	underperformSeparation = 0.25
+	// underperformSiblingStaleness bounds how old a sibling's last-reported value may be and
+	// still count toward the cohort. Without this, a 24h-lookback comparison could rank a live
+	// job against a sibling that finished or stalled an hour ago — a different phase of the run,
+	// not a fair comparison of "right now."
+	underperformSiblingStaleness = 15 * time.Minute
+)
+
+// checkUnderperformance looks at how this job's just-recorded ranking-metric sample compares to
+// its cohort (every other job in the same platform experiment reporting the same metric) and, if
+// it just became the clear straggler, tells only the owning agent so — once per stretch of
+// trailing, never persisted, never a command. See db.EventJobUnderperforming.
+//
+// Nothing here is retained between calls: both "is this job trailing now" and "was it trailing
+// as of its own previous sample" are recomputed fresh from the metrics store every time, which is
+// what keeps this stateless. An in-memory cooldown map would need to survive a process restart
+// and would go stale exactly the way important.md's "no caches / in-ram state" rule warns
+// about; recomputing the edge from data already sitting in a store that is "assumed to answer in
+// real time" costs a couple of extra points read, not a duplicated source of truth.
+//
+// One honest cost of that choice, found running this live against a real GreptimeDB: the query
+// this runs is issued the instant after this same call wrote its own sample, and remote-write
+// ingestion is not synchronous — a sibling's (or this job's own previous) very recent point can
+// still be invisible to the very next query. When that happens this silently sees a smaller, or
+// staler, cohort than actually exists and may under-fire for a checkpoint it should have flagged.
+// That is the safe direction to fail in: a missed advisory costs nothing an agent wasn't already
+// going to find out about at the next checkpoint, while over-firing on a query that raced its own
+// write would be the false positive this whole design exists to avoid. Not fixed here because
+// fixing it means either waiting on the store (turning a reactive check into a blocking one) or
+// caching the very state this function is built specifically not to retain.
+func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experiment, metricName string, fractionComplete, value float64, at time.Time) {
+	if s.events == nil || exp.PlatformExperimentID == "" {
+		return
+	}
+	if fractionComplete < underperformMinFraction {
+		return
+	}
+	// Only evaluate near a checkpoint (see underperformCheckpointWidth) — this is the throttle,
+	// derived purely from the sample itself, not from anything remembered about earlier ones.
+	if rem := math.Mod(fractionComplete, underperformCheckpointWidth); rem > underperformCheckpointEps && rem < underperformCheckpointWidth-underperformCheckpointEps {
+		return
+	}
+
+	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, exp.PlatformExperimentID)
+	if err != nil || !found {
+		return
+	}
+	var direction string
+	for _, m := range metrics {
+		if m.Key == metricName && m.EffectiveRole() == domain.MetricRoleRanking {
+			direction = m.Direction
+			break
+		}
+	}
+	if direction == "" {
+		// Not a ranking metric (or not declared at all) — nothing to rank it against.
+		return
+	}
+
+	// A short lookback, not the dashboard's 24h: GetPlatformExperimentTimeseries resamples onto a
+	// lookback/500 grid, and 24h makes that grid ~173s wide. At that width the "previous" self
+	// point this check reads back can be a carried-forward copy of the value it is checking right
+	// now (same value, an earlier grid timestamp) rather than a genuinely earlier sample — which
+	// silently treats every first checkpoint of a trailing stretch as a continuation of one that
+	// never happened. A lookback sized to underperformSiblingStaleness keeps the grid close enough
+	// to real sample timestamps for that edge to be trustworthy, at the same query cost.
+	series, err := s.GetPlatformExperimentTimeseries(ctx, exp.PlatformExperimentID, metricName, underperformSiblingStaleness+5*time.Minute)
+	if err != nil {
+		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
+		return
+	}
+
+	score := func(v float64) float64 {
+		if direction == "minimize" {
+			return -v
+		}
+		return v
+	}
+
+	var siblingScores []float64
+	var prevSelfScore float64
+	havePrevSelf := false
+	for _, s := range series {
+		if s.ExperimentID == exp.ID {
+			// Exclude exactly the sample this call is checking, by its own write time, not an
+			// arbitrary window — two checkpoints written a second apart are still two distinct
+			// checkpoints, and a coarse "last N seconds" cutoff would wrongly discard the older
+			// one as "too recent" and leave the edge-check with nothing to compare against.
+			for i := len(s.Points) - 1; i >= 0; i-- {
+				if s.Points[i].Timestamp.Before(at) {
+					prevSelfScore = score(s.Points[i].Value)
+					havePrevSelf = true
+					break
+				}
+			}
+			continue
+		}
+		if len(s.Points) == 0 {
+			continue
+		}
+		last := s.Points[len(s.Points)-1]
+		// A sibling that stopped reporting a while ago is comparing a different phase of the
+		// run, not the same moment — a job that finished strong an hour ago is not evidence this
+		// one is trailing right now. Silence itself is a separate, already-handled concern
+		// (report_interval_seconds/silent-eviction); this check only compares live cohorts.
+		if time.Since(last.Timestamp) > underperformSiblingStaleness {
+			continue
+		}
+		siblingScores = append(siblingScores, score(last.Value))
+	}
+	if len(siblingScores) < underperformCohortMinSize {
+		return
+	}
+
+	trails := func(selfScore float64) bool {
+		best, worst := siblingScores[0], siblingScores[0]
+		for _, v := range siblingScores[1:] {
+			if v > best {
+				best = v
+			}
+			if v < worst {
+				worst = v
+			}
+		}
+		if selfScore >= worst {
+			return false
+		}
+		// The margin is normally a fraction of the cohort's own spread — scale-free, and blind
+		// to a cohort that is simply close together by nature of the metric. But a cohort
+		// reporting the exact same value (spread == 0) has no spread to take a fraction of, and
+		// dividing by zero there would flag any nonzero gap at all, however negligible. Scale off
+		// the cohort's own value instead in that case, so a tied cohort still needs a real,
+		// proportionate gap before it calls one job out.
+		margin := underperformSeparation * (best - worst)
+		if margin <= 0 {
+			margin = underperformSeparation * math.Abs(worst)
+		}
+		return worst-selfScore >= margin
+	}
+
+	if !trails(score(value)) {
+		return
+	}
+	if havePrevSelf && trails(prevSelfScore) {
+		// Already trailing as of the previous checkpoint — this is the same stretch, not a new
+		// one. Fire once per stretch, on the transition into it, not on every sample inside it.
+		return
+	}
+
+	err = s.events.NotifyEvent(ctx, db.Event{
+		Kind:                 db.EventJobUnderperforming,
+		Subject:              exp.ID,
+		Value:                metricName,
+		Detail:               "trailing its cohort on this ranking metric",
+		PlatformExperimentID: exp.PlatformExperimentID,
+		AgentID:              exp.AgentID,
+		Cursor:               db.NewCursor(time.Now().UTC()),
+	})
+	if err != nil {
+		s.logger.Warn("registry: notify underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
+	}
 }
 
 // notifyMetricArrived tells subscribers that a sample landed, and tells them nothing about it

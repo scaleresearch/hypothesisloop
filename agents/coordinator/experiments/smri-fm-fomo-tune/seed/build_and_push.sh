@@ -17,7 +17,11 @@
 # it normally, no per-machine import step left to forget.
 set -euo pipefail
 
-REGISTRY="${REGISTRY:-localhost:5000}"
+# localhost:5000 resolves on the coordinator's own host but NOT inside a cluster node's network
+# namespace (k3s node registries.yaml mirrors the host LAN IP, e.g. 192.168.1.76:5000, never
+# localhost) -- an image pushed under localhost:5000 pulls fine from here but ImagePullBackOffs on
+# every real job pod. Same rule as CODE_REPO_URL/data_store.endpoint in setup.md step 1.
+REGISTRY="${REGISTRY:?set REGISTRY to the host LAN IP:5000, e.g. 192.168.1.76:5000 -- localhost:5000 is unreachable from inside a job pod}"
 TAG="${TAG:-$(git rev-parse --short HEAD)}"
 IMAGE="${REGISTRY}/hypothesisloop-smri-fm-fomo-tune-workload:${TAG}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
