@@ -122,8 +122,15 @@ _MAX_SINGLE_SLEEP_S = 3600
 # steady" (observed costing real tokens over an 8h run once an agent finishes early -- see
 # improvements.md). Any turn that does use a tool resets the backoff immediately, since that's a
 # real reaction to new state, not idle polling.
+# Capped at 240s (under Anthropic's 5-minute default prompt-cache TTL), not 900s: once the gap
+# between turns on this connection exceeds the cache TTL, the next turn's system prompt + full
+# accumulated history is a cache MISS -- recomputed at ~10x (or ~12.5x, rewriting the cache) the
+# cost of a cache-hit turn (confirmed via Codex consult, 2026-09-11). A 900s cap meant most idle
+# turns after the 3rd-4th backoff step paid full non-cached input price on an ever-growing
+# transcript -- the actual fast (within-an-hour, not just over idle days) budget-burn cause,
+# distinct from the separately-documented "no real blocking wait exists" issue. See fix-later.md.
 _IDLE_NUDGE_BACKOFF_INITIAL_S = 15
-_IDLE_NUDGE_BACKOFF_MAX_S = 900
+_IDLE_NUDGE_BACKOFF_MAX_S = 240
 
 
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
