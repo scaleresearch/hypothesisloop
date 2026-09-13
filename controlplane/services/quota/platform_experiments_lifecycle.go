@@ -184,7 +184,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 }
 
 // Signup registers an agent for a platform experiment in a fixed role. quotaTierOverride is the
-// signup-time explicit tier override ("" defers to domain.ResolveQuotaTier's kind default).
+// signup-time explicit tier override ("" defers to the experiment's default_quota_tier policy,
+// see domain.ResolveQuotaTier).
 func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTierOverride domain.QuotaTier) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -277,7 +278,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 			// is allocated the same way and a burst-only participant's guaranteed part is moved
 			// into burst, not taken away.
 			acceleratorGuaranteed, acceleratorBurst = domain.ApplyQuotaTier(
-				domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride, pe.DefaultQuotaTier), acceleratorGuaranteed, acceleratorBurst)
+				domain.ResolveQuotaTier(p.QuotaTierOverride, pe.DefaultQuotaTier), acceleratorGuaranteed, acceleratorBurst)
 			allocated = append(allocated, &domain.AgentQuota{
 				ID:                         uuid.New().String(),
 				AgentID:                    agentID,

@@ -12,8 +12,9 @@ import (
 
 // quotaTierTestDB is eventsTestDB: the same dev database, and crucially the same installation of
 // every ADD COLUMN IF NOT EXISTS in schema.sql. These tests read columns (agents.kind,
-// experiment_signups.quota_tier) that a development database a few migrations behind will not
-// have, and without that step they fail as a missing column rather than as a wrong allocation.
+// experiment_signups.quota_tier, platform_experiments.default_quota_tier) that a development
+// database a few migrations behind will not have, and without that step they fail as a missing
+// column rather than as a wrong allocation.
 func quotaTierTestDB(t *testing.T) *Pool {
 	t.Helper()
 	return eventsTestDB(t)
@@ -45,6 +46,9 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 		// building the row itself has to resolve it too.
 		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed,
 		JobSubmitPolicy:        domain.SubmitterPolicyMixed,
+		// Left empty on purpose in most of this file: an empty DefaultQuotaTier is the legacy/
+		// unset-policy case, which ResolveQuotaTier now resolves to guaranteed for everyone (no
+		// AgentKind involved at all) — the exact case these tests exist to pin down.
 	}
 	if err := pes.CreatePlatformExperiment(context.Background(), pe); err != nil {
 		t.Fatalf("create platform experiment: got = %v, want = nil", err)
@@ -59,7 +63,7 @@ func allocateStartQuotas(peID string, budget float64, participants []StartPartic
 	out := make([]*domain.AgentQuota, 0, len(participants))
 	for _, p := range participants {
 		g, b := domain.AllocateQuota(budget, len(participants), 0, 0, cfg)
-		g, b = domain.ApplyQuotaTier(domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride, ""), g, b)
+		g, b = domain.ApplyQuotaTier(domain.ResolveQuotaTier(p.QuotaTierOverride, ""), g, b)
 		out = append(out, &domain.AgentQuota{
 			ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: peID,
 			GuaranteedAcceleratorHours: g, BurstAcceleratorHours: b, CreatedAt: time.Now().UTC(),
@@ -68,7 +72,10 @@ func allocateStartQuotas(peID string, budget float64, participants []StartPartic
 	return out
 }
 
-func TestStartGivesHumansGuaranteedQuotaAndAgentsBurstOnly(t *testing.T) {
+// The platform's actual policy: quota tier never depends on AgentKind. A human and an agent with
+// no signup-time override, on an experiment with no default_quota_tier policy set, get exactly
+// the same (guaranteed) treatment and an equal share.
+func TestStartGivesEveryParticipantGuaranteedQuotaRegardlessOfKind(t *testing.T) {
 	pool := quotaTierTestDB(t)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -87,6 +94,8 @@ func TestStartGivesHumansGuaranteedQuotaAndAgentsBurstOnly(t *testing.T) {
 
 	var seenKinds map[string]domain.AgentKind
 	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+		// StartParticipant.Kind still resolves real kinds — it is just no longer read by quota
+		// allocation. Confirm the join itself is intact even though allocateStartQuotas ignores it.
 		seenKinds = make(map[string]domain.AgentKind, len(participants))
 		for _, p := range participants {
 			seenKinds[p.AgentID] = p.Kind
@@ -110,29 +119,30 @@ func TestStartGivesHumansGuaranteedQuotaAndAgentsBurstOnly(t *testing.T) {
 	if g := byAgent[human].GuaranteedAcceleratorHours; g <= 0 {
 		t.Errorf("human guaranteed = %v, want > 0", g)
 	}
-	if g := byAgent[agent].GuaranteedAcceleratorHours; g != 0 {
-		t.Errorf("agent guaranteed = %v, want 0 — agents are burst-only", g)
+	if g := byAgent[agent].GuaranteedAcceleratorHours; g <= 0 {
+		t.Errorf("agent guaranteed = %v, want > 0 — quota tier no longer depends on AgentKind", g)
 	}
-	if b := byAgent[agent].BurstAcceleratorHours; b <= 0 {
-		t.Errorf("agent burst = %v, want > 0 — the agent's would-be guaranteed share must land here instead", b)
+	if byAgent[human].GuaranteedAcceleratorHours != byAgent[agent].GuaranteedAcceleratorHours {
+		t.Errorf("guaranteed shares = human %v, agent %v; want equal", byAgent[human].GuaranteedAcceleratorHours, byAgent[agent].GuaranteedAcceleratorHours)
 	}
 }
 
-// The feature this file is really about: a signup-time override lets one experiment mix tiers
-// however it wants, independent of AgentKind — an agent explicitly granted guaranteed quota, and
-// a human explicitly restricted to burst-only, in the same run.
-func TestSignupQuotaTierOverrideWinsOverAgentKind(t *testing.T) {
+// A signup-time override still lets one experiment mix tiers however it wants — an agent
+// explicitly restricted to burst-only, and a human explicitly restricted to burst-only, in the
+// same run — and it wins regardless of kind, exactly as it did before AgentKind was removed from
+// the resolution order.
+func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 	pool := quotaTierTestDB(t)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
-	agentGuaranteed, humanBurstOnly, pe := "agent-guar-"+suffix, "human-burst-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, agentGuaranteed, domain.AgentKindAgent)
+	agentBurstOnly, humanBurstOnly, pe := "agent-burst-"+suffix, "human-burst-"+suffix, "pe-"+suffix
+	createTestAgent(t, pool, agentBurstOnly, domain.AgentKindAgent)
 	createTestAgent(t, pool, humanBurstOnly, domain.AgentKindHuman)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
-	if _, err := pes.Signup(ctx, pe, agentGuaranteed, domain.SignupRoleCompetitor, domain.QuotaTierGuaranteed); err != nil {
-		t.Fatalf("signup agent with guaranteed override: got = %v, want = nil", err)
+	if _, err := pes.Signup(ctx, pe, agentBurstOnly, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+		t.Fatalf("signup agent with burst_only override: got = %v, want = nil", err)
 	}
 	if _, err := pes.Signup(ctx, pe, humanBurstOnly, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
 		t.Fatalf("signup human with burst_only override: got = %v, want = nil", err)
@@ -149,18 +159,20 @@ func TestSignupQuotaTierOverrideWinsOverAgentKind(t *testing.T) {
 	for _, q := range quotas {
 		byAgent[q.AgentID] = q
 	}
-	if g := byAgent[agentGuaranteed].GuaranteedAcceleratorHours; g <= 0 {
-		t.Errorf("agent explicitly granted guaranteed: guaranteed = %v, want > 0 despite AgentKindAgent", g)
-	}
-	if g := byAgent[humanBurstOnly].GuaranteedAcceleratorHours; g != 0 {
-		t.Errorf("human explicitly restricted to burst_only: guaranteed = %v, want 0 despite AgentKindHuman", g)
-	}
-	if b := byAgent[humanBurstOnly].BurstAcceleratorHours; b <= 0 {
-		t.Errorf("human explicitly restricted to burst_only: burst = %v, want > 0", b)
+	for _, id := range []string{agentBurstOnly, humanBurstOnly} {
+		if g := byAgent[id].GuaranteedAcceleratorHours; g != 0 {
+			t.Errorf("%s explicitly restricted to burst_only: guaranteed = %v, want 0", id, g)
+		}
+		if b := byAgent[id].BurstAcceleratorHours; b <= 0 {
+			t.Errorf("%s explicitly restricted to burst_only: burst = %v, want > 0", id, b)
+		}
 	}
 }
 
-func TestAdvanceStageCreditsSurvivorsIntoTheTierTheirKindAllows(t *testing.T) {
+// The stage-boundary credit routes through the same tier resolution as Start, so it must give
+// both kinds of survivor the same (guaranteed) treatment; a cut agent's quota is zeroed
+// regardless of kind or tier.
+func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *testing.T) {
 	pool := quotaTierTestDB(t)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -199,11 +211,11 @@ func TestAdvanceStageCreditsSurvivorsIntoTheTierTheirKindAllows(t *testing.T) {
 	if g := quotas[humanSurvivor].guaranteed; g <= 4.0/2 {
 		t.Errorf("human survivor guaranteed after credit = %v, want > its pre-credit share (credit landed in the wrong column, or not at all)", g)
 	}
-	if g := quotas[agentSurvivor].guaranteed; g != 0 {
-		t.Errorf("agent survivor guaranteed after credit = %v, want 0 — the stage-boundary credit must never regrant guaranteed quota to an agent", g)
+	if g := quotas[agentSurvivor].guaranteed; g <= 4.0/2 {
+		t.Errorf("agent survivor guaranteed after credit = %v, want > its pre-credit share — quota tier no longer depends on AgentKind", g)
 	}
-	if b := quotas[agentSurvivor].burst; b <= 2.0 {
-		t.Errorf("agent survivor burst after credit = %v, want > its pre-credit burst (the release must land here instead)", b)
+	if quotas[humanSurvivor].guaranteed != quotas[agentSurvivor].guaranteed {
+		t.Errorf("guaranteed after credit = human %v, agent %v; want equal", quotas[humanSurvivor].guaranteed, quotas[agentSurvivor].guaranteed)
 	}
 	if g, b := quotas[cutAgent].guaranteed, quotas[cutAgent].burst; g != 0 || b != 0 {
 		t.Errorf("cut agent quota = (%v, %v), want (0, 0) — cut zeroes both columns", g, b)
@@ -235,7 +247,9 @@ func (l *AgentsQuotaLookup) byAgent(ctx context.Context, peID string, agentIDs [
 	return out, rows.Err()
 }
 
-func TestDonationToAnAgentRecipientLandsEntirelyInBurst(t *testing.T) {
+// A donation credits whatever tier the recipient's own signup resolves to — with no override and
+// no experiment policy, that is now guaranteed for a human or an agent recipient alike.
+func TestDonationToARecipientWithNoOverrideLandsInGuaranteedRegardlessOfKind(t *testing.T) {
 	pool := quotaTierTestDB(t)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -280,10 +294,75 @@ func TestDonationToAnAgentRecipientLandsEntirelyInBurst(t *testing.T) {
 		t.Fatalf("lookup quota: got = %v, want = nil", err)
 	}
 	recipient := quotas[recipientAgent]
-	if recipient.guaranteed != 0 {
-		t.Errorf("agent recipient guaranteed after donation = %v, want 0 — a human's donation must not grant an agent priority capacity", recipient.guaranteed)
+	// Pre-donation: AllocateQuota(8, 2 participants, BurstFraction=0.5) gives each a guaranteed
+	// share of 4 and a burst share of 2. A guaranteed-tier recipient is credited into BOTH
+	// columns (creditIntoTier's whole point — guaranteed and its matching burst move together,
+	// see FulfillDonationTx's own comment), so guaranteed grows by the donated 1.0 and burst by
+	// the moved 0.5: exactly what a human recipient would get under the same tier. Only a
+	// burst_only recipient (see the sibling test below) folds everything into burst instead.
+	if recipient.guaranteed != 5.0 {
+		t.Errorf("agent recipient guaranteed after donation = %v, want 5.0 (4.0 pre-donation + 1.0 donated) — quota tier no longer depends on AgentKind", recipient.guaranteed)
 	}
-	if recipient.burst <= 4.0 { // pre-donation burst share was ~4 (8 AccH / 2 participants), donation adds 1.5 more
-		t.Errorf("agent recipient burst after donation = %v, want it to have grown by the full donated amount", recipient.burst)
+	if recipient.burst != 2.5 {
+		t.Errorf("agent recipient burst after donation = %v, want 2.5 (2.0 pre-donation + 0.5 moved alongside the guaranteed credit)", recipient.burst)
+	}
+}
+
+// A recipient explicitly signed up burst_only still gets the donation entirely in burst, whether
+// human or agent — the override is what decides this, never AgentKind.
+func TestDonationToABurstOnlyRecipientLandsEntirelyInBurstRegardlessOfKind(t *testing.T) {
+	pool := quotaTierTestDB(t)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	donorHuman, recipientAgent, pe := "donor-"+suffix, "recipient-"+suffix, "pe-"+suffix
+	createTestAgent(t, pool, donorHuman, domain.AgentKindHuman)
+	createTestAgent(t, pool, recipientAgent, domain.AgentKindAgent)
+	createTestPE(t, pool, pe, 10)
+
+	pes := NewPlatformExperimentsStore(pool)
+	if _, err := pes.Signup(ctx, pe, donorHuman, domain.SignupRoleCompetitor, ""); err != nil {
+		t.Fatalf("signup %s: got = %v, want = nil", donorHuman, err)
+	}
+	if _, err := pes.Signup(ctx, pe, recipientAgent, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+		t.Fatalf("signup %s with burst_only override: got = %v, want = nil", recipientAgent, err)
+	}
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+		return allocateStartQuotas(pe, 8, participants), nil
+	})
+	if err != nil || !started {
+		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
+	}
+
+	donationID := uuid.New().String()
+	if _, err := pool.pool.Exec(ctx,
+		`INSERT INTO donation_requests (id, agent_id, platform_experiment_id, credits_want, reason, status, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, 'test', 'open', now(), now())`,
+		donationID, recipientAgent, pe, 1.0,
+	); err != nil {
+		t.Fatalf("insert donation request: got = %v, want = nil", err)
+	}
+
+	fulfilled, err := pes.FulfillDonationTx(ctx, donationID, donorHuman, recipientAgent, pe,
+		domain.ResourceAcceleratorHours, 1.0, 0.5,
+		func(context.Context) (*domain.AgentQuota, error) {
+			return &domain.AgentQuota{AgentID: donorHuman, PlatformExperimentID: pe}, nil // zero observed usage
+		})
+	if err != nil || !fulfilled {
+		t.Fatalf("fulfill donation: got = (%v, %v), want = (true, nil)", fulfilled, err)
+	}
+
+	quotas, err := (&AgentsQuotaLookup{pool: pool}).byAgent(ctx, pe, []string{recipientAgent})
+	if err != nil {
+		t.Fatalf("lookup quota: got = %v, want = nil", err)
+	}
+	recipient := quotas[recipientAgent]
+	// Pre-donation: AllocateQuota(8, 2 participants, BurstFraction=0.5) gives a 4/2 guaranteed/
+	// burst split, and ApplyQuotaTier(burst_only, 4, 2) folds it entirely into burst = 6. The
+	// donation similarly folds its own 1.0 guaranteed + 0.5 burst into a single +1.5 burst credit.
+	if recipient.guaranteed != 0 {
+		t.Errorf("burst_only recipient guaranteed after donation = %v, want 0", recipient.guaranteed)
+	}
+	if recipient.burst != 7.5 {
+		t.Errorf("burst_only recipient burst after donation = %v, want 7.5 (6.0 pre-donation + 1.5 donated, fully folded)", recipient.burst)
 	}
 }

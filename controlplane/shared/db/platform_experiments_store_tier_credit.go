@@ -9,15 +9,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// participantTiers resolves each named agent's quota tier from its kind and its signup-time
-// override, on the transaction's own connection. Reading it here rather than accepting it from
-// the caller is what keeps the tier a property of the signup: a caller passing its own idea of
-// who is burst-only would eventually pass a stale one.
+// participantTiers resolves each named agent's quota tier from its signup-time override and the
+// experiment's policy, on the transaction's own connection. Reading it here rather than accepting
+// it from the caller is what keeps the tier a property of the signup: a caller passing its own
+// idea of who is burst-only would eventually pass a stale one.
 func participantTiers(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs []string) (map[string]domain.QuotaTier, error) {
 	rows, err := tx.Query(ctx, `
-SELECT s.agent_id, COALESCE(a.kind, ''), s.quota_tier, pe.default_quota_tier
+SELECT s.agent_id, s.quota_tier, pe.default_quota_tier
 FROM experiment_signups s
-LEFT JOIN agents a ON a.id = s.agent_id
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2)`, platformExpID, agentIDs)
 	if err != nil {
@@ -27,13 +26,12 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2)`, platformExpID, ag
 	out := make(map[string]domain.QuotaTier, len(agentIDs))
 	for rows.Next() {
 		var agentID string
-		var kind domain.AgentKind
 		var override domain.QuotaTier
 		var experimentDefault domain.QuotaTier
-		if err := rows.Scan(&agentID, &kind, &override, &experimentDefault); err != nil {
+		if err := rows.Scan(&agentID, &override, &experimentDefault); err != nil {
 			return nil, fmt.Errorf("participantTiers: scan: %w", err)
 		}
-		out[agentID] = domain.ResolveQuotaTier(kind, override, experimentDefault)
+		out[agentID] = domain.ResolveQuotaTier(override, experimentDefault)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("participantTiers: %w", err)

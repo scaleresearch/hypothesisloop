@@ -28,36 +28,27 @@ func TestApplyQuotaTierPreservesTotalEntitlement(t *testing.T) {
 	}
 }
 
-func TestResolveQuotaTierDefaultsByKind(t *testing.T) {
-	if got := ResolveQuotaTier(AgentKindHuman, "", ""); got != QuotaTierGuaranteed {
-		t.Errorf("human, no override: got %q, want guaranteed", got)
-	}
-	if got := ResolveQuotaTier(AgentKindAgent, "", ""); got != QuotaTierBurstOnly {
-		t.Errorf("agent, no override: got %q, want burst_only", got)
-	}
-	if got := ResolveQuotaTier(AgentKind(""), "", ""); got != QuotaTierBurstOnly {
-		t.Errorf("unrecognized kind, no override: got %q, want burst_only", got)
-	}
-	if got := ResolveQuotaTier(AgentKind("typo"), "", ""); got != QuotaTierBurstOnly {
-		t.Errorf("typo'd kind, no override: got %q, want burst_only", got)
+func TestResolveQuotaTierDefaultsToGuaranteedWithNoOverrideOrPolicy(t *testing.T) {
+	if got := ResolveQuotaTier("", ""); got != QuotaTierGuaranteed {
+		t.Errorf("no override, no experiment policy: got %q, want guaranteed", got)
 	}
 }
 
-func TestResolveQuotaTierOverrideWinsOverKind(t *testing.T) {
-	if got := ResolveQuotaTier(AgentKindAgent, QuotaTierGuaranteed, QuotaTierBurstOnly); got != QuotaTierGuaranteed {
-		t.Errorf("agent explicitly granted guaranteed: got %q, want guaranteed", got)
+func TestResolveQuotaTierOverrideWinsOverExperimentPolicy(t *testing.T) {
+	if got := ResolveQuotaTier(QuotaTierBurstOnly, QuotaTierGuaranteed); got != QuotaTierBurstOnly {
+		t.Errorf("explicit burst_only override under a guaranteed policy: got %q, want burst_only", got)
 	}
-	if got := ResolveQuotaTier(AgentKindHuman, QuotaTierBurstOnly, QuotaTierGuaranteed); got != QuotaTierBurstOnly {
-		t.Errorf("human explicitly restricted to burst_only: got %q, want burst_only", got)
+	if got := ResolveQuotaTier(QuotaTierGuaranteed, QuotaTierBurstOnly); got != QuotaTierGuaranteed {
+		t.Errorf("explicit guaranteed override under a burst_only policy: got %q, want guaranteed", got)
 	}
 }
 
-func TestResolveQuotaTierExperimentDefaultWinsOverKind(t *testing.T) {
-	if got := ResolveQuotaTier(AgentKindAgent, "", QuotaTierGuaranteed); got != QuotaTierGuaranteed {
-		t.Errorf("agent under guaranteed experiment default: got %q, want guaranteed", got)
+func TestResolveQuotaTierExperimentPolicyWinsWithNoOverride(t *testing.T) {
+	if got := ResolveQuotaTier("", QuotaTierGuaranteed); got != QuotaTierGuaranteed {
+		t.Errorf("no override, guaranteed policy: got %q, want guaranteed", got)
 	}
-	if got := ResolveQuotaTier(AgentKindHuman, "", QuotaTierBurstOnly); got != QuotaTierBurstOnly {
-		t.Errorf("human under burst_only experiment default: got %q, want burst_only", got)
+	if got := ResolveQuotaTier("", QuotaTierBurstOnly); got != QuotaTierBurstOnly {
+		t.Errorf("no override, burst_only policy: got %q, want burst_only", got)
 	}
 }
 

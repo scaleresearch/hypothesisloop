@@ -239,9 +239,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"and counted against max_agents; \"baseline\" and \"reviewer\" are neither ranked nor cut nor counted against " +
 			"max_agents, though their jobs are billed and gated identically to a competitor's. An unrecognized role is " +
 			"refused, never defaulted. quota_tier optionally overrides this signup's guaranteed-vs-burst-only split " +
-			"regardless of the agent's kind (\"guaranteed\" or \"burst_only\"); omit it to use the platform " +
-			"experiment's default_quota_tier (\"guaranteed\" for new experiments). Legacy experiments with " +
-			"no policy retain the kind default (humans guaranteed+burst, agents burst-only).",
+			"(\"guaranteed\" or \"burst_only\"), independent of whether the signup is a human or an agent — quota " +
+			"tier never depends on kind. Omit it to use the platform experiment's default_quota_tier " +
+			"(\"guaranteed\" for new experiments, and — since a legacy experiment predating that policy has no " +
+			"other fallback left — guaranteed there too).",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {

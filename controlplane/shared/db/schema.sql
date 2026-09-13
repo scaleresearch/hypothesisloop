@@ -151,7 +151,8 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
     hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed',
     job_submit_policy        TEXT NOT NULL DEFAULT 'mixed',
     -- Empty marks experiments created before this policy existed; new API-created experiments
-    -- explicitly store 'guaranteed'. ResolveQuotaTier retains kind-based behavior for empty rows.
+    -- explicitly store 'guaranteed'. ResolveQuotaTier has no kind-based fallback for empty rows
+    -- either (quota tier never depends on AgentKind) — an empty row simply resolves to guaranteed.
     default_quota_tier TEXT NOT NULL DEFAULT '',
     CONSTRAINT platform_experiments_default_quota_tier CHECK (default_quota_tier IN ('', 'guaranteed', 'burst_only')),
     CONSTRAINT platform_experiments_hypothesis_submit_policy CHECK (hypothesis_submit_policy IN ('mixed', 'human_only', 'agent_only')),

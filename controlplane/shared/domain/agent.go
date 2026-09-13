@@ -18,16 +18,16 @@ type Agent struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
-// AgentKind distinguishes a human participant from an AI agent. Scheduling and standings never
-// branch on it, but quota does: see ApplyParticipantQuotaTier.
+// AgentKind distinguishes a human participant from an AI agent. Scheduling, standings, and quota
+// (see ResolveQuotaTier) never branch on it — it exists for identity/display and submitter-policy
+// checks only. A human and an agent get exactly the same quota treatment.
 type AgentKind string
 
 const (
-	// AgentKindAgent is the default: an autonomous (typically AI) research agent. Burst-tier
-	// quota only — see ApplyParticipantQuotaTier.
+	// AgentKindAgent is the default: an autonomous (typically AI) research agent.
 	AgentKindAgent AgentKind = "agent"
 	// AgentKindHuman is a real person registered as a participant, submitting hypotheses and
-	// jobs through the same API an AI agent uses. Gets the normal guaranteed+burst split.
+	// jobs through the same API an AI agent uses.
 	AgentKindHuman AgentKind = "human"
 )
 
@@ -45,9 +45,9 @@ func ValidAgentKind(k AgentKind) bool {
 }
 
 // QuotaTier is which column of an experiment's budget a participant's share lands in: the normal
-// guaranteed+burst split, or burst-only. It is decided per signup (see ResolveQuotaTier), not
-// fixed by AgentKind — one experiment can mix guaranteed humans, burst-only agents, and agents
-// explicitly granted guaranteed quota, all at once.
+// guaranteed+burst split, or burst-only. It is decided per signup (see ResolveQuotaTier),
+// independent of AgentKind — one experiment can mix guaranteed and burst-only participants of
+// either kind, all at once.
 type QuotaTier string
 
 const (
@@ -58,8 +58,8 @@ const (
 )
 
 // ValidQuotaTierOverride reports whether s is a legal signup-time override: empty (defer to the
-// agent's kind, see ResolveQuotaTier) or one of the two named tiers. Checked at signup so a typo
-// is rejected there, not silently stored and misread as "" (kind default) forever after.
+// experiment's policy, see ResolveQuotaTier) or one of the two named tiers. Checked at signup so
+// a typo is rejected there, not silently stored and misread as "" (policy default) forever after.
 func ValidQuotaTierOverride(s string) bool {
 	switch QuotaTier(s) {
 	case "", QuotaTierGuaranteed, QuotaTierBurstOnly:
@@ -69,20 +69,22 @@ func ValidQuotaTierOverride(s string) bool {
 	}
 }
 
-// ResolveQuotaTier applies a signup's explicit override, then the experiment policy. An empty
-// experiment policy identifies a legacy row and preserves its kind-based default: humans get
-// guaranteed+burst, while everyone else gets burst-only.
-func ResolveQuotaTier(kind AgentKind, override, experimentDefault QuotaTier) QuotaTier {
+// ResolveQuotaTier applies a signup's explicit override, then the experiment's default_quota_tier
+// policy, then a fixed guaranteed default. Deliberately independent of AgentKind: a human and an
+// agent with no override on the same (or an unset-policy legacy) experiment get identical
+// treatment. An experiment created before default_quota_tier existed (empty policy, no override)
+// now also resolves to guaranteed — this intentionally changes what a future quota-affecting event
+// (a stage-boundary credit, a donation) on such an experiment would compute, since the platform no
+// longer has any kind-based tier to fall back to; it does not rewrite quota already materialized
+// by an earlier ResolveQuotaTier call (see AllocateQuota/ApplyQuotaTier call sites).
+func ResolveQuotaTier(override, experimentDefault QuotaTier) QuotaTier {
 	if override != "" {
 		return override
 	}
 	if experimentDefault != "" {
 		return experimentDefault
 	}
-	if kind == AgentKindHuman {
-		return QuotaTierGuaranteed
-	}
-	return QuotaTierBurstOnly
+	return QuotaTierGuaranteed
 }
 
 // ApplyQuotaTier is the platform's one enforcement point for where a participant's
