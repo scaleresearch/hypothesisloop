@@ -5,7 +5,7 @@ Runs on claude_agent_sdk rather than a hand-rolled ReAct loop — it's Claude Co
 library, run on our own infra (same container, same platform APIs) instead of Anthropic-hosted.
 This gives us, for free, what a hand-rolled loop had to reinvent badly: the agent loop itself, a
 real bash/file/web tool surface (no bespoke run_bash/call_api — the model just curls the platform
-API directly via the built-in Bash tool), and server-side context compaction for long runs.
+API directly via the built-in Bash tool).
 Auth: Claude subscription (Claude Code login) or
 ANTHROPIC_API_KEY, exactly as Claude Code itself resolves it.
 
@@ -77,6 +77,10 @@ def _session_file(setup: core.RunSetup) -> str:
     return os.path.join(setup.workdir, ".claude_session_id")
 
 
+def _handoff_file(setup: core.RunSetup) -> str:
+    return os.path.join(setup.workdir, ".claude_compaction_handoff")
+
+
 def _load_resume_id(setup: core.RunSetup) -> str | None:
     path = _session_file(setup)
     try:
@@ -92,6 +96,22 @@ def _save_resume_id(setup: core.RunSetup, session_id: str | None) -> None:
         return
     with open(_session_file(setup), "w") as f:
         f.write(session_id)
+
+
+def _load_handoff(setup: core.RunSetup) -> str | None:
+    try:
+        with open(_handoff_file(setup)) as f:
+            handoff = f.read().strip()
+        return handoff or None
+    except FileNotFoundError:
+        return None
+
+
+def _remove_file(path: str) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
 
 
 # Nudge sent on the same connection whenever the model ends its turn without a real stop
@@ -132,14 +152,39 @@ _MAX_SINGLE_SLEEP_S = 3600
 _IDLE_NUDGE_BACKOFF_INITIAL_S = 15
 _IDLE_NUDGE_BACKOFF_MAX_S = 240
 
+# Claude Code normally auto-compacts near its model-dependent context limit, but that path does
+# not fire reliably for this SDK's long-lived sequence of query()/receive_response() calls (the
+# production transcript reached 650K cache-read tokens with zero compact boundaries). The SDK has
+# no public compact method or context-limit option, so checkpoint into a fresh, non-resumed
+# session at a fixed ceiling. ResultMessage usage is the only free per-turn measurement available;
+# summing input/cache/output fields approximates the context carried into the next query.
+_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 400_000
+_COMPACTION_PROMPT = (
+    "We must rotate to a fresh session because this session has reached its context budget. "
+    "Produce a concise but complete handoff for the next instance of yourself: current platform "
+    "experiment state, hypotheses and evidence, actions/results so far, important files or jobs, "
+    "decisions and rejected paths, and the exact next useful steps. Do not do more research or "
+    "use tools; output only the handoff."
+)
+
+
+def _context_tokens(usage: dict | None) -> int:
+    """Best available approximation of context represented by one ResultMessage usage block."""
+    if not usage:
+        return 0
+    return sum(int(usage.get(key, 0) or 0) for key in (
+        "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens",
+    ))
+
 
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
-                            started_at: float, stop_flag: list) -> tuple[str | None, float | None]:
+                            started_at: float, stop_flag: list,
+                            initial_prompt: str | None = None,
+                            ) -> tuple[str | None, float | None, str | None]:
     """Runs one ClaudeSDKClient connection until it ends (real stop, error, or rate limit).
 
-    Returns (updated resume_id, rate_limit resets_at unix seconds or None). Raising means an
-    unexpected error the caller should back off and retry on; returning normally with
-    resets_at=None and the stop condition true means a real stop.
+    Returns (updated resume_id, rate-limit reset time, compaction handoff). A non-None handoff
+    means the caller must start a fresh session without resume=.
     """
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt,
@@ -166,13 +211,14 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     rate_limited_resets_at: float | None = None
 
     async with ClaudeSDKClient(options=options) as client:
-        first_prompt = "Continue where you left off." if resume_id else "Begin."
+        first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
         await client.query(first_prompt)
         idle_nudge_backoff_s = _IDLE_NUDGE_BACKOFF_INITIAL_S
         while True:
             got_result = False
             turn_is_error = False
             turn_used_tool = False
+            context_tokens = 0
             async for message in client.receive_response():
                 if _log_message(message):
                     turn_used_tool = True
@@ -184,10 +230,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     session_id = getattr(message, "session_id", None) or resume_id
                     _save_resume_id(setup, session_id)
                     resume_id = session_id or resume_id
+                    context_tokens = _context_tokens(message.usage)
+                    if initial_prompt and not message.is_error:
+                        _remove_file(_handoff_file(setup))
 
             if rate_limited_resets_at:
                 log.info("stopping session: rate-limited, resets_at=%s", rate_limited_resets_at)
-                return resume_id, rate_limited_resets_at
+                return resume_id, rate_limited_resets_at, None
 
             if not got_result:
                 # The stream ended without a ResultMessage — typically the CLI process itself
@@ -196,7 +245,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # reason to stop the whole agent: a quota outage must not end the run, it must
                 # pause it.
                 log.warning("stream ended without a ResultMessage — treating as transient")
-                return resume_id, None
+                return resume_id, None, None
 
             if turn_is_error:
                 # is_error=True with subtype="success" is the CLI's signal for an underlying
@@ -206,12 +255,41 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # path spins this loop as fast as the CLI can be invoked, forever. Route it
                 # through the same backoff as a transient error instead of re-querying immediately.
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
-                return resume_id, None
+                return resume_id, None, None
 
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
-                return resume_id, None
+                return resume_id, None, None
+
+            if context_tokens >= _CONTEXT_COMPACTION_THRESHOLD_TOKENS:
+                log.info("context reached ~%d tokens — creating handoff before fresh session", context_tokens)
+                await client.query(_COMPACTION_PROMPT)
+                handoff_parts = []
+                handoff_result = None
+                async for message in client.receive_response():
+                    _log_message(message)
+                    if isinstance(message, AssistantMessage):
+                        handoff_parts.extend(
+                            block.text for block in message.content
+                            if isinstance(block, TextBlock) and block.text.strip()
+                        )
+                    elif isinstance(message, ResultMessage):
+                        handoff_result = message
+                if not handoff_result or handoff_result.is_error:
+                    log.warning("context handoff failed — preserving old session for retry")
+                    return resume_id, None, None
+                handoff = (handoff_result.result or "\n".join(handoff_parts)).strip()
+                if not handoff:
+                    log.warning("context handoff was empty — preserving old session for retry")
+                    return resume_id, None, None
+                # Persist the bridge before removing the old id. If the worker dies before the
+                # fresh session returns its first ResultMessage, startup retries this handoff;
+                # only that successful result removes the file.
+                with open(_handoff_file(setup), "w") as f:
+                    f.write(handoff)
+                _remove_file(_session_file(setup))
+                return None, None, handoff
 
             # The model ended its turn but no real stop condition holds — nudge it forward on
             # the same connection instead of letting the process exit. This is what actually
@@ -232,6 +310,16 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     started_at = time.time()
     stop_flag = core.install_signal_handler()
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
+    pending_handoff = _load_handoff(setup)
+    # A resume id alongside a handoff means the replacement session already produced a result
+    # and persisted its id before a crash; resuming it is safer than injecting the bridge twice.
+    if resume_id and pending_handoff:
+        _remove_file(_handoff_file(setup))
+        pending_handoff = None
+    initial_prompt = (
+        "Continue this experiment from the following handoff:\n\n" + pending_handoff
+        if pending_handoff else None
+    )
 
     # Outer loop: keeps the agent alive across quota exhaustion, transient errors, and dropped
     # connections for the whole platform-experiment lifetime — a "no budget right now" condition
@@ -244,11 +332,29 @@ async def _run(setup: core.RunSetup, model: str) -> None:
             return
 
         try:
-            resume_id, resets_at = await _run_one_session(setup, model, resume_id, started_at, stop_flag)
+            resume_id, resets_at, handoff = await _run_one_session(
+                setup, model, resume_id, started_at, stop_flag, initial_prompt,
+            )
         except Exception:
             log.exception("session ended with an unexpected error — will retry after backoff")
             resets_at = None
         else:
+            if handoff is not None:
+                # Rotation is deliberate, not an outage: reconnect immediately and give the new
+                # session the compacted state as its first user message. Idle-nudge and transient
+                # reconnect backoffs remain local to their original cases.
+                initial_prompt = "Continue this experiment from the following handoff:\n\n" + handoff
+                backoff_s = _RECONNECT_BACKOFF_INITIAL_S
+                continue
+            pending_handoff = _load_handoff(setup)
+            if pending_handoff and not resume_id:
+                # No ResultMessage/session id was produced after sending the bridge; retain it
+                # across the ordinary transient reconnect backoff and try another fresh session.
+                initial_prompt = (
+                    "Continue this experiment from the following handoff:\n\n" + pending_handoff
+                )
+            else:
+                initial_prompt = None
             if resets_at is None:
                 # Clean stop (real stop condition, or a transient stream-ended-early case already
                 # logged inside _run_one_session) — re-check stop_reason at the top of the loop.

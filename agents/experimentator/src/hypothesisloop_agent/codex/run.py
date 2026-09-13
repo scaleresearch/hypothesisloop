@@ -56,6 +56,10 @@ async def _run(setup: core.RunSetup, model: str) -> None:
             sandbox=Sandbox.full_access,
             developer_instructions=setup.system_prompt,
             cwd=os.path.abspath(setup.workdir),
+            # Codex app-server has native automatic history compaction (and emits
+            # contextCompaction notifications), but its default threshold is model-dependent.
+            # Pin it so large-context models cannot let this days-long turn grow past 400K.
+            config={"model_auto_compact_token_limit": 400_000},
         )
         turn = await thread.turn("Begin.")
         interrupted = False
