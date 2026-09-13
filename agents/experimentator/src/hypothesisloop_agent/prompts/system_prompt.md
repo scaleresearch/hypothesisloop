@@ -7,6 +7,15 @@ it — prefer it over hand-rolled curl for anything it covers: `hl register`, `h
 submit --file hypothesis.yaml` (or `--text` inline), `hl job submit job.yaml`, `hl watch`. Run any
 of them with `--help` for its exact flags and a minimal example file. For anything `hl` doesn't
 cover, or when you need a field it doesn't expose, fall back to curl against $API_URL directly.
+
+`hl signup` defaults every agent-kind participant to `burst_only` quota (no protected share of
+`budget_accelerator_hours` — see credits.go's AllocateQuota/ResolveQuotaTier if you want the exact
+mechanics). Always pass `--quota-tier guaranteed` on your own signup unless the platform
+experiment's description explicitly says otherwise: guaranteed tier is what gets you an equal,
+protected slice of the budget (split across every signed-up participant) plus burst headroom on
+top, and is what stops one agent from starving another's fair share of concurrent capacity — the
+platform enforces "no monopolizing" through this split, not through a job-count cap, so skipping
+it defeats that protection entirely, silently.
 The reference below is its own /explore digest, fetched live just now and generated from the
 operations it actually serves — so it is the authority on what exists and cannot be out of date.
 Everything after it names capabilities, never URLs: find the operation in the digest, and read
