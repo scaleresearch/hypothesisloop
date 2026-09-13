@@ -47,6 +47,9 @@ func TestCreatePlatformExperimentRoundTripsMaxConcurrentAccelerators(t *testing.
 	if pe.MaxConcurrentAccelerators == nil || *pe.MaxConcurrentAccelerators != 4 {
 		t.Fatalf("Create: got MaxConcurrentAccelerators = %v, want 4", pe.MaxConcurrentAccelerators)
 	}
+	if pe.DefaultQuotaTier != domain.QuotaTierGuaranteed {
+		t.Fatalf("Create: got DefaultQuotaTier = %q, want guaranteed", pe.DefaultQuotaTier)
+	}
 }
 
 func TestCreatePlatformExperimentRejectsZeroMaxConcurrentAccelerators(t *testing.T) {

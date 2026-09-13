@@ -69,12 +69,15 @@ func ValidQuotaTierOverride(s string) bool {
 	}
 }
 
-// ResolveQuotaTier applies a signup's explicit override, or — when none was given — the kind
-// default: humans guaranteed+burst, everyone else (including an unrecognized kind, which must
-// never silently gain priority capacity) burst-only.
-func ResolveQuotaTier(kind AgentKind, override QuotaTier) QuotaTier {
+// ResolveQuotaTier applies a signup's explicit override, then the experiment policy. An empty
+// experiment policy identifies a legacy row and preserves its kind-based default: humans get
+// guaranteed+burst, while everyone else gets burst-only.
+func ResolveQuotaTier(kind AgentKind, override, experimentDefault QuotaTier) QuotaTier {
 	if override != "" {
 		return override
+	}
+	if experimentDefault != "" {
+		return experimentDefault
 	}
 	if kind == AgentKindHuman {
 		return QuotaTierGuaranteed

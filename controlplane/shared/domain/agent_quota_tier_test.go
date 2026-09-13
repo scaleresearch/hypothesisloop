@@ -29,26 +29,35 @@ func TestApplyQuotaTierPreservesTotalEntitlement(t *testing.T) {
 }
 
 func TestResolveQuotaTierDefaultsByKind(t *testing.T) {
-	if got := ResolveQuotaTier(AgentKindHuman, ""); got != QuotaTierGuaranteed {
+	if got := ResolveQuotaTier(AgentKindHuman, "", ""); got != QuotaTierGuaranteed {
 		t.Errorf("human, no override: got %q, want guaranteed", got)
 	}
-	if got := ResolveQuotaTier(AgentKindAgent, ""); got != QuotaTierBurstOnly {
+	if got := ResolveQuotaTier(AgentKindAgent, "", ""); got != QuotaTierBurstOnly {
 		t.Errorf("agent, no override: got %q, want burst_only", got)
 	}
-	if got := ResolveQuotaTier(AgentKind(""), ""); got != QuotaTierBurstOnly {
+	if got := ResolveQuotaTier(AgentKind(""), "", ""); got != QuotaTierBurstOnly {
 		t.Errorf("unrecognized kind, no override: got %q, want burst_only", got)
 	}
-	if got := ResolveQuotaTier(AgentKind("typo"), ""); got != QuotaTierBurstOnly {
+	if got := ResolveQuotaTier(AgentKind("typo"), "", ""); got != QuotaTierBurstOnly {
 		t.Errorf("typo'd kind, no override: got %q, want burst_only", got)
 	}
 }
 
 func TestResolveQuotaTierOverrideWinsOverKind(t *testing.T) {
-	if got := ResolveQuotaTier(AgentKindAgent, QuotaTierGuaranteed); got != QuotaTierGuaranteed {
+	if got := ResolveQuotaTier(AgentKindAgent, QuotaTierGuaranteed, QuotaTierBurstOnly); got != QuotaTierGuaranteed {
 		t.Errorf("agent explicitly granted guaranteed: got %q, want guaranteed", got)
 	}
-	if got := ResolveQuotaTier(AgentKindHuman, QuotaTierBurstOnly); got != QuotaTierBurstOnly {
+	if got := ResolveQuotaTier(AgentKindHuman, QuotaTierBurstOnly, QuotaTierGuaranteed); got != QuotaTierBurstOnly {
 		t.Errorf("human explicitly restricted to burst_only: got %q, want burst_only", got)
+	}
+}
+
+func TestResolveQuotaTierExperimentDefaultWinsOverKind(t *testing.T) {
+	if got := ResolveQuotaTier(AgentKindAgent, "", QuotaTierGuaranteed); got != QuotaTierGuaranteed {
+		t.Errorf("agent under guaranteed experiment default: got %q, want guaranteed", got)
+	}
+	if got := ResolveQuotaTier(AgentKindHuman, "", QuotaTierBurstOnly); got != QuotaTierBurstOnly {
+		t.Errorf("human under burst_only experiment default: got %q, want burst_only", got)
 	}
 }
 

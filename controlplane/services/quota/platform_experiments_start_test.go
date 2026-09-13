@@ -31,11 +31,16 @@ func (f *startStore) StartPlatformExperimentTx(ctx context.Context, id string,
 }
 
 func startWith(t *testing.T, participants ...db.StartParticipant) map[string]*domain.AgentQuota {
+	return startWithDefault(t, domain.QuotaTierGuaranteed, participants...)
+}
+
+func startWithDefault(t *testing.T, defaultTier domain.QuotaTier, participants ...db.StartParticipant) map[string]*domain.AgentQuota {
 	t.Helper()
 	store := &startStore{
 		pe: &domain.PlatformExperiment{
 			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100,
-			Stages: []domain.Stage{{LengthPct: 50, EvictPct: 50}, {LengthPct: 50, EvictPct: 0}},
+			Stages:           []domain.Stage{{LengthPct: 50, EvictPct: 50}, {LengthPct: 50, EvictPct: 0}},
+			DefaultQuotaTier: defaultTier,
 		},
 		participants: participants,
 	}
@@ -61,7 +66,7 @@ func participant(agentID string, kind domain.AgentKind, override domain.QuotaTie
 // Nothing downstream re-reads it, so an allocation that ignores it is not corrected later: the
 // agent simply holds guaranteed hours — priority capacity admission honours ahead of everyone
 // else's burst — for the whole run.
-func TestStartAllocatesEachParticipantIntoTheTierItsKindEntitlesItTo(t *testing.T) {
+func TestStartGuaranteedDefaultAllocatesEqualGuaranteedSharesRegardlessOfKind(t *testing.T) {
 	byAgent := startWith(t,
 		participant("human-1", domain.AgentKindHuman, ""),
 		participant("agent-1", domain.AgentKindAgent, ""),
@@ -71,8 +76,8 @@ func TestStartAllocatesEachParticipantIntoTheTierItsKindEntitlesItTo(t *testing.
 	if human.GuaranteedAcceleratorHours <= 0 {
 		t.Errorf("human guaranteed = %v, want > 0", human.GuaranteedAcceleratorHours)
 	}
-	if agent.GuaranteedAcceleratorHours != 0 {
-		t.Errorf("agent guaranteed = %v, want 0 — an autonomous participant is burst-only", agent.GuaranteedAcceleratorHours)
+	if agent.GuaranteedAcceleratorHours <= 0 {
+		t.Errorf("agent guaranteed = %v, want > 0 under the experiment's guaranteed default", agent.GuaranteedAcceleratorHours)
 	}
 	// The tier decides which column the share lands in, never how large it is. Taking the
 	// guaranteed part away instead of moving it would quietly hand the whole budget to whichever
@@ -81,6 +86,9 @@ func TestStartAllocatesEachParticipantIntoTheTierItsKindEntitlesItTo(t *testing.
 	agentTotal := agent.GuaranteedAcceleratorHours + agent.BurstAcceleratorHours
 	if humanTotal != agentTotal {
 		t.Errorf("totals = human %v, agent %v; want equal — the tier routes a share, it does not shrink one", humanTotal, agentTotal)
+	}
+	if human.GuaranteedAcceleratorHours != agent.GuaranteedAcceleratorHours {
+		t.Errorf("guaranteed shares = human %v, agent %v; want equal", human.GuaranteedAcceleratorHours, agent.GuaranteedAcceleratorHours)
 	}
 }
 
@@ -100,6 +108,20 @@ func TestStartLetsASignupOverrideWinOverTheAgentsKind(t *testing.T) {
 	}
 	if b := byAgent["human-burst-only"].BurstAcceleratorHours; b <= 0 {
 		t.Errorf("human restricted to burst_only: burst = %v, want > 0 — the share moves, it is not forfeited", b)
+	}
+}
+
+func TestStartBurstOnlyOverrideWinsOverGuaranteedExperimentDefault(t *testing.T) {
+	byAgent := startWith(t, participant("agent-1", domain.AgentKindAgent, domain.QuotaTierBurstOnly))
+	if g := byAgent["agent-1"].GuaranteedAcceleratorHours; g != 0 {
+		t.Errorf("agent guaranteed = %v, want 0 with explicit burst_only override", g)
+	}
+}
+
+func TestStartLegacyExperimentStillDefaultsAgentsToBurstOnly(t *testing.T) {
+	byAgent := startWithDefault(t, "", participant("agent-1", domain.AgentKindAgent, ""))
+	if g := byAgent["agent-1"].GuaranteedAcceleratorHours; g != 0 {
+		t.Errorf("legacy agent guaranteed = %v, want 0 from kind-based fallback", g)
 	}
 }
 

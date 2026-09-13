@@ -130,6 +130,9 @@ type CreatePlatformExperimentRequest struct {
 	// submit a job — empty resolves to "mixed" (today's behavior). See domain.SubmitterPolicy.
 	HypothesisSubmitPolicy string `json:"hypothesis_submit_policy,omitempty"`
 	JobSubmitPolicy        string `json:"job_submit_policy,omitempty"`
+	// DefaultQuotaTier controls signups that omit quota_tier. Empty defaults to "guaranteed" on
+	// create; accepted values are "guaranteed" and "burst_only".
+	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
 }
 
 // AgentResult is (agentID, finalMetric) used when closing an experiment.

@@ -44,6 +44,13 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: job_submit_policy: %w", err)
 	}
+	defaultQuotaTier := domain.QuotaTier(req.DefaultQuotaTier)
+	if defaultQuotaTier == "" {
+		defaultQuotaTier = domain.QuotaTierGuaranteed
+	}
+	if !domain.ValidQuotaTierOverride(string(defaultQuotaTier)) {
+		return nil, fmt.Errorf("platform_experiments.Create: default_quota_tier must be \"guaranteed\" or \"burst_only\"")
+	}
 	if req.MaxConcurrentAccelerators != nil && *req.MaxConcurrentAccelerators <= 0 {
 		return nil, fmt.Errorf("platform_experiments.Create: max_concurrent_accelerators must be positive")
 	}
@@ -65,6 +72,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		CurrentStage:              1,
 		HypothesisSubmitPolicy:    hypothesisPolicy,
 		JobSubmitPolicy:           jobPolicy,
+		DefaultQuotaTier:          defaultQuotaTier,
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
@@ -269,7 +277,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 			// is allocated the same way and a burst-only participant's guaranteed part is moved
 			// into burst, not taken away.
 			acceleratorGuaranteed, acceleratorBurst = domain.ApplyQuotaTier(
-				domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride), acceleratorGuaranteed, acceleratorBurst)
+				domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride, pe.DefaultQuotaTier), acceleratorGuaranteed, acceleratorBurst)
 			allocated = append(allocated, &domain.AgentQuota{
 				ID:                         uuid.New().String(),
 				AgentID:                    agentID,

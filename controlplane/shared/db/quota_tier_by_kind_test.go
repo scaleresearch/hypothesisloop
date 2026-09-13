@@ -59,7 +59,7 @@ func allocateStartQuotas(peID string, budget float64, participants []StartPartic
 	out := make([]*domain.AgentQuota, 0, len(participants))
 	for _, p := range participants {
 		g, b := domain.AllocateQuota(budget, len(participants), 0, 0, cfg)
-		g, b = domain.ApplyQuotaTier(domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride), g, b)
+		g, b = domain.ApplyQuotaTier(domain.ResolveQuotaTier(p.Kind, p.QuotaTierOverride, ""), g, b)
 		out = append(out, &domain.AgentQuota{
 			ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: peID,
 			GuaranteedAcceleratorHours: g, BurstAcceleratorHours: b, CreatedAt: time.Now().UTC(),

@@ -150,6 +150,10 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
     -- behavior — both may submit — unchanged for every row that predates this column.
     hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed',
     job_submit_policy        TEXT NOT NULL DEFAULT 'mixed',
+    -- Empty marks experiments created before this policy existed; new API-created experiments
+    -- explicitly store 'guaranteed'. ResolveQuotaTier retains kind-based behavior for empty rows.
+    default_quota_tier TEXT NOT NULL DEFAULT '',
+    CONSTRAINT platform_experiments_default_quota_tier CHECK (default_quota_tier IN ('', 'guaranteed', 'burst_only')),
     CONSTRAINT platform_experiments_hypothesis_submit_policy CHECK (hypothesis_submit_policy IN ('mixed', 'human_only', 'agent_only')),
     CONSTRAINT platform_experiments_job_submit_policy CHECK (job_submit_policy IN ('mixed', 'human_only', 'agent_only')),
     created_at           TIMESTAMPTZ                NOT NULL DEFAULT now(),
@@ -158,6 +162,14 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
 
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_submit_policy        TEXT NOT NULL DEFAULT 'mixed';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS default_quota_tier TEXT NOT NULL DEFAULT '';
+
+DO $$ BEGIN
+    ALTER TABLE platform_experiments ADD CONSTRAINT platform_experiments_default_quota_tier
+        CHECK (default_quota_tier IN ('', 'guaranteed', 'burst_only'));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Accelerators this platform experiment may hold in flight (SUBMITTED+RUNNING) at once, across
 -- all its agents' jobs. NULL = use the config default (quota.default_max_concurrent_accelerators).

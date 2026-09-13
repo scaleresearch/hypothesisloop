@@ -15,9 +15,10 @@ import (
 // who is burst-only would eventually pass a stale one.
 func participantTiers(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs []string) (map[string]domain.QuotaTier, error) {
 	rows, err := tx.Query(ctx, `
-SELECT s.agent_id, COALESCE(a.kind, ''), s.quota_tier
+SELECT s.agent_id, COALESCE(a.kind, ''), s.quota_tier, pe.default_quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
+JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2)`, platformExpID, agentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("participantTiers: %w", err)
@@ -28,10 +29,11 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2)`, platformExpID, ag
 		var agentID string
 		var kind domain.AgentKind
 		var override domain.QuotaTier
-		if err := rows.Scan(&agentID, &kind, &override); err != nil {
+		var experimentDefault domain.QuotaTier
+		if err := rows.Scan(&agentID, &kind, &override, &experimentDefault); err != nil {
 			return nil, fmt.Errorf("participantTiers: scan: %w", err)
 		}
-		out[agentID] = domain.ResolveQuotaTier(kind, override)
+		out[agentID] = domain.ResolveQuotaTier(kind, override, experimentDefault)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("participantTiers: %w", err)

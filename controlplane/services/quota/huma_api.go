@@ -104,7 +104,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description:   "Operator/dashboard endpoint. name and budget_accelerator_hours are required.",
+		Description: "Operator/dashboard endpoint. name and budget_accelerator_hours are required. " +
+			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\".",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -238,8 +239,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"and counted against max_agents; \"baseline\" and \"reviewer\" are neither ranked nor cut nor counted against " +
 			"max_agents, though their jobs are billed and gated identically to a competitor's. An unrecognized role is " +
 			"refused, never defaulted. quota_tier optionally overrides this signup's guaranteed-vs-burst-only split " +
-			"regardless of the agent's kind (\"guaranteed\" or \"burst_only\"); omit it to use the kind default " +
-			"(humans guaranteed+burst, agents burst-only).",
+			"regardless of the agent's kind (\"guaranteed\" or \"burst_only\"); omit it to use the platform " +
+			"experiment's default_quota_tier (\"guaranteed\" for new experiments). Legacy experiments with " +
+			"no policy retain the kind default (humans guaranteed+burst, agents burst-only).",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {

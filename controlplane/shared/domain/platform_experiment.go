@@ -157,8 +157,11 @@ type PlatformExperiment struct {
 	// SubmitterPolicyMixed (today's behavior, unchanged) via ParseSubmitterPolicy.
 	HypothesisSubmitPolicy SubmitterPolicy `json:"hypothesis_submit_policy,omitempty"`
 	JobSubmitPolicy        SubmitterPolicy `json:"job_submit_policy,omitempty"`
-	CreatedAt              time.Time       `json:"created_at"`
-	UpdatedAt              time.Time       `json:"updated_at"`
+	// DefaultQuotaTier is used when a signup does not choose its own tier. Empty means this row
+	// predates the policy and ResolveQuotaTier must use the legacy kind-based default.
+	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // SignupRole is what an agent was signed up to do in one platform experiment. It lives on the
