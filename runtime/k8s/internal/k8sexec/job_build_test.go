@@ -364,7 +364,7 @@ func testDataAccess() *domain.DataAccess {
 	return &domain.DataAccess{
 		URI: "s3://hl-data/pe-1/agent/exp-1/", Shared: "s3://hl-data/pe-1/",
 		Endpoint: "http://store.invalid:9000", Region: "us-east-1",
-		AccessKeyID: "key", SecretAccessKey: "secret", SessionToken: "session-token",
+		AccessKeyID: "key", SecretAccessKey: "secret",
 	}
 }
 
@@ -403,20 +403,21 @@ func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
 	if got := env["AWS_SECRET_ACCESS_KEY"]; got != exp.Data.SecretAccessKey {
 		t.Fatalf("AWS_SECRET_ACCESS_KEY = %q, want %q — an address the job has no credentials for is not an address", got, exp.Data.SecretAccessKey)
 	}
-	if got := env["AWS_SESSION_TOKEN"]; got != exp.Data.SessionToken {
-		t.Fatalf("AWS_SESSION_TOKEN = %q, want %q — without the session token the scoped credentials are unusable, and the job falls back to no access at all", got, exp.Data.SessionToken)
+	if got := env["AWS_ACCESS_KEY_ID"]; got != exp.Data.AccessKeyID {
+		t.Fatalf("AWS_ACCESS_KEY_ID = %q, want %q — the job's own key, straight from desired state", got, exp.Data.AccessKeyID)
+	}
+	if _, ok := env["AWS_SESSION_TOKEN"]; ok {
+		t.Fatal("AWS_SESSION_TOKEN is set: a permanent key has no session, and S3 clients reject a key paired with a stray token")
 	}
 }
 
-// The control plane mints a fresh session on every reconcile pass, a few seconds apart. If the
-// session reached the desired-spec hash, reconcile would see drift every pass and delete every
-// running job mid-training — the same failure resolved placement caused, from a different source.
-// Rotating an access grant is not the control plane asking for a different job.
-func TestDesiredSpecHashIgnoresRotatingDurableDataCredentials(t *testing.T) {
+// A job's key is permanent and stored with it, so it is desired state like the prefix: a
+// different key means a different job, and the hash must say so.
+func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: APIURLDefault}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
-		ID:   "cred-rotation", AgentID: "agent", ProjectID: "project",
+		ID:   "key-change", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
@@ -429,17 +430,17 @@ func TestDesiredSpecHashIgnoresRotatingDurableDataCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rotated := *exp
-	rotated.Data = &domain.DataAccess{
+	rekeyed := *exp
+	rekeyed.Data = &domain.DataAccess{
 		URI: exp.Data.URI, Shared: exp.Data.Shared, Endpoint: exp.Data.Endpoint, Region: exp.Data.Region,
-		AccessKeyID: "next-key", SecretAccessKey: "next-secret", SessionToken: "next-session-token",
+		AccessKeyID: "other-key", SecretAccessKey: "other-secret",
 	}
-	second, err := c.BuildJob(&rotated, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	second, err := c.BuildJob(&rekeyed, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Annotations[DesiredSpecHashAnnotation] != second.Annotations[DesiredSpecHashAnnotation] {
-		t.Fatal("a rotated durable-data session changed the desired-spec hash — reconcile will drift-delete every running job every pass")
+	if first.Annotations[DesiredSpecHashAnnotation] == second.Annotations[DesiredSpecHashAnnotation] {
+		t.Fatal("a different durable-data key left the desired-spec hash unchanged — a job would keep running with a key that is no longer its own")
 	}
 }
 

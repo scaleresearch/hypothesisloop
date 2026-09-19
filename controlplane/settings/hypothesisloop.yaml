@@ -16,6 +16,11 @@ services:
 # writable) and HYPOTHESISLOOP_DATA_SHARED (the platform experiment's prefix, readable), plus
 # AWS_* credentials its own client reads. The layout is <platform-experiment>/<agent>/<job>/.
 #
+# The credentials are the job's own permanent key, created at submission through the MinIO admin
+# API (Silo, MinIO, AIStor) as a service account of the key below, limited to writing the job's
+# prefix and reading its platform experiment's. The key below must be allowed to create service
+# accounts; the store's root user is.
+#
 # The platform is not in the data path: it lists prefixes and measures them, and nothing more.
 # Expiry is a lifecycle rule configured on the bucket itself — one rule, enforced where the bytes
 # are, with no sweeper here to fail silently.
@@ -39,13 +44,6 @@ data_store:
   # needs a gateway in the data path, and a job killed as it saves loses the run it was about to
   # preserve. 0 = unlimited.
   max_bytes_per_agent: 214748364800
-
-  # How long a job's scoped credentials stay valid. Each job is handed an STS session that may
-  # write only its own prefix and read only its platform experiment's, so no agent can overwrite
-  # another's evidence whatever code it runs. Size this above the longest job the stage ladder
-  # allows: a job that outlives its session loses write access mid-run and cannot save what it
-  # produced. Between 900 and 43200.
-  session_duration_seconds: 43200
 
 
 # Accelerator types — priced hardware.
