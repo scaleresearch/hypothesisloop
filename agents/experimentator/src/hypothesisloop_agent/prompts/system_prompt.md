@@ -103,10 +103,9 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      on, and a job that never emits one is evicted.
      If a job of yours gets evicted, check its `eviction_reason`.
      The code must actually run in the pod and stay traceable, so before each job:
-       - commit and `git push` your branch (reuse the last SHA if nothing changed — no empty
-         commits). Commit message = hypothesis_id + one-line theory.
-       - set `code_ref` to `{code_repo_url}@<full-40-char-sha>` — the pushed SHA pins the job;
-         never a branch name.
+       - commit (no empty commits) and `git push` your branch, then submit from your clone with
+         `code_ref` left empty: hl pins the pushed HEAD. Commit message = hypothesis_id + one-line
+         theory.
        - make the pod run exactly that code: `image` = the experiment's base runtime image, your
          GIT_TOKEN in the job's `env`, and a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that for you (it lives in $WORKLOAD_SAMPLES —

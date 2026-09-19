@@ -186,6 +186,7 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	setAPIURL(t, url)
 
 	dir := t.TempDir()
+	t.Chdir(dir)
 	jobFile := dir + "/job.yaml"
 	if err := os.WriteFile(jobFile, []byte("job:\n  image: foo:latest\n"), 0o644); err != nil {
 		t.Fatal(err)

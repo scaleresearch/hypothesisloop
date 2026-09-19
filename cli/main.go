@@ -374,7 +374,10 @@ func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 
 FILE is a YAML file shaped exactly like the POST /experiments body — id, metadata, job.
 metadata.hypothesis_id is REQUIRED: every job tests a specific, previously-registered
-hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis path. Minimal shape:
+hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis path. An empty
+metadata.code_ref is filled with <origin url>@<HEAD sha> of the git repository in the current
+directory; that repository must have no uncommitted changes to tracked files and HEAD pushed to
+origin. Minimal shape:
 
   id: job-123
   metadata:
@@ -382,7 +385,6 @@ hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis pat
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
     project_id: my-project
     objective: "maximize val_accuracy"
-    code_ref: git://...
   job:
     image: ...
     accelerator_type: ...
@@ -412,6 +414,9 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 			metadata = map[string]any{}
 		}
 		metadata["agent_id"] = *agent
+		if err := fillCodeRef(metadata, ""); err != nil {
+			return fail(stderr, fmt.Errorf("job submit: %w", err))
+		}
 		body["metadata"] = metadata
 		var out any
 		if err := c.Do("POST", "/experiments", body, &out); err != nil {
