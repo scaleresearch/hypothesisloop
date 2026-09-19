@@ -311,14 +311,15 @@ func (l *Loop) tick(ctx context.Context) error {
 		// cannot fit is folded into the ordinary not-admitted path below by simply un-picking the
 		// cluster, exactly like a scalar or topology miss: preemption cannot fix a job whose own
 		// request is oversized for every node, so there is nothing else to try here.
+		misfit := ""
 		if cluster != "" {
-			resolvedJob, fitsCluster, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
+			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
 			if rerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
 				continue
 			}
-			if !fitsCluster {
-				cluster = ""
+			if resolveMisfit != "" {
+				cluster, misfit = "", resolveMisfit
 			} else {
 				exp.ResolvedJob = resolvedJob
 				fp = exp.Footprint()
@@ -356,18 +357,18 @@ func (l *Loop) tick(ctx context.Context) error {
 				// "max" sentinel in the submitted spec -- codex review caught this as a real
 				// hazard.
 				if specCluster != cluster {
-					resolvedJob, fitsSpecCluster, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvail[specCluster], nodeLabels[specCluster])
+					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvail[specCluster], nodeLabels[specCluster])
 					if rerr != nil {
 						l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources for speculative target: %w", rerr))
 						continue
 					}
-					if !fitsSpecCluster {
+					if specMisfit != "" {
 						// This job's own request (post-"max"-resolution) cannot fit even the
 						// speculative target's largest node -- speculativeCandidates' own
 						// fitsLargestNode check used the unresolved request, so this can still
 						// happen. Nothing else to try this tick.
 						obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-						if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedCapacityUnavailable); err != nil {
+						if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, specMisfit); err != nil {
 							l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 						}
 						continue
@@ -474,6 +475,8 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedWaitingForScaleUp
 			case allSpeculativeCandidatesTried(exp, autoscalerEnabled, connectedClusters, clusterIDs, l.triedClusterTTL):
 				reason = domain.NotAdmittedNoScalableCapacity
+			case misfit != "":
+				reason = misfit
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
@@ -555,14 +558,15 @@ func (l *Loop) tick(ctx context.Context) error {
 		}
 		// See the guaranteed pass above for why this runs here, after cluster/flavor settle and
 		// before the fit check.
+		misfit := ""
 		if cluster != "" {
-			resolvedJob, fitsCluster, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
+			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
 			if rerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
 				continue
 			}
-			if !fitsCluster {
-				cluster = ""
+			if resolveMisfit != "" {
+				cluster, misfit = "", resolveMisfit
 			} else {
 				exp.ResolvedJob = resolvedJob
 				fp = exp.Footprint()
@@ -593,9 +597,13 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			backlog.record(start, cluster, "burst", exp, shortage)
-			fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
-				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, notAdmittedReasonFor(fitAtTickStart, fp, shortage)); err != nil {
+			reason := misfit
+			if reason == "" {
+				fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
+					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+				reason = notAdmittedReasonFor(fitAtTickStart, fp, shortage)
+			}
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue

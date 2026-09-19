@@ -119,9 +119,9 @@ def test_max_resource_sentinel_resolves_to_cluster_local_fair_share(api, run_id,
             f"({expected_share_milli}m) was admitted (status={stuck['status']})"
         )
         reason = stuck.get("not_admitted_reason") or ""
-        assert reason.startswith("capacity_unavailable"), (
-            f"not_admitted_reason={reason!r}, expected it to start with capacity_unavailable "
-            "(loop_tick.go's notAdmittedReasonFor fallback)"
+        assert reason.startswith("exceeds_accelerator_share"), (
+            f"not_admitted_reason={reason!r}, expected it to start with exceeds_accelerator_share "
+            "(loop_resolve.go's shareMisfit)"
         )
         api.cancel_job(impossible_job)
 

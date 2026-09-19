@@ -334,3 +334,67 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 		t.Fatal("preemption requeued a victim for a shortfall that was purely about layout, not capacity")
 	}
 }
+
+// --- Tick-level: a request above the per-accelerator share says so ---
+
+// shareWorkload is one node with eight free accelerators and 6 cores in total, so one accelerator
+// is entitled to 750m. Every scalar and topology check passes; only the share is too small.
+type shareWorkload struct{ LoopWorkloadClient }
+
+func (shareWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	free := func() domain.Footprint {
+		return domain.CapacityFootprint(6, map[string]int64{h100: 8}, 64<<30, 64<<30)
+	}
+	return map[string]domain.Footprint{"cluster-a": free()}, map[string]domain.Footprint{"cluster-a": free()}, nil
+}
+func (shareWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 8}}}, nil
+}
+func (shareWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": shareNodeTotal()}}, nil
+}
+func (shareWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": shareNodeTotal()}}, nil
+}
+func (shareWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
+	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}}, nil
+}
+func (shareWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{"cluster-a": false}, nil
+}
+func (shareWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
+	return map[string]domain.Footprint{}, nil
+}
+
+func shareNodeTotal() map[string]int64 {
+	return map[string]int64{
+		domain.NodeResourceCPUMillicores: 6000,
+		domain.NodeResourceMemoryBytes:   64 << 30,
+		domain.NodeResourceStorageBytes:  64 << 30,
+	}
+}
+
+func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		t.Run(string(tier), func(t *testing.T) {
+			exp := &domain.Experiment{
+				ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", CapacityTier: tier,
+				AcceleratorType: h100, AcceleratorCount: 1,
+				Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
+			}
+			store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
+			l := NewLoop(store, tickQuota{}, shareWorkload{}, zap.NewNop())
+			l.evictor = noopEvictor{}
+			l.disbalanceTolerance = DefaultDisbalanceTolerance
+			l.reprioritizer = noopReprioritizer{}
+
+			if err := l.tick(context.Background()); err != nil {
+				t.Fatalf("tick() = %v, want nil", err)
+			}
+			want := `exceeds_accelerator_share: cpu 1 is above the 750m that 1 accelerator(s) get on cluster cluster-a (each node's cpu split evenly across its installed accelerators); request at most 750m or "max"`
+			if got := store.notAdmitted[exp.ID]; got != want {
+				t.Fatalf("not_admitted_reason = %q\nwant                  %q", got, want)
+			}
+		})
+	}
+}

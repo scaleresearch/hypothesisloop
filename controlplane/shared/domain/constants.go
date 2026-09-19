@@ -59,6 +59,10 @@ const (
 	// RUNNING); admitting this job would exceed that spend-rate control (autoscaler.md's
 	// concurrency cap).
 	NotAdmittedConcurrencyCap = "concurrency_cap"
+	// NotAdmittedExceedsAcceleratorShare means an explicit cpu/memory/storage request is above
+	// the share its accelerator count gets on the chosen cluster's nodes. Waiting does not help;
+	// a smaller request does, or a node with more of that resource per accelerator joining.
+	NotAdmittedExceedsAcceleratorShare = "exceeds_accelerator_share"
 )
 
 // IsTerminal reports whether the status is a final lifecycle state that no further execution

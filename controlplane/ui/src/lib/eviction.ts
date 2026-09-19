@@ -35,6 +35,7 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   'waiting-for-scale-up': 'Waiting for an autoscaler node already booting on this cluster',
   no_scalable_capacity: 'No autoscaler cluster had room to try — will retry as clusters free up',
   concurrency_cap: 'At its experiment’s max concurrent accelerators',
+  exceeds_accelerator_share: 'Requests more cpu/memory/storage than its accelerators’ share of a node',
 }
 
 export function notAdmittedLabel(reason?: string | null): string {

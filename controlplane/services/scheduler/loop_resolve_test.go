@@ -62,12 +62,12 @@ func TestResolveClusterLocalResourcesMaxUsesMinimumAcrossEligibleNodes(t *testin
 		"tight": {"example.com/product=test-accelerator": 1},
 	}
 
-	resolved, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
-	if !fits {
-		t.Fatal("fits = false, want true")
+	if misfit != "" {
+		t.Fatalf("misfit = %q, want it to fit", misfit)
 	}
 	if resolved.CPU != "2" {
 		t.Errorf("resolved.CPU = %q, want \"2\" (2000m, the minimum across both nodes, not the average 5000m or the roomy node's 8000m)", resolved.CPU)
@@ -106,12 +106,12 @@ func TestResolveClusterLocalResourcesGroupedJobUsesPerGroupAcceleratorCount(t *t
 		"node-a": {string(flavor): 3},
 	}
 
-	resolved, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
-	if !fits {
-		t.Fatal("fits = false, want true")
+	if misfit != "" {
+		t.Fatalf("misfit = %q, want it to fit", misfit)
 	}
 	// Per-accelerator share = 9000/3 = 3000m. Learner (2 accelerators) gets 6000m; actor (1) gets
 	// 3000m — never the job's TotalAccelerators (3) applied to both groups alike.
@@ -141,12 +141,12 @@ func TestResolveClusterLocalResourcesExplicitNumberJudgedOnlyAgainstSelectedClus
 		"roomy": {"example.com/product=test-accelerator": 1},
 	}
 
-	_, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	_, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
-	if !fits {
-		t.Fatal("fits = false, want true: 5000m is within this cluster's 8000m/accelerator share, regardless of what any other cluster might offer")
+	if misfit != "" {
+		t.Fatalf("misfit = %q, want it to fit: 5000m is within this cluster's 8000m/accelerator share, regardless of what any other cluster might offer", misfit)
 	}
 }
 
@@ -167,12 +167,16 @@ func TestResolveClusterLocalResourcesExplicitNumberExceedingEveryEligibleNodeDoe
 		"tight-b": {"example.com/product=test-accelerator": 1},
 	}
 
-	resolved, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
-	if fits {
-		t.Fatalf("fits = true, want false: 9000m exceeds every eligible node's fair share (max 4000m) — resolved=%+v", resolved)
+	if resolved != nil {
+		t.Fatalf("resolved = %+v, want nil: 9000m exceeds the smallest eligible node's fair share (2000m)", resolved)
+	}
+	want := `exceeds_accelerator_share: cpu 9 is above the 2 that 1 accelerator(s) get on cluster cluster-a (each node's cpu split evenly across its installed accelerators); request at most 2 or "max"`
+	if misfit != want {
+		t.Fatalf("misfit = %q\nwant      %q", misfit, want)
 	}
 }
 
@@ -192,12 +196,16 @@ func TestResolveClusterLocalResourcesNoEligibleNodeDoesNotFit(t *testing.T) {
 		"node-a": {"example.com/product=test-accelerator": 0},
 	}
 
-	resolved, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
-	if fits {
-		t.Fatalf("fits = true, want false: no node is eligible to resolve against, resolved=%+v", resolved)
+	if resolved != nil {
+		t.Fatalf("resolved = %+v, want nil: no node is eligible to resolve against", resolved)
+	}
+	want := `capacity_unavailable: no node on cluster cluster-a reports example.com/product=test-accelerator to resolve "max" against`
+	if misfit != want {
+		t.Fatalf("misfit = %q\nwant      %q", misfit, want)
 	}
 }
 
@@ -215,12 +223,12 @@ func TestResolveClusterLocalResourcesSingleEligibleNodeIsItsOwnMinimum(t *testin
 		"only": {"example.com/product=test-accelerator": 1},
 	}
 
-	resolved, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
-	if !fits {
-		t.Fatal("fits = false, want true")
+	if misfit != "" {
+		t.Fatalf("misfit = %q, want it to fit", misfit)
 	}
 	if resolved.CPU != "4" {
 		t.Errorf("resolved.CPU = %q, want \"4\" (the single eligible node's own share)", resolved.CPU)
@@ -245,12 +253,12 @@ func TestResolveClusterLocalResourcesTiedNodesResolveDeterministically(t *testin
 
 	for i := 0; i < 25; i++ {
 		exp := maxAcceleratorExperiment(1)
-		resolved, fits, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+		resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
 		if err != nil {
 			t.Fatalf("resolveClusterLocalResources: %v", err)
 		}
-		if !fits {
-			t.Fatal("fits = false, want true")
+		if misfit != "" {
+			t.Fatalf("misfit = %q, want it to fit", misfit)
 		}
 		if resolved.CPU != "3" {
 			t.Fatalf("run %d: resolved.CPU = %q, want \"3\" every time (tie must be deterministic)", i, resolved.CPU)
