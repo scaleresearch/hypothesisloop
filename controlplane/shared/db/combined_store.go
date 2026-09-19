@@ -99,7 +99,10 @@ type SubmissionRateLimit struct {
 	Window     time.Duration
 }
 
-func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit) (AdmitDecision, string, error) {
+// createDataKey registers the job's key with the object store after the row is written and
+// before commit: a store failure rolls the submission back, and no key is created for an id that
+// was rejected or already queued.
+func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit, createDataKey func(context.Context) error) (AdmitDecision, string, error) {
 	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
 	if err != nil {
 		return AdmitRejected, "", fmt.Errorf("admit experiment: begin: %w", err)
@@ -198,6 +201,9 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err
+	}
+	if err := createDataKey(ctx); err != nil {
+		return AdmitRejected, "", fmt.Errorf("admit experiment: durable-data key: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AdmitRejected, "", fmt.Errorf("admit experiment: commit: %w", err)

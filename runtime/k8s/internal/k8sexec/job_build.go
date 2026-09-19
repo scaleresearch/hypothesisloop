@@ -130,13 +130,7 @@ func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement Accelera
 		// DeviceClasses and node labels, so hashing it made a DeviceClass rename or a driver upgrade
 		// re-hash every running job of that type and drift-delete it mid-training — the cluster
 		// changing around a job is not the control plane asking for a different job.
-		// The same rule applies to the durable-data session: the control plane mints a fresh one on
-		// every reconcile pass, so hashing it would re-hash every running job every few seconds and
-		// drift-delete it mid-training. The addressing it carries is desired state and stays hashed;
-		// only the rotating credentials are dropped.
-		identityExp := *exp
-		identityExp.Data = exp.Data.WithoutCredentials()
-		identity, err := c.compileJob(&identityExp, AcceleratorPlacement{}, plan)
+		identity, err := c.compileJob(exp, AcceleratorPlacement{}, plan)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +295,6 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		{Name: "AWS_ENDPOINT_URL_S3", Value: exp.Data.Endpoint},
 		{Name: "AWS_REGION", Value: exp.Data.Region},
 		{Name: "AWS_SECRET_ACCESS_KEY", Value: exp.Data.SecretAccessKey},
-		{Name: "AWS_SESSION_TOKEN", Value: exp.Data.SessionToken},
 		{Name: "HYPOTHESISLOOP_DATA_SHARED", Value: exp.Data.Shared},
 		{Name: "HYPOTHESISLOOP_DATA_URI", Value: exp.Data.URI},
 		{Name: "HYPOTHESISLOOP_EXPERIMENT_ID", Value: exp.ID},

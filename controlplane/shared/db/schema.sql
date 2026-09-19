@@ -241,6 +241,10 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- over from within scheduler.tried_cluster_ttl_seconds. No separate failover_count: the
     -- list itself is the cap on attempts, one entry per cluster per TTL window.
     tried_clusters           JSONB             NOT NULL DEFAULT '[]'::jsonb,
+    -- The job's permanent object-store key, created in the store in the same transaction that
+    -- inserts the row and never rotated or deleted. '' only on rows that predate per-job keys.
+    data_access_key_id       TEXT              NOT NULL DEFAULT '',
+    data_secret_access_key   TEXT              NOT NULL DEFAULT '',
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
@@ -251,6 +255,8 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL 
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resolved_job_spec JSONB;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS tried_clusters JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_access_key_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_secret_access_key TEXT NOT NULL DEFAULT '';
 
 -- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
 -- nothing else, so a job could never report its own files; the real bytes live in the object

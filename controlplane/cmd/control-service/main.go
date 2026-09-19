@@ -282,7 +282,6 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, dataStore,
-		time.Duration(pcfg.DataStore.SessionDurationSeconds)*time.Second,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second, logger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "")

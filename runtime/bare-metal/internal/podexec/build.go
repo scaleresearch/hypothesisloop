@@ -208,7 +208,6 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		"AWS_ENDPOINT_URL_S3":             containerReachable(exp.Data.Endpoint),
 		"AWS_REGION":                      exp.Data.Region,
 		"AWS_SECRET_ACCESS_KEY":           exp.Data.SecretAccessKey,
-		"AWS_SESSION_TOKEN":               exp.Data.SessionToken,
 		"HYPOTHESISLOOP_DATA_SHARED":      exp.Data.Shared,
 		"HYPOTHESISLOOP_DATA_URI":         exp.Data.URI,
 		"HYPOTHESISLOOP_EXPERIMENT_ID":    exp.ID,
@@ -315,16 +314,6 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 // hence sorted separately in BuildContainerSpec... actually env is a map here since podman -e
 // order is irrelevant to behavior).
 func hashContainerSpec(cs containerSpec) (string, error) {
-	// Exclude the durable-data session: the control plane mints a fresh one on every reconcile
-	// pass, and hashing it would recreate every running container every few seconds. The prefixes
-	// and endpoint it comes with are desired state and stay in.
-	env := make(map[string]string, len(cs.Env))
-	for k, v := range cs.Env {
-		env[k] = v
-	}
-	for _, name := range domain.DataCredentialEnvNames {
-		delete(env, name)
-	}
 	// Exclude the hash label itself (not yet set) and copy so this pass never mutates cs.
 	labels := make(map[string]string, len(cs.Labels))
 	for k, v := range cs.Labels {
@@ -348,7 +337,7 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 		Mounts         []string
 		ReadOnlyMounts map[string]string
 		Labels         map[string]string
-	}{cs.Name, cs.Image, cs.Command, cs.Args, env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
+	}{cs.Name, cs.Image, cs.Command, cs.Args, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("podexec: hash desired spec: %w", err)

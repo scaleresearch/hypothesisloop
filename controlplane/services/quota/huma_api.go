@@ -44,7 +44,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
 		// Validated here rather than only where it is used: an agent id is pasted verbatim into
-		// Kubernetes object names and into the object-store session policy that decides what a
+		// Kubernetes object names and into the object-store key policy that decides what a
 		// job may write. Registration is the one moment it can be refused for free.
 		if err := domain.ValidateIdentifier("id", in.Body.ID); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
