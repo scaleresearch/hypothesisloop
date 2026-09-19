@@ -3,7 +3,8 @@
 The harness runs `hl watch` whenever the agent ends its turn, and briefly after each of its tool
 calls: the platform holds whatever happened while the agent worked and replays it from the cursor
 hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
-delivered once whichever of the two reads it.
+delivered once whichever of the two reads it. An event is a pointer; a job that completed is
+handed over with its metrics, read once per batch, so that learning of it costs the agent no call.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ def watch_env(api_url: str, agent_id: str, platform_experiment_id: str, workdir:
             "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
 
 
-async def _run_watch(command: list[str], env: dict[str, str], stopped: Callable[[], bool]) -> tuple[int | None, str]:
+async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[], bool]) -> tuple[int | None, str]:
     proc = await asyncio.create_subprocess_exec(*command, env=env, stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE)
     communicate = asyncio.ensure_future(proc.communicate())
@@ -54,7 +55,7 @@ async def _run_watch(command: list[str], env: dict[str, str], stopped: Callable[
             proc.kill()
             await proc.wait()
     if proc.returncode != 0:
-        log.warning("hl watch exited %s: %s", proc.returncode, stderr.decode(errors="replace").strip()[-500:])
+        log.warning("%s exited %s: %s", " ".join(command[:3]), proc.returncode, stderr.decode(errors="replace").strip()[-500:])
     return proc.returncode, stdout.decode(errors="replace")
 
 
@@ -62,10 +63,27 @@ def _events(stdout: str) -> list[dict]:
     return [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
 
 
+def _completed(event: dict) -> bool:
+    return event.get("kind") == "experiment.status" and event.get("value") == "COMPLETED"
+
+
+async def _with_metrics(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
+    """events, each COMPLETED job's carrying its declared metrics as detail: one hl call for all
+    of them. An event whose job could not be read stays as it came."""
+    ids = list(dict.fromkeys(e["subject"] for e in events if _completed(e)))
+    if not ids:
+        return events
+    _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
+    detail = {job.get("id"): ", ".join(
+        f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
+        for m in job.get("metrics", [])) for job in _events(stdout)}
+    return [dict(e, detail=detail.get(e["subject"], "")) if _completed(e) else e for e in events]
+
+
 async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict]:
     """The events already waiting on the cursor, without waiting for more."""
-    _, stdout = await _run_watch([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False)
-    return _events(stdout)
+    _, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False)
+    return await _with_metrics(_events(stdout), env, command[0])
 
 
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
@@ -74,10 +92,10 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
     without any, or as soon as stopped() is true. A failed hl watch is retried after retry_s."""
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
-        code, stdout = await _run_watch(command, env, stopped)
+        code, stdout = await _run_hl(command, env, stopped)
         events = _events(stdout)
         if events:
-            return events
+            return await _with_metrics(events, env, command[0])
         if code not in (0, None):
             deadline = min(give_up, time.monotonic() + retry_s)
             while not stopped() and time.monotonic() < deadline:

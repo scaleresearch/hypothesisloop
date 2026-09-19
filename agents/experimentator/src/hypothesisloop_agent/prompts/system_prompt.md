@@ -108,8 +108,8 @@ it outranks this briefing. Roughly, not a rigid script:
      `parent_id` and reading the parent's prefix.
   6. Updates about your own jobs and hypotheses arrive as messages on their own: a job ending or
      held by what waiting will not clear, your quota, a stage advance or your cut, the run closing or its brief
-     changing, and others' comments, findings and links on your hypotheses. Each is a pointer:
-     `hl job list` has every job's status and best ranking metric, `hl hypothesis get` the rest.
+     changing, and others' comments, findings and links on your hypotheses. A completed job's
+     carries its metrics, best and last; `hl job list` has every job's, `hl hypothesis get` the rest.
      Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A changed
      brief outranks anything you inferred earlier, so re-read it before your next trial. If you are
      cut, wind up and stop.
