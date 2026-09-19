@@ -134,7 +134,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       height: NODE_HEIGHT,
       data: { label: rootLabel, selected: selected === graph.root },
     },
-    ...graph.nodes.map(item => ({
+    ...graph.nodes.filter(item => positions.has(item.id)).map(item => ({
       id: item.id,
       type: 'hypothesis',
       position: positions.get(item.id)!,
@@ -144,7 +144,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
     })),
   ], [graph, positions, rootLabel, selected, hits, dimmed])
 
-  const edges = useMemo<Edge[]>(() => graph.edges.map(e => {
+  const edges = useMemo<Edge[]>(() => graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
     const s = hypothesisLinkStyles[e.type]
     const hierarchy = e.type === 'builds_on'
     return {
@@ -160,7 +160,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
         opacity: dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1,
       },
     }
-  }), [graph, dimmed])
+  }), [graph, positions, dimmed])
 
   // Without a focus the view opens on the objective at the top centre: a few hundred nodes
   // framed at once are unreadable.

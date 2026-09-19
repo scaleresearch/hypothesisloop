@@ -1,4 +1,3 @@
-import dagre from '@dagrejs/dagre'
 import type { Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types'
 
 export const NODE_WIDTH = 240
@@ -25,21 +24,82 @@ export interface Position {
   y: number
 }
 
-// Only builds_on edges rank the layout: cross links would pull branches out of their hierarchy.
+const COLUMN = NODE_WIDTH + 24
+const ROW = NODE_HEIGHT + 64
+
+interface Contour {
+  /** Leftmost and rightmost column per rank, relative to the subtree's root. */
+  left: number[]
+  right: number[]
+}
+
+// Linear in nodes times depth, unlike a general layered layout, so thousands of nodes lay out
+// instantly. A node's rank is its longest builds_on path from the objective, keeping every parent
+// above its children. It hangs under its deepest parent, each subtree packed against its left
+// siblings as tightly as their per-rank extents allow, and a parent is centred over its children.
+// A node not reached from the objective (a builds_on cycle) gets no position and is not drawn.
 export function layoutGraph(graph: HypothesisGraph): Map<string, Position> {
-  const g = new dagre.graphlib.Graph()
-  g.setGraph({ rankdir: 'TB', nodesep: 24, ranksep: 64 })
-  g.setDefaultEdgeLabel(() => ({}))
-  g.setNode(graph.root, { width: NODE_WIDTH, height: NODE_HEIGHT })
-  for (const n of graph.nodes) g.setNode(n.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
-  for (const e of graph.edges) {
-    if (e.type === 'builds_on') g.setEdge(e.to, e.from)
+  const children = new Map<string, string[]>()
+  const pending = new Map<string, number>()
+  for (const n of graph.nodes) {
+    pending.set(n.id, n.builds_on.length)
+    for (const p of n.builds_on) {
+      if (!children.has(p)) children.set(p, [])
+      children.get(p)!.push(n.id)
+    }
   }
-  dagre.layout(g)
-  const positions = new Map<string, Position>()
-  for (const id of g.nodes()) {
-    const n = g.node(id)
-    positions.set(id, { x: n.x - NODE_WIDTH / 2, y: n.y - NODE_HEIGHT / 2 })
+  const rank = new Map([[graph.root, 0]])
+  const treeParent = new Map<string, string>()
+  const order = [graph.root]
+  for (let i = 0; i < order.length; i++) {
+    const id = order[i]
+    for (const c of children.get(id) ?? []) {
+      if (!rank.has(c) || rank.get(id)! + 1 > rank.get(c)!) {
+        rank.set(c, rank.get(id)! + 1)
+        treeParent.set(c, id)
+      }
+      pending.set(c, pending.get(c)! - 1)
+      if (pending.get(c) === 0) order.push(c)
+    }
+  }
+
+  const treeChildren = new Map<string, string[]>()
+  for (const n of [...graph.nodes].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    const p = treeParent.get(n.id)
+    if (p === undefined || pending.get(n.id) !== 0) continue
+    if (!treeChildren.has(p)) treeChildren.set(p, [])
+    treeChildren.get(p)!.push(n.id)
+  }
+
+  const offset = new Map<string, number>()
+  function place(id: string): Contour {
+    const kids = treeChildren.get(id) ?? []
+    const left: number[] = []
+    const right: number[] = []
+    for (const kid of kids) {
+      const c = place(kid)
+      let shift = 0
+      c.left.forEach((l, r) => {
+        if (right[r] !== undefined) shift = Math.max(shift, right[r] + 1 - l)
+      })
+      offset.set(kid, shift)
+      c.left.forEach((l, r) => { left[r] ??= l + shift })
+      c.right.forEach((x, r) => { right[r] = x + shift })
+    }
+    const centre = kids.length === 0 ? 0 : (offset.get(kids[0])! + offset.get(kids[kids.length - 1])!) / 2
+    for (const kid of kids) offset.set(kid, offset.get(kid)! - centre)
+    const own = { left: left.map(l => l - centre), right: right.map(x => x - centre) }
+    own.left[rank.get(id)!] = 0
+    own.right[rank.get(id)!] = 0
+    return own
+  }
+  place(graph.root)
+
+  const positions = new Map([[graph.root, { x: 0, y: 0 }]])
+  for (const id of order) {
+    for (const kid of treeChildren.get(id) ?? []) {
+      positions.set(kid, { x: positions.get(id)!.x + offset.get(kid)! * COLUMN, y: rank.get(kid)! * ROW })
+    }
   }
   return positions
 }

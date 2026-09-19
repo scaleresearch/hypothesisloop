@@ -8,7 +8,6 @@
     "start": "next start"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^3.1.1",
     "@headlessui/react": "^2.2.10",
     "@tanstack/react-table": "^8.21.3",
     "@xyflow/react": "^12.12.0",
