@@ -521,12 +521,22 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 // agent still receives the full picture rather than having the other's news withheld.
 func TestHLWatchDistinguishesItsOwnStageCutFromAnotherAgentsWithAnFYIPrefix(t *testing.T) {
 	source := newFakeEvents()
-	server := watchServer(t, source)
+	handler := NewWatchHandler(source,
+		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.Start(ctx)
+	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
+	defer server.Close()
 
-	stop := make(chan struct{})
-	defer close(stop)
 	go func() {
-		time.Sleep(200 * time.Millisecond)
+		deadline := time.Now().Add(5 * time.Second)
+		for len(handler.hub.list("pe-1", "agent-a")) == 0 || len(handler.hub.list("pe-1", "agent-b")) == 0 {
+			if time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		now := time.Now().UnixMicro()
 		// One boundary row produces both agents' cut events, exactly as the real ladder does.
 		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
