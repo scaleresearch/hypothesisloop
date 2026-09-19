@@ -25,8 +25,11 @@ def fake_hl(script: str) -> tuple[list[str], str]:
 
 
 def runs(counter: str) -> int:
-    with open(counter) as f:
-        return int(f.read())
+    try:
+        with open(counter) as f:
+            return int(f.read())
+    except (FileNotFoundError, ValueError):
+        return 0
 
 
 class NextBatchTest(unittest.IsolatedAsyncioTestCase):
@@ -37,9 +40,10 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_empty_window_returns_nothing_and_watches_again(self):
         command, counter = fake_hl("exit 0\n")
-        events = await updates.next_batch(os.environ.copy(), lambda: False, 0.5, command=command)
+        events = await updates.next_batch(os.environ.copy(), lambda: runs(counter) > 1, 60, command=command)
         self.assertEqual(events, [])
         self.assertGreater(runs(counter), 1)
+        self.assertEqual(await updates.next_batch(os.environ.copy(), lambda: False, 0, command=command), [])
 
     async def test_a_failed_watch_is_retried(self):
         command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
