@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Panel,
   Position as Side, useReactFlow, useStore,
@@ -27,8 +27,12 @@ export function NodeMeta({ item }: { item: HypothesisListItem }) {
   )
 }
 
-type HypothesisNodeData = { item: HypothesisListItem; selected: boolean; hit: boolean; dimmed: boolean }
-type ObjectiveNodeData = { label: string; selected: boolean }
+type HypothesisNodeData = { item: HypothesisListItem }
+type ObjectiveNodeData = { label: string }
+
+// Kept out of node data so that selecting or filtering re-renders only the drawn nodes instead of
+// rebuilding every React Flow node.
+const Highlight = createContext({ selected: '', hits: new Set<string>(), dimmed: new Set<string>() })
 
 function HiddenHandles() {
   return (
@@ -41,10 +45,11 @@ function HiddenHandles() {
 
 const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<HypothesisNodeData>>) {
   const { item } = data
+  const { selected, hits, dimmed } = useContext(Highlight)
   const color = hypothesisStatusColors[item.status]
   return (
     <div
-      className={clsx('hg-node', data.selected && 'selected', data.hit && 'hit', data.dimmed && 'dimmed')}
+      className={clsx('hg-node', selected === item.id && 'selected', hits.has(item.id) && 'hit', dimmed.has(item.id) && 'dimmed')}
       style={{ borderLeftColor: color }}
       title={item.text}
     >
@@ -58,9 +63,10 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
   )
 })
 
-const ObjectiveNode = memo(function ObjectiveNode({ data }: NodeProps<Node<ObjectiveNodeData>>) {
+const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
+  const { selected } = useContext(Highlight)
   return (
-    <div className={clsx('hg-node hg-objective', data.selected && 'selected')}>
+    <div className={clsx('hg-node hg-objective', selected === id && 'selected')}>
       <HiddenHandles />
       <span className="uppercase-label">Objective</span>
       <div className="hg-node-text">{data.label}</div>
@@ -132,7 +138,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       position: positions.get(graph.root)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      data: { label: rootLabel, selected: selected === graph.root },
+      data: { label: rootLabel },
     },
     ...graph.nodes.filter(item => positions.has(item.id)).map(item => ({
       id: item.id,
@@ -140,9 +146,10 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       position: positions.get(item.id)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      data: { item, selected: selected === item.id, hit: hits.has(item.id), dimmed: dimmed.has(item.id) },
+      data: { item },
     })),
-  ], [graph, positions, rootLabel, selected, hits, dimmed])
+  ], [graph, positions, rootLabel])
+  const highlight = useMemo(() => ({ selected, hits, dimmed }), [selected, hits, dimmed])
 
   const edges = useMemo<Edge[]>(() => graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
     const s = hypothesisLinkStyles[e.type]
@@ -178,39 +185,41 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
   }, [ready, focus, graph.root, positions, width, setCenter, setViewport, getZoom])
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      colorMode="dark"
-      onInit={() => setReady(true)}
-      minZoom={0.05}
-      maxZoom={2}
-      onlyRenderVisibleElements
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={false}
-      onNodeClick={(_, node) => {
-        centered.current = node.id
-        onSelect(node.id)
-      }}
-      attributionPosition="top-right"
-      style={{ background: 'var(--surface)' }}
-    >
-      <Background gap={24} color="rgba(255, 255, 255, 0.05)" />
-      <Controls showInteractive={false} />
-      <MiniMap
-        pannable
-        zoomable
-        nodeColor={n => n.type === 'objective' ? '#7c6cf0' : hypothesisStatusColors[(n.data as HypothesisNodeData).item.status]}
-        maskColor="rgba(8, 9, 12, 0.7)"
-        style={{ background: 'var(--surface-2)' }}
-      />
-      {/* The view opens on the objective at the top and centres a focused node, so the legend sits
-          at the bottom, between the controls and the minimap, where it hides neither. */}
-      <Panel position="bottom-center">
-        <Legend />
-      </Panel>
-    </ReactFlow>
+    <Highlight.Provider value={highlight}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        colorMode="dark"
+        onInit={() => setReady(true)}
+        minZoom={0.05}
+        maxZoom={2}
+        onlyRenderVisibleElements
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        onNodeClick={(_, node) => {
+          centered.current = node.id
+          onSelect(node.id)
+        }}
+        attributionPosition="top-right"
+        style={{ background: 'var(--surface)' }}
+      >
+        <Background gap={24} color="rgba(255, 255, 255, 0.05)" />
+        <Controls showInteractive={false} />
+        <MiniMap
+          pannable
+          zoomable
+          nodeColor={n => n.type === 'objective' ? '#7c6cf0' : hypothesisStatusColors[(n.data as HypothesisNodeData).item.status]}
+          maskColor="rgba(8, 9, 12, 0.7)"
+          style={{ background: 'var(--surface-2)' }}
+        />
+        {/* The view opens on the objective at the top and centres a focused node, so the legend sits
+            at the bottom, between the controls and the minimap, where it hides neither. */}
+        <Panel position="bottom-center">
+          <Legend />
+        </Panel>
+      </ReactFlow>
+    </Highlight.Provider>
   )
 }
