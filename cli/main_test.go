@@ -586,7 +586,12 @@ func TestUnfinishedJobSaysTheResultArrivesAsAnUpdate(t *testing.T) {
 }
 
 func TestGuessedFormsPointToTheCommand(t *testing.T) {
-	recordingServer(t, func(int, recorded) any { return []any{} })
+	recordingServer(t, func(_ int, r recorded) any {
+		if strings.HasSuffix(r.Path, "/results") {
+			return map[string]any{"metrics": []any{map[string]any{"metric": "val_accuracy"}}}
+		}
+		return []any{}
+	})
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
 	for _, tc := range []struct {
 		args []string
@@ -595,6 +600,8 @@ func TestGuessedFormsPointToTheCommand(t *testing.T) {
 	}{
 		{[]string{"hypothesis", "comments", "--help"}, 2, "hl hypothesis get ID"},
 		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
+		{[]string{"hypothesis", "links", "--help"}, 2, "hl hypothesis link"},
+		{[]string{"platform-experiments", "results"}, 0, "no standing on val_accuracy yet"},
 		{[]string{"experiments", "list", "--platform-experiment-id", "pe-1"}, 2, "hl job list"},
 		{[]string{"job", "metrics", "job-1", "--raw"}, 0, "no metric reported yet"},
 	} {

@@ -104,8 +104,8 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 		return hypothesisGet(c, rest, stdout, stderr)
 	case "query":
 		return hypothesisQuery(c, rest, stdout, stderr)
-	case "comments":
-		fmt.Fprintln(stderr, "hl: hypothesis comments: read them with hl hypothesis get ID, add one with hl hypothesis comment ID --text T")
+	case "comments", "links":
+		fmt.Fprintf(stderr, "hl: hypothesis %s: read them with hl hypothesis get ID, add one with hl hypothesis %s\n", sub, strings.TrimSuffix(sub, "s"))
 		return 2
 	default:
 		fmt.Fprintf(stderr, "hl: hypothesis: unknown subcommand %q\n\n%s\n", sub, hypothesisUsage)

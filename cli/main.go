@@ -428,6 +428,8 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsUpdate(c, args[1:], stdout, stderr)
 		case "get":
 			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
+		case "results":
+			return cmdResults(c, args[1:], stdout, stderr)
 		}
 	}
 	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] | get [PE] | create [FILE] | start PE | update PE [FILE]", stderr)
