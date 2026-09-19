@@ -104,7 +104,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED",
 		Description: "Your job moved. detail carries the eviction reason when there is one; the queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
-		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on."},
+		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
 		Description: "A grant, a donation or a stage move landed. What it is made of comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
@@ -523,7 +523,7 @@ WHERE platform_experiment_id = $1
 		current := Event{Kind: EventExperimentStatus, Subject: id, Value: status, Detail: evictionReason,
 			PlatformExperimentID: peID, AgentID: agentID, Position: statusXid}
 		events = append(events, current)
-		if notAdmitted != "" {
+		if notAdmitted != "" && notAdmitted != domain.NotAdmittedAwaitingAdmission && notAdmitted != domain.NotAdmittedSummaryGate {
 			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: notAdmitted,
 				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
 		}

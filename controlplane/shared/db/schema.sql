@@ -647,8 +647,10 @@ BEGIN
             COALESCE(NEW.eviction_reason, ''), NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     -- The queue reason is what an agent polls hardest for: it changes while the status does not,
-    -- so it needs an event of its own or a waiting agent learns nothing until admission.
-    IF NEW.not_admitted_reason IS NOT NULL
+    -- so it needs an event of its own or a waiting agent learns nothing until admission. A job
+    -- nobody has judged yet has no reason to tell, and the submit reply already says summary_gate
+    -- (replayExperiments leaves out the same two).
+    IF NEW.not_admitted_reason NOT IN ('awaiting_admission', 'summary_gate')
        AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
         PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id, NEW.not_admitted_reason, '',
             NEW.platform_experiment_id, NEW.agent_id);

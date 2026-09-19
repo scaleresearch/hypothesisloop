@@ -306,6 +306,35 @@ func TestReplayedJobEventsEqualTheirLiveTwins(t *testing.T) {
 	}
 }
 
+// A job nobody has judged yet has nothing to report, and hl job submit already says summary_gate.
+func TestAJobAwaitingAdmissionOrASummaryIsNotAnnouncedAsBlocked(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "unjudged", true)
+	const jobID = "watch-test-job-unjudged"
+	before := cursorNow(t, pool)
+	exec(t, pool, `INSERT INTO experiments
+(id, agent_id, project_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
+VALUES ($1, $2, 'p', $3, 'r@0', 'h', 'd', $4, 'claim', 'objective', 'test-accelerator',
+        'QUEUED', 'awaiting_admission', 1, now(), 'AK', 'SK')`, jobID, agentID, peID, hypothesisID)
+	store := NewEventsStore(pool, noHypothesisEvents{})
+	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}
+	for _, reason := range []string{"awaiting_admission", "summary_gate"} {
+		exec(t, pool, `UPDATE experiments SET not_admitted_reason = $2, updated_at = now() WHERE id = $1`, jobID, reason)
+		replayed, err := store.Replay(context.Background(), filter, before)
+		if err != nil || len(replayed) != 0 {
+			t.Errorf("replay of a job held as %s: got = %+v, %v, want = no blocked event", reason, replayed, err)
+		}
+	}
+	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'capacity_unavailable', updated_at = now() WHERE id = $1`, jobID)
+	if got := awaitEvent(t, events, EventExperimentBlocked, jobID).Value; got != "capacity_unavailable" {
+		t.Errorf("first live blocked event: got = %v, want = capacity_unavailable", got)
+	}
+}
+
 // A client hands back the cursor of the last event it saw. It must be told everything from that
 // event's transaction on, which may repeat that event, and nothing from before it.
 func TestReplayFromAnEventsCursorReturnsThatEventAndWhatCameAfterIt(t *testing.T) {
