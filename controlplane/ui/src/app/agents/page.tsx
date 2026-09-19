@@ -19,22 +19,6 @@ import { formatAccH } from '@/lib/format'
 
 const PAGE_SIZE = 25
 
-function BonusChip({ label, active }: { label: string; active: boolean }) {
-  return (
-    <span
-      className="wa-chip"
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'default',
-        color: active ? semantic.success : 'var(--dim-fg)',
-        borderColor: active ? 'rgba(74, 222, 128, 0.35)' : undefined,
-        background: active ? 'rgba(74, 222, 128, 0.1)' : undefined,
-      }}
-    >
-      {label}
-    </span>
-  )
-}
-
 function AgentExperimentQuota({ agentId, pe }: { agentId: string; pe: PlatformExperiment }) {
   const { data: quotas } = useSWR<AgentQuota[]>(
     ['pe-quotas', pe.id],
@@ -244,7 +228,14 @@ export default function AgentsPage() {
                         <AgentKindBadge kind={a.kind} className="ml-2" />
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <BonusChip label="+25% Top-3" active={a.top3_count > 0} />
+                        {a.top3_count > 0 ? (
+                          <span
+                            className="wa-chip"
+                            style={{ cursor: 'default', color: semantic.success, borderColor: 'rgba(74, 222, 128, 0.35)', background: 'rgba(74, 222, 128, 0.1)' }}
+                          >
+                            +25% Top-3
+                          </span>
+                        ) : <span className="text-dim">—</span>}
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{a.performance_score.toFixed(3)}</td>
                       <td className="text-dim" style={{ fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</td>
