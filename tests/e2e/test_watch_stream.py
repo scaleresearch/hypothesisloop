@@ -1,5 +1,5 @@
 """GET /watch: the live change stream, exercised through `hl watch` -- the client agents actually
-use (the Go port of the former agents/coordinator/experiments/hl-watch; see cli/internal/watchclient).
+use (see cli/internal/watchclient).
 Ported 1:1 from tests/scenarios/watch-stream.sh, split one test per independently-diagnosable
 property, per tests/improve.md #7 step 4:
   1. Order and completeness: a subscriber attached BEFORE submission sees QUEUED, SUBMITTED,
@@ -60,7 +60,7 @@ RANK = {"QUEUED": 0, "SUBMITTED": 1, "ADMITTED": 2, "RUNNING": 3, "COMPLETED": 4
 
 
 # --- holding a websocket from Python -----------------------------------------------------------
-# hl watch is a long-running subprocess, exactly as `hl-watch` was: every subscriber below is an
+# hl watch is a long-running subprocess: every subscriber below is an
 # `hl watch` process writing JSON lines to a file, and the assertions read the file. Killing the
 # process IS killing the connection. Output goes to files (not subprocess.PIPE) so nothing here
 # can block forever on an unread pipe -- reads are bounded polls against the file, never a

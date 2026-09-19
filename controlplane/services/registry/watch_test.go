@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -382,7 +384,7 @@ func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
 
 // A running job knows its own experiment id and nothing else — it is never told which platform
 // experiment it belongs to. If subscribing required that id the job could not subscribe at all,
-// and hl-watch --experiment would be unusable from inside a workload.
+// and hl watch --experiment would be unusable from inside a workload.
 func TestSubscribingByExperimentIDAloneResolvesItsPlatformExperiment(t *testing.T) {
 	source := newFakeEvents()
 	server := watchServer(t, source)
@@ -396,21 +398,34 @@ func TestSubscribingByExperimentIDAloneResolvesItsPlatformExperiment(t *testing.
 	}
 }
 
-// runHLWatch runs the real script against the real server and returns its exit code and what it
-// wrote to stderr — the two things an agent branching on this tool actually sees.
+var (
+	hlBinaryOnce sync.Once
+	hlBinary     string
+	hlBinaryErr  error
+)
+
+// runHLWatch runs the real hl binary's watch command against the real server and returns its exit
+// code, stdout and stderr: what an agent branching on this tool actually sees.
 func runHLWatch(t *testing.T, serverURL string, args ...string) (int, string, string) {
 	t.Helper()
-	script, err := filepath.Abs(filepath.Join("..", "..", "..", "agents", "coordinator", "experiments", "hl-watch"))
-	if err != nil {
-		t.Fatalf("locate hl-watch: got = %v, want = nil", err)
-	}
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skipf("no python3 to run hl-watch: %v", err)
+	hlBinaryOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "hl watch-test-")
+		if err != nil {
+			hlBinaryErr = err
+			return
+		}
+		hlBinary = filepath.Join(dir, "hl")
+		out, err := exec.Command("go", "build", "-o", hlBinary, "github.com/scaleresearch/hypothesisloop/cli").CombinedOutput()
+		if err != nil {
+			hlBinaryErr = fmt.Errorf("%v: %s", err, out)
+		}
+	})
+	if hlBinaryErr != nil {
+		t.Fatalf("build hl: got = %v, want = nil", hlBinaryErr)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, python, append([]string{script, "--url", serverURL}, args...)...)
+	cmd := exec.CommandContext(ctx, hlBinary, append([]string{"watch", "--url", serverURL}, args...)...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -420,14 +435,14 @@ func runHLWatch(t *testing.T, serverURL string, args ...string) (int, string, st
 	case runErr == nil:
 	case errors.As(runErr, &exitErr):
 	default:
-		t.Fatalf("run hl-watch: got = %v, want = nil or an exit status", runErr)
+		t.Fatalf("run hl watch: got = %v, want = nil or an exit status", runErr)
 	}
 	return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
 }
 
-// hl-watch is the whole point of the transport: a model cannot hold a socket across tool calls,
-// so a process holds it instead and exits on the condition. This runs the real script against the
-// real server — the handshake, the framing and the --until contract in one — because those three
+// hl watch is the whole point of the transport: a model cannot hold a socket across tool calls,
+// so a process holds it instead and exits on the condition. This runs the real hl binary against
+// the real server — the handshake, the framing and the --until contract in one — because those three
 // agreeing separately is not the same as them agreeing with each other, and the failure mode if
 // they do not is a wait that always ends at the timeout and never at the answer.
 func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
@@ -453,16 +468,16 @@ func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
 	code, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
 		"--until", "status in COMPLETED,FAILED,EVICTED", "--timeout", "20")
 	if code != 0 {
-		t.Fatalf("hl-watch exit code: got = %v, want = %v (stderr: %s)", code, 0, stderr)
+		t.Fatalf("hl watch exit code: got = %v, want = %v (stderr: %s)", code, 0, stderr)
 	}
 	if !strings.Contains(output, `"value":"COMPLETED"`) {
-		t.Errorf("hl-watch output: got = %v, want = a line carrying COMPLETED", output)
+		t.Errorf("hl watch output: got = %v, want = a line carrying COMPLETED", output)
 	}
 }
 
 // A 4xx says the request is wrong, and it will be exactly as wrong on the next attempt. Retrying
 // it to the timeout and then exiting 0 is the worst of both: the agent blocks for its whole
-// window and then reads success, which is the silent wait hl-watch exists to remove. It has to
+// window and then reads success, which is the silent wait hl watch exists to remove. It has to
 // fail immediately and say so in the exit code.
 func TestHLWatchFailsImmediatelyWhenThePlatformRefusesTheSubscription(t *testing.T) {
 	server := watchServer(t, newFakeEvents())
@@ -472,7 +487,7 @@ func TestHLWatchFailsImmediatelyWhenThePlatformRefusesTheSubscription(t *testing
 		"--kinds", "not.a.real.kind", "--timeout", "30")
 
 	if code != 2 {
-		t.Errorf("hl-watch exit code for a refused subscription: got = %v, want = %v (stderr: %s)", code, 2, stderr)
+		t.Errorf("hl watch exit code for a refused subscription: got = %v, want = %v (stderr: %s)", code, 2, stderr)
 	}
 	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Errorf("time spent before giving up: got = %v, want = well under the 30s timeout", elapsed)
@@ -489,7 +504,7 @@ func TestHLWatchPrintsThePlatformsReasonForRefusingRatherThanABare400(t *testing
 		"--kinds", "not.a.real.kind", "--timeout", "30")
 
 	if !strings.Contains(stderr, "not.a.real.kind") {
-		t.Errorf("hl-watch refusal message: got = %v, want = one naming the offending kind", stderr)
+		t.Errorf("hl watch refusal message: got = %v, want = one naming the offending kind", stderr)
 	}
 }
 
@@ -510,12 +525,12 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 		"--until", "status in COMPLETED", "--timeout", "5")
 
 	if code != 124 {
-		t.Errorf("hl-watch exit code after retrying an unreachable server: got = %v, want = %v (stderr: %s)", code, 124, stderr)
+		t.Errorf("hl watch exit code after retrying an unreachable server: got = %v, want = %v (stderr: %s)", code, 124, stderr)
 	}
 }
 
 // The real battle test: two agents' jobs under one platform experiment, each running the actual
-// hl-watch script against the actual server. Each agent's own stage cut must arrive unmarked, and
+// hl watch against the actual server. Each agent's own stage cut must arrive unmarked, and
 // the other agent's must arrive "FYI: cut" — proving the prefix survives the real WebSocket
 // handshake and framing, not just the in-process db.EventFilter unit tests above, and that each
 // agent still receives the full picture rather than having the other's news withheld.
@@ -1079,7 +1094,7 @@ func TestTheDefaultTheServerAppliesIsTheDefaultGETWatchKindsAdvertises(t *testin
 	}
 }
 
-// The inspect path end to end, through the real script. hl-watch masks what it sends and the
+// The inspect path end to end, through the real hl binary. hl watch masks what it sends and the
 // server unmasks it, and those two agreeing separately is not the same as them agreeing with each
 // other — if they do not, an agent asking what it is subscribed to gets a dropped socket instead of
 // an answer, which is worse than not being able to ask.
@@ -1090,9 +1105,9 @@ func TestHLWatchPrintsWhatTheServerSaysThisConnectionIsSubscribedTo(t *testing.T
 		"--kinds", "experiment.status", "--show-subscription", "--timeout", "5")
 
 	if !strings.Contains(output, `"subscription"`) {
-		t.Errorf("hl-watch --show-subscription output: got = %v, want = a subscription line (stderr: %s)", output, stderr)
+		t.Errorf("hl watch --show-subscription output: got = %v, want = a subscription line (stderr: %s)", output, stderr)
 	}
 	if !strings.Contains(output, `"experiment.status"`) {
-		t.Errorf("hl-watch --show-subscription output: got = %v, want = one naming the kind in force", output)
+		t.Errorf("hl watch --show-subscription output: got = %v, want = one naming the kind in force", output)
 	}
 }

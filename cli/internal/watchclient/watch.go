@@ -1,8 +1,6 @@
-// Package watchclient is a native Go port of agents/coordinator/experiments/hl-watch: block until
-// the platform reports an event on GET /watch, instead of polling for it. It speaks RFC 6455
-// itself (no third-party library) for the same reason the Python original does — the platform's
-// own API images are whatever a workload happens to be built on, and this ships wherever `hl`
-// does.
+// Package watchclient blocks until the platform reports an event on GET /watch, instead of
+// polling for it. It speaks RFC 6455 itself (no third-party library) because it ships wherever
+// `hl` does, including job images built on anything.
 package watchclient
 
 import (
@@ -40,7 +38,7 @@ type Refused struct{ msg string }
 
 func (e *Refused) Error() string { return e.msg }
 
-// Options mirrors hl-watch's flags.
+// Options are hl watch's flags.
 type Options struct {
 	URL                string
 	Experiment         string
@@ -57,8 +55,7 @@ type Options struct {
 	Stderr io.Writer
 }
 
-// Run executes the watch loop and returns the process exit code, matching hl-watch's contract:
-// 0 on --until becoming true (or the window elapsing without --until), 124 on timeout with
+// Run executes the watch loop and returns the process exit code: 0 on --until becoming true (or the window elapsing without --until), 124 on timeout with
 // --until still unmet, 2 on a usage error or a refused subscription.
 func Run(opts Options) int {
 	if opts.URL == "" {
@@ -197,7 +194,7 @@ func sleepUntil(deadline time.Time, d time.Duration) {
 }
 
 // parseUntil turns "status in A,B,C" into a predicate over one job or platform experiment status
-// event (their values never overlap: jobs are upper case, runs lower case), the only form hl-watch
+// event (their values never overlap: jobs are upper case, runs lower case), the only form hl watch
 // understands — a wait that can never end is the failure this tool exists to remove, so an
 // expression that isn't this shape is a usage error rather than a condition that quietly never
 // fires.
