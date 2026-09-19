@@ -122,11 +122,10 @@ func rankingMetric(key, direction string) []domain.MetricDefinition {
 	return []domain.MetricDefinition{{Key: key, Direction: direction}}
 }
 
-// A job whose previous checkpoint was ahead of the pack and whose current one is clearly cut off
-// from the worst of the rest crosses into the advisory. A job that recovers and drops back makes
-// that crossing again, and the agent still hears about it once.
-func TestUnderperformanceFiresOncePerJobOnTheTransitionIntoTrailing(t *testing.T) {
-	server := cohortSeriesServer(0.87, []float64{0.9, 0.85, 0.88})
+// A job launched after its siblings finished trails them from its first sample: its previous
+// sample trailed as well. It is told at its first checkpoint, and once, however many follow.
+func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.T) {
+	server := cohortSeriesServer(0.84375, []float64{0.9, 0.9, 0.9125, 0.9375, 0.94375, 0.875})
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
@@ -137,8 +136,9 @@ func TestUnderperformanceFiresOncePerJobOnTheTransitionIntoTrailing(t *testing.T
 		events:       notifier,
 	}
 
-	for _, fraction := range []float64{0.5, 0.7} {
-		svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", fraction, 0.5, time.Now().UTC())
+	// A run of 3 minutes: 36 s in at 20%, 54 s at 30%, 72 s at 40%, where under 2 minutes are left.
+	for fraction, elapsed := range map[float64]time.Duration{0.2: 36 * time.Second, 0.3: 54 * time.Second, 0.4: 72 * time.Second} {
+		svc.checkUnderperformance(context.Background(), admittedAgo(elapsed), "acc", fraction, 0.84375, time.Now().UTC())
 	}
 
 	if len(notifier.events) != 1 {
@@ -147,27 +147,6 @@ func TestUnderperformanceFiresOncePerJobOnTheTransitionIntoTrailing(t *testing.T
 	got := notifier.events[0]
 	if got.Kind != db.EventJobUnderperforming || got.Subject != "exp-1" || got.Value != "acc" {
 		t.Fatalf("event = %+v, want kind=%s subject=exp-1 value=acc", got, db.EventJobUnderperforming)
-	}
-}
-
-// A job that was already trailing as of its own previous checkpoint is in the same stretch, not
-// a new one — no second advisory for it.
-func TestUnderperformanceDoesNotRepeatWithinTheSameStretch(t *testing.T) {
-	server := cohortSeriesServer(0.60, []float64{0.9, 0.85, 0.88}) // already trailing last checkpoint too
-	defer server.Close()
-
-	notifier := &capturingNotifier{}
-	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
-		events:       notifier,
-	}
-
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
-
-	if len(notifier.events) != 0 {
-		t.Fatalf("events = %d, want 0 (already trailing last checkpoint)", len(notifier.events))
 	}
 }
 
@@ -254,35 +233,6 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (2%% gap against a tied cohort is not a real straggler)", len(notifier.events))
-	}
-}
-
-// Two checkpoints written a second apart are still two distinct checkpoints. This was caught
-// live: a coarse "ignore anything from the last 2 seconds" cutoff discarded the previous, genuine
-// checkpoint as if it were the sample just written, so the edge-check had nothing to compare
-// against and fired on every sample of a stretch instead of only its first one.
-func TestUnderperformanceEdgeCheckIsNotFooledByCloselyTimedCheckpoints(t *testing.T) {
-	// Both siblings and self report at nearly the same instant; self's previous checkpoint
-	// already trailed by exactly the margin of its current one, so the edge should not fire
-	// again here even though both samples land inside what used to be the 2s cutoff window.
-	server := cohortSeriesServer(0.3, []float64{0.9, 0.85, 0.88})
-	defer server.Close()
-
-	notifier := &capturingNotifier{}
-	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
-		events:       notifier,
-	}
-
-	// The self series' one stored point (0.3, timestamped an hour ago by cohortSeriesServer) is
-	// older than `at`, so it is read back as the previous checkpoint regardless of how close
-	// together the two RecordMetric calls actually were in wall-clock time.
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.6, 0.3, time.Now().UTC())
-
-	if len(notifier.events) != 0 {
-		t.Fatalf("events = %d, want 0 (same stretch as the previous checkpoint, however close in time)", len(notifier.events))
 	}
 }
 

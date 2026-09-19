@@ -130,25 +130,19 @@ const (
 	underperformMinRemaining = 2 * time.Minute
 )
 
-// checkUnderperformance looks at how this job's just-recorded ranking-metric sample compares to
-// its cohort (every other job in the same platform experiment reporting the same metric) and, if
-// it just became the clear straggler with underperformMinRemaining of its run still ahead, tells
-// only the owning agent so — once per job, never a command. See db.EventJobUnderperforming.
+// checkUnderperformance compares this job's just-recorded ranking-metric sample to its cohort
+// (every other job in the same platform experiment reporting the same metric) and, if it is the
+// clear straggler with underperformMinRemaining of its run still ahead, tells only the owning
+// agent so: once per job, never a command. See db.EventJobUnderperforming.
 //
-// Both "is this job trailing now" and "was it trailing as of its own previous sample" are
-// recomputed from the metrics store every time; the only thing kept is the marker on the job's
-// row saying its owner was told.
+// Trailing is recomputed from the metrics store every time; the only thing kept is the marker on
+// the job's row saying its owner was told. A job launched against siblings that already finished
+// trails from its first sample, so the check asks whether it trails now, never whether it just
+// started to.
 //
-// One honest cost of that choice, found running this live against a real GreptimeDB: the query
-// this runs is issued the instant after this same call wrote its own sample, and remote-write
-// ingestion is not synchronous — a sibling's (or this job's own previous) very recent point can
-// still be invisible to the very next query. When that happens this silently sees a smaller, or
-// staler, cohort than actually exists and may under-fire for a checkpoint it should have flagged.
-// That is the safe direction to fail in: a missed advisory costs nothing an agent wasn't already
-// going to find out about at the next checkpoint, while over-firing on a query that raced its own
-// write would be the false positive this whole design exists to avoid. Not fixed here because
-// fixing it means either waiting on the store (turning a reactive check into a blocking one) or
-// caching the very state this function is built specifically not to retain.
+// The query runs the instant after this call wrote its own sample and remote-write ingestion is
+// not synchronous, so a sibling's newest point can be missing. That under-fires for one
+// checkpoint, the safe direction: the next checkpoint sees it.
 func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experiment, metricName string, fractionComplete, value float64, at time.Time) {
 	if s.events == nil || exp.PlatformExperimentID == "" {
 		return
@@ -184,13 +178,6 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		return
 	}
 
-	// A short lookback, not the dashboard's 24h: GetPlatformExperimentTimeseries resamples onto a
-	// lookback/500 grid, and 24h makes that grid ~173s wide. At that width the "previous" self
-	// point this check reads back can be a carried-forward copy of the value it is checking right
-	// now (same value, an earlier grid timestamp) rather than a genuinely earlier sample — which
-	// silently treats every first checkpoint of a trailing stretch as a continuation of one that
-	// never happened. A lookback sized to underperformSiblingStaleness keeps the grid close enough
-	// to real sample timestamps for that edge to be trustworthy, at the same query cost.
 	series, err := s.GetPlatformExperimentTimeseries(ctx, exp.PlatformExperimentID, metricName, underperformSiblingStaleness+5*time.Minute, time.Time{})
 	if err != nil {
 		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
@@ -205,21 +192,8 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	}
 
 	var siblingScores []float64
-	var prevSelfScore float64
-	havePrevSelf := false
 	for _, s := range series {
 		if s.ExperimentID == exp.ID {
-			// Exclude exactly the sample this call is checking, by its own write time, not an
-			// arbitrary window — two checkpoints written a second apart are still two distinct
-			// checkpoints, and a coarse "last N seconds" cutoff would wrongly discard the older
-			// one as "too recent" and leave the edge-check with nothing to compare against.
-			for i := len(s.Points) - 1; i >= 0; i-- {
-				if s.Points[i].Timestamp.Before(at) {
-					prevSelfScore = score(s.Points[i].Value)
-					havePrevSelf = true
-					break
-				}
-			}
 			continue
 		}
 		if len(s.Points) == 0 {
@@ -239,41 +213,20 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		return
 	}
 
-	trails := func(selfScore float64) bool {
-		best, worst := siblingScores[0], siblingScores[0]
-		for _, v := range siblingScores[1:] {
-			if v > best {
-				best = v
-			}
-			if v < worst {
-				worst = v
-			}
-		}
-		if selfScore >= worst {
-			return false
-		}
-		// The margin is normally a fraction of the cohort's own spread — scale-free, and blind
-		// to a cohort that is simply close together by nature of the metric. But a cohort
-		// reporting the exact same value (spread == 0) has no spread to take a fraction of, and
-		// dividing by zero there would flag any nonzero gap at all, however negligible. Scale off
-		// the cohort's own value instead in that case, so a tied cohort still needs a real,
-		// proportionate gap before it calls one job out.
-		margin := underperformSeparation * (best - worst)
-		if margin <= 0 {
-			margin = underperformSeparation * math.Abs(worst)
-		}
-		return worst-selfScore >= margin
+	best, worst := siblingScores[0], siblingScores[0]
+	for _, v := range siblingScores[1:] {
+		best, worst = max(best, v), min(worst, v)
 	}
-
-	if !trails(score(value)) {
+	// The margin is a fraction of the cohort's own spread, so it assumes no unit. A cohort tied on
+	// one value has no spread, and any gap at all would clear a zero margin: it is then scaled off
+	// the cohort's value.
+	margin := underperformSeparation * (best - worst)
+	if margin <= 0 {
+		margin = underperformSeparation * math.Abs(worst)
+	}
+	if worst-score(value) < margin {
 		return
 	}
-	if havePrevSelf && trails(prevSelfScore) {
-		// Already trailing as of the previous checkpoint: no transition into trailing.
-		return
-	}
-	// A job that drops in and out of trailing makes that transition several times; the marker on
-	// its row keeps the advisory to one per job.
 	first, err := s.store.MarkUnderperforming(ctx, exp.ID)
 	if err != nil {
 		s.logger.Warn("registry: mark underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
