@@ -199,6 +199,9 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
+	if !strings.Contains(stderr.String(), "arrives as an update when you end your turn") {
+		t.Fatalf("stderr = %q, want the note that the result arrives as an update", stderr.String())
+	}
 	metadata, ok := gotBody["metadata"].(map[string]any)
 	if !ok || metadata["agent_id"] != "jane" || metadata["platform_experiment_id"] != "pe-env" {
 		t.Fatalf("agent_id and platform_experiment_id not stamped onto metadata: %+v", gotBody)
@@ -556,6 +559,49 @@ func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
 		}
 		if len(queries) != 1 || queries[0] != tc.want {
 			t.Fatalf("%v: queries = %v, want %q", tc.args, queries, tc.want)
+		}
+	}
+}
+
+func TestUnfinishedJobSaysTheResultArrivesAsAnUpdate(t *testing.T) {
+	status := "RUNNING"
+	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "job-1", "status": status} })
+	note := "the result arrives as an update when you end your turn"
+	for _, tc := range []struct {
+		status string
+		want   bool
+	}{{"RUNNING", true}, {"QUEUED", true}, {"COMPLETED", false}, {"FAILED", false}} {
+		status = tc.status
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d, stderr %s", code, stderr.String())
+		}
+		if got := strings.Contains(stderr.String(), note); got != tc.want {
+			t.Fatalf("%s: stderr = %q, note wanted %v", tc.status, stderr.String(), tc.want)
+		}
+		if strings.Contains(stdout.String(), note) {
+			t.Fatalf("%s: note on stdout: %q", tc.status, stdout.String())
+		}
+	}
+}
+
+func TestGuessedFormsPointToTheCommand(t *testing.T) {
+	recordingServer(t, func(int, recorded) any { return []any{} })
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"hypothesis", "comments", "--help"}, 2, "hl hypothesis get ID"},
+		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
+		{[]string{"experiments", "list", "--platform-experiment-id", "pe-1"}, 2, "hl job list"},
+		{[]string{"job", "metrics", "job-1", "--raw"}, 0, "no metric reported yet"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(tc.args, &stdout, &stderr)
+		if code != tc.code || !strings.Contains(stderr.String(), tc.want) || strings.Count(stderr.String(), "\n") != 1 {
+			t.Fatalf("%v: exit %d, stderr %q", tc.args, code, stderr.String())
 		}
 	}
 }

@@ -104,6 +104,9 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 		return hypothesisGet(c, rest, stdout, stderr)
 	case "query":
 		return hypothesisQuery(c, rest, stdout, stderr)
+	case "comments":
+		fmt.Fprintln(stderr, "hl: hypothesis comments: read them with hl hypothesis get ID, add one with hl hypothesis comment ID --text T")
+		return 2
 	default:
 		fmt.Fprintf(stderr, "hl: hypothesis: unknown subcommand %q\n\n%s\n", sub, hypothesisUsage)
 		return 2
@@ -546,9 +549,14 @@ description (/explore). Examples:
 	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default $PLATFORM_EXPERIMENT_ID)")
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
+	paramsJSON := fs.String("params", "", "")
 	cypher, err := parseOne(fs, args, "query", "", "cypher")
 	if err != nil {
 		return parseExit(err)
+	}
+	if *paramsJSON != "" {
+		fmt.Fprintln(stderr, "hl: hypothesis query: $pe and $tested are already bound; pass any other parameter as --param k=v")
+		return 2
 	}
 	if cypher == "-" {
 		raw, err := io.ReadAll(os.Stdin)

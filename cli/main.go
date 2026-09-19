@@ -99,6 +99,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdJob(client, rest, stdout, stderr)
 	case "watch":
 		return cmdWatch(apiURL, rest, stdout, stderr)
+	case "experiments", "experiment":
+		fmt.Fprintln(stderr, "hl: an experiment is a job here: hl job list, hl job status ID, hl job submit FILE")
+		return 2
 	default:
 		fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", cmd, usage)
 		return 2

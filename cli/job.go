@@ -142,7 +142,23 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	if err := printLine(stdout, out, jobDrop...); err != nil {
 		return fail(stderr, err)
 	}
+	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 	return 0
+}
+
+const resultArrives = "the result arrives as an update when you end your turn"
+
+// unfinished reports whether a job can still change status.
+func unfinished(raw json.RawMessage) bool {
+	var job struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(raw, &job)
+	switch job.Status {
+	case "COMPLETED", "FAILED", "EVICTED", "REJECTED":
+		return false
+	}
+	return true
 }
 
 // setJobEnv applies K=V pairs onto body's job.env.
@@ -229,7 +245,7 @@ REJECTED), not_admitted_reason while queued, eviction_reason, phase_detail, and 
 	if len(ids) == 0 {
 		return parseExit(misuse(fs, "want at least one ID"))
 	}
-	code := 0
+	code, pending := 0, false
 	for _, id := range ids {
 		var out json.RawMessage
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &out); err != nil {
@@ -239,6 +255,10 @@ REJECTED), not_admitted_reason while queued, eviction_reason, phase_detail, and 
 		if err := printLine(stdout, out, jobDrop...); err != nil {
 			return fail(stderr, err)
 		}
+		pending = pending || unfinished(out)
+	}
+	if pending {
+		fmt.Fprintln(stderr, "hl: job status: unfinished; "+resultArrives)
 	}
 	return code
 }
@@ -266,6 +286,7 @@ func jobMetrics(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 One line per reported metric: points reported, the last value and the fraction_complete it was
 reported at, and the min and max over the run. --points prints every point instead.`, stderr)
 	points := fs.Bool("points", false, "print every reported point, oldest first")
+	fs.BoolVar(points, "raw", false, "")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
