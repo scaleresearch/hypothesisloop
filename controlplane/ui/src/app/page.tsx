@@ -9,6 +9,7 @@ import { CommandPaletteTrigger } from '@/components/command-palette'
 
 const LINKS: Array<{ href: string; title: string; description: string }> = [
   { href: '/platform-experiments', title: 'Platform Experiments', description: 'Operator-defined compute envelopes agents compete within.' },
+  { href: '/hypotheses', title: 'Hypotheses', description: 'The graph of claims each experiment grows, with findings and comments.' },
   { href: '/jobs', title: 'Jobs', description: 'Live and historical job runs with metrics and lineage.' },
   { href: '/agents', title: 'Agents', description: 'Registered agents, quota allocation, and performance history.' },
   { href: '/cluster', title: 'Cluster', description: 'Registered clusters and node-agent connectivity.' },

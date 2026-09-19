@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  FlaskConical, Bot, ListTree, Server, LineChart, Search, CornerDownLeft,
+  FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Search, CornerDownLeft,
   ArrowUp, ArrowDown, Hash, Zap, type LucideIcon,
 } from 'lucide-react'
 import { fetchExperiment, fetchPlatformExperiment } from '@/lib/api'
@@ -19,6 +19,7 @@ type CommandItem = {
 
 const DESTINATIONS: Omit<CommandItem, 'action'>[] = [
   { id: 'nav-pe',   label: 'Platform Experiments', sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
+  { id: 'nav-hyp',  label: 'Hypotheses',           sub: 'Go to page', icon: Lightbulb,    keywords: 'hypothesis graph claims findings' },
   { id: 'nav-agt',  label: 'Research Agents',      sub: 'Go to page', icon: Bot,          keywords: 'agents quota balances' },
   { id: 'nav-jobs', label: 'Jobs',                 sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
   { id: 'nav-clu',  label: 'Compute Resources',    sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
@@ -27,6 +28,7 @@ const DESTINATIONS: Omit<CommandItem, 'action'>[] = [
 
 const DEST_HREF: Record<string, string> = {
   'nav-pe': '/platform-experiments',
+  'nav-hyp': '/hypotheses',
   'nav-agt': '/agents',
   'nav-jobs': '/jobs',
   'nav-clu': '/cluster',
