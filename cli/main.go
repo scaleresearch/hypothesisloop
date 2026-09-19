@@ -52,6 +52,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -152,48 +153,64 @@ func fail(stderr io.Writer, err error) int {
 	return 1
 }
 
-// newFlags is a flag set whose message on -h, on a wrong flag and on any other misuse starts with
-// the command's usage text.
-func newFlags(name, usage string, stderr io.Writer) *flag.FlagSet {
+// flagSet answers -h with the command's help and any misuse with one error line and the synopsis,
+// the first paragraph of the help.
+type flagSet struct {
+	*flag.FlagSet
+	help   string
+	stderr io.Writer
+}
+
+func newFlags(name, help string, stderr io.Writer) *flagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, usage)
-		printFlags(fs, stderr)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	return &flagSet{fs, help, stderr}
+}
+
+func (fs *flagSet) Parse(args []string) error {
+	err := fs.FlagSet.Parse(args)
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Fprintln(fs.stderr, fs.help)
+		fs.printFlags()
+		return err
 	}
-	return fs
+	if err != nil {
+		return misuse(fs, "%s", err)
+	}
+	return nil
 }
 
 // printFlags lists the flags except the aliases, which are registered with an empty usage.
-func printFlags(fs *flag.FlagSet, w io.Writer) {
+func (fs *flagSet) printFlags() {
 	header := false
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Usage == "" {
 			return
 		}
 		if !header {
-			fmt.Fprintln(w, "\nflags:")
+			fmt.Fprintln(fs.stderr, "\nflags:")
 			header = true
 		}
 		name, help := flag.UnquoteUsage(f)
 		if name != "" {
 			name = " " + name
 		}
-		fmt.Fprintf(w, "  --%s%s\n      %s\n", f.Name, name, help)
+		fmt.Fprintf(fs.stderr, "  --%s%s\n      %s\n", f.Name, name, help)
 	})
 }
 
 var errUsage = errors.New("usage")
 
-// misuse reports a wrong invocation followed by the command's usage.
-func misuse(fs *flag.FlagSet, format string, a ...any) error {
-	fmt.Fprintf(fs.Output(), "hl: %s: %s\n\n", fs.Name(), fmt.Sprintf(format, a...))
-	fs.Usage()
+// misuse reports a wrong invocation followed by the command's synopsis.
+func misuse(fs *flagSet, format string, a ...any) error {
+	synopsis, _, _ := strings.Cut(fs.help, "\n\n")
+	fmt.Fprintf(fs.stderr, "hl: %s: %s\n%s\n", fs.Name(), fmt.Sprintf(format, a...), synopsis)
 	return errUsage
 }
 
 // parseArgs parses flags placed before, between or after the positional arguments.
-func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+func parseArgs(fs *flagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -210,7 +227,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 
 // parseOperands returns the positional arguments followed by the values of the alias flags, which
 // take the same arguments so that a first guess at the form works: hl job status ID and --id ID.
-func parseOperands(fs *flag.FlagSet, argv []string, aliases ...string) ([]string, error) {
+func parseOperands(fs *flagSet, argv []string, aliases ...string) ([]string, error) {
 	var flagged stringList
 	for _, name := range aliases {
 		fs.Var(&flagged, name, "")
@@ -224,7 +241,7 @@ func parseOperands(fs *flag.FlagSet, argv []string, aliases ...string) ([]string
 
 // parseOne is parseOperands for a command taking exactly one operand; def stands in for a missing
 // one when set.
-func parseOne(fs *flag.FlagSet, argv []string, what, def string, aliases ...string) (string, error) {
+func parseOne(fs *flagSet, argv []string, what, def string, aliases ...string) (string, error) {
 	got, err := parseOperands(fs, argv, aliases...)
 	if err != nil {
 		return "", err

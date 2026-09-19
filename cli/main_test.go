@@ -279,7 +279,7 @@ func TestIDIsPositionalOrFlag(t *testing.T) {
 	}
 }
 
-func TestWrongFlagShowsUsageLine(t *testing.T) {
+func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return nil })
 	for _, tc := range []struct {
 		args  []string
@@ -291,11 +291,19 @@ func TestWrongFlagShowsUsageLine(t *testing.T) {
 		{[]string{"hypothesis", "status", "h-1", "h-2", "--status", "open"}, "usage: hl hypothesis status ID"},
 		{[]string{"job", "summary", "job-1"}, "usage: hl job summary ID --text T"},
 		{[]string{"quota", "--bogus"}, "usage: hl quota"},
+		{[]string{"job", "list", "--platform-experiment-id", "pe-1"}, "[--platform-experiment PE]"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(tc.args, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), tc.usage) {
 			t.Fatalf("%v: exit %d, stderr %q, want 2 and %q", tc.args, code, stderr.String(), tc.usage)
 		}
+		if got := strings.Count(stderr.String(), "\n"); got != 2 || !strings.HasPrefix(stderr.String(), "hl: ") {
+			t.Fatalf("%v: want one error line and the synopsis, got %q", tc.args, stderr.String())
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "list", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stderr.String(), "--needs-summary\n") {
+		t.Fatalf("--help: exit %d, want the flag list, got %q", code, stderr.String())
 	}
 	if len(*got) != 0 {
 		t.Fatalf("misuse sent requests: %+v", *got)
