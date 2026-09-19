@@ -210,7 +210,7 @@ hypotheses:
 
     rows = [
         json.loads(line)
-        for line in api.hl("hypothesis", "query", CHILDREN, "--param", f"id={base['id']}").splitlines()
+        for line in api.hl("hypothesis", "query", CHILDREN, "--platform-experiment", pe_id, "--param", f"id={base['id']}").splitlines()
     ]
     assert rows == [{"id": child["id"]}]
 
