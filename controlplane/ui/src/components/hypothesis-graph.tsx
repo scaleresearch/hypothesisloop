@@ -2,7 +2,7 @@
 
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle, Panel,
+  ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle,
   Position as Side, useReactFlow, useStore,
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
@@ -207,6 +207,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
 
   return (
     <Highlight.Provider value={highlight}>
+      <Legend />
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -222,22 +223,18 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
         elementsSelectable={false}
         onNodeClick={(_, node) => onSelect(node.id)}
         proOptions={{ hideAttribution: true }}
-        style={{ background: 'var(--surface)' }}
+        style={{ background: 'var(--surface)', flex: 1, height: 'auto', minHeight: 0 }}
       >
         <Background gap={24} color="rgba(255, 255, 255, 0.05)" />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} position="top-left" />
         <MiniMap
+          position="top-right"
           pannable
           zoomable
           nodeColor={n => n.type === 'objective' ? '#7c6cf0' : hypothesisStatusColors[(n.data as HypothesisNodeData).item.status]}
           maskColor="rgba(8, 9, 12, 0.7)"
-          style={{ background: 'var(--surface-2)' }}
+          style={{ background: 'var(--surface-2)', width: 150, height: 100 }}
         />
-        {/* The view opens on the objective at the top and centres a focused node, so the legend sits
-            at the bottom, between the controls and the minimap, where it hides neither. */}
-        <Panel position="bottom-center">
-          <Legend />
-        </Panel>
       </ReactFlow>
     </Highlight.Provider>
   )

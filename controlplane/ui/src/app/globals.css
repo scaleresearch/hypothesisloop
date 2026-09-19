@@ -842,7 +842,7 @@ select:focus-visible,
 
 .hg-layout {
   flex: 1 0 0;
-  min-height: 520px;
+  min-height: 420px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -858,6 +858,8 @@ select:focus-visible,
   border-radius: var(--radius);
   background: var(--surface);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .hg-side {
@@ -939,11 +941,8 @@ select:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  max-width: 420px;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: rgba(15, 17, 22, 0.88);
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
   font-size: 10.5px;
   color: var(--muted-fg);
 }
