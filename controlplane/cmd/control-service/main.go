@@ -267,7 +267,7 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 	// loops rather than running per replica. Both are idempotent — Settle is an absolute set,
 	// Close() logs invalid_transition when it loses a race — so concurrent copies are not
 	// incorrect, just N redundant sweeps racing over the same row. One owner.
-	go leaderelection.Run(runCtx, pool.Raw(), leaderelection.SchedulerLockKey,
+	go leaderelection.Run(runCtx, pool, leaderelection.SchedulerLockKey,
 		5*time.Second, logger, func(leaderCtx context.Context) {
 			go settlementReconciler.Start(leaderCtx)
 			// Auto-close platform experiments past their ends_at deadline.

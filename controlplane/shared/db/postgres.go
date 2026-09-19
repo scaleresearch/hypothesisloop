@@ -54,9 +54,40 @@ func (p *Pool) Close() {
 	p.pool.Close()
 }
 
-// Raw returns the underlying pgxpool.Pool, for callers that need a dedicated connection outside
-// the query interfaces this package exposes (e.g. shared/leaderelection's advisory lock, which
-// must hold one connection for as long as it holds leadership).
-func (p *Pool) Raw() *pgxpool.Pool {
-	return p.pool
+// AdvisoryLock is a session-level advisory lock held on one dedicated connection. Postgres
+// releases it the moment that connection closes, including on a process crash.
+type AdvisoryLock struct {
+	conn *pgxpool.Conn
+}
+
+// TryAdvisoryLock takes the advisory lock key without waiting. It returns nil and no error when
+// another session holds it.
+func (p *Pool) TryAdvisoryLock(ctx context.Context, key int64) (*AdvisoryLock, error) {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("db.TryAdvisoryLock: acquire connection: %w", err)
+	}
+	var ok bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&ok); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("db.TryAdvisoryLock: %w", err)
+	}
+	if !ok {
+		conn.Release()
+		return nil, nil
+	}
+	return &AdvisoryLock{conn: conn}, nil
+}
+
+// Ping fails once the lock's connection is gone, which means the lock is released.
+func (l *AdvisoryLock) Ping(ctx context.Context) error {
+	if _, err := l.conn.Exec(ctx, "SELECT 1"); err != nil {
+		return fmt.Errorf("db.AdvisoryLock.Ping: %w", err)
+	}
+	return nil
+}
+
+// Release returns the lock's connection to the pool.
+func (l *AdvisoryLock) Release() {
+	l.conn.Release()
 }
