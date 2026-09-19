@@ -100,5 +100,6 @@ continuing — do this as routine housekeeping, not just when someone complains 
 - `POST .../platform-experiments/{id}/close` with a JSON body — `{}` is enough (a request with no
   body at all 400s: "request body is required").
 - `lib_detach_node $KUBE_CONTEXT $NODE_NAME`.
-- `podman stop agent-<id>`; leave branches/commits in `$CODE_REPO_URL` intact.
+- `podman stop -t 90 agent-<id>` (the agent takes one last turn of up to a minute to file owed
+  summaries and verdicts); leave branches/commits in `$CODE_REPO_URL` intact.
 - Final pass over `$FINDINGS_FILE` — anything still open should say so explicitly.

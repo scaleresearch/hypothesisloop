@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
 
 class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
-    async def test_a_turn_end_hands_the_next_batch_to_the_session_and_the_session_stops_with_it(self):
+    async def test_a_turn_end_hands_the_next_batch_to_the_session_and_a_stop_during_it_ends_the_session_after_one_last_turn(self):
         from contextlib import redirect_stdout
         from io import StringIO
         from types import SimpleNamespace
@@ -188,5 +188,5 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "next_batch", one_batch), \
                 redirect_stdout(StringIO()) as out:
             await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
-        self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED"])
+        self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED", run._SHUTDOWN_PROMPT])
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())

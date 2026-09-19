@@ -161,8 +161,38 @@ _COMPACTION_PROMPT = (
 _TURN_SILENCE_TIMEOUT_S = 900
 
 
+# On a stop the turn in flight is interrupted and the agent gets one turn of this length to
+# write down what it already knows. `podman stop` must allow for it: -t 90.
+_SHUTDOWN_TURN_S = 60
+_SHUTDOWN_PROMPT = (
+    "You are being stopped and this is your last turn, about a minute long. Start nothing new: no "
+    "job, no hypothesis, no research. File the summaries you owe on finished jobs and set the "
+    "verdicts your evidence already supports, then end your turn."
+)
+
+
 class TurnStalled(Exception):
     pass
+
+
+async def _interrupt_on_stop(client, stopped) -> None:
+    """Interrupts the turn in flight as soon as stopped() is true."""
+    while not stopped():
+        await asyncio.sleep(1)
+    try:
+        await client.interrupt()
+    except Exception as e:
+        log.warning("could not interrupt the turn (%s): it runs to its own end", e)
+
+
+async def _last_turn(client, agent: str) -> None:
+    await client.query(_SHUTDOWN_PROMPT)
+    try:
+        async with asyncio.timeout(_SHUTDOWN_TURN_S):
+            async for message in client.receive_response():
+                _log_message(message, agent)
+    except TimeoutError:
+        log.info("last turn cut off after %ss", _SHUTDOWN_TURN_S)
 
 
 async def _receive_turn(client):
@@ -227,6 +257,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     rate_limited_resets_at: float | None = None
 
+    def stopped() -> bool:
+        return core.stop_requested(setup, started_at, stop_flag)
+
     async with ClaudeSDKClient(options=options) as client:
         first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
         await client.query(first_prompt)
@@ -234,20 +267,29 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             got_result = False
             turn_is_error = False
             context_tokens = 0
-            async for message in _receive_turn(client):
-                _log_message(message, setup.cfg.agent_id)
-                if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
-                    context_tokens = _context_tokens(message.usage)
-                if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
-                    rate_limited_resets_at = message.rate_limit_info.resets_at
-                if isinstance(message, ResultMessage):
-                    got_result = True
-                    turn_is_error = message.is_error
-                    session_id = getattr(message, "session_id", None) or resume_id
-                    _save_resume_id(setup, session_id)
-                    resume_id = session_id or resume_id
-                    if initial_prompt and not message.is_error:
-                        _remove_file(_handoff_file(setup))
+            interrupter = asyncio.ensure_future(_interrupt_on_stop(client, stopped))
+            try:
+                async for message in _receive_turn(client):
+                    _log_message(message, setup.cfg.agent_id)
+                    if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
+                        context_tokens = _context_tokens(message.usage)
+                    if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
+                        rate_limited_resets_at = message.rate_limit_info.resets_at
+                    if isinstance(message, ResultMessage):
+                        got_result = True
+                        turn_is_error = message.is_error
+                        session_id = getattr(message, "session_id", None) or resume_id
+                        _save_resume_id(setup, session_id)
+                        resume_id = session_id or resume_id
+                        if initial_prompt and not message.is_error:
+                            _remove_file(_handoff_file(setup))
+            finally:
+                interrupter.cancel()
+
+            if stopped() and got_result and not rate_limited_resets_at:
+                log.info("stopping: turn interrupted, one last turn to file what is owed")
+                await _last_turn(client, cfg.agent_id)
+                return resume_id, None, None
 
             if rate_limited_resets_at:
                 log.info("stopping session: rate-limited, resets_at=%s", rate_limited_resets_at)
@@ -308,8 +350,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
             # The agent ended its turn: wait for the next batch of updates about its own jobs and
             # hypotheses and hand it over on the same connection.
-            events = await updates.next_batch(
-                watch_env, lambda: core.stop_requested(setup, started_at, stop_flag), updates.IDLE_NUDGE_S)
+            events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
             if events:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)

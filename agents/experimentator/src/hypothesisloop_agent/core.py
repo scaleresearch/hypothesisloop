@@ -44,7 +44,7 @@ def install_signal_handler() -> list:
     stop_flag = [False]
 
     def _handler(signum, _frame):
-        log.info("received signal %s — will stop after the current message finishes", signum)
+        log.info("received signal %s, stopping", signum)
         stop_flag[0] = True
 
     signal.signal(signal.SIGTERM, _handler)
