@@ -7,9 +7,9 @@ export function isZeroDate(iso: string | null | undefined): boolean {
   return !iso || iso.startsWith(ZERO_TIME_PREFIX)
 }
 
-// Formats an ISO timestamp for display, or 'N/A' if it's absent or the Go zero-time value.
+// Formats an ISO timestamp as date and time, or 'N/A' if it's absent or the Go zero-time value.
 export function formatDate(iso: string | null | undefined): string {
-  return isZeroDate(iso) ? 'N/A' : new Date(iso as string).toLocaleDateString()
+  return isZeroDate(iso) ? 'N/A' : new Date(iso as string).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 }
 
 // Formats a AccH (Accelerator-hour) quantity for display. Values ≥ 1 round to the nearest
@@ -38,4 +38,11 @@ export function relTime(iso: string | null | undefined): string {
 // tables show that product name and keep the full selector for the job's own page.
 export function acceleratorLabel(type: string): string {
   return type.slice(type.lastIndexOf('=') + 1)
+}
+
+export function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s} s`
+  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`
+  return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`
 }
