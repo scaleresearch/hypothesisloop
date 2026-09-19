@@ -860,7 +860,7 @@ func jobPhase(job *batchv1.Job) workload.JobPhase {
 // node is rank 0's k8s node name (or the first scheduled pod's, if rank 0 isn't up yet) —
 // piggybacked on this lookup since the only consumer (cluster-agent's status report loop)
 // always wants both together. This is the sole source of job->physical-node attribution in the
-// system; PushStatus forwards it straight into the metrics store (metricsdb.RecordExperimentNode),
+// system; PushStatus forwards it straight into the metrics store (metricsdb.RecordJobStatuses),
 // per this repo's "metrics only in the metrics store, no duplicates" rule.
 //
 // Resolves from rank 0's node when available, falling back to the first scheduled pod found —

@@ -438,8 +438,8 @@ export interface ResourceCatalog {
 
 
 // Live, per-cluster accelerator capacity — what's actually schedulable right now, as opposed to
-// fetchResourceCatalog's static type/rate list. Same numbers the scheduler's own admission loop
-// reads (metricsdb.LiveClusterAcceleratorCapacity), just exposed for display.
+// fetchResourceCatalog's static type/rate list. Read from the metrics store
+// (metricsdb.LiveClusterAcceleratorAvailableAndTotal).
 export interface ResourceCapacity {
   clusters: Array<{
     cluster_name: string
