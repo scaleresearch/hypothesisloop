@@ -270,6 +270,9 @@ def test_query_value_mapping(api, graph_pe, run_id):
     assert (rel["_type"], rel["_from"], rel["_to"], rel["agent_id"]) == ("BUILDS_ON", child["id"], parent["id"], agent_a)
     assert rows[0]["parent"] == parent["id"]
 
+    newer = "MATCH (h:Hypothesis {id: $id}) WHERE h.created_at >= datetime($since) RETURN h.id AS id"
+    assert api.query_rows(newer, id=child["id"], since=node["created_at"]) == [{"id": child["id"]}]
+
 
 def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
     pe_id, agent_a, _ = graph_pe

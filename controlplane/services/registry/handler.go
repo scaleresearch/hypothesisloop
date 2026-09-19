@@ -80,6 +80,8 @@ var queryDescription = "Read-only Cypher against the hypothesis graph (Memgraph)
 	"{columns, rows, truncated}. Use it to find where an idea belongs before registering it, and to walk lineage. " +
 	"Schema: (:Objective {id}) is the root of one platform experiment, id = platform_experiment_id. " +
 	"(:Hypothesis {id, platform_experiment_id, agent_id, source, author, text, status, created_at, status_changed_at}). " +
+	"created_at and status_changed_at are datetimes, returned as RFC3339 text: compare them with " +
+	"datetime('2026-10-02T01:30:00Z'), since a string never matches one. " +
 	"Relationships, each {agent_id, author, created_at}: (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective) " +
 	"(refines, extends, combines; acyclic, every hypothesis has one or more), (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), " +
 	"(:Hypothesis)-[:RELATED]->(:Hypothesis). The graph spans every platform experiment: filter by platform_experiment_id " +
