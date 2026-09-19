@@ -113,7 +113,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error400BadRequest("name and budget_accelerator_hours are required")
 		}
 		pe, err := peh.svc.Create(ctx, in.Body)
-		if errors.Is(err, domain.ErrInvalidStages) {
+		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
 		if err != nil {

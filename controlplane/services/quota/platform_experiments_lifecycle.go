@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// ErrInvalidPlatformExperiment wraps every Create rejection of the request itself.
+var ErrInvalidPlatformExperiment = errors.New("invalid platform experiment")
+
+func invalidPlatformExperiment(err error) error {
+	return fmt.Errorf("platform_experiments.Create: %w: %w", ErrInvalidPlatformExperiment, err)
+}
+
 // Create creates a new platform experiment in open status (accepting signups immediately).
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
@@ -20,10 +28,10 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		metrics = []domain.MetricDefinition{}
 	}
 	if err := domain.ValidateMetricDefinitions(metrics); err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+		return nil, invalidPlatformExperiment(err)
 	}
 	if err := domain.RequireRankingMetric(metrics); err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+		return nil, invalidPlatformExperiment(err)
 	}
 	reportInterval := req.ReportIntervalSeconds
 	if reportInterval <= 0 {
@@ -35,28 +43,28 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	}
 	// Fixed at creation, so it is rejected here rather than defended against downstream.
 	if err := domain.ValidateStages(stages); err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+		return nil, invalidPlatformExperiment(err)
 	}
 	hypothesisPolicy, err := domain.ParseSubmitterPolicy(req.HypothesisSubmitPolicy)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: hypothesis_submit_policy: %w", err)
+		return nil, invalidPlatformExperiment(fmt.Errorf("hypothesis_submit_policy: %w", err))
 	}
 	jobPolicy, err := domain.ParseSubmitterPolicy(req.JobSubmitPolicy)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: job_submit_policy: %w", err)
+		return nil, invalidPlatformExperiment(fmt.Errorf("job_submit_policy: %w", err))
 	}
 	defaultQuotaTier := domain.QuotaTier(req.DefaultQuotaTier)
 	if defaultQuotaTier == "" {
 		defaultQuotaTier = domain.QuotaTierGuaranteed
 	}
 	if !domain.ValidQuotaTierOverride(string(defaultQuotaTier)) {
-		return nil, fmt.Errorf("platform_experiments.Create: default_quota_tier must be \"guaranteed\" or \"burst_only\"")
+		return nil, invalidPlatformExperiment(errors.New("default_quota_tier must be \"guaranteed\" or \"burst_only\""))
 	}
 	if req.MaxConcurrentAccelerators != nil && *req.MaxConcurrentAccelerators <= 0 {
-		return nil, fmt.Errorf("platform_experiments.Create: max_concurrent_accelerators must be positive")
+		return nil, invalidPlatformExperiment(errors.New("max_concurrent_accelerators must be positive"))
 	}
 	if req.EndsAt.IsZero() {
-		return nil, fmt.Errorf("platform_experiments.Create: ends_at is required")
+		return nil, invalidPlatformExperiment(errors.New("ends_at is required"))
 	}
 	pe := &domain.PlatformExperiment{
 		ID:                        "pe-" + uuid.New().String()[:8],
