@@ -344,14 +344,13 @@ between.
 | `make controlplane-up`            | Build images + start the control plane                             |
 | `make controlplane-down`          | Stop the control plane                                              |
 | `make cluster-agent-up CLUSTER=x` | Install node-agent + cluster-agent on the cluster `kubectl` currently points at (or `KUBECONFIG_PATH`/`KUBE_CONTEXT`), one per target cluster |
-| `make cluster-agent-down CLUSTER=x` | Remove the cluster-agent bundle from that target cluster           |
+| `make cluster-agent-down`         | Remove node-agent + cluster-agent from that target cluster          |
 | `make k3s-up`                     | Bootstrap a local k3s cluster and install the cluster-agent bundle onto it |
 | `make k3s-down`                   | Destroy the local k3s cluster                                       |
 | `make full-up`                    | k3s-up + controlplane-up                                            |
 | `make full-stop` / `make full-start` | Pause/resume everything (podman machine, k3s, control plane) without destroying cluster state |
-| `make reload`                     | Rebuild every image from current source, push it everywhere it's cached, and bounce all containers/pods to run it - faster than a manual rebuild+restart after a Go change |
+| `make reload`                     | Rebuild every image from current source, push it to the registry, and bounce all containers/pods to run it - use after a Go change |
 | `make reset`                      | controlplane-down + controlplane-up                                 |
-| `make up` / `make down`           | Aliases for `controlplane-up` / `controlplane-down` (back-compat)  |
 
 ## Development
 

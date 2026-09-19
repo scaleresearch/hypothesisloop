@@ -1,12 +1,12 @@
-.PHONY: up down reset build test e2e-py lint check images sparse-sdpa-workload-image \
+.PHONY: reset build test e2e-py lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag registry-up registry-prune \
-	helm-prepare helm-push helm-lint helm-template \
+	helm-prepare helm-lint helm-template \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down k3s-e2e \
 	full-stop full-start reload \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e tt-reload \
-	git-daemon-start git-daemon-stop git-daemon-status git-daemon-destroy git-daemon-test
+	git-daemon-start git-daemon-stop git-daemon-status git-daemon-destroy
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -75,10 +75,6 @@ controlplane-destroy:
 	fi
 	podman compose -f $(COMPOSE_FILE) down --volumes
 
-# Back-compat aliases for the old target names.
-up: controlplane-up
-down: controlplane-down
-
 reset:
 	$(MAKE) controlplane-down
 	$(MAKE) controlplane-up
@@ -146,7 +142,7 @@ reload: images
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
 # Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
 # fake-accelerator nodes. Also control-plane-only by default (tainted no-workload) — see
-# tt-dev-nodes-up below. See localdev/k3s-tenstorrent/README.md.
+# tt-dev-nodes-up below.
 tt-up: images
 	bash localdev/k3s-tenstorrent/install.sh
 
@@ -156,9 +152,8 @@ tt-up: images
 tt-down:
 	bash localdev/k3s-tenstorrent/destroy.sh
 
-# Attaches this host's own node as a full worker (no fake containers — a real Tenstorrent box
-# is the one node the portable and hardware e2e suites both need, and the one node real serving/
-# training work runs on). Idempotent.
+# Provisions fake-accelerator container nodes. box-a itself stays detached; the hardware
+# e2e test attaches it while it runs. Idempotent.
 tt-dev-nodes-up:
 	bash localdev/k3s-tenstorrent/dev-nodes-up.sh
 
@@ -178,8 +173,7 @@ tt-e2e: tt-hardware-image
 tt-reload: images
 	bash localdev/k3s-tenstorrent/reload.sh
 
-# Detaches it again, returning the cluster to control-plane-only so real training work outside
-# k3s isn't sharing capacity with anything scheduled onto it.
+# Removes the fake nodes and detaches box-a, returning the cluster to control-plane-only.
 tt-dev-nodes-down:
 	bash localdev/k3s-tenstorrent/dev-nodes-down.sh
 
@@ -276,13 +270,6 @@ helm-lint: helm-prepare
 
 helm-template: helm-prepare
 	helm template hypothesisloop $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
-
-# `make images` already builds and pushes every image the chart references (control-service,
-# metrics-service, cluster-agent, node-agent) to $(REGISTRY):$(TAG) -- this is only a named
-# alias so a helm install/upgrade reads as `make helm-push && helm upgrade --install ...
-# --set images.registry=$(REGISTRY) --set images.tag=$(TAG)`, the two values images already
-# computed for you.
-helm-push: images
 
 build:
 	go build ./...

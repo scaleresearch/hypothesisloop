@@ -12,14 +12,14 @@ namespace:
   name: hypothesisloop
 
 images:
-  # Built and pushed with `make helm-push` (from the repo root) to a real registry every node in
+  # Built and pushed with `make images` (from the repo root) to a real registry every node in
   # the target cluster can already reach -- provisioning that reachability is the cluster
   # provisioner's job, same division of responsibility as runtime/k8s/infra/install.sh's
   # REGISTRY_URL. No default: a prod registry host is never a safe guess, so rendering fails
   # fast without one instead of silently defaulting to a dev-only address.
   registry: ""
   pullPolicy: IfNotPresent
-  # No default either: `make helm-push` computes this as the git SHA it just built and pushed
+  # No default either: `make images` computes this from the tree it built and pushed
   # (content-addressed, so IfNotPresent never risks running stale bytes under a reused tag) --
   # supply the same value here that it printed.
   tag: ""

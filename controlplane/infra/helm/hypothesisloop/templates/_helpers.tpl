@@ -4,7 +4,7 @@
 
 {{/* call as: include "hypothesisloop.image" (dict "name" "control-service" "root" $) */}}
 {{- define "hypothesisloop.image" -}}
-{{ required "images.registry is required -- run `make helm-push` and pass its REGISTRY, or point at your own registry" .root.Values.images.registry }}/hypothesisloop-{{ .name }}:{{ required "images.tag is required -- run `make helm-push` and pass the TAG it built" .root.Values.images.tag }}
+{{ required "images.registry is required -- run `make images` and pass its REGISTRY, or point at your own registry" .root.Values.images.registry }}/hypothesisloop-{{ .name }}:{{ required "images.tag is required -- run `make images` and pass the TAG it built" .root.Values.images.tag }}
 {{- end -}}
 
 {{/*

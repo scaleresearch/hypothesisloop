@@ -7,8 +7,8 @@ install into the cluster first.
 ## Install
 
 ```sh
-make helm-images                 # build control-service/metrics-service/cluster-agent/
-                                  # node-agent images and import them into this host's k3s
+make images REGISTRY=<registry>  # build every image and push it to a registry the cluster's
+                                  # nodes can pull from, tagged with the TAG make prints
 make helm-prepare                # stage controlplane/settings/hypothesisloop.yaml into the
                                   # chart (single source of truth — never edit the staged
                                   # copy directly). schema.sql is not staged: it's baked into
@@ -16,21 +16,13 @@ make helm-prepare                # stage controlplane/settings/hypothesisloop.ya
                                   # (db.ApplySchema) — Postgres starts with no init script at
                                   # all, and metrics-service never touches the schema.
 helm install hypothesisloop controlplane/infra/helm/hypothesisloop \
+  --set images.registry=<registry> --set images.tag=<TAG> \
   --set objectStore.endpoint=http://<host-lan-ip>:9000
 ```
 
 `objectStore.endpoint` must be the durable-data object store's real LAN address, same
 constraint as `controlplane/settings/hypothesisloop.yaml` itself — a loopback address is
 unreachable from inside the cluster.
-
-On a single-node cluster, or once every node has its own copy of the locally-built
-images, clear the node pinning:
-
-```sh
-helm install hypothesisloop controlplane/infra/helm/hypothesisloop \
-  --set objectStore.endpoint=http://<host-lan-ip>:9000 \
-  --set builtImageNodeSelector={} --set builtImageTolerations={}
-```
 
 ## What this chart does not do
 

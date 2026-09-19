@@ -3,7 +3,7 @@
 \i /schema/schema.sql
 
 -- Seed test agents so the system is ready to accept experiment submissions
--- immediately after `make up`. Real agents are added via POST /agents.
+-- immediately after `make controlplane-up`. Real agents are added via POST /agents.
 INSERT INTO agents (id, name, performance_score, created_at)
 VALUES
   ('agent-alice', 'Alice', 0.6, now()),
