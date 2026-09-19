@@ -70,20 +70,6 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
--- hypothesis_status is the owning agent's own verdict on its claim (see domain.HypothesisStatus)
--- — a closed enum is correct here, unlike accelerator_type above: these four values are a fixed
--- design decision, not an operator-extensible catalog.
-DO $$ BEGIN
-    CREATE TYPE hypothesis_status AS ENUM (
-        'open',
-        'confirmed',
-        'refuted',
-        'inconclusive'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-
 -- ---------------------------------------------------------------------------
 -- agents
 -- ---------------------------------------------------------------------------
@@ -192,55 +178,6 @@ ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_ram_gb_hours;
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_storage_gb_hours;
 
 -- ---------------------------------------------------------------------------
--- hypotheses — the research-claim registry, scoped to a single platform experiment. Each
--- platform experiment accumulates its own shared pool of ideas: agents register (or
--- retrieve, if an equivalent one already exists *within that platform experiment*) a
--- hypothesis here before submitting a job that tests it. normalized_text (lowercased,
--- whitespace-collapsed) carries a UNIQUE index scoped per platform_experiment_id — the real
--- uniqueness check: registering the same claim twice within the same platform experiment
--- returns the existing row instead of a fake always-novel stub. The same wording in two
--- different platform experiments is intentionally allowed to register separately — they are
--- different research programs with independent idea pools. See
--- services/registry.RegisterHypothesis and services/dedup (novelty scoring, which is
--- advisory and separate from this hard constraint).
--- ---------------------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS hypotheses (
-    id                     TEXT              PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    -- The owner column, and the only one anything keys ownership on: a job, quota and the
-    -- standings all read it. NULL on a human-submitted row, which is why such a row can own
-    -- none of those. Exactly one of agent_id/author is set (domain.ClassifyHypothesisOrigin).
-    agent_id               TEXT              REFERENCES agents(id),
-    -- domain.HypothesisSource. Existing rows backfill to 'agent' via this column default.
-    source                 TEXT              NOT NULL DEFAULT 'agent',
-    -- The name a human typed in the UI. There is no auth: it is a claim, not an identity,
-    -- exactly as agent_id is. Empty on an agent row.
-    author                 TEXT              NOT NULL DEFAULT '',
-    platform_experiment_id TEXT              NOT NULL REFERENCES platform_experiments(id),
-    text                   TEXT              NOT NULL,
-    normalized_text        TEXT              NOT NULL,
-    -- The owning agent's own verdict on this claim — see domain.HypothesisStatus. Every existing
-    -- row backfills to 'open' via this column default (this schema has no migration history; a
-    -- fresh apply and an in-place ADD COLUMN both get the same backfill from one DEFAULT clause).
-    status                 hypothesis_status NOT NULL DEFAULT 'open',
-    created_at             TIMESTAMPTZ       NOT NULL DEFAULT now()
-);
-
--- No migration history: a fresh apply gets these from the column definitions above, an existing
--- database from the ALTERs, and both land on the same 'agent'/'' backfill from the one DEFAULT
--- clause each. Dropping NOT NULL on agent_id is what lets a human row exist at all, and is a
--- no-op on a database that already has it dropped.
-ALTER TABLE hypotheses ALTER COLUMN agent_id DROP NOT NULL;
-ALTER TABLE hypotheses ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'agent';
-ALTER TABLE hypotheses ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
-
--- The dedup index is deliberately not scoped by source: a human idea and an agent's restatement
--- of the same claim are the same claim, and collide exactly as two agent rows would.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_hypotheses_platform_normalized_text ON hypotheses(platform_experiment_id, normalized_text);
-CREATE INDEX IF NOT EXISTS idx_hypotheses_agent    ON hypotheses(agent_id);
-CREATE INDEX IF NOT EXISTS idx_hypotheses_platform ON hypotheses(platform_experiment_id);
-
--- ---------------------------------------------------------------------------
 -- experiments
 -- ---------------------------------------------------------------------------
 
@@ -264,7 +201,8 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- admitted, or for a job with nothing to resolve. job_spec itself is NEVER rewritten, so a
     -- GET always shows exactly what was submitted — see domain.Experiment.ResolvedJob/EffectiveJob.
     resolved_job_spec        JSONB,
-    hypothesis_id            TEXT              NOT NULL REFERENCES hypotheses(id),
+    -- A hypothesis in the graph store (shared/graphdb), validated there at submit.
+    hypothesis_id            TEXT              NOT NULL,
     hypothesis               TEXT              NOT NULL,
     objective                TEXT              NOT NULL,
     theory                   TEXT              NOT NULL DEFAULT '',
@@ -370,14 +308,22 @@ CREATE INDEX IF NOT EXISTS idx_experiments_agent_platform_status ON experiments(
 
 CREATE TABLE IF NOT EXISTS hypothesis_findings (
     id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
+    -- hypothesis_id names a hypothesis in the graph store; platform_experiment_id is its platform
+    -- experiment, carried here so replay and the notify trigger need nothing outside this row.
+    hypothesis_id  TEXT        NOT NULL,
+    platform_experiment_id TEXT NOT NULL REFERENCES platform_experiments(id),
     experiment_id  TEXT        NOT NULL REFERENCES experiments(id) UNIQUE,
     agent_id       TEXT        NOT NULL REFERENCES agents(id),
     summary        TEXT        NOT NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Nullable here only so an existing table can take the column; db.DropLegacyHypotheses backfills
+-- it and sets NOT NULL.
+ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS platform_experiment_id TEXT REFERENCES platform_experiments(id);
+
 CREATE INDEX IF NOT EXISTS idx_hypothesis_findings_hypothesis ON hypothesis_findings(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_hypothesis_findings_platform ON hypothesis_findings(platform_experiment_id, created_at);
 
 -- ---------------------------------------------------------------------------
 -- hypothesis_comments — a freeform, job-independent note on a hypothesis (amend, abandon,
@@ -389,7 +335,9 @@ CREATE INDEX IF NOT EXISTS idx_hypothesis_findings_hypothesis ON hypothesis_find
 
 CREATE TABLE IF NOT EXISTS hypothesis_comments (
     id             TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    hypothesis_id  TEXT        NOT NULL REFERENCES hypotheses(id),
+    -- Same pair as hypothesis_findings above.
+    hypothesis_id  TEXT        NOT NULL,
+    platform_experiment_id TEXT NOT NULL REFERENCES platform_experiments(id),
     -- NULL on a human comment; author carries the typed name instead. Exactly one of the two is
     -- set, on the same rule as hypotheses (domain.ClassifyHypothesisOrigin).
     agent_id       TEXT        REFERENCES agents(id),
@@ -399,13 +347,15 @@ CREATE TABLE IF NOT EXISTS hypothesis_comments (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Same no-migration-history pattern as hypotheses above: one DEFAULT clause backfills existing
--- rows to 'agent'/'' whether the table is created fresh or altered in place.
+-- No migration history: one DEFAULT clause backfills existing rows to 'agent'/'' whether the
+-- table is created fresh or altered in place. platform_experiment_id as on hypothesis_findings.
 ALTER TABLE hypothesis_comments ALTER COLUMN agent_id DROP NOT NULL;
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'agent';
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
+ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS platform_experiment_id TEXT REFERENCES platform_experiments(id);
 
 CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_platform ON hypothesis_comments(platform_experiment_id, created_at);
 
 -- ---------------------------------------------------------------------------
 -- donation_requests
@@ -573,11 +523,11 @@ CREATE TABLE IF NOT EXISTS cluster_settings (
 -- Change notification — the source of GET /watch's live event stream
 -- ---------------------------------------------------------------------------
 --
--- Every event is emitted by an AFTER trigger on the row that changed, so the NOTIFY is part of
--- the very transaction that wrote it: a rolled-back write emits nothing, and no event can ever
--- describe a state the database did not commit. That is also why this is a trigger rather than a
--- pg_notify() call added to each Go write path — a write path can be added tomorrow that forgets
--- to notify, a trigger cannot be bypassed.
+-- Every event about a Postgres row is emitted by an AFTER trigger on the row that changed, so the
+-- NOTIFY is part of the very transaction that wrote it: a rolled-back write emits nothing, and no
+-- event can ever describe a state the database did not commit. Hypotheses live in the graph store,
+-- which has no NOTIFY, so their events are sent by the registry after the graph write commits,
+-- through the same channel and payload.
 --
 -- The payload is a small typed record — kind, subject, new value, a qualifying detail, the two
 -- scoping ids, and a cursor — never a copy of the row. A client wanting detail follows with a
@@ -595,7 +545,6 @@ CREATE TABLE IF NOT EXISTS cluster_settings (
 -- watcher could not tell a verdict settled an hour ago from one settled while it was away. They
 -- are NULL until the field first moves — a row still holding what it was created with has no such
 -- moment — and no Go writer sets them: one clock per column, and no write path can forget it.
-ALTER TABLE hypotheses            ADD COLUMN IF NOT EXISTS status_changed_at      TIMESTAMPTZ;
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS status_changed_at      TIMESTAMPTZ;
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_at TIMESTAMPTZ;
 
@@ -664,53 +613,6 @@ DROP TRIGGER IF EXISTS agent_quotas_notify ON agent_quotas;
 CREATE TRIGGER agent_quotas_notify AFTER INSERT OR UPDATE ON agent_quotas
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_quotas_notify();
 
-CREATE OR REPLACE FUNCTION hypothesisloop_hypotheses_notify() RETURNS trigger AS $$
-BEGIN
-    -- The value is where the idea came from, agent or human. The text itself is not here: an
-    -- event says what changed and never carries a copy of the row, so a reader that wants the
-    -- claim fetches GET /hypotheses/{id} exactly as it would have anyway.
-    PERFORM hypothesisloop_notify_event('hypothesis.new', NEW.id, NEW.source, '',
-        NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''), NEW.created_at);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS hypotheses_notify ON hypotheses;
-CREATE TRIGGER hypotheses_notify AFTER INSERT ON hypotheses
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_notify();
-
-CREATE OR REPLACE FUNCTION hypothesisloop_hypotheses_touch() RETURNS trigger AS $$
-BEGIN
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-        NEW.status_changed_at := now();
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS hypotheses_touch ON hypotheses;
-CREATE TRIGGER hypotheses_touch BEFORE UPDATE ON hypotheses
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_touch();
-
--- A claim being settled is the one pool signal an agent could not be told about: hypothesis.new
--- announces the idea, and nothing announced the verdict. Without it an agent spends a run
--- re-testing what a peer already confirmed or refuted — the most expensive mistake available in
--- this platform. Pool-scoped, like every other event about the shared notebook: the verdict
--- concerns everyone competing, not only whoever wrote it.
-CREATE OR REPLACE FUNCTION hypothesisloop_hypotheses_status_notify() RETURNS trigger AS $$
-BEGIN
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-        PERFORM hypothesisloop_notify_event('hypothesis.status', NEW.id, NEW.status::text, '',
-            NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''), NEW.status_changed_at);
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS hypotheses_status_notify ON hypotheses;
-CREATE TRIGGER hypotheses_status_notify AFTER UPDATE ON hypotheses
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_hypotheses_status_notify();
-
 CREATE OR REPLACE FUNCTION hypothesisloop_platform_experiments_touch() RETURNS trigger AS $$
 BEGIN
     IF NEW.status IS DISTINCT FROM OLD.status THEN
@@ -754,11 +656,9 @@ CREATE TRIGGER platform_experiments_notify AFTER UPDATE ON platform_experiments
 -- Findings and comments both name the hypothesis they hang off as their subject, not their own
 -- id: the hypothesis is what a reader would GET, and it is what the pool is organised around.
 CREATE OR REPLACE FUNCTION hypothesisloop_findings_notify() RETURNS trigger AS $$
-DECLARE pe_id TEXT;
 BEGIN
-    SELECT platform_experiment_id INTO pe_id FROM hypotheses WHERE id = NEW.hypothesis_id;
     PERFORM hypothesisloop_notify_event('finding.new', NEW.hypothesis_id, NEW.experiment_id, '',
-        pe_id, NEW.agent_id, NEW.created_at);
+        NEW.platform_experiment_id, NEW.agent_id, NEW.created_at);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -768,11 +668,9 @@ CREATE TRIGGER hypothesis_findings_notify AFTER INSERT ON hypothesis_findings
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_findings_notify();
 
 CREATE OR REPLACE FUNCTION hypothesisloop_comments_notify() RETURNS trigger AS $$
-DECLARE pe_id TEXT;
 BEGIN
-    SELECT platform_experiment_id INTO pe_id FROM hypotheses WHERE id = NEW.hypothesis_id;
     PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, NEW.source, '',
-        pe_id, COALESCE(NEW.agent_id, ''), NEW.created_at);
+        NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''), NEW.created_at);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

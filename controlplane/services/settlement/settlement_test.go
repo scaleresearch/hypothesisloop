@@ -211,7 +211,7 @@ func TestAnInfrastructureFaultCarryingDetailIsStillRefunded(t *testing.T) {
 		EstimatedDurationHours: 1,
 		EstimatedCostAccH:      8,
 		Status:                 domain.StatusEvicted,
-		EvictionReason:         string(domain.EvictionWorkloadGone.WithDetail("no pod on cluster tt-small")),
+		EvictionReason:         string(domain.EvictionWorkloadGone.WithDetail("no pod on cluster box-b")),
 	}
 	if err := settler.Settle(context.Background(), exp); err != nil {
 		t.Fatalf("Settle: %v", err)

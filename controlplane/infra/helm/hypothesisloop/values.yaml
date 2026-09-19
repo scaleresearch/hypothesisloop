@@ -59,6 +59,21 @@ greptimedb:
     existingSecret: ""
     existingSecretKey: "url"
 
+# The hypothesis graph, read and written only by control-service. Pinned: the schema bootstrap and
+# the read-only query guard (controlplane/shared/graphdb) were verified against exactly this version.
+memgraph:
+  image: memgraph/memgraph:3.13.1
+  storage: 5Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 2Gi }
+  # An existing Memgraph instead of the StatefulSet this chart would otherwise deploy: its bolt
+  # URL, e.g. bolt://memgraph.example:7687.
+  external:
+    enabled: false
+    url: ""
+
 controlService:
   replicas: 1
   port: 8081

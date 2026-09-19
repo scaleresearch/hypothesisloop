@@ -4,72 +4,124 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 )
 
-// poolStore is the shared idea pool reduced to the one rule the database really enforces: a row
-// is unique on (platform_experiment_id, normalized_text) and on nothing else. It embeds Store so
-// any method a test did not think about panics instead of quietly answering zero.
+// poolStore is the Postgres side of the registry reduced to what hypothesis writes consult: every
+// platform experiment exists with a mixed policy, every agent exists, and a comment is accepted.
+// It embeds Store so any method a test did not think about panics instead of quietly answering zero.
 type poolStore struct {
 	Store
-	rows map[string]*domain.Hypothesis
 }
 
-func newPoolStore() *poolStore {
-	return &poolStore{rows: map[string]*domain.Hypothesis{}}
-}
+func newPoolStore() *poolStore { return &poolStore{} }
 
-// GetPlatformExperimentSubmitPolicies defaults to "not found" — every existing test in this file
-// registers hypotheses against a platform experiment id this fake never populates a policy for,
-// and RegisterHypothesis must treat that exactly like today's behavior: unrestricted.
 func (s *poolStore) GetPlatformExperimentSubmitPolicies(_ context.Context, _ string) (domain.SubmitterPolicy, domain.SubmitterPolicy, bool, error) {
-	return "", "", false, nil
+	return domain.SubmitterPolicyMixed, domain.SubmitterPolicyMixed, true, nil
 }
 
-func (s *poolStore) FindOrCreateHypothesis(_ context.Context, source domain.HypothesisSource, agentID, author, platformExperimentID, text string) (*domain.Hypothesis, bool, error) {
-	key := platformExperimentID + "\x00" + domain.NormalizeHypothesisText(text)
-	if existing, ok := s.rows[key]; ok {
-		return existing, true, nil
-	}
-	h := &domain.Hypothesis{
-		ID: key, AgentID: agentID, Source: source, Author: author,
-		PlatformExperimentID: platformExperimentID, Text: text, Status: domain.HypothesisOpen,
-	}
-	s.rows[key] = h
-	return h, false, nil
-}
-
-// UpdateHypothesisStatus mirrors the store's single-statement predicate,
-// `agent_id = $2 OR agent_id IS NULL`: an owned row answers only to its owner, and a row nobody
-// owns answers to whoever tested it.
-func (s *poolStore) UpdateHypothesisStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
-	h, ok := s.rows[id]
-	if !ok {
-		return nil, nil
-	}
-	if h.AgentID != "" && h.AgentID != callerAgentID {
-		return nil, db.ErrNotOwner
-	}
-	h.Status = status
-	return h, nil
+func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
+	return &domain.Agent{ID: id}, nil
 }
 
 // CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
 // beyond its id — a note is attached to a row, not authorised against its owner.
-func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
+func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
 	return &domain.HypothesisComment{
-		ID: "c-1", HypothesisID: hypothesisID, Source: source,
+		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID, Source: source,
 		AgentID: agentID, Author: author, Text: text,
 	}, nil
 }
 
-func poolService(store Store) *Service {
-	return &Service{store: store, logger: zap.NewNop()}
+// fakeGraph is the hypothesis graph reduced to the rules the registry relies on it for: dedup on
+// (platform_experiment_id, normalized text), and the owner rule on status and links. Link
+// validation itself is the graph store's and is tested against Memgraph in shared/graphdb.
+type fakeGraph struct {
+	Graph
+	rows  map[string]*domain.Hypothesis
+	links map[string]bool
+	clock time.Time
 }
+
+func newFakeGraph() *fakeGraph {
+	return &fakeGraph{rows: map[string]*domain.Hypothesis{}, links: map[string]bool{},
+		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
+func (g *fakeGraph) tick() time.Time {
+	g.clock = g.clock.Add(time.Second)
+	return g.clock
+}
+
+func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, error) {
+	id := n.PlatformExperimentID + "\x00" + domain.NormalizeHypothesisText(n.Text)
+	if existing, ok := g.rows[id]; ok {
+		return existing, []domain.Link{}, true, nil
+	}
+	h := &domain.Hypothesis{
+		ID: id, AgentID: n.AgentID, Source: n.Source, Author: n.Author,
+		PlatformExperimentID: n.PlatformExperimentID, Text: n.Text, Status: domain.HypothesisOpen, CreatedAt: g.tick(),
+	}
+	g.rows[id] = h
+	return h, []domain.Link{}, false, nil
+}
+
+func (g *fakeGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothesis, error) {
+	return g.rows[id], nil
+}
+
+func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, bool, error) {
+	h, ok := g.rows[id]
+	if !ok {
+		return nil, false, graphdb.ErrNotFound
+	}
+	if h.AgentID != "" && h.AgentID != callerAgentID {
+		return nil, false, graphdb.ErrNotOwner
+	}
+	if h.Status == status {
+		return h, false, nil
+	}
+	at := g.tick()
+	h.Status, h.StatusChangedAt = status, &at
+	return h, true, nil
+}
+
+func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec domain.LinkSpec) (*graphdb.LinkResult, error) {
+	h, ok := g.rows[fromID]
+	if !ok {
+		return nil, graphdb.ErrNotFound
+	}
+	if h.AgentID != "" && h.AgentID != agentID {
+		return nil, graphdb.ErrNotOwner
+	}
+	key := fromID + string(spec.Type) + spec.To
+	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Out: []domain.Link{}}
+	if result.Created {
+		result.CreatedAt = g.tick()
+	}
+	g.links[key] = true
+	return result, nil
+}
+
+// recordedEvents is the watch stream as the registry sees it.
+type recordedEvents struct{ events []db.Event }
+
+func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
+	r.events = append(r.events, e)
+	return nil
+}
+
+func poolService(store Store) *Service {
+	return &Service{store: store, graph: newFakeGraph(), logger: zap.NewNop()}
+}
+
+var buildOnRoot = []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}
 
 // A row carrying both an agent_id and a human author would be owned and unowned at the same
 // time: quota, standings and the job-ownership check all key on agent_id, so the row would spend
@@ -78,7 +130,7 @@ func poolService(store Store) *Service {
 func TestRegisterHypothesisRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *testing.T) {
 	svc := poolService(newPoolStore())
 
-	_, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "Ada", "pe-1", "warmup helps")
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "Ada", "pe-1", "warmup helps", buildOnRoot)
 	if !errors.Is(err, domain.ErrHypothesisOrigin) {
 		t.Fatalf("RegisterHypothesis with both agent_id and author: got = %v, want %v", err, domain.ErrHypothesisOrigin)
 	}
@@ -90,7 +142,7 @@ func TestRegisterHypothesisRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *test
 func TestRegisterHypothesisRejectsARowWithNeitherAnAgentNorAHumanAuthor(t *testing.T) {
 	svc := poolService(newPoolStore())
 
-	_, _, err := svc.RegisterHypothesis(context.Background(), "", "", "pe-1", "warmup helps")
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "", "", "pe-1", "warmup helps", buildOnRoot)
 	if !errors.Is(err, domain.ErrHypothesisOrigin) {
 		t.Fatalf("RegisterHypothesis with neither agent_id nor author: got = %v, want %v", err, domain.ErrHypothesisOrigin)
 	}
@@ -103,7 +155,7 @@ func TestRegisterHypothesisRejectsARowWithNeitherAnAgentNorAHumanAuthor(t *testi
 func TestRegisterHypothesisStoresAHumanRowWithAnEmptyAgentIDAndTheTypedName(t *testing.T) {
 	svc := poolService(newPoolStore())
 
-	h, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps")
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -123,12 +175,12 @@ func TestRegisterHypothesisStoresAHumanRowWithAnEmptyAgentIDAndTheTypedName(t *t
 // the same idea twice and hand every reading agent two entries to reconcile.
 func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *testing.T) {
 	svc := poolService(newPoolStore())
-	human, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "Warmup   helps.")
+	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "Warmup   helps.", buildOnRoot)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (human): got = %v, want nil", err)
 	}
 
-	agent, existed, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps.")
+	agent, _, existed, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps.", buildOnRoot)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (agent): got = %v, want nil", err)
 	}
@@ -146,7 +198,7 @@ func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *te
 // record the verdict, with the findings underneath as the record of who earned it.
 func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 	svc := poolService(newPoolStore())
-	human, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps")
+	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -167,7 +219,7 @@ func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 // second agent's verdict on it is refused rather than recorded.
 func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testing.T) {
 	svc := poolService(newPoolStore())
-	owned, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps")
+	owned, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -187,7 +239,7 @@ func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testi
 // attached, and this test holds that open.
 func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.T) {
 	svc := poolService(newPoolStore())
-	human, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps")
+	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -212,5 +264,147 @@ func TestAddHypothesisCommentRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *te
 	_, err := svc.AddHypothesisComment(context.Background(), "h-1", "agent-1", "Ada", "try a shorter warmup")
 	if !errors.Is(err, domain.ErrHypothesisOrigin) {
 		t.Fatalf("AddHypothesisComment with both agent_id and author: got = %v, want %v", err, domain.ErrHypothesisOrigin)
+	}
+}
+
+// The graph has no NOTIFY, so the registry is what tells /watch about a new idea. The event has to
+// carry the graph's own timestamp as its cursor: replay derives the same event from that stored
+// value, and a reconnecting watcher must see one event, not a live one and a differently-cursored
+// twin.
+func TestRegisteringANewHypothesisAnnouncesItWithTheStoredCreationTimeAsCursor(t *testing.T) {
+	events := &recordedEvents{}
+	svc := poolService(newPoolStore()).WithEvents(events)
+
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: "agent", PlatformExperimentID: "pe-1",
+		AgentID: "agent-1", Cursor: db.NewCursor(h.CreatedAt)}
+	if len(events.events) != 1 || events.events[0] != want {
+		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)
+	}
+}
+
+// A dedup hit is the existing idea handed back, and announcing it again would wake every agent for
+// a claim they already know about.
+func TestRegisteringAnExistingHypothesisAnnouncesNothing(t *testing.T) {
+	events := &recordedEvents{}
+	svc := poolService(newPoolStore()).WithEvents(events)
+	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot); err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+
+	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-2", "", "pe-1", "Warmup helps", buildOnRoot); err != nil {
+		t.Fatalf("RegisterHypothesis (duplicate): got = %v, want nil", err)
+	}
+	if len(events.events) != 1 {
+		t.Errorf("events after a dedup hit: got = %v, want = %v", len(events.events), 1)
+	}
+}
+
+// A verdict is announced once, when it changes; re-sending the same verdict is not news.
+func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
+	events := &recordedEvents{}
+	svc := poolService(newPoolStore()).WithEvents(events)
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+
+	for range 2 {
+		if _, err := svc.SetHypothesisStatus(context.Background(), h.ID, "agent-1", domain.HypothesisRefuted); err != nil {
+			t.Fatalf("SetHypothesisStatus: got = %v, want nil", err)
+		}
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("events: got = %v, want = %v (hypothesis.new, then one hypothesis.status)", len(events.events), 2)
+	}
+	got := events.events[1]
+	if got.Kind != db.EventHypothesisStatus || got.Value != "refuted" || got.Cursor != db.NewCursor(*h.StatusChangedAt) {
+		t.Errorf("status event: got = %+v, want = hypothesis.status refuted at status_changed_at", got)
+	}
+}
+
+// A link added after registration is the one way an agent places its idea further in the graph,
+// and other agents need to hear about it; a link that already existed changed nothing.
+func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
+	events := &recordedEvents{}
+	svc := poolService(newPoolStore()).WithEvents(events)
+	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+	b, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-2", "", "pe-1", "cooldown helps", buildOnRoot)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+
+	link := domain.LinkSpec{Type: domain.LinkContradicts, To: b.ID}
+	for range 2 {
+		if _, err := svc.AddHypothesisLink(context.Background(), a.ID, "agent-1", "", link); err != nil {
+			t.Fatalf("AddHypothesisLink: got = %v, want nil", err)
+		}
+	}
+	if len(events.events) != 3 {
+		t.Fatalf("events: got = %v, want = %v (two hypothesis.new, one hypothesis.link)", len(events.events), 3)
+	}
+	got := events.events[2]
+	if got.Kind != db.EventHypothesisLink || got.Subject != a.ID || got.Value != "contradicts" || got.Detail != b.ID {
+		t.Errorf("link event: got = %+v, want = hypothesis.link %s contradicts %s", got, a.ID, b.ID)
+	}
+}
+
+// Linking from another agent's hypothesis would put words in its mouth; the registry passes the
+// graph's refusal through as the owner error the HTTP layer turns into 403.
+func TestAddingALinkFromAnotherAgentsHypothesisIsRefused(t *testing.T) {
+	svc := poolService(newPoolStore())
+	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+
+	_, err = svc.AddHypothesisLink(context.Background(), a.ID, "agent-2", "", domain.LinkSpec{Type: domain.LinkBuildsOn, To: "pe-1"})
+	if !errors.Is(err, ErrHypothesisNotOwner) {
+		t.Fatalf("AddHypothesisLink by a non-owner: got = %v, want %v", err, ErrHypothesisNotOwner)
+	}
+}
+
+// A comment carries its hypothesis's platform experiment so its replay and its notify trigger need
+// nothing outside its own row; a comment on a hypothesis that does not exist is a 404, not a row.
+func TestAddHypothesisCommentCarriesTheHypothesisPlatformExperimentAndRefusesAnUnknownOne(t *testing.T) {
+	svc := poolService(newPoolStore())
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+
+	c, err := svc.AddHypothesisComment(context.Background(), h.ID, "agent-2", "", "retested")
+	if err != nil {
+		t.Fatalf("AddHypothesisComment: got = %v, want nil", err)
+	}
+	if c.PlatformExperimentID != "pe-1" {
+		t.Errorf("comment platform_experiment_id: got = %v, want %v", c.PlatformExperimentID, "pe-1")
+	}
+	if _, err := svc.AddHypothesisComment(context.Background(), "no-such-hypothesis", "agent-2", "", "x"); !errors.Is(err, ErrHypothesisNotFound) {
+		t.Errorf("AddHypothesisComment on an unknown hypothesis: got = %v, want %v", err, ErrHypothesisNotFound)
+	}
+}
+
+type missingExperimentStore struct{ poolStore }
+
+func (missingExperimentStore) GetPlatformExperimentSubmitPolicies(context.Context, string) (domain.SubmitterPolicy, domain.SubmitterPolicy, bool, error) {
+	return "", "", false, nil
+}
+
+// The graph does not know which platform experiments exist; Postgres does, and a hypothesis under
+// an id nobody created would be an orphan no job could ever run against.
+func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
+	svc := poolService(&missingExperimentStore{})
+
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-missing", "warmup helps",
+		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-missing"}})
+	if !errors.Is(err, ErrUnknownPlatformExperiment) {
+		t.Fatalf("RegisterHypothesis under an unknown platform experiment: got = %v, want %v", err, ErrUnknownPlatformExperiment)
 	}
 }

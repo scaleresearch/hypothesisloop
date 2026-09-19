@@ -148,7 +148,7 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string
 			Message: fmt.Sprintf("summary can only be written on terminal experiments (got %s)", exp.Status),
 		}
 	}
-	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, id, exp.AgentID, summary); err != nil {
+	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, summary); err != nil {
 		return fmt.Errorf("summary: create finding: %w", err)
 	}
 	return nil

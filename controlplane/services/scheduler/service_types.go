@@ -42,7 +42,7 @@ type Store interface {
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
 	// CreateHypothesisFinding records the agent's post-run write-up, attached to the
 	// hypothesis the completed job tested (see domain.HypothesisFinding).
-	CreateHypothesisFinding(ctx context.Context, hypothesisID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
+	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
 	// TransitionStatus atomically updates status only when current status matches from.
 	// Returns true if updated, false if already changed by a concurrent request.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
@@ -89,8 +89,8 @@ type WorkloadClient interface {
 // NoveltyDetector computes the novelty of a hypothesis relative to existing experiments.
 type NoveltyDetector interface {
 	// ComputeNovelty returns a value in [0,1] where 1.0 is completely novel. hypothesisID
-	// identifies a row registered via the hypotheses registry (services/registry); real
-	// duplicate *rejection* happens there (a DB unique constraint), so this score is purely
+	// identifies a hypothesis registered via the hypotheses registry (services/registry); real
+	// duplicate *rejection* happens there (a graph uniqueness constraint), so this score is purely
 	// advisory, based on how many active experiments share the same hypothesis_id.
 	ComputeNovelty(ctx context.Context, hypothesisID string, existingExperiments []*domain.Experiment) (float64, error)
 }
@@ -100,9 +100,9 @@ type Triggerable interface {
 	Trigger()
 }
 
-// HypothesisStore resolves a hypothesis_id to the hypothesis it names. Submissions must
-// reference an already-registered hypothesis; the scheduler never creates hypotheses, only
-// validates the reference.
+// HypothesisStore resolves a hypothesis_id to the hypothesis it names, nil when there is none
+// (the graph store). Submissions must reference an already-registered hypothesis; the scheduler
+// never creates hypotheses, only validates the reference.
 type HypothesisStore interface {
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 }

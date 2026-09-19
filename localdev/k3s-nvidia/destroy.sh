@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full teardown: uninstalls k3s (takes the device plugin/GFD/cluster-agent objects down with
-# it, same reasoning as k3s-tenstorrent-qb2/destroy.sh). Does NOT touch the host's NVIDIA
+# it, same reasoning as k3s-tenstorrent/destroy.sh). Does NOT touch the host's NVIDIA
 # driver, nvidia-container-toolkit, or docker's default-runtime setting.
 set -euo pipefail
 

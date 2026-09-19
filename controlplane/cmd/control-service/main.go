@@ -26,6 +26,7 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/queuebackend"
@@ -77,6 +78,14 @@ func main() {
 		logger.Fatal("control-service: apply schema", zap.Error(err))
 	}
 
+	graphCtx, graphCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	graph, err := openGraph(graphCtx, pcfg.Services.GraphDBURL, pool)
+	graphCancel()
+	if err != nil {
+		logger.Fatal("control-service: graph store", zap.Error(err))
+	}
+	defer graph.Close(context.Background()) //nolint:errcheck
+
 	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
@@ -101,7 +110,7 @@ func main() {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
-	apiServer := newAPIServer(runCtx, pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	apiServer := newAPIServer(runCtx, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -125,7 +134,7 @@ func main() {
 	logger.Info("control-service: stopped")
 }
 
-func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -157,12 +166,12 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin)
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see services/registry/watch.go.
-	events := db.NewEventsStore(pool)
-	registrySvc := registry.New(store, logger, metricsDBURL, dataStore).WithEvents(events)
+	events := db.NewEventsStore(pool, graph)
+	registrySvc := registry.New(store, graph, logger, metricsDBURL, dataStore).WithEvents(events)
 	registryHandler := registry.NewHandler(registrySvc, logger)
 	watchHandler := registry.NewWatchHandler(events, store, logger)
 	watchHandler.Start(runCtx)
@@ -218,7 +227,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, peFull
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
@@ -243,7 +252,7 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, e
 		WithScaleUpTimeout(time.Duration(pcfg.Scheduler.ScaleUpTimeoutSeconds) * time.Second)
 
 	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, store, settler, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, graph, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
@@ -289,6 +298,31 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, e
 
 	return schedulerHandler, clusterAgentRouter
 }
+
+// openGraph connects to the hypothesis graph, makes sure its schema exists, and moves any
+// hypotheses still in the retired Postgres table into it (see db.LegacyHypotheses).
+func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, error) {
+	graph, err := graphdb.Open(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	if err := graph.EnsureSchema(ctx); err != nil {
+		graph.Close(ctx) //nolint:errcheck
+		return nil, err
+	}
+	legacy, found, err := db.LegacyHypotheses(ctx, pool)
+	if err == nil && found {
+		if err = graph.ImportLegacy(ctx, legacy); err == nil {
+			err = db.DropLegacyHypotheses(ctx, pool)
+		}
+	}
+	if err != nil {
+		graph.Close(ctx) //nolint:errcheck
+		return nil, fmt.Errorf("move hypotheses from postgres to the graph: %w", err)
+	}
+	return graph, nil
+}
+
 func requiredEnv(key string, logger *zap.Logger) string {
 	value := os.Getenv(key)
 	if value == "" {

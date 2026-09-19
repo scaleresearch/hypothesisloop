@@ -1,4 +1,4 @@
-# Local control-plane stack: Postgres, GreptimeDB, MinIO, control-service, metrics-service.
+# Local control-plane stack: Postgres, GreptimeDB, Memgraph, MinIO, control-service, metrics-service.
 # Brought up via `make controlplane-up` (podman compose) — nothing here is
 # podman-specific; `docker compose -f this-file up` works identically).
 #
@@ -7,8 +7,9 @@
 # reach this stack the same way production would reach a real deployment — by one HTTP base URL,
 # configured externally (API_URL / NEXT_PUBLIC_API_URL / HYPOTHESISLOOP_CONTROL_PLANE_URL), never
 # hardcoded. Change a published port here and every one of those needs the same change. Do not
-# rename a service either: controlplane/settings/hypothesisloop.yaml's metrics_db_url is the
-# literal DNS name "greptimedb" (compose's own per-service DNS resolves it — no /etc/hosts hack
+# rename a service either: controlplane/settings/hypothesisloop.yaml's metrics_db_url and
+# graph_db_url are the literal DNS names "greptimedb" and "memgraph" (compose's own per-service DNS
+# resolves them — no /etc/hosts hack
 # needed, unlike the single-pod model this replaces), so a service rename breaks config that is
 # otherwise identical between this stack and a real cluster's.
 
@@ -60,6 +61,30 @@ services:
     volumes:
       - greptimedb-data:/tmp/greptimedb-data
 
+  # The hypothesis graph. Pinned: schema bootstrap and the read-only query guard
+  # (controlplane/shared/graphdb) were verified against exactly this version. Memgraph holds the
+  # graph in memory; the WAL (fsynced on every commit) and periodic snapshots on the volume are what
+  # a restart or a crash recovers it from.
+  memgraph:
+    image: docker.io/memgraph/memgraph:3.13.1
+    restart: unless-stopped
+    command:
+      - --telemetry-enabled=false
+      - --data-recovery-on-startup=true
+      - --storage-wal-enabled=true
+      - --storage-wal-file-flush-every-n-tx=1
+      - --storage-snapshot-interval-sec=300
+      - --storage-snapshot-on-exit=true
+    ports:
+      - "7687:7687"
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   minio:
     image: docker.io/minio/minio:latest
     restart: unless-stopped
@@ -101,6 +126,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      memgraph:
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
 
@@ -126,5 +153,7 @@ volumes:
     name: hypothesisloop-postgres-data
   greptimedb-data:
     name: hypothesisloop-greptimedb-data
+  memgraph-data:
+    name: hypothesisloop-memgraph-data
   minio-data:
     name: hypothesisloop-minio-data

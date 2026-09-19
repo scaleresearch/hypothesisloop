@@ -8,16 +8,13 @@ import (
 )
 
 // Hypothesis is a registered research claim an agent intends to test, scoped to a single
-// platform experiment — each platform experiment accumulates its own shared pool of ideas.
-// Agents register (or retrieve, if an equivalent one already exists within the same platform
-// experiment — see NormalizeHypothesisText) a Hypothesis before submitting a job against it;
-// ExperimentMeta.HypothesisID is required and must reference a row here whose
-// PlatformExperimentID matches the job's own PlatformExperimentID. This is the real
-// uniqueness check: a DB-level UNIQUE index on (platform_experiment_id, normalized_text)
-// (see shared/db/schema.sql) rejects a second registration of the same claim within the same platform
-// experiment, replacing the old always-novel dedup stub. The same claim registered under a
-// different platform experiment is a distinct hypothesis — different research programs don't
-// share an idea pool.
+// platform experiment. Hypotheses live in the graph store (shared/graphdb): each one builds on the
+// experiment's objective or on earlier hypotheses, so the pool is a graph rooted at the objective.
+// ExperimentMeta.HypothesisID is required and must reference a hypothesis whose
+// PlatformExperimentID matches the job's own. A uniqueness constraint on
+// (platform_experiment_id, normalized text) makes registering the same claim twice within one
+// platform experiment return the existing hypothesis (see NormalizeHypothesisText); the same claim
+// in a different platform experiment is a distinct hypothesis.
 // The pool is shared with humans: AgentID is set on agent rows and empty on human ones, where
 // Author carries the name the person typed instead. See HypothesisSource.
 type Hypothesis struct {
@@ -29,6 +26,8 @@ type Hypothesis struct {
 	Text                 string           `json:"text"`
 	Status               HypothesisStatus `json:"status"`
 	CreatedAt            time.Time        `json:"created_at"`
+	// StatusChangedAt is when Status last moved; nil while it still holds its initial value.
+	StatusChangedAt *time.Time `json:"status_changed_at"`
 }
 
 // HypothesisSource records who put a row in the pool. A human watching a run adds an idea from
@@ -105,6 +104,76 @@ func ValidHypothesisStatus(s HypothesisStatus) bool {
 	}
 }
 
+// LinkType is how one hypothesis relates to another. builds_on (refines, extends or combines;
+// acyclic, and every hypothesis has at least one) may also point at the objective root, named by
+// the platform experiment id. contradicts and related only connect hypotheses.
+type LinkType string
+
+const (
+	LinkBuildsOn    LinkType = "builds_on"
+	LinkContradicts LinkType = "contradicts"
+	LinkRelated     LinkType = "related"
+)
+
+// ValidLinkType reports whether t is one of the three link types.
+func ValidLinkType(t LinkType) bool {
+	switch t {
+	case LinkBuildsOn, LinkContradicts, LinkRelated:
+		return true
+	default:
+		return false
+	}
+}
+
+// LinkSpec is a link a caller asks for: from the hypothesis being written to To, a hypothesis id
+// or the platform experiment id meaning the objective root.
+type LinkSpec struct {
+	Type LinkType `json:"type"`
+	To   string   `json:"to"`
+}
+
+// Link is one edge seen from one of its ends. HypothesisID, Text and Status describe the other end;
+// when that end is the objective root, HypothesisID is the platform experiment id and Text and
+// Status are empty. AgentID or Author (exactly one, as on a hypothesis) and CreatedAt describe who
+// created the edge and when.
+type Link struct {
+	Type         LinkType  `json:"type"`
+	HypothesisID string    `json:"hypothesis_id"`
+	Text         string    `json:"text"`
+	Status       string    `json:"status"`
+	AgentID      string    `json:"agent_id"`
+	Author       string    `json:"author"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// HypothesisLinks is every edge touching one hypothesis, split by direction.
+type HypothesisLinks struct {
+	Out []Link `json:"out"`
+	In  []Link `json:"in"`
+}
+
+// HypothesisListItem is a hypothesis with its place in the graph and cheap activity counts, so a
+// bounded list read tells the reader which rows are worth a full detail fetch.
+// BuildsOn lists outgoing builds_on targets (the root appears as the platform experiment id);
+// ChildCount counts incoming builds_on edges.
+type HypothesisListItem struct {
+	*Hypothesis
+	BuildsOn     []string `json:"builds_on"`
+	ChildCount   int      `json:"child_count"`
+	FindingCount int      `json:"finding_count"`
+	CommentCount int      `json:"comment_count"`
+}
+
+// GraphEdge is one edge of a platform experiment's hypothesis graph, with who created it and when.
+type GraphEdge struct {
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	Type      LinkType  `json:"type"`
+	AgentID   string    `json:"agent_id"`
+	Author    string    `json:"author"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // HypothesisFinding is the post-run write-up an agent files after one of its jobs testing
 // this hypothesis reaches a terminal state (COMPLETED, FAILED, EVICTED, or REJECTED).
 // Attached to the hypothesis (not just the job) so the accumulated evidence for a claim is
@@ -112,12 +181,13 @@ func ValidHypothesisStatus(s HypothesisStatus) bool {
 // services/scheduler.WriteExperimentSummary and the scheduler's summary gate. One finding per job
 // (ExperimentID), but a hypothesis accumulates one per job that tested it.
 type HypothesisFinding struct {
-	ID           string    `json:"id"`
-	HypothesisID string    `json:"hypothesis_id"`
-	ExperimentID string    `json:"experiment_id"`
-	AgentID      string    `json:"agent_id"`
-	Summary      string    `json:"summary"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                   string    `json:"id"`
+	HypothesisID         string    `json:"hypothesis_id"`
+	PlatformExperimentID string    `json:"platform_experiment_id"`
+	ExperimentID         string    `json:"experiment_id"`
+	AgentID              string    `json:"agent_id"`
+	Summary              string    `json:"summary"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 // HypothesisComment is a freeform, job-independent note on a hypothesis — amending, abandoning,
@@ -128,13 +198,14 @@ type HypothesisFinding struct {
 // A comment carries the same origin pair as its hypothesis: AgentID on an agent's note, Author
 // on a human's, exactly one of the two (see ClassifyHypothesisOrigin).
 type HypothesisComment struct {
-	ID           string           `json:"id"`
-	HypothesisID string           `json:"hypothesis_id"`
-	AgentID      string           `json:"agent_id"`
-	Source       HypothesisSource `json:"source"`
-	Author       string           `json:"author"`
-	Text         string           `json:"text"`
-	CreatedAt    time.Time        `json:"created_at"`
+	ID                   string           `json:"id"`
+	HypothesisID         string           `json:"hypothesis_id"`
+	PlatformExperimentID string           `json:"platform_experiment_id"`
+	AgentID              string           `json:"agent_id"`
+	Source               HypothesisSource `json:"source"`
+	Author               string           `json:"author"`
+	Text                 string           `json:"text"`
+	CreatedAt            time.Time        `json:"created_at"`
 }
 
 // NormalizeHypothesisText collapses a hypothesis statement to a canonical form (lowercased,

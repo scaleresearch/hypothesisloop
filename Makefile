@@ -76,8 +76,8 @@ controlplane-up: registry-up render-settings images
 controlplane-down:
 	podman compose -f $(COMPOSE_FILE) down
 
-# Irreversible: deletes the postgres + GreptimeDB + MinIO volumes (every platform experiment,
-# experiment record, metric, hypothesis and stored checkpoint). Prompts unless CONFIRM=--yes.
+# Irreversible: deletes the postgres + GreptimeDB + Memgraph + MinIO volumes (every platform
+# experiment, experiment record, metric, hypothesis and stored checkpoint). Prompts unless CONFIRM=--yes.
 controlplane-destroy:
 	@if [ "$(CONFIRM)" != "--yes" ]; then \
 		echo "make controlplane-destroy: this DELETES ALL control-plane data. There is no backup and no undo." >&2; \
@@ -117,7 +117,7 @@ k3s-up: images
 # Unlike controlplane-down, this one IS destructive: the k3s cluster's own state (etcd/sqlite,
 # every Job/Deployment/Pod it knows about) lives only inside the k3s node itself, so tearing the
 # node down is the whole cluster's `destroy`, not a `down`. No confirmation prompt today — the
-# cluster is ephemeral local-dev infra, not the durable postgres/GreptimeDB data controlplane-down
+# cluster is ephemeral local-dev infra, not the durable postgres/GreptimeDB/Memgraph data controlplane-down
 # protects. Use `make full-stop` / `full-start` for a same-state pause/resume instead.
 k3s-down:
 	bash localdev/k3s-macos/destroy.sh
@@ -159,23 +159,23 @@ reload:
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
 # Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
 # fake-accelerator nodes. Also control-plane-only by default (tainted no-workload) — see
-# tt-dev-nodes-up below. See localdev/k3s-tenstorrent-qb2/README.md.
+# tt-dev-nodes-up below. See localdev/k3s-tenstorrent/README.md.
 tt-up: images
-	bash localdev/k3s-tenstorrent-qb2/install.sh
+	bash localdev/k3s-tenstorrent/install.sh
 
 # Destructive the same way k3s-down is (see its comment) — tears down the whole k3s cluster on
 # this Tenstorrent host, not just this repo's containers. Use `make tt-stop`/`tt-start` to
 # pause/resume without losing cluster state.
 tt-down:
-	bash localdev/k3s-tenstorrent-qb2/destroy.sh
+	bash localdev/k3s-tenstorrent/destroy.sh
 
 # Attaches this host's own node as a full worker (no fake containers — a real Tenstorrent box
 # is the one node the portable and hardware e2e suites both need, and the one node real serving/
 # training work runs on). Idempotent.
 tt-dev-nodes-up:
-	bash localdev/k3s-tenstorrent-qb2/dev-nodes-up.sh
+	bash localdev/k3s-tenstorrent/dev-nodes-up.sh
 
-# Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the tt-quietbox
+# Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the box-a
 # k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
 # image; no more local save/import.
 tt-hardware-image: check-clean-tree
@@ -185,21 +185,21 @@ tt-hardware-image: check-clean-tree
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 
 tt-e2e: tt-hardware-image
-	bash localdev/k3s-tenstorrent-qb2/run-e2e.sh
+	bash localdev/k3s-tenstorrent/run-e2e.sh
 
 # Counterpart to `reload` for the real Tenstorrent host: rebuild every image, import into
 # k3s's own containerd (native on Linux, no podman-machine hop), and bounce cluster-agent/
 # node-agent so they run current code.
 tt-reload:
-	bash localdev/k3s-tenstorrent-qb2/reload.sh
+	bash localdev/k3s-tenstorrent/reload.sh
 
 # Detaches it again, returning the cluster to control-plane-only so real training work outside
 # k3s isn't sharing capacity with anything scheduled onto it.
 tt-dev-nodes-down:
-	bash localdev/k3s-tenstorrent-qb2/dev-nodes-down.sh
+	bash localdev/k3s-tenstorrent/dev-nodes-down.sh
 
 tt-status:
-	bash localdev/k3s-tenstorrent-qb2/status.sh
+	bash localdev/k3s-tenstorrent/status.sh
 
 # ---- git:// daemon: serves per-experiment code repos to experimentator agent containers ----------
 # Always restarts (not just "start if not running") and always passes --enable=receive-pack --
@@ -219,10 +219,10 @@ git-daemon-destroy:
 	bash localdev/local-git/git-daemon.sh destroy
 
 tt-stop:
-	bash localdev/k3s-tenstorrent-qb2/stop.sh
+	bash localdev/k3s-tenstorrent/stop.sh
 
 tt-start:
-	bash localdev/k3s-tenstorrent-qb2/start.sh
+	bash localdev/k3s-tenstorrent/start.sh
 
 # Builds every platform image and pushes it to $(REGISTRY) under two tags: $(TAG) (the git SHA
 # that produced it -- the one every manifest pins) and latest (a mutable convenience pointer for

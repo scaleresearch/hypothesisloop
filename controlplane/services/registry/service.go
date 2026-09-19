@@ -7,6 +7,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -17,10 +18,8 @@ type Store interface {
 	CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error)
 	MarkStarted(ctx context.Context, id string) (bool, error)
 	GetLineage(ctx context.Context, experimentID string) ([]*domain.Experiment, error)
-	// FindOrCreateHypothesis registers a hypothesis within a platform experiment, or returns
-	// the existing row (and true) if one with equivalent normalized text already exists in
-	// that same platform experiment — the real uniqueness check.
-	FindOrCreateHypothesis(ctx context.Context, source domain.HypothesisSource, agentID, author, platformExperimentID, text string) (h *domain.Hypothesis, alreadyExisted bool, err error)
+	// GetAgent resolves an agent id, nil when no such agent ever signed up.
+	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// GetPlatformExperimentSubmitPolicies is a narrow read of a platform experiment's
 	// HypothesisSubmitPolicy/JobSubmitPolicy, used to gate RegisterHypothesis without pulling
 	// the full row through this interface. found=false means id does not exist.
@@ -29,47 +28,60 @@ type Store interface {
 	// MetricDefinitions, used by the underperformance check to find the ranking metric's
 	// direction without pulling the full row through this interface.
 	GetPlatformExperimentMetrics(ctx context.Context, platformExperimentID string) (metrics []domain.MetricDefinition, found bool, err error)
-	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
-	ListHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus, limit, offset int) ([]*db.HypothesisListItem, error)
-	CountHypotheses(ctx context.Context, platformExperimentID, agentID string, status domain.HypothesisStatus) (int, error)
-	UpdateHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error)
 	ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error)
 	CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
-	CreateHypothesisComment(ctx context.Context, hypothesisID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error)
+	CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error)
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
+	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)
+}
+
+// Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.
+// Implemented by graphdb.Store.
+type Graph interface {
+	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, error)
+	AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec) (*graphdb.LinkResult, error)
+	UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, bool, error)
+	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
+	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
+	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
+	CountHypotheses(ctx context.Context, f graphdb.ListFilter) (int, error)
+	ExperimentGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error)
+	Query(ctx context.Context, cypher string, params map[string]any) (*graphdb.QueryResult, error)
 }
 
 // Service manages experiments and their metric timeseries.
 type Service struct {
 	store        Store
+	graph        Graph
 	logger       *zap.Logger
 	metricsDBURL string
 	// dataStore is the only way this service learns what a job wrote — listed live, never
 	// mirrored into PostgreSQL.
 	dataStore *objectstore.Client
-	// events, when wired, carries the metric-arrival pointer to /watch subscribers. Optional:
-	// every other event on that stream is emitted by the database itself, so a Service without
-	// it still serves a complete stream minus the one kind Postgres never sees.
+	// events, when wired, carries to /watch subscribers the events no Postgres trigger emits: the
+	// metric-arrival pointer and every hypothesis event (the graph store has no NOTIFY).
 	events EventNotifier
 }
 
-// EventNotifier emits an event that no row change produced. See Service.notifyMetricArrived —
-// the metric pointer is the only such event, because a metric is never written to Postgres.
+// EventNotifier emits an event that no Postgres row change produced: the metric pointer and the
+// hypothesis events.
 type EventNotifier interface {
 	NotifyEvent(ctx context.Context, e db.Event) error
 }
 
-// WithEvents wires the change stream this service announces metric arrivals on.
+// WithEvents wires the change stream this service announces metric arrivals and hypothesis
+// changes on.
 func (s *Service) WithEvents(events EventNotifier) *Service {
 	s.events = events
 	return s
 }
 
 // New returns a new registry Service.
-func New(store Store, logger *zap.Logger, metricsDBURL string, dataStore *objectstore.Client) *Service {
+func New(store Store, graph Graph, logger *zap.Logger, metricsDBURL string, dataStore *objectstore.Client) *Service {
 	return &Service{
 		store:        store,
+		graph:        graph,
 		logger:       logger,
 		metricsDBURL: metricsDBURL,
 		dataStore:    dataStore,

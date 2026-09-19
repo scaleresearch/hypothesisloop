@@ -3,7 +3,7 @@
 # dev-nodes-{up,down}.sh scripts.
 #
 #   - lib_create_node / lib_destroy_node: spin up a brand-new container node.
-#   - lib_attach_node / lib_detach_node: taint/untaint an already-existing node (tt-quietbox).
+#   - lib_attach_node / lib_detach_node: taint/untaint an already-existing node (box-a).
 
 LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
 
@@ -125,7 +125,7 @@ lib_wait_node_ready() {
 # namespace), bypassing the registry entirely. The node-agent/cluster-agent Deployments run with
 # imagePullPolicy: Never for local dev (see values.yaml), so the registries.yaml mirror
 # lib_create_node writes is irrelevant to them -- each fake node's containerd is its own isolated
-# store (unlike tt-quietbox, which shares the host's), so the image has to be pushed in directly.
+# store (unlike box-a, which shares the host's), so the image has to be pushed in directly.
 # Usage: lib_import_images <name> <image-ref>...  (each ref must already exist in the local podman
 # store, e.g. "localhost/hypothesisloop-node-agent:latest")
 lib_import_images() {

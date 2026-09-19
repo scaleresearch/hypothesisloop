@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstraps a k3s cluster on this host with real NVIDIA GPU access, so the platform's
 # k3s/device-plugin path (runtime/k8s/internal/k8sexec) can be tested against real hardware —
-# the NVIDIA counterpart to localdev/k3s-tenstorrent-qb2/install.sh. Run on an actual host with
+# the NVIDIA counterpart to localdev/k3s-tenstorrent/install.sh. Run on an actual host with
 # an NVIDIA GPU (a vast.ai KVM VM, a bare-metal box — anything with nvidia-smi and a driver),
 # not a dev laptop.
 #

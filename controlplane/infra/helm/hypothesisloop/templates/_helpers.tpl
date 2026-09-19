@@ -63,3 +63,15 @@ through this file.
 http://greptimedb:4000
 {{- end -}}
 {{- end -}}
+
+{{/* Memgraph graph_db_url, rendered into the staged hypothesisloop.yaml ConfigMap like metrics_db_url. */}}
+{{- define "hypothesisloop.graphDBURL" -}}
+{{- if .Values.memgraph.external.enabled -}}
+{{- if not .Values.memgraph.external.url -}}
+{{- fail "memgraph.external.enabled is true but memgraph.external.url is not set" -}}
+{{- end -}}
+{{ .Values.memgraph.external.url }}
+{{- else -}}
+bolt://memgraph:7687
+{{- end -}}
+{{- end -}}

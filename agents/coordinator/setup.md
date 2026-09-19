@@ -13,7 +13,7 @@ shown. Resolve against the live environment, never guess.
     CHIPS_PER_AGENT=2                          # NUM_AGENTS * CHIPS_PER_AGENT <= available capacity
     CLAUDE_CODE_OAUTH_TOKEN=<auto-loaded from agents/coordinator/.env, see step 1>
     KUBE_CONTEXT=k3s-tt
-    NODE_NAME=tt-quietbox
+    NODE_NAME=box-a
     CHIP_ARCH=tenstorrent.com/chipArch=blackhole
     API_URL=http://localhost:8081              # the whole API: platform experiments, jobs,
                                                # hypotheses, metrics, resource catalog
@@ -61,7 +61,7 @@ silently improvise.
    sibling's `seed/` in prose; check `experiment.md` first.
    **`$CODE_REPO_URL` is a separate repo, not a live mirror of this one** — after editing
    `seed/`, push it to `$CODE_REPO_URL`'s `main` too, and diff-check before spawning agents.
-   **`CODE_REPO_URL` must use the host's LAN IP (e.g. `git://192.168.1.76/...`), never
+   **`CODE_REPO_URL` must use the host's LAN IP (e.g. `git://192.0.2.10/...`), never
    `127.0.0.1`.** The coordinator/agent containers run `--network host` so `127.0.0.1` resolves
    there, but a job pod (k3s) is in a separate network namespace and can't reach the host's
    loopback — `code_ref` built from a `127.0.0.1` `CODE_REPO_URL` fails to clone inside every job,

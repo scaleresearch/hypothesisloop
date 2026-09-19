@@ -46,8 +46,8 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 // parent Job's own ObjectMeta, never on the pod template — so that selector matched zero pods,
 // every tick, for every job. scheduledNodes stayed permanently 0 regardless of true pod health,
 // and a genuinely running, progressing job (real log lines, real embed progress) was evicted as
-// stuck_pending once job_watcher's scale-up deadline passed. Live: pe-e11aa080,
-// smri11-heterofrofastacked-local (v1/v2/v4/v5), see fix-later.md.
+// stuck_pending once job_watcher's scale-up deadline passed. Live: pe-example,
+// example-experiment (v1/v2/v4/v5), see fix-later.md.
 func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: APIURLDefault}
 	exp := &domain.Experiment{
@@ -86,7 +86,7 @@ func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
-			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/FOMO_with_dwi"},
+			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/example"},
 		},
 	}
 
@@ -102,8 +102,8 @@ func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
 	if len(vols) != 1 || vols[0].Name != mounts[0].Name {
 		t.Fatalf("Volumes = %+v, want one volume named %q", vols, mounts[0].Name)
 	}
-	if vols[0].HostPath == nil || vols[0].HostPath.Path != "/var/lib/hypothesisloop/datasets/FOMO_with_dwi" {
-		t.Fatalf("HostPath volume = %+v, want Path /var/lib/hypothesisloop/datasets/FOMO_with_dwi", vols[0].HostPath)
+	if vols[0].HostPath == nil || vols[0].HostPath.Path != "/var/lib/hypothesisloop/datasets/example" {
+		t.Fatalf("HostPath volume = %+v, want Path /var/lib/hypothesisloop/datasets/example", vols[0].HostPath)
 	}
 	if vols[0].HostPath.Type == nil || *vols[0].HostPath.Type != corev1.HostPathDirectory {
 		t.Fatalf("HostPath.Type = %v, want HostPathDirectory (fail fast if not present, not DirectoryOrCreate)", vols[0].HostPath.Type)

@@ -119,10 +119,10 @@ func listenForEvents(t *testing.T, pool *Pool) (<-chan Event, context.CancelFunc
 	return events, cancel
 }
 
-// registerHypothesis inserts the rows a hypothesis needs and the hypothesis itself, inside one
-// transaction, committing or rolling back as asked. The hypothesis insert is what fires the
-// trigger; the rest exists only because the row cannot exist without it.
-func registerHypothesis(t *testing.T, pool *Pool, suffix string, commit bool) (agentID, peID, hypothesisID string) {
+// seedRun inserts an agent, a platform experiment and one comment on a hypothesis, inside one
+// transaction, committing or rolling back as asked. The comment insert is what fires a trigger;
+// the hypothesis itself lives in the graph store, so here it is only an id.
+func seedRun(t *testing.T, pool *Pool, suffix string, commit bool) (agentID, peID, hypothesisID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -134,6 +134,7 @@ func registerHypothesis(t *testing.T, pool *Pool, suffix string, commit bool) (a
 
 	agentID = "watch-test-agent-" + suffix
 	peID = "watch-test-pe-" + suffix
+	hypothesisID = "watch-test-hypothesis-" + suffix
 	if _, err := tx.Exec(ctx, `INSERT INTO agents (id, name) VALUES ($1, $1)`, agentID); err != nil {
 		t.Fatalf("insert agent: got = %v, want = nil", err)
 	}
@@ -141,9 +142,9 @@ func registerHypothesis(t *testing.T, pool *Pool, suffix string, commit bool) (a
 VALUES ($1, $1, 1, now(), now() + interval '1 hour')`, peID); err != nil {
 		t.Fatalf("insert platform experiment: got = %v, want = nil", err)
 	}
-	if err := tx.QueryRow(ctx, `INSERT INTO hypotheses (agent_id, platform_experiment_id, text, normalized_text)
-VALUES ($1, $2, $3, $3) RETURNING id`, agentID, peID, "watch test claim "+suffix).Scan(&hypothesisID); err != nil {
-		t.Fatalf("insert hypothesis: got = %v, want = nil", err)
+	if _, err := tx.Exec(ctx, `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, text)
+VALUES ($1, $2, $3, 'watch test comment')`, hypothesisID, peID, agentID); err != nil {
+		t.Fatalf("insert comment: got = %v, want = nil", err)
 	}
 	if !commit {
 		return agentID, peID, hypothesisID
@@ -155,9 +156,10 @@ VALUES ($1, $2, $3, $3) RETURNING id`, agentID, peID, "watch test claim "+suffix
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
 		for _, q := range []string{
+			`DELETE FROM hypothesis_findings WHERE platform_experiment_id = $1`,
+			`DELETE FROM hypothesis_comments WHERE platform_experiment_id = $1`,
 			`DELETE FROM experiments WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`,
-			`DELETE FROM hypotheses WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiments WHERE id = $1`,
 		} {
 			if _, err := pool.pool.Exec(cleanupCtx, q, peID); err != nil {
@@ -171,6 +173,14 @@ VALUES ($1, $2, $3, $3) RETURNING id`, agentID, peID, "watch test claim "+suffix
 	return agentID, peID, hypothesisID
 }
 
+// noHypothesisEvents stands in for the graph store where a test exercises only Postgres-derived
+// replay.
+type noHypothesisEvents struct{}
+
+func (noHypothesisEvents) ReplayEvents(context.Context, string, time.Time) ([]Event, error) {
+	return nil, nil
+}
+
 // This is the whole reason the events are emitted by a trigger inside the writing transaction. A
 // stream that can announce a state the database then threw away is worse than no stream at all:
 // an agent would act on a job it believes exists, and no later event would ever correct it,
@@ -180,7 +190,7 @@ func TestAChangeInARolledBackTransactionProducesNoEvent(t *testing.T) {
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
-	_, peID, _ := registerHypothesis(t, pool, "rollback", false)
+	_, peID, _ := seedRun(t, pool, "rollback", false)
 
 	// Scoped to this test's own write, the same way the committed case is. The listener sees
 	// every event on the database, and the development database it runs against is shared with a
@@ -190,7 +200,7 @@ func TestAChangeInARolledBackTransactionProducesNoEvent(t *testing.T) {
 	for {
 		select {
 		case e := <-events:
-			if e.Kind == EventHypothesisNew && e.PlatformExperimentID == peID {
+			if e.Kind == EventCommentNew && e.PlatformExperimentID == peID {
 				t.Fatalf("event after a rolled-back write: got = %v, want = %v", e.Kind, "no event")
 			}
 		case <-deadline:
@@ -207,13 +217,13 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
-	registerHypothesis(t, pool, "commit", true)
+	seedRun(t, pool, "commit", true)
 
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case e := <-events:
-			if e.Kind != EventHypothesisNew {
+			if e.Kind != EventCommentNew {
 				continue
 			}
 			if e.PlatformExperimentID != "watch-test-pe-commit" {
@@ -224,7 +234,7 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 			}
 			return
 		case <-deadline:
-			t.Fatalf("hypothesis.new after a committed write: got = %v, want = one event", "no event")
+			t.Fatalf("comment.new after a committed write: got = %v, want = one event", "no event")
 		}
 	}
 }
@@ -262,10 +272,10 @@ VALUES ($1, $2, 'p', $3, 'r@0', 'h', 'd', $4, 'claim', 'objective', 'test-accele
 // fails and this stream would need a log after all.
 func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnTimestamps(t *testing.T) {
 	pool := eventsTestDB(t)
-	agentID, peID, hypothesisID := registerHypothesis(t, pool, "replay", true)
+	agentID, peID, hypothesisID := seedRun(t, pool, "replay", true)
 	before := insertJob(t, pool, agentID, peID, hypothesisID, "watch-test-job-replay")
 
-	events, err := NewEventsStore(pool).Replay(context.Background(),
+	events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
 		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
@@ -285,10 +295,10 @@ func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnTimestamps(t *testin
 // transition twice; delivering less would put it back to polling.
 func TestReplayReturnsOnlyWhatHappenedAfterTheGivenCursor(t *testing.T) {
 	pool := eventsTestDB(t)
-	agentID, peID, hypothesisID := registerHypothesis(t, pool, "cursor", true)
+	agentID, peID, hypothesisID := seedRun(t, pool, "cursor", true)
 	before := insertJob(t, pool, agentID, peID, hypothesisID, "watch-test-job-cursor")
 
-	store := NewEventsStore(pool)
+	store := NewEventsStore(pool, noHypothesisEvents{})
 	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}
 	all, err := store.Replay(context.Background(), filter, before)
 	if err != nil {
@@ -336,30 +346,13 @@ func exec(t *testing.T, pool *Pool, query string, args ...any) {
 	}
 }
 
-// A settled claim is the one pool change nothing announced: hypothesis.new carried the idea, and
-// the verdict on it arrived silently. Without this event an agent spends real device time
-// re-testing what a peer already confirmed or refuted, which is the most expensive mistake its own
-// prompt warns it about.
-func TestSettlingAHypothesisAnnouncesItsNewVerdictToThePool(t *testing.T) {
-	pool := eventsTestDB(t)
-	_, _, hypothesisID := registerHypothesis(t, pool, "verdict", true)
-	events, stop := listenForEvents(t, pool)
-	defer stop()
-
-	exec(t, pool, `UPDATE hypotheses SET status = 'refuted' WHERE id = $1`, hypothesisID)
-
-	if got := awaitEvent(t, events, EventHypothesisStatus, hypothesisID).Value; got != "refuted" {
-		t.Errorf("announced verdict: got = %v, want = %v", got, "refuted")
-	}
-}
-
 // The description is the question every agent in the run is working on, and it is edited mid-run.
 // The event says only that it changed: a description is unbounded, and copying it onto the stream
 // would make the event a second copy of a row anyone can already GET — the one thing this stream
 // is built never to be.
 func TestEditingTheDescriptionAnnouncesThatItChangedAndCarriesNoneOfItsText(t *testing.T) {
 	pool := eventsTestDB(t)
-	_, peID, _ := registerHypothesis(t, pool, "brief", true)
+	_, peID, _ := seedRun(t, pool, "brief", true)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
@@ -377,7 +370,7 @@ func TestEditingTheDescriptionAnnouncesThatItChangedAndCarriesNoneOfItsText(t *t
 // that had already finished.
 func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
 	pool := eventsTestDB(t)
-	_, peID, _ := registerHypothesis(t, pool, "closed", true)
+	_, peID, _ := seedRun(t, pool, "closed", true)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
@@ -394,7 +387,7 @@ func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
 // exists to remove.
 func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *testing.T) {
 	pool := eventsTestDB(t)
-	agentID, peID, _ := registerHypothesis(t, pool, "cut", true)
+	agentID, peID, _ := seedRun(t, pool, "cut", true)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
@@ -410,12 +403,12 @@ VALUES ($1, $2, 1)`, peID, agentID)
 }
 
 // The rollback guarantee has to hold for every kind, not only the one it was first written for.
-// These four are emitted by triggers added later, and a trigger added later is exactly where a
+// These are emitted by triggers added later, and a trigger added later is exactly where a
 // notify outside the writing transaction would creep in — announcing a verdict, a closure or a cut
 // the database then threw away, with no later event to correct it.
 func TestTheNewKindsEmitNothingWhenTheirTransactionRollsBack(t *testing.T) {
 	pool := eventsTestDB(t)
-	agentID, peID, hypothesisID := registerHypothesis(t, pool, "newkinds-rollback", true)
+	agentID, peID, _ := seedRun(t, pool, "newkinds-rollback", true)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
@@ -426,7 +419,6 @@ func TestTheNewKindsEmitNothingWhenTheirTransactionRollsBack(t *testing.T) {
 		t.Fatalf("begin: got = %v, want = nil", err)
 	}
 	for _, q := range []string{
-		`UPDATE hypotheses SET status = 'confirmed' WHERE id = '` + hypothesisID + `'`,
 		`UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = '` + peID + `'`,
 		`INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 VALUES ('` + peID + `', '` + agentID + `', 1)`,
@@ -454,19 +446,18 @@ VALUES ('` + peID + `', '` + agentID + `', 1)`,
 
 // Replay is what makes a dropped connection a delay rather than a gap, and it has to cover the
 // whole vocabulary: a kind that is only ever live is a kind an agent silently misses across every
-// reconnect, which puts it straight back to polling for exactly that thing. These four are derived
+// reconnect, which puts it straight back to polling for exactly that thing. These are derived
 // from the changed row's own timestamps, with no event log to fall back on.
 func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnTimestamps(t *testing.T) {
 	pool := eventsTestDB(t)
-	agentID, peID, hypothesisID := registerHypothesis(t, pool, "newkinds-replay", true)
 	before := NewCursor(time.Now().UTC().Add(-time.Second))
+	agentID, peID, hypothesisID := seedRun(t, pool, "newkinds-replay", true)
 
-	exec(t, pool, `UPDATE hypotheses SET status = 'confirmed' WHERE id = $1`, hypothesisID)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 VALUES ($1, $2, 1)`, peID, agentID)
 
-	events, err := NewEventsStore(pool).Replay(context.Background(), EventFilter{PlatformExperimentID: peID}, before)
+	events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -475,7 +466,7 @@ VALUES ($1, $2, 1)`, peID, agentID)
 		seen[e.Kind] = e.Subject
 	}
 	for kind, wantSubject := range map[string]string{
-		EventHypothesisStatus:              hypothesisID,
+		EventCommentNew:                    hypothesisID,
 		EventPlatformExperimentStatus:      peID,
 		EventPlatformExperimentDescription: peID,
 		EventAgentCut:                      agentID,
@@ -492,10 +483,10 @@ VALUES ($1, $2, 1)`, peID, agentID)
 // time it reconnects.
 func TestReplayDoesNotReturnARunWideChangeThatHappenedBeforeTheGivenCursor(t *testing.T) {
 	pool := eventsTestDB(t)
-	_, peID, _ := registerHypothesis(t, pool, "newkinds-cursor", true)
+	_, peID, _ := seedRun(t, pool, "newkinds-cursor", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
 
-	store := NewEventsStore(pool)
+	store := NewEventsStore(pool, noHypothesisEvents{})
 	all, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
 		Kinds: map[string]bool{EventPlatformExperimentStatus: true}}, NewCursor(time.Now().UTC().Add(-time.Second)))
 	if err != nil {
@@ -652,5 +643,39 @@ func TestAnnotateLeavesAnAgentsOwnEmptyDetailEmpty(t *testing.T) {
 	got := filter.Annotate(e)
 	if got.Detail != "" {
 		t.Errorf("Annotate(%+v).Detail = %q, want empty", e, got.Detail)
+	}
+}
+
+type fixedHypothesisEvents []Event
+
+func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, time.Time) ([]Event, error) {
+	return f, nil
+}
+
+// Hypothesis events come from the graph store, everything else from Postgres, and a reconnecting
+// client must still get one stream: both halves filtered by the same subscription and interleaved
+// in cursor order.
+func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInCursorOrder(t *testing.T) {
+	pool := eventsTestDB(t)
+	before := NewCursor(time.Now().UTC().Add(-time.Second))
+	_, peID, hypothesisID := seedRun(t, pool, "graph-merge", true)
+	graph := fixedHypothesisEvents{
+		{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID, Cursor: before + 1},
+		{Kind: EventHypothesisLink, Subject: hypothesisID, Value: "related", PlatformExperimentID: peID, Cursor: NewCursor(time.Now().UTC().Add(time.Hour))},
+		{Kind: EventHypothesisStatus, Subject: hypothesisID, Value: "refuted", PlatformExperimentID: peID, Cursor: before - 1},
+	}
+
+	events, err := NewEventsStore(pool, graph).Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
+		Kinds: map[string]bool{EventHypothesisNew: true, EventHypothesisLink: true, EventHypothesisStatus: true, EventCommentNew: true}}, before)
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	var kinds []string
+	for _, e := range events {
+		kinds = append(kinds, e.Kind)
+	}
+	want := "hypothesis.new comment.new hypothesis.link"
+	if got := strings.Join(kinds, " "); got != want {
+		t.Errorf("replayed kinds: got = %v, want = %v", got, want)
 	}
 }

@@ -27,7 +27,7 @@ func TestValidateIdentifierAcceptsTheIdsTheSuiteAndAgentsActuallyUse(t *testing.
 	for _, good := range []string{
 		"agent-dist-depth-1786534808",
 		"job-d2dfbf80-1786534808-4004470",
-		"pe-1b62dccc",
+		"pe-4f7a9c2e",
 		"a",
 		"agent1",
 	} {

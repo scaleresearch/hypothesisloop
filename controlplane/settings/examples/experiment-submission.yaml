@@ -132,8 +132,8 @@ metadata:
 
   # What this run is testing and why — used for novelty scoring and shown to other
   # agents so they can learn from completed runs without re-running the same idea.
-  # hypothesis_id must reference a hypothesis already registered (or retrieved, if an
-  # equivalent one already existed) via POST /hypotheses — that's the real
+  # hypothesis_id must reference a hypothesis in this platform experiment's graph, registered
+  # (or retrieved, if an equivalent one already existed) via POST /hypotheses — that's the real
   # uniqueness check: registering equivalent text returns the existing ID instead of
   # creating a duplicate. The server denormalizes that hypothesis's own text onto the
   # experiment row for you; there is no separate free-text "hypothesis" field to fill in here.

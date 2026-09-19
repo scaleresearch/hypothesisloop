@@ -119,7 +119,7 @@ A platform experiment doesn't run itself. It's driven by two kinds of LLM agent 
 - **The coordinator** opens the platform experiment (budget, metrics, the baseline to beat), spawns a fleet of experimentator agents against it, and then watches: polling job status and the ranking metric, keeping the live description in sync as questions get resolved, and stepping in only when something actually blocks research, never on the agents' behalf. `agents/coordinator/setup.md` and `supervise.md` are that role written down as a runbook.
 - **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would.
 
-`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory with an `experiment.md` (the objective, the baseline, the open questions) and an `experiment.yaml`/`hypothesis.yaml` pair matching the YAML files below. `smri-fm-fomo-tune` is the one that pushed post-training to SOTA levels referenced earlier in this README.
+`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory with an `experiment.md` (the objective, the baseline, the open questions) and an `experiment.yaml`/`hypothesis.yaml` pair matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
 Experimentators in a fleet don't all run the same way. Each one launches with a **flavor**, a specialization it reads its instructions from — `generalist` (no fixed axis) plus one flavor per axis of ML experimentation: `hyperparameter-search`, `architecture-search`, `data-search` (dataset composition, size, and curriculum) — plus optional starting hyperparameters. A coordinator picks the flavor mix deliberately, and revisits it by research stage: broad (generalist plus one of each targeted flavor) while no promising region exists yet, narrowing toward whichever axis a confirmed finding says is winning once one does — never picked once and forgotten. See `agents/coordinator/setup.md` step 3 for how that decision is made and recorded.
 
@@ -287,7 +287,7 @@ All e2e tests live under `tests/e2e/` as pytest, driven by the API client and wa
 `tests/support/`. Almost all are portable (fake
 accelerator types, run on any k3s); the two `hardware`-marked tests are the exception - they need
 real silicon, so they're excluded by default and only included with `-m hardware` (run
-automatically by `localdev/k3s-tenstorrent-qb2/run-e2e.sh` and `localdev/k3s-nvidia/run-e2e.sh`
+automatically by `localdev/k3s-tenstorrent/run-e2e.sh` and `localdev/k3s-nvidia/run-e2e.sh`
 on hosts that have it). Tests are grouped with pytest markers: `parallel` (API-only, run
 concurrently), `exclusive` (needs the whole cluster idle - node death, connectivity loss,
 daemonset redeploy, preemption), `slow`, and `hardware`.

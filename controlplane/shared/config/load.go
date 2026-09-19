@@ -123,8 +123,8 @@ func (c *Config) build() error {
 	services := c.Services
 	if services.APIPort <= 0 || services.APIPort > 65535 ||
 		services.MetricControllerPort <= 0 || services.MetricControllerPort > 65535 ||
-		services.MetricsDBURL == "" {
-		return fmt.Errorf("service ports must be in 1-65535 and metrics_db_url is required")
+		services.MetricsDBURL == "" || services.GraphDBURL == "" {
+		return fmt.Errorf("service ports must be in 1-65535 and metrics_db_url and graph_db_url are required")
 	}
 	return nil
 }

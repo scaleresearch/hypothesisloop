@@ -5,6 +5,7 @@ services:
   api_port: 8081
   metric_controller_port: 8084
   metrics_db_url: http://greptimedb:4000
+  graph_db_url: bolt://memgraph:7687
 
 
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.

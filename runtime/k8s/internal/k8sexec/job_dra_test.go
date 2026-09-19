@@ -198,8 +198,8 @@ func TestLiveDRACapacitySnapshotsUnrelatedDriverUnaffected(t *testing.T) {
 // empty (or just missing the installed driver's entry) leaves `drivers` without that domain, so
 // the per-driver loops iterate zero times for it and — before this fix — silently returned zero
 // capacity for real, currently-installed hardware, with no error at all (the sawSliceForDriver
-// check only guards drivers DeviceClasses DID discover). Live incident: pe-e11aa080,
-// smri11-heterofrofastacked-local-v2 stuck QUEUED ~2026-08-27T17:59-18:05Z with
+// check only guards drivers DeviceClasses DID discover). Live incident: pe-example,
+// example-experiment-v2 stuck QUEUED ~2026-08-27T17:59-18:05Z with
 // cluster_unresolved=true despite GreptimeDB and kubectl both confirming 3/4 blackhole chips free
 // and no error logged from the first (ResourceSlices-side) fix — see fix-later.md.
 func TestLiveDRACapacitySnapshotsRejectsMissingDeviceClass(t *testing.T) {

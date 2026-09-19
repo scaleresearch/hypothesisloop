@@ -15,14 +15,10 @@ import (
 // second, independent gate on the same submit path.
 func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string, acceleratorCount int, status domain.ExperimentStatus) {
 	t.Helper()
-	hyp, _, err := NewHypothesesStore(pool).FindOrCreateHypothesis(context.Background(), domain.HypothesisSourceAgent, agentID, agentID, peID, "cap test hypothesis "+id)
-	if err != nil {
-		t.Fatalf("seed hypothesis for %s: got = %v, want = nil", id, err)
-	}
 	exps := NewExperimentsStore(pool)
 	exp := &domain.Experiment{
 		ID: id, AgentID: agentID, PlatformExperimentID: peID,
-		HypothesisID: hyp.ID, Hypothesis: "h", Objective: "o",
+		HypothesisID: "cap-test-hypothesis-" + id, Hypothesis: "h", Objective: "o",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount,
 		EstimatedDurationHours: 1, EstimatedCostAccH: 1,
 		CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,

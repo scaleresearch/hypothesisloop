@@ -122,7 +122,7 @@ Verify registration: `curl <scheduler tunnel>/internal/clusters` and
 
 ## 7B. k3s / cluster-agent path
 
-Use `localdev/k3s-nvidia/install.sh` (mirrors `localdev/k3s-tenstorrent-qb2/`) — installs
+Use `localdev/k3s-nvidia/install.sh` (mirrors `localdev/k3s-tenstorrent/`) — installs
 nvidia-container-toolkit, k3s (`--docker`), the NVIDIA device plugin, GPU Feature Discovery,
 and the cluster-agent bundle in one shot. Requires `API_URL`/
 `METRICS_URL` env vars pointed at your tunnels. See that script's header comment for why it

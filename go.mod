@@ -13,6 +13,7 @@ require (
 	github.com/jackc/pgx/v5 v5.5.5
 	github.com/moby/moby/api v1.55.0
 	github.com/moby/moby/client v0.5.0
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.5
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/prometheus v0.314.0

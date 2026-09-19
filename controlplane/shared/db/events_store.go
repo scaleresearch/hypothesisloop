@@ -33,6 +33,7 @@ const (
 	EventStageBoundary     = "stage.boundary"
 	EventHypothesisNew     = "hypothesis.new"
 	EventHypothesisStatus  = "hypothesis.status"
+	EventHypothesisLink    = "hypothesis.link"
 	EventFindingNew        = "finding.new"
 	EventCommentNew        = "comment.new"
 	// EventAgentCut says the run ended for one agent. stage.boundary already says the ladder
@@ -95,6 +96,8 @@ var EventKinds = []EventKindDoc{
 		Description: "An idea entered the shared pool. The claim itself comes from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
 		Description: "A claim was settled. A settled claim is to read, not to retest."},
+	{Kind: EventHypothesisLink, Subject: "hypothesis id (the link's source)", Value: "builds_on, contradicts or related",
+		Description: "A link was added to an existing hypothesis. detail is the target: a hypothesis id, or the platform experiment id for the objective. Links given at registration ride on hypothesis.new instead."},
 	{Kind: EventFindingNew, Subject: "hypothesis id", Value: "the experiment id that produced it",
 		Description: "A result was attached to a claim — someone's number is now readable instead of yours being re-derived."},
 	{Kind: EventCommentNew, Subject: "hypothesis id", Value: "'agent' or 'human'",
@@ -234,14 +237,22 @@ func (f EventFilter) Annotate(e Event) Event {
 
 // EventsStore is the only path to the change stream: it listens for live events and derives the
 // replay of missed ones. Like every other store here it owns its queries — nothing outside this
-// package writes SQL against these tables to build an event.
+// package writes SQL against these tables to build an event. Hypothesis events are derived by the
+// graph store, which holds the hypotheses.
 type EventsStore struct {
-	pool *Pool
+	pool       *Pool
+	hypotheses HypothesisEvents
 }
 
-// NewEventsStore returns an EventsStore backed by pool.
-func NewEventsStore(pool *Pool) *EventsStore {
-	return &EventsStore{pool: pool}
+// HypothesisEvents derives the hypothesis.new, hypothesis.status and hypothesis.link events of one
+// platform experiment that happened after since (see graphdb.Store.ReplayEvents).
+type HypothesisEvents interface {
+	ReplayEvents(ctx context.Context, platformExperimentID string, since time.Time) ([]Event, error)
+}
+
+// NewEventsStore returns an EventsStore backed by pool and the graph store's hypothesis events.
+func NewEventsStore(pool *Pool, hypotheses HypothesisEvents) *EventsStore {
+	return &EventsStore{pool: pool, hypotheses: hypotheses}
 }
 
 // ListenEvents holds one dedicated connection on LISTEN and forwards every notification to out
@@ -275,9 +286,9 @@ func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event) error 
 	}
 }
 
-// NotifyEvent emits one event that no row change produced. The metric pointer is the only such
-// event: a metric is written to the metrics store, not to Postgres, so there is no row and no
-// transaction to hang a trigger on. It is therefore also the only kind Replay cannot reconstruct.
+// NotifyEvent emits one event that no Postgres row change produced: a metric pointer (the metrics
+// store has no row to hang a trigger on, so Replay cannot reconstruct it) or a hypothesis event
+// (the graph store has no NOTIFY; Replay derives those from the graph).
 func (s *EventsStore) NotifyEvent(ctx context.Context, e Event) error {
 	payload, err := json.Marshal(e)
 	if err != nil {
@@ -330,7 +341,8 @@ func (s *EventsStore) Replay(ctx context.Context, filter EventFilter, since int6
 	for _, derive := range []func(context.Context, string, time.Time) ([]Event, error){
 		s.replayExperiments,
 		s.replayQuotas,
-		s.replayPool,
+		s.hypotheses.ReplayEvents,
+		s.replayEvidence,
 		s.replayStageBoundaries,
 		s.replayAgentCuts,
 		s.replayPlatformExperiment,
@@ -436,24 +448,16 @@ FROM agent_quotas WHERE platform_experiment_id = $1 AND updated_at > $2`
 	return events, nil
 }
 
-func (s *EventsStore) replayPool(ctx context.Context, peID string, at time.Time) ([]Event, error) {
+func (s *EventsStore) replayEvidence(ctx context.Context, peID string, at time.Time) ([]Event, error) {
 	const q = `
-SELECT 'hypothesis.new', h.id, h.source, h.text, COALESCE(h.agent_id, ''), h.created_at
-FROM hypotheses h WHERE h.platform_experiment_id = $1 AND h.created_at > $2
-UNION ALL
 SELECT 'finding.new', f.hypothesis_id, f.experiment_id, '', f.agent_id, f.created_at
-FROM hypothesis_findings f JOIN hypotheses h ON h.id = f.hypothesis_id
-WHERE h.platform_experiment_id = $1 AND f.created_at > $2
+FROM hypothesis_findings f WHERE f.platform_experiment_id = $1 AND f.created_at > $2
 UNION ALL
 SELECT 'comment.new', c.hypothesis_id, c.source, '', COALESCE(c.agent_id, ''), c.created_at
-FROM hypothesis_comments c JOIN hypotheses h ON h.id = c.hypothesis_id
-WHERE h.platform_experiment_id = $1 AND c.created_at > $2
-UNION ALL
-SELECT 'hypothesis.status', h.id, h.status::text, '', COALESCE(h.agent_id, ''), h.status_changed_at
-FROM hypotheses h WHERE h.platform_experiment_id = $1 AND h.status_changed_at > $2`
+FROM hypothesis_comments c WHERE c.platform_experiment_id = $1 AND c.created_at > $2`
 	rows, err := s.pool.pool.Query(ctx, q, peID, at)
 	if err != nil {
-		return nil, fmt.Errorf("events_store.replayPool: %w", err)
+		return nil, fmt.Errorf("events_store.replayEvidence: %w", err)
 	}
 	defer rows.Close()
 
@@ -462,14 +466,14 @@ FROM hypotheses h WHERE h.platform_experiment_id = $1 AND h.status_changed_at > 
 		var e Event
 		var createdAt time.Time
 		if err := rows.Scan(&e.Kind, &e.Subject, &e.Value, &e.Detail, &e.AgentID, &createdAt); err != nil {
-			return nil, fmt.Errorf("events_store.replayPool: scan: %w", err)
+			return nil, fmt.Errorf("events_store.replayEvidence: scan: %w", err)
 		}
 		e.PlatformExperimentID = peID
 		e.Cursor = NewCursor(createdAt)
 		events = append(events, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("events_store.replayPool: %w", err)
+		return nil, fmt.Errorf("events_store.replayEvidence: %w", err)
 	}
 	return events, nil
 }

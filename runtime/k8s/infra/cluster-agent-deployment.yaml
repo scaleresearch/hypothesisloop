@@ -116,6 +116,6 @@ spec:
               cpu: "300m"
               memory: "64Mi"
       # Same as node-agent-daemonset.yaml: must always have somewhere to run regardless of
-      # whether any workload node is attached (tt-quietbox's no-workload taint).
+      # whether any workload node is attached (box-a's no-workload taint).
       tolerations:
         - operator: Exists

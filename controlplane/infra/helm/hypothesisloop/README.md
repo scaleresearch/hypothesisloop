@@ -1,6 +1,6 @@
 # hypothesisloop (Helm chart)
 
-Installs control-service, metrics-service, Postgres, and GreptimeDB into a Kubernetes
+Installs control-service, metrics-service, Postgres, GreptimeDB, and Memgraph into a Kubernetes
 cluster with plain `helm install`/`helm upgrade` — Helm 4, no server-side component to
 install into the cluster first.
 
@@ -41,9 +41,11 @@ helm install hypothesisloop controlplane/infra/helm/hypothesisloop \
 - **Does not manage the durable-data object store.** Point `objectStore.endpoint` at an
   existing S3-compatible bucket; the platform is deliberately not in the data path (see
   the `data_store` comment in `controlplane/settings/hypothesisloop.yaml`).
-- **Runs Postgres/GreptimeDB as single-replica StatefulSets with no backup policy.**
-  Fine for getting the platform running; durability/HA for both is a later problem, not
-  one this chart tries to solve now.
+- **Runs Postgres/GreptimeDB/Memgraph as single-replica StatefulSets with no backup policy.**
+  Fine for getting the platform running; durability/HA for all three is a later problem, not
+  one this chart tries to solve now. Memgraph holds the hypothesis graph and is reached only by
+  control-service; point `memgraph.external` at an existing instance to skip the StatefulSet.
+  control-service exits if Memgraph is unreachable at startup and is restarted until it is up.
 
 ## Verifying an install
 

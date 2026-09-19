@@ -13,6 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -28,18 +29,20 @@ func NewHandler(svc *Service, logger *zap.Logger) *Handler {
 }
 
 // hypothesisResponse wraps a Hypothesis with whether registration found a pre-existing
-// equivalent row.
+// equivalent row, and its outgoing links.
 type hypothesisResponse struct {
 	*domain.Hypothesis
-	AlreadyExisted bool `json:"already_existed"`
+	AlreadyExisted bool          `json:"already_existed"`
+	Links          []domain.Link `json:"links"`
 }
 
-// hypothesisWithJobs bundles a hypothesis with the jobs submitted against it and the
-// findings filed against it. Each of the three lists is one bounded page of a set that only
-// ever grows, so each carries the full count it was drawn from — a caller can always tell a
-// short list from a truncated one, and page the rest with ?limit/?offset.
+// hypothesisWithJobs bundles a hypothesis with its links, the jobs submitted against it and the
+// findings and comments filed against it. Each of the three lists is one bounded page of a set
+// that only ever grows, so each carries the full count it was drawn from — a caller can always
+// tell a short list from a truncated one, and page the rest with ?limit/?offset.
 type hypothesisWithJobs struct {
 	*domain.Hypothesis
+	Links        domain.HypothesisLinks      `json:"links"`
 	Jobs         []*domain.Experiment        `json:"jobs"`
 	JobCount     int                         `json:"job_count"`
 	Findings     []*domain.HypothesisFinding `json:"findings"`
@@ -47,6 +50,50 @@ type hypothesisWithJobs struct {
 	Comments     []*domain.HypothesisComment `json:"comments"`
 	CommentCount int                         `json:"comment_count"`
 }
+
+// hypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.
+type hypothesisGraph struct {
+	Root  string                       `json:"root"`
+	Nodes []*domain.HypothesisListItem `json:"nodes"`
+	Edges []domain.GraphEdge           `json:"edges"`
+}
+
+// hypothesisWriteError maps the errors a hypothesis write can return to the status an agent can
+// act on, keeping the message.
+func hypothesisWriteError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrHypothesisOrigin), errors.Is(err, graphdb.ErrInvalidLink),
+		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
+		return huma.Error400BadRequest(err.Error())
+	case errors.Is(err, ErrHypothesisNotOwner), errors.Is(err, ErrHypothesisSubmitterNotAllowed):
+		return huma.Error403Forbidden(err.Error())
+	case errors.Is(err, ErrHypothesisNotFound):
+		return huma.Error404NotFound(err.Error())
+	default:
+		return huma.Error500InternalServerError(err.Error())
+	}
+}
+
+// queryDescription is the schema an agent needs to write Cypher against the graph. It is served
+// at /explore, which agents read into their prompt.
+var queryDescription = "Read-only Cypher against the hypothesis graph (Memgraph). Body {cypher, params}; answer " +
+	"{columns, rows, truncated}. Use it to find where an idea belongs before registering it, and to walk lineage. " +
+	"Schema: (:Objective {id}) is the root of one platform experiment, id = platform_experiment_id. " +
+	"(:Hypothesis {id, platform_experiment_id, agent_id, source, author, text, status, created_at, status_changed_at}). " +
+	"Relationships, each {agent_id, author, created_at}: (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective) " +
+	"(refines, extends, combines; acyclic, every hypothesis has one or more), (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), " +
+	"(:Hypothesis)-[:RELATED]->(:Hypothesis). The graph spans every platform experiment: filter by platform_experiment_id " +
+	"yourself. Full-text index " + graphdb.TextIndex + " over Hypothesis.text, ranked by how many of your words match: " +
+	"`CALL text_search.search_all('" + graphdb.TextIndex + "', 'warmup cosine schedule') YIELD node, score " +
+	"WHERE node.platform_experiment_id = $pe RETURN node.id, node.text, node.status, score ORDER BY score DESC LIMIT 10` " +
+	"(plain words; quotes, colons and parentheses are search syntax). " +
+	"Children of a hypothesis: `MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id}) RETURN c.id, c.text, c.status`. " +
+	"Nodes come back as their properties plus _labels, relationships as properties plus _type, _from and _to, paths as lists. " +
+	"Nothing a query writes persists (writes go through POST /hypotheses and POST /hypotheses/{id}/links). " +
+	"LOAD CSV, periodic commits and procedures other than text_search.* are refused. Limits: " +
+	fmt.Sprintf("%s per query, %d rows (truncated=true when cut). ", graphdb.QueryTimeout, graphdb.QueryRowCap) +
+	"A Cypher error comes back as 400 with Memgraph's message. Findings, comments and jobs are not in the graph: " +
+	"GET /hypotheses/{id} returns them."
 
 // RegisterHuma registers the registry's operations: what hangs off an experiment (lineage,
 // metrics, logs) and the hypothesis notebook. Paths sit under the resource they belong to —
@@ -214,27 +261,28 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "register-hypothesis", Method: "POST", Path: "/hypotheses",
-		Summary: "Register a hypothesis", Tags: []string{"hypotheses"},
+		Summary: "Register a hypothesis in the graph", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
-		Description: "Idempotent within a platform_experiment_id: text equivalent to an existing hypothesis " +
-			"(modulo case/whitespace) returns that row with 200 and already_existed=true, a new one 201. The " +
-			"returned id is metadata.hypothesis_id for the job testing it; every job must reference a " +
-			"hypothesis from its own platform experiment. Exactly one of agent_id (an agent's row) " +
-			"or author (a human's, submitted from the UI) must be set; both sit in the same pool " +
-			"under the same dedup, and any agent may submit a job against either. What a human " +
-			"author does not get is quota or a place in the standings — those key on agent_id, " +
-			"and a job's quota and result belong to the agent that ran it.",
+		Description: "Every hypothesis has a place in its platform experiment's graph: links needs at least one " +
+			"{type: builds_on, to} where to is an existing hypothesis id, or the platform_experiment_id itself for the " +
+			"objective. Several builds_on make a combination of ideas; contradicts and related links may be added too. " +
+			"Find where your idea belongs first with POST /hypotheses/query. Idempotent within a platform_experiment_id: " +
+			"text equivalent to an existing hypothesis (modulo case/whitespace) returns that row with 200 and " +
+			"already_existed=true and your links are not applied; a new one returns 201. The returned id is " +
+			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +
+			"experiment. Exactly one of agent_id (an agent's row) or author (a human's, submitted from the UI) must be set; " +
+			"both sit in the same graph under the same dedup, and any agent may submit a job against either. What a human " +
+			"author does not get is quota or a place in the standings — those key on agent_id.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			// Neither is schema-required, and that is deliberate: exactly one of them must be
 			// set, which is a rule about the PAIR that no per-field "required" can express.
-			// Marking either one required rejects the other half of the very rule -- a required
-			// author refuses every agent-submitted hypothesis, which is how every caller written
-			// before humans could post one would break. domain.ClassifyHypothesisOrigin owns it.
-			AgentID              string `json:"agent_id,omitempty" required:"false"`
-			Author               string `json:"author,omitempty" required:"false" doc:"The name a human types in the UI. There is no auth: this is a claim, not an identity, exactly as agent_id is. Set this instead of agent_id, never both."`
-			PlatformExperimentID string `json:"platform_experiment_id"`
-			Text                 string `json:"text"`
+			// domain.ClassifyHypothesisOrigin owns it.
+			AgentID              string            `json:"agent_id,omitempty" required:"false"`
+			Author               string            `json:"author,omitempty" required:"false" doc:"The name a human types in the UI. There is no auth: this is a claim, not an identity, exactly as agent_id is. Set this instead of agent_id, never both."`
+			PlatformExperimentID string            `json:"platform_experiment_id"`
+			Text                 string            `json:"text"`
+			Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
 		}
 	}) (*struct {
 		Status int
@@ -247,16 +295,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if b.Text == "" {
 			return nil, huma.Error400BadRequest("text is required")
 		}
-		hyp, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, b.Author, b.PlatformExperimentID, b.Text)
+		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, b.Author, b.PlatformExperimentID, b.Text, b.Links)
 		if err != nil {
-			if errors.Is(err, domain.ErrHypothesisOrigin) {
-				return nil, huma.Error400BadRequest(err.Error())
-			}
-			h.logger.Error("register hypothesis", zap.Error(err))
-			return nil, huma.Error500InternalServerError(err.Error())
+			h.logger.Info("register hypothesis", zap.Error(err))
+			return nil, hypothesisWriteError(err)
 		}
-		// Preserve the pre-Huma status semantics: 200 when the equivalent hypothesis already
-		// existed (idempotent hit), 201 when a new row was created.
 		status := http.StatusCreated
 		if existed {
 			status = http.StatusOK
@@ -264,27 +307,103 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct {
 			Status int
 			Body   hypothesisResponse
-		}{Status: status, Body: hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed}}, nil
+		}{Status: status, Body: hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed, Links: links}}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "add-hypothesis-link", Method: "POST", Path: "/hypotheses/{id}/links",
+		Summary: "Link a hypothesis to another", Tags: []string{"hypotheses"},
+		DefaultStatus: 201,
+		Description: "Adds one outgoing link: builds_on (to a hypothesis, or the platform_experiment_id for the " +
+			"objective), contradicts or related (to a hypothesis in the same platform experiment). Only the registering " +
+			"agent_id may link from its hypothesis; a human-submitted one can be linked by anyone, others get 403. " +
+			"400 on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links " +
+			"are append-only and re-adding one changes nothing. Returns the hypothesis's outgoing links.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			AgentID string          `json:"agent_id,omitempty" required:"false"`
+			Author  string          `json:"author,omitempty" required:"false" doc:"The name a human types in the UI. Set this instead of agent_id, never both."`
+			Type    domain.LinkType `json:"type" doc:"builds_on, contradicts or related."`
+			To      string          `json:"to" doc:"A hypothesis id, or the platform_experiment_id for the objective (builds_on only)."`
+		}
+	}) (*struct {
+		Status int
+		Body   []domain.Link
+	}, error) {
+		links, err := h.svc.AddHypothesisLink(ctx, in.ID, in.Body.AgentID, in.Body.Author, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
+		if err != nil {
+			h.logger.Info("add hypothesis link", zap.Error(err))
+			return nil, hypothesisWriteError(err)
+		}
+		return &struct {
+			Status int
+			Body   []domain.Link
+		}{Status: http.StatusCreated, Body: links}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "query-hypotheses", Method: "POST", Path: "/hypotheses/query",
+		Summary: "Query the hypothesis graph with read-only Cypher", Tags: []string{"hypotheses"},
+		Description: queryDescription,
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Cypher string         `json:"cypher"`
+			Params map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name."`
+		}
+	}) (*struct{ Body *graphdb.QueryResult }, error) {
+		if in.Body.Cypher == "" {
+			return nil, huma.Error400BadRequest("cypher is required")
+		}
+		result, err := h.svc.QueryGraph(ctx, in.Body.Cypher, in.Body.Params)
+		if err != nil {
+			if errors.Is(err, graphdb.ErrInvalidQuery) {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			h.logger.Error("query hypotheses", zap.Error(err))
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body *graphdb.QueryResult }{Body: result}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "get-hypothesis-graph", Method: "GET", Path: "/hypotheses/graph",
+		Summary: "Get one platform experiment's whole hypothesis graph", Tags: []string{"hypotheses"},
+		Description: "Every hypothesis of the platform experiment as a list item (nodes) and every link between them " +
+			"(edges, {from, to, type, agent_id, author, created_at}); an edge to the objective has to = root = the platform_experiment_id. Unpaged, " +
+			"for drawing the graph.",
+	}, func(ctx context.Context, in *struct {
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Required."`
+	}) (*struct{ Body hypothesisGraph }, error) {
+		if in.PlatformExperimentID == "" {
+			return nil, huma.Error400BadRequest("platform_experiment_id is required")
+		}
+		nodes, edges, err := h.svc.HypothesisGraph(ctx, in.PlatformExperimentID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body hypothesisGraph }{Body: hypothesisGraph{Root: in.PlatformExperimentID, Nodes: nodes, Edges: edges}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-hypotheses", Method: "GET", Path: "/hypotheses",
 		Summary: "List hypotheses, optionally scoped to one platform experiment", Tags: []string{"hypotheses"},
-		Description: "Optional ?platform_experiment_id restricts to one pool; omitted, every " +
+		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
 			"Optional ?agent for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
 			"for just that status, ?limit (default 20, max 200) and ?offset, most recent first. " +
-			"Total match count is returned in the X-Total-Count response header. Rows carry " +
-			"finding_count/comment_count — drill into GET /hypotheses/{id} only where a count or " +
-			"relevance earns it.",
+			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
+			"(what each builds on; the platform_experiment_id stands for the objective), child_count " +
+			"(how many build on it) and finding_count/comment_count. To walk or search the graph use " +
+			"POST /hypotheses/query.",
 	}, func(ctx context.Context, in *struct {
-		PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment's idea pool. Omitted, every pool's hypotheses are candidates -- the operator-facing global view."`
+		PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment. Omitted, every platform experiment's hypotheses are candidates -- the operator-facing global view."`
 		Agent                string                  `query:"agent" doc:"Only hypotheses registered by this agent."`
 		Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
 		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. See X-Total-Count for how much you have not seen."`
 		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
-		Body       []*db.HypothesisListItem
+		Body       []*domain.HypothesisListItem
 		TotalCount int `header:"X-Total-Count"`
 	}, error) {
 		if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
@@ -293,26 +412,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		hs, err := h.svc.ListHypotheses(ctx, in.PlatformExperimentID, in.Agent, in.Status, in.Limit, in.Offset)
+		filter := graphdb.ListFilter{PlatformExperimentID: in.PlatformExperimentID, AgentID: in.Agent,
+			Status: in.Status, Limit: in.Limit, Offset: in.Offset}
+		hs, err := h.svc.ListHypotheses(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		total, err := h.svc.CountHypotheses(ctx, in.PlatformExperimentID, in.Agent, in.Status)
+		total, err := h.svc.CountHypotheses(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct {
-			Body       []*db.HypothesisListItem
+			Body       []*domain.HypothesisListItem
 			TotalCount int `header:"X-Total-Count"`
 		}{Body: hs, TotalCount: total}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-hypothesis", Method: "GET", Path: "/hypotheses/{id}",
-		Summary: "Get a hypothesis with its jobs, findings, and comments", Tags: []string{"hypotheses"},
-		Description: "?limit (default 20, max 200) and ?offset apply to each of jobs, findings and " +
-			"comments alike, oldest first; job_count/finding_count/comment_count report the full " +
-			"size of each set so a caller can page the rest.",
+		Summary: "Get a hypothesis with its links, jobs, findings, and comments", Tags: []string{"hypotheses"},
+		Description: "links.out and links.in are its edges, oldest first, at most 200 each way. Each has type, the other " +
+			"end's hypothesis_id, text and status (for the objective: the platform_experiment_id, empty text and status), " +
+			"and the agent_id or author and created_at of whoever made the link. ?limit (default 20, max 200) and " +
+			"?offset apply to each of jobs, findings and comments alike, oldest first; " +
+			"job_count/finding_count/comment_count report the full size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {
 		ID     string `path:"id"`
 		Limit  int    `query:"limit" doc:"Page size applied to each of jobs, findings and comments alike; default 20, maximum 200. job_count/finding_count/comment_count report the full size of each set."`
@@ -332,6 +455,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		if hyp == nil {
 			return nil, huma.Error404NotFound("hypothesis not found")
+		}
+		links, err := h.svc.GetHypothesisLinks(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		jobFilter := domain.ExperimentFilter{HypothesisID: in.ID}
 		jobs, err := h.svc.List(ctx, domain.ExperimentFilter{
@@ -354,6 +481,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{
 			Hypothesis: hyp,
+			Links:      links,
 			Jobs:       jobs, JobCount: jobCount,
 			Findings: findings, FindingCount: findingCount,
 			Comments: comments, CommentCount: commentCount,
@@ -385,14 +513,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		c, err := h.svc.AddHypothesisComment(ctx, in.ID, in.Body.AgentID, in.Body.Author, in.Body.Text)
 		if err != nil {
-			if errors.Is(err, domain.ErrHypothesisOrigin) {
-				return nil, huma.Error400BadRequest(err.Error())
-			}
-			if errors.Is(err, db.ErrUnknownAgent) {
-				return nil, huma.Error400BadRequest("unknown_agent: " + in.Body.AgentID)
-			}
-			h.logger.Error("add hypothesis comment", zap.Error(err))
-			return nil, huma.Error500InternalServerError(err.Error())
+			h.logger.Info("add hypothesis comment", zap.Error(err))
+			return nil, hypothesisWriteError(err)
 		}
 		return &struct {
 			Status int
@@ -423,15 +545,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, in.Body.AgentID, in.Body.Status)
 		if err != nil {
-			switch {
-			case errors.Is(err, ErrHypothesisNotFound):
-				return nil, huma.Error404NotFound("hypothesis not found")
-			case errors.Is(err, ErrHypothesisNotOwner):
-				return nil, huma.Error403Forbidden("agent_id does not own this hypothesis")
-			default:
-				h.logger.Error("set hypothesis status", zap.Error(err))
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
+			h.logger.Info("set hypothesis status", zap.Error(err))
+			return nil, hypothesisWriteError(err)
 		}
 		return &struct{ Body *domain.Hypothesis }{Body: hyp}, nil
 	})

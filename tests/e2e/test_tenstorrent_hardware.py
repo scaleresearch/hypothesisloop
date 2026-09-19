@@ -1,17 +1,17 @@
-"""HARDWARE-ONLY: requires real Tenstorrent Blackhole hardware (tt-quietbox's `make tt-up`).
+"""HARDWARE-ONLY: requires real Tenstorrent Blackhole hardware (box-a's `make tt-up`).
 Excluded from a default pytest run -- included only with `-m hardware`. Proves the platform's own
 submission path reaches real hardware: submit a job, verify a genuine DRA ResourceClaim gets
 allocated a real /dev/tenstorrent device, not just that the platform reports success. Then proves
 the same physical device is independently reachable via the bare-node agent (no k3s/DRA involved).
 
-Ported 1:1 from tests/scenarios/tenstorrent-hardware.sh -- attaches/detaches tt-quietbox from its
+Ported 1:1 from tests/scenarios/tenstorrent-hardware.sh -- attaches/detaches box-a from its
 k3s context via localdev/lib/node.sh's lib_attach_node/lib_detach_node for the duration of the
 test only, same care as the k8s-mutating scenarios (test_node_and_daemonset_faults.py): detach
 happens in a `finally` so it runs on pass, fail, or timeout.
 
 KNOWN HOST ISSUE (2026-08-26, not a porting defect -- see the port's report): the DRA
 submission/admission/allocation path this test asserts on (submit -> admitted onto
-cluster_name=tt-quietbox -> real ResourceClaim device allocation) is confirmed working end to
+cluster_name=box-a -> real ResourceClaim device allocation) is confirmed working end to
 end on this host. train.py's own container then segfaults inside vendor tt-metal/ttnn during
 device init/teardown (`dmesg`: repeated general-protection-fault in libc abort(), inside
 libtt_metal.so's MetalContext::destroy_instance) -- this device currently reports firmware
@@ -71,12 +71,12 @@ def _kubectl(*args: str, timeout: float = 15) -> str:
 def _preconditions_met() -> str | None:
     """Returns a skip reason if any real-hardware precondition is missing, else None."""
     if sys.platform != "linux":
-        return "this scenario only runs on the Linux tt-quietbox host"
+        return "this scenario only runs on the Linux box-a host"
     if subprocess.run(
-        ["kubectl", "--context", TT_CONTEXT, "get", "node", "tt-quietbox"],
+        ["kubectl", "--context", TT_CONTEXT, "get", "node", "box-a"],
         capture_output=True, timeout=15,
     ).returncode != 0:
-        return f"context {TT_CONTEXT} is not the tt-quietbox cluster"
+        return f"context {TT_CONTEXT} is not the box-a cluster"
     if subprocess.run(
         ["kubectl", "--context", TT_CONTEXT, "get", "deviceclass", "tenstorrent.com"],
         capture_output=True, timeout=15,
@@ -104,7 +104,7 @@ if _SKIP_REASON is not None:
 
 def _lib_attach_node() -> None:
     subprocess.run(
-        ["kubectl", "--context", TT_CONTEXT, "taint", "node", "tt-quietbox",
+        ["kubectl", "--context", TT_CONTEXT, "taint", "node", "box-a",
          "hypothesisloop.io/no-workload:NoSchedule-"],
         capture_output=True, text=True, timeout=15,
     )
@@ -112,7 +112,7 @@ def _lib_attach_node() -> None:
 
 def _lib_detach_node() -> None:
     subprocess.run(
-        ["kubectl", "--context", TT_CONTEXT, "taint", "node", "tt-quietbox",
+        ["kubectl", "--context", TT_CONTEXT, "taint", "node", "box-a",
          "hypothesisloop.io/no-workload:NoSchedule", "--overwrite"],
         capture_output=True, text=True, timeout=15,
     )
@@ -187,8 +187,8 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
         accept=lambda e: bool(e.get("cluster_name")),
         deadline=deadline,
     )
-    assert exp.get("cluster_name") == "tt-quietbox", (
-        f"job admitted onto cluster_name={exp.get('cluster_name')!r}, expected tt-quietbox "
+    assert exp.get("cluster_name") == "box-a", (
+        f"job admitted onto cluster_name={exp.get('cluster_name')!r}, expected box-a "
         "(real hardware, not a fake/local node)"
     )
 
@@ -230,10 +230,10 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
 
     metrics = api.metrics(job)
     assert len(metrics) >= 1, "0 metric points recorded -- pod may not have actually run/reported"
-    api.file_finding(job, "Tenstorrent e2e: real DRA allocation on tt-quietbox confirmed.")
+    api.file_finding(job, "Tenstorrent e2e: real DRA allocation on box-a confirmed.")
 
     # -- same physical hardware, reached via this host's bare-node agent (no k3s/DRA at all) --
-    # Detach tt-quietbox from k3s now: it stays a schedulable, guaranteed-capacity node until the
+    # Detach box-a from k3s now: it stays a schedulable, guaranteed-capacity node until the
     # fixture's own teardown, so leaving it attached races the explicit admit() below -- the normal
     # k3s scheduler can (and does) auto-admit the SUBMITTED job onto it before that call lands.
     _lib_detach_node()
