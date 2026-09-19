@@ -20,9 +20,9 @@ import {
   fetchPlatformExperimentTimeseries,
   fetchHypothesesPage,
 } from '@/lib/api'
-import type { StagesStatus } from '@/lib/api'
+import type { ExperimentStats, StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
-import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries, MetricDefinition, Hypothesis } from '@/types'
+import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries, MetricDefinition } from '@/types'
 import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
@@ -488,7 +488,15 @@ function CompetingAgentsChart({
   )
 }
 
-function AgentJobsPanel({ agentId, jobs, trackedMetrics }: { agentId: string; jobs: Experiment[]; trackedMetrics: string[] }) {
+function AgentJobsPanel({ platformExperimentId, agentId, trackedMetrics }: { platformExperimentId: string; agentId: string; trackedMetrics: string[] }) {
+  const { data, error } = useSWR(
+    ['pe-agent-jobs', platformExperimentId, agentId],
+    () => fetchExperimentsPage({ platform_experiment_id: platformExperimentId, agent: agentId, sort: '-created_at' }),
+    { refreshInterval: 15_000 },
+  )
+  if (error) return <ErrorMessage>Could not load jobs from {agentId}.</ErrorMessage>
+  if (!data) return <Loading />
+  const jobs = data.items
   if (jobs.length === 0) {
     return <EmptyState>No jobs from {agentId} yet.</EmptyState>
   }
@@ -566,30 +574,22 @@ function dominates(a: MetricBests, b: MetricBests, metrics: MetricDefinition[]):
 //  - Everyone else is ranked below, ordered by how many agents dominate them (fewer is better),
 //    tie-broken alphabetically by agent id for a stable, well-defined order.
 function buildScoreboard(
-  experiments: Experiment[],
+  jobsByAgent: Record<string, ExperimentStats>,
   quotas: AgentQuota[],
   metrics: MetricDefinition[],
   metricBestsByAgent: Map<string, MetricBests>,
   nonRawAgentIdsByMetric: Map<string, Set<string>> = new Map(),
 ): Array<{ agentId: string; metricBests: MetricBests; jobCount: number; completedCount: number; isWinner: boolean; nonRawMetrics: string[] }> {
-  const counts = new Map<string, { jobCount: number; completedCount: number }>()
-  for (const exp of experiments) {
-    const entry = counts.get(exp.agent_id) ?? { jobCount: 0, completedCount: 0 }
-    entry.jobCount++
-    if (exp.status === 'COMPLETED') entry.completedCount++
-    counts.set(exp.agent_id, entry)
-  }
-
   const agentIds = new Set<string>([
-    ...experiments.map(e => e.agent_id),
+    ...Object.keys(jobsByAgent),
     ...quotas.map(q => q.agent_id),
   ])
 
   const rows = Array.from(agentIds).map((agentId) => {
     const metricBests = metricBestsByAgent.get(agentId) ?? {}
-    const c = counts.get(agentId) ?? { jobCount: 0, completedCount: 0 }
+    const jobs = jobsByAgent[agentId]
     const hasAnyData = metrics.some(m => metricBests[m.key] != null)
-    return { agentId, metricBests, ...c, hasAnyData }
+    return { agentId, metricBests, jobCount: jobs?.total ?? 0, completedCount: jobs?.by_status.COMPLETED ?? 0, hasAnyData }
   })
 
   const dominatedByCount = new Map<string, number>()
@@ -675,8 +675,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  // One explicitly bounded page: every list endpoint caps a read, so asking without a limit
-  // would only hide where the cut fell.
+  // The newest jobs only, for the recent list and the live metrics picker.
   const { data: experimentsPage, error: experimentsError } = useSWR(
     ['pe-experiments', id],
     () => fetchExperimentsPage({ platform_experiment_id: id, sort: '-created_at', limit: MAX_LIST_PAGE_SIZE }),
@@ -694,8 +693,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // Whole-experiment job counts, grouped server-side. The job list above is one bounded page,
   // so tallying it would report the page's shape under a label that reads as the experiment's.
   const { data: stats, error: statsError } = useSWR(
-    ['pe-stats', id],
-    () => fetchExperimentStats({ platform_experiment_id: id }),
+    ['pe-stats-by-agent', id],
+    () => fetchExperimentStats({ platform_experiment_id: id, group_by: 'agent' }),
+    { refreshInterval: 15_000 },
+  )
+  const jobsByAgent = stats?.groups ?? {}
+  const { data: hypothesisStats, error: hypothesisStatsError } = useSWR(
+    ['pe-stats-by-hypothesis', id],
+    () => fetchExperimentStats({ platform_experiment_id: id, group_by: 'hypothesis' }),
     { refreshInterval: 15_000 },
   )
 
@@ -711,12 +716,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
+  // Asked for one row: only the total in X-Total-Count is used.
   const { data: hypothesesPage, error: hypothesesError } = useSWR(
-    ['pe-hypotheses', id],
-    () => fetchHypothesesPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
+    ['pe-hypothesis-count', id],
+    () => fetchHypothesesPage({ platform_experiment_id: id, limit: 1 }),
     { refreshInterval: 15_000 },
   )
-  const hypotheses = hypothesesPage?.items
 
   // Fetch the full timeseries for every objective metric so the scoreboard can compute each
   // agent's best value per metric (needed for Pareto winner detection below). This is the
@@ -743,7 +748,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // stays stable across renders — useAgentColorMap can't follow a conditional return.
   const knownAgentIds = Array.from(new Set([
     ...(quotas ?? []).map(q => q.agent_id),
-    ...(experiments ?? []).map(e => e.agent_id),
+    ...Object.keys(jobsByAgent),
   ])).sort()
   const colorMap = useAgentColorMap(knownAgentIds)
   const colorFor = (agentId: string) => colorMap.get(agentId) ?? semantic.neutral
@@ -758,7 +763,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     stagesError && 'stage status',
     hypothesesError && 'hypotheses',
     metricSeriesError && 'metric history',
-    statsError && 'job counts',
+    (statsError || hypothesisStatsError) && 'job counts',
   ].filter(Boolean) as string[]
 
   if (peLoading) return <Loading />
@@ -786,18 +791,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     nonRawAgentIdsByMetric.set(m.key, nonRawAgentIds)
   }
 
-  const scoreboard = buildScoreboard(experiments ?? [], quotas ?? [], metrics, metricBestsByAgent, nonRawAgentIdsByMetric)
+  const scoreboard = buildScoreboard(jobsByAgent, quotas ?? [], metrics, metricBestsByAgent, nonRawAgentIdsByMetric)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
-  const hypothesisProgress = hypothesisProgressCounts(hypotheses ?? [], experiments ?? [])
+  const hypothesisProgress = hypothesisProgressCounts(hypothesesPage?.total ?? 0, hypothesisStats?.groups ?? {})
 
-  // Accelerators currently in flight (SUBMITTED+RUNNING) against max_concurrent_accelerators —
-  // autoscaler.md's concurrency cap. Summed over the bounded experiments page like the scoreboard
-  // above, not a whole-experiment aggregate: acceptable here since the cap itself only ever
-  // compares against a live, similarly-scoped SUM in ReserveAdmittedFlavorTx server-side — this is
-  // a display, not the enforcement.
-  const inFlightAccelerators = (experiments ?? [])
-    .filter(e => e.status === 'SUBMITTED' || e.status === 'RUNNING')
-    .reduce((s, e) => s + (e.accelerator_count ?? 0), 0)
+  // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
+  const inFlightAccelerators = stats?.in_flight_accelerators ?? 0
 
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
@@ -841,12 +840,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // Default both selectors to "everything" until the user narrows them down.
   const activeAgentIds = selectedAgentIds ?? new Set(knownAgentIds)
   const activeMetricKeys = selectedMetricKeys ?? new Set(metrics.map(m => m.key))
-  const jobsByAgent = (experiments ?? []).reduce<Map<string, Experiment[]>>((map, exp) => {
-    const list = map.get(exp.agent_id) ?? []
-    list.push(exp)
-    map.set(exp.agent_id, list)
-    return map
-  }, new Map())
 
   // Donations targeted at agents in this experiment
   const relevantAgents = new Set((quotas ?? []).map(q => q.agent_id))
@@ -1147,8 +1140,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         <tr>
                           <td colSpan={colCount} style={{ background: 'var(--surface-2)' }}>
                             <AgentJobsPanel
+                              platformExperimentId={pe.id}
                               agentId={entry.agentId}
-                              jobs={jobsByAgent.get(entry.agentId) ?? []}
                               trackedMetrics={trackedMetricKeys}
                             />
                           </td>
