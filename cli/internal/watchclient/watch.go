@@ -25,9 +25,10 @@ const (
 	TimeoutExitCode = 124
 	UsageExitCode   = 2
 
-	readTimeout    = 45 * time.Second
 	reconnectDelay = 2 * time.Second
 )
+
+var readTimeout = 45 * time.Second
 
 // Closed means the connection ended, or the server was momentarily unable. Reconnect and replay.
 type Closed struct{ msg string }
@@ -144,8 +145,7 @@ func streamOne(ws *webSocket, opts Options, deadline time.Time, satisfied func(m
 		_ = ws.sendText("{}")
 	}
 	for time.Now().Before(deadline) {
-		ws.setReadDeadline(minTime(deadline, time.Now().Add(readTimeout)))
-		line, err := ws.nextText()
+		line, err := ws.nextText(deadline)
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "hl watch: stream ended (%s) — reconnecting from cursor %d\n", err, *cursor)
 			sleepUntil(deadline, reconnectDelay)
@@ -425,9 +425,11 @@ func (ws *webSocket) sendText(text string) error {
 	return ws.sendFrame(0x1, []byte(text))
 }
 
-// nextText returns the next text frame, answering pings and skipping everything else.
-func (ws *webSocket) nextText() (string, error) {
+// nextText returns the next text frame, answering pings and skipping everything else. Every frame
+// renews the read timeout, so the server's pings keep a quiet stream open.
+func (ws *webSocket) nextText(deadline time.Time) (string, error) {
 	for {
+		ws.setReadDeadline(minTime(deadline, time.Now().Add(readTimeout)))
 		head, err := ws.readExactly(2)
 		if err != nil {
 			return "", err

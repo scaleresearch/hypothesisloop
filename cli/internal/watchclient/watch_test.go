@@ -186,3 +186,49 @@ func TestRunTimesOutWithoutUntil(t *testing.T) {
 	}
 	_ = code // either exit code is acceptable here; this test only guards against hanging
 }
+
+func TestPingsKeepAQuietStreamOpen(t *testing.T) {
+	defer func(d time.Duration) { readTimeout = d }(readTimeout)
+	readTimeout = 200 * time.Millisecond
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+		for i := 0; i < 8; i++ {
+			time.Sleep(100 * time.Millisecond)
+			_, _ = conn.Write([]byte{0x89, 0x00})
+		}
+		_, _ = conn.Write(serverTextFrame(`{"kind":"experiment.status","value":"COMPLETED","cursor":1}`))
+		time.Sleep(time.Second)
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{
+		URL:        "ws://" + ln.Addr().String(),
+		Experiment: "exp-1",
+		Until:      "status in COMPLETED",
+		Timeout:    5 * time.Second,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "stream ended") {
+		t.Fatalf("a stream carrying only pings was dropped: %s", stderr.String())
+	}
+}
