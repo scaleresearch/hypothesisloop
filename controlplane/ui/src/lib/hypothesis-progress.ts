@@ -39,3 +39,10 @@ export function variedEnvKeys(jobs: Experiment[]): string[] {
 export function envSettings(job: Experiment, keys: string[]): string {
   return keys.map(k => job.job?.env?.[k] === undefined ? `${k} not set` : `${k}=${job.job.env[k]}`).join(' ')
 }
+
+// Per hypothesis, the settings its jobs in the list do not share: what tells those rows apart.
+export function variedEnvByHypothesis(jobs: Experiment[]): Map<string, string[]> {
+  const groups = new Map<string, Experiment[]>()
+  for (const j of jobs) groups.set(j.hypothesis_id, [...(groups.get(j.hypothesis_id) ?? []), j])
+  return new Map(Array.from(groups, ([id, group]) => [id, variedEnvKeys(group)]))
+}

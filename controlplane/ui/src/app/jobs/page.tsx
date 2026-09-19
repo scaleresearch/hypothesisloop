@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -20,7 +20,7 @@ import { semantic } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useQueryParam } from '@/lib/query-state'
-import { envSettings, variedEnvKeys } from '@/lib/hypothesis-progress'
+import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -111,12 +111,7 @@ function JobsPageContent() {
 
   const visible = data?.items ?? []
   const total = data?.total ?? 0
-  // What tells one hypothesis's jobs on this page apart: the settings they do not share.
-  const variedByHypothesis = useMemo(() => {
-    const groups = new Map<string, Experiment[]>()
-    for (const j of visible) groups.set(j.hypothesis_id, [...(groups.get(j.hypothesis_id) ?? []), j])
-    return new Map(Array.from(groups, ([id, jobs]) => [id, variedEnvKeys(jobs)]))
-  }, [visible])
+  const variedByHypothesis = variedEnvByHypothesis(visible)
 
   // The tiles count the whole filtered set, server-side — the same filters this page's list
   // read uses, minus its paging. Tallying the visible rows instead would report the page's

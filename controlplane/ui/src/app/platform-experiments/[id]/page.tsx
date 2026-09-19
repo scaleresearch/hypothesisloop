@@ -38,7 +38,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { semantic, agentPalette } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { filedAfterVerdict, hypothesisActivity } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, hypothesisActivity, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 
 const TWO_LINES: React.CSSProperties = {
@@ -699,6 +699,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const jobsByStatus = stats?.by_status ?? {}
   const running = runningPage?.items ?? []
   const recent = (experiments ?? []).slice(0, 20)
+  const variedByHypothesis = variedEnvByHypothesis(recent)
 
   // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
   // different reasons (stuck on admission vs. explicitly cancelled vs. ran past a stage's job
@@ -1163,7 +1164,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <th>ID</th>
                   <th>Agent</th>
                   <th>Status</th>
-                  <th>Hypothesis</th>
+                  <th title="Under each hypothesis: the settings that differ between these jobs of it">Hypothesis · varied settings</th>
                   <th style={{ textAlign: 'right' }}>Best {primaryStandings?.metric ?? 'Metric'}</th>
                   <th style={{ textAlign: 'right' }}>Est. Cost</th>
                   <th>Submitted</th>
@@ -1194,6 +1195,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         {exp.hypothesis_id
                           ? <Link href={`/hypotheses/${exp.hypothesis_id}`} className="text-link">{exp.hypothesis}</Link>
                           : exp.hypothesis}
+                        <div className="mono text-muted" style={{ fontSize: 10, marginTop: 3, whiteSpace: 'normal' }}>
+                          {envSettings(exp, variedByHypothesis.get(exp.hypothesis_id) ?? [])}
+                        </div>
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{exp.metric?.best.toFixed(4) ?? '—'}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
