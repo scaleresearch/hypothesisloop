@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ACTION="${1:?usage: git-daemon.sh start|stop|status|destroy}"
-BASE_PATH="${GIT_DAEMON_BASE_PATH:-/srv/git-repos}"
+BASE_PATH="${GIT_DAEMON_BASE_PATH:-$HOME/git-repos}"
 PORT="${GIT_DAEMON_PORT:-9418}"
 PID_FILE="$BASE_PATH/git-daemon.pid"
 LOG_FILE="$BASE_PATH/logs/git-daemon.log"
