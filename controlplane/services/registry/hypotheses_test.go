@@ -586,3 +586,70 @@ func TestASimilarityHoldSaysWhoseVerdictTheCloseHypothesisIsAndThatANarrowerClai
 		}
 	}
 }
+
+// findingsStore and findingsGraph hold one platform experiment that minimizes loss, with two
+// judged hypotheses: one tested by three jobs and written up twice, one judged with no job.
+type findingsStore struct{ *poolStore }
+
+func (findingsStore) GetPlatformExperimentMetrics(_ context.Context, id string) ([]domain.MetricDefinition, bool, error) {
+	return []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, id == "pe-1", nil
+}
+
+func (findingsStore) NewestFindingSummaries(_ context.Context, _ []string) (map[string]string, error) {
+	return map[string]string{"hyp-tested": "the newest write-up"}, nil
+}
+
+func (findingsStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
+	if !reflect.DeepEqual(ids, []string{"hyp-tested", "hyp-untested"}) {
+		return nil, errors.New("asked for the jobs of other hypotheses")
+	}
+	created := time.Now().Add(-time.Hour)
+	jobs := []*domain.Experiment{{ID: "job-a"}, {ID: "job-b"}, {ID: "job-rescaled"}}
+	for _, job := range jobs {
+		job.PlatformExperimentID, job.HypothesisID, job.CreatedAt = "pe-1", "hyp-tested", created
+	}
+	return jobs, nil
+}
+
+type findingsGraph struct{ Graph }
+
+func (findingsGraph) ListHypotheses(_ context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {
+	if !f.Judged || f.PlatformExperimentID != "pe-1" {
+		return nil, errors.New("asked for more than the judged hypotheses of pe-1")
+	}
+	return []*domain.HypothesisListItem{
+		{Hypothesis: &domain.Hypothesis{ID: "hyp-tested", Status: domain.HypothesisConfirmed}},
+		{Hypothesis: &domain.Hypothesis{ID: "hyp-untested", Status: domain.HypothesisInconclusive}},
+	}, nil
+}
+
+// The experiment page answers "what was found" from one read: each judged hypothesis with its
+// newest finding and the job that did best on the ranking metric, a rescaled value never winning.
+func TestFindingsPairEachJudgedHypothesisWithItsNewestFindingAndBestJob(t *testing.T) {
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[
+			{"metric":{"job_id":"job-a","metric_basis":"raw"},"value":[1,"0.30"]},
+			{"metric":{"job_id":"job-b","metric_basis":"raw"},"value":[1,"0.10"]},
+			{"metric":{"job_id":"job-rescaled","metric_basis":"per_token"},"value":[1,"0.01"]}]}}`))
+	}))
+	defer metrics.Close()
+	svc := New(findingsStore{newPoolStore()}, findingsGraph{}, zap.NewNop(), metrics.URL, nil)
+
+	got, err := svc.Findings(context.Background(), "pe-1")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Findings: got = (%+v, %v), want 2 hypotheses", got, err)
+	}
+	tested, untested := got[0], got[1]
+	if tested.ID != "hyp-tested" || tested.Finding != "the newest write-up" || tested.BestJob == nil ||
+		tested.BestJob.ID != "job-b" || *tested.BestJob.Metric != (domain.JobMetric{Name: "loss", Best: 0.10, Basis: "raw"}) {
+		t.Errorf("tested hypothesis: got = %+v (best job %+v), want its newest finding and job-b at loss 0.10", tested, tested.BestJob)
+	}
+	if untested.ID != "hyp-untested" || untested.Finding != "" || untested.BestJob != nil {
+		t.Errorf("untested hypothesis: got = %+v, want no finding and no best job", untested)
+	}
+
+	if _, err := svc.Findings(context.Background(), "pe-none"); !errors.Is(err, ErrUnknownPlatformExperiment) {
+		t.Errorf("Findings of an unknown platform experiment: got = %v, want %v", err, ErrUnknownPlatformExperiment)
+	}
+}

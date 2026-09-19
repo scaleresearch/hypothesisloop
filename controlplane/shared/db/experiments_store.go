@@ -181,6 +181,18 @@ ORDER BY ` + experimentOrderBy(filter.Sort)
 	return collectExperiments(rows)
 }
 
+// ListExperimentsTesting returns every experiment that tests one of the hypotheses, oldest first.
+func (s *ExperimentsStore) ListExperimentsTesting(ctx context.Context, hypothesisIDs []string) ([]*domain.Experiment, error) {
+	q := `SELECT` + experimentColumns + `FROM experiments WHERE hypothesis_id = ANY($1) ORDER BY created_at, id`
+	rows, err := s.pool.pool.Query(ctx, q, hypothesisIDs)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.ListExperimentsTesting: %w", err)
+	}
+	defer rows.Close()
+
+	return collectExperiments(rows)
+}
+
 // CountExperiments returns the number of experiments matching the given filter, ignoring
 // Limit/Offset/Sort — the total a caller paginating with ListExperiments should show.
 func (s *ExperimentsStore) CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error) {

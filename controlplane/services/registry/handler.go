@@ -489,6 +489,25 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.HypothesisStats }{Body: stats}, nil
 	})
 
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "platform-experiment-findings", Method: "GET", Path: "/platform-experiments/{id}/findings",
+		Summary: "What a platform experiment has settled", Tags: []string{"hypotheses"},
+		Description: "Its 50 newest hypotheses that hold a verdict (confirmed, refuted or inconclusive), each with " +
+			"finding, the newest summary filed against it, and best_job {id, metric}, the job testing it with the " +
+			"best raw value on the first ranking metric. GET /hypotheses/stats counts them all.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{ Body []*JudgedHypothesis }, error) {
+		findings, err := h.svc.Findings(ctx, in.ID)
+		if errors.Is(err, ErrUnknownPlatformExperiment) {
+			return nil, huma.Error404NotFound(err.Error())
+		}
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body []*JudgedHypothesis }{Body: findings}, nil
+	})
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-hypothesis", Method: "GET", Path: "/hypotheses/{id}",
 		Summary: "Get a hypothesis with its links, jobs, findings, and comments", Tags: []string{"hypotheses"},

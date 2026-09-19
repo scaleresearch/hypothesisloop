@@ -20,6 +20,7 @@ import {
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
   fetchHypothesisStats,
+  fetchFindings,
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
 import type { StagesStatus } from '@/lib/api'
@@ -38,6 +39,10 @@ import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/form
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
+
+const TWO_LINES: React.CSSProperties = {
+  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+}
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -606,6 +611,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
+  const { data: findings, error: findingsError } = useSWR(
+    ['pe-findings', id],
+    () => fetchFindings(id),
+    { refreshInterval: 15_000 },
+  )
+
   const { data: results, error: resultsError } = useSWR(
     ['pe-results', id],
     () => fetchPlatformExperimentResults(id),
@@ -641,7 +652,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     quotasError && 'quotas',
     (experimentsError || runningError) && 'jobs',
     stagesError && 'stage status',
-    hypothesesError && 'hypotheses',
+    (hypothesesError || findingsError) && 'hypotheses',
     metricSeriesError && 'metric history',
     resultsError && 'results',
     (statsError || hypothesisStatsError) && 'job counts',
@@ -664,6 +675,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     results?.bests.find(b => b.metric === metricKey)?.agents.find(a => a.agent_id === agentId)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const hypothesisCount = verdicts?.total ?? 0
+  const judgedCount = hypothesisCount - (verdicts?.by_status.open ?? 0)
   const hypothesisSub = [
     HYPOTHESIS_STATUSES.map(v => `${verdicts?.by_status[v] ?? 0} ${v}`).join(' · '),
     hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}),
@@ -908,6 +920,50 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           </div>
         </PodContent>
       </Pod>
+
+      {/* Findings */}
+      {findings && findings.length > 0 && (
+        <Pod>
+          <PodHeader>
+            Findings
+            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+              ({judgedCount} hypotheses with a verdict{judgedCount > findings.length ? `, showing the newest ${findings.length}` : ''})
+            </span>
+          </PodHeader>
+          <PodContent scrollX>
+            <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 110 }}>Verdict</th>
+                  <th>Hypothesis</th>
+                  <th>Newest finding</th>
+                  <th style={{ width: 170, textAlign: 'right' }}>Best job</th>
+                </tr>
+              </thead>
+              <tbody>
+                {findings.map(h => (
+                  <tr key={h.id} style={{ verticalAlign: 'top' }}>
+                    <td><Badge status={h.status}>{h.status}</Badge></td>
+                    <td style={{ fontSize: 12 }}>
+                      <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {h.finding ? <span style={TWO_LINES} title={h.finding}>{h.finding}</span> : <span className="text-muted">—</span>}
+                    </td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {h.best_job ? (
+                        <Link href={`/jobs/${h.best_job.id}`} className="text-link" title={h.best_job.id}>
+                          {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
+                        </Link>
+                      ) : <span className="text-muted">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </PodContent>
+        </Pod>
+      )}
 
       {/* Scoreboard */}
       <Pod>

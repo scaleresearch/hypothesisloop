@@ -11,6 +11,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 var (
@@ -198,6 +199,80 @@ func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher s
 		return nil, fmt.Errorf("registry.QueryGraph: %w", err)
 	}
 	return result, nil
+}
+
+// JudgedHypothesis is a hypothesis with a verdict and the evidence a reader wants beside it.
+type JudgedHypothesis struct {
+	*domain.Hypothesis
+	// Finding is the newest summary filed against it, empty when it was judged without one.
+	Finding string `json:"finding,omitempty"`
+	// BestJob is the job testing it that holds the best raw value on the platform experiment's
+	// first ranking metric, nil when none reported it.
+	BestJob *BestJob `json:"best_job,omitempty"`
+}
+
+type BestJob struct {
+	ID     string            `json:"id"`
+	Metric *domain.JobMetric `json:"metric"`
+}
+
+// maxFindings bounds what Findings returns.
+const maxFindings = 50
+
+// Findings returns what a platform experiment has settled: its newest maxFindings hypotheses that
+// hold a verdict, each with its newest finding and its best job.
+func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]*JudgedHypothesis, error) {
+	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, platformExperimentID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
+	}
+	judged, err := s.graph.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExperimentID, Judged: true, Limit: maxFindings})
+	if err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	ids := make([]string, len(judged))
+	for i, h := range judged {
+		ids[i] = h.ID
+	}
+	summaries, err := s.store.NewestFindingSummaries(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	jobs, err := s.store.ListExperimentsTesting(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	if err := metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, s.store.GetPlatformExperimentMetrics, jobs); err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	primary, _ := domain.PrimaryRankingMetric(metrics)
+	best := map[string]*domain.Experiment{}
+	for _, job := range jobs {
+		if job.Metric == nil || job.Metric.Basis != "raw" {
+			continue
+		}
+		if cur := best[job.HypothesisID]; cur != nil {
+			better := job.Metric.Best > cur.Metric.Best
+			if primary.Direction == "minimize" {
+				better = job.Metric.Best < cur.Metric.Best
+			}
+			if !better {
+				continue
+			}
+		}
+		best[job.HypothesisID] = job
+	}
+	out := make([]*JudgedHypothesis, len(judged))
+	for i, h := range judged {
+		out[i] = &JudgedHypothesis{Hypothesis: h.Hypothesis, Finding: summaries[h.ID]}
+		if job := best[h.ID]; job != nil {
+			out[i].BestJob = &BestJob{ID: job.ID, Metric: job.Metric}
+		}
+	}
+	return out, nil
 }
 
 // addActivity fills the finding/comment counts of items from Postgres, in one query.

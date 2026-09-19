@@ -150,6 +150,15 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     assert status_resp.status_code == 200
     assert api.hypothesis(human["id"])["status"] == "confirmed"
 
+    # What the experiment has settled, in one read each: the judged hypothesis with its newest
+    # finding and best job, and the count of hypotheses by status.
+    (judged,) = api.get_json(f"/platform-experiments/{pe_id}/findings")
+    assert (judged["id"], judged["status"], judged["finding"]) == (human["id"], "confirmed", human_finding), judged
+    metric = api.experiment(human_job).get("metric")
+    assert judged.get("best_job") == ({"id": human_job, "metric": metric} if metric else None), judged
+    stats = api.get_json(f"/hypotheses/stats?platform_experiment_id={pe_id}")
+    assert stats["by_status"]["confirmed"] == 1 and stats["total"] == len(api.hypotheses(pe_id)), stats
+
     # ...but an OWNED row is still its owner's alone.
     owned_status_resp = api.set_hypothesis_status(agent_hyp["id"], agent_b, "refuted")
     assert owned_status_resp.status_code == 403

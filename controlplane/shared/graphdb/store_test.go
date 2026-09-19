@@ -449,6 +449,10 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 		stats.ByStatus[domain.HypothesisRefuted] != 1 || stats.ByStatus[domain.HypothesisOpen] != 1 {
 		t.Errorf("HypothesisStats: got = (%+v, %v), want total 2 with 1 refuted and 1 open", stats, err)
 	}
+	judged, err := s.ListHypotheses(ctx, ListFilter{PlatformExperimentID: pe, Judged: true})
+	if err != nil || len(judged) != 1 || judged[0].ID != h.ID {
+		t.Errorf("ListHypotheses(Judged): got = (%+v, %v), want the refuted one only", judged, err)
+	}
 }
 
 func TestTheTextIndexRanksHypothesesThroughTheQueryEndpoint(t *testing.T) {

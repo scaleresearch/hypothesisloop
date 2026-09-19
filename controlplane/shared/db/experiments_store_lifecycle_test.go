@@ -86,3 +86,31 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 		t.Errorf("FindingSummary: got = %q, %v, want %q", got, err, "it held")
 	}
 }
+
+func TestFindingsReadsCoverManyHypothesesInOneQueryEach(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	exps, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
+	ctx := context.Background()
+	first, second, other := "many-first-"+peID, "many-second-"+peID, "many-other-"+peID
+	for _, id := range []string{first, second, other} {
+		seedExperimentForCapTest(t, pool, id, agentID, peID, 1, domain.StatusCompleted)
+	}
+	shared := "many-hypothesis-" + peID
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET hypothesis_id = $1 WHERE id = ANY($2)`, shared, []string{first, second}); err != nil {
+		t.Fatalf("point two jobs at one hypothesis: %v", err)
+	}
+	for _, id := range []string{first, second} {
+		if _, err := hyps.CreateHypothesisFinding(ctx, shared, peID, id, agentID, "summary of "+id); err != nil {
+			t.Fatalf("CreateHypothesisFinding: %v", err)
+		}
+	}
+
+	jobs, err := exps.ListExperimentsTesting(ctx, []string{shared, "no-such-hypothesis"})
+	if err != nil || len(jobs) != 2 || jobs[0].ID != first || jobs[1].ID != second {
+		t.Errorf("ListExperimentsTesting: got = %v, %v, want %s then %s", jobs, err, first, second)
+	}
+	summaries, err := hyps.NewestFindingSummaries(ctx, []string{shared, "no-such-hypothesis"})
+	if err != nil || len(summaries) != 1 || summaries[shared] != "summary of "+second {
+		t.Errorf("NewestFindingSummaries: got = %v, %v, want the summary of %s only", summaries, err, second)
+	}
+}

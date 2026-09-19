@@ -107,6 +107,27 @@ func (s *HypothesesStore) FindingSummary(ctx context.Context, experimentID strin
 	return summary, nil
 }
 
+// NewestFindingSummaries returns the newest summary filed against each hypothesis in ids, in one
+// query. A hypothesis with no finding is absent.
+func (s *HypothesesStore) NewestFindingSummaries(ctx context.Context, ids []string) (map[string]string, error) {
+	const q = `SELECT DISTINCT ON (hypothesis_id) hypothesis_id, summary
+FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, created_at DESC`
+	rows, err := s.pool.pool.Query(ctx, q, ids)
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.NewestFindingSummaries: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, summary string
+		if err := rows.Scan(&id, &summary); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.NewestFindingSummaries: scan: %w", err)
+		}
+		out[id] = summary
+	}
+	return out, rows.Err()
+}
+
 // ListFindingsByHypothesis returns one page of the findings filed against a hypothesis, oldest
 // first — the accumulated evidence trail for that claim across every job that tested it. The
 // trail only ever grows, so limit is defaulted and clamped exactly like every other list read

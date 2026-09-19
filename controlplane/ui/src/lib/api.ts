@@ -253,6 +253,18 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
   )
 }
 
+// A hypothesis that holds a verdict, with the newest finding filed against it and the job testing
+// it that did best on the ranking metric.
+export interface JudgedHypothesis extends Hypothesis {
+  finding?: string
+  best_job?: { id: string; metric: { name: string; best: number; basis: string } }
+}
+
+// At most the 50 newest; fetchHypothesisStats counts them all.
+export function fetchFindings(platformExperimentID: string): Promise<JudgedHypothesis[]> {
+  return apiFetch<JudgedHypothesis[]>(`${API_URL}/platform-experiments/${platformExperimentID}/findings`)
+}
+
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {
   return apiFetch<HypothesisWithJobs>(`${API_URL}/hypotheses/${id}`)
 }
