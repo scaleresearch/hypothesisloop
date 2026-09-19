@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAgentsPage, fetchPlatformExperiment, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
+import { fetchAgentsPage, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
 import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -18,10 +18,6 @@ import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 
 const PAGE_SIZE = 25
-// Filtering by experiment cross-references the full signed-up-agents set, which server-side
-// pagination can't do without a dedicated endpoint — so a filtered view asks for one big page
-// (bounded like every other list read) instead of paging through per-experiment signups.
-const MAX_PAGE_SIZE = MAX_LIST_PAGE_SIZE
 
 function BonusChip({ label, active }: { label: string; active: boolean }) {
   return (
@@ -68,12 +64,11 @@ function AgentExperimentQuota({ agentId, pe }: { agentId: string; pe: PlatformEx
   )
 }
 
-function AgentQuotaRows({ agentId, experiments }: { agentId: string; experiments: PlatformExperiment[] }) {
-  const active = experiments.filter(pe => pe.status === 'open' || pe.status === 'running')
-  if (active.length === 0) return (
-    <tr><td colSpan={4} className="text-dim" style={{ fontSize: 12, paddingLeft: 20 }}>No active platform experiments</td></tr>
+function AgentQuotaRows({ agentId, running }: { agentId: string; running: PlatformExperiment[] }) {
+  if (running.length === 0) return (
+    <tr><td colSpan={4} className="text-dim" style={{ fontSize: 12, paddingLeft: 20 }}>No running platform experiments</td></tr>
   )
-  return <>{active.map(pe => <AgentExperimentQuota key={pe.id} agentId={agentId} pe={pe} />)}</>
+  return <>{running.map(pe => <AgentExperimentQuota key={pe.id} agentId={agentId} pe={pe} />)}</>
 }
 
 export default function AgentsPage() {
@@ -84,19 +79,16 @@ export default function AgentsPage() {
 
   const { data, error, isLoading } = useSWR(
     ['agents-page', experimentFilter, page],
-    () => fetchAgentsPage(
-      experimentFilter
-        ? { limit: MAX_PAGE_SIZE, offset: 0 }
-        : { limit: PAGE_SIZE, offset: page * PAGE_SIZE },
-    ),
+    () => fetchAgentsPage({ platform_experiment_id: experimentFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     { refreshInterval: 15_000, keepPreviousData: true },
   )
   const agents = data?.items
   const total = data?.total ?? 0
 
-  const { data: experiments } = useSWR<PlatformExperiment[]>(
-    'platform-experiments-all',
-    () => fetchPlatformExperiments(),
+  // Quota exists from an experiment's start, so only running ones have a row to show.
+  const { data: running } = useSWR<PlatformExperiment[]>(
+    'platform-experiments-running',
+    () => fetchPlatformExperimentsPage({ status: 'running', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items),
     { refreshInterval: 30_000 },
   )
 
@@ -108,17 +100,10 @@ export default function AgentsPage() {
   const donationItems = donations?.items ?? []
   const donationTotal = donations?.total ?? 0
 
-  // Only the single-experiment read carries the signup roster.
   const { data: selectedPE } = useSWR(
     experimentFilter ? ['pe', experimentFilter] : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
-  // Memoized: the table re-renders without end on rows that change identity every render.
-  const filteredAgents = useMemo(() => {
-    if (!experimentFilter) return agents
-    const signedUp = new Set(selectedPE?.signed_up_agents)
-    return agents?.filter(a => signedUp.has(a.id))
-  }, [experimentFilter, agents, selectedPE])
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
@@ -127,7 +112,7 @@ export default function AgentsPage() {
     { accessorKey: 'performance_score', header: 'Perf Score' },
   ], [])
   const agentTable = useReactTable({
-    data: filteredAgents ?? [],
+    data: agents ?? [],
     columns: agentColumns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -151,7 +136,7 @@ export default function AgentsPage() {
       />
 
       {/* KPI row — Top-3/Avg Perf tally the current page only (see jobs page's own KPI-strip
-          precedent) when unfiltered; Registered Agents always reflects the true platform total. */}
+          precedent); Registered Agents counts every agent the filter matches. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
         <StatTile label="Registered Agents" value={total || '—'} />
         <StatTile label="Top-3 Eligible" value={top3Count} color={semantic.success} sub="+25% quota bonus" />
@@ -218,22 +203,8 @@ export default function AgentsPage() {
       <Pod>
         <PodHeader>
           Registered Agents
-          {filteredAgents && (
-            <span className="text-dim" style={{ fontWeight: 400, marginLeft: 8 }}>
-              ({experimentFilter ? filteredAgents.length : total})
-            </span>
-          )}
-          {experimentFilter && agents && filteredAgents && filteredAgents.length !== agents.length && (
-            <span className="text-link" style={{ fontWeight: 400, fontSize: 11, marginLeft: 6 }}>filtered from {agents.length}</span>
-          )}
+          {agents && <span className="text-dim" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
         </PodHeader>
-        {experimentFilter && total > MAX_PAGE_SIZE && (
-          <div className="text-dim" style={{ fontSize: 12, padding: '6px 12px', color: semantic.warning }}>
-            Showing first {MAX_PAGE_SIZE} of {total} agents system-wide before filtering — some
-            agents signed up for this experiment may be missing from this list. Narrow the filter
-            or check the platform experiment&apos;s quota list for the full signup roster.
-          </div>
-        )}
         <PodContent scrollX>
           <table className="wa-table">
             <thead>
@@ -255,13 +226,11 @@ export default function AgentsPage() {
               </tr>
             </thead>
             <tbody>
-              {!filteredAgents || filteredAgents.length === 0 ? (
+              {!agents || agents.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ padding: 0 }}>
                     <EmptyState>
-                      {!experimentFilter ? 'No agents registered.'
-                        : selectedPE?.signup_count ? `The ${selectedPE.signup_count} agents signed up for this experiment are not among the first ${MAX_PAGE_SIZE} agents read.`
-                        : 'No agents signed up for this experiment.'}
+                      {experimentFilter ? 'No agents signed up for this experiment.' : 'No agents registered.'}
                     </EmptyState>
                   </td>
                 </tr>
@@ -280,15 +249,13 @@ export default function AgentsPage() {
                       <td className="mono" style={{ textAlign: 'right' }}>{a.performance_score.toFixed(3)}</td>
                       <td className="text-dim" style={{ fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</td>
                     </tr>
-                    {isExpanded && experiments && (
-                      <AgentQuotaRows agentId={a.id} experiments={experiments} />
-                    )}
+                    {isExpanded && running && <AgentQuotaRows agentId={a.id} running={running} />}
                   </Fragment>
                 )
               })}
             </tbody>
           </table>
-          {!experimentFilter && <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </PodContent>
       </Pod>
 

@@ -84,6 +84,9 @@ export async function putClusterSettings(
 
 
 export interface AgentsParams {
+  platform_experiment_id?: string
+  /** Substring match against id and name. */
+  q?: string
   limit?: number
   offset?: number
 }
@@ -92,17 +95,10 @@ export function fetchAgentsPage(params?: AgentsParams): Promise<Page<Agent>> {
   const url = new URL(`${API_URL}/agents`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined) url.searchParams.set(k, String(v))
+      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
     }
   }
   return apiFetchPage<Agent>(url.toString())
-}
-
-// The first page at the server's own ceiling, for the id->name lookups that decorate other
-// pages' rows. Callers that display agents as their subject must page instead — see
-// fetchAgentsPage.
-export function fetchAgents(): Promise<Agent[]> {
-  return fetchAgentsPage({ limit: MAX_LIST_PAGE_SIZE }).then(p => p.items)
 }
 
 
@@ -387,14 +383,6 @@ export function fetchPlatformExperimentsPage(params?: PlatformExperimentsParams)
     }
   }
   return apiFetchPage<PlatformExperiment>(url.toString())
-}
-
-// The first page at the server's own ceiling, for the id->name lookups and filter dropdowns that
-// decorate other pages, latest start first as on the platform experiments page: an unscheduled
-// experiment has no start and sorts last. Callers that display platform experiments as their
-// subject must page instead — see fetchPlatformExperimentsPage.
-export function fetchPlatformExperiments(): Promise<PlatformExperiment[]> {
-  return fetchPlatformExperimentsPage({ sort: '-starts_at', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items)
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {

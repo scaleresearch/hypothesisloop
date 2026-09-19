@@ -4,9 +4,10 @@ import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperimentsPage, fetchExperimentStats, fetchAgents, cancelExperiment, fetchClusters } from '@/lib/api'
-import type { Experiment, Agent, ClustersResponse } from '@/types'
+import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchClusters } from '@/lib/api'
+import type { Experiment, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
+import { AgentSelect } from '@/components/agent-select'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -15,7 +16,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
-import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
@@ -60,11 +60,6 @@ function JobsPageContent() {
   const [sortKey, setSortKey] = useState<SortKey>('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
-  const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
-  const sortedAgents = useMemo(
-    () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [agents],
-  )
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
 
@@ -159,12 +154,7 @@ function JobsPageContent() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="uppercase-label">Agent</span>
-          <SearchableSelect
-            value={agentFilter}
-            onChange={v => { setAgentFilter(v); setPage(0) }}
-            allLabel="All agents"
-            options={sortedAgents.map(a => ({ value: a.id, label: a.name ?? a.id }))}
-          />
+          <AgentSelect value={agentFilter} onChange={v => { setAgentFilter(v); setPage(0) }} />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

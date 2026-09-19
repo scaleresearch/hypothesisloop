@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
-import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperiments } from '@/lib/api'
+import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -43,9 +43,8 @@ function HypothesesPageContent() {
   const [addUnder, setAddUnder] = useState<string | null>(null)
 
   const { data: platformExperiments, error: peError } = useSWR<PlatformExperiment[]>(
-    'platform-experiments-all',
-    () => fetchPlatformExperiments(),
-    { refreshInterval: 30_000 },
+    peID ? null : 'platform-experiment-latest',
+    () => fetchPlatformExperimentsPage({ sort: '-starts_at', limit: 1 }).then(p => p.items),
   )
   const { data: pe, error: selectedError } = useSWR(
     peID ? ['pe', peID] : null,
