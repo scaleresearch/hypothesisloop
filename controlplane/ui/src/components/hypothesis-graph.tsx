@@ -154,6 +154,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
   const edges = useMemo<Edge[]>(() => graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
     const s = hypothesisLinkStyles[e.type]
     const hierarchy = e.type === 'builds_on'
+    const opacity = dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1
     return {
       id: `${e.type}:${e.from}:${e.to}`,
       // builds_on points from child to parent; drawn parent to child so the tree reads top down.
@@ -162,13 +163,13 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       type: hierarchy ? 'smoothstep' : 'default',
       label: hierarchy ? undefined : s.label,
       zIndex: hierarchy ? 0 : 1,
-      labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600 },
+      labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600, opacity },
       labelBgStyle: { fill: 'var(--surface)' },
       labelBgPadding: [4, 2] as [number, number],
       style: {
         stroke: s.color,
         strokeWidth: hierarchy ? 1.5 : 2,
-        opacity: dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1,
+        opacity,
       },
     }
   }), [graph, positions, dimmed])
