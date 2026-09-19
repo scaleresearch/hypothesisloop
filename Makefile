@@ -44,18 +44,11 @@ check-clean-tree:
 # loopback endpoint outright, so a host where detection picks the wrong interface fails here,
 # not hours into a run with nothing saved.
 #
-# The same detected address is written to REGISTRY_HOST_IP_FILE for the local registry: a k3s
-# node container reaches the compose-published registry the same way it reaches the data store
-# -- over the host's LAN address, never localhost/127.0.0.1 -- and this must stay the one place
-# that detection happens (see localdev/lib/node.sh's registries.yaml comment).
+# The same address (localdev/lib/node.sh's lib_host_ip) is written to REGISTRY_HOST_IP_FILE for
+# the local registry: a k3s node container reaches the compose-published registry the same way it
+# reaches the data store, over the host's LAN address, never localhost/127.0.0.1.
 render-settings:
-	@host_ip=$$(ip -4 addr show 2>/dev/null | awk '/inet /{print $$2}' | \
-		grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1 | cut -d/ -f1); \
-	if [ -z "$$host_ip" ]; then \
-		echo "make render-settings: could not detect a host LAN address for data_store.endpoint." >&2; \
-		echo "  Set it by hand in controlplane/settings/hypothesisloop.yaml (see the comment there)." >&2; \
-		exit 1; \
-	fi; \
+	@host_ip=$$(bash -c '. localdev/lib/node.sh && lib_host_ip') || exit 1; \
 	sed "s|REPLACE-WITH-HOST-LAN-IP|$$host_ip|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS); \
 	echo "$$host_ip" > $(REGISTRY_HOST_IP_FILE); \
 	echo "make render-settings: data_store.endpoint and registry host rendered against $$host_ip"

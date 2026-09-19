@@ -23,10 +23,9 @@ echo "==> Rebuilding and pushing all images..."
 (cd "${SCRIPT_DIR}/../.." && make images)
 TAG="$(cd "${SCRIPT_DIR}/../.." && git rev-parse --short HEAD)"
 
-HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
 REGISTRY_HOST_IP="$(cat "${SCRIPT_DIR}/../.registry-host-ip")"
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="http://${HOST_IP}:8081" METRICS_URL="http://${HOST_IP}:8084" \
+  API_URL="http://${REGISTRY_HOST_IP}:8081" METRICS_URL="http://${REGISTRY_HOST_IP}:8084" \
   REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG}" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 

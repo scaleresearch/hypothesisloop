@@ -38,17 +38,12 @@
 set -euo pipefail
 
 CONTEXT_NAME="k3s-tt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/node.sh"
 
-# Same host-LAN-IP heuristic Makefile's render-settings uses for data_store.endpoint -- one
-# detection, reused everywhere an address for this host needs to reach a pod's network
-# namespace. k3s's own containerd needs it too: it pulls workload images from the local registry
-# (docker-compose.yml) over this address, never localhost.
-REGISTRY_HOST_IP="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | \
-  grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1 | cut -d/ -f1)"
-if [[ -z "${REGISTRY_HOST_IP}" ]]; then
-  echo "ERROR: could not detect a host LAN address for the local registry." >&2
-  exit 1
-fi
+# k3s's containerd pulls images from the local registry (docker-compose.yml) over this address,
+# never localhost.
+REGISTRY_HOST_IP="$(lib_host_ip)"
 
 # Matches localdev/k3s-macos/install.sh's pin so both profiles track the same tested k8s
 # minor version. DRA (resource.k8s.io/v1) is GA from k8s 1.34; this is comfortably past
@@ -67,8 +62,6 @@ TT_OPERATOR_CHART="oci://ghcr.io/tenstorrent/helm/tt-operator"
 # Pin the chart version once a known-good one is confirmed working here, e.g.
 # TT_OPERATOR_CHART_VERSION="0.1.0"; empty tracks whatever "latest" resolves to.
 TT_OPERATOR_CHART_VERSION="${TT_OPERATOR_CHART_VERSION:-}"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 wait_for() {
   local max="$1" delay="$2" desc="$3"; shift 3
@@ -120,16 +113,7 @@ fi
 STAGE_T0=$(date +%s)
 echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
 sudo mkdir -p /etc/rancher/k3s
-cat <<EOF | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
-mirrors:
-  "${REGISTRY_HOST_IP}:5000":
-    endpoint:
-      - "http://${REGISTRY_HOST_IP}:5000"
-configs:
-  "${REGISTRY_HOST_IP}:5000":
-    tls:
-      insecure_skip_verify: true
-EOF
+lib_registries_yaml "${REGISTRY_HOST_IP}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
 sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
 
 echo "==> Ensuring k3s ${K3S_VERSION} is installed and running..."
@@ -171,8 +155,6 @@ echo "==> Waiting for node..."
 wait_for 40 3 "node to register" kubectl --context "${CONTEXT_NAME}" get nodes
 kubectl --context "${CONTEXT_NAME}" wait node --all --for=condition=Ready --timeout=120s
 echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
-
-source "${SCRIPT_DIR}/../lib/node.sh"
 
 # ---- helm ---------------------------------------------------------------
 STAGE_T0=$(date +%s)
@@ -237,9 +219,8 @@ STAGE_T0=$(date +%s)
 # anything, so cluster-agent would poll a name that never resolves. The control plane's containers
 # publish on 0.0.0.0 (confirmed via `docker port`), so the host's own real IP reaches them from
 # any pod on this node.
-HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="http://${HOST_IP}:8081" METRICS_URL="http://${HOST_IP}:8084" \
+  API_URL="http://${REGISTRY_HOST_IP}:8081" METRICS_URL="http://${REGISTRY_HOST_IP}:8084" \
   REGISTRY_URL="${REGISTRY_HOST_IP}:5000" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "${REGISTRY_HOST_IP}" > "${SCRIPT_DIR}/../.registry-host-ip"

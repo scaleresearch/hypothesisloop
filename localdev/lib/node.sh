@@ -14,8 +14,7 @@ LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
 # Usage: lib_create_node <context> <name> <image> <server_url> <token> <cpus> <memory> [network] [ip]
 #
 # REGISTRY_HOST_IP (required, env) is the one address every node pulls images through — the
-# same host-LAN-IP `make render-settings` already resolves for data_store.endpoint (there is
-# exactly one place that detection happens; see Makefile's render-settings). k3s reads
+# lib_host_ip address `make render-settings` writes for data_store.endpoint. k3s reads
 # registries.yaml at agent-process start, not on a later reload, so it must exist inside the
 # container's filesystem before `agent` runs. It is copied in between create and start: a bind
 # mount of a host temp file disappears with it once removed (macOS virtiofs), and the node then
@@ -29,7 +28,7 @@ lib_create_node() {
   local config_dir
   config_dir="$(mktemp -d)"
   mkdir -p "${config_dir}/rancher/k3s"
-  lib_write_registries_yaml "${config_dir}/rancher/k3s/registries.yaml" "$REGISTRY_HOST_IP"
+  lib_registries_yaml "$REGISTRY_HOST_IP" > "${config_dir}/rancher/k3s/registries.yaml"
 
   # Expanded below as ${net_args[@]+"${net_args[@]}"}: under `set -u`, macOS's bash 3.2 treats
   # an unset-because-empty array as an unbound variable.
@@ -54,14 +53,20 @@ lib_create_node() {
   lib_wait_node_ready "$context" "$name"
 }
 
-# Writes a k3s registries.yaml at <path> that mirrors the local registry at <registry_host_ip>:5000
+# lib_host_ip prints the source address of this host's default route: the address a k3s node or
+# job pod reaches this host's published ports on. The UDP connect sends no packet.
+lib_host_ip() {
+  python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("1.1.1.1", 80)); print(s.getsockname()[0])'
+}
+
+# Prints a k3s registries.yaml that mirrors the local registry at <registry_host_ip>:5000
 # as plain HTTP with no TLS verification -- matches docker-compose.yml's registry service, which
 # is dev-only and never TLS-terminated. A remote cluster's own containerd config is the
 # provisioner's responsibility (see runtime/k8s/infra/install.sh's REGISTRY_URL comment), not
 # something this repo generates.
-lib_write_registries_yaml() {
-  local path="$1" registry_host_ip="$2"
-  cat > "$path" <<EOF
+lib_registries_yaml() {
+  local registry_host_ip="$1"
+  cat <<EOF
 mirrors:
   "${registry_host_ip}:5000":
     endpoint:

@@ -8,27 +8,12 @@
 set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/node.sh"
 
-# Same host-LAN-IP detection Makefile's render-settings uses for data_store.endpoint -- one
-# heuristic, reused everywhere an address for this host needs to reach into a VM/container.
-# k3s's own server needs this too now: it pulls workload images from the local registry
-# (docker-compose.yml) over this address, not localhost, since the VM/native k3s process is not
-# the same network namespace as the host running podman compose.
-REGISTRY_HOST_IP="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | \
-  grep -vE '^(127\.|10\.88\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1 | cut -d/ -f1)"
-if [[ -z "${REGISTRY_HOST_IP}" ]]; then
-  echo "ERROR: could not detect a host LAN address for the local registry." >&2
-  exit 1
-fi
-REGISTRIES_YAML="mirrors:
-  \"${REGISTRY_HOST_IP}:5000\":
-    endpoint:
-      - \"http://${REGISTRY_HOST_IP}:5000\"
-configs:
-  \"${REGISTRY_HOST_IP}:5000\":
-    tls:
-      insecure_skip_verify: true
-"
+# k3s pulls images from the local registry (docker-compose.yml) over this address, not
+# localhost, since the VM/native k3s process is not in the host's network namespace.
+REGISTRY_HOST_IP="$(lib_host_ip)"
 
 # Pinned to a k3s release bundling k8s 1.36, which introduced native (alpha) gang scheduling —
 # the Job controller auto-creates Workload/PodGroup objects and the in-tree scheduler admits/
@@ -93,7 +78,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
   # (colons, quotes) would otherwise need a second layer of shell-quoting through ssh, the exact
   # trap K3S_KUBELET_IMAGE_GC_FLAGS's own escaping comment above warns about.
   echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
-  REGISTRIES_YAML_B64="$(printf '%s' "${REGISTRIES_YAML}" | base64 | tr -d '\n')"
+  REGISTRIES_YAML_B64="$(lib_registries_yaml "${REGISTRY_HOST_IP}" | base64 | tr -d '\n')"
   vm "sudo mkdir -p /etc/rancher/k3s && echo ${REGISTRIES_YAML_B64} | base64 -d | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null"
   vm "sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true"
 
@@ -163,7 +148,7 @@ sys.stdout.write(re.sub(
 else
   echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
   sudo mkdir -p /etc/rancher/k3s
-  printf '%s' "${REGISTRIES_YAML}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
+  lib_registries_yaml "${REGISTRY_HOST_IP}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
   sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
 
   if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
@@ -208,9 +193,6 @@ wait_for 40 3 "node to register" \
 kubectl --context "${CONTEXT_NAME}" wait node --all \
   --for=condition=Ready --timeout=120s
 echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../lib/node.sh"
 
 # The control-plane node donates zero capacity to workloads by default — it never runs
 # training pods, but node-agent's DaemonSet tolerates every taint
