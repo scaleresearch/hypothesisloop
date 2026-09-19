@@ -1,14 +1,18 @@
 'use client'
 
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
+import Link from 'next/link'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
-import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from '@/lib/quota'
+import {
+  fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas,
+  fetchDonationsPage, fetchExperimentsPage, fetchExperimentStats, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
+} from '@/lib/api'
+import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Badge, AgentKindBadge } from '@/components/ui/badge'
+import { Badge, AgentKindBadge, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
@@ -16,10 +20,11 @@ import { PlatformExperimentSelect } from '@/components/platform-experiment-selec
 import { Pagination } from '@/components/ui/pagination'
 import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
+import { useQueryParam } from '@/lib/query-state'
 
 const PAGE_SIZE = 25
 
-function AgentExperimentQuota({ agentId, pe }: { agentId: string; pe: PlatformExperiment }) {
+function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: PlatformExperiment; colSpan: number }) {
   const { data: quotas } = useSWR<AgentQuota[]>(
     ['pe-quotas', pe.id],
     () => fetchPlatformExperimentQuotas(pe.id),
@@ -27,37 +32,45 @@ function AgentExperimentQuota({ agentId, pe }: { agentId: string; pe: PlatformEx
   )
   const q = quotas?.find(q => q.agent_id === agentId)
   if (!q) return null
-  const gRem = guaranteedRemainingAccH(q)
-  const bRem = burstRemainingAccH(q)
   const totalRem = quotaRemainingAccH(q)
   return (
     <tr style={{ background: 'var(--muted)' }}>
-      <td style={{ paddingLeft: 28, fontSize: 12 }} className="text-link">{pe.name}</td>
-      <td className="mono" style={{ fontSize: 11 }}>
-        <Badge status="guaranteed" className="mr-1">G</Badge>
-        {formatAccH(q.guaranteed_accelerator_hours)} AccH ({gRem >= 0 ? `${formatAccH(gRem)} left` : 'over'})
-      </td>
-      <td className="mono" style={{ fontSize: 11 }}>
-        <Badge status="burst" className="mr-1">B</Badge>
-        {formatAccH(q.burst_accelerator_hours)} AccH ({bRem >= 0 ? `${formatAccH(bRem)} left` : 'over'})
-      </td>
-      <td className="mono" style={{ fontSize: 11, color: totalRem > 0 ? semantic.success : semantic.danger }}>
-        {formatAccH(totalRem)} AccH
+      <td colSpan={colSpan} className="mono" style={{ paddingLeft: 28, fontSize: 11 }}>
+        <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Link href={`/platform-experiments/${pe.id}`} className="text-link" style={{ fontSize: 12 }}>{pe.name}</Link>
+          <span>
+            <Badge status="guaranteed" className="mr-1">G</Badge>
+            {formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH used
+          </span>
+          <span>
+            <Badge status="burst" className="mr-1">B</Badge>
+            {formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH used
+          </span>
+          <span style={{ color: totalRem > 0 ? semantic.success : semantic.danger }}>{formatAccH(totalRem)} AccH left</span>
+        </div>
       </td>
     </tr>
   )
 }
 
-function AgentQuotaRows({ agentId, running }: { agentId: string; running: PlatformExperiment[] }) {
-  if (running.length === 0) return (
-    <tr><td colSpan={4} className="text-dim" style={{ fontSize: 12, paddingLeft: 20 }}>No running platform experiments</td></tr>
+function AgentQuotaRows({ agentId, experiments, colSpan }: { agentId: string; experiments: PlatformExperiment[]; colSpan: number }) {
+  if (experiments.length === 0) return (
+    <tr><td colSpan={colSpan} className="text-dim" style={{ fontSize: 12, paddingLeft: 20 }}>No running platform experiments</td></tr>
   )
-  return <>{running.map(pe => <AgentExperimentQuota key={pe.id} agentId={agentId} pe={pe} />)}</>
+  return <>{experiments.map(pe => <AgentExperimentQuota key={pe.id} agentId={agentId} pe={pe} colSpan={colSpan} />)}</>
 }
 
 export default function AgentsPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <AgentsPageContent />
+    </Suspense>
+  )
+}
+
+function AgentsPageContent() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
-  const [experimentFilter, setExperimentFilter] = useState('')
+  const [experimentFilter, setExperimentFilter] = useQueryParam('platform_experiment_id')
   const [page, setPage] = useState(0)
   const [donationPage, setDonationPage] = useState(0)
 
@@ -94,6 +107,26 @@ export default function AgentsPage() {
     experimentFilter ? ['pe', experimentFilter] : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
+
+  // What each agent did in the selected experiment: its jobs, its best result and standing, and the
+  // completed jobs it left without a summary (tallied from at most the 50 newest of them).
+  const { data: jobStats } = useSWR(
+    experimentFilter ? ['pe-stats-by-agent', experimentFilter] : null,
+    () => fetchExperimentStats({ platform_experiment_id: experimentFilter, group_by: 'agent' }),
+    { refreshInterval: 15_000 },
+  )
+  const { data: results } = useSWR(
+    experimentFilter ? ['pe-results', experimentFilter] : null,
+    () => fetchPlatformExperimentResults(experimentFilter),
+    { refreshInterval: 15_000 },
+  )
+  const { data: unsummarized } = useSWR(
+    experimentFilter ? ['pe-unsummarized-jobs', experimentFilter] : null,
+    () => fetchExperimentsPage({ platform_experiment_id: experimentFilter, needs_summary: true, limit: 50 }).then(p => p.items),
+    { refreshInterval: 15_000 },
+  )
+  const ranking = results?.metrics[0]
+  const colSpan = experimentFilter ? 7 : 4
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
@@ -206,13 +239,20 @@ export default function AgentsPage() {
                     {h.column.getIsSorted() === 'desc' ? ' ▼' : h.column.getIsSorted() === 'asc' ? ' ▲' : ''}
                   </th>
                 ))}
+                {experimentFilter && (
+                  <>
+                    <th style={{ textAlign: 'right' }}>Best {ranking?.metric ?? 'metric'}</th>
+                    <th>Jobs</th>
+                    <th>Summaries filed</th>
+                  </>
+                )}
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {!agents || agents.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ padding: 0 }}>
+                  <td colSpan={colSpan} style={{ padding: 0 }}>
                     <EmptyState>
                       {experimentFilter ? 'No agents signed up for this experiment.' : 'No agents registered.'}
                     </EmptyState>
@@ -220,6 +260,10 @@ export default function AgentsPage() {
                 </tr>
               ) : sortedAgents.map(a => {
                 const isExpanded = expandedAgent === a.id
+                const standing = ranking?.standings.find(st => st.agent_id === a.id)
+                const jobs = jobStats?.groups?.[a.id]
+                const completed = jobs?.by_status.COMPLETED ?? 0
+                const missing = (unsummarized ?? []).filter(j => j.agent_id === a.id)
                 return (
                   <Fragment key={a.id}>
                     <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedAgent(isExpanded ? null : a.id)}>
@@ -238,9 +282,31 @@ export default function AgentsPage() {
                         ) : <span className="text-dim">—</span>}
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{a.performance_score.toFixed(3)}</td>
+                      {experimentFilter && (
+                        <>
+                          <td className="mono" style={{ textAlign: 'right' }}>
+                            {standing?.experiment_id ? (
+                              <Link href={`/jobs/${standing.experiment_id}`} className="text-link" onClick={e => e.stopPropagation()}>
+                                #{standing.rank} · {standing.best.toFixed(4)}
+                              </Link>
+                            ) : <span className="text-dim">—</span>}
+                            {missing.some(j => j.id === standing?.experiment_id) && <div><NoSummary /></div>}
+                          </td>
+                          <td className="mono" style={{ fontSize: 11 }}>
+                            {jobs
+                              ? Object.entries(jobs.by_status).map(([status, n]) => `${n} ${status.toLowerCase()}`).join(' · ')
+                              : <span className="text-dim">none</span>}
+                          </td>
+                          <td className="mono" style={{ fontSize: 11, color: missing.length > 0 ? semantic.warning : undefined }}>
+                            {completed - missing.length} of {completed} completed
+                          </td>
+                        </>
+                      )}
                       <td className="text-dim" style={{ fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</td>
                     </tr>
-                    {isExpanded && running && <AgentQuotaRows agentId={a.id} running={running} />}
+                    {isExpanded && (selectedPE ? [selectedPE] : running) && (
+                      <AgentQuotaRows agentId={a.id} experiments={(selectedPE ? [selectedPE] : running)!} colSpan={colSpan} />
+                    )}
                   </Fragment>
                 )
               })}
