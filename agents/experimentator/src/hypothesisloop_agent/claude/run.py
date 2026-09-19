@@ -230,6 +230,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         setting_sources=[],
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
+        # The 2 min default backgrounded every `hl watch`, and agents then polled its output file.
+        env={"BASH_DEFAULT_TIMEOUT_MS": "600000"},
     )
 
     rate_limited_resets_at: float | None = None
