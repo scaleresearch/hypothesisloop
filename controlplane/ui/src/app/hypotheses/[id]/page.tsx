@@ -50,8 +50,8 @@ function LinkRow({ link, platformExperimentID, pe }: {
     <Link href={`/hypotheses/${link.hypothesis_id}`} className="hg-hit" title={link.text}>
       <Badge status={link.status}>{link.status}</Badge>
       <span className="hg-outline-text">{link.text}</span>
-      <span className="text-dim" style={{ fontSize: 11 }}>
-        <PoolAuthor source={link.author ? 'human' : 'agent'} agentID={link.agent_id} author={link.author} />
+      <span className="text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+        linked by <PoolAuthor source={link.author ? 'human' : 'agent'} agentID={link.agent_id} author={link.author} />
       </span>
     </Link>
   )
@@ -101,6 +101,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           </h1>
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
             Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
+            {data.status_changed_at && <> · {data.status} {relTime(data.status_changed_at)}</>}
           </p>
         </div>
         <Link href={graphHref(data.platform_experiment_id, data.id)} className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>

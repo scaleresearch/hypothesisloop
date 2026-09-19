@@ -352,6 +352,8 @@ export interface Hypothesis {
   text: string
   status: HypothesisStatus
   created_at: string
+  /** When the owner last set the verdict; null while it has never been set. */
+  status_changed_at: string | null
 }
 
 export type HypothesisLinkType = 'builds_on' | 'contradicts' | 'related'
