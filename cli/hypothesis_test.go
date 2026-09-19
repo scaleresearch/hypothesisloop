@@ -521,3 +521,17 @@ func TestHypothesisSubmitOnARefutedParentSuggestsContradicts(t *testing.T) {
 		t.Fatalf("a confirmed parent drew a note: %s", stderr.String())
 	}
 }
+
+func TestHypothesisSubmitTakesCommaSeparatedIDs(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "combo",
+		"--builds-on", "hyp-1,hyp-2", "--related", "hyp-3"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := links("builds_on", "hyp-1", "builds_on", "hyp-2", "related", "hyp-3")
+	if !reflect.DeepEqual((*got)[0].Body["links"], want) {
+		t.Fatalf("links = %v, want %v", (*got)[0].Body["links"], want)
+	}
+}

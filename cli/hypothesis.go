@@ -27,6 +27,20 @@ type stringList []string
 func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
+// idList takes one id or a comma-separated list: agents write --builds-on a,b as often as they
+// repeat the flag, and no id contains a comma.
+type idList []string
+
+func (s *idList) String() string { return strings.Join(*s, ",") }
+func (s *idList) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			*s = append(*s, part)
+		}
+	}
+	return nil
+}
+
 type link struct {
 	Type string `json:"type"`
 	To   string `json:"to"`
@@ -81,10 +95,10 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	pe := fs.String("platform-experiment", "", "platform experiment id")
 	text := fs.String("text", "", "hypothesis text")
 	file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body, or a hypotheses: list of them")
-	var buildsOn, contradicts, related stringList
-	fs.Var(&buildsOn, "builds-on", "hypothesis id this refines, extends or combines, or root for the objective (repeatable, at least one)")
-	fs.Var(&contradicts, "contradicts", "hypothesis id this competes with (repeatable)")
-	fs.Var(&related, "related", "hypothesis id to cross-reference (repeatable)")
+	var buildsOn, contradicts, related idList
+	fs.Var(&buildsOn, "builds-on", "hypothesis id this refines, extends or combines, or root for the objective (repeatable or comma-separated, at least one)")
+	fs.Var(&contradicts, "contradicts", "hypothesis id that cannot hold together with this one (repeatable or comma-separated)")
+	fs.Var(&related, "related", "hypothesis id to cross-reference (repeatable or comma-separated)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, `usage: hl hypothesis submit --agent A --platform-experiment PE --text T --builds-on ID|root
          [--builds-on ID ...] [--contradicts ID ...] [--related ID ...]
@@ -125,7 +139,7 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 	var flagLinks []link
 	for _, group := range []struct {
 		typ string
-		ids stringList
+		ids idList
 	}{{"builds_on", buildsOn}, {"contradicts", contradicts}, {"related", related}} {
 		for _, id := range group.ids {
 			flagLinks = append(flagLinks, link{Type: group.typ, To: id})
