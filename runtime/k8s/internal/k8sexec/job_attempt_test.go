@@ -2,8 +2,11 @@ package k8sexec
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -104,5 +107,23 @@ func TestAnAbsentWorkloadReportsGoneWithNoAttempt(t *testing.T) {
 	}
 	if status.Attempt != workload.AttemptUnknown {
 		t.Errorf("attempt = %d, want %d (AttemptUnknown)", status.Attempt, workload.AttemptUnknown)
+	}
+}
+
+func TestAWorkloadIsNotRecreatedWhileAPodOfItsPreviousGenerationExists(t *testing.T) {
+	exp := attemptTestExperiment(2)
+	c := attemptTestClient()
+	c.kube = fake.NewClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "old", Namespace: HypothesisLoopNamespace, Labels: map[string]string{workloadkeys.ExperimentID: exp.ID},
+	}})
+	if err := c.CreateWorkload(context.Background(), exp); err == nil || !strings.Contains(err.Error(), "previous generation") {
+		t.Fatalf("CreateWorkload beside a pod of the previous generation returned %v, want a retry error naming it", err)
+	}
+	jobs, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("created %d job(s) beside a pod of the previous generation", len(jobs.Items))
 	}
 }
