@@ -8,7 +8,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// List returns the experiments matching the filter, each with its best ranking metric: a
+// List returns the experiments matching the filter, each with its metrics: a
 // hypothesis's jobs. GET /experiments is the scheduler service's.
 func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	exps, err := s.store.ListExperiments(ctx, filter)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ import (
 
 var jobCommands = []subcommand{
 	{"submit", "submit a job spec, prints its id", jobSubmit},
-	{"list", "jobs, newest first, one brief line each with its metric", jobList},
+	{"list", "jobs, newest first, one brief line each with its metrics", jobList},
 	{"status", "a job's whole record", jobStatus},
 	{"metrics", "per metric: last value, min, max and points reported", jobMetrics},
 	{"summary", "file the write-up of a finished job", jobSummary},
@@ -149,7 +150,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 // summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.
 const summaryGate = "summary_gate"
 
-const resultArrives = "the result arrives as an update when you end your turn; hl job list then has its metric"
+const resultArrives = "the result arrives as an update with its metrics when you end your turn"
 
 // progress reports whether a job can still change status, and whether an owed summary holds it.
 func progress(raw json.RawMessage) (unfinished, held bool) {
@@ -193,8 +194,9 @@ func setJobEnv(body map[string]any, pairs []string) error {
 }
 
 // jobDrop leaves out of a printed job what a reader already has: the hypothesis text (hl
-// hypothesis get) and the admission-resolved copy of the submitted spec.
-var jobDrop = []string{"hypothesis", "resolved_job"}
+// hypothesis get), the admission-resolved copy of the submitted spec and the ranking metric, which
+// metrics repeats.
+var jobDrop = []string{"hypothesis", "resolved_job", "metric"}
 
 // jobBrief is what a listing prints of a job; hl job status ID prints the whole record.
 type jobBrief struct {
@@ -203,13 +205,40 @@ type jobBrief struct {
 	AgentID           string          `json:"agent_id"`
 	HypothesisID      string          `json:"hypothesis_id"`
 	Status            string          `json:"status"`
-	Metric            json.RawMessage `json:"metric"`
+	Metrics           briefMetrics    `json:"metrics"`
 	NotAdmittedReason string          `json:"not_admitted_reason"`
 	EvictionReason    string          `json:"eviction_reason"`
 	PhaseDetail       json.RawMessage `json:"phase_detail"`
 	Theory            string          `json:"theory"`
 	EstimatedCost     float64         `json:"estimated_cost_acch"`
 	CreatedAt         string          `json:"created_at"`
+}
+
+// briefMetrics prints a job's metrics as name: best and last, at six significant digits, with
+// the basis when it is not raw.
+type briefMetrics []struct {
+	Name  string  `json:"name"`
+	Best  float64 `json:"best"`
+	Last  float64 `json:"last"`
+	Basis string  `json:"basis"`
+}
+
+func (m briefMetrics) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, metric := range m {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `%q:{"best":%s,"last":%s`, metric.Name,
+			strconv.FormatFloat(metric.Best, 'g', 6, 64), strconv.FormatFloat(metric.Last, 'g', 6, 64))
+		if metric.Basis != "raw" {
+			fmt.Fprintf(&b, `,"basis":%q`, metric.Basis)
+		}
+		b.WriteByte('}')
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
 }
 
 // briefJobs is one compact line per job, ending in env: the settings that differ between these
@@ -254,7 +283,7 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
-One job per line, newest first: ids, status, metric (its best value on the ranking metric),
+One job per line, newest first: ids, status, metrics (best and last of each declared metric),
 reasons, theory, cost and env, the settings that differ between the listed jobs. hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
@@ -313,7 +342,7 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
 One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED or
-REJECTED), metric, finished_at, summary, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
+REJECTED), metrics, finished_at, summary, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
 what the job waits for: awaiting_admission for the scheduler's first look at it, summary_gate
 for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")

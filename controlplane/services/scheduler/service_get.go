@@ -36,8 +36,8 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	return exp, nil
 }
 
-// mergeMetrics attaches each experiment's best value on its platform experiment's first ranking
-// metric, read live from the metrics store.
+// mergeMetrics attaches what each experiment reported on its platform experiment's declared
+// metrics, read live from the metrics store.
 func (s *Service) mergeMetrics(ctx context.Context, exps []*domain.Experiment) error {
 	return metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, func(ctx context.Context, id string) ([]domain.MetricDefinition, bool, error) {
 		pe, err := s.store.GetPlatformExperiment(ctx, id)

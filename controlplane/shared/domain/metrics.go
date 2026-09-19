@@ -35,9 +35,11 @@ type AgentMetricSeries struct {
 	Points      []MetricSeriesPoint `json:"points"`
 }
 
-// JobMetric is one job's best value on a ranking metric.
+// JobMetric is one job's best and last reported value on a declared metric. Best follows the
+// metric's direction.
 type JobMetric struct {
 	Name  string  `json:"name"`
 	Best  float64 `json:"best"`
+	Last  float64 `json:"last"`
 	Basis string  `json:"basis"`
 }

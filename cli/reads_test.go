@@ -145,10 +145,12 @@ func TestHypothesisQueryTakesCypherFlag(t *testing.T) {
 	}
 }
 
-func TestJobListAndHypothesisGetPrintBriefJobsWithMetricAndTheEnvTheyVaried(t *testing.T) {
+func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVaried(t *testing.T) {
 	job := func(id string, env map[string]any) map[string]any {
 		return map[string]any{"id": id, "agent_id": "a", "hypothesis_id": "hyp-1", "status": "COMPLETED", "hypothesis": "long text",
-			"metric": map[string]any{"name": "acc", "best": 0.9, "basis": "raw"}, "phase_detail": map[string]any{}, "theory": "a > b",
+			"metric": map[string]any{"name": "acc", "best": 0.9, "last": 0.85, "basis": "raw"}, "phase_detail": map[string]any{}, "theory": "a > b",
+			"metrics": []any{map[string]any{"name": "acc", "best": 0.9, "last": 0.85, "basis": "raw"},
+				map[string]any{"name": "loss", "best": 0.2608416958176093, "last": 0.31, "basis": "per_token"}},
 			"estimated_cost_acch": 0.5, "created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"image": "i"},
 			"job": map[string]any{"image": "i", "env": env}}
 	}
@@ -160,7 +162,7 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithMetricAndTheEnvTheyVaried(t *t
 		return map[string]any{"id": "hyp-1", "jobs": jobs, "job_count": 5}
 	})
 	brief := func(id, env string) string {
-		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"COMPLETED","metric":{"basis":"raw","best":0.9,"name":"acc"},` +
+		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"COMPLETED","metrics":{"acc":{"best":0.9,"last":0.85},"loss":{"best":0.260842,"last":0.31,"basis":"per_token"}},` +
 			`"theory":"a > b","estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z","env":` + env + `}`
 	}
 	both := []string{brief("job-1", `{}`), brief("job-2", `{"LR":"0.3"}`)}

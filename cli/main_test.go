@@ -200,7 +200,7 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "arrives as an update when you end your turn") {
+	if !strings.Contains(stderr.String(), "arrives as an update with its metrics when you end your turn") {
 		t.Fatalf("stderr = %q, want the note that the result arrives as an update", stderr.String())
 	}
 	if want := `{"id":"job-1","status":"QUEUED","code_ref":"repo@abc","capacity_tier":"guaranteed","estimated_cost_acch":0.5}` + "\n"; stdout.String() != want {
@@ -686,7 +686,7 @@ func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
 func TestUnfinishedJobSaysTheResultArrivesAsAnUpdate(t *testing.T) {
 	status := "RUNNING"
 	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "job-1", "status": status} })
-	note := "the result arrives as an update when you end your turn"
+	note := "the result arrives as an update with its metrics when you end your turn"
 	for _, tc := range []struct {
 		status string
 		want   bool

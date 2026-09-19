@@ -636,9 +636,9 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[
-			{"metric":{"job_id":"job-a","metric_basis":"raw"},"value":[1,"0.30"]},
-			{"metric":{"job_id":"job-b","metric_basis":"raw"},"value":[1,"0.10"]},
-			{"metric":{"job_id":"job-rescaled","metric_basis":"per_token"},"value":[1,"0.01"]}]}}`))
+			{"metric":{"job_id":"job-a","metric_name":"loss","metric_basis":"raw"},"value":[1,"0.30"]},
+			{"metric":{"job_id":"job-b","metric_name":"loss","metric_basis":"raw"},"value":[1,"0.10"]},
+			{"metric":{"job_id":"job-rescaled","metric_name":"loss","metric_basis":"per_token"},"value":[1,"0.01"]}]}}`))
 	}))
 	defer metrics.Close()
 	svc := New(findingsStore{newPoolStore()}, findingsGraph{}, zap.NewNop(), metrics.URL, nil)
@@ -649,7 +649,7 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 	}
 	tested, untested, open := got[0], got[1], got[2]
 	if tested.ID != "hyp-tested" || tested.Finding == nil || tested.Finding.Summary != "the newest write-up" || tested.BestJob == nil ||
-		tested.BestJob.ID != "job-b" || *tested.BestJob.Metric != (domain.JobMetric{Name: "loss", Best: 0.10, Basis: "raw"}) {
+		tested.BestJob.ID != "job-b" || *tested.BestJob.Metric != (domain.JobMetric{Name: "loss", Best: 0.10, Last: 0.10, Basis: "raw"}) {
 		t.Errorf("tested hypothesis: got = %+v (best job %+v), want its newest finding and job-b at loss 0.10", tested, tested.BestJob)
 	}
 	if untested.ID != "hyp-untested" || untested.Finding != nil || untested.BestJob != nil {

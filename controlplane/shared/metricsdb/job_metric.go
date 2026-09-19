@@ -9,10 +9,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// PopulateJobMetrics sets Metric on every job of exps that reported its platform experiment's
-// first ranking metric: the job's best value, the aggregation the standings rank with
-// (BestPerAgentOnMetric), raw basis before any other. One query per platform experiment among
-// exps. definitions returns the declared metrics of one.
+// PopulateJobMetrics sets Metrics on every job of exps: per declared metric of its platform
+// experiment that the job reported, the best and the last value, raw basis before any other.
+// Metric is the one on the first ranking metric, whose best is the aggregation the standings
+// rank with (BestPerAgentOnMetric). Three queries per platform experiment among exps, whatever
+// the number of jobs. definitions returns the declared metrics of one.
 func PopulateJobMetrics(ctx context.Context, dbURL string,
 	definitions func(ctx context.Context, platformExperimentID string) ([]domain.MetricDefinition, bool, error),
 	exps []*domain.Experiment) error {
@@ -22,55 +23,90 @@ func PopulateJobMetrics(ctx context.Context, dbURL string,
 			byPlatformExperiment[exp.PlatformExperimentID] = append(byPlatformExperiment[exp.PlatformExperimentID], exp)
 		}
 	}
+	type series struct{ job, metric, basis string }
 	for id, jobs := range byPlatformExperiment {
 		defs, _, err := definitions(ctx, id)
 		if err != nil {
 			return fmt.Errorf("metricsdb.PopulateJobMetrics: %w", err)
 		}
-		metric, ok := domain.PrimaryRankingMetric(defs)
-		if !ok {
+		if len(defs) == 0 {
 			continue
 		}
-		agg := "max"
-		if metric.Direction == "minimize" {
-			agg = "min"
+		primary, _ := domain.PrimaryRankingMetric(defs)
+		names := make([]string, len(defs))
+		for i, def := range defs {
+			names[i] = regexp.QuoteMeta(def.Key)
 		}
-		byID := make(map[string]*domain.Experiment, len(jobs))
 		ids := make([]string, len(jobs))
 		oldest := jobs[0].CreatedAt
 		for i, job := range jobs {
-			byID[job.ID] = job
 			ids[i] = regexp.QuoteMeta(job.ID)
 			if job.CreatedAt.Before(oldest) {
 				oldest = job.CreatedAt
 			}
 		}
-		promQL := fmt.Sprintf(`%s by (job_id, metric_basis) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q, job_id=~%q}[%s]))`,
-			agg, agg, ExperimentMetricValue, id, metric.Key, strings.Join(ids, "|"), ObservedLookback(oldest))
-		samples, err := QueryVector(ctx, dbURL, promQL)
-		if err != nil {
-			return fmt.Errorf("metricsdb.PopulateJobMetrics: %s: %w", metric.Key, err)
+		// Each (job, metric, basis) is one series, so the outer aggregation only drops labels.
+		read := func(outer, over string) (map[series]float64, error) {
+			promQL := fmt.Sprintf(`%s by (job_id, metric_name, metric_basis) (%s_over_time(%s{platform_experiment_id=%q, metric_name=~%q, job_id=~%q}[%s]))`,
+				outer, over, ExperimentMetricValue, id, strings.Join(names, "|"), strings.Join(ids, "|"), ObservedLookback(oldest))
+			samples, err := QueryVector(ctx, dbURL, promQL)
+			if err != nil {
+				return nil, fmt.Errorf("metricsdb.PopulateJobMetrics: %w", err)
+			}
+			values := make(map[series]float64, len(samples))
+			for _, sm := range samples {
+				basis := sm.Labels["metric_basis"]
+				if basis == "" {
+					basis = "raw"
+				}
+				values[series{sm.Labels["job_id"], sm.Labels["metric_name"], basis}] = sm.Value
+			}
+			return values, nil
 		}
-		for _, sm := range samples {
-			job := byID[sm.Labels["job_id"]]
-			if job == nil {
-				continue
+		highest, err := read("max", "max")
+		if err != nil {
+			return err
+		}
+		lowest, err := read("min", "min")
+		if err != nil {
+			return err
+		}
+		last, err := read("max", "last")
+		if err != nil {
+			return err
+		}
+		minimize := map[string]bool{}
+		for _, def := range defs {
+			minimize[def.Key] = def.Direction == "minimize"
+		}
+		chosen := map[[2]string]domain.JobMetric{}
+		for s, value := range last {
+			got := domain.JobMetric{Name: s.metric, Best: highest[s], Last: value, Basis: s.basis}
+			if minimize[s.metric] {
+				got.Best = lowest[s]
 			}
-			basis := sm.Labels["metric_basis"]
-			if basis == "" {
-				basis = "raw"
-			}
-			got := &domain.JobMetric{Name: metric.Key, Best: sm.Value, Basis: basis}
-			if cur := job.Metric; cur != nil {
+			if cur, ok := chosen[[2]string{s.job, s.metric}]; ok {
 				better := got.Best > cur.Best
-				if metric.Direction == "minimize" {
+				if minimize[s.metric] {
 					better = got.Best < cur.Best
 				}
-				if raw, curRaw := got.Basis == "raw", cur.Basis == "raw"; raw != curRaw && curRaw || raw == curRaw && !better {
+				if cur.Basis == "raw" || got.Basis != "raw" && !better {
 					continue
 				}
 			}
-			job.Metric = got
+			chosen[[2]string{s.job, s.metric}] = got
+		}
+		for _, job := range jobs {
+			for _, def := range defs {
+				got, ok := chosen[[2]string{job.ID, def.Key}]
+				if !ok {
+					continue
+				}
+				job.Metrics = append(job.Metrics, got)
+				if def.Key == primary.Key {
+					job.Metric = &got
+				}
+			}
 		}
 	}
 	return nil
