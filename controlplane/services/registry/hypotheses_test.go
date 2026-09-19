@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -516,5 +517,41 @@ func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
 		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-missing"}}, nil)
 	if !errors.Is(err, ErrUnknownPlatformExperiment) {
 		t.Fatalf("RegisterHypothesis under an unknown platform experiment: got = %v, want %v", err, ErrUnknownPlatformExperiment)
+	}
+}
+
+type testedStore struct {
+	poolStore
+	tested []string
+}
+
+func (s *testedStore) TestedHypotheses(_ context.Context, _ string) ([]string, error) {
+	return s.tested, nil
+}
+
+type queryGraph struct {
+	fakeGraph
+	params map[string]any
+}
+
+func (g *queryGraph) Query(_ context.Context, _, _ string, params map[string]any) (*graphdb.QueryResult, error) {
+	g.params = params
+	return &graphdb.QueryResult{}, nil
+}
+
+// Jobs live in Postgres, so a query can tell tested from untested hypotheses only through the
+// ids bound as $tested, and a caller's own $tested must not stand in for them.
+func TestQueryGraphBindsTheTestedHypotheses(t *testing.T) {
+	graph := &queryGraph{}
+	svc := &Service{store: &testedStore{tested: []string{"h-1"}}, graph: graph, logger: zap.NewNop()}
+
+	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN $tested", map[string]any{"id": "h-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(graph.params, map[string]any{"id": "h-2", "tested": []string{"h-1"}}) {
+		t.Fatalf("params = %v", graph.params)
+	}
+	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN 1", map[string]any{"tested": "x"}); !errors.Is(err, graphdb.ErrInvalidQuery) {
+		t.Fatalf("caller $tested: err = %v, want ErrInvalidQuery", err)
 	}
 }

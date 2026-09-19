@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"go.uber.org/zap"
 
@@ -173,7 +174,19 @@ func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID stri
 
 // QueryGraph runs one read-only Cypher query against one platform experiment's hypothesis graph.
 func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher string, params map[string]any) (*graphdb.QueryResult, error) {
-	result, err := s.graph.Query(ctx, platformExperimentID, cypher, params)
+	if _, ok := params["tested"]; ok {
+		return nil, fmt.Errorf("%w: $tested is bound to the hypotheses a job tests, use another parameter name", graphdb.ErrInvalidQuery)
+	}
+	tested, err := s.store.TestedHypotheses(ctx, platformExperimentID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.QueryGraph: %w", err)
+	}
+	bound := maps.Clone(params)
+	if bound == nil {
+		bound = map[string]any{}
+	}
+	bound["tested"] = tested
+	result, err := s.graph.Query(ctx, platformExperimentID, cypher, bound)
 	if err != nil {
 		return nil, fmt.Errorf("registry.QueryGraph: %w", err)
 	}
