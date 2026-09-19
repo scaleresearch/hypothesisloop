@@ -65,8 +65,8 @@ silently improvise.
    `127.0.0.1`.** The coordinator/agent containers run `--network host` so `127.0.0.1` resolves
    there, but a job pod (k3s) is in a separate network namespace and can't reach the host's
    loopback — `code_ref` built from a `127.0.0.1` `CODE_REPO_URL` fails to clone inside every job,
-   with no useful error beyond "connection refused". Find the LAN IP with `ip -4 addr show`
-   (the address on the main interface, not `lo`/`docker0`/`br-*`/`tailscale0`/`flannel.1`/`cni0`).
+   with no useful error beyond "connection refused". The LAN IP is in `localdev/.registry-host-ip`
+   (written by `make render-settings`).
    Confirm reachability from *inside a real job pod*, not just from the coordinator container.
    **`data_store.endpoint` in `controlplane/settings/hypothesisloop.yaml` has the same rule and
    the same reason.** Job pods reach the object store directly to write checkpoints (the platform
@@ -86,7 +86,8 @@ silently improvise.
    (`imagePullPolicy: IfNotPresent`) — a build that never made it past `podman build` (no
    `podman push`) is invisible to every cluster node the same way a typo'd tag is. Build with
    the per-experiment `seed/build_and_push.sh` where one exists (it pushes and renders the
-   job.yaml's placeholder image ref for you), or `make <name>-workload-image` for the platform's
+   job.yaml's placeholder image ref into `job.rendered.yaml`; push that to `$CODE_REPO_URL` with
+   the rest of `seed/`), or `make <name>-workload-image` for the platform's
    own images. Verify with `podman pull --tls-verify=false localhost:5000/<image>:<tag>` from
    any cluster node before spawning any agents.
 5. `make git-daemon-start` (safe to re-run).
@@ -213,20 +214,20 @@ it as `generalist` with that config as its hyperparameters (or none at all, and 
 agent gets `generalist`) and `AGENT_HYPERPARAMETERS` (a JSON object; omit it and the agent gets
 `{}`). Build once: `make experimentator-image EXPERIMENT=$EXPERIMENT`.
 
-    podman run -d --name agent-<id> --network host --userns=keep-id \
+    podman run -d --name agent-<id> --network host \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
       -e AGENT_FLAVOR=hyperparameter-search -e AGENT_HYPERPARAMETERS='{"batch_size":64}' \
       -e API_URL=$API_URL \
       -e CODE_REPO_URL=$CODE_REPO_URL -e GIT_TOKEN=$GIT_TOKEN \
-      ${CLAUDE_CODE_OAUTH_TOKEN:+-e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN} \
-      -v ~/.claude/.credentials.json:/home/agent/.claude/.credentials.json:ro \
-      -v ~/.claude.json:/home/agent/.claude.json:ro \
-      -v ~/.codex/auth.json:/home/agent/.codex/auth.json:ro \
+      -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT
 
-Default: the token from `agents/coordinator/.env` (loaded in step 0). Otherwise: mount the host's
-`~/.claude` / `~/.codex` credentials as shown above. Both can be set at once — the SDK always
-prefers the token. Never use `--bare`; it ignores the token.
+Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files
+mount with `--userns=keep-id -v ~/.claude/.credentials.json:/home/agent/.claude/.credentials.json:ro
+-v ~/.claude.json:/home/agent/.claude.json:ro -v ~/.codex/auth.json:/home/agent/.codex/auth.json:ro`,
+on rootless podman only: a rootful podman machine (macOS) rejects `--userns=keep-id` with
+`crun: mount sysfs to sys: Operation not permitted`. The SDK prefers the token when both are set.
+Never use `--bare`; it ignores the token.
 
 One shared private `$CODE_REPO_URL`; each agent works on branch
 `agent-<id>-$PLATFORM_EXPERIMENT_ID` (platform experiment id included so a fresh experiment always
