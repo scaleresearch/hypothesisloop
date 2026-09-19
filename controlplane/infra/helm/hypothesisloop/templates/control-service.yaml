@@ -26,11 +26,18 @@ spec:
       labels:
         app: hypothesisloop-control-service
     spec:
-      {{- if not .Values.postgres.external.enabled }}
+      {{- if not (and .Values.postgres.external.enabled .Values.memgraph.external.enabled) }}
       initContainers:
+        {{- if not .Values.postgres.external.enabled }}
         - name: wait-for-postgres
           image: {{ .Values.postgres.image }}
           command: ["sh", "-c", "until pg_isready -h hypothesisloop-postgres -U {{ .Values.postgres.user }}; do sleep 2; done"]
+        {{- end }}
+        {{- if not .Values.memgraph.external.enabled }}
+        - name: wait-for-memgraph
+          image: {{ .Values.memgraph.image }}
+          command: ["sh", "-c", "until echo 'RETURN 1;' | mgconsole --host memgraph >/dev/null 2>&1; do sleep 2; done"]
+        {{- end }}
       {{- end }}
       containers:
         - name: control-service
