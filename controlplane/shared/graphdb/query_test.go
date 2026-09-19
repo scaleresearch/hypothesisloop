@@ -3,6 +3,7 @@ package graphdb
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // The guard is what stands between a rolled-back read and the statements a rollback cannot undo,
@@ -31,5 +32,14 @@ func TestCheckReadOnly(t *testing.T) {
 		if got := errors.Is(err, ErrInvalidQuery); got != refused {
 			t.Errorf("checkReadOnly(%q): got = %v, want refused = %v", q, err, refused)
 		}
+	}
+}
+
+// A datetime read from a query must be accepted back by datetime(), which wants 3 or 6 fraction
+// digits: RFC3339Nano would print .12345 for a time whose last microsecond digit is zero.
+func TestQueryDatetimesKeepSixFractionDigits(t *testing.T) {
+	at := time.Date(2026, 10, 2, 8, 59, 0, 123450000, time.FixedZone("x", 3600))
+	if got, want := mapValue(at, nil), "2026-10-02T07:59:00.123450Z"; got != want {
+		t.Fatalf("mapValue(%v) = %v, want %s", at, got, want)
 	}
 }

@@ -278,6 +278,10 @@ func mapValue(v any, ids map[int64]string) any {
 		return out
 	case map[string]any:
 		return mapProps(t, ids)
+	case time.Time:
+		// Memgraph's datetime() takes 3 or 6 fraction digits, so a value read here can be
+		// compared with datetime() as is; RFC3339Nano trims trailing zeros.
+		return t.UTC().Format("2006-01-02T15:04:05.000000Z07:00")
 	default:
 		return v
 	}
