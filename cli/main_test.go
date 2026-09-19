@@ -621,6 +621,25 @@ func TestUnfinishedJobSaysTheResultArrivesAsAnUpdate(t *testing.T) {
 	}
 }
 
+func TestOpenPlatformExperimentSaysTheStartArrivesAsAnUpdate(t *testing.T) {
+	status := "open"
+	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "pe-1", "status": status} })
+	note := "the start arrives as an update when you end your turn"
+	for _, tc := range []struct {
+		status string
+		want   bool
+	}{{"open", true}, {"running", false}, {"closed", false}} {
+		status = tc.status
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"platform-experiments", "get", "pe-1"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d, stderr %s", code, stderr.String())
+		}
+		if got := strings.Contains(stderr.String(), note); got != tc.want || strings.Contains(stdout.String(), note) {
+			t.Fatalf("%s: stdout %q, stderr %q, note wanted on stderr: %v", tc.status, stdout.String(), stderr.String(), tc.want)
+		}
+	}
+}
+
 func TestGuessedFormsPointToTheCommand(t *testing.T) {
 	recordingServer(t, func(_ int, r recorded) any {
 		if strings.HasSuffix(r.Path, "/results") {

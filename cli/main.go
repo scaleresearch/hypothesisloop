@@ -598,6 +598,9 @@ stages and current_stage.`, stderr)
 	}
 	delete(out, "$schema")
 	printJSON(stdout, out)
+	if out["status"] == "open" {
+		fmt.Fprintln(stderr, "hl: platform-experiments get: not started; the start arrives as an update when you end your turn")
+	}
 	return 0
 }
 
