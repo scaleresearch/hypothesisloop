@@ -265,3 +265,17 @@ def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, ex
         f"cut {cut_n} agents, want exactly floor(50% x 5)=2 -- a larger cut means the baseline was "
         "counted into the field"
     )
+
+
+def test_repeat_signup_of_a_member_succeeds_once_running_and_full(api, experiment, run_id):
+    # An agent restarting signs up again after the run started and filled; a newcomer is still refused.
+    member = make_agent(api, run_id, "repeat-member")
+    pe_id = experiment("repeat-signup", [member], budget=0.05, max_agents=1)
+
+    for _ in range(2):
+        r = api.signup(pe_id, member)
+        assert r.status_code == 200, f"repeat signup of a member: HTTP {r.status_code} {r.text}"
+    api.hl("signup", "--platform-experiment", pe_id, "--agent", member)
+
+    r = api.signup(pe_id, make_agent(api, run_id, "repeat-newcomer"))
+    assert r.status_code == 400 and "signup_closed" in r.text, f"newcomer after start: HTTP {r.status_code} {r.text}"

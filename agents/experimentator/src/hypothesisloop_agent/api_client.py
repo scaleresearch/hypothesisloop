@@ -36,19 +36,12 @@ class PlatformClient:
         self.api_url = api_url.rstrip("/")
 
     def join(self, agent_id: str, pe_id: str) -> None:
-        """Registers the agent and signs it up, safe to repeat on restart. A repeat register is a
-        409. A repeat signup is read first because POST refuses an agent already signed up once
-        the experiment is running or full."""
+        """Registers the agent and signs it up, safe to repeat on restart: a repeat register is a
+        409 and a repeat signup succeeds."""
         try:
             _request("POST", f"{self.api_url}/agents", {"id": agent_id, "kind": "agent"})
         except APIError as e:
             if e.status != 409:
-                raise
-        try:
-            _request("GET", f"{self.api_url}/platform-experiments/{pe_id}/signups/{agent_id}")
-            return
-        except APIError as e:
-            if e.status != 404:
                 raise
         _request("POST", f"{self.api_url}/platform-experiments/{pe_id}/signup", {"agent_id": agent_id})
 

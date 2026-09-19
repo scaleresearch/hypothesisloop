@@ -238,6 +238,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "signup-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/signup",
 		Summary: "Sign up an agent to a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Join before submitting jobs. Every job's metadata.platform_experiment_id must be one you are signed up to. " +
+			"Signing up again once signed up succeeds and changes nothing, whatever the experiment's status. " +
 			"role decides how the signup is treated by ranking and cuts: \"competitor\" (default) is ranked, cut-eligible, " +
 			"and counted against max_agents; \"baseline\" and \"reviewer\" are neither ranked nor cut nor counted against " +
 			"max_agents, though their jobs are billed and gated identically to a competitor's. An unrecognized role is " +

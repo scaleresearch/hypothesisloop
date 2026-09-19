@@ -201,6 +201,14 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 	if pe == nil {
 		return fmt.Errorf("experiment_not_found")
 	}
+	// A member signing up again has what it asked for, whatever the experiment's status or size.
+	already, err := s.store.IsSignedUp(ctx, platformExpID, agentID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.Signup: %w", err)
+	}
+	if already {
+		return nil
+	}
 	if pe.Status != domain.PlatformExpOpen {
 		return fmt.Errorf("signup_closed: experiment is %s", pe.Status)
 	}
@@ -222,8 +230,8 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
 	}
 	if !inserted {
-		// The insert is guarded on the experiment still being open, so this is either a repeat
-		// signup or a Start that committed since the status was read above.
+		// The insert is guarded on the experiment still being open, so this is either a
+		// concurrent signup of the same agent or a Start that committed since the reads above.
 		already, err := s.store.IsSignedUp(ctx, platformExpID, agentID)
 		if err != nil {
 			return fmt.Errorf("platform_experiments.Signup: %w", err)

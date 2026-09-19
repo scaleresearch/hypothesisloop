@@ -25,9 +25,12 @@ type signupStore struct {
 	// refuseInsert makes the guarded insert report inserted=false, which the store returns both
 	// for a repeat signup and for an experiment that started since the status was read.
 	refuseInsert bool
-	// alreadySignedUp is what the follow-up read finds, and the only thing that tells those two
-	// cases apart.
+	// alreadySignedUp is whether the agent is a member before the call.
 	alreadySignedUp bool
+	// racedIn makes the read after a refused insert find the agent signed up, as when a
+	// concurrent signup of the same agent committed first.
+	racedIn      bool
+	insertCalled bool
 }
 
 func (f *signupStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
@@ -40,11 +43,12 @@ func (f *signupStore) CountSignupsByRole(ctx context.Context, platformExpID stri
 
 func (f *signupStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
 	f.insertedFor = role
+	f.insertCalled = true
 	return !f.refuseInsert, nil
 }
 
 func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error) {
-	return f.alreadySignedUp, nil
+	return f.alreadySignedUp || (f.insertCalled && f.racedIn), nil
 }
 
 func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
@@ -213,20 +217,46 @@ func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest
 	}))
 }
 
-// The guarded insert reports the same inserted=false for two different situations, and the caller
-// gets a different answer for each. An agent signing up twice has succeeded — it is in the
-// experiment, which is all it asked for — and returning an error there would fail a retry of a
-// request that already worked, the exact thing an idempotent signup exists to prevent.
-func TestARepeatSignupSucceedsRatherThanReportingTheExperimentClosed(t *testing.T) {
-	store := &signupStore{
-		pe:              &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
-		byRole:          map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1},
-		refuseInsert:    true,
-		alreadySignedUp: true,
+// A member signing up again has succeeded: it is in the experiment, which is all it asked for.
+// The harness repeats signup on every restart, by which time the run has usually started and
+// filled up, so neither may turn the repeat into an error.
+func TestARepeatSignupSucceedsWhateverTheExperimentsStatusOrSize(t *testing.T) {
+	for _, pe := range []*domain.PlatformExperiment{
+		{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
+		{ID: "pe-1", Status: domain.PlatformExpRunning, MaxAgents: 5},
+		{ID: "pe-1", Status: domain.PlatformExpClosed, MaxAgents: 5},
+		{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 1},
+	} {
+		store := &signupStore{pe: pe, byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1}, alreadySignedUp: true}
+		if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, ""); err != nil {
+			t.Fatalf("%s, max_agents %d: repeat signup err = %v, want nil", pe.Status, pe.MaxAgents, err)
+		}
+		if store.insertCalled {
+			t.Fatalf("%s: a repeat signup inserted again", pe.Status)
+		}
 	}
+}
 
+// Two signups of the same agent racing: the loser's guarded insert is refused, and the read after
+// it finds the agent in, so the loser succeeds too.
+func TestASignupThatLostTheRaceWithItsOwnTwinSucceeds(t *testing.T) {
+	store := &signupStore{
+		pe:           &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
+		byRole:       map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1},
+		refuseInsert: true,
+		racedIn:      true,
+	}
 	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, ""); err != nil {
-		t.Fatalf("repeat signup err = %v, want nil — the agent is already in the experiment, which is what it asked for", err)
+		t.Fatalf("err = %v, want nil", err)
+	}
+}
+
+// A newcomer still meets the closed and full checks.
+func TestANewcomerIsRefusedOnceTheExperimentStarted(t *testing.T) {
+	store := &signupStore{pe: &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, MaxAgents: 5}}
+	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-2", domain.SignupRoleCompetitor, "")
+	if err == nil || !strings.Contains(err.Error(), "signup_closed") {
+		t.Fatalf("err = %v, want signup_closed", err)
 	}
 }
 
