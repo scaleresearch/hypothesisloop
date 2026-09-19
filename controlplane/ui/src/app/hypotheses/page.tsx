@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
-import { fetchHypothesisGraph, fetchPlatformExperiments } from '@/lib/api'
+import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperiments } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -46,18 +46,18 @@ function HypothesesPageContent() {
     () => fetchPlatformExperiments(),
     { refreshInterval: 30_000 },
   )
-  const sortedPEs = useMemo(
-    () => [...(platformExperiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [platformExperiments],
+  // The selector lists one page of experiments; the selected one may lie beyond it.
+  const { data: pe, error: selectedError } = useSWR(
+    peID ? ['pe', peID] : null,
+    () => fetchPlatformExperiment(peID),
   )
-  const pe = sortedPEs.find(p => p.id === peID)
 
-  // A graph belongs to one experiment, so the URL always names one: the newest by default.
+  // A graph belongs to one experiment, so the URL always names one: the latest started by default.
   useEffect(() => {
-    if (!peID && sortedPEs.length > 0) router.replace(graphHref(sortedPEs[0].id))
-  }, [peID, sortedPEs, router])
+    if (!peID && platformExperiments && platformExperiments.length > 0) router.replace(graphHref(platformExperiments[0].id))
+  }, [peID, platformExperiments, router])
 
-  const { data: graph, error, isLoading, mutate } = useSWR(
+  const { data: graph, error, mutate } = useSWR(
     peID ? ['hypothesis-graph', peID] : null,
     () => fetchHypothesisGraph(peID),
     { refreshInterval: 15_000 },
@@ -76,8 +76,12 @@ function HypothesesPageContent() {
     return options
   }, [graph])
 
+  const peOptions = useMemo(() => {
+    const listed = platformExperiments ?? []
+    return (pe && !listed.some(p => p.id === pe.id) ? [pe, ...listed] : listed).map(p => ({ value: p.id, label: p.name }))
+  }, [platformExperiments, pe])
+
   const selected = focus || graph?.root || ''
-  const rootLabel = pe?.name ?? peID
   const filtering = statusFilter !== '' || ownerFilter !== ''
   const showSide = graph !== undefined && (q !== '' || selected !== graph.root)
   const matching = graph ? graph.nodes.filter(n => matchesFilters(n, filters)).length : 0
@@ -108,7 +112,7 @@ function HypothesesPageContent() {
           hideAllOption
           placeholder="Select an experiment"
           style={{ minWidth: 260 }}
-          options={sortedPEs.map(p => ({ value: p.id, label: p.name }))}
+          options={peOptions}
         />
         <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }} role="group" aria-label="View">
           <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
@@ -138,14 +142,15 @@ function HypothesesPageContent() {
       </div>
 
       {peError && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
-      {platformExperiments && sortedPEs.length === 0 && (
+      {platformExperiments && platformExperiments.length === 0 && (
         <EmptyState>No platform experiments yet. A hypothesis graph grows inside one.</EmptyState>
       )}
+      {selectedError && <ErrorMessage>Cannot load platform experiment {peID}: {selectedError.message}</ErrorMessage>}
       {error && <ErrorMessage>Cannot load the hypothesis graph: {error.message}</ErrorMessage>}
-      {(isLoading || (!peID && !platformExperiments && !peError)) && <Loading />}
+      {(peID ? !(graph && pe) && !error && !selectedError : !platformExperiments && !peError) && <Loading />}
 
-      {graph && positions && <ObjectiveBar graph={graph} pe={pe} onAddIdea={setAddUnder} />}
-      {graph && positions && (
+      {graph && positions && pe && <ObjectiveBar graph={graph} pe={pe} onAddIdea={setAddUnder} />}
+      {graph && positions && pe && (
         <div className={clsx('hg-layout', showSide && 'with-side')}>
           <div className="hg-main">
             {graph.nodes.length === 0 ? (
@@ -156,7 +161,7 @@ function HypothesesPageContent() {
             ) : view === 'outline' ? (
               <HypothesisOutline
                 graph={graph}
-                rootLabel={rootLabel}
+                rootLabel={pe.name}
                 selected={selected}
                 hits={hits}
                 filters={filters}
@@ -167,7 +172,7 @@ function HypothesesPageContent() {
                 key={graph.root}
                 graph={graph}
                 positions={positions}
-                rootLabel={rootLabel}
+                rootLabel={pe.name}
                 focus={focus}
                 selected={selected}
                 hits={hits}
@@ -201,7 +206,7 @@ function HypothesesPageContent() {
         </div>
       )}
 
-      {graph && addUnder !== null && (
+      {graph && pe && addUnder !== null && (
         <Dialog open onClose={() => setAddUnder(null)} className="wa-dialog">
           <div className="wa-dialog-backdrop" aria-hidden="true" />
           <div className="wa-dialog-container">
@@ -211,7 +216,7 @@ function HypothesesPageContent() {
                 platformExperimentID={peID}
                 parent={{
                   id: addUnder,
-                  label: addUnder === graph.root ? `the objective of ${rootLabel}` : nodeByID.get(addUnder)!.text,
+                  label: addUnder === graph.root ? `the objective of ${pe.name}` : nodeByID.get(addUnder)!.text,
                 }}
                 onAdded={onAdded}
               />

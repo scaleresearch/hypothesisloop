@@ -47,7 +47,8 @@ function optionRowStyle(focus: boolean, selected: boolean): React.CSSProperties 
 export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, style, hideAllOption }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
 
-  const selected = options.find(o => o.value === value) ?? null
+  // A value outside the options (a filter set from a link) shows as itself, never as "All".
+  const selected = options.find(o => o.value === value)
   const filtered = query === ''
     ? options
     : options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
@@ -64,7 +65,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
         className="mono"
         style={FIELD_STYLE}
         placeholder={placeholder ?? allLabel}
-        displayValue={() => (selected ? selected.label : '')}
+        displayValue={() => selected?.label ?? value}
         onChange={e => setQuery(e.target.value)}
       />
       <ComboboxOptions

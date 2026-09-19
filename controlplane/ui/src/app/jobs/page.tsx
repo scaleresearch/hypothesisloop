@@ -63,10 +63,6 @@ function JobsPageContent() {
     [agents],
   )
   const { data: platformExperiments } = useSWR<PlatformExperiment[]>('platform-experiments-all', () => fetchPlatformExperiments())
-  const sortedPEs = useMemo(
-    () => [...(platformExperiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [platformExperiments],
-  )
   const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
@@ -176,7 +172,7 @@ function JobsPageContent() {
             value={peFilter}
             onChange={v => { setPEFilter(v); setPage(0) }}
             allLabel="All experiments"
-            options={sortedPEs.map(pe => ({ value: pe.id, label: pe.name }))}
+            options={(platformExperiments ?? []).map(pe => ({ value: pe.id, label: pe.name }))}
           />
         </div>
       </div>

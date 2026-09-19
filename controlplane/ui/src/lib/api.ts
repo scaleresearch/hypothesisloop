@@ -375,7 +375,7 @@ export interface PlatformExperimentsParams {
   q?: string
   limit?: number
   offset?: number
-  /** "created_at" | "name" | "status", optionally prefixed with "-" for descending. */
+  /** "created_at" | "starts_at" | "name" | "status", optionally prefixed with "-" for descending. */
   sort?: string
 }
 
@@ -390,12 +390,11 @@ export function fetchPlatformExperimentsPage(params?: PlatformExperimentsParams)
 }
 
 // The first page at the server's own ceiling, for the id->name lookups and filter dropdowns that
-// decorate other pages. The list default is deliberately small (see the API's own docs), so this
-// asks explicitly rather than silently showing 20. Callers that display platform experiments as
-// their subject must page instead — see fetchPlatformExperimentsPage.
-export function fetchPlatformExperiments(status?: string): Promise<PlatformExperiment[]> {
-  return fetchPlatformExperimentsPage({ ...(status ? { status } : {}), limit: MAX_LIST_PAGE_SIZE })
-    .then(p => p.items)
+// decorate other pages, latest start first as on the platform experiments page: an unscheduled
+// experiment has no start and sorts last. Callers that display platform experiments as their
+// subject must page instead — see fetchPlatformExperimentsPage.
+export function fetchPlatformExperiments(): Promise<PlatformExperiment[]> {
+  return fetchPlatformExperimentsPage({ sort: '-starts_at', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items)
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {

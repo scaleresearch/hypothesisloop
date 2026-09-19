@@ -22,7 +22,7 @@ interface HypothesisPanelProps {
 
 export function ObjectiveBar({ graph, pe, onAddIdea }: {
   graph: HypothesisGraph
-  pe: PlatformExperiment | undefined
+  pe: PlatformExperiment
   onAddIdea: (parentID: string) => void
 }) {
   return (
@@ -30,7 +30,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
       <PodContent className="hg-stack">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
           <span className="uppercase-label">Objective</span>
-          <span style={{ fontWeight: 650 }}>{pe?.name ?? graph.root}</span>
+          <span style={{ fontWeight: 650 }}>{pe.name}</span>
           <span className="text-muted" style={{ fontSize: 12 }}>
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
           </span>
@@ -39,7 +39,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
             <Link href={`/platform-experiments/${graph.root}`} className="text-link" style={{ fontSize: 12 }}>Experiment →</Link>
           </span>
         </div>
-        {pe?.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
+        {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
       </PodContent>
     </Pod>
   )
