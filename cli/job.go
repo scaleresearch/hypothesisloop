@@ -17,7 +17,7 @@ import (
 
 const jobUsage = `usage: hl job <command> ...
 
-  submit   [FILE|-]            submit a job spec, prints the accepted job; --hypothesis and --env override it
+  submit   [FILE|-]            submit a job spec, prints its id; --hypothesis and --env override it
   list                         jobs of your platform experiment, one per line
   status   ID [ID ...]         one line per job: status, queue or eviction reason, spec
   metrics  ID [--points]       per metric: last value, min, max and points reported
@@ -71,7 +71,8 @@ func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 
 FILE is a YAML file shaped exactly like the POST /experiments body: id, metadata, job. The flags
 override it for this one submission, so one committed base spec serves every job that differs
-only in its hypothesis and env, with nothing to edit and nothing to commit.
+only in its hypothesis and env, with nothing to edit and nothing to commit. Prints the accepted
+job's id, status, code_ref, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
@@ -135,7 +136,14 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	body["metadata"] = metadata
-	var out json.RawMessage
+	// The reply repeats the submitted spec; only what the platform decided is printed.
+	var out struct {
+		ID            string  `json:"id"`
+		Status        string  `json:"status,omitempty"`
+		CodeRef       string  `json:"code_ref,omitempty"`
+		CapacityTier  string  `json:"capacity_tier,omitempty"`
+		EstimatedCost float64 `json:"estimated_cost_acch,omitempty"`
+	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		if missing := missingSummaries(c, metadata, err); missing != "" {
 			fmt.Fprintln(stderr, "hl: job submit: refused until each of your COMPLETED jobs has a summary; file these, then submit again: "+missing)
@@ -143,9 +151,8 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		}
 		return fail(stderr, err)
 	}
-	if err := printLine(stdout, out, jobDrop...); err != nil {
-		return fail(stderr, err)
-	}
+	line, _ := json.Marshal(out)
+	fmt.Fprintf(stdout, "%s\n", line)
 	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 	return 0
 }

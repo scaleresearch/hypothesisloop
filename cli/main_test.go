@@ -182,7 +182,8 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-1"})
+		_, _ = w.Write([]byte(`{"id":"job-1","agent_id":"jane","code_ref":"repo@abc","job":{"image":"foo:latest"},` +
+			`"estimated_cost_acch":0.5,"capacity_tier":"guaranteed","status":"QUEUED","not_admitted_reason":"capacity_unavailable"}`))
 	})
 	setAPIURL(t, url)
 
@@ -201,6 +202,9 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "arrives as an update when you end your turn") {
 		t.Fatalf("stderr = %q, want the note that the result arrives as an update", stderr.String())
+	}
+	if want := `{"id":"job-1","status":"QUEUED","code_ref":"repo@abc","capacity_tier":"guaranteed","estimated_cost_acch":0.5}` + "\n"; stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 	metadata, ok := gotBody["metadata"].(map[string]any)
 	if !ok || metadata["agent_id"] != "jane" || metadata["platform_experiment_id"] != "pe-env" {
