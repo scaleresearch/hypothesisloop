@@ -47,22 +47,40 @@ func (e *Executor) sumRunningRequestsExcluding(ctx context.Context, excludeExper
 		if c.State != "running" && c.State != "created" {
 			continue
 		}
-		if v, err := strconv.ParseInt(c.Labels[LabelCPUCores], 10, 64); err == nil {
-			out.cpuMilli += v
+		cpuMilli, err := requestLabel(c, LabelCPUCores)
+		if err != nil {
+			return runningRequests{}, err
 		}
-		if v, err := strconv.ParseInt(c.Labels[LabelMemoryBytes], 10, 64); err == nil {
-			out.memoryBytes += v
+		memoryBytes, err := requestLabel(c, LabelMemoryBytes)
+		if err != nil {
+			return runningRequests{}, err
 		}
-		if v, err := strconv.ParseInt(c.Labels[LabelStorageBytes], 10, 64); err == nil {
-			out.storageBytes += v
+		storageBytes, err := requestLabel(c, LabelStorageBytes)
+		if err != nil {
+			return runningRequests{}, err
 		}
-		acceleratorType := c.Labels[LabelAcceleratorType]
-		count, _ := strconv.ParseInt(c.Labels[LabelAcceleratorCnt], 10, 64)
-		if acceleratorType != "" && count > 0 {
+		count, err := requestLabel(c, LabelAcceleratorCnt)
+		if err != nil {
+			return runningRequests{}, err
+		}
+		out.cpuMilli += cpuMilli
+		out.memoryBytes += memoryBytes
+		out.storageBytes += storageBytes
+		if acceleratorType := c.Labels[LabelAcceleratorType]; acceleratorType != "" && count > 0 {
 			out.accelerators[acceleratorType] += count
 		}
 	}
 	return out, nil
+}
+
+// requestLabel parses a resource request recorded on a managed container. A missing or
+// malformed value fails the whole read: counting it as zero would over-report free capacity.
+func requestLabel(c containerInfo, key string) (int64, error) {
+	v, err := strconv.ParseInt(c.Labels[key], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("podexec: container %s label %s=%q: %w", c.name(), key, c.Labels[key], err)
+	}
+	return v, nil
 }
 
 // GetLiveCPUCapacity reports this node's real, current CPU-core capacity: total logical cores
