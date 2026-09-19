@@ -202,7 +202,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"evictions_by_class folds the same tally into whose fault it was: 'workload' is " +
 			"yours, 'infrastructure' is the environment's (those cost you no quota and no retry " +
 			"attempt -- stop debugging code that was correct), and 'policy' is the platform's " +
-			"own decision, such as a stage cut, which is not a failure at all.",
+			"own decision, such as a stage cut, which is not a failure at all. " +
+			"in_flight_accelerators sums accelerator_count over SUBMITTED and RUNNING. " +
+			"?group_by=agent or ?group_by=hypothesis adds groups: the same counts once per " +
+			"agent or hypothesis that has a matching experiment, keyed by its id.",
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent" doc:"Only this agent's experiments."`
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
@@ -211,7 +214,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
 		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
+		GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
 	}) (*struct{ Body *domain.ExperimentStats }, error) {
+		if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
+			return nil, huma.Error400BadRequest("unknown group_by " + in.GroupBy)
+		}
 		if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
 			return nil, huma.Error400BadRequest("unknown status " + in.Status)
 		}
@@ -231,7 +238,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
-		})
+		}, in.GroupBy)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

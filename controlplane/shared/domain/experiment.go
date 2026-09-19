@@ -257,6 +257,19 @@ type ExperimentStats struct {
 	// decisions without knowing the fifteen reason codes. Derived here at read time from the
 	// same tally, never stored: a class is a pure function of a reason.
 	EvictionsByClass map[string]int `json:"evictions_by_class"`
+	// InFlightAccelerators sums accelerator_count over SUBMITTED and RUNNING, the same set the
+	// max_concurrent_accelerators cap is checked against.
+	InFlightAccelerators int `json:"in_flight_accelerators"`
+	// Groups holds the same stats once per value of the requested group field, keyed by that
+	// value. Absent when no grouping was asked for.
+	Groups map[string]*ExperimentStats `json:"groups,omitempty"`
+}
+
+// ExperimentStatsGroupFields are the fields ExperimentStats can be split by, mapped to their
+// SQL column.
+var ExperimentStatsGroupFields = map[string]string{
+	"agent":      "agent_id",
+	"hypothesis": "hypothesis_id",
 }
 
 // ValidSortField reports whether sort names a field in allowed, ignoring a leading "-" for

@@ -23,7 +23,7 @@ type Store interface {
 	CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error)
 	// ExperimentStats counts the matching set grouped by status/tier/eviction reason, for
 	// callers that need whole-set totals rather than a page of rows.
-	ExperimentStats(ctx context.Context, filter domain.ExperimentFilter) (*domain.ExperimentStats, error)
+	ExperimentStats(ctx context.Context, filter domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error)
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
 	MarkQueued(ctx context.Context, id, reason string) error
 	GetRunningAndQueued(ctx context.Context) ([]*domain.Experiment, error)

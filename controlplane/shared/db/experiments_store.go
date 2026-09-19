@@ -195,14 +195,24 @@ func (s *ExperimentsStore) CountExperiments(ctx context.Context, filter domain.E
 
 // ExperimentStats counts the experiments matching filter, grouped in PostgreSQL. Limit/Offset/
 // Sort are ignored: this is the whole matching set by construction, which is the point — a
-// caller reading pages of rows can only ever count the page it holds.
-func (s *ExperimentsStore) ExperimentStats(ctx context.Context, filter domain.ExperimentFilter) (*domain.ExperimentStats, error) {
+// caller reading pages of rows can only ever count the page it holds. A non-empty groupBy (a key
+// of domain.ExperimentStatsGroupFields) also fills Groups with the same counts per value.
+func (s *ExperimentsStore) ExperimentStats(ctx context.Context, filter domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error) {
+	groupColumn := "''"
+	if groupBy != "" {
+		column, ok := domain.ExperimentStatsGroupFields[groupBy]
+		if !ok {
+			return nil, fmt.Errorf("experiments_store.ExperimentStats: unknown group field %q", groupBy)
+		}
+		groupColumn = column
+	}
 	clauses, args := experimentFilterClauses(filter)
 	// split_part yields the whole string when there is no ':', so a reason with no detail
 	// suffix is its own code — the same rule the UI applies when it labels one.
-	q := `SELECT status, capacity_tier, split_part(COALESCE(eviction_reason, ''), ':', 1) AS reason_code, COUNT(*)
+	q := `SELECT ` + groupColumn + ` AS group_key, status, capacity_tier,
+       split_part(COALESCE(eviction_reason, ''), ':', 1) AS reason_code, COUNT(*), SUM(accelerator_count)
 FROM experiments WHERE ` + strings.Join(clauses, " AND ") + `
-GROUP BY status, capacity_tier, reason_code`
+GROUP BY group_key, status, capacity_tier, reason_code`
 
 	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -210,41 +220,68 @@ GROUP BY status, capacity_tier, reason_code`
 	}
 	defer rows.Close()
 
-	out := &domain.ExperimentStats{
+	out := newExperimentStats()
+	if groupBy != "" {
+		out.Groups = map[string]*domain.ExperimentStats{}
+	}
+	for rows.Next() {
+		var key, status, tier, reasonCode string
+		var n, accelerators int
+		if err := rows.Scan(&key, &status, &tier, &reasonCode, &n, &accelerators); err != nil {
+			return nil, fmt.Errorf("experiments_store.ExperimentStats: scan: %w", err)
+		}
+		tallyExperimentStats(out, status, tier, reasonCode, n, accelerators)
+		if groupBy != "" {
+			if out.Groups[key] == nil {
+				out.Groups[key] = newExperimentStats()
+			}
+			tallyExperimentStats(out.Groups[key], status, tier, reasonCode, n, accelerators)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("experiments_store.ExperimentStats: rows: %w", err)
+	}
+	classifyEvictions(out)
+	for _, group := range out.Groups {
+		classifyEvictions(group)
+	}
+	return out, nil
+}
+
+func newExperimentStats() *domain.ExperimentStats {
+	return &domain.ExperimentStats{
 		ByStatus:              map[string]int{},
 		ByCapacityTier:        map[string]int{},
 		RunningByCapacityTier: map[string]int{},
 		EvictedByCapacityTier: map[string]int{},
 		EvictionsByReason:     map[string]int{},
+		EvictionsByClass:      map[string]int{},
 	}
-	for rows.Next() {
-		var status, tier, reasonCode string
-		var n int
-		if err := rows.Scan(&status, &tier, &reasonCode, &n); err != nil {
-			return nil, fmt.Errorf("experiments_store.ExperimentStats: scan: %w", err)
+}
+
+func tallyExperimentStats(out *domain.ExperimentStats, status, tier, reasonCode string, n, accelerators int) {
+	out.Total += n
+	out.ByStatus[status] += n
+	out.ByCapacityTier[tier] += n
+	switch domain.ExperimentStatus(status) {
+	case domain.StatusSubmitted:
+		out.InFlightAccelerators += accelerators
+	case domain.StatusRunning:
+		out.InFlightAccelerators += accelerators
+		out.RunningByCapacityTier[tier] += n
+	case domain.StatusEvicted:
+		out.EvictedByCapacityTier[tier] += n
+		if reasonCode == "" {
+			reasonCode = "unknown"
 		}
-		out.Total += n
-		out.ByStatus[status] += n
-		out.ByCapacityTier[tier] += n
-		if domain.ExperimentStatus(status) == domain.StatusRunning {
-			out.RunningByCapacityTier[tier] += n
-		}
-		if domain.ExperimentStatus(status) == domain.StatusEvicted {
-			out.EvictedByCapacityTier[tier] += n
-			if reasonCode == "" {
-				reasonCode = "unknown"
-			}
-			out.EvictionsByReason[reasonCode] += n
-		}
+		out.EvictionsByReason[reasonCode] += n
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	out.EvictionsByClass = map[string]int{}
+}
+
+func classifyEvictions(out *domain.ExperimentStats) {
 	for class, n := range domain.ClassifyCounts(out.EvictionsByReason) {
 		out.EvictionsByClass[string(class)] = n
 	}
-	return out, nil
 }
 
 func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {

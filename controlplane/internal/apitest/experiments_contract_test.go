@@ -23,11 +23,12 @@ import (
 // handler actually forwards to storage rather than on a re-implementation of the query.
 type filterSpyStore struct {
 	scheduler.Store
-	gotList  domain.ExperimentFilter
-	gotCount domain.ExperimentFilter
-	gotStats domain.ExperimentFilter
-	items    []*domain.Experiment
-	total    int
+	gotList    domain.ExperimentFilter
+	gotCount   domain.ExperimentFilter
+	gotStats   domain.ExperimentFilter
+	gotGroupBy string
+	items      []*domain.Experiment
+	total      int
 }
 
 func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentFilter) ([]*domain.Experiment, error) {
@@ -40,8 +41,9 @@ func (s *filterSpyStore) CountExperiments(_ context.Context, f domain.Experiment
 	return s.total, nil
 }
 
-func (s *filterSpyStore) ExperimentStats(_ context.Context, f domain.ExperimentFilter) (*domain.ExperimentStats, error) {
+func (s *filterSpyStore) ExperimentStats(_ context.Context, f domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error) {
 	s.gotStats = f
+	s.gotGroupBy = groupBy
 	return &domain.ExperimentStats{Total: s.total, ByStatus: map[string]int{"RUNNING": s.total}}, nil
 }
 
@@ -253,5 +255,20 @@ func TestExperimentStatsIsNotShadowedByExperimentByID(t *testing.T) {
 	}
 	if spy.gotStats.Status != domain.StatusRunning {
 		t.Errorf("stats filter status = %q, want RUNNING", spy.gotStats.Status)
+	}
+}
+
+func TestExperimentStatsForwardsKnownGroupByAndRejectsOthers(t *testing.T) {
+	spy := &filterSpyStore{}
+	r := schedulerRouter(t, spy)
+
+	if code, body := get(t, r, "/experiments/stats?platform_experiment_id=pe-1&group_by=agent"); code != 200 {
+		t.Fatalf("status = %d (%s), want 200", code, body)
+	}
+	if spy.gotGroupBy != "agent" || spy.gotStats.PlatformExperimentID != "pe-1" {
+		t.Errorf("group by = %q, platform experiment = %q, want agent, pe-1", spy.gotGroupBy, spy.gotStats.PlatformExperimentID)
+	}
+	if code, body := get(t, r, "/experiments/stats?group_by=status"); code != 400 {
+		t.Errorf("unknown group_by: status = %d (%s), want 400", code, body)
 	}
 }
