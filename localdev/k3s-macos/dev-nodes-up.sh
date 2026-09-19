@@ -59,10 +59,17 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   if podman inspect "${name}" &>/dev/null && ! kubectl --context "${CONTEXT_NAME}" get node "${name}" &>/dev/null; then
     lib_destroy_node "${CONTEXT_NAME}" "${name}"
   fi
+  if podman inspect "${name}" &>/dev/null; then
+    if [[ "$(podman inspect -f '{{.State.Running}}' "${name}")" != true ]]; then
+      podman start "${name}" >/dev/null
+    fi
+    # A node created before the host changed networks still pulls from the old address.
+    if ! podman exec "${name}" grep -q "${REGISTRY_HOST_IP}:5000" /etc/rancher/k3s/registries.yaml; then
+      lib_destroy_node "${CONTEXT_NAME}" "${name}"
+    fi
+  fi
   if ! podman inspect "${name}" &>/dev/null; then
     lib_create_node "${CONTEXT_NAME}" "${name}" "${IMAGE}" "${SERVER_URL}" "${TOKEN}" "${NODE_CPUS}" "${NODE_MEMORY}"
-  elif [[ "$(podman inspect -f '{{.State.Running}}' "${name}")" != true ]]; then
-    podman start "${name}" >/dev/null
   fi
   lib_wait_node_ready "${CONTEXT_NAME}" "${name}"
 

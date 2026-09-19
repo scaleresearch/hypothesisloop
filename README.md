@@ -364,7 +364,7 @@ between.
 | `make cluster-agent-down`         | Remove node-agent + cluster-agent from that target cluster          |
 | `make k3s-up`                     | Bootstrap a local k3s cluster and install the cluster-agent bundle onto it |
 | `make k3s-down`                   | Destroy the local k3s cluster                                       |
-| `make full-up`                    | k3s-up + controlplane-up                                            |
+| `make full-up`                    | k3s-up + controlplane-up; rerun it after the host changes networks, since the registry, the data store and every node are addressed by the host's LAN IP |
 | `make full-stop` / `make full-start` | Pause/resume everything (podman machine, k3s, control plane) without destroying cluster state |
 | `make reload`                     | Rebuild every image from current source, push it to the registry, and bounce all containers/pods to run it - use after a Go change |
 | `make reset`                      | controlplane-down + controlplane-up                                 |
