@@ -41,17 +41,6 @@ const (
 	DistributedMasterPort = 29500
 )
 
-// Named values used by focused workload-builder tests. New requires every operational value
-// explicitly and never applies these implicitly.
-const (
-	// DefaultTerminationGracePeriodSeconds is used when a job doesn't request its own.
-	DefaultTerminationGracePeriodSeconds = int64(5)
-	// DefaultMaxTerminationGracePeriodSeconds caps whatever a job requests for itself.
-	DefaultMaxTerminationGracePeriodSeconds = int64(30)
-	// DefaultMaxCheckpointGraceSeconds caps job.checkpoint_grace_seconds.
-	DefaultMaxCheckpointGraceSeconds = int64(600)
-)
-
 type Config struct {
 	KubeconfigPath string
 	KubeContext    string
