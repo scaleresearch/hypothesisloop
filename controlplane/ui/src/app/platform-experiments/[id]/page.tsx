@@ -75,21 +75,27 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
   }
   const hasBounded = metricNames.some(isBoundedMetric)
   const hasUnbounded = metricNames.some((n) => !isBoundedMetric(n))
+  // A job of a few seconds needs fractions of a second to tell its ticks apart.
+  const short = chartData[chartData.length - 1].t - chartData[0].t < 10_000
+  const formatTime = (t: number) => new Date(t).toLocaleTimeString(undefined, {
+    hour: 'numeric', minute: '2-digit', second: '2-digit', fractionalSecondDigits: short ? 1 : undefined,
+  })
+  const axisOf = (name: string) => (isBoundedMetric(name) ? 'left' : 'right')
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+      <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={CHART_TICK} />
-        {hasBounded && <YAxis yAxisId="left" domain={[0, 1]} tick={CHART_TICK} width={28} />}
-        {hasUnbounded && <YAxis yAxisId="right" orientation="right" tick={CHART_TICK} width={28} />}
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={CHART_TOOLTIP_STYLE} />
+        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={formatTime} tick={CHART_TICK} />
+        {hasBounded && <YAxis yAxisId="left" domain={[0, 1]} tick={CHART_TICK} width={40} />}
+        {hasUnbounded && <YAxis yAxisId="right" orientation="right" tick={CHART_TICK} width={40} />}
+        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={formatTime} contentStyle={CHART_TOOLTIP_STYLE} />
         <Legend wrapperStyle={{ fontSize: 10 }} />
         {metricNames.map((name, i) => (
           <Line
             key={name}
-            yAxisId={isBoundedMetric(name) ? 'left' : 'right'}
+            yAxisId={axisOf(name)}
             dataKey={name}
-            name={name}
+            name={hasBounded && hasUnbounded ? `${name} (${axisOf(name)} axis)` : name}
             stroke={METRIC_COLORS[i % METRIC_COLORS.length]}
             dot={{ r: 2 }}
             strokeWidth={1.5}
