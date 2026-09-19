@@ -466,7 +466,7 @@ func TestJobListWithoutAgentListsWholePlatformExperiment(t *testing.T) {
 func TestHTTPErrorSurfacesPlatformMessage(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"error":"agent already exists"}`))
+		_, _ = w.Write([]byte(`{"$schema":"http://api/schemas/ErrorModel.json", "error":"agent already exists"}`))
 	})
 	setAPIURL(t, url)
 
@@ -475,8 +475,8 @@ func TestHTTPErrorSurfacesPlatformMessage(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "agent already exists") {
-		t.Fatalf("stderr did not surface platform error: %s", stderr.String())
+	if want := "hl: POST /agents -> HTTP 409: {\"error\":\"agent already exists\"}\n"; stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 

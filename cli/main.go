@@ -148,7 +148,14 @@ func printJSON(stdout io.Writer, v any) {
 	fmt.Fprintln(stdout, string(data))
 }
 
+// fail prints err on one line, a JSON reply of the platform compacted like any other output.
 func fail(stderr io.Writer, err error) int {
+	var refused *apiclient.HTTPError
+	if errors.As(err, &refused) {
+		if body, jsonErr := compactJSON([]byte(refused.Body)); jsonErr == nil {
+			refused.Body = string(body)
+		}
+	}
 	fmt.Fprintf(stderr, "hl: %s\n", err)
 	return 1
 }
