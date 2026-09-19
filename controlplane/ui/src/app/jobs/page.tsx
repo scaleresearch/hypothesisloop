@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchClusters } from '@/lib/api'
+import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchClusters, fetchPlatformExperiment, fetchPlatformExperimentTimeseries } from '@/lib/api'
 import type { Experiment, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { AgentSelect } from '@/components/agent-select'
@@ -117,6 +117,26 @@ function JobsPageContent() {
     }),
     { refreshInterval: 8_000, keepPreviousData: true },
   )
+
+  // The job record carries no metric. One experiment's ranking metric comes in a single read of
+  // its timeseries; across experiments there is no such read, so the column needs the filter.
+  const { data: pe } = useSWR(peFilter ? ['pe', peFilter] : null, () => fetchPlatformExperiment(peFilter))
+  const rankingMetric = pe?.metrics?.find(m => m.role === 'ranking') ?? pe?.metrics?.[0]
+  const { data: rankingSeries } = useSWR(
+    pe && rankingMetric ? ['pe-ranking-series', pe.id, rankingMetric.key] : null,
+    () => fetchPlatformExperimentTimeseries(
+      pe!.id, rankingMetric!.key,
+      Math.max(24, Math.ceil((Date.now() - new Date(pe!.starts_at ?? pe!.created_at).getTime()) / 3_600_000)),
+    ),
+    { refreshInterval: 30_000 },
+  )
+  const bestByJob = new Map<string, number>()
+  for (const s of rankingSeries?.series ?? []) {
+    if (s.points.length === 0 || (s.metric_basis && s.metric_basis !== 'raw')) continue
+    const values = s.points.map(p => p.value)
+    bestByJob.set(s.experiment_id, rankingMetric!.direction === 'maximize' ? Math.max(...values) : Math.min(...values))
+  }
+
   const byStatus = stats?.by_status ?? {}
   const running   = byStatus.RUNNING ?? 0
   const queued    = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0) + (byStatus.ADMITTED ?? 0)
@@ -176,15 +196,17 @@ function JobsPageContent() {
           {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
         </PodHeader>
         <PodContent scrollX>
-          {/* Fixed widths for the short columns; experiment and hypothesis share what is left. */}
+          {/* Fixed widths for the short columns; experiment and hypothesis share what is left. An
+              experiment filter swaps the experiment column for that experiment's ranking metric. */}
           <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 940 }}>
             <thead>
               <tr>
                 <th style={{ width: 84 }}>Job ID</th>
                 <th style={{ width: 150 }}>Agent</th>
-                <th>Experiment</th>
+                {!peFilter && <th>Experiment</th>}
                 <SortHeader label="Status" sortKey="status" active={sortKey === 'status'} dir={sortDir} onClick={toggleSort} width={140} />
                 <th style={{ width: 130 }}>Accelerator</th>
+                {rankingMetric && <th style={{ width: 150, textAlign: 'right' }}>Best {rankingMetric.key}</th>}
                 <th style={{ width: 92, textAlign: 'right' }}>Est. Cost</th>
                 <th>Hypothesis</th>
                 <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} width={104} />
@@ -217,17 +239,19 @@ function JobsPageContent() {
                   >
                     <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{job.id.slice(0, 8)}…</td>
                     <td className="mono" style={ELLIPSIS} title={job.agent_id}>{job.agent_id}</td>
-                    <td className="mono" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>
-                      {j.platform_experiment_id ? (
-                        <Link
-                          href={`/platform-experiments/${j.platform_experiment_id}`}
-                          className="text-link"
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <PlatformExperimentName id={j.platform_experiment_id} />
-                        </Link>
-                      ) : '—'}
-                    </td>
+                    {!peFilter && (
+                      <td className="mono" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>
+                        {j.platform_experiment_id ? (
+                          <Link
+                            href={`/platform-experiments/${j.platform_experiment_id}`}
+                            className="text-link"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <PlatformExperimentName id={j.platform_experiment_id} />
+                          </Link>
+                        ) : '—'}
+                      </td>
+                    )}
                     <td>
                       <Badge status={status}>{status}</Badge>
                       {status === 'QUEUED' && j.not_admitted_reason && (
@@ -254,6 +278,9 @@ function JobsPageContent() {
                     <td className="mono" style={{ ...ELLIPSIS, fontSize: 11 }} title={j.accelerator_type}>
                       {j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}
                     </td>
+                    {rankingMetric && (
+                      <td className="mono" style={{ textAlign: 'right' }}>{bestByJob.get(job.id)?.toFixed(4) ?? '—'}</td>
+                    )}
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11, whiteSpace: 'nowrap' }}>
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>
