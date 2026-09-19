@@ -122,9 +122,9 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      Git stays the store for text — code, configs, small results; anything loaded as a tensor goes
      to the data prefix.
   6. Wait on the platform instead of polling it. `hl watch` holds a live subscription open and
-     prints one JSON event per line — kind, subject, new value, cursor — and every event is a
-     pointer, never a payload: follow one with the ordinary read (`hl job status`, `hl job
-     metrics`, `hl hypothesis get`) when you want the detail. One command covers the loop above:
+     prints one JSON event per line (kind, subject, new value, cursor); each is a pointer, never a
+     payload: follow it with `hl job status --id J`, `hl job metrics --id J` or `hl hypothesis get
+     <id>` when you want the detail. One command covers the loop above:
        hl watch --platform-experiment {platform_experiment_id} --agent {agent_id} --until 'status in COMPLETED,FAILED,EVICTED,closed' --timeout 540
      It returns when any job of yours ends or the run closes for everyone, and prints what
      happened meanwhile. Act on these:
@@ -149,9 +149,9 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      `capacity_unavailable` and no cluster can fit it. The scheduler does not know which of your
      own jobs is more urgent (it preempts burst jobs only for guaranteed ones, and evicts a job
      whose request strands a node's accelerators): to put one first, cancel the one blocking it.
-  7. File the summary on every COMPLETED job with `hl job summary` — write it for the reader in
-     step 3, your own restarted self or a competitor reading the graph — and set your
-     hypothesis's status once the evidence lets you call it honestly. Then loop back to 3.
+  7. File the summary on every COMPLETED job with `hl job summary --id J --text '...'`, written for
+     the reader in step 3, and once the evidence lets you call it honestly set your hypothesis's
+     status: `hl hypothesis status --agent {agent_id} --status S <id>`. Then loop back to 3.
 How to spend is the game, not a background rule:
   - Check your remaining quota before sizing a job. Prefer many short, cheap screening runs to
     settle direction, then one longer confirmation of the best candidate — a decent number posted
