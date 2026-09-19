@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchClusters } from '@/lib/api'
+import { fetchExperimentsPage, fetchExperimentStats, fetchUnsummarizedJobIDs, cancelExperiment, fetchClusters } from '@/lib/api'
 import type { Experiment, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { AgentSelect } from '@/components/agent-select'
@@ -12,7 +12,7 @@ import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
-import { Badge } from '@/components/ui/badge'
+import { Badge, NoSummary } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
@@ -85,6 +85,12 @@ function JobsPageContent() {
       offset: page * PAGE_SIZE,
       sort,
     }),
+    { refreshInterval: 8_000, keepPreviousData: true },
+  )
+
+  const { data: unsummarized } = useSWR(
+    ['jobs-unsummarized', agentFilter, peFilter],
+    () => fetchUnsummarizedJobIDs({ agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
     { refreshInterval: 8_000, keepPreviousData: true },
   )
 
@@ -235,6 +241,7 @@ function JobsPageContent() {
                     )}
                     <td>
                       <Badge status={status}>{status}</Badge>
+                      {unsummarized?.has(job.id) && <div style={{ marginTop: 3 }}><NoSummary /></div>}
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3 }}>
                           {notAdmittedLabel(j.not_admitted_reason)}

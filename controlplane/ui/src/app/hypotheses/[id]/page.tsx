@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Badge } from '@/components/ui/badge'
+import { Badge, NoSummary } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
@@ -61,6 +61,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const findings = data.findings ?? []
   const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
+  const summarized = new Set(findings.map(f => f.experiment_id))
   // The env settings that are not the same in every job here: what this hypothesis's runs varied.
   // With nothing varied, every setting is shown.
   const envKeys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
@@ -245,7 +246,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                   >
                     <td className="mono text-dim" style={{ fontSize: 11 }}>{job.id.slice(0, 8)}…</td>
                     <td className="mono">{job.agent_id}</td>
-                    <td><Badge status={status}>{status}</Badge></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <Badge status={status}>{status}</Badge>
+                      {status === 'COMPLETED' && data.finding_count === findings.length && !summarized.has(job.id) && <NoSummary style={{ marginLeft: 6 }} />}
+                    </td>
                     <td className="mono" style={{ fontSize: 11 }}>
                       {shownEnv.map(k => j.job?.env?.[k] === undefined ? `${k} not set` : `${k}=${j.job.env[k]}`).join(' ') || '—'}
                     </td>

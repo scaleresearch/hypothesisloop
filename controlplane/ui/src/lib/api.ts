@@ -130,6 +130,8 @@ export interface ExperimentsParams {
   platform_experiment_id?: string
   /** Substring match against hypothesis/objective/theory. */
   search?: string
+  /** Only COMPLETED jobs whose agent filed no summary. */
+  needs_summary?: boolean
   limit?: number
   offset?: number
   /** "created_at" | "priority_score" | "status", optionally prefixed with "-" for descending. */
@@ -144,6 +146,11 @@ export function fetchExperimentsPage(params?: ExperimentsParams): Promise<Page<E
     }
   }
   return apiFetchPage<Experiment>(url.toString())
+}
+
+// The ids of the completed jobs no summary was filed for, at most the 50 newest.
+export function fetchUnsummarizedJobIDs(params: Pick<ExperimentsParams, 'agent' | 'platform_experiment_id'>): Promise<Set<string>> {
+  return fetchExperimentsPage({ ...params, needs_summary: true, limit: 50 }).then(p => new Set(p.items.map(j => j.id)))
 }
 
 export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment[]> {

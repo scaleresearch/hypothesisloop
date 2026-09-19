@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { clsx } from 'clsx'
+import { semantic } from '@/lib/colors'
 
 interface BadgeProps {
   children: ReactNode
@@ -32,4 +33,16 @@ export function TierBadge({ tier }: { tier?: string }) {
 export function AgentKindBadge({ kind, className }: { kind?: string; className?: string }) {
   const isHuman = kind === 'human'
   return <Badge status={isHuman ? 'human' : 'agent'} className={className}>{isHuman ? 'Human' : 'Agent'}</Badge>
+}
+
+/** Marks a completed job whose agent filed no summary of it. */
+export function NoSummary({ style }: { style?: CSSProperties }) {
+  return (
+    <span
+      title="This job completed and its agent filed no summary of it"
+      style={{ fontSize: 10, fontWeight: 400, whiteSpace: 'nowrap', color: semantic.warning, ...style }}
+    >
+      no summary
+    </span>
+  )
 }

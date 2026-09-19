@@ -21,6 +21,7 @@ import {
   fetchPlatformExperimentTimeseries,
   fetchHypothesisStats,
   fetchFindings,
+  fetchUnsummarizedJobIDs,
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
 import type { StagesStatus } from '@/lib/api'
@@ -28,7 +29,7 @@ import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Badge } from '@/components/ui/badge'
+import { Badge, NoSummary } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { SearchableSelect } from '@/components/ui/searchable-select'
@@ -617,6 +618,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
+  const { data: unsummarized } = useSWR(
+    ['pe-unsummarized', id],
+    () => fetchUnsummarizedJobIDs({ platform_experiment_id: id }),
+    { refreshInterval: 15_000 },
+  )
+
   const { data: results, error: resultsError } = useSWR(
     ['pe-results', id],
     () => fetchPlatformExperimentResults(id),
@@ -962,6 +969,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                           {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
                         </Link>
                       ) : <span className="text-muted">—</span>}
+                      {h.best_job && unsummarized?.has(h.best_job.id) && <div><NoSummary /></div>}
                     </td>
                   </tr>
                 ))}
@@ -1055,6 +1063,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                                   {best.best.toFixed(4)}
                                 </Link>
                               ) : best ? best.best.toFixed(4) : '—'}
+                              {best?.experiment_id && unsummarized?.has(best.experiment_id) && <div><NoSummary /></div>}
                             </td>
                           )
                         }) : <td className="mono" style={{ textAlign: 'right' }}>—</td>}
@@ -1167,6 +1176,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <td className="mono">{exp.agent_id}</td>
                       <td>
                         <StatusBadge status={exp.status} />
+                        {unsummarized?.has(exp.id) && <NoSummary style={{ marginLeft: 6 }} />}
                         {evictionText && (
                           <div className="text-dim" style={{ fontSize: 10, marginTop: 2 }} title="eviction_reason">
                             {evictionText}
