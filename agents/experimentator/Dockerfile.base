@@ -22,6 +22,13 @@ COPY go.mod go.sum ./
 COPY cli/ cli/
 RUN CGO_ENABLED=0 go build -o /out/hl ./cli
 
+# Only each experiment's seed/ and hl-clone reach the agent: experiment.md carries coordinator
+# notes agents must not read.
+FROM golang:1.25-bookworm AS samples
+COPY agents/coordinator/experiments /samples
+RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed -exec rm -rf {} + \
+	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete
+
 FROM python:3.13-slim
 
 # git: the agent pushes the exact code each job runs to its branch in the shared CODE_REPO_URL
@@ -47,20 +54,17 @@ RUN git config --system credential.helper \
 # therefore required, not optional, for this container to start at all.
 RUN useradd --create-home --shell /bin/bash agent
 
-# Build context is the repo root (see Makefile `experimentator-base-image`) so the experiment seed
-# environments can be baked in: WORKLOAD_SAMPLES is the agent's starting point for what a job
-# workload looks like — read, copy, adapt into its own repo. Sourced from
-# agents/coordinator/experiments/*/seed/, not tests/workloads/ (that tree is test-only fixture
-# code, not agent-facing). Not run here (no device); read-only reference. Deliberately not
-# experiment-specific: an agent benefits from seeing every experiment's seed, not just its own.
+# WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every
+# experiment's seed/ (not tests/workloads/, which is test-only fixture code) plus hl-clone. Read,
+# copy, adapt into its own repo. Deliberately not experiment-specific.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
-COPY agents/coordinator/experiments $WORKLOAD_SAMPLES
+COPY --from=samples /samples $WORKLOAD_SAMPLES
 
 # The `hl` CLI, built in the hl-builder stage above. This is how the agent talks to the platform
 # for everything a human would use it for too -- hl register/signup, hl platform-experiments
 # create/start, hl hypothesis query/submit/link, hl job submit job.yaml, hl watch
-# (which replaces the old standalone hl-watch script: `hl watch --experiment ID --until '...'`
-# holds a websocket open and exits when the platform says the thing happened). A job image that
+# (`hl watch --experiment ID --until '...'` holds a websocket open and exits when the platform
+# says the thing happened). A job image that
 # wants it too can COPY it in the same way it copies a seed workload.
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
 
