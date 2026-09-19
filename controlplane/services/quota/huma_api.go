@@ -448,7 +448,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		if aq == nil {
-			return nil, huma.Error404NotFound("quota not found")
+			return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID + ": quota is granted when the experiment starts, to the agents signed up to it")
 		}
 		return &struct{ Body *domain.AgentQuota }{Body: aq}, nil
 	})

@@ -42,7 +42,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if pe.Status != domain.PlatformExpRunning {
 		return &AdmissionError{
 			Reason:  "experiment_not_running",
-			Message: fmt.Sprintf("platform experiment is %s, not running", pe.Status),
+			Message: fmt.Sprintf("platform experiment %s is %s (open: it has not started yet, closed: it is over); jobs are accepted only while it is running", pe.ID, pe.Status),
 		}
 	}
 	signedUp, err := s.store.IsSignedUp(ctx, exp.PlatformExperimentID, exp.AgentID)
@@ -118,10 +118,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason: ReasonSummaryRequired,
 			Message: fmt.Sprintf(
-				"agent has completed experiments without summaries — list them with "+
-					"GET /experiments?needs_summary=true&agent=%s&platform_experiment_id=%s and file each one via "+
-					"POST /experiments/{id}/summary before submitting new jobs",
-				exp.AgentID, exp.PlatformExperimentID),
+				"agent has completed jobs without summaries: list them with "+
+					"`hl job list --needs-summary --agent %s` and file each one with "+
+					"`hl job summary ID --text ...` before submitting new jobs",
+				exp.AgentID),
 		}
 	}
 

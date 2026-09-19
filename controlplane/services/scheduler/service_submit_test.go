@@ -167,3 +167,38 @@ func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t
 		t.Errorf("reason: got = %v, want %v", admission.Reason, ReasonMalformed)
 	}
 }
+
+type unsummarizedStore struct{ poolOnlyStore }
+
+func (unsummarizedStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+func TestSummaryGateNamesTheHlCommandsThatClearIt(t *testing.T) {
+	s := &Service{store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
+
+	var admission *AdmissionError
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != ReasonSummaryRequired {
+		t.Fatalf("Submit with unsummarized jobs: got = %v, want %s", err, ReasonSummaryRequired)
+	}
+	for _, want := range []string{"hl job list --needs-summary --agent agent-1", "hl job summary"} {
+		if !strings.Contains(admission.Message, want) {
+			t.Errorf("message %q does not name %q", admission.Message, want)
+		}
+	}
+}
+
+type openStore struct{ poolOnlyStore }
+
+func (openStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpOpen}, nil
+}
+
+func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
+	s := &Service{store: openStore{}, hypotheses: humanHypothesis("pe-1")}
+
+	var admission *AdmissionError
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || !strings.Contains(admission.Message, "has not started") {
+		t.Fatalf("Submit to an open platform experiment: got = %v, want a message saying it has not started", err)
+	}
+}
