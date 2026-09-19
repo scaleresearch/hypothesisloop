@@ -20,7 +20,7 @@ const rootTarget = "root"
 
 var linkTypes = []string{"builds_on", "contradicts", "related"}
 
-const placementHelp = "place the idea in the graph: --builds-on root for a new direction on the objective, " +
+const placementHelp = "place the idea in the graph: --builds-on root for a fundamentally new approach to the objective, " +
 	"or --builds-on ID for each hypothesis it refines, extends or combines " +
 	"(find candidates with 'hl hypothesis query' or 'hl hypothesis list')"
 
