@@ -4,8 +4,8 @@
 Runs on claude_agent_sdk rather than a hand-rolled ReAct loop — it's Claude Code packaged as a
 library, run on our own infra (same container, same platform APIs) instead of Anthropic-hosted.
 This gives us, for free, what a hand-rolled loop had to reinvent badly: the agent loop itself, a
-real bash/file/web tool surface (no bespoke run_bash/call_api — the model just curls the platform
-API directly via the built-in Bash tool).
+real bash/file/web tool surface (no bespoke run_bash/call_api — the model runs `hl` via the
+built-in Bash tool).
 Auth: Claude subscription (Claude Code login) or
 ANTHROPIC_API_KEY, exactly as Claude Code itself resolves it.
 

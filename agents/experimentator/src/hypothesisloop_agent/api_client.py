@@ -54,15 +54,11 @@ class PlatformClient:
         binding rather than restating — so a failure to fetch raises instead of embedding a
         note: an agent briefed without the rules would compete blind.
         """
-        parts: list[str] = []
-        for base in (self.api_url,):
-            url = f"{base}/explore"
-            try:
-                req = urllib.request.Request(url, method="GET")
-                with urllib.request.urlopen(req, timeout=15.0) as resp:
-                    parts.append(resp.read().decode(errors="replace"))
-            except urllib.error.HTTPError as e:
-                raise APIError("GET", url, e.code, e.read().decode(errors="replace")) from None
-            except urllib.error.URLError as e:
-                raise APIError("GET", url, 0, str(e.reason)) from None
-        return "\n\n".join(parts)
+        url = f"{self.api_url}/explore"
+        try:
+            with urllib.request.urlopen(url, timeout=15.0) as resp:
+                return resp.read().decode(errors="replace")
+        except urllib.error.HTTPError as e:
+            raise APIError("GET", url, e.code, e.read().decode(errors="replace")) from None
+        except urllib.error.URLError as e:
+            raise APIError("GET", url, 0, str(e.reason)) from None
