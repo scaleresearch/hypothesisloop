@@ -178,17 +178,20 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithMetricAndTheEnvTheyVaried(t *t
 	}
 }
 
-func TestJobListSaysHowManyJobsThePageLeftOut(t *testing.T) {
+func TestAListSaysHowManyRowsThePageLeftOut(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Total-Count", "39")
-		_, _ = w.Write([]byte(`[{"id":"job-1"},{"id":"job-2"}]`))
+		_, _ = w.Write([]byte(`[{"id":"x-1"},{"id":"x-2"}]`))
 	})
 	setAPIURL(t, url)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "list", "--offset", "30"}, &stdout, &stderr); code != 0 || len(lines(stdout.String())) != 2 {
-		t.Fatalf("exit %d, stdout %q", code, stdout.String())
-	}
-	if got := stderr.String(); got != "hl: job list: 7 more; --limit N (max 50) and --offset N show them\n" {
-		t.Fatalf("stderr = %q", got)
+	for _, tc := range []struct{ what, want string }{
+		{"job", "hl: job list: 7 more; --limit N (max 50) and --offset N show them\n"},
+		{"hypothesis", "hl: hypothesis list: 7 more; --limit N (max 200) and --offset N show them\n"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{tc.what, "list", "--platform-experiment", "pe-1", "--offset", "30"}, &stdout, &stderr)
+		if code != 0 || len(lines(stdout.String())) != 2 || stderr.String() != tc.want {
+			t.Fatalf("%s list: exit %d, stdout %q, stderr %q", tc.what, code, stdout.String(), stderr.String())
+		}
 	}
 }

@@ -498,12 +498,21 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 	if *offset != 0 {
 		q.Set("offset", strconv.Itoa(*offset))
 	}
-	var out json.RawMessage
-	if err := c.Do("GET", "/hypotheses?"+q.Encode(), nil, &out); err != nil {
+	var out []json.RawMessage
+	header, err := c.DoHeader("GET", "/hypotheses?"+q.Encode(), nil, &out)
+	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "hypothesis list: no hypothesis matches", out); err != nil {
-		return fail(stderr, err)
+	for _, h := range out {
+		if err := printLine(stdout, h); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if len(out) == 0 {
+		fmt.Fprintln(stderr, "hl: hypothesis list: no hypothesis matches")
+	}
+	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > *offset+len(out) {
+		fmt.Fprintf(stderr, "hl: hypothesis list: %d more; --limit N (max 200) and --offset N show them\n", total-*offset-len(out))
 	}
 	return 0
 }
