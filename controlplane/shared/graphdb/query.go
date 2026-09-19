@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -39,19 +40,32 @@ type QueryResult struct {
 	Truncated bool     `json:"truncated"`
 }
 
-// Query runs one read-only Cypher query, in an explicit read-mode transaction that is always rolled
-// back. Memgraph refuses a write clause in a read-mode transaction and refuses index, constraint,
-// user, trigger and storage statements in any explicit one; the rollback is the backstop. What
-// neither covers (procedures that write outside the transaction, LOAD CSV) is refused before the
-// query is sent (see checkReadOnly). params are JSON values: a whole number
-// arrives as float64 and is passed on as an integer so it works in LIMIT and comparisons.
+// Query runs one read-only Cypher query over one platform experiment's graph, in an explicit
+// read-mode transaction that is always rolled back. Memgraph refuses a write clause in a read-mode
+// transaction and refuses index, constraint, user, trigger and storage statements in any explicit
+// one; the rollback is the backstop. What neither covers (procedures that write outside the
+// transaction, LOAD CSV) is refused before the query is sent (see checkReadOnly). params are JSON
+// values: a whole number arrives as float64 and is passed on as an integer so it works in LIMIT and
+// comparisons.
+//
+// The platform experiment is bound as $pe. A result holding a node or relationship of another
+// platform experiment is refused (see checkScope); scalars cannot be traced to their nodes, so
+// that check is not a boundary against a query written to read elsewhere.
 //
 // Nodes come back as their properties plus _labels, relationships as their properties plus _type,
 // _from and _to (the endpoints' id properties), paths as a list of those, scalars as they are.
-func (s *Store) Query(ctx context.Context, cypher string, params map[string]any) (*QueryResult, error) {
+func (s *Store) Query(ctx context.Context, platformExperimentID, cypher string, params map[string]any) (*QueryResult, error) {
+	if platformExperimentID == "" {
+		return nil, fmt.Errorf("%w: a query reads one platform experiment, name it", ErrInvalidQuery)
+	}
+	if _, ok := params["pe"]; ok {
+		return nil, fmt.Errorf("%w: $pe is bound to the platform experiment the query reads, use another parameter name", ErrInvalidQuery)
+	}
 	if err := checkReadOnly(cypher); err != nil {
 		return nil, err
 	}
+	bound := jsonParams(params)
+	bound["pe"] = platformExperimentID
 	ctx, cancel := context.WithTimeout(ctx, 2*QueryTimeout)
 	defer cancel()
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
@@ -62,7 +76,7 @@ func (s *Store) Query(ctx context.Context, cypher string, params map[string]any)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	result, err := tx.Run(ctx, withMemoryLimit(cypher), jsonParams(params))
+	result, err := tx.Run(ctx, withMemoryLimit(cypher), bound)
 	if err != nil {
 		return nil, queryError(err)
 	}
@@ -82,9 +96,20 @@ func (s *Store) Query(ctx context.Context, cypher string, params map[string]any)
 	if err := result.Err(); err != nil {
 		return nil, queryError(err)
 	}
-	ids, err := endpointIDs(ctx, tx, raw)
+	nodes, err := resultNodes(ctx, tx, raw)
 	if err != nil {
 		return nil, queryError(err)
+	}
+	if err := checkScope(platformExperimentID, nodes); err != nil {
+		return nil, err
+	}
+	var d decoder
+	ids := make(map[int64]string, len(nodes))
+	for id, n := range nodes {
+		ids[id] = d.str(n.Props["id"])
+	}
+	if d.err != nil {
+		return nil, fmt.Errorf("graphdb.Query: %w", d.err)
 	}
 	for _, values := range raw {
 		row := make([]any, len(values))
@@ -94,6 +119,22 @@ func (s *Store) Query(ctx context.Context, cypher string, params map[string]any)
 		out.Rows = append(out.Rows, row)
 	}
 	return out, nil
+}
+
+// checkScope refuses a result holding a node of another platform experiment: a hypothesis
+// belongs to its platform_experiment_id, an objective to its id.
+func checkScope(platformExperimentID string, nodes map[int64]neo4j.Node) error {
+	for _, n := range nodes {
+		scope := n.Props["id"]
+		if slices.Contains(n.Labels, "Hypothesis") {
+			scope = n.Props["platform_experiment_id"]
+		}
+		if scope != platformExperimentID {
+			return fmt.Errorf("%w: the result holds %s %v of platform experiment %v; queries read platform experiment %s only, "+
+				"filter every MATCH and text_search result with platform_experiment_id = $pe", ErrInvalidQuery, strings.Join(n.Labels, ":"), n.Props["id"], scope, platformExperimentID)
+		}
+	}
+	return nil
 }
 
 // withMemoryLimit appends Memgraph's QUERY MEMORY LIMIT clause on a new line, so a trailing line
@@ -153,19 +194,18 @@ func jsonValue(v any) any {
 	}
 }
 
-// endpointIDs resolves the id property of every relationship endpoint in rows, in the same
-// transaction, since the driver only reports a relationship's endpoints by internal id.
-func endpointIDs(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any) (map[int64]string, error) {
-	ids := map[int64]string{}
-	var missing []int64
-	var d decoder
+// resultNodes returns every node in rows by internal id, including relationship endpoints, which
+// the driver reports by internal id only and are fetched in the same transaction.
+func resultNodes(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any) (map[int64]neo4j.Node, error) {
+	nodes := map[int64]neo4j.Node{}
+	var endpoints []int64
 	var walk func(v any)
 	walk = func(v any) {
 		switch t := v.(type) {
 		case neo4j.Node:
-			ids[t.Id] = d.str(t.Props["id"])
+			nodes[t.Id] = t
 		case neo4j.Relationship:
-			missing = append(missing, t.StartId, t.EndId)
+			endpoints = append(endpoints, t.StartId, t.EndId)
 		case neo4j.Path:
 			for _, n := range t.Nodes {
 				walk(n)
@@ -186,15 +226,15 @@ func endpointIDs(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 		}
 	}
 	var lookup []int64
-	for _, id := range missing {
-		if _, ok := ids[id]; !ok {
+	for _, id := range endpoints {
+		if _, ok := nodes[id]; !ok {
 			lookup = append(lookup, id)
 		}
 	}
 	if len(lookup) == 0 {
-		return ids, d.err
+		return nodes, nil
 	}
-	result, err := tx.Run(ctx, `MATCH (n) WHERE id(n) IN $ids RETURN id(n), n.id`, map[string]any{"ids": lookup})
+	result, err := tx.Run(ctx, `MATCH (n) WHERE id(n) IN $ids RETURN n`, map[string]any{"ids": lookup})
 	if err != nil {
 		return nil, err
 	}
@@ -203,9 +243,10 @@ func endpointIDs(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 		return nil, err
 	}
 	for _, r := range records {
-		ids[r.Values[0].(int64)] = d.str(r.Values[1])
+		n := r.Values[0].(neo4j.Node)
+		nodes[n.Id] = n
 	}
-	return ids, d.err
+	return nodes, nil
 }
 
 func mapValue(v any, ids map[int64]string) any {

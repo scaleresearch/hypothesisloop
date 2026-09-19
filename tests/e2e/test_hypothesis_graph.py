@@ -124,8 +124,8 @@ def test_tree_combination_and_cross_links(api, graph_pe, run_id):
     assert rows[root_child["id"]]["builds_on"] == [pe_id]
     assert sorted(rows[combined["id"]]["builds_on"]) == sorted([root_child["id"], sibling["id"]])
 
-    assert [r["id"] for r in api.query_rows(CHILDREN, id=pe_id)] == sorted([root_child["id"], sibling["id"]])
-    assert [r["id"] for r in api.query_rows(CHILDREN, id=root_child["id"])] == sorted([grandchild["id"], combined["id"]])
+    assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=pe_id)] == sorted([root_child["id"], sibling["id"]])
+    assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=root_child["id"])] == sorted([grandchild["id"], combined["id"]])
 
     graph = api.hypothesis_graph(pe_id)
     assert graph["root"] == pe_id
@@ -263,7 +263,7 @@ def test_query_text_search_and_status(api, graph_pe, run_id):
     assert api.set_hypothesis_status(refuted["id"], agent_a, "refuted").status_code == 200
 
     def search(q: str, status: str = "") -> list[dict]:
-        return api.query_rows(TEXT_SEARCH, q=q, pe=pe_id, status=status)
+        return api.query_rows(pe_id, TEXT_SEARCH, q=q, status=status)
 
     deadline = Deadline.in_seconds(30)
     hits = eventually(
@@ -284,6 +284,7 @@ def test_query_value_mapping(api, graph_pe, run_id):
     child = api.register_hypothesis(pe_id, agent_a, f"label noise caps accuracy {run_id}", links=[link("builds_on", parent["id"])])
 
     rows = api.query_rows(
+        pe_id,
         "MATCH (c:Hypothesis {id: $id})-[r:BUILDS_ON]->(p) RETURN c, r, p.id AS parent",
         id=child["id"],
     )
@@ -295,7 +296,20 @@ def test_query_value_mapping(api, graph_pe, run_id):
     assert rows[0]["parent"] == parent["id"]
 
     newer = "MATCH (h:Hypothesis {id: $id}) WHERE h.created_at >= datetime($since) RETURN h.id AS id"
-    assert api.query_rows(newer, id=child["id"], since=node["created_at"]) == [{"id": child["id"]}]
+    assert api.query_rows(pe_id, newer, id=child["id"], since=node["created_at"]) == [{"id": child["id"]}]
+
+
+def test_query_reads_one_platform_experiment(api, graph_pe, experiment, run_id):
+    pe_id, agent_a, _ = graph_pe
+    other_pe = experiment("hypothesis-graph-scope", [agent_a], budget=BUDGET)
+    mine = api.register_hypothesis(pe_id, agent_a, f"scoped claim {run_id}")
+    theirs = api.register_hypothesis(other_pe, agent_a, f"foreign claim {run_id}")
+
+    refused = api.query(pe_id, "MATCH (h:Hypothesis {id: $id}) RETURN h", id=theirs["id"])
+    assert refused.status_code == 400, f"another experiment's node answered {refused.status_code}"
+    assert "$pe" in refused.json().get("error", ""), refused.text
+    scoped = "MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.id IN $ids RETURN h.id AS id"
+    assert api.query_rows(pe_id, scoped, ids=[mine["id"], theirs["id"]]) == [{"id": mine["id"]}]
 
 
 def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
@@ -306,32 +320,32 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
 
     writes = [
         ("MATCH (h:Hypothesis {id: $id}) SET h.text = 'vandalized' RETURN h.text", {"id": hyp["id"]}),
-        ("CREATE (h:Hypothesis {id: $planted, platform_experiment_id: $pe, text: 'planted'}) RETURN h.id", {"planted": planted, "pe": pe_id}),
+        ("CREATE (h:Hypothesis {id: $planted, platform_experiment_id: $pe, text: 'planted'}) RETURN h.id", {"planted": planted}),
         ("MERGE (h:Hypothesis {id: $planted}) RETURN h.id", {"planted": planted}),
         ("MATCH (h:Hypothesis {id: $id}) DETACH DELETE h", {"id": hyp["id"]}),
         ("CREATE INDEX ON :Hypothesis(agent_id)", {}),
     ]
     for cypher, params in writes:
-        r = api.query(cypher, **params)
+        r = api.query(pe_id, cypher, **params)
         assert r.status_code in (200, 400), f"{cypher!r}: {r.status_code} {r.text}"
 
     assert api.hypothesis(hyp["id"])["text"] == text
     assert _out(api.hypothesis(hyp["id"])) == {("builds_on", pe_id)}
-    assert api.query_rows("MATCH (h {id: $planted}) RETURN count(h) AS n", planted=planted) == [{"n": 0}]
+    assert api.query_rows(pe_id, "MATCH (h {id: $planted}) RETURN count(h) AS n", planted=planted) == [{"n": 0}]
     assert planted not in {h["id"] for h in api.hypotheses(pe_id)}
 
-    bad = api.query("MATC (h:Hypothesis) RETURN h")
+    bad = api.query(pe_id, "MATC (h:Hypothesis) RETURN h")
     assert bad.status_code == 400, f"malformed Cypher answered {bad.status_code}"
     assert "mismatched input" in bad.json().get("error", ""), f"400 without Memgraph's message: {bad.text}"
 
-    capped = api.query("UNWIND range(1, 1000) AS i RETURN i")
+    capped = api.query(pe_id, "UNWIND range(1, 1000) AS i RETURN i")
     assert capped.status_code == 200, capped.text
     body = capped.json()
     assert body["columns"] == ["i"]
     assert body["truncated"] is True
     assert 0 < len(body["rows"]) < 1000
 
-    small = api.query("UNWIND range(1, 3) AS i RETURN i").json()
+    small = api.query(pe_id, "UNWIND range(1, 3) AS i RETURN i").json()
     assert (small["rows"], small["truncated"]) == ([[1], [2], [3]], False)
 
 

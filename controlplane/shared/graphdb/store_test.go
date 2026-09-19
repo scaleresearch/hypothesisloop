@@ -451,8 +451,8 @@ func TestTheTextIndexRanksHypothesesThroughTheQueryEndpoint(t *testing.T) {
 	register(t, s, pe, "agent-1", "Linear warmup stabilises early training", onRoot(pe))
 	register(t, s, pe, "agent-1", "Label smoothing reduces overconfidence", onRoot(pe))
 
-	result, err := s.Query(context.Background(), `CALL text_search.search_all('`+TextIndex+`', 'warmup training') YIELD node, score
-WHERE node.platform_experiment_id = $pe RETURN node.text, score ORDER BY score DESC`, map[string]any{"pe": pe})
+	result, err := s.Query(context.Background(), pe, `CALL text_search.search_all('`+TextIndex+`', 'warmup training') YIELD node, score
+WHERE node.platform_experiment_id = $pe RETURN node.text, score ORDER BY score DESC`, nil)
 	if err != nil {
 		t.Fatalf("Query: got = %v, want nil", err)
 	}
@@ -492,7 +492,7 @@ func TestAQueryCannotLeaveATraceInTheGraph(t *testing.T) {
 		`MATCH (h:Hypothesis {id: '` + h.ID + `'}) DETACH DELETE h`,
 		`MATCH (o:Objective {id: '` + pe + `'}) CREATE (o)-[:QUERY_TRACE]->(o)`,
 	} {
-		if _, err := s.Query(ctx, q, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "read-only") {
+		if _, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "read-only") {
 			t.Errorf("Query %q: got = %v, want %v saying the endpoint is read-only", q, err, ErrInvalidQuery)
 		}
 	}
@@ -531,7 +531,7 @@ func TestAQueryRefusesWhatARollbackCannotUndo(t *testing.T) {
 		"CALL mg.load_all()",
 		"RETURN 1; CREATE (:QueryTrace)",
 	} {
-		if _, err := s.Query(ctx, q, nil); !errors.Is(err, ErrInvalidQuery) {
+		if _, err := s.Query(ctx, "pe-1", q, nil); !errors.Is(err, ErrInvalidQuery) {
 			t.Errorf("Query %q: got = %v, want %v", q, err, ErrInvalidQuery)
 		}
 	}
@@ -553,7 +553,7 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 	register(t, s, pe, "agent-1", "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}})
 	ctx := context.Background()
 
-	result, err := s.Query(ctx, `MATCH (b:Hypothesis {text: 'b', platform_experiment_id: $pe})-[r:BUILDS_ON]->(a) RETURN b, r, a.id AS parent`, map[string]any{"pe": pe})
+	result, err := s.Query(ctx, pe, `MATCH (b:Hypothesis {text: 'b', platform_experiment_id: $pe})-[r:BUILDS_ON]->(a) RETURN b, r, a.id AS parent`, nil)
 	if err != nil {
 		t.Fatalf("Query: got = %v, want nil", err)
 	}
@@ -569,14 +569,14 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 		t.Errorf("relationship: got = %v, want BUILDS_ON from b to %s", rel, a.ID)
 	}
 
-	capped, err := s.Query(ctx, `UNWIND range(1, $n) AS i RETURN i`, map[string]any{"n": float64(QueryRowCap + 5)})
+	capped, err := s.Query(ctx, "pe-1", `UNWIND range(1, $n) AS i RETURN i`, map[string]any{"n": float64(QueryRowCap + 5)})
 	if err != nil || len(capped.Rows) != QueryRowCap || !capped.Truncated {
 		t.Errorf("capped query: got = (%d rows, truncated=%v, %v), want (%d, true, nil)", len(capped.Rows), capped != nil && capped.Truncated, err, QueryRowCap)
 	}
-	if literal, err := s.Query(ctx, `RETURN 'LOAD CSV and CALL mg.load_all()' AS s // CALL mg.load_all()`, nil); err != nil || literal.Rows[0][0] != "LOAD CSV and CALL mg.load_all()" {
+	if literal, err := s.Query(ctx, "pe-1", `RETURN 'LOAD CSV and CALL mg.load_all()' AS s // CALL mg.load_all()`, nil); err != nil || literal.Rows[0][0] != "LOAD CSV and CALL mg.load_all()" {
 		t.Errorf("keywords inside a string and a comment: got = (%v, %v), want the string back", literal, err)
 	}
-	if _, err := s.Query(ctx, `MATCH (n RETURN n`, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "mismatched input") {
+	if _, err := s.Query(ctx, "pe-1", `MATCH (n RETURN n`, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "mismatched input") {
 		t.Errorf("syntax error: got = %v, want %v with Memgraph's message", err, ErrInvalidQuery)
 	}
 }
@@ -584,7 +584,7 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 func TestAQueryIsStoppedAtItsTimeout(t *testing.T) {
 	s := testStore(t)
 	start := time.Now()
-	_, err := s.Query(context.Background(), `UNWIND range(1, 40000) AS i UNWIND range(1, 40000) AS j WITH i, j WHERE i + j < 0 RETURN count(*)`, nil)
+	_, err := s.Query(context.Background(), "pe-1", `UNWIND range(1, 40000) AS i UNWIND range(1, 40000) AS j WITH i, j WHERE i + j < 0 RETURN count(*)`, nil)
 	if !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("long query: got = %v, want %v naming the timeout", err, ErrInvalidQuery)
 	}
@@ -596,16 +596,16 @@ func TestAQueryIsStoppedAtItsTimeout(t *testing.T) {
 func TestAQueryIsStoppedAtItsMemoryLimit(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	_, err := s.Query(ctx, `UNWIND range(1, 100000000) AS i WITH collect(i) AS c RETURN size(c)`, nil)
+	_, err := s.Query(ctx, "pe-1", `UNWIND range(1, 100000000) AS i WITH collect(i) AS c RETURN size(c)`, nil)
 	if !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "Memory limit exceeded") {
 		t.Fatalf("large query: got = %v, want %v naming the memory limit", err, ErrInvalidQuery)
 	}
 	for _, q := range []string{"RETURN 1;", "RETURN 1 // trailing comment"} {
-		if _, err := s.Query(ctx, q, nil); err != nil {
+		if _, err := s.Query(ctx, "pe-1", q, nil); err != nil {
 			t.Errorf("Query(%q): got = %v, want nil", q, err)
 		}
 	}
-	if _, err := s.Query(ctx, "RETURN 1 QUERY MEMORY UNLIMITED", nil); !errors.Is(err, ErrInvalidQuery) {
+	if _, err := s.Query(ctx, "pe-1", "RETURN 1 QUERY MEMORY UNLIMITED", nil); !errors.Is(err, ErrInvalidQuery) {
 		t.Errorf("query lifting the limit: got = %v, want %v", err, ErrInvalidQuery)
 	}
 }
@@ -695,5 +695,49 @@ func TestImportLegacyPlacesOldHypothesesOnTheObjectiveAndIsRepeatable(t *testing
 	if _, _, existed, err := s.Register(ctx, NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-2",
 		PlatformExperimentID: pe, Text: "old idea", Links: onRoot(pe)}); err != nil || !existed {
 		t.Errorf("registering the legacy claim again: got = (existed=%v, %v), want the imported one", existed, err)
+	}
+}
+
+// Each experiment's graph is closed (links stay inside it), so a result can only reach another
+// experiment through an unfiltered scan or text search; such a result is refused.
+func TestAQueryReadsOnePlatformExperiment(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	other := testExperiment(t, s)
+	mine := register(t, s, pe, "agent-1", "cosine decay helps", onRoot(pe))
+	register(t, s, other, "agent-1", "cosine decay hurts", onRoot(other))
+	ctx := context.Background()
+
+	for _, q := range []string{
+		`MATCH (h:Hypothesis) RETURN h`,
+		`MATCH (o:Objective) RETURN o.id, o`,
+		`MATCH ()-[r:BUILDS_ON]->() RETURN r`,
+		`MATCH p = (:Hypothesis)-[:BUILDS_ON]->(:Objective) RETURN p`,
+		`MATCH (h:Hypothesis) RETURN collect(h) AS all`,
+		`CALL text_search.search_all('` + TextIndex + `', 'cosine') YIELD node RETURN node`,
+	} {
+		if _, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "platform_experiment_id = $pe") {
+			t.Errorf("Query %q: got = %v, want %v asking to filter on $pe", q, err, ErrInvalidQuery)
+		}
+	}
+
+	for _, q := range []string{
+		`MATCH p = (h:Hypothesis {platform_experiment_id: $pe})-[:BUILDS_ON]->(o:Objective) RETURN h, p, o`,
+		`MATCH (h:Hypothesis)-[r:BUILDS_ON]->(:Objective {id: $pe}) RETURN r, h.id`,
+		`CALL text_search.search_all('` + TextIndex + `', 'cosine') YIELD node WHERE node.platform_experiment_id = $pe RETURN node`,
+	} {
+		result, err := s.Query(ctx, pe, q, nil)
+		if err != nil || len(result.Rows) != 1 {
+			t.Errorf("Query %q: got = (%v, %v), want one row", q, result, err)
+		}
+	}
+	if result, err := s.Query(ctx, pe, `MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id`, nil); err != nil || result.Rows[0][0] != mine.ID {
+		t.Errorf("Query with $pe: got = (%v, %v), want %s", result, err, mine.ID)
+	}
+	if _, err := s.Query(ctx, pe, `RETURN $pe`, map[string]any{"pe": other}); !errors.Is(err, ErrInvalidQuery) {
+		t.Errorf("Query rebinding $pe: got = %v, want %v", err, ErrInvalidQuery)
+	}
+	if _, err := s.Query(ctx, "", `RETURN 1`, nil); !errors.Is(err, ErrInvalidQuery) {
+		t.Errorf("Query without a platform experiment: got = %v, want %v", err, ErrInvalidQuery)
 	}
 }

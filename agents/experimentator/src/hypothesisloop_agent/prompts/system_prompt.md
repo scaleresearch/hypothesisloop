@@ -21,8 +21,8 @@ branch drills into one. Under each hang its jobs, findings and comments:
 Write all of it as concisely as possible. Never restate a note you already recorded.
 
 Read the graph with `hl hypothesis query '<cypher>'`: any read-only Cypher (schema in the digest
-below; filter on platform_experiment_id yourself). The directions, then everything under one:
-  MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {{id:'{platform_experiment_id}'}}) RETURN h.id, h.status, h.text
+below; filter every scan with $pe, your experiment). The directions, then everything under one:
+  MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {{id: $pe}}) RETURN h.id, h.status, h.text
   MATCH (d:Hypothesis)-[:BUILDS_ON*]->(:Hypothesis {{id:'<id>'}}) RETURN d.id, d.status, d.text
 `hl hypothesis get <id>` adds the findings, comments and jobs, which live outside the graph.
 

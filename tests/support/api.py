@@ -349,13 +349,13 @@ class API:
     def hypothesis_graph(self, pe_id: str) -> dict:
         return self.get_json("/hypotheses/graph", params={"platform_experiment_id": pe_id})
 
-    def query(self, cypher: str, /, **params: Any) -> requests.Response:
-        return self.post("/hypotheses/query", {"cypher": cypher, "params": params})
+    def query(self, pe_id: str, cypher: str, /, **params: Any) -> requests.Response:
+        return self.post("/hypotheses/query", {"platform_experiment_id": pe_id, "cypher": cypher, "params": params})
 
-    def query_rows(self, cypher: str, /, **params: Any) -> list[dict]:
+    def query_rows(self, pe_id: str, cypher: str, /, **params: Any) -> list[dict]:
         """Rows of a POST /hypotheses/query as dicts keyed by column; fails on a truncated result
         so no assertion silently reads a partial answer."""
-        r = self.query(cypher, **params)
+        r = self.query(pe_id, cypher, **params)
         assert r.status_code == 200, f"query refused ({r.status_code}): {r.text}"
         body = r.json()
         assert not body["truncated"], f"query result truncated: {cypher}"

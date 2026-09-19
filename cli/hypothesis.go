@@ -554,15 +554,18 @@ func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	pe := fs.String("platform-experiment", os.Getenv("PLATFORM_EXPERIMENT_ID"), "platform experiment whose graph is read, bound as $pe (default $PLATFORM_EXPERIMENT_ID)")
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl hypothesis query 'CYPHER' [--param k=v ...]
-   or: hl hypothesis query - [--param k=v ...]   (query read from stdin)
+		fmt.Fprintln(stderr, `usage: hl hypothesis query 'CYPHER' [--platform-experiment PE] [--param k=v ...]
+   or: hl hypothesis query - [--platform-experiment PE] [--param k=v ...]   (query read from stdin)
 
-Read-only Cypher over the hypothesis graph; writes are discarded, use submit/link instead.
-Prints one JSON object per row keyed by column. The schema is in the POST /hypotheses/query
-description (/explore). Example, the children of a hypothesis:
+Read-only Cypher over one platform experiment's hypothesis graph (--platform-experiment, default
+$PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded, use submit/link instead. Filter
+every MATCH and text search with platform_experiment_id = $pe: a result holding another
+experiment's nodes is refused. Prints one JSON object per row keyed by column. The schema is in
+the POST /hypotheses/query description (/explore). Example, the children of a hypothesis:
 
   hl hypothesis query 'MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id})
     RETURN c.id, c.text, c.status' --param id=HYP_ID`)
@@ -582,6 +585,10 @@ description (/explore). Example, the children of a hypothesis:
 		fmt.Fprintln(stderr, "hl: hypothesis query: empty query")
 		return 2
 	}
+	if *pe == "" {
+		fmt.Fprintln(stderr, "hl: hypothesis query: --platform-experiment is required (or set PLATFORM_EXPERIMENT_ID)")
+		return 2
+	}
 	bound := map[string]any{}
 	for _, p := range params {
 		k, v, ok := strings.Cut(p, "=")
@@ -596,7 +603,7 @@ description (/explore). Example, the children of a hypothesis:
 		Rows      [][]json.RawMessage `json:"rows"`
 		Truncated bool                `json:"truncated"`
 	}
-	if err := c.Do("POST", "/hypotheses/query", map[string]any{"cypher": cypher, "params": bound}, &out); err != nil {
+	if err := c.Do("POST", "/hypotheses/query", map[string]any{"platform_experiment_id": *pe, "cypher": cypher, "params": bound}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	for i, row := range out.Rows {

@@ -98,7 +98,8 @@ func hypothesisWriteError(err error) error {
 
 // queryDescription is the schema an agent needs to write Cypher against the graph. It is served
 // at /explore, which agents read into their prompt.
-var queryDescription = "Read-only Cypher against the hypothesis graph (Memgraph). Body {cypher, params}; answer " +
+var queryDescription = "Read-only Cypher against one platform experiment's hypothesis graph (Memgraph). " +
+	"Body {platform_experiment_id, cypher, params}; answer " +
 	"{columns, rows, truncated}. Use it to find where an idea belongs before registering it, and to walk lineage. " +
 	"Schema: (:Objective {id}) is the root of one platform experiment, id = platform_experiment_id. " +
 	"(:Hypothesis {id, platform_experiment_id, agent_id, source, author, text, status, created_at, status_changed_at}). " +
@@ -106,8 +107,9 @@ var queryDescription = "Read-only Cypher against the hypothesis graph (Memgraph)
 	"datetime('2026-10-02T01:30:00Z'), since a string never matches one. " +
 	"Relationships, each {agent_id, author, created_at}: (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective) " +
 	"(refines, extends, combines; acyclic, every hypothesis has one or more), (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), " +
-	"(:Hypothesis)-[:RELATED]->(:Hypothesis). The graph spans every platform experiment: filter by platform_experiment_id " +
-	"yourself. Full-text index " + graphdb.TextIndex + " over Hypothesis.text, ranked by how many of your words match: " +
+	"(:Hypothesis)-[:RELATED]->(:Hypothesis). $pe is bound to platform_experiment_id: filter every MATCH and text search " +
+	"with it; a result holding a node or relationship of another platform experiment is refused with 400. " +
+	"Full-text index " + graphdb.TextIndex + " over Hypothesis.text, ranked by how many of your words match: " +
 	"`CALL text_search.search_all('" + graphdb.TextIndex + "', 'warmup cosine schedule') YIELD node, score " +
 	"WHERE node.platform_experiment_id = $pe RETURN node.id, node.text, node.status, score ORDER BY score DESC LIMIT 10` " +
 	"(plain words; quotes, colons and parentheses are search syntax). " +
@@ -376,14 +378,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: queryDescription,
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			Cypher string         `json:"cypher"`
-			Params map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name."`
+			PlatformExperimentID string         `json:"platform_experiment_id" doc:"The platform experiment whose graph the query reads, bound as $pe."`
+			Cypher               string         `json:"cypher"`
+			Params               map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name; pe is reserved."`
 		}
 	}) (*struct{ Body *graphdb.QueryResult }, error) {
-		if in.Body.Cypher == "" {
-			return nil, huma.Error400BadRequest("cypher is required")
+		if in.Body.PlatformExperimentID == "" || in.Body.Cypher == "" {
+			return nil, huma.Error400BadRequest("platform_experiment_id and cypher are required")
 		}
-		result, err := h.svc.QueryGraph(ctx, in.Body.Cypher, in.Body.Params)
+		result, err := h.svc.QueryGraph(ctx, in.Body.PlatformExperimentID, in.Body.Cypher, in.Body.Params)
 		if err != nil {
 			if errors.Is(err, graphdb.ErrInvalidQuery) {
 				return nil, huma.Error400BadRequest(err.Error())

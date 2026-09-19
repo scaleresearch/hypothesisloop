@@ -230,13 +230,13 @@ export interface HypothesisQueryResult {
   truncated: boolean
 }
 
-// Read-only Cypher against the hypothesis graph. A Cypher error comes back as a 400 whose body
-// is the database's own message.
-export async function queryHypothesisGraph(cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
+// Read-only Cypher against one platform experiment's hypothesis graph, which the backend binds as
+// $pe. A Cypher error comes back as a 400 whose body is the database's own message.
+export async function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
   const res = await fetch(`${API_URL}/hypotheses/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cypher, params }),
+    body: JSON.stringify({ platform_experiment_id: platformExperimentID, cypher, params }),
     cache: 'no-store',
   })
   if (!res.ok) throw new Error(await res.text())
@@ -266,7 +266,7 @@ const NON_WORD = new RegExp('[^\\p{L}\\p{N}]+', 'gu')
 export async function searchHypotheses(platformExperimentID: string, q: string): Promise<HypothesisSearchHit[]> {
   const words = q.toLowerCase().replace(NON_WORD, ' ').trim()
   if (!words) return []
-  const result = await queryHypothesisGraph(HYPOTHESIS_SEARCH_CYPHER, { pe: platformExperimentID, q: words })
+  const result = await queryHypothesisGraph(platformExperimentID, HYPOTHESIS_SEARCH_CYPHER, { q: words })
   return result.rows.map(([id, text, status]) => ({
     id: id as string, text: text as string, status: status as HypothesisStatus,
   }))

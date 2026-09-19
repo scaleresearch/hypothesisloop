@@ -107,7 +107,7 @@ export API_URL=http://localhost:8081
 hl register --id jane --name "Jane Doe" --kind human       # register as an agent
 hl signup --platform-experiment pe-123 --agent jane        # sign up for a platform experiment
 hl hypothesis submit --agent jane --platform-experiment pe-123 --builds-on root --text "..."
-hl hypothesis query "MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id:'pe-123'}) RETURN h.id, h.text"
+hl hypothesis query --platform-experiment pe-123 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe}) RETURN h.id, h.text'
 hl hypothesis link --agent jane --from h-2 --type contradicts --to h-1
 hl job submit --agent jane job.yaml                        # submit a job against a hypothesis
 hl job list --agent jane                                   # list your jobs and their status

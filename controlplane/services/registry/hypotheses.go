@@ -162,9 +162,9 @@ func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID stri
 	return nodes, edges, nil
 }
 
-// QueryGraph runs one read-only Cypher query against the hypothesis graph.
-func (s *Service) QueryGraph(ctx context.Context, cypher string, params map[string]any) (*graphdb.QueryResult, error) {
-	result, err := s.graph.Query(ctx, cypher, params)
+// QueryGraph runs one read-only Cypher query against one platform experiment's hypothesis graph.
+func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher string, params map[string]any) (*graphdb.QueryResult, error) {
+	result, err := s.graph.Query(ctx, platformExperimentID, cypher, params)
 	if err != nil {
 		return nil, fmt.Errorf("registry.QueryGraph: %w", err)
 	}

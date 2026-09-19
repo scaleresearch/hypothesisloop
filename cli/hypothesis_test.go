@@ -351,11 +351,12 @@ func TestHypothesisQuery(t *testing.T) {
 	})
 	cypher := "MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id}) RETURN c.id AS id, c.text AS text, 3 AS n"
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"hypothesis", "query", cypher, "--param", "id=hyp-0", "--param", "q=a=b"}, &stdout, &stderr)
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+	code := run([]string{"hypothesis", "query", cypher, "--param", "id=hyp-0", "--param", "q=a=b", "--platform-experiment", "pe-1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	want := map[string]any{"cypher": cypher, "params": map[string]any{"id": "hyp-0", "q": "a=b"}}
+	want := map[string]any{"platform_experiment_id": "pe-1", "cypher": cypher, "params": map[string]any{"id": "hyp-0", "q": "a=b"}}
 	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/query" || !reflect.DeepEqual((*got)[0].Body, want) {
 		t.Fatalf("request = %+v", (*got)[0])
 	}
@@ -372,6 +373,7 @@ func TestHypothesisQueryTruncatedWarnsOnStderr(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"columns": []string{"id"}, "rows": [][]any{{"a"}, {"b"}}, "truncated": true}
 	})
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"hypothesis", "query", "MATCH (h:Hypothesis) RETURN h.id AS id"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -395,22 +397,25 @@ func TestHypothesisQueryFromStdin(t *testing.T) {
 	_, _ = w.WriteString("MATCH (n) RETURN count(n)\n")
 	w.Close()
 
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"hypothesis", "query", "--param", "x=1", "-"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	if (*got)[0].Body["cypher"] != "MATCH (n) RETURN count(n)\n" {
+	if (*got)[0].Body["cypher"] != "MATCH (n) RETURN count(n)\n" || (*got)[0].Body["platform_experiment_id"] != "pe-env" {
 		t.Fatalf("body = %v", (*got)[0].Body)
 	}
 }
 
 func TestHypothesisQueryUsageErrors(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return nil })
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
 	for _, args := range [][]string{
 		{},
-		{"MATCH (n) RETURN n", "extra"},
-		{"MATCH (n) RETURN n", "--param", "novalue"},
-		{"   "},
+		{"MATCH (n) RETURN n"},
+		{"MATCH (n) RETURN n", "--platform-experiment", "pe-1", "extra"},
+		{"MATCH (n) RETURN n", "--platform-experiment", "pe-1", "--param", "novalue"},
+		{"   ", "--platform-experiment", "pe-1"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(append([]string{"hypothesis", "query"}, args...), &stdout, &stderr); code != 2 {
@@ -429,7 +434,7 @@ func TestHypothesisQueryErrorSurfacesServerMessage(t *testing.T) {
 	})
 	setAPIURL(t, url)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"hypothesis", "query", "MATC (n) RETURN n"}, &stdout, &stderr); code != 1 {
+	if code := run([]string{"hypothesis", "query", "MATC (n) RETURN n", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "mismatched input") {

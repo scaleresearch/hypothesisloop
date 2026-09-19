@@ -47,7 +47,7 @@ type Graph interface {
 	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
 	CountHypotheses(ctx context.Context, f graphdb.ListFilter) (int, error)
 	ExperimentGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error)
-	Query(ctx context.Context, cypher string, params map[string]any) (*graphdb.QueryResult, error)
+	Query(ctx context.Context, platformExperimentID, cypher string, params map[string]any) (*graphdb.QueryResult, error)
 }
 
 // Service manages experiments and their metric timeseries.
