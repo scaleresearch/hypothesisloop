@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +44,7 @@ func main() {
 	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
-	logTailLines, _ := strconv.Atoi(os.Getenv("LOG_TAIL_LINES"))
+	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 
 	scratchDir := os.Getenv("SCRATCH_DIR")
 	if scratchDir == "" {

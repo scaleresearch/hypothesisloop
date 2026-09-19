@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -22,7 +23,7 @@ import (
 )
 
 // DefaultLogTailLines is how many trailing lines FetchLogTail is asked for when the agent
-// binary doesn't override it (see RequiredEnv("LOG_TAIL_LINES", ...) in each cmd/'s main.go).
+// binary doesn't override it (see OptionalIntEnv("LOG_TAIL_LINES", ...) in each cmd/'s main.go).
 const DefaultLogTailLines = 100
 
 // finalStatusCaptureBudget bounds the whole last-chance observation-and-push phase for workloads
@@ -495,6 +496,36 @@ func RequiredEnv(binaryName, key string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		fmt.Fprintf(os.Stderr, "%s: %s environment variable is required\n", binaryName, key)
+		os.Exit(1)
+	}
+	return value
+}
+
+// OptionalIntEnv reads an integer environment variable, returning 0 when it is unset and exiting
+// the process with a labeled error when it is set but malformed.
+func OptionalIntEnv(binaryName, key string) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %s=%q is not an integer\n", binaryName, key, raw)
+		os.Exit(1)
+	}
+	return value
+}
+
+// OptionalBoolEnv reads a boolean environment variable, returning false when it is unset and
+// exiting the process with a labeled error when it is set but malformed.
+func OptionalBoolEnv(binaryName, key string) bool {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return false
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %s=%q is not a boolean\n", binaryName, key, raw)
 		os.Exit(1)
 	}
 	return value
