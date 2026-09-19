@@ -74,7 +74,8 @@ const (
 	// platform experiment's ranking metric by enough margin to be worth a look — an opinion, not
 	// an instruction. Like metric.point it has no backing row: nothing about "trailing" is
 	// desired state anyone stores, it is recomputed from the metrics store at the moment a
-	// sample makes it true, and it is never stored itself. The agent decides; the existing
+	// sample makes it true, and it is never stored itself; the job's row only records that its
+	// owner was told, so it is sent once per job. The agent decides; the existing
 	// cancel-experiment call is the only path that ever ends the job.
 	EventJobUnderperforming = "job.underperforming"
 )
@@ -127,7 +128,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
-		Description: "This job just started trailing its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Fires once per stretch of underperformance, never replayed, and never sent twice for the same stretch."},
+		Description: "This job just started trailing its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job and never replayed."},
 }
 
 func init() {

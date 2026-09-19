@@ -284,6 +284,8 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS underperforming_notified_at TIMESTAMPTZ;
+
 -- A row from before per-job keys has no store key and would run with empty AWS_* credentials, so
 -- an active one is cancelled the way CancelExperiment would, and no active row may lack a key.
 UPDATE experiments

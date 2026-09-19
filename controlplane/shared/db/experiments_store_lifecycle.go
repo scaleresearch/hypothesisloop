@@ -147,6 +147,18 @@ WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
 	return tag.RowsAffected() > 0, nil
 }
 
+// MarkUnderperforming records that the job's owner is being told it trails its cohort, and
+// reports whether this call was the first to do so, so the advisory is sent once per job.
+func (s *ExperimentsStore) MarkUnderperforming(ctx context.Context, id string) (bool, error) {
+	const q = `UPDATE experiments SET underperforming_notified_at = NOW()
+WHERE id = $1 AND underperforming_notified_at IS NULL`
+	tag, err := s.pool.pool.Exec(ctx, q, id)
+	if err != nil {
+		return false, fmt.Errorf("experiments_store.MarkUnderperforming: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // UpdateNotAdmittedReason replaces the explanation only while the job is still QUEUED.
 // ClaimSubmitted clears it in the same statement that changes the lifecycle, so a stale
 // scheduler decision can never attach a queue reason to an admitted job.

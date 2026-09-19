@@ -34,3 +34,17 @@ func TestAJobTheAdmissionLoopHasNotSeenIsAwaitingAdmission(t *testing.T) {
 		t.Errorf("a requeued job: not_admitted_reason = %q, want %q", got, domain.NotAdmittedAwaitingAdmission)
 	}
 }
+
+func TestMarkUnderperformingIsTrueOncePerJob(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	exps := NewExperimentsStore(pool)
+	id := "underperforming-" + peID
+	seedExperimentForCapTest(t, pool, id, agentID, peID, 1, domain.StatusRunning)
+
+	for i, want := range []bool{true, false} {
+		got, err := exps.MarkUnderperforming(context.Background(), id)
+		if err != nil || got != want {
+			t.Errorf("call %d: MarkUnderperforming = %v, %v, want %v", i+1, got, err, want)
+		}
+	}
+}

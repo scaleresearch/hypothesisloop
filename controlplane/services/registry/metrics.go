@@ -128,15 +128,12 @@ const (
 
 // checkUnderperformance looks at how this job's just-recorded ranking-metric sample compares to
 // its cohort (every other job in the same platform experiment reporting the same metric) and, if
-// it just became the clear straggler, tells only the owning agent so — once per stretch of
-// trailing, never persisted, never a command. See db.EventJobUnderperforming.
+// it just became the clear straggler, tells only the owning agent so — once per job, never a
+// command. See db.EventJobUnderperforming.
 //
-// Nothing here is retained between calls: both "is this job trailing now" and "was it trailing
-// as of its own previous sample" are recomputed fresh from the metrics store every time, which is
-// what keeps this stateless. An in-memory cooldown map would need to survive a process restart
-// and would go stale exactly the way important.md's "no caches / in-ram state" rule warns
-// about; recomputing the edge from data already sitting in a store that is "assumed to answer in
-// real time" costs a couple of extra points read, not a duplicated source of truth.
+// Both "is this job trailing now" and "was it trailing as of its own previous sample" are
+// recomputed from the metrics store every time; the only thing kept is the marker on the job's
+// row saying its owner was told.
 //
 // One honest cost of that choice, found running this live against a real GreptimeDB: the query
 // this runs is issued the instant after this same call wrote its own sample, and remote-write
@@ -262,8 +259,17 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		return
 	}
 	if havePrevSelf && trails(prevSelfScore) {
-		// Already trailing as of the previous checkpoint — this is the same stretch, not a new
-		// one. Fire once per stretch, on the transition into it, not on every sample inside it.
+		// Already trailing as of the previous checkpoint: no transition into trailing.
+		return
+	}
+	// A job that drops in and out of trailing makes that transition several times; the marker on
+	// its row keeps the advisory to one per job.
+	first, err := s.store.MarkUnderperforming(ctx, exp.ID)
+	if err != nil {
+		s.logger.Warn("registry: mark underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
+		return
+	}
+	if !first {
 		return
 	}
 

@@ -22,6 +22,16 @@ type underperformStore struct {
 	Store
 	exp     *domain.Experiment
 	metrics []domain.MetricDefinition
+	told    map[string]bool
+}
+
+func (s underperformStore) MarkUnderperforming(_ context.Context, id string) (bool, error) {
+	if s.told == nil {
+		return true, nil
+	}
+	first := !s.told[id]
+	s.told[id] = true
+	return first, nil
 }
 
 func (s underperformStore) GetExperiment(_ context.Context, _ string) (*domain.Experiment, error) {
@@ -107,20 +117,23 @@ func rankingMetric(key, direction string) []domain.MetricDefinition {
 }
 
 // A job whose previous checkpoint was ahead of the pack and whose current one is clearly cut off
-// from the worst of the rest crosses into the advisory: the agent hears about it once, this call.
-func TestUnderperformanceFiresOnceOnTheTransitionIntoTrailing(t *testing.T) {
+// from the worst of the rest crosses into the advisory. A job that recovers and drops back makes
+// that crossing again, and the agent still hears about it once.
+func TestUnderperformanceFiresOncePerJobOnTheTransitionIntoTrailing(t *testing.T) {
 	server := cohortSeriesServer(0.87, []float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize"), told: map[string]bool{}},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.5, 0.5, time.Now().UTC())
+	for _, fraction := range []float64{0.5, 0.7} {
+		svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", fraction, 0.5, time.Now().UTC())
+	}
 
 	if len(notifier.events) != 1 {
 		t.Fatalf("events = %d, want 1", len(notifier.events))
