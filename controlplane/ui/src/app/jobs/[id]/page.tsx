@@ -116,7 +116,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             )}
           </p>
         </div>
-        <Link href="/jobs" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All jobs</Link>
+        <Link href={`/jobs?platform_experiment_id=${j.platform_experiment_id}`} className="text-link" style={{ fontSize: 12, marginBottom: 4, whiteSpace: 'nowrap' }}>
+          ← This experiment&apos;s jobs
+        </Link>
       </div>
 
       {/* Eviction alert */}
@@ -216,7 +218,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               } />
               <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
-              <Row label="Est. duration" value={j.estimated_duration_hours != null ? `${j.estimated_duration_hours.toFixed(2)} h` : '—'} />
+              <Row label="Est. duration" value={j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'} />
               <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} AccH` : '—'} />
               <Row label="Submitted" value={new Date(j.created_at).toLocaleString()} />
               {j.submitted_at && <Row label="Sent to cluster" value={new Date(j.submitted_at).toLocaleString()} />}
