@@ -191,8 +191,7 @@ def list_keys(bucket: str, prefix: str) -> list[str]:
     status, body = s3("GET", f"/{bucket}", {"list-type": "2", "prefix": prefix, "max-keys": "1000"})
     if status != 200:
         raise SystemExit(f"listing {prefix!r} failed with status {status}: {body[:400]!r}")
-    # MinIO namespaces its response; matching on the local tag name keeps this independent of
-    # which S3 implementation is behind the endpoint.
+    # Matching on the local tag name ignores whichever XML namespace the S3 implementation uses.
     return [
         el.text
         for el in ET.fromstring(body).iter()
