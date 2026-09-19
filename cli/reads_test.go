@@ -143,3 +143,32 @@ func TestHypothesisQueryTakesCypherFlag(t *testing.T) {
 		t.Fatalf("request %+v, stdout %q", (*got)[0], stdout.String())
 	}
 }
+
+func TestJobListAndHypothesisGetPrintBriefJobsWithTheEnvTheyVaried(t *testing.T) {
+	job := func(id, lr string) map[string]any {
+		return map[string]any{"id": id, "agent_id": "a", "hypothesis_id": "hyp-1", "status": "QUEUED", "hypothesis": "long text",
+			"not_admitted_reason": "awaiting_admission", "phase_detail": map[string]any{}, "theory": "why", "estimated_cost_acch": 0.5,
+			"created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"image": "i"},
+			"job": map[string]any{"image": "i", "env": map[string]any{"LR": lr, "GIT_TOKEN": "secret"}}}
+	}
+	jobs := []any{job("job-1", "0.1"), job("job-2", "0.3")}
+	recordingServer(t, func(_ int, r recorded) any {
+		if r.Path == "/experiments" {
+			return jobs
+		}
+		return map[string]any{"id": "hyp-1", "jobs": jobs, "job_count": 2}
+	})
+	brief := func(id, lr string) string {
+		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"QUEUED","not_admitted_reason":"awaiting_admission",` +
+			`"theory":"why","env":{"LR":"` + lr + `"},"estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z"}`
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "list"}, &stdout, &stderr); code != 0 || stdout.String() != brief("job-1", "0.1")+"\n"+brief("job-2", "0.3")+"\n" {
+		t.Fatalf("job list: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	want := `{"id":"hyp-1","job_count":2,"jobs":[` + brief("job-1", "0.1") + "," + brief("job-2", "0.3") + "]}\n"
+	if code := run([]string{"hypothesis", "get", "hyp-1"}, &stdout, &stderr); code != 0 || stdout.String() != want {
+		t.Fatalf("hypothesis get: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
+	}
+}

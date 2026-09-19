@@ -326,7 +326,7 @@ func TestHypothesisGet(t *testing.T) {
 	if (*got)[0].Method != "GET" || (*got)[0].Path != "/hypotheses/hyp-1" {
 		t.Fatalf("request = %+v", (*got)[0])
 	}
-	if stdout.String() != `{"id":"hyp-1","links":{"in":[],"out":[]}}`+"\n" {
+	if stdout.String() != `{"id":"hyp-1","links":{"in":[],"out":[]},"jobs":[]}`+"\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if code := run([]string{"hypothesis", "get"}, &stdout, &stderr); code != 2 {

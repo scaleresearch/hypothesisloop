@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -18,8 +19,8 @@ import (
 const jobUsage = `usage: hl job <command> ...
 
   submit   [FILE|-]            submit a job spec, prints its id; --hypothesis and --env override it
-  list                         jobs of your platform experiment, one per line
-  status   ID [ID ...]         one line per job: status, queue or eviction reason, spec
+  list                         jobs of your platform experiment, one brief line each
+  status   ID [ID ...]         a job's whole record: status, queue or eviction reason, spec
   metrics  ID [--points]       per metric: last value, min, max and points reported
   summary  ID --text T         file the write-up of a finished job
   logs     ID [--lines N]      the last log lines its cluster reported
@@ -222,10 +223,63 @@ func setJobEnv(body map[string]any, pairs []string) error {
 // hypothesis get) and the admission-resolved copy of the submitted spec.
 var jobDrop = []string{"hypothesis", "resolved_job"}
 
+// jobBrief is what a listing prints of a job; hl job status ID prints the whole record.
+type jobBrief struct {
+	ID                string          `json:"id"`
+	ParentID          string          `json:"parent_id"`
+	AgentID           string          `json:"agent_id"`
+	HypothesisID      string          `json:"hypothesis_id"`
+	Status            string          `json:"status"`
+	NotAdmittedReason string          `json:"not_admitted_reason"`
+	EvictionReason    string          `json:"eviction_reason"`
+	PhaseDetail       json.RawMessage `json:"phase_detail"`
+	Theory            string          `json:"theory"`
+	Env               map[string]any  `json:"env"`
+	EstimatedCost     float64         `json:"estimated_cost_acch"`
+	CreatedAt         string          `json:"created_at"`
+}
+
+// briefJobs is one compact line per job, with the env settings that differ between these jobs.
+func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
+	briefs := make([]jobBrief, len(jobs))
+	envs := make([]map[string]any, len(jobs))
+	for i, raw := range jobs {
+		var spec struct {
+			Job struct {
+				Env map[string]any `json:"env"`
+			} `json:"job"`
+		}
+		if err := json.Unmarshal(raw, &briefs[i]); err != nil {
+			return nil, fmt.Errorf("response is not a job: %w", err)
+		}
+		_ = json.Unmarshal(raw, &spec)
+		envs[i] = spec.Job.Env
+	}
+	lines := make([][]byte, len(jobs))
+	for i := range briefs {
+		for key, value := range envs[i] {
+			if slices.ContainsFunc(envs, func(other map[string]any) bool { return other[key] != value }) {
+				if briefs[i].Env == nil {
+					briefs[i].Env = map[string]any{}
+				}
+				briefs[i].Env[key] = value
+			}
+		}
+		line, _ := json.Marshal(briefs[i])
+		var err error
+		if lines[i], err = compactJSON(line); err != nil {
+			return nil, err
+		}
+	}
+	return lines, nil
+}
+
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job list", `usage: hl job list [--platform-experiment PE] [--agent A] [--status S] [--needs-summary] [--limit N]
 
-One job per line, in the scheduler's order. Without --agent, every agent's jobs.`, stderr)
+One job per line, in the scheduler's order: ids, status, reasons, theory, cost and the env
+settings that differ between the listed jobs. hl job status ID prints a job's whole record.
+Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, ADMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED")
@@ -253,12 +307,19 @@ One job per line, in the scheduler's order. Without --agent, every agent's jobs.
 	if *limit != 0 {
 		q.Set("limit", strconv.Itoa(*limit))
 	}
-	var out json.RawMessage
-	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &out); err != nil {
+	var jobs []json.RawMessage
+	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &jobs); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "job list: no job matches", out, jobDrop...); err != nil {
+	lines, err := briefJobs(jobs)
+	if err != nil {
 		return fail(stderr, err)
+	}
+	for _, line := range lines {
+		fmt.Fprintf(stdout, "%s\n", line)
+	}
+	if len(lines) == 0 {
+		fmt.Fprintln(stderr, "hl: job list: no job matches")
 	}
 	return 0
 }

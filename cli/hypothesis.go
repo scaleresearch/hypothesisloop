@@ -536,7 +536,10 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 }
 
 func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis get", "usage: hl hypothesis get ID\n\nOne hypothesis with its links (in and out), jobs, findings and comments.", stderr)
+	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID
+
+One hypothesis with its links (in and out), findings, comments and jobs. A job is as brief as in
+hl job list; hl job status ID prints its whole record.`, stderr)
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
 		return parseExit(err)
@@ -545,9 +548,21 @@ func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 	if err := c.Do("GET", "/hypotheses/"+url.PathEscape(id), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLine(stdout, out); err != nil {
+	var h struct {
+		Jobs []json.RawMessage `json:"jobs"`
+	}
+	if err := json.Unmarshal(out, &h); err != nil {
+		return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+	}
+	jobs, err := briefJobs(h.Jobs)
+	if err != nil {
 		return fail(stderr, err)
 	}
+	line, err := compactJSON(out, "jobs")
+	if err != nil {
+		return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+	}
+	fmt.Fprintf(stdout, "%s,\"jobs\":[%s]}\n", line[:len(line)-1], bytes.Join(jobs, []byte(",")))
 	return 0
 }
 
