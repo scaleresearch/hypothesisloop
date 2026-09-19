@@ -38,7 +38,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { semantic, agentPalette } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { hypothesisActivity } from '@/lib/hypothesis-progress'
+import { filedAfterVerdict, hypothesisActivity } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 
 const TWO_LINES: React.CSSProperties = {
@@ -954,7 +954,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               <tbody>
                 {found.map(h => (
                   <tr key={h.id} style={{ verticalAlign: 'top' }}>
-                    <td><Badge status={h.status}>{h.status}</Badge></td>
+                    <td>
+                      <Badge status={h.status}>{h.status}</Badge>
+                      {h.finding && filedAfterVerdict(h, h.finding.created_at) && (
+                        <div style={{ fontSize: 10, marginTop: 3, color: semantic.warning }} title="The newest finding was filed after this verdict was set">
+                          newer finding
+                        </div>
+                      )}
+                    </td>
                     <td style={{ fontSize: 12 }}>
                       <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
                     </td>

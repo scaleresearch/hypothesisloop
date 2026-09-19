@@ -23,3 +23,8 @@ export function hypothesisActivity(
     untested > 0 && `${untested} without jobs`,
   ].filter(Boolean).join(' · ')
 }
+
+// A finding filed after the verdict is evidence the verdict did not weigh.
+export function filedAfterVerdict(h: { status_changed_at: string | null }, findingAt: string): boolean {
+  return h.status_changed_at != null && new Date(findingAt).getTime() > new Date(h.status_changed_at).getTime()
+}

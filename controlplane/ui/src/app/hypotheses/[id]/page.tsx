@@ -11,6 +11,8 @@ import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
+import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import { semantic } from '@/lib/colors'
 
 function LinkRow({ link, platformExperimentID, pe }: {
   link: HypothesisLink
@@ -62,6 +64,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
   const summarized = new Set(findings.map(f => f.experiment_id))
+  const sinceVerdict = findings.filter(f => filedAfterVerdict(data, f.created_at)).length
   // The env settings that are not the same in every job here: what this hypothesis's runs varied.
   // With nothing varied, every setting is shown.
   const envKeys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
@@ -87,6 +90,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
             Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
             {data.status_changed_at && <> · {data.status} {relTime(data.status_changed_at)}</>}
+            {sinceVerdict > 0 && (
+              <span style={{ color: semantic.warning }}> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
+            )}
           </p>
         </div>
         <Link href={graphHref(data.platform_experiment_id, data.id)} className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>
@@ -161,7 +167,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                         <Link href={`/jobs/${f.experiment_id}`} className="mono text-link">{f.experiment_id.slice(0, 8)}…</Link>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
                       </span>
-                      <span className="text-dim mono">{relTime(f.created_at)}</span>
+                      <span className="text-dim mono">
+                        {filedAfterVerdict(data, f.created_at) && <span style={{ color: semantic.warning }}>after the verdict · </span>}
+                        {relTime(f.created_at)}
+                      </span>
                     </div>
                     <p style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{f.summary}</p>
                   </div>
