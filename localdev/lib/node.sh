@@ -125,23 +125,6 @@ lib_wait_node_ready() {
   kubectl --context "$context" wait "node/$name" --for=condition=Ready --timeout="${timeout}s" >/dev/null
 }
 
-# lib_import_images loads locally-built images straight into <name>'s own containerd (k8s.io
-# namespace), bypassing the registry entirely. The node-agent/cluster-agent Deployments run with
-# imagePullPolicy: Never for local dev (see values.yaml), so the registries.yaml mirror
-# lib_create_node writes is irrelevant to them -- each fake node's containerd is its own isolated
-# store (unlike box-a, which shares the host's), so the image has to be pushed in directly.
-# Usage: lib_import_images <name> <image-ref>...  (each ref must already exist in the local podman
-# store, e.g. "localhost/hypothesisloop-node-agent:latest")
-lib_import_images() {
-  local name="$1"; shift
-  local podman_cmd=(${NODE_PODMAN:-podman})
-  local ref
-  for ref in "$@"; do
-    podman save "$ref" | "${podman_cmd[@]}" exec -i "$name" \
-      ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import - >/dev/null
-  done
-}
-
 # lib_attach_node makes an already-registered node (typically the control-plane's own host)
 # schedulable by removing the default no-workload taint. Idempotent.
 lib_attach_node() {

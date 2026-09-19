@@ -25,6 +25,7 @@
 # host than the GPU node itself, so there's no "just use localhost" fallback):
 #   API_URL, METRICS_URL — reachable from this host (see
 #   localdev/local-tunnels/ if the control plane is local and this is a remote rented box).
+#   TAG — image tag the cluster-agent/node-agent images are built and deployed under.
 #
 # Idempotent: safe to re-run.
 set -euo pipefail
@@ -34,6 +35,8 @@ CLUSTER_NAME="k3s-nvidia"
 
 : "${API_URL:?set API_URL (e.g. a localdev/local-tunnels/ URL reaching :8081)}"
 : "${METRICS_URL:?set METRICS_URL (e.g. a localdev/local-tunnels/ URL reaching :8084)}"
+: "${TAG:?set TAG (e.g. the git SHA of this checkout)}"
+export TAG
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -144,7 +147,7 @@ grep -qFi "nvidia.com/gpu.product=${GPU_PRODUCT}" "${ROOT}/controlplane/settings
 
 echo "==> Building cluster-agent/node-agent images (this host, --docker)..."
 for img in cluster-agent node-agent; do
-  docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "localhost/hypothesisloop-${img}:latest" "${ROOT}" >/dev/null
+  docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "localhost:5000/hypothesisloop-${img}:${TAG}" "${ROOT}" >/dev/null
 done
 
 echo "==> Installing cluster-agent bundle (API: ${API_URL})..."

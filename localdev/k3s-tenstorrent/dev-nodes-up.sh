@@ -9,6 +9,8 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
 export NODE_PODMAN="sudo podman"
+REGISTRY_HOST_IP="$(cat "${DIR}/../.registry-host-ip")"
+export REGISTRY_HOST_IP
 
 CONTEXT="${TT_CONTEXT:-k3s-tt}"
 NODE="${TT_NODE:-box-a}"
@@ -46,16 +48,6 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT}" "${name}"
 
-  # node-agent/cluster-agent/workload all run with imagePullPolicy: Never for local dev, so each
-  # node's own containerd needs the image pushed in directly -- the registries.yaml mirror
-  # lib_create_node wrote only matters to pods that actually pull. Run `make images` beforehand so
-  # the local store has current builds to import. This list is every image the e2e suite's own
-  # scenarios reference (not every hypothesisloop-* image on the host -- some of those are
-  # multi-GB experiment workloads unrelated to e2e and would blow up import time/disk per node).
-  lib_import_images "${name}" \
-    localhost/hypothesisloop-node-agent:latest \
-    localhost/hypothesisloop-cluster-agent:latest \
-    localhost/hypothesisloop-workload:latest
   bash "${DIR}/../lib/fake-gpu-node.sh" "${CONTEXT}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
 done
 
