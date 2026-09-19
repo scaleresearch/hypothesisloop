@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -16,7 +17,7 @@ import (
 
 const jobUsage = `usage: hl job <command> ...
 
-  submit   [FILE|-]            submit a job spec, prints the accepted job
+  submit   [FILE|-]            submit a job spec, prints the accepted job; --hypothesis and --env override it
   list                         jobs of your platform experiment, one per line
   status   ID [ID ...]         one line per job: status, queue or eviction reason, spec
   metrics  ID [--points]       per metric: last value, min, max and points reported
@@ -66,15 +67,18 @@ func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [--agent AGENT] [FILE|-]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--objective T] [--theory T] [--agent AGENT]
 
-FILE is a YAML file shaped exactly like the POST /experiments body: id, metadata, job.
-An empty id is generated. metadata.hypothesis_id is REQUIRED: every job tests a specific, previously-registered
-hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis path.
+FILE is a YAML file shaped exactly like the POST /experiments body: id, metadata, job. The flags
+override it for this one submission, so one committed base spec serves every job that differs
+only in its hypothesis and env, with nothing to edit and nothing to commit.
+An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
+every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
 $PLATFORM_EXPERIMENT_ID. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
-files and HEAD pushed to origin: commit, git push, submit. Minimal shape:
+files and HEAD pushed to origin. Commit and git push only after changing a tracked file.
+Minimal shape:
 
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
@@ -88,6 +92,13 @@ files and HEAD pushed to origin: commit, git push, submit. Minimal shape:
 
 See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`, stderr)
 	agent := fs.String("agent", "", "stamped onto metadata.agent_id (default $AGENT_ID)")
+	overrides := map[string]*string{
+		"hypothesis_id": fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
+		"objective":     fs.String("objective", "", "sets metadata.objective"),
+		"theory":        fs.String("theory", "", "sets metadata.theory"),
+	}
+	var env stringList
+	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
 	path, err := parseOne(fs, args, "FILE", "-")
 	if err != nil {
 		return parseExit(err)
@@ -108,6 +119,14 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	if v := body["id"]; v == nil || v == "" {
 		body["id"] = "job-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	}
+	for key, value := range overrides {
+		if *value != "" {
+			metadata[key] = *value
+		}
+	}
+	if err := setJobEnv(body, env); err != nil {
+		return parseExit(misuse(fs, "%s", err))
+	}
 	metadata["agent_id"] = *agent
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
 		metadata["platform_experiment_id"] = os.Getenv(platformExperimentEnv)
@@ -124,6 +143,33 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		return fail(stderr, err)
 	}
 	return 0
+}
+
+// setJobEnv applies K=V pairs onto body's job.env.
+func setJobEnv(body map[string]any, pairs []string) error {
+	if len(pairs) == 0 {
+		return nil
+	}
+	job, ok := body["job"].(map[string]any)
+	if !ok {
+		return errors.New("--env needs a job mapping in FILE")
+	}
+	env, ok := job["env"].(map[string]any)
+	if !ok {
+		if job["env"] != nil {
+			return errors.New("--env needs job.env in FILE to be a mapping")
+		}
+		env = map[string]any{}
+		job["env"] = env
+	}
+	for _, pair := range pairs {
+		key, value, ok := strings.Cut(pair, "=")
+		if !ok || key == "" {
+			return fmt.Errorf("--env wants K=V, got %q", pair)
+		}
+		env[key] = value
+	}
+	return nil
 }
 
 // jobDrop leaves out of a printed job what a reader already has: the hypothesis text (hl

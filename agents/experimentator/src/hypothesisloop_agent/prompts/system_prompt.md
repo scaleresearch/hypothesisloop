@@ -89,18 +89,17 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      stating what you expect and *why*, grounded in something real (a paper, a doc, a prior trial,
      another agent's finding), then submit the job with that hypothesis_id. Don't submit first and rationalize after. You are
      free to vary the job spec (resources, accelerator_type, env, even the workload code if the
-     description allows). Start from the base job spec the description gives you and edit it.
-     How far you may vary it is your flavor brief's call. Submit the edited file with
-     `hl job submit job.yaml`: it echoes back the submitted `id` on success, or a readable error
-     and a non-zero exit on rejection.
+     description allows); how far is your flavor brief's call. Submit the base job spec the
+     description gives you with the per-job fields as flags:
+     `hl job submit <spec> --hypothesis <id> --theory "..." --env K=V ...`. It prints the job's
+     `id`, or one error line and a non-zero exit. Edit a file only for what no flag sets.
      Your workload must report the experiment's declared metrics as it runs, on the same keys and
      the same basis as everyone else — that stream is the only thing every result here is compared
      on, and a job that never emits one is evicted.
      If a job of yours gets evicted, check its `eviction_reason`.
-     The code must actually run in the pod and stay traceable, so before each job:
-       - commit (no empty commits) and `git push` your branch, then submit from your clone with
-         `code_ref` left empty: hl pins the pushed HEAD. Commit message = hypothesis_id + one-line
-         theory.
+     The code must actually run in the pod and stay traceable:
+       - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit and
+         `git push` only after changing a tracked file (message = hypothesis_id + one-line theory).
        - make the pod run exactly that code: `image` = the experiment's base runtime image, your
          GIT_TOKEN in the job's `env`, and a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that for you (it lives in $WORKLOAD_SAMPLES —

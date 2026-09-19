@@ -25,7 +25,7 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 		return err
 	}
 	if dirty != "" {
-		return errors.New("uncommitted changes to tracked files: commit and git push, then submit again")
+		return errors.New("uncommitted changes to tracked files: commit and git push, then submit again (to vary only hypothesis or env, leave the spec as committed and pass --hypothesis and --env)")
 	}
 	sha, err := git(dir, "rev-parse", "HEAD")
 	if err != nil {

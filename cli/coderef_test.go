@@ -113,3 +113,40 @@ func TestJobSubmitOutsideRepoWithoutCodeRefFails(t *testing.T) {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
 }
+
+func TestJobSubmitFlagsOverrideTheCommittedSpecWithoutACommit(t *testing.T) {
+	clone, origin := pushedClone(t)
+	var sent map[string]any
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-1"})
+	}))
+	var stdout, stderr bytes.Buffer
+	args := []string{"job", "submit", "job.yaml", "--agent", "jane", "--hypothesis", "hyp-9", "--theory", "wider wins",
+		"--env", "LR=0.1", "--env", "NOTE=a=b"}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	metadata := sent["metadata"].(map[string]any)
+	if metadata["hypothesis_id"] != "hyp-9" || metadata["theory"] != "wider wins" {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+	if want := origin + "@" + mustGit(t, clone, "rev-parse", "HEAD"); metadata["code_ref"] != want {
+		t.Fatalf("code_ref = %v, want %s", metadata["code_ref"], want)
+	}
+	env := sent["job"].(map[string]any)["env"].(map[string]any)
+	if env["LR"] != "0.1" || env["NOTE"] != "a=b" {
+		t.Fatalf("env = %+v", env)
+	}
+	if dirty := mustGit(t, clone, "status", "--porcelain"); dirty != "" {
+		t.Fatalf("submit changed the clone: %s", dirty)
+	}
+}
+
+func TestJobSubmitRejectsMalformedEnv(t *testing.T) {
+	pushedClone(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--env", "LR"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2, stderr = %s", code, stderr.String())
+	}
+}

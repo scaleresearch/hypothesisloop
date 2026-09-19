@@ -19,7 +19,8 @@
 // no second schema for "what a job looks like" here — `hl job submit` takes a YAML file shaped
 // exactly like /explore's POST /experiments body, because hand-encoding that shape as a second set
 // of flags is the kind of silently-drifting copy of a contract this codebase explicitly avoids
-// elsewhere. YAML rather than JSON because a human is meant to write and edit this file by hand.
+// elsewhere. Its --hypothesis and --env flags override, for one submission, the fields that change
+// per job. YAML rather than JSON because a human is meant to write and edit this file by hand.
 //
 // --agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, which the
 // experimentator harness sets in an agent's container.
@@ -30,6 +31,7 @@
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
 //	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --platform-experiment pe-123
 //	hl job submit --agent jane job.yaml
+//	hl job submit --agent jane job.yaml --hypothesis hyp-1 --env LR=0.1
 //	hl job status job-1
 //	hl job list --platform-experiment pe-123
 //	hl quota
