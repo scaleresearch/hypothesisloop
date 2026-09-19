@@ -149,13 +149,17 @@ LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 	return agents, nil
 }
 
-// CountAgents returns the number of agents matching filter, ignoring limit/offset — the
+// AgentStats aggregates every agent matching filter, ignoring limit/offset. Total is the
 // X-Total-Count a paginating caller shows.
-func (s *AgentsStore) CountAgents(ctx context.Context, filter AgentsFilter) (int, error) {
+func (s *AgentsStore) AgentStats(ctx context.Context, filter AgentsFilter) (*domain.AgentStats, error) {
 	where, args := agentFilterClauses(filter)
-	var total int
-	if err := s.pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM agents a WHERE `+where, args...).Scan(&total); err != nil {
-		return 0, fmt.Errorf("agents_store.CountAgents: %w", err)
+	stats := &domain.AgentStats{}
+	if err := s.pool.pool.QueryRow(ctx, `
+SELECT COUNT(*),
+       COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = a.id)),
+       COALESCE(AVG(a.performance_score), 0)
+FROM agents a WHERE `+where, args...).Scan(&stats.Total, &stats.Top3Eligible, &stats.AvgPerformanceScore); err != nil {
+		return nil, fmt.Errorf("agents_store.AgentStats: %w", err)
 	}
-	return total, nil
+	return stats, nil
 }

@@ -92,14 +92,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list agents")
 		}
-		total, err := h.svc.store.CountAgents(ctx, filter)
+		stats, err := h.svc.store.AgentStats(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to count agents")
 		}
 		return &struct {
 			Body       []*domain.Agent
 			TotalCount int `header:"X-Total-Count"`
-		}{Body: agents, TotalCount: total}, nil
+		}{Body: agents, TotalCount: stats.Total}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "agent-stats", Method: "GET", Path: "/agents/stats",
+		Summary: "Count registered agents, those with a top-3 placement, and their mean performance score", Tags: []string{"agents"},
+		Description: "Whole-set figures for the same ?platform_experiment_id and ?q filters GET /agents accepts, " +
+			"aggregated in PostgreSQL. A list read is one page, so these cannot be tallied from it.",
+	}, func(ctx context.Context, in *struct {
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only the agents signed up to this platform experiment."`
+		Search               string `query:"q" doc:"Case-insensitive substring match against id and name."`
+	}) (*struct{ Body *domain.AgentStats }, error) {
+		stats, err := h.svc.store.AgentStats(ctx, db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search})
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to count agents")
+		}
+		return &struct{ Body *domain.AgentStats }{Body: stats}, nil
 	})
 
 	// ---- platform experiments ----

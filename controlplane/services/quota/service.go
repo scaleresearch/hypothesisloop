@@ -14,7 +14,7 @@ import (
 type Store interface {
 	CreateAgent(ctx context.Context, agent *domain.Agent) error
 	ListAgents(ctx context.Context, filter db.AgentsFilter) ([]*domain.Agent, error)
-	CountAgents(ctx context.Context, filter db.AgentsFilter) (int, error)
+	AgentStats(ctx context.Context, filter db.AgentsFilter) (*domain.AgentStats, error)
 }
 
 // Service implements the quota domain logic.

@@ -24,8 +24,8 @@ func (f *fakeAgentStore) ListAgents(ctx context.Context, filter db.AgentsFilter)
 	return f.created, nil
 }
 
-func (f *fakeAgentStore) CountAgents(ctx context.Context, filter db.AgentsFilter) (int, error) {
-	return len(f.created), nil
+func (f *fakeAgentStore) AgentStats(ctx context.Context, filter db.AgentsFilter) (*domain.AgentStats, error) {
+	return &domain.AgentStats{Total: len(f.created)}, nil
 }
 
 // TestRegisterAgent_KindDefaultsToAgent covers the backward-compat path: every existing caller

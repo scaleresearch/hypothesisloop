@@ -18,6 +18,16 @@ type Agent struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// AgentStats is the whole set of agents matching a filter, aggregated in PostgreSQL: a list read
+// is one page, so a figure tallied from it describes the page.
+type AgentStats struct {
+	Total int `json:"total"`
+	// Top3Eligible counts agents with at least one top-3 placement.
+	Top3Eligible int `json:"top3_eligible"`
+	// AvgPerformanceScore is 0 when Total is 0.
+	AvgPerformanceScore float64 `json:"avg_performance_score"`
+}
+
 // AgentKind distinguishes a human participant from an AI agent. Scheduling, standings, and quota
 // (see ResolveQuotaTier) never branch on it — it exists for identity/display and submitter-policy
 // checks only. A human and an agent get exactly the same quota treatment.
