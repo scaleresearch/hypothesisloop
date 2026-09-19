@@ -114,7 +114,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?search (substring match " +
 			"against hypothesis/objective/theory), ?needs_summary (finished experiments still missing " +
-			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 200), ?offset. ?sort selects order: created_at, " +
+			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
 			"Total match count is returned in the X-Total-Count response header.",
@@ -127,7 +127,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
 		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
 		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
-		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Default -created_at, newest first."`
 	}) (*struct {
