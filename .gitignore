@@ -102,4 +102,5 @@ agents/coordinator/experiments/*/
 controlplane/settings/.hypothesisloop.rendered.yaml
 agents/coordinator/experiments/*/seed/*.rendered.yaml
 localdev/.registry-host-ip
+localdev/.image-tag
 controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml

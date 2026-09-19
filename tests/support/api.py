@@ -24,9 +24,11 @@ JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
 
 def workload_image() -> str:
     """The generic workload as cluster nodes pull it: from the local registry at the host address
-    `make render-settings` detected (nodes cannot reach the host's localhost)."""
+    `make render-settings` detected (nodes cannot reach the host's localhost), under the tag
+    `make images` last pushed. Never latest: nodes pull IfNotPresent and keep a stale latest."""
     host = (REPO_ROOT / "localdev" / ".registry-host-ip").read_text().strip()
-    return f"{host}:5000/hypothesisloop-workload:latest"
+    tag = (REPO_ROOT / "localdev" / ".image-tag").read_text().strip()
+    return f"{host}:5000/hypothesisloop-workload:{tag}"
 
 
 def load_yaml(path: Path, overrides: dict[str, Any] | None = None) -> dict[str, Any]:

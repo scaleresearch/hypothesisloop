@@ -12,6 +12,7 @@
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
 RENDERED_SETTINGS := controlplane/settings/.hypothesisloop.rendered.yaml
 REGISTRY_HOST_IP_FILE := localdev/.registry-host-ip
+IMAGE_TAG_FILE := localdev/.image-tag
 
 # REGISTRY_HOST_IP is this host's LAN address (localdev/lib/node.sh's lib_host_ip): the local
 # registry publishes on it and every k3s node and job pod reaches the host through it. Never
@@ -209,6 +210,8 @@ tt-start:
 # registries.yaml, the Helm chart's images.registry) pulls normally instead of the old
 # podman-save-pipe-ctr-import sideload, which is what left an unpinned image ID for kubelet's
 # own image GC to reclaim mid-run (see the fix-later.md incident this replaced).
+# IMAGE_TAG_FILE hands TAG to the e2e tests, whose jobs must pin it: nodes pull IfNotPresent, so
+# a job naming latest keeps running whatever latest was when that node first pulled it.
 IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:. \
 	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
@@ -224,6 +227,7 @@ images: check-tag registry-up
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
 	done
+	echo "$(TAG)" > $(IMAGE_TAG_FILE)
 
 # Shared base every experiment's own Dockerfile.experimentator FROMs (see
 # agents/experimentator/Dockerfile.base's header) -- the agent harness, git/Claude Code plumbing,
