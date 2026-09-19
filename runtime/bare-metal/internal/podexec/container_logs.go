@@ -8,14 +8,15 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 )
 
 // FetchLogTail returns the last maxLines lines of experimentID's own container's current
 // stdout/stderr, read live from the container engine (never cached, never stored by this
 // executor itself — see agentloop.LogTailer). Returns (nil, nil) rather than an error if no
-// managed container exists for experimentID yet: an ordinary transient state for a job that was
-// just admitted, not a failure worth logging every reconcile tick.
+// managed container exists for experimentID, including one removed between the listing and the
+// log read: an ordinary transient state, not a failure worth logging every reconcile tick.
 func (e *Executor) FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error) {
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
@@ -36,8 +37,11 @@ func (e *Executor) FetchLogTail(ctx context.Context, experimentID string, maxLin
 	stream, err := e.docker.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: tail,
 	})
-	if err != nil {
+	if errdefs.IsNotFound(err) {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("podexec.FetchLogTail: container logs for %s: %w", experimentID, err)
 	}
 	defer stream.Close()
 
