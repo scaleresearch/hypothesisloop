@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
+import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs, fetchPlatformExperiment } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
@@ -37,6 +37,11 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     job ? `metrics-${id}` : null,
     () => fetchExperimentMetrics(id),
     { refreshInterval: 10_000 },
+  )
+
+  const { data: pe } = useSWR(
+    job ? ['pe', job.platform_experiment_id] : null,
+    () => fetchPlatformExperiment(job!.platform_experiment_id),
   )
 
   if (error) return (
@@ -103,7 +108,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       <div className="wa-title" style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
         <div style={{ flex: 1 }}>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="mono text-dim" style={{ fontSize: 14 }}>{j.id?.slice(0, 8)}…</span>
+            <span className="mono text-dim" style={{ fontSize: 14 }}>{j.id}</span>
             <Badge status={j.status ?? 'UNKNOWN'}>{j.status ?? 'UNKNOWN'}</Badge>
             <TierBadge tier={j.capacity_tier} />
           </h1>
@@ -198,9 +203,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           <table className="wa-table">
             <tbody>
               <Row label="Agent" value={j.agent_id} />
-              <Row label="Platform Experiment" value={j.platform_experiment_id
-                ? <Link href="/platform-experiments" className="text-link">{j.platform_experiment_id.slice(0, 12)}…</Link>
-                : '—'
+              <Row label="Platform Experiment" value={
+                <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-link">{pe?.name ?? j.platform_experiment_id}</Link>
               } />
               <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
@@ -249,7 +253,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                     )}
                   </div>
                   <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
-                    <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                    <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 14 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                       <XAxis
                         dataKey="frac"
