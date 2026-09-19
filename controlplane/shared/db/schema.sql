@@ -561,6 +561,8 @@ ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_x
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS queued_xid    BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS submitted_xid BIGINT;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS status_xid       BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS not_admitted_xid BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE agent_quotas          ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_findings   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_comments   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
@@ -594,10 +596,18 @@ $$ LANGUAGE plpgsql;
 DROP FUNCTION IF EXISTS hypothesisloop_notify_event(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ);
 
 -- updated_xid moves on every write, as updated_at does. A waypoint's xid moves when its
--- timestamp does; a waypoint is only ever set from NULL, so the comparison is exact.
+-- timestamp does; a waypoint is only ever set from NULL, so the comparison is exact. status_xid
+-- and not_admitted_xid move only with the column the live event announces, so a replayed event
+-- carries the position its live twin did even after an unrelated later write to the row.
 CREATE OR REPLACE FUNCTION hypothesisloop_experiments_touch() RETURNS trigger AS $$
 BEGIN
     NEW.updated_xid := pg_current_xact_id()::text::bigint;
+    IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
+        NEW.status_xid := NEW.updated_xid;
+    END IF;
+    IF TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason THEN
+        NEW.not_admitted_xid := NEW.updated_xid;
+    END IF;
     IF TG_OP = 'INSERT' OR NEW.queued_at IS DISTINCT FROM OLD.queued_at THEN
         NEW.queued_xid := CASE WHEN NEW.queued_at IS NULL THEN NULL ELSE NEW.updated_xid END;
     END IF;
@@ -616,8 +626,7 @@ CREATE OR REPLACE FUNCTION hypothesisloop_experiments_notify() RETURNS trigger A
 BEGIN
     IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
         PERFORM hypothesisloop_notify_event('experiment.status', NEW.id, NEW.status::text,
-            COALESCE(NEW.eviction_reason, NEW.not_admitted_reason, ''),
-            NEW.platform_experiment_id, NEW.agent_id);
+            COALESCE(NEW.eviction_reason, ''), NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     -- The queue reason is what an agent polls hardest for: it changes while the status does not,
     -- so it needs an event of its own or a waiting agent learns nothing until admission.

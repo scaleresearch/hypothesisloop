@@ -301,6 +301,56 @@ func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnColumns(t *testing.T
 	}
 }
 
+// A reconnecting client drops a replayed event only when it is identical to one it printed, so a
+// replayed event must equal its live twin, including after a later write to the row that changed
+// neither the status nor the queue reason. (A queue reason already cleared is not replayed at all.)
+func TestReplayedJobEventsEqualTheirLiveTwins(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "twins", true)
+	const jobID = "watch-test-job-twins"
+	before := insertJob(t, pool, agentID, peID, hypothesisID, jobID)
+	exec(t, pool, `UPDATE experiments SET quota_settled_at = now(), updated_at = now() WHERE id = $1`, jobID)
+
+	var live []Event
+	deadline := time.After(5 * time.Second)
+	for len(live) < 4 {
+		select {
+		case e := <-events:
+			if e.Subject == jobID {
+				live = append(live, e)
+			}
+		case <-deadline:
+			t.Fatalf("live events for %s: got = %+v, want = QUEUED, blocked, SUBMITTED, RUNNING", jobID, live)
+		}
+	}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
+		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true, EventExperimentBlocked: true}}, before)
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	twin := map[[3]string]Event{}
+	for _, e := range live {
+		twin[[3]string{e.Kind, e.Subject, e.Value}] = e.Identity()
+	}
+	statuses := 0
+	for _, e := range replayed {
+		want, ok := twin[[3]string{e.Kind, e.Subject, e.Value}]
+		if !ok {
+			t.Errorf("replayed event %+v: got = no live twin, want = one", e)
+			continue
+		}
+		if e.Identity() != want {
+			t.Errorf("replayed event: got = %+v, want = its live twin %+v", e.Identity(), want)
+		}
+		statuses++
+	}
+	if statuses != 3 {
+		t.Errorf("replayed statuses: got = %v, want = QUEUED, SUBMITTED, RUNNING", statuses)
+	}
+}
+
 // A client hands back the cursor of the last event it saw. It must be told everything from that
 // event's transaction on, which may repeat that event, and nothing from before it.
 func TestReplayFromAnEventsCursorReturnsThatEventAndWhatCameAfterIt(t *testing.T) {

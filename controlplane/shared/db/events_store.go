@@ -101,7 +101,7 @@ type EventKindDoc struct {
 // failures a hand-kept second list produces the first time a kind is added.
 var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED",
-		Description: "Your job moved. detail carries the eviction or not-admitted reason when there is one."},
+		Description: "Your job moved. detail carries the eviction reason when there is one; the queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
 		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
@@ -362,7 +362,7 @@ func (s *EventsStore) Emit(ctx context.Context, write func(position int64) ([]Ev
 //
 // What that costs, stated plainly: the rows record when each state was reached, not every state
 // ever passed through. A status the experiment row records (QUEUED via queued_xid, SUBMITTED
-// via submitted_xid, and whatever it holds now via updated_xid) replays exactly; a status it passed
+// via submitted_xid, and whatever it holds now via status_xid) replays exactly; a status it passed
 // through and left inside the missed window, without its own column, is collapsed into the one
 // the row now holds. So a reconnecting client is never told something false and never misses a
 // subject that changed — it may only be told the latest of two values instead of both. That is
@@ -429,9 +429,10 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 
 func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
 	const q = `SELECT id, agent_id, status::text, COALESCE(eviction_reason, ''), COALESCE(not_admitted_reason, ''),
-	queued_xid, submitted_xid, updated_xid
+	queued_xid, submitted_xid, status_xid, not_admitted_xid
 FROM experiments
-WHERE platform_experiment_id = $1 AND (updated_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2)`
+WHERE platform_experiment_id = $1
+  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayExperiments: %w", err)
@@ -442,8 +443,8 @@ WHERE platform_experiment_id = $1 AND (updated_xid >= $2 OR queued_xid >= $2 OR 
 	for rows.Next() {
 		var id, agentID, status, evictionReason, notAdmitted string
 		var queuedXid, submittedXid *int64
-		var updatedXid int64
-		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &updatedXid); err != nil {
+		var statusXid, notAdmittedXid int64
+		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid); err != nil {
 			return nil, fmt.Errorf("events_store.replayExperiments: scan: %w", err)
 		}
 		if queuedXid != nil {
@@ -455,11 +456,11 @@ WHERE platform_experiment_id = $1 AND (updated_xid >= $2 OR queued_xid >= $2 OR 
 				PlatformExperimentID: peID, AgentID: agentID, Position: *submittedXid})
 		}
 		current := Event{Kind: EventExperimentStatus, Subject: id, Value: status, Detail: evictionReason,
-			PlatformExperimentID: peID, AgentID: agentID, Position: updatedXid}
+			PlatformExperimentID: peID, AgentID: agentID, Position: statusXid}
 		events = append(events, current)
 		if notAdmitted != "" {
 			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: notAdmitted,
-				PlatformExperimentID: peID, AgentID: agentID, Position: updatedXid})
+				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -469,7 +470,7 @@ WHERE platform_experiment_id = $1 AND (updated_xid >= $2 OR queued_xid >= $2 OR 
 }
 
 // dedupe drops an event that is identical to one already derived at the same position. The
-// waypoint columns and updated_xid name the same transition whenever the row has not moved since:
+// waypoint columns and status_xid name the same transition whenever the row has not moved since:
 // without this a job sitting in QUEUED would replay QUEUED twice.
 func dedupe(events []Event) []Event {
 	seen := make(map[Event]bool, len(events))
