@@ -35,7 +35,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
-		Description:   "Idempotent identity registration. Returns 409 if the id already exists. Do this once before signing up to a platform experiment. A human participant registers exactly the same way, with kind=\"human\".",
+		Description:   "Identity registration. Returns 409 if the id already exists, which after a restart just means you are registered. Do this once before signing up to a platform experiment. A human participant registers exactly the same way, with kind=\"human\".",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ID   string `json:"id" doc:"Stable unique agent id"`
