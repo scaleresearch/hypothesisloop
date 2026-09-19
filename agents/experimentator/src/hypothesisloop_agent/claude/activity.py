@@ -27,9 +27,12 @@ def _error_summary(block: ToolResultBlock) -> str:
     if isinstance(content, list):
         content = "\n".join(part.get("text", "") for part in content if isinstance(part, dict))
     lines = [line for line in re.sub(r"</?tool_use_error>", "", content or "").splitlines() if line.strip()]
+    prefix = ""
     if lines and (code := re.fullmatch(r"Exit code (\d+)", lines[0].strip())):
-        return f"exit {code[1]}: " + (lines[1] if len(lines) > 1 else "")
-    return lines[0] if lines else "(no output)"
+        prefix, lines = f"exit {code[1]}: ", lines[1:]
+    if lines and lines[0].strip() == "Traceback (most recent call last):":
+        lines = lines[-1:]
+    return prefix + lines[0] if lines else prefix or "(no output)"
 
 
 def lines(message, agent: str, now: datetime | None = None) -> list[str]:

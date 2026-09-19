@@ -51,6 +51,12 @@ class ActivityLinesTest(unittest.TestCase):
         self.assertEqual(activity.lines(failed([{"type": "text", "text": "boom\nx"}]), "a", NOW),
                          ["2026-10-02T06:21:30Z a error boom"])
 
+    def test_failed_traceback_shows_the_error_line(self):
+        message = failed('Exit code 1\nTraceback (most recent call last):\n  File "t.py", line 3, in <module>\n'
+                         '    run()\nValueError: lr must be positive\n\n')
+        self.assertEqual(activity.lines(message, "a", NOW),
+                         ["2026-10-02T06:21:30Z a error exit 1: ValueError: lr must be positive"])
+
     def test_successful_result_is_not_logged(self):
         message = UserMessage(content=[ToolResultBlock(tool_use_id="t", content="ok", is_error=False)])
         self.assertEqual(activity.lines(message, "a", NOW), [])
