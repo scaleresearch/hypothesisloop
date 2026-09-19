@@ -106,6 +106,17 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	// 3a. Summary gate. A job that completed during the agent's turn is unknown to the agent until
+	// the turn ends, so a refusal here would hit every submit of a batch. The job is queued and
+	// says at once why the admission loop will hold it.
+	unsummarized, err := s.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
+	if err != nil {
+		return fmt.Errorf("scheduler: check unsummarized completed: %w", err)
+	}
+	if unsummarized {
+		exp.NotAdmittedReason = domain.NotAdmittedSummaryGate
+	}
+
 	// 2b. Validate hypothesis reference: every experiment must test a specific,
 	// previously-registered hypothesis (POST /hypotheses) rather than restating
 	// free text ad hoc. Denormalize its text onto the experiment for cheap reads.

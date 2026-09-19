@@ -85,6 +85,9 @@ func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 }
 func (poolOnlyStore) IsSignedUp(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
+func (poolOnlyStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
 func (poolOnlyStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
 	return &domain.Agent{ID: id, Kind: domain.AgentKindAgent}, nil
 }
@@ -162,6 +165,26 @@ func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t
 	}
 	if admission.Reason != ReasonMalformed {
 		t.Errorf("reason: got = %v, want %v", admission.Reason, ReasonMalformed)
+	}
+}
+
+type unsummarizedStore struct{ poolOnlyStore }
+
+func (unsummarizedStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+// A job that completed during the agent's turn is unknown to it, so the submit is not refused: it
+// goes on to be queued, saying at once what holds it.
+func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
+	s := &Service{store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
+	exp := humanIdeaSubmission()
+
+	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("Submit with unsummarized jobs: got = %v, want it to pass the summary gate", err)
+	}
+	if exp.NotAdmittedReason != domain.NotAdmittedSummaryGate {
+		t.Errorf("not_admitted_reason: got = %q, want %q", exp.NotAdmittedReason, domain.NotAdmittedSummaryGate)
 	}
 }
 

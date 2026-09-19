@@ -40,8 +40,7 @@ type LoopStore interface {
 	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error)
 	UpdateNotAdmittedReason(ctx context.Context, id, reason string) error
 	// HasUnsummarizedCompleted is the summary gate: an agent's queued jobs wait while one of its
-	// COMPLETED jobs has no summary. Submission never refuses on it, since a job that completed
-	// during the agent's turn is unknown to the agent until the turn ends.
+	// COMPLETED jobs has no summary.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// GetPlatformExperiment supplies the current stage, whose max_job_hours gates admission of
