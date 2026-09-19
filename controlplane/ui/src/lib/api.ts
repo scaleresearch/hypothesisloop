@@ -11,6 +11,7 @@ import type {
   AgentMetricSeries,
   Hypothesis,
   HypothesisComment,
+  HypothesisFinding,
   HypothesisGraph,
   HypothesisLinkInput,
   HypothesisLinkType,
@@ -253,16 +254,16 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
   )
 }
 
-// A hypothesis that holds a verdict, with the newest finding filed against it and the job testing
-// it that did best on the ranking metric.
-export interface JudgedHypothesis extends Hypothesis {
-  finding?: string
+// A hypothesis with a verdict, a finding or a job with a metric: its newest finding and the job
+// testing it that did best on the ranking metric.
+export interface HypothesisEvidence extends Hypothesis {
+  finding?: HypothesisFinding
   best_job?: { id: string; metric: { name: string; best: number; basis: string } }
 }
 
-// At most the 50 newest; fetchHypothesisStats counts them all.
-export function fetchFindings(platformExperimentID: string): Promise<JudgedHypothesis[]> {
-  return apiFetch<JudgedHypothesis[]>(`${API_URL}/platform-experiments/${platformExperimentID}/findings`)
+// Drawn from the 200 newest hypotheses.
+export function fetchFindings(platformExperimentID: string): Promise<HypothesisEvidence[]> {
+  return apiFetch<HypothesisEvidence[]>(`${API_URL}/platform-experiments/${platformExperimentID}/findings`)
 }
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {

@@ -272,10 +272,8 @@ type ListFilter struct {
 	PlatformExperimentID string
 	AgentID              string
 	Status               domain.HypothesisStatus
-	// Judged keeps only the hypotheses with a verdict: any status but open.
-	Judged bool
-	Limit  int
-	Offset int
+	Limit                int
+	Offset               int
 }
 
 func (f ListFilter) where() (string, map[string]any) {
@@ -292,10 +290,6 @@ func (f ListFilter) where() (string, map[string]any) {
 	if f.Status != "" {
 		clauses = append(clauses, "h.status = $status")
 		params["status"] = string(f.Status)
-	}
-	if f.Judged {
-		clauses = append(clauses, "h.status <> $open")
-		params["open"] = string(domain.HypothesisOpen)
 	}
 	return strings.Join(clauses, " AND "), params
 }

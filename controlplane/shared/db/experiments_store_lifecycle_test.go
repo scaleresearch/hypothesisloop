@@ -109,8 +109,8 @@ func TestFindingsReadsCoverManyHypothesesInOneQueryEach(t *testing.T) {
 	if err != nil || len(jobs) != 2 || jobs[0].ID != first || jobs[1].ID != second {
 		t.Errorf("ListExperimentsTesting: got = %v, %v, want %s then %s", jobs, err, first, second)
 	}
-	summaries, err := hyps.NewestFindingSummaries(ctx, []string{shared, "no-such-hypothesis"})
-	if err != nil || len(summaries) != 1 || summaries[shared] != "summary of "+second {
-		t.Errorf("NewestFindingSummaries: got = %v, %v, want the summary of %s only", summaries, err, second)
+	newest, err := hyps.NewestFindings(ctx, []string{shared, "no-such-hypothesis"})
+	if err != nil || len(newest) != 1 || newest[shared].ExperimentID != second || newest[shared].Summary != "summary of "+second {
+		t.Errorf("NewestFindings: got = %v, %v, want the finding of %s only", newest, err, second)
 	}
 }

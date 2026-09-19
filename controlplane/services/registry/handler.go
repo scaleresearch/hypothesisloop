@@ -491,13 +491,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "platform-experiment-findings", Method: "GET", Path: "/platform-experiments/{id}/findings",
-		Summary: "What a platform experiment has settled", Tags: []string{"hypotheses"},
-		Description: "Its 50 newest hypotheses that hold a verdict (confirmed, refuted or inconclusive), each with " +
-			"finding, the newest summary filed against it, and best_job {id, metric}, the job testing it with the " +
-			"best raw value on the first ranking metric. GET /hypotheses/stats counts them all.",
+		Summary: "What a platform experiment has found", Tags: []string{"hypotheses"},
+		Description: "Among its 200 newest hypotheses, each one that holds a verdict, a finding or a job with a " +
+			"metric, whatever its status, with finding, the newest one filed against it, and best_job {id, metric}, " +
+			"the job testing it with the best raw value on the first ranking metric. A finding whose created_at is " +
+			"later than status_changed_at was filed after the verdict.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
-	}) (*struct{ Body []*JudgedHypothesis }, error) {
+	}) (*struct{ Body []*HypothesisEvidence }, error) {
 		findings, err := h.svc.Findings(ctx, in.ID)
 		if errors.Is(err, ErrUnknownPlatformExperiment) {
 			return nil, huma.Error404NotFound(err.Error())
@@ -505,7 +506,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body []*JudgedHypothesis }{Body: findings}, nil
+		return &struct{ Body []*HypothesisEvidence }{Body: findings}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

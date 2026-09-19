@@ -201,11 +201,11 @@ func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher s
 	return result, nil
 }
 
-// JudgedHypothesis is a hypothesis with a verdict and the evidence a reader wants beside it.
-type JudgedHypothesis struct {
+// HypothesisEvidence is a hypothesis with what was found for it.
+type HypothesisEvidence struct {
 	*domain.Hypothesis
-	// Finding is the newest summary filed against it, empty when it was judged without one.
-	Finding string `json:"finding,omitempty"`
+	// Finding is the newest finding filed against it, nil when none was.
+	Finding *domain.HypothesisFinding `json:"finding,omitempty"`
 	// BestJob is the job testing it that holds the best raw value on the platform experiment's
 	// first ranking metric, nil when none reported it.
 	BestJob *BestJob `json:"best_job,omitempty"`
@@ -216,12 +216,13 @@ type BestJob struct {
 	Metric *domain.JobMetric `json:"metric"`
 }
 
-// maxFindings bounds what Findings returns.
-const maxFindings = 50
+// maxFindings bounds how many hypotheses Findings reads.
+const maxFindings = 200
 
-// Findings returns what a platform experiment has settled: its newest maxFindings hypotheses that
-// hold a verdict, each with its newest finding and its best job.
-func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]*JudgedHypothesis, error) {
+// Findings returns what a platform experiment has found: among its newest maxFindings hypotheses,
+// each one that holds a verdict, a finding or a job with a metric, with its newest finding and its
+// best job.
+func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]*HypothesisEvidence, error) {
 	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, platformExperimentID)
 	if err != nil {
 		return nil, fmt.Errorf("registry.Findings: %w", err)
@@ -229,15 +230,15 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 	if !found {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
-	judged, err := s.graph.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExperimentID, Judged: true, Limit: maxFindings})
+	hypotheses, err := s.graph.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExperimentID, Limit: maxFindings})
 	if err != nil {
 		return nil, fmt.Errorf("registry.Findings: %w", err)
 	}
-	ids := make([]string, len(judged))
-	for i, h := range judged {
+	ids := make([]string, len(hypotheses))
+	for i, h := range hypotheses {
 		ids[i] = h.ID
 	}
-	summaries, err := s.store.NewestFindingSummaries(ctx, ids)
+	newest, err := s.store.NewestFindings(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("registry.Findings: %w", err)
 	}
@@ -265,11 +266,14 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 		}
 		best[job.HypothesisID] = job
 	}
-	out := make([]*JudgedHypothesis, len(judged))
-	for i, h := range judged {
-		out[i] = &JudgedHypothesis{Hypothesis: h.Hypothesis, Finding: summaries[h.ID]}
+	out := []*HypothesisEvidence{}
+	for _, h := range hypotheses {
+		e := &HypothesisEvidence{Hypothesis: h.Hypothesis, Finding: newest[h.ID]}
 		if job := best[h.ID]; job != nil {
-			out[i].BestJob = &BestJob{ID: job.ID, Metric: job.Metric}
+			e.BestJob = &BestJob{ID: job.ID, Metric: job.Metric}
+		}
+		if h.Status != domain.HypothesisOpen || e.Finding != nil || e.BestJob != nil {
+			out = append(out, e)
 		}
 	}
 	return out, nil

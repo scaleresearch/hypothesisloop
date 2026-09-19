@@ -107,23 +107,23 @@ func (s *HypothesesStore) FindingSummary(ctx context.Context, experimentID strin
 	return summary, nil
 }
 
-// NewestFindingSummaries returns the newest summary filed against each hypothesis in ids, in one
-// query. A hypothesis with no finding is absent.
-func (s *HypothesesStore) NewestFindingSummaries(ctx context.Context, ids []string) (map[string]string, error) {
-	const q = `SELECT DISTINCT ON (hypothesis_id) hypothesis_id, summary
+// NewestFindings returns the newest finding filed against each hypothesis in ids, in one query. A
+// hypothesis with no finding is absent.
+func (s *HypothesesStore) NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error) {
+	const q = `SELECT DISTINCT ON (hypothesis_id) id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, summary, created_at
 FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, created_at DESC`
 	rows, err := s.pool.pool.Query(ctx, q, ids)
 	if err != nil {
-		return nil, fmt.Errorf("hypotheses_store.NewestFindingSummaries: %w", err)
+		return nil, fmt.Errorf("hypotheses_store.NewestFindings: %w", err)
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	out := map[string]*domain.HypothesisFinding{}
 	for rows.Next() {
-		var id, summary string
-		if err := rows.Scan(&id, &summary); err != nil {
-			return nil, fmt.Errorf("hypotheses_store.NewestFindingSummaries: scan: %w", err)
+		f := &domain.HypothesisFinding{}
+		if err := rows.Scan(&f.ID, &f.HypothesisID, &f.PlatformExperimentID, &f.ExperimentID, &f.AgentID, &f.Summary, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.NewestFindings: scan: %w", err)
 		}
-		out[id] = summary
+		out[f.HypothesisID] = f
 	}
 	return out, rows.Err()
 }

@@ -675,11 +675,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     results?.bests.find(b => b.metric === metricKey)?.agents.find(a => a.agent_id === agentId)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const hypothesisCount = verdicts?.total ?? 0
-  const judgedCount = hypothesisCount - (verdicts?.by_status.open ?? 0)
   const hypothesisSub = [
     HYPOTHESIS_STATUSES.map(v => `${verdicts?.by_status[v] ?? 0} ${v}`).join(' · '),
     hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}),
   ].filter(Boolean).join(' · ')
+
+  // Best result first; a hypothesis whose jobs reported no metric comes last.
+  const bestFirst = primaryStandings?.direction === 'minimize' ? 1 : -1
+  const found = [...(findings ?? [])].sort((a, b) =>
+    (a.best_job ? bestFirst * a.best_job.metric.best : Infinity) - (b.best_job ? bestFirst * b.best_job.metric.best : Infinity))
 
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const inFlightAccelerators = stats?.in_flight_accelerators ?? 0
@@ -922,12 +926,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       </Pod>
 
       {/* Findings */}
-      {findings && findings.length > 0 && (
+      {found.length > 0 && (
         <Pod>
           <PodHeader>
             Findings
             <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
-              ({judgedCount} hypotheses with a verdict{judgedCount > findings.length ? `, showing the newest ${findings.length}` : ''})
+              ({found.length} hypotheses with a verdict or a result)
             </span>
           </PodHeader>
           <PodContent scrollX>
@@ -941,14 +945,16 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 </tr>
               </thead>
               <tbody>
-                {findings.map(h => (
+                {found.map(h => (
                   <tr key={h.id} style={{ verticalAlign: 'top' }}>
                     <td><Badge status={h.status}>{h.status}</Badge></td>
                     <td style={{ fontSize: 12 }}>
                       <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
                     </td>
                     <td style={{ fontSize: 12 }}>
-                      {h.finding ? <span style={TWO_LINES} title={h.finding}>{h.finding}</span> : <span className="text-muted">—</span>}
+                      {h.finding
+                        ? <span style={TWO_LINES} title={h.finding.summary}>{h.finding.summary}</span>
+                        : <span className="text-muted">no finding filed</span>}
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>
                       {h.best_job ? (
