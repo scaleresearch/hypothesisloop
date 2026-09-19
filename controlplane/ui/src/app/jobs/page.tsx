@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { fetchExperimentsPage, fetchExperimentStats, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
 import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
+import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge, TierBadge } from '@/components/ui/badge'
@@ -63,7 +64,6 @@ function JobsPageContent() {
     [agents],
   )
   const { data: platformExperiments } = useSWR<PlatformExperiment[]>('platform-experiments-all', () => fetchPlatformExperiments())
-  const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
 
@@ -209,7 +209,7 @@ function JobsPageContent() {
                     <div className="empty-state">
                       No jobs found{statusFilter ? ` for status "${statusFilter}"` : ''}
                       {agentFilter ? ` from agent "${agentFilter}"` : ''}
-                      {peFilter ? ` in "${peByID.get(peFilter)?.name ?? peFilter}"` : ''}.
+                      {peFilter && <> in <PlatformExperimentName id={peFilter} /></>}.
                     </div>
                   </td>
                 </tr>
@@ -226,7 +226,7 @@ function JobsPageContent() {
                     onClick={() => router.push(`/jobs/${job.id}`)}
                     onKeyDown={e => { if (e.key === 'Enter') router.push(`/jobs/${job.id}`) }}
                   >
-                    <td className="mono text-dim" style={{ fontSize: 11 }}>{job.id.slice(0, 8)}…</td>
+                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{job.id.slice(0, 8)}…</td>
                     <td className="mono">{job.agent_id}</td>
                     <td className="mono" style={{ fontSize: 11 }}>
                       {j.platform_experiment_id ? (
@@ -235,7 +235,7 @@ function JobsPageContent() {
                           className="text-link"
                           onClick={e => e.stopPropagation()}
                         >
-                          {peByID.get(j.platform_experiment_id)?.name ?? j.platform_experiment_id.slice(0, 12) + '…'}
+                          <PlatformExperimentName id={j.platform_experiment_id} />
                         </Link>
                       ) : '—'}
                     </td>

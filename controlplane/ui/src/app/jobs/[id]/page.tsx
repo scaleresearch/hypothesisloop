@@ -5,8 +5,9 @@ import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs, fetchPlatformExperiment } from '@/lib/api'
+import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
+import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
@@ -37,11 +38,6 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     job ? `metrics-${id}` : null,
     () => fetchExperimentMetrics(id),
     { refreshInterval: 10_000 },
-  )
-
-  const { data: pe } = useSWR(
-    job ? ['pe', job.platform_experiment_id] : null,
-    () => fetchPlatformExperiment(job!.platform_experiment_id),
   )
 
   if (error) return (
@@ -204,7 +200,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             <tbody>
               <Row label="Agent" value={j.agent_id} />
               <Row label="Platform Experiment" value={
-                <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-link">{pe?.name ?? j.platform_experiment_id}</Link>
+                <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-link"><PlatformExperimentName id={j.platform_experiment_id} /></Link>
               } />
               <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
