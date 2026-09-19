@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAgentsPage, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
+import { fetchAgentsPage, fetchPlatformExperiment, fetchPlatformExperiments, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
 import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -108,19 +108,17 @@ export default function AgentsPage() {
   const donationItems = donations?.items ?? []
   const donationTotal = donations?.total ?? 0
 
-  // Filter agents by experiment (those who signed up)
-  const filteredAgents = (() => {
-    if (!experimentFilter || !experiments) return agents
-    const pe = experiments.find(e => e.id === experimentFilter)
-    if (!pe || !pe.signed_up_agents) return agents
-    const agentSet = new Set(pe.signed_up_agents)
-    return (agents ?? []).filter(a => agentSet.has(a.id))
-  })()
-
-  const sortedExperiments = useMemo(
-    () => [...(experiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [experiments],
+  // Only the single-experiment read carries the signup roster.
+  const { data: selectedPE } = useSWR(
+    experimentFilter ? ['pe', experimentFilter] : null,
+    () => fetchPlatformExperiment(experimentFilter),
   )
+  // Memoized: the table re-renders without end on rows that change identity every render.
+  const filteredAgents = useMemo(() => {
+    if (!experimentFilter) return agents
+    const signedUp = new Set(selectedPE?.signed_up_agents)
+    return agents?.filter(a => signedUp.has(a.id))
+  }, [experimentFilter, agents, selectedPE])
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
@@ -138,7 +136,6 @@ export default function AgentsPage() {
   })
   const sortedAgents = agentTable.getRowModel().rows.map(r => r.original)
 
-  const selectedPE = experimentFilter ? (experiments ?? []).find(pe => pe.id === experimentFilter) ?? null : null
   const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
 
   const top3Count = (agents ?? []).filter(a => a.top3_count > 0).length
@@ -171,8 +168,8 @@ export default function AgentsPage() {
             <SearchableSelect
               value={experimentFilter}
               onChange={v => { setExperimentFilter(v); setPage(0) }}
-              allLabel="All agents"
-              options={sortedExperiments.map(pe => ({ value: pe.id, label: `${pe.name} (${pe.status})` }))}
+              allLabel="All experiments"
+              options={(experiments ?? []).map(pe => ({ value: pe.id, label: `${pe.name} (${pe.status})` }))}
             />
             {experimentFilter && (
               <Button size="sm" onClick={() => { setExperimentFilter(''); setPage(0) }}>Clear</Button>
@@ -263,7 +260,9 @@ export default function AgentsPage() {
                 <tr>
                   <td colSpan={4} style={{ padding: 0 }}>
                     <EmptyState>
-                      {experimentFilter ? 'No agents signed up for this experiment.' : 'No agents registered.'}
+                      {!experimentFilter ? 'No agents registered.'
+                        : selectedPE?.signup_count ? `The ${selectedPE.signup_count} agents signed up for this experiment are not among the first ${MAX_PAGE_SIZE} agents read.`
+                        : 'No agents signed up for this experiment.'}
                     </EmptyState>
                   </td>
                 </tr>
