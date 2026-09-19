@@ -25,7 +25,7 @@ import (
 type EventSource interface {
 	ListenEvents(ctx context.Context, out chan<- db.Event) error
 	Replay(ctx context.Context, filter db.EventFilter, since int64) ([]db.Event, error)
-	Concerns(ctx context.Context, filter db.EventFilter, e db.Event) (bool, error)
+	Concerns(ctx context.Context, filter db.EventFilter, events []db.Event) ([]db.Event, error)
 }
 
 const (
@@ -321,10 +321,8 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for kind := range filter.Kinds {
 		delivered.floor[kind] = since
 	}
-	for _, e := range replayed {
-		if err := delivered.send(conn, filter, e); err != nil {
-			return
-		}
+	if err := delivered.send(conn, filter, replayed...); err != nil {
+		return
 	}
 
 	ping := time.NewTicker(watchPingInterval)
@@ -380,27 +378,26 @@ type served struct {
 	sent   map[db.Event]bool
 }
 
-func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event) error {
-	if e.Position < s.floor[e.Kind] || s.sent[e.Identity()] {
-		return nil
-	}
-	concerns, err := s.source.Concerns(s.ctx, filter, e)
+func (s *served) send(conn *wsConn, filter db.EventFilter, events ...db.Event) error {
+	events, err := s.source.Concerns(s.ctx, filter, events)
 	if err != nil {
-		s.logger.Error("watch: scope an event to its agent", zap.Error(err))
+		s.logger.Error("watch: scope events to their agent", zap.Error(err))
 		return err
 	}
-	if !concerns {
-		return nil
-	}
-	if err := writeEvent(conn, e); err != nil {
-		return err
-	}
-	s.sent[e.Identity()] = true
-	if e.Cursor > s.floor[e.Kind] {
-		s.floor[e.Kind] = e.Cursor
-		for sent := range s.sent {
-			if sent.Kind == e.Kind && sent.Position < e.Cursor {
-				delete(s.sent, sent)
+	for _, e := range events {
+		if e.Position < s.floor[e.Kind] || s.sent[e.Identity()] {
+			continue
+		}
+		if err := writeEvent(conn, e); err != nil {
+			return err
+		}
+		s.sent[e.Identity()] = true
+		if e.Cursor > s.floor[e.Kind] {
+			s.floor[e.Kind] = e.Cursor
+			for sent := range s.sent {
+				if sent.Kind == e.Kind && sent.Position < e.Cursor {
+					delete(s.sent, sent)
+				}
 			}
 		}
 	}
@@ -482,10 +479,8 @@ func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subs
 				h.logger.Error("watch: replay after widening a subscription", zap.Error(err))
 				return writeFrame(conn, watchFrame{Error: "could not replay the kinds you added; reconnect with since=<largest cursor you saw>"})
 			}
-			for _, e := range events {
-				if err := delivered.send(conn, replayFilter, e); err != nil {
-					return err
-				}
+			if err := delivered.send(conn, replayFilter, events...); err != nil {
+				return err
 			}
 		}
 	}

@@ -881,10 +881,17 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		{db.Event{Kind: db.EventHypothesisNew, Subject: child.ID}, true},
 		{db.Event{Kind: db.EventHypothesisNew, Subject: theirs.ID}, false},
 	}
-	for _, c := range cases {
-		got, err := s.ConcernsAgent(context.Background(), "agent-1", c.e)
-		if err != nil || got != c.want {
-			t.Errorf("ConcernsAgent(agent-1, %+v): got = %v, %v, want = %v, nil", c.e, got, err, c.want)
+	events := make([]db.Event, len(cases))
+	for i, c := range cases {
+		events[i] = c.e
+	}
+	got, err := s.ConcernsAgent(context.Background(), "agent-1", events)
+	if err != nil || len(got) != len(cases) {
+		t.Fatalf("ConcernsAgent(agent-1, %d events): got = %v, %v", len(cases), got, err)
+	}
+	for i, c := range cases {
+		if got[i] != c.want {
+			t.Errorf("ConcernsAgent(agent-1, %+v): got = %v, want = %v", c.e, got[i], c.want)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -132,8 +133,8 @@ func (noHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event,
 	return nil, nil
 }
 
-func (noHypothesisEvents) ConcernsAgent(context.Context, string, Event) (bool, error) {
-	return false, nil
+func (noHypothesisEvents) ConcernsAgent(_ context.Context, _ string, events []Event) ([]bool, error) {
+	return make([]bool, len(events)), nil
 }
 
 // This is the whole reason the events are emitted by a trigger inside the writing transaction. A
@@ -758,34 +759,43 @@ func TestASubscriptionWithoutAnAgentCarriesEveryAgentsEvents(t *testing.T) {
 	}
 }
 
-type ownedHypotheses map[string]string
+type ownedHypotheses struct {
+	owner map[string]string
+	reads *int
+}
 
 func (ownedHypotheses) ReplayEvents(context.Context, string, int64) ([]Event, error) { return nil, nil }
 
-func (o ownedHypotheses) ConcernsAgent(_ context.Context, agentID string, e Event) (bool, error) {
-	return o[e.Subject] == agentID, nil
+func (o ownedHypotheses) ConcernsAgent(_ context.Context, agentID string, events []Event) ([]bool, error) {
+	*o.reads++
+	out := make([]bool, len(events))
+	for i, e := range events {
+		out[i] = o.owner[e.Subject] == agentID
+	}
+	return out, nil
 }
 
-// Concerns asks the graph only about hypothesis events on an agent scope; everything else Matches
-// admitted stands.
-func TestConcernsAsksTheGraphOnlyAboutHypothesisEventsOnAnAgentScope(t *testing.T) {
-	store := NewEventsStore(nil, ownedHypotheses{"hyp-a": "agent-a"})
-	scoped := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
-	cases := []struct {
-		filter EventFilter
-		e      Event
-		want   bool
-	}{
-		{scoped, Event{Kind: EventCommentNew, Subject: "hyp-a", AgentID: "agent-b"}, true},
-		{scoped, Event{Kind: EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}, false},
-		{scoped, Event{Kind: EventExperimentStatus, Subject: "exp-1", Value: "COMPLETED", AgentID: "agent-a"}, true},
-		{EventFilter{PlatformExperimentID: "pe-1"}, Event{Kind: EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}, true},
+// Concerns asks the graph only about hypothesis events on an agent scope, once for all of them;
+// everything else Matches admitted stands.
+func TestConcernsAsksTheGraphOnceAndOnlyAboutHypothesisEventsOnAnAgentScope(t *testing.T) {
+	reads := 0
+	store := NewEventsStore(nil, ownedHypotheses{owner: map[string]string{"hyp-a": "agent-a"}, reads: &reads})
+	mine := Event{Kind: EventCommentNew, Subject: "hyp-a", AgentID: "agent-b"}
+	theirs := Event{Kind: EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}
+	job := Event{Kind: EventExperimentStatus, Subject: "exp-1", Value: "COMPLETED", AgentID: "agent-a"}
+	events := []Event{theirs, job, mine, theirs}
+
+	got, err := store.Concerns(context.Background(), EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}, events)
+	if err != nil || !reflect.DeepEqual(got, []Event{job, mine}) {
+		t.Errorf("Concerns on an agent scope: got = %+v, %v, want = %+v, nil", got, err, []Event{job, mine})
 	}
-	for _, c := range cases {
-		got, err := store.Concerns(context.Background(), c.filter, c.e)
-		if err != nil || got != c.want {
-			t.Errorf("Concerns(%+v, %+v): got = %v, %v, want = %v, nil", c.filter, c.e, got, err, c.want)
-		}
+	if reads != 1 {
+		t.Errorf("graph reads for four events: got = %d, want = 1", reads)
+	}
+
+	got, err = store.Concerns(context.Background(), EventFilter{PlatformExperimentID: "pe-1"}, events)
+	if err != nil || !reflect.DeepEqual(got, events) || reads != 1 {
+		t.Errorf("Concerns without an agent: got = %+v, %v after %d reads, want every event and no further read", got, err, reads)
 	}
 }
 
@@ -808,8 +818,8 @@ func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]E
 	return f, nil
 }
 
-func (fixedHypothesisEvents) ConcernsAgent(context.Context, string, Event) (bool, error) {
-	return false, nil
+func (fixedHypothesisEvents) ConcernsAgent(_ context.Context, _ string, events []Event) ([]bool, error) {
+	return make([]bool, len(events)), nil
 }
 
 // Hypothesis events come from the graph store, everything else from Postgres, and a reconnecting

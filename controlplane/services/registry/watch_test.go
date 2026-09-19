@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +40,8 @@ type fakeEvents struct {
 	links map[string][]string
 	// next, when set, is the largest cursor this database could have issued.
 	next int64
+	// concernsCalls counts the times the agent scope was asked, each one a graph read.
+	concernsCalls atomic.Int32
 }
 
 func newFakeEvents(stored ...db.Event) *fakeEvents {
@@ -61,21 +64,32 @@ func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int6
 	return out, nil
 }
 
-func (f *fakeEvents) Concerns(_ context.Context, filter db.EventFilter, e db.Event) (bool, error) {
+func (f *fakeEvents) Concerns(_ context.Context, filter db.EventFilter, events []db.Event) ([]db.Event, error) {
+	f.concernsCalls.Add(1)
+	var kept []db.Event
+	for _, e := range events {
+		if f.concerns(filter, e) {
+			kept = append(kept, e)
+		}
+	}
+	return kept, nil
+}
+
+func (f *fakeEvents) concerns(filter db.EventFilter, e db.Event) bool {
 	switch {
 	case filter.AgentID == "" || !strings.HasPrefix(e.Subject, "hyp-"):
-		return true, nil
+		return true
 	case e.Kind == db.EventHypothesisNew:
 		for _, to := range f.links[e.Subject] {
 			if f.owner[to] == filter.AgentID {
-				return true, nil
+				return true
 			}
 		}
-		return false, nil
+		return false
 	case e.Kind == db.EventHypothesisLink:
-		return f.owner[e.Detail] == filter.AgentID, nil
+		return f.owner[e.Detail] == filter.AgentID
 	default:
-		return f.owner[e.Subject] == filter.AgentID, nil
+		return f.owner[e.Subject] == filter.AgentID
 	}
 }
 
@@ -401,11 +415,15 @@ func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromTh
 	}
 	query := url.Values{"platform_experiment_id": {"pe-1"}, "agent": {"agent-a"}}
 
-	replayed := dialWatch(t, watchServer(t, scope(newFakeEvents(events...))), query)
+	stored := scope(newFakeEvents(events...))
+	replayed := dialWatch(t, watchServer(t, stored), query)
 	for _, position := range want {
 		if got := replayed.next(t).Position; got != position {
 			t.Errorf("replayed position: got = %v, want = %v", got, position)
 		}
+	}
+	if got := stored.concernsCalls.Load(); got != 1 {
+		t.Errorf("agent scope reads for a replay of %d events: got = %v, want = 1", len(events), got)
 	}
 
 	source := scope(newFakeEvents())

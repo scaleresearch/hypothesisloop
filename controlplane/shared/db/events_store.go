@@ -274,10 +274,11 @@ type EventsStore struct {
 
 // HypothesisEvents derives the hypothesis.new, hypothesis.status and hypothesis.link events of one
 // platform experiment at a position of at least since (see graphdb.Store.ReplayEvents), and answers
-// whether a hypothesis event concerns a hypothesis an agent registered (graphdb.Store.ConcernsAgent).
+// per event whether a hypothesis event concerns a hypothesis an agent registered
+// (graphdb.Store.ConcernsAgent).
 type HypothesisEvents interface {
 	ReplayEvents(ctx context.Context, platformExperimentID string, since int64) ([]Event, error)
-	ConcernsAgent(ctx context.Context, agentID string, e Event) (bool, error)
+	ConcernsAgent(ctx context.Context, agentID string, events []Event) ([]bool, error)
 }
 
 // NewEventsStore returns an EventsStore backed by pool and the graph store's hypothesis events.
@@ -316,13 +317,38 @@ func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event) error 
 	}
 }
 
-// Concerns completes Matches for an agent filter: a hypothesis event belongs on it only when it
-// concerns a hypothesis that agent registered. Every other event that Matches admits, it admits.
-func (s *EventsStore) Concerns(ctx context.Context, filter EventFilter, e Event) (bool, error) {
-	if filter.AgentID == "" || !isHypothesisActivity(e.Kind) {
-		return true, nil
+// Concerns completes Matches for an agent filter: of events, a hypothesis event stays only when it
+// concerns a hypothesis that agent registered. Every other event that Matches admits stays. The
+// graph is read once for all of them, so a snapshot replay over a large pool costs one read.
+func (s *EventsStore) Concerns(ctx context.Context, filter EventFilter, events []Event) ([]Event, error) {
+	if filter.AgentID == "" {
+		return events, nil
 	}
-	return s.hypotheses.ConcernsAgent(ctx, filter.AgentID, e)
+	var asked []Event
+	for _, e := range events {
+		if isHypothesisActivity(e.Kind) {
+			asked = append(asked, e)
+		}
+	}
+	if len(asked) == 0 {
+		return events, nil
+	}
+	concerns, err := s.hypotheses.ConcernsAgent(ctx, filter.AgentID, asked)
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]Event, 0, len(events))
+	next := 0
+	for _, e := range events {
+		if isHypothesisActivity(e.Kind) {
+			next++
+			if !concerns[next-1] {
+				continue
+			}
+		}
+		kept = append(kept, e)
+	}
+	return kept, nil
 }
 
 const notifySQL = "SELECT hypothesisloop_notify_event($1, $2, $3, $4, $5, $6)"

@@ -54,28 +54,61 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 	return out.([]db.Event), nil
 }
 
-// ConcernsAgent reports whether a hypothesis event concerns a hypothesis agentID registered: the
-// subject of a comment, finding or status, the target of a link, or a target of the links a new
-// hypothesis was registered with. A link added to a new hypothesis later is its own event, so it
-// does not make the hypothesis.new concern the agent, live or in a replay.
-func (s *Store) ConcernsAgent(ctx context.Context, agentID string, e db.Event) (bool, error) {
-	q, id := `MATCH (t:Hypothesis {id: $id, agent_id: $agent}) RETURN count(t) > 0`, e.Subject
-	switch e.Kind {
-	case db.EventHypothesisNew:
-		q = `MATCH (h:Hypothesis {id: $id})-[r]->(t:Hypothesis {agent_id: $agent}) WHERE r.created_at = h.created_at
-RETURN count(t) > 0`
-	case db.EventHypothesisLink:
-		id = e.Detail
+// ConcernsAgent reports, per event, whether a hypothesis event concerns a hypothesis agentID
+// registered: the subject of a comment, finding or status, the target of a link, or a target of
+// the links a new hypothesis was registered with. A link added to a new hypothesis later is its
+// own event, so it does not make the hypothesis.new concern the agent, live or in a replay. It is
+// one read however many events are asked about.
+func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []db.Event) ([]bool, error) {
+	var targets, created []string
+	for _, e := range events {
+		switch e.Kind {
+		case db.EventHypothesisNew:
+			created = append(created, e.Subject)
+		case db.EventHypothesisLink:
+			targets = append(targets, e.Detail)
+		default:
+			targets = append(targets, e.Subject)
+		}
 	}
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		records, err := collect(ctx, tx, q, map[string]any{"id": id, "agent": agentID})
-		if err != nil {
-			return nil, err
+		concerned := map[string]bool{}
+		for _, q := range []struct {
+			cypher string
+			ids    []string
+		}{
+			{`MATCH (t:Hypothesis {agent_id: $agent}) WHERE t.id IN $ids RETURN t.id`, targets},
+			{`MATCH (h:Hypothesis)-[r]->(t:Hypothesis {agent_id: $agent}) WHERE h.id IN $ids AND r.created_at = h.created_at
+RETURN DISTINCT h.id`, created},
+		} {
+			if len(q.ids) == 0 {
+				continue
+			}
+			records, err := collect(ctx, tx, q.cypher, map[string]any{"ids": q.ids, "agent": agentID})
+			if err != nil {
+				return nil, err
+			}
+			var d decoder
+			for _, r := range records {
+				concerned[d.str(r.Values[0])] = true
+			}
+			if d.err != nil {
+				return nil, d.err
+			}
 		}
-		return records[0].Values[0].(bool), nil
+		return concerned, nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("graphdb.ConcernsAgent: %w", err)
+		return nil, fmt.Errorf("graphdb.ConcernsAgent: %w", err)
 	}
-	return out.(bool), nil
+	concerned := out.(map[string]bool)
+	result := make([]bool, len(events))
+	for i, e := range events {
+		id := e.Subject
+		if e.Kind == db.EventHypothesisLink {
+			id = e.Detail
+		}
+		result[i] = concerned[id]
+	}
+	return result, nil
 }
