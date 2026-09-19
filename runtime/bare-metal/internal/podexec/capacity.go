@@ -182,36 +182,6 @@ func splitLabel(s string) (key, value string, ok bool) {
 	return "", "", false
 }
 
-// GetFlavorCapacity reports this node's capacity as a single canonical domain.Footprint under
-// its own cluster_name — the workload.Backend contract's admission-facing view. Every job here
-// is guaranteed-tier eligible capacity; burst capacity is reported as the same numbers, since a
-// single bare node has no separate burst pool the way k8s PriorityClasses model preemption
-// (there is nothing here to preempt into — this runtime runs at most one workload's containers
-// concurrently within whatever fits).
-func (e *Executor) GetFlavorCapacity(ctx context.Context, clusterName string) (guaranteed, burst map[string]domain.Footprint, err error) {
-	cpuAvail, _, err := e.GetLiveCPUCapacity(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	ramAvail, _, err := e.GetLiveRAMCapacity(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	acceleratorAvail, _, _, _, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	fp := domain.NewFootprint()
-	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindCPU}, int64(cpuAvail*1000))
-	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, ramAvail)
-	for acceleratorType, count := range acceleratorAvail {
-		fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: acceleratorType}, count)
-	}
-	guaranteed = map[string]domain.Footprint{clusterName: fp}
-	burst = map[string]domain.Footprint{clusterName: fp}
-	return guaranteed, burst, nil
-}
-
 // GetLiveNodeResourceCapacity reports this node's free CPU/memory/storage. There is exactly one
 // node, so this is the per-node view of the same numbers the cluster-wide collectors report.
 func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error) {
@@ -263,24 +233,6 @@ func (e *Executor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[str
 		domain.NodeResourceMemoryBytes:   ramTotal,
 		domain.NodeResourceStorageBytes:  storageTotal,
 	}}, nil
-}
-
-// GetAcceleratorCapacityByNode/GetNodeLabels give the plain cluster->node->... shape
-// workload.Backend expects, wrapping GetLiveAcceleratorCapacitySnapshot's single-node result.
-func (e *Executor) GetAcceleratorCapacityByNode(ctx context.Context, clusterName string) (map[string]map[string]map[string]int64, error) {
-	_, _, byNode, _, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]map[string]map[string]int64{clusterName: byNode}, nil
-}
-
-func (e *Executor) GetNodeLabels(ctx context.Context, clusterName string) (map[string]map[string]map[string]string, error) {
-	_, _, _, nodeLabels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]map[string]map[string]string{clusterName: nodeLabels}, nil
 }
 
 // devicesInUseExcluding returns the set of host device paths (case-folded, matching the

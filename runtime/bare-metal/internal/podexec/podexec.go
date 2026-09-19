@@ -54,7 +54,7 @@ type Config struct {
 	// (podman --storage-opt size=, statfs'd for total/available). Required.
 	ScratchDir string
 	// NodeLabels are this node's static facts (zone, disk class, ...) merged with
-	// probe-derived accelerator labels when reporting GetNodeLabels — the bare-node analogue
+	// probe-derived accelerator labels in GetLiveAcceleratorCapacitySnapshot, the bare-node analogue
 	// of a single fleet.yaml node entry (different-backend.md §4.2).
 	NodeLabels map[string]string
 	// NodeName overrides the OS hostname as this node's reported identity. Optional.
