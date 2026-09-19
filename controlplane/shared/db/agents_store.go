@@ -106,7 +106,7 @@ func agentFilterClauses(filter AgentsFilter) (string, []any) {
 	return where, args
 }
 
-// ListAgents returns the agents matching filter ordered by created_at, including top3_count from
+// ListAgents returns the agents matching filter newest first, including top3_count from
 // experiment_top3. Limit is defaulted and clamped to [1, maxAgentListLimit]; limit<=0 uses the default.
 func (s *AgentsStore) ListAgents(ctx context.Context, filter AgentsFilter) ([]*domain.Agent, error) {
 	limit := filter.Limit
@@ -123,7 +123,7 @@ SELECT a.id, a.name, a.kind, a.performance_score, a.created_at,
        (SELECT COUNT(*) FROM experiment_top3 t WHERE t.agent_id = a.id) AS top3_count
 FROM agents a
 WHERE %s
-ORDER BY a.created_at ASC
+ORDER BY a.created_at DESC, a.id
 LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 
 	rows, err := s.pool.pool.Query(ctx, q, args...)

@@ -30,7 +30,7 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 	}{
 		{"signed up", AgentsFilter{PlatformExperimentID: pe}, []string{in}},
 		{"search, any case", AgentsFilter{Search: "BETA-" + suffix}, []string{out}},
-		{"search across both", AgentsFilter{Search: suffix}, []string{in, out}},
+		{"search across both, newest first", AgentsFilter{Search: suffix}, []string{out, in}},
 		{"signed up and search miss", AgentsFilter{PlatformExperimentID: pe, Search: "beta"}, nil},
 	} {
 		got, err := agents.ListAgents(ctx, tc.filter)

@@ -73,7 +73,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
 		Description: "Filter with ?platform_experiment_id (the agents signed up to it) and ?q (search id/name). " +
-			"Optional ?limit (default 20, max 200) and ?offset, oldest first. Total match count is " +
+			"Optional ?limit (default 20, max 200) and ?offset, newest first. Total match count is " +
 			"returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only the agents signed up to this platform experiment."`
