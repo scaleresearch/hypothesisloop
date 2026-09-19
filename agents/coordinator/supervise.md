@@ -8,7 +8,8 @@ never act on an agent's behalf.
 Every 5-10 min at first, widen once behavior looks steady.
 
 - `podman logs --tail 100 agent-<id>` (or `tail -100` of its `.activity.log`) — progress or
-  stuck loop? Each line is one `say`, `tool` or `error` action; see setup.md section 4.
+  stuck loop? Each line is one `say`, `tool`, `error` or `event` (a platform update the agent was
+  handed); see setup.md section 4.
 - `GET $API_URL/platform-experiments/{id}/stages` — current stage, progress, cut agents. A job
   stuck past `max_job_hours` is a bug, not just slow.
 - `GET $API_URL/...` — is the ranking metric moving, reporting at `experiment.md`'s cadence?
@@ -74,8 +75,8 @@ platform experiment's `description` field, then `GET` it back and diff against t
 loop; it has failed to stop one before. If an agent keeps retrying past a comment, verify the
 *description* actually changed before assuming the agent is ignoring you.
 
-That `PUT` now emits a `platform_experiment.description` event on `/watch`, and agents are told to
-re-read the description when it fires. That does not weaken anything above: the event carries no
+That `PUT` emits a `platform_experiment.description` event on `/watch`, which the harness hands to
+every agent as an update, and agents are told to re-read the description when it arrives. That does not weaken anything above: the event carries no
 text, so the description remains the only place the new question exists, and an agent that is
 mid-job, disconnected or restarting learns nothing until it reads it. The event only shortens the
 delay between your edit and the agent noticing — which is why the edit still has to happen, and

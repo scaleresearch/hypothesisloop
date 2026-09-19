@@ -12,9 +12,9 @@ ANTHROPIC_API_KEY, exactly as Claude Code itself resolves it.
 Uses ClaudeSDKClient (bidirectional, resumable) rather than one-shot query(): a platform
 experiment runs for hours to days, and a one-shot query() ends the whole process the moment the
 model reaches a natural end_turn — which happens constantly, e.g. any time the model "waits" for
-a background job instead of blocking on it. This session survives that: an end_turn just gets a
-follow-up nudge on the same connection (same context, same prompt cache) instead of the process
-exiting. The session_id is persisted to disk so that even a genuine process crash/redeploy resumes
+a background job instead of blocking on it. This session survives that: an end_turn waits for the
+next batch of platform updates (see updates.py) and sends it on the same connection (same context,
+same prompt cache) instead of the process exiting. The session_id is persisted to disk so that even a genuine process crash/redeploy resumes
 the same conversation (via `resume=`) rather than starting over cold.
 """
 from __future__ import annotations
@@ -31,10 +31,9 @@ from claude_agent_sdk import (
     RateLimitEvent,
     ResultMessage,
     TextBlock,
-    ToolUseBlock,
 )
 
-from hypothesisloop_agent import core
+from hypothesisloop_agent import core, updates
 from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
@@ -49,12 +48,10 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
                      "TaskOutput", "TaskStop"]
 
 
-def _log_message(message, agent: str) -> bool:
-    """Prints the activity lines to stdout, logs the rest, returns True iff a tool was used."""
+def _log_message(message, agent: str) -> None:
+    """Prints the activity lines to stdout and logs the rest."""
     for line in activity.lines(message, agent):
         print(line, flush=True)
-    used_tool = isinstance(message, AssistantMessage) and any(
-        isinstance(block, ToolUseBlock) for block in message.content)
     if isinstance(message, ResultMessage):
         log.info(
             "result: subtype=%s turns=%d cost_usd=%s stop_reason=%s",
@@ -66,7 +63,6 @@ def _log_message(message, agent: str) -> bool:
             "rate_limit: status=%s type=%s utilization=%s resets_at=%s",
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
-    return used_tool
 
 
 def _session_file(setup: core.RunSetup) -> str:
@@ -110,17 +106,6 @@ def _remove_file(path: str) -> None:
         pass
 
 
-# Nudge sent on the same connection whenever the model ends its turn without a real stop
-# condition being true (see core.stop_reason) — keeps the conversation (and its prompt cache)
-# alive across what would otherwise be process-ending idle exits.
-CONTINUE_PROMPT = (
-    "Your turn ended but the platform experiment is still open and you are not held. Nothing "
-    "resumes this process on a timer — a background wakeup you scheduled will NOT wake it — so "
-    "check current platform state and continue with the most useful work available rather than "
-    "ending your turn to wait idle."
-)
-
-
 # Backoff for reconnect attempts that aren't governed by an explicit RateLimitInfo.resets_at
 # (e.g. a dropped connection, a 5xx from the API, transient CLI crash). Capped well below the
 # quota backoff below since these are usually transient.
@@ -131,22 +116,6 @@ _RECONNECT_BACKOFF_MAX_S = 900
 # resets_at read in case of a bogus/far-future timestamp, and re-check state after waking rather
 # than trusting one read for arbitrarily long.
 _MAX_SINGLE_SLEEP_S = 3600
-
-# Idle-nudge backoff: when the model ends its turn with no tool use at all (nothing to react to
-# -- no job polled, no API touched), doubling the pre-nudge sleep avoids burning a full model turn
-# every ~15-20s once an agent has converged and is just repeating "nothing changed, holding
-# steady" (observed costing real tokens over an 8h run once an agent finishes early -- see
-# improvements.md). Any turn that does use a tool resets the backoff immediately, since that's a
-# real reaction to new state, not idle polling.
-# Capped at 240s (under Anthropic's 5-minute default prompt-cache TTL), not 900s: once the gap
-# between turns on this connection exceeds the cache TTL, the next turn's system prompt + full
-# accumulated history is a cache MISS -- recomputed at ~10x (or ~12.5x, rewriting the cache) the
-# cost of a cache-hit turn (confirmed via Codex consult, 2026-09-11). A 900s cap meant most idle
-# turns after the 3rd-4th backoff step paid full non-cached input price on an ever-growing
-# transcript -- the actual fast (within-an-hour, not just over idle days) budget-burn cause,
-# distinct from the separately-documented "no real blocking wait exists" issue. See fix-later.md.
-_IDLE_NUDGE_BACKOFF_INITIAL_S = 15
-_IDLE_NUDGE_BACKOFF_MAX_S = 240
 
 # Claude Code normally auto-compacts near its model-dependent context limit, but that path does
 # not fire reliably for this SDK's long-lived sequence of query()/receive_response() calls (the
@@ -226,24 +195,23 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         setting_sources=[],
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
-        # The 2 min default backgrounded every `hl watch`, and agents then polled its output file.
+        # The 2 min default backgrounds long commands, and agents then poll their output files.
         env={"BASH_DEFAULT_TIMEOUT_MS": "600000"},
     )
 
     rate_limited_resets_at: float | None = None
+    cfg = setup.cfg
+    watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
 
     async with ClaudeSDKClient(options=options) as client:
         first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
         await client.query(first_prompt)
-        idle_nudge_backoff_s = _IDLE_NUDGE_BACKOFF_INITIAL_S
         while True:
             got_result = False
             turn_is_error = False
-            turn_used_tool = False
             context_tokens = 0
             async for message in _receive_turn(client):
-                if _log_message(message, setup.cfg.agent_id):
-                    turn_used_tool = True
+                _log_message(message, setup.cfg.agent_id)
                 if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
                     context_tokens = _context_tokens(message.usage)
                 if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
@@ -274,9 +242,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # is_error=True with subtype="success" is the CLI's signal for an underlying
                 # failure it couldn't otherwise surface (auth not set up, a bad API response,
                 # ...) — e.g. "Not logged in · Please run /login". The turn still "completes"
-                # instantly with no tool use, so falling through to the normal continue-nudge
-                # path spins this loop as fast as the CLI can be invoked, forever. Route it
-                # through the same backoff as a transient error instead of re-querying immediately.
+                # instantly with no tool use, so falling through to the update wait would treat a
+                # broken session as an idle agent. Route it through the same backoff as a
+                # transient error instead.
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
                 return resume_id, None, None
 
@@ -314,18 +282,21 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 _remove_file(_session_file(setup))
                 return None, None, handoff
 
-            # The model ended its turn but no real stop condition holds — nudge it forward on
-            # the same connection instead of letting the process exit. This is what actually
-            # lets a single session span hours/days: every other "stop" here was actually just
-            # the model treating an ordinary pause as the end of the whole run.
-            if turn_used_tool:
-                idle_nudge_backoff_s = _IDLE_NUDGE_BACKOFF_INITIAL_S
-            else:
-                log.info("turn ended with no tool use — idle, sleeping %.0fs before nudging", idle_nudge_backoff_s)
-                await asyncio.sleep(idle_nudge_backoff_s)
-                idle_nudge_backoff_s = min(idle_nudge_backoff_s * 2, _IDLE_NUDGE_BACKOFF_MAX_S)
-            log.info("turn ended, no stop condition met — continuing session")
-            await client.query(CONTINUE_PROMPT)
+            # The agent ended its turn: wait for the next batch of updates about its own jobs and
+            # hypotheses and hand it over on the same connection.
+            events = await updates.next_batch(
+                watch_env, lambda: core.stop_requested(setup, started_at, stop_flag), updates.IDLE_NUDGE_S)
+            if events:
+                for line in activity.event_lines(events, cfg.agent_id):
+                    print(line, flush=True)
+                await client.query(updates.message(events, cfg.agent_id))
+                continue
+            reason = core.stop_reason(setup, started_at, stop_flag)
+            if reason:
+                log.info("stopping: %s", reason)
+                return resume_id, None, None
+            log.info("no platform updates for %ds, nudging", updates.IDLE_NUDGE_S)
+            await client.query(updates.IDLE_PROMPT)
 
 
 async def _run(setup: core.RunSetup, model: str) -> None:

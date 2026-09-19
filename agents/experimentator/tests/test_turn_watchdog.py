@@ -38,7 +38,7 @@ class HangingClient:
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
     async def test_silent_cli_ends_session_with_turn_stalled(self):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
-                                cfg=SimpleNamespace(agent_id="agent-a"))
+                                cfg=SimpleNamespace(agent_id="agent-a", api_url="http://x", platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", HangingClient), \
                 mock.patch.object(run, "_TURN_SILENCE_TIMEOUT_S", 0.05), \
                 contextlib.redirect_stdout(io.StringIO()) as out:

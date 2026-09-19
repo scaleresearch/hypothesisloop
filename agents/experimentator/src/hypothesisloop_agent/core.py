@@ -85,6 +85,12 @@ def prepare() -> RunSetup:
                     max_turns=max_turns, workdir=workdir)
 
 
+def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:
+    """The stop conditions that need no platform call: a signal or MAX_WALL_HOURS."""
+    hours = setup.cfg.max_wall_hours
+    return stop_flag[0] or bool(hours and (time.time() - started_at) / 3600.0 >= hours)
+
+
 def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | None:
     """Between-event stop check shared by both backends. Returns a reason string, or None."""
     if stop_flag[0]:

@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 
+from hypothesisloop_agent import updates
+
 WIDTH = 200
 _TOOL_INPUT_KEYS = ("command", "file_path", "pattern", "url", "query", "description")
 
@@ -35,9 +37,18 @@ def _error_summary(block: ToolResultBlock) -> str:
     return prefix + lines[0] if lines else prefix or "(no output)"
 
 
+def _stamp(now: datetime | None) -> str:
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def event_lines(events: list[dict], agent: str, now: datetime | None = None) -> list[str]:
+    """One line per platform update the harness handed the agent."""
+    return [f"{_stamp(now)} {agent} event {_one_line(updates.event_line(e, agent))}" for e in events]
+
+
 def lines(message, agent: str, now: datetime | None = None) -> list[str]:
     """One human-readable line per meaningful action in a Claude stream message."""
-    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = _stamp(now)
     entries = []
     if isinstance(message, AssistantMessage):
         for block in message.content:

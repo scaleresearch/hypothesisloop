@@ -234,8 +234,12 @@ on rootless podman only: a rootful podman machine (macOS) rejects `--userns=keep
 Never use `--bare`; it ignores the token.
 
 Each agent prints its activity log to stdout: one line per action (UTC time, agent id, kind,
-summary), where the kind is `say` (its own text), `tool` (a tool call, with the Bash command) or
-`error` (the first line of a failed tool result). Harness logs (turn results, rate limits,
+summary), where the kind is `say` (its own text), `tool` (a tool call, with the Bash command),
+`error` (the first line of a failed tool result) or `event` (a platform update the harness handed
+the agent). The agent does not run `hl watch` itself: whenever it ends its turn, the harness runs
+it for the agent's own resources and starts the next turn with the batch it returns, and nudges the
+agent after 30 minutes without one. The cursor lives in `.hl-state/` in the agent's workdir, so a
+restarted agent resumes where it stopped. Harness logs (turn results, rate limits,
 reconnects) go to stderr and the full transcript stays in the Claude Code session jsonl under
 `~/.claude/projects/` inside the container. For a per-agent activity file, run the container
 attached in the background instead of `-d` and redirect its streams:

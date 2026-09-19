@@ -18,7 +18,8 @@ Backend-specific choices, mirroring the Claude entry point's bypassPermissions s
     countable message budget) and is ignored here; MAX_WALL_HOURS is the portable limit.
 
 Stop conditions are checked between streamed notifications; unlike the Claude one-shot query(),
-Codex turns support a real interrupt(), which we use.
+Codex turns support a real interrupt(), which we use. When a turn ends, the next batch of platform
+updates (see updates.py) starts the next turn on the same thread.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ import time
 
 from openai_codex import ApprovalMode, AsyncCodex, Sandbox
 
-from hypothesisloop_agent import core
+from hypothesisloop_agent import core, updates
 
 log = logging.getLogger("llm_agent")
 
@@ -61,25 +62,42 @@ async def _run(setup: core.RunSetup, model: str) -> None:
             # Pin it so large-context models cannot let this days-long turn grow past 400K.
             config={"model_auto_compact_token_limit": 400_000},
         )
-        turn = await thread.turn("Begin.")
-        interrupted = False
-        async for note in turn.stream():
-            _log_notification(note)
+        cfg = setup.cfg
+        watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
+        prompt = "Begin."
+        while True:
+            turn = await thread.turn(prompt)
+            interrupted = False
+            async for note in turn.stream():
+                _log_notification(note)
+                reason = core.stop_reason(setup, started_at, stop_flag)
+                if reason:
+                    log.info("stopping: %s", reason)
+                    await turn.interrupt()
+                    interrupted = True
+                    break
+
+            result = await turn.run()  # collect the (possibly interrupted) turn's final result
+            log.info(
+                "result: status=%s duration_ms=%s error=%s%s",
+                result.status, result.duration_ms, result.error,
+                " (interrupted)" if interrupted else "",
+            )
+            if result.final_response:
+                log.info("assistant: %s", result.final_response.strip()[:800])
+
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
-                await turn.interrupt()
-                interrupted = True
-                break
-
-        result = await turn.run()  # collect the (possibly interrupted) turn's final result
-        log.info(
-            "result: status=%s duration_ms=%s error=%s%s",
-            result.status, result.duration_ms, result.error,
-            " (interrupted)" if interrupted else "",
-        )
-        if result.final_response:
-            log.info("assistant: %s", result.final_response.strip()[:800])
+                return
+            events = await updates.next_batch(
+                watch_env, lambda: core.stop_requested(setup, started_at, stop_flag), updates.IDLE_NUDGE_S)
+            if events:
+                for event in events:
+                    log.info("event: %s", updates.event_line(event, cfg.agent_id))
+                prompt = updates.message(events, cfg.agent_id)
+            else:
+                prompt = updates.IDLE_PROMPT
 
 
 def main() -> None:

@@ -59,8 +59,8 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
   0. You are already registered and signed up. `hl platform-experiments get --id
      {platform_experiment_id}`: read its `description` completely, with its `metrics`, `stages`
      and `current_stage`: the stage advances between your restarts, so re-read rather than assume
-     what a past session concluded. While its status is still `open` jobs are refused; wait with
-       hl watch --until 'status in running'
+     what a past session concluded. While its status is still `open` jobs are refused; end your
+     turn and the run starting reaches you as an update.
   1. Unless the description fixes it, pick your accelerator_type from the live capacity listing,
      copied verbatim and with available > 0 — a type with none queues forever and never errors.
   2. One-time: clone {code_repo_url} and work on branch `{agent_id}-{platform_experiment_id}`
@@ -121,30 +121,13 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      Chain a stage onto its parent by setting `parent_id` and reading the parent's prefix.
      Git stays the store for text — code, configs, small results; anything loaded as a tensor goes
      to the data prefix.
-  6. Wait on the platform instead of polling it. `hl watch` holds a live subscription open and
-     prints one JSON event per line (kind, subject, new value, cursor); each is a pointer, never a
-     payload: follow it with `hl job status --id J`, `hl job metrics --id J` or `hl hypothesis get
-     <id>` when you want the detail. One command covers the loop above:
-       hl watch --until 'status in COMPLETED,FAILED,EVICTED,closed'
-     It returns when any job of yours ends or the run closes for everyone, and prints what
-     happened meanwhile. Act on these:
-       - `experiment.blocked`: why a queued job still waits; the reason can change while the
-         status stays QUEUED.
-       - `hypothesis.status`: a claim was settled; read it, don't retest it. New hypotheses,
-         findings and comments arrive too, so a peer's verdict reaches you before you plan the
-         next trial rather than after you have paid for it.
-       - `agent.cut`: the run is over for you; wind up and stop.
-       - `platform_experiment.description`: the brief changed. Re-read the platform experiment
-         before your next trial: the edit outranks anything you inferred earlier, including a
-         retry in progress.
-     It leaves out `metric.point`; name that in `--kinds` to follow one job's progress.
-     Branch on the exit code, don't assume 0 means your condition was met:
-       0    --until became true (or, with no --until, the watch window simply elapsed)
-       124  the timeout expired with --until still unmet — read state once and decide
-       2    the request was wrong and will stay wrong: a bad flag, an unknown kind, an
-            experiment that does not exist. It prints the platform's own reason; fix that exact
-            thing rather than retrying. Anything genuinely transient — a dropped socket, an
-            unreachable server — it retries for you until the timeout.
+  6. Updates about your own jobs and hypotheses arrive as messages on their own: a job ending or
+     still queued and why, your quota, a stage advance or your cut, the run closing or its brief
+     changing, and others' comments, findings and links on your hypotheses. Each is a pointer:
+     follow it with `hl job status`, `hl job metrics` or `hl hypothesis get` for the detail. Never
+     poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A changed
+     brief outranks anything you inferred earlier, so re-read it before your next trial. If you are
+     cut, wind up and stop. Other agents' ideas come from searching the graph when you plan.
      While a job is QUEUED, cancel and resubmit it smaller if its `not_admitted_reason` stays
      `capacity_unavailable` and no cluster can fit it. The scheduler does not know which of your
      own jobs is more urgent (it preempts burst jobs only for guaranteed ones, and evicts a job

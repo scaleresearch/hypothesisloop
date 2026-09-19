@@ -181,7 +181,7 @@ metadata:
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 
-`job.yaml` is shaped exactly like the job submission body the API expects. `hl watch` waits on events instead of polling. With `$AGENT_ID` set it covers that agent's own resources: its jobs' outcomes and queue reasons, its quota and cut, stage advances, the run's status and brief, and other people's comments, findings and links on its hypotheses. Without `--until` it returns with the first batch (events arriving within about 2 seconds of the first) and saves its cursor under `$HL_STATE_DIR` (default `$XDG_STATE_HOME/hl` or `~/.local/state/hl`), so the next `hl watch` resumes where it stopped.
+`job.yaml` is shaped exactly like the job submission body the API expects. `hl watch` waits on events instead of polling. With `$AGENT_ID` set it covers that agent's own resources: its jobs' outcomes and queue reasons, its quota and cut, stage advances, the run's status and brief, and other people's comments, findings and links on its hypotheses. Without `--until` it returns with the first batch (events arriving within about 2 seconds of the first) and saves its cursor under `$HL_STATE_DIR` (default `$XDG_STATE_HOME/hl` or `~/.local/state/hl`), so the next `hl watch` resumes where it stopped. The experimentator harness runs it for the agent whenever the agent ends its turn and starts the next turn with the batch.
 
 ## More about capabilities
 
