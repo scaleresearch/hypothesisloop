@@ -1,4 +1,4 @@
-.PHONY: up down reset build test e2e-py lint images sparse-sdpa-workload-image \
+.PHONY: up down reset build test e2e-py lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-clean-tree registry-up registry-prune \
 	helm-prepare helm-push helm-lint helm-template \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
@@ -304,3 +304,7 @@ e2e-py:
 
 lint:
 	golangci-lint run ./...
+
+check: build test helm-lint
+	go vet ./...
+	cd controlplane/ui && npm run build
