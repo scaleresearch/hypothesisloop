@@ -1,61 +1,25 @@
 package main
 
 import (
-	"bufio"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 )
 
-// readAllPodStats walks cgroupRoot looking for cpu.stat files and returns a map
-// of cgroup path → entry. Pod UID is parsed from the path.
-func readAllPodStats() map[string]cpuStatEntry {
-	result := map[string]cpuStatEntry{}
+// podUIDsWithCgroups walks cgroupRoot for cpu.stat files and returns the pod UIDs their paths name.
+func podUIDsWithCgroups() map[string]bool {
+	result := map[string]bool{}
 	_ = filepath.WalkDir(cgroupRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || d.Name() != "cpu.stat" {
 			return nil
 		}
-		usage, ok := readUsageUsec(path)
-		if !ok {
-			return nil
-		}
-		uid := extractPodUID(path)
-		result[path] = cpuStatEntry{
-			path:      path,
-			podUID:    uid,
-			usageUsec: usage,
-			readAt:    time.Now(),
+		if uid := extractPodUID(path); uid != "" {
+			result[uid] = true
 		}
 		return nil
 	})
 	return result
-}
-
-// readUsageUsec extracts the usage_usec value from a cgroup v2 cpu.stat file.
-func readUsageUsec(path string) (uint64, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, false
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "usage_usec ") {
-			parts := strings.Fields(line)
-			if len(parts) == 2 {
-				v, err := strconv.ParseUint(parts[1], 10, 64)
-				if err == nil {
-					return v, true
-				}
-			}
-		}
-	}
-	return 0, false
 }
 
 // extractPodUID parses a pod UID from a cgroup path. Two layouts are supported:

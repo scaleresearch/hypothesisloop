@@ -51,14 +51,6 @@ type pushPayload struct {
 	Pods      []podSample `json:"pods"`
 }
 
-// cpuStatEntry holds a single cpu.stat reading for a cgroup path.
-type cpuStatEntry struct {
-	path      string
-	podUID    string
-	usageUsec uint64
-	readAt    time.Time
-}
-
 func main() {
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -97,7 +89,7 @@ func main() {
 		// zone here so that's never a question, even though Go's time.Time comparisons are
 		// already zone-independent given a correct absolute instant.
 		now := time.Now().UTC()
-		current := readAllPodStats()
+		current := podUIDsWithCgroups()
 		samples := []podSample{}
 
 		// Re-listed every tick rather than watched: a plain List is self-healing by
@@ -110,9 +102,9 @@ func main() {
 			continue
 		}
 
-		for _, cur := range current {
-			if cur.podUID != "" && expByUID[cur.podUID] != "" {
-				samples = append(samples, podSample{PodUID: cur.podUID, ExperimentID: expByUID[cur.podUID]})
+		for uid := range current {
+			if expByUID[uid] != "" {
+				samples = append(samples, podSample{PodUID: uid, ExperimentID: expByUID[uid]})
 			}
 		}
 
