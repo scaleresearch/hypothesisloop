@@ -13,15 +13,15 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// scratchDatabase creates an empty database next to the test database and drops it afterwards, so
-// schema.sql can be applied in full without touching the shared one.
+// scratchDatabase creates an empty database and drops it afterwards, for tests that apply
+// schema.sql to a database of their own.
 func scratchDatabase(t *testing.T) *Pool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	admin, err := NewPool(ctx, Config{DSN: testDSN(), MaxConns: 1, MinConns: 1})
+	admin, err := NewPool(ctx, Config{DSN: serverDSN(), MaxConns: 1, MinConns: 1})
 	if err != nil {
-		t.Skipf("no database at %s: %v", testDSN(), err)
+		t.Skipf("no database at %s: %v", serverDSN(), err)
 	}
 	t.Cleanup(admin.Close)
 	name := "schema_test_" + uuid.New().String()[:8]
@@ -31,7 +31,7 @@ func scratchDatabase(t *testing.T) *Pool {
 	t.Cleanup(func() {
 		_, _ = admin.pool.Exec(context.Background(), `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`)
 	})
-	dsn, err := url.Parse(testDSN())
+	dsn, err := url.Parse(serverDSN())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,11 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// quotaTierTestDB is eventsTestDB: the same dev database, and crucially the same installation of
-// every ADD COLUMN IF NOT EXISTS in schema.sql. These tests read columns (agents.kind,
-// experiment_signups.quota_tier, platform_experiments.default_quota_tier) that a development
-// database a few migrations behind will not have, and without that step they fail as a missing
-// column rather than as a wrong allocation.
 func quotaTierTestDB(t *testing.T) *Pool {
 	t.Helper()
 	return eventsTestDB(t)

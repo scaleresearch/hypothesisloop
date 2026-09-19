@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,49 +13,11 @@ import (
 // database and not by Go, so the tests below run against a real PostgreSQL or not at all: a fake
 // cannot show that a NOTIFY inherits its transaction, which is the entire reason the events are
 // emitted from a trigger rather than from a Go write path.
-const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
-
-// eventsTestPrefix namespaces every row these tests insert, so a developer looking at the shared
-// development database can tell test debris from real data — and so a cleanup that has to be done
-// by hand has something to match on.
+// eventsTestPrefix namespaces the rows these tests insert.
 const eventsTestPrefix = "watch-test-"
 
-func testDSN() string {
-	if dsn := os.Getenv("HYPOTHESISLOOP_TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	return devDSN
-}
-
-// notificationDDL returns the part of schema.sql these tests need installed: every
-// ADD COLUMN IF NOT EXISTS the schema declares, followed by the whole change-notification
-// section. It is read from the shipped schema rather than restated here, so these tests can only
-// ever exercise the triggers the platform actually installs. Every statement it returns is
-// idempotent — ADD COLUMN IF NOT EXISTS, CREATE OR REPLACE, DROP TRIGGER IF EXISTS — which is
-// what makes it safe to run against a development database that is simply a few columns behind.
-func notificationDDL(t *testing.T) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(".", "schema.sql"))
-	if err != nil {
-		t.Fatalf("read schema.sql: got = %v, want = nil", err)
-	}
-	var ddl strings.Builder
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.Contains(line, "ADD COLUMN IF NOT EXISTS") {
-			ddl.WriteString(line + "\n")
-		}
-	}
-	const marker = "CREATE OR REPLACE FUNCTION hypothesisloop_notify_event("
-	start := strings.Index(string(raw), marker)
-	if start < 0 {
-		t.Fatalf("locate the notification section in schema.sql: got = %v, want = a %q statement", -1, marker)
-	}
-	ddl.WriteString(strings.TrimSuffix(strings.TrimSpace(string(raw)[start:]), "COMMIT;"))
-	return ddl.String()
-}
-
-// eventsTestDB connects to a real database, makes sure the notification triggers are installed,
-// and skips the test when no database is reachable.
+// eventsTestDB connects to the run's scratch database and skips the test when no database is
+// reachable.
 func eventsTestDB(t *testing.T) *Pool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -67,16 +27,6 @@ func eventsTestDB(t *testing.T) *Pool {
 		t.Skipf("no database at %s: %v", testDSN(), err)
 	}
 	t.Cleanup(pool.Close)
-	conn, err := pool.pool.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire: got = %v, want = nil", err)
-	}
-	defer conn.Release()
-	// The simple protocol, because this is several statements in one string and the extended
-	// protocol refuses those.
-	if _, err := conn.Conn().PgConn().Exec(ctx, notificationDDL(t)).ReadAll(); err != nil {
-		t.Fatalf("install notification triggers: got = %v, want = nil", err)
-	}
 	return pool
 }
 
