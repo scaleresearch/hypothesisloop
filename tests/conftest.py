@@ -49,7 +49,7 @@ def run_id() -> str:
 
 
 def _build_hl_binary() -> Path:
-    if HL_BIN.is_file() and os.access(HL_BIN, os.X_OK):
+    if "HL_BIN" in os.environ:
         return HL_BIN
     HL_BIN.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["go", "build", "-o", str(HL_BIN), "./cli"], cwd=REPO_ROOT, check=True)

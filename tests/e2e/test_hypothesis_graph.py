@@ -219,6 +219,16 @@ hypotheses:
     api.hl("hypothesis", "link", "--agent", agent_a, "--from", sibling["id"], "--type", "contradicts", "--to", child["id"])
     assert _out(api.hypothesis(sibling["id"])) == {("builds_on", pe_id), ("related", base["id"]), ("contradicts", child["id"])}
 
+    api.hl("hypothesis", "comment", base["id"], "--agent", agent_a, "--text", f"dead end {run_id}")
+    api.hl("hypothesis", "status", "--agent", agent_a, "--status", "refuted", base["id"])
+    got = json.loads(api.hl("hypothesis", "get", base["id"]))
+    assert got["status"] == "refuted" and [c["text"] for c in got["comments"]] == [f"dead end {run_id}"]
+
+    opposite = api.hl_expect("hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id,
+                             "--text", f"cli tree opposite {run_id}", "--builds-on", base["id"])
+    assert opposite.returncode == 0, opposite.stderr
+    assert f"--type contradicts --to {base['id']}" in opposite.stderr
+
 
 def test_query_text_search_and_status(api, graph_pe, run_id):
     pe_id, agent_a, _ = graph_pe
