@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
-# Generic, cross-platform k3s node lifecycle primitives, sourced by the per-platform
-# dev-nodes-{up,down}.sh scripts.
+# Generic, cross-platform k3s node lifecycle primitives and wait_for, sourced by the localdev
+# scripts.
 #
 #   - lib_create_node / lib_destroy_node: spin up a brand-new container node.
 #   - lib_attach_node / lib_detach_node: taint/untaint an already-existing node (box-a).
 
 LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
+
+# Polls until a command succeeds; exits the calling script when the attempts run out.
+# Usage: wait_for <max_attempts> <sleep_secs> <description> <command...>
+wait_for() {
+  local max="$1" delay="$2" desc="$3"; shift 3
+  for i in $(seq 1 "${max}"); do
+    if "$@" &>/dev/null; then return 0; fi
+    if [[ "${i}" -eq "${max}" ]]; then
+      echo "ERROR: timed out waiting for ${desc}"; exit 1
+    fi
+    sleep "${delay}"
+  done
+}
 
 # NODE_PODMAN (default: podman) runs the node container itself — override to "sudo podman" on
 # hosts where rootless podman can't create containerd's own nested cgroups for pods.

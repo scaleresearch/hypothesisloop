@@ -63,17 +63,6 @@ TT_OPERATOR_CHART="oci://ghcr.io/tenstorrent/helm/tt-operator"
 # TT_OPERATOR_CHART_VERSION="0.1.0"; empty tracks whatever "latest" resolves to.
 TT_OPERATOR_CHART_VERSION="${TT_OPERATOR_CHART_VERSION:-}"
 
-wait_for() {
-  local max="$1" delay="$2" desc="$3"; shift 3
-  for i in $(seq 1 "${max}"); do
-    if "$@" &>/dev/null; then return 0; fi
-    if [[ "${i}" -eq "${max}" ]]; then
-      echo "ERROR: timed out waiting for ${desc}"; exit 1
-    fi
-    sleep "${delay}"
-  done
-}
-
 if [[ "$(uname)" != "Linux" ]]; then
   echo "ERROR: this script installs k3s natively and expects real Tenstorrent"
   echo "       PCIe hardware — it only makes sense on a Linux TT host. For"

@@ -8,17 +8,7 @@ set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-wait_for() {
-  local max="$1" delay="$2" desc="$3"; shift 3
-  for i in $(seq 1 "${max}"); do
-    if "$@" &>/dev/null; then return 0; fi
-    if [[ "${i}" -eq "${max}" ]]; then
-      echo "ERROR: timed out waiting for ${desc}"; exit 1
-    fi
-    sleep "${delay}"
-  done
-}
+source "${SCRIPT_DIR}/../lib/node.sh"
 
 if [[ "$(uname)" == "Darwin" ]]; then
   if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q "true"; then

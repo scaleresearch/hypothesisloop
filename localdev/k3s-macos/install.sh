@@ -44,19 +44,6 @@ K3S_GANG_SCHEDULING_FLAGS="--kube-apiserver-arg=feature-gates=GenericWorkload=tr
 # as literal flag text.
 K3S_KUBELET_IMAGE_GC_FLAGS="--kubelet-arg=eviction-hard=imagefs.available\\<1%,nodefs.available\\<1%"
 
-# Poll until a condition succeeds or the attempt limit is reached.
-# Usage: wait_for <max_attempts> <sleep_secs> <description> <command...>
-wait_for() {
-  local max="$1" delay="$2" desc="$3"; shift 3
-  for i in $(seq 1 "${max}"); do
-    if "$@" &>/dev/null; then return 0; fi
-    if [[ "${i}" -eq "${max}" ]]; then
-      echo "ERROR: timed out waiting for ${desc}"; exit 1
-    fi
-    sleep "${delay}"
-  done
-}
-
 # ---- macOS: k3s inside the podman machine VM --------------------------------
 STAGE_T0=$(date +%s)
 if [[ "$(uname)" == "Darwin" ]]; then

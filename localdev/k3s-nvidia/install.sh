@@ -39,16 +39,8 @@ CLUSTER_NAME="k3s-nvidia"
 export TAG
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/node.sh"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-
-wait_for() {
-  local max="$1" delay="$2" desc="$3"; shift 3
-  for i in $(seq 1 "${max}"); do
-    if "$@" &>/dev/null; then return 0; fi
-    [[ "${i}" -eq "${max}" ]] && { echo "ERROR: timed out waiting for ${desc}"; exit 1; }
-    sleep "${delay}"
-  done
-}
 
 if [[ "$(uname)" != "Linux" ]]; then
   echo "ERROR: this installs k3s natively against a real NVIDIA GPU — Linux only."
