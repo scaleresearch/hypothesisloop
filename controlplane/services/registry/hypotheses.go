@@ -62,13 +62,14 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 		}
 	}
 
-	err = s.events.Emit(ctx, func(position int64) ([]db.Event, error) {
-		h, out, alreadyExisted, err = s.graph.Register(ctx, graphdb.NewHypothesis{
+	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+		var announce bool
+		h, out, alreadyExisted, announce, err = s.graph.Register(ctx, graphdb.NewHypothesis{
 			Source: source, AgentID: agentID, Author: author,
 			PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
-			Position: position,
+			Stamp: stamp,
 		})
-		if err != nil || alreadyExisted {
+		if err != nil || !announce {
 			return nil, err
 		}
 		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Source),
@@ -97,10 +98,10 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID, author str
 		}
 	}
 	var result *graphdb.LinkResult
-	err = s.events.Emit(ctx, func(position int64) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		var err error
-		result, err = s.graph.AddLink(ctx, id, agentID, author, spec, position)
-		if err != nil || !result.Created {
+		result, err = s.graph.AddLink(ctx, id, agentID, author, spec, stamp)
+		if err != nil || !result.Announce {
 			return nil, err
 		}
 		return []db.Event{{Kind: db.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
@@ -204,11 +205,11 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: invalid status %q", status)
 	}
 	var h *domain.Hypothesis
-	var changed bool
-	err := s.events.Emit(ctx, func(position int64) ([]db.Event, error) {
+	var announced bool
+	err := s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		var err error
-		h, changed, err = s.graph.UpdateStatus(ctx, id, callerAgentID, status, position)
-		if err != nil || !changed {
+		h, announced, err = s.graph.UpdateStatus(ctx, id, callerAgentID, status, stamp)
+		if err != nil || !announced {
 			return nil, err
 		}
 		return []db.Event{{Kind: db.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
@@ -218,7 +219,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 	}
 	s.logger.Info("hypothesis status updated",
-		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("changed", changed))
+		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("announced", announced))
 	return h, nil
 }
 

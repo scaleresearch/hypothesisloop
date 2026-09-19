@@ -39,9 +39,9 @@ type Store interface {
 // Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.
 // Implemented by graphdb.Store.
 type Graph interface {
-	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, error)
-	AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec, position int64) (*graphdb.LinkResult, error)
-	UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus, position int64) (*domain.Hypothesis, bool, error)
+	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, error)
+	AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
+	UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
 	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
@@ -68,7 +68,7 @@ type Service struct {
 // events, emitted around the graph write they describe (see db.EventsStore.Emit).
 type EventNotifier interface {
 	NotifyEvent(ctx context.Context, e db.Event) error
-	Emit(ctx context.Context, write func(position int64) ([]db.Event, error)) error
+	Emit(ctx context.Context, write func(stamp db.Stamp) ([]db.Event, error)) error
 }
 
 // WithEvents wires the change stream this service announces metric arrivals and hypothesis

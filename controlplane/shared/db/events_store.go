@@ -315,22 +315,40 @@ func (s *EventsStore) NotifyEvent(ctx context.Context, e Event) error {
 	return nil
 }
 
+// Stamp is what Emit hands a write to another store: the position to record on what it writes,
+// and a way to tell whether an earlier write's events were sent.
+type Stamp struct {
+	// Position is the id of Emit's transaction.
+	Position int64
+	// Aborted reports whether the transaction with id position aborted. The events it emitted
+	// were then never sent, though its write to the other store may have committed: a write that
+	// finds such a position on what it would have written records its own and emits the events
+	// again.
+	Aborted func(position int64) (bool, error)
+}
+
 // Emit runs a write to another store inside a Postgres transaction and emits the events it
-// returns from that transaction. write stamps position, the transaction's id, on what it writes:
-// until this transaction ends no snapshot's xmin, and so no cursor, can pass it, which is what
-// keeps a resuming watcher from skipping a graph write. Position and cursor of the returned
-// events are set by Postgres.
-func (s *EventsStore) Emit(ctx context.Context, write func(position int64) ([]Event, error)) error {
+// returns from that transaction. write stamps the transaction's id on what it writes: until
+// this transaction ends no snapshot's xmin, and so no cursor, can pass it, which is what keeps a
+// resuming watcher from skipping a graph write. Position and cursor of the returned events are
+// set by Postgres.
+func (s *EventsStore) Emit(ctx context.Context, write func(stamp Stamp) ([]Event, error)) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("events_store.Emit: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	var position int64
-	if err := tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text::bigint").Scan(&position); err != nil {
+	stamp := Stamp{Aborted: func(position int64) (bool, error) {
+		var status *string
+		if err := tx.QueryRow(ctx, "SELECT pg_xact_status($1::bigint::text::xid8)", position).Scan(&status); err != nil {
+			return false, fmt.Errorf("events_store.Emit: status of %d: %w", position, err)
+		}
+		return status != nil && *status == "aborted", nil
+	}}
+	if err := tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text::bigint").Scan(&stamp.Position); err != nil {
 		return fmt.Errorf("events_store.Emit: position: %w", err)
 	}
-	events, err := write(position)
+	events, err := write(stamp)
 	if err != nil {
 		return err
 	}

@@ -43,7 +43,7 @@ func (n *capturingNotifier) NotifyEvent(_ context.Context, e db.Event) error {
 	return nil
 }
 
-func (n *capturingNotifier) Emit(context.Context, func(int64) ([]db.Event, error)) error {
+func (n *capturingNotifier) Emit(context.Context, func(db.Stamp) ([]db.Event, error)) error {
 	panic("the underperformance check writes nothing to the graph")
 }
 

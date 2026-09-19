@@ -49,11 +49,30 @@ type fakeGraph struct {
 	clock time.Time
 	// positions is the watch stream position each write was stamped with, by hypothesis id.
 	positions map[string][]int64
+	// stamps is the position each announced fact holds now, by fact.
+	stamps map[string]int64
 }
 
 func newFakeGraph() *fakeGraph {
 	return &fakeGraph{rows: map[string]*domain.Hypothesis{}, links: map[string]bool{},
-		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), positions: map[string][]int64{}}
+		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), positions: map[string][]int64{}, stamps: map[string]int64{}}
+}
+
+// stamp records the position of a fact a write announced.
+func (g *fakeGraph) stamp(id, fact string, position int64) {
+	g.stamps[fact] = position
+	g.positions[id] = append(g.positions[id], position)
+}
+
+// restamp mirrors graphdb's: a repeated write over a fact whose transaction aborted takes the
+// repeat's position and announces it again.
+func (g *fakeGraph) restamp(id, fact string, stamp db.Stamp) (bool, error) {
+	aborted, err := stamp.Aborted(g.stamps[fact])
+	if err != nil || !aborted {
+		return false, err
+	}
+	g.stamp(id, fact, stamp.Position)
+	return true, nil
 }
 
 func (g *fakeGraph) tick() time.Time {
@@ -61,25 +80,26 @@ func (g *fakeGraph) tick() time.Time {
 	return g.clock
 }
 
-func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, error) {
+func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, error) {
 	id := n.PlatformExperimentID + "\x00" + domain.NormalizeHypothesisText(n.Text)
 	if existing, ok := g.rows[id]; ok {
-		return existing, []domain.Link{}, true, nil
+		announce, err := g.restamp(id, "new"+id, n.Stamp)
+		return existing, []domain.Link{}, true, announce, err
 	}
 	h := &domain.Hypothesis{
 		ID: id, AgentID: n.AgentID, Source: n.Source, Author: n.Author,
 		PlatformExperimentID: n.PlatformExperimentID, Text: n.Text, Status: domain.HypothesisOpen, CreatedAt: g.tick(),
 	}
 	g.rows[id] = h
-	g.positions[id] = append(g.positions[id], n.Position)
-	return h, []domain.Link{}, false, nil
+	g.stamp(id, "new"+id, n.Stamp.Position)
+	return h, []domain.Link{}, false, true, nil
 }
 
 func (g *fakeGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothesis, error) {
 	return g.rows[id], nil
 }
 
-func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus, position int64) (*domain.Hypothesis, bool, error) {
+func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error) {
 	h, ok := g.rows[id]
 	if !ok {
 		return nil, false, graphdb.ErrNotFound
@@ -88,15 +108,16 @@ func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, st
 		return nil, false, graphdb.ErrNotOwner
 	}
 	if h.Status == status {
-		return h, false, nil
+		announce, err := g.restamp(id, "status"+id, stamp)
+		return h, announce, err
 	}
 	at := g.tick()
 	h.Status, h.StatusChangedAt = status, &at
-	g.positions[id] = append(g.positions[id], position)
+	g.stamp(id, "status"+id, stamp.Position)
 	return h, true, nil
 }
 
-func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec domain.LinkSpec, position int64) (*graphdb.LinkResult, error) {
+func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error) {
 	h, ok := g.rows[fromID]
 	if !ok {
 		return nil, graphdb.ErrNotFound
@@ -105,12 +126,15 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec d
 		return nil, graphdb.ErrNotOwner
 	}
 	key := fromID + string(spec.Type) + spec.To
-	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Out: []domain.Link{}}
-	if result.Created {
-		result.CreatedAt = g.tick()
-		g.positions[fromID] = append(g.positions[fromID], position)
-	}
+	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Announce: !g.links[key], Out: []domain.Link{}}
 	g.links[key] = true
+	if !result.Created {
+		var err error
+		result.Announce, err = g.restamp(fromID, "link"+key, stamp)
+		return result, err
+	}
+	result.CreatedAt = g.tick()
+	g.stamp(fromID, "link"+key, stamp.Position)
 	return result, nil
 }
 
@@ -119,6 +143,10 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec d
 type recordedEvents struct {
 	events   []db.Event
 	position int64
+	// failNext fails the next Emit after its write, as a Postgres commit failing after the graph
+	// write committed; its position is then aborted.
+	failNext bool
+	aborted  map[int64]bool
 }
 
 func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
@@ -126,11 +154,19 @@ func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
 	return nil
 }
 
-func (r *recordedEvents) Emit(_ context.Context, write func(position int64) ([]db.Event, error)) error {
+func (r *recordedEvents) Emit(_ context.Context, write func(stamp db.Stamp) ([]db.Event, error)) error {
 	r.position++
-	events, err := write(r.position)
+	events, err := write(db.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil }})
 	if err != nil {
 		return err
+	}
+	if r.failNext {
+		r.failNext = false
+		if r.aborted == nil {
+			r.aborted = map[int64]bool{}
+		}
+		r.aborted[r.position] = true
+		return errors.New("commit failed")
 	}
 	for _, e := range events {
 		e.Position = r.position
@@ -378,6 +414,54 @@ func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 	got := events.events[2]
 	if got.Kind != db.EventHypothesisLink || got.Subject != a.ID || got.Value != "contradicts" || got.Detail != b.ID {
 		t.Errorf("link event: got = %+v, want = hypothesis.link %s contradicts %s", got, a.ID, b.ID)
+	}
+}
+
+// The graph write commits before the Postgres transaction that emits its event, so that commit
+// can fail with the write already made. The caller's retry finds the write done and has to send
+// the event the failed attempt never did, once, at the retry's own position.
+func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
+	events := &recordedEvents{}
+	svc := poolService(newPoolStore()).WithEvents(events)
+	ctx := context.Background()
+	b, _, _, err := svc.RegisterHypothesis(ctx, "agent-2", "", "pe-1", "cooldown helps", buildOnRoot, nil)
+	if err != nil {
+		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
+	}
+	var a *domain.Hypothesis
+	link := domain.LinkSpec{Type: domain.LinkContradicts, To: b.ID}
+	for _, write := range []struct {
+		kind string
+		do   func() error
+	}{
+		{db.EventHypothesisNew, func() error {
+			a, _, _, err = svc.RegisterHypothesis(ctx, "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
+			return err
+		}},
+		{db.EventHypothesisStatus, func() error {
+			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", domain.HypothesisRefuted)
+			return err
+		}},
+		{db.EventHypothesisLink, func() error {
+			_, err := svc.AddHypothesisLink(ctx, a.ID, "agent-1", "", link)
+			return err
+		}},
+	} {
+		sent := len(events.events)
+		events.failNext = true
+		if err := write.do(); err == nil {
+			t.Fatalf("%s with a failing commit: got = nil, want an error", write.kind)
+		}
+		for range 2 {
+			if err := write.do(); err != nil {
+				t.Fatalf("%s retry: got = %v, want nil", write.kind, err)
+			}
+		}
+		got := events.events[sent:]
+		if len(got) != 1 || got[0].Kind != write.kind || got[0].Position != events.position-1 {
+			t.Errorf("%s events after a failed commit and two retries: got = %+v, want one at the first retry's position %d",
+				write.kind, got, events.position-1)
+		}
 	}
 }
 

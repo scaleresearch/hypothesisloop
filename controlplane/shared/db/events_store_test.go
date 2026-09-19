@@ -641,8 +641,8 @@ func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
 	defer stop()
 
 	var position, during int64
-	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(p int64) ([]Event, error) {
-		position, during = p, cursorNow(t, pool)
+	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(stamp Stamp) ([]Event, error) {
+		position, during = stamp.Position, cursorNow(t, pool)
 		return []Event{{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID}}, nil
 	})
 	if err != nil {
@@ -653,6 +653,40 @@ func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
 	}
 	if got := awaitEvent(t, events, EventHypothesisNew, hypothesisID); got.Position != position || got.Cursor > position {
 		t.Errorf("emitted event: got = position %v cursor %v, want = position %v and a cursor at or below it", got.Position, got.Cursor, position)
+	}
+}
+
+// A graph write commits before Emit's transaction does, so that transaction can abort after the
+// graph holds its position. A later Emit has to tell that apart from a position whose events were
+// sent, and from one still being written.
+func TestEmitTellsAnAbortedPositionFromACommittedOrRunningOne(t *testing.T) {
+	pool := eventsTestDB(t)
+	store := NewEventsStore(pool, noHypothesisEvents{})
+	ctx := context.Background()
+	var committed, aborted int64
+	if err := store.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+		committed = stamp.Position
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("Emit: got = %v, want = nil", err)
+	}
+	failed := errors.New("notify failed")
+	if err := store.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+		aborted = stamp.Position
+		return nil, failed
+	}); !errors.Is(err, failed) {
+		t.Fatalf("Emit: got = %v, want = %v", err, failed)
+	}
+	err := store.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+		for position, want := range map[int64]bool{committed: false, aborted: true, stamp.Position: false, 0: false} {
+			if got, err := stamp.Aborted(position); err != nil || got != want {
+				t.Errorf("Aborted(%d): got = (%v, %v), want = (%v, nil)", position, got, err, want)
+			}
+		}
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("Emit: got = %v, want = nil", err)
 	}
 }
 
