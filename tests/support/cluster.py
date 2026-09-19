@@ -207,6 +207,20 @@ def cordon_node(node: str) -> None:
     subprocess.run(["kubectl", "cordon", node], capture_output=True, text=True, timeout=15)
 
 
+def set_node_accelerators(node: str, accel_type: str, count: int) -> None:
+    """Sets how many accelerators of `accel_type`'s resource `node` advertises, the way a device
+    plugin does when devices come up or drop out."""
+    resource = accel_type.partition("=")[0].rsplit(".", 1)[0].replace("/", "~1")
+    patch = json.dumps([
+        {"op": "add", "path": f"/status/{field}/{resource}", "value": str(count)}
+        for field in ("capacity", "allocatable")
+    ])
+    subprocess.run(
+        ["kubectl", "patch", "node", node, "--subresource=status", "--type=json", "-p", patch],
+        capture_output=True, text=True, timeout=15, check=True,
+    )
+
+
 def set_cluster_agent_autoscaler_enabled(enabled: bool) -> None:
     """Patches AUTOSCALER_ENABLED on the live cluster-agent Deployment and waits for the rollout
     -- test_autoscaler_failover.py's only way to exercise the speculative-submit/scale-up-deadline
