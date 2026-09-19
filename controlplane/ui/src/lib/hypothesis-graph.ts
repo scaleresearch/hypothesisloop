@@ -25,7 +25,7 @@ export interface Position {
 }
 
 const COLUMN = NODE_WIDTH + 24
-const ROW = NODE_HEIGHT + 64
+export const ROW = NODE_HEIGHT + 64
 
 interface Contour {
   /** Leftmost and rightmost column per rank, relative to the subtree's root. */

@@ -2,7 +2,7 @@
 
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Panel,
+  ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle, Panel,
   Position as Side, useReactFlow, useStore,
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
@@ -11,7 +11,7 @@ import { clsx } from 'clsx'
 import { FileText, MessageSquare } from 'lucide-react'
 import type { HypothesisGraph, HypothesisListItem } from '@/types'
 import { hypothesisLinkStyles, hypothesisStatusColors } from '@/lib/colors'
-import { NODE_HEIGHT, NODE_WIDTH, matchesFilters } from '@/lib/hypothesis-graph'
+import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
 /** Owner and evidence counts, shared by graph nodes and outline rows. */
@@ -37,8 +37,10 @@ const Highlight = createContext({ selected: '', hits: new Set<string>(), dimmed:
 function HiddenHandles() {
   return (
     <>
-      <Handle type="target" position={Side.Top} isConnectable={false} className="hg-handle" />
-      <Handle type="source" position={Side.Bottom} isConnectable={false} className="hg-handle" />
+      <Handle id="top" type="target" position={Side.Top} isConnectable={false} className="hg-handle" />
+      <Handle id="bottom" type="source" position={Side.Bottom} isConnectable={false} className="hg-handle" />
+      <Handle id="left" type="source" position={Side.Left} isConnectable={false} className="hg-handle" />
+      <Handle id="right" type="source" position={Side.Right} isConnectable={false} className="hg-handle" />
     </>
   )
 }
@@ -155,12 +157,26 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
     const s = hypothesisLinkStyles[e.type]
     const hierarchy = e.type === 'builds_on'
     const opacity = dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1
+    // builds_on points from child to parent and is drawn parent to child, so the tree reads top
+    // down. A cross link has no direction to show and is drawn from its upper end.
+    const [source, target] = positions.get(e.from)!.y > positions.get(e.to)!.y ? [e.to, e.from] : [e.from, e.to]
+    const a = positions.get(source)!
+    const b = positions.get(target)!
+    // Cross links keep to the gaps between rows, each kind of line at its own height: under the
+    // row for two nodes of one row, low in the gap for neighbouring rows. Only a link that skips
+    // a row has to cross it, from side to side.
+    const rows = (b.y - a.y) / ROW
+    const [sourceHandle, targetHandle] = hierarchy || rows === 1 ? ['bottom', 'top']
+      : rows === 0 ? ['bottom', 'bottom']
+      : a.x < b.x ? ['right', 'left'] : ['left', 'right']
     return {
       id: `${e.type}:${e.from}:${e.to}`,
-      // builds_on points from child to parent; drawn parent to child so the tree reads top down.
-      source: hierarchy ? e.to : e.from,
-      target: hierarchy ? e.from : e.to,
-      type: hierarchy ? 'smoothstep' : 'default',
+      source,
+      target,
+      sourceHandle,
+      targetHandle,
+      type: hierarchy || rows <= 1 ? 'smoothstep' : 'default',
+      pathOptions: hierarchy ? undefined : { stepPosition: 1 },
       label: hierarchy ? undefined : s.label,
       zIndex: hierarchy ? 0 : 1,
       labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600, opacity },
@@ -195,6 +211,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        connectionMode={ConnectionMode.Loose}
         colorMode="dark"
         onInit={() => setReady(true)}
         minZoom={0.05}
