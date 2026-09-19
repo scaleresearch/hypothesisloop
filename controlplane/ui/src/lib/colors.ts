@@ -44,3 +44,18 @@ export const agentPalette = [
   '#f57f17',
   semantic.accentStrong,
 ]
+
+/** Hypothesis verdicts, matching the `.badge-<status>` rules in globals.css. */
+export const hypothesisStatusColors: Record<string, string> = {
+  open: semantic.accent,
+  confirmed: semantic.success,
+  refuted: semantic.danger,
+  inconclusive: semantic.neutral,
+}
+
+/** Hypothesis graph edges. builds_on is the hierarchy; the two cross links stand out from it. */
+export const hypothesisLinkStyles = {
+  builds_on: { color: 'rgba(255, 255, 255, 0.28)', dash: undefined, label: 'builds on' },
+  contradicts: { color: semantic.danger, dash: '6 4', label: 'contradicts' },
+  related: { color: semantic.info, dash: '2 4', label: 'related' },
+} as const

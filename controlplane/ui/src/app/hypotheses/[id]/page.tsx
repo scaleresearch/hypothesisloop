@@ -4,12 +4,13 @@ import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchHypothesis, fetchPlatformExperiment, fetchExperimentMetrics } from '@/lib/api'
-import type { PlatformExperiment, MetricDefinition } from '@/types'
+import type { PlatformExperiment, MetricDefinition, HypothesisLink } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { formatAccH, relTime } from '@/lib/format'
-import { PoolAuthor, AddCommentForm } from '@/components/human-idea'
+import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
+import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 
 // The registry's job record has no final_metric_value field at all (confirmed against the live
 // API — it was always undefined, rendering "—" for every job regardless of outcome). The real
@@ -32,6 +33,30 @@ function JobFinalMetric({ jobId, primaryMetric }: { jobId: string; primaryMetric
   return <span className="accent">{best.toFixed(4)}</span>
 }
 
+function LinkRow({ link, platformExperimentID, pe }: {
+  link: HypothesisLink
+  platformExperimentID: string
+  pe: PlatformExperiment | undefined
+}) {
+  if (link.hypothesis_id === platformExperimentID) {
+    return (
+      <Link href={`/platform-experiments/${platformExperimentID}`} className="hg-hit text-link">
+        <span className="uppercase-label">Objective</span>
+        <span className="hg-outline-text">{pe?.name ?? platformExperimentID}</span>
+      </Link>
+    )
+  }
+  return (
+    <Link href={`/hypotheses/${link.hypothesis_id}`} className="hg-hit" title={link.text}>
+      <Badge status={link.status}>{link.status}</Badge>
+      <span className="hg-outline-text">{link.text}</span>
+      <span className="text-dim" style={{ fontSize: 11 }}>
+        <PoolAuthor source={link.author ? 'human' : 'agent'} agentID={link.agent_id} author={link.author} />
+      </span>
+    </Link>
+  )
+}
+
 export default function HypothesisDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
   const router = useRouter()
@@ -47,7 +72,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
     <div>
       <div className="wa-title"><h1>Hypothesis Not Found</h1></div>
       <p className="text-error">Could not load hypothesis {id}</p>
-      <Link href="/hypotheses" className="text-link" style={{ fontSize: 13 }}>← Back to hypotheses</Link>
+      <Link href="/hypotheses" className="text-link" style={{ fontSize: 13 }}>← Hypothesis graph</Link>
     </div>
   )
 
@@ -78,7 +103,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
             Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
           </p>
         </div>
-        <Link href="/hypotheses" className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>← All hypotheses</Link>
+        <Link href={graphHref(data.platform_experiment_id, data.id)} className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>
+          View in graph →
+        </Link>
       </div>
 
       <Pod style={{ marginBottom: 12 }}>
@@ -100,6 +127,28 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
       </Pod>
 
       <Pod>
+        <PodHeader>Links</PodHeader>
+        <PodContent>
+          <div className="hg-stack" style={{ gap: 12, maxWidth: 760 }}>
+            {linkGroups(data.links.out, data.links.in).map(group => (
+              <div key={group.label} className="hg-stack" style={{ gap: 2 }}>
+                <span className="uppercase-label">{group.label}</span>
+                {group.items.map(l => (
+                  <LinkRow
+                    key={`${l.type}:${l.hypothesis_id}`}
+                    link={l}
+                    platformExperimentID={data.platform_experiment_id}
+                    pe={pe}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+          <AddLinkForm hypothesis={data} onAdded={() => mutate()} />
+        </PodContent>
+      </Pod>
+
+      <Pod>
         <PodHeader>
           Findings
           {data.finding_count > 0 && (
@@ -111,7 +160,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         <PodContent>
           {findings.length === 0 ? (
             <EmptyState>
-              No findings filed yet — agents write a summary via POST /experiments/{'{id}'}/summary once a job testing
+              No findings filed yet. Agents write a summary via POST /experiments/{'{id}'}/summary once a job testing
               this hypothesis reaches a terminal state.
             </EmptyState>
           ) : (
@@ -148,7 +197,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         </PodHeader>
         <PodContent>
           {comments.length === 0 ? (
-            <EmptyState>No comments yet — a note here needs no job behind it.</EmptyState>
+            <EmptyState>No comments yet. A note here needs no job behind it.</EmptyState>
           ) : (
             <div style={{ display: 'grid', gap: 10 }}>
               {comments.map(c => (

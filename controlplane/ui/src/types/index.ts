@@ -334,7 +334,7 @@ export interface LineageNode {
 
 // The owning agent's own verdict on its claim — see POST /hypotheses/{id}/status. Only
 // the agent named in `agent_id` may ever change it.
-export type HypothesisStatus = 'open' | 'confirmed' | 'inconclusive'
+export type HypothesisStatus = 'open' | 'confirmed' | 'refuted' | 'inconclusive'
 
 // Who put a row in the pool. Human rows come from the UI form and carry `author` instead of
 // `agent_id`; exactly one of the two is ever set. Both sit in the same pool under the same dedup,
@@ -352,6 +352,53 @@ export interface Hypothesis {
   text: string
   status: HypothesisStatus
   created_at: string
+}
+
+export type HypothesisLinkType = 'builds_on' | 'contradicts' | 'related'
+
+// A row of GET /hypotheses and a node of the graph. `builds_on` names the outgoing builds_on
+// targets; the objective root appears as the platform_experiment_id.
+export interface HypothesisListItem extends Hypothesis {
+  builds_on: string[]
+  child_count: number
+  finding_count: number
+  comment_count: number
+}
+
+// agent_id or author (exactly one) and created_at say who made the link and when.
+export interface HypothesisGraphEdge {
+  from: string
+  to: string
+  type: HypothesisLinkType
+  agent_id: string
+  author: string
+  created_at: string
+}
+
+// GET /hypotheses/graph: one platform experiment's whole graph. `root` is the objective's id,
+// equal to the platform_experiment_id.
+export interface HypothesisGraph {
+  root: string
+  nodes: HypothesisListItem[]
+  edges: HypothesisGraphEdge[]
+}
+
+// One neighbour on GET /hypotheses/{id}. When it is the objective root, hypothesis_id is the
+// platform_experiment_id and text and status are empty. agent_id or author (exactly one) and
+// created_at say who made the link and when.
+export interface HypothesisLink {
+  type: HypothesisLinkType
+  hypothesis_id: string
+  text: string
+  status: HypothesisStatus | ''
+  agent_id: string
+  author: string
+  created_at: string
+}
+
+export interface HypothesisLinkInput {
+  type: HypothesisLinkType
+  to: string
 }
 
 // A post-run write-up an agent filed after one of its jobs testing this hypothesis reached
@@ -390,4 +437,5 @@ export interface HypothesisWithJobs extends Hypothesis {
   finding_count: number
   comments: HypothesisComment[]
   comment_count: number
+  links: { out: HypothesisLink[]; in: HypothesisLink[] }
 }

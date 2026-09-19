@@ -35,6 +35,7 @@ import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
+import { graphHref } from '@/lib/hypothesis-graph'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
 const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
@@ -858,8 +859,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 {formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}
               </span>
             )}
-            <Link href={`/hypotheses?pe=${pe.id}`} className="text-link" style={{ fontSize: 12 }}>
-              {(hypotheses?.length ?? 0)} Hypotheses →
+            <Link href={graphHref(pe.id)} className="text-link" style={{ fontSize: 12 }}>
+              {hypothesesPage?.total ?? 0} Hypotheses →
             </Link>
             <SubmitPolicyChips pe={pe} />
           </div>
@@ -1041,7 +1042,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               value={(hypothesesPage?.total ?? 0).toString()}
               color={semantic.accent}
               sub={`${hypothesisProgress.finished} finished · ${hypothesisProgress.in_flight} in flight · ${hypothesisProgress.pending} pending`}
-              href={`/hypotheses?pe=${pe.id}`}
+              href={graphHref(pe.id)}
             />
           </div>
         </PodContent>

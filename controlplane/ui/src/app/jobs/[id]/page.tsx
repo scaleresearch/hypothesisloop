@@ -13,6 +13,7 @@ import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-messag
 import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
+import { graphHref } from '@/lib/hypothesis-graph'
 
 function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
   return (
@@ -113,6 +114,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 {' '}
                 <Link href={`/hypotheses/${j.hypothesis_id}`} className="text-link" style={{ fontStyle: 'normal', fontSize: 12, whiteSpace: 'nowrap' }}>
                   View hypothesis →
+                </Link>
+                {' '}
+                <Link href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="text-link" style={{ fontStyle: 'normal', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  In graph →
                 </Link>
               </>
             )}

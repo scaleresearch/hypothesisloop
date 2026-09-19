@@ -1,32 +1,25 @@
 'use client'
 
-import Link from 'next/link'
-import { Suspense } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import { useMemo, useState } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
-import { fetchHypothesesPage, fetchPlatformExperiments, fetchAgents } from '@/lib/api'
-import type { Hypothesis, HypothesisStatus, PlatformExperiment, Agent } from '@/types'
-import { relTime } from '@/lib/format'
+import { fetchHypothesisGraph, fetchPlatformExperiments } from '@/lib/api'
+import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Button, Chip } from '@/components/ui/button'
+import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
-import { Pagination } from '@/components/ui/pagination'
-import { PoolAuthor, AddIdeaForm } from '@/components/human-idea'
+import { AddIdeaForm } from '@/components/human-idea'
+import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
+import { HypothesisOutline } from '@/components/hypothesis-outline'
+import { HypothesisPanel } from '@/components/hypothesis-panel'
+import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypothesis-search'
 import { useQueryParam } from '@/lib/query-state'
+import { HUMAN_OWNER, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
 
-const PAGE_SIZE = 25
-
-const STATUS_FILTERS: Array<{ value: HypothesisStatus | ''; label: string }> = [
-  { value: '', label: 'All' },
-  { value: 'open', label: 'Open' },
-  { value: 'confirmed', label: 'Confirmed' },
-  { value: 'inconclusive', label: 'Inconclusive' },
-]
+const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
 
 export default function HypothesesPage() {
   return (
@@ -40,177 +33,189 @@ function HypothesesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const peID = searchParams.get('pe') ?? ''
-  const [agentFilter, setAgentFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useQueryParam('status') as [HypothesisStatus | '', (v: HypothesisStatus | '') => void]
-  const [page, setPage] = useState(0)
-  const [addIdeaOpen, setAddIdeaOpen] = useState(false)
+  const [focus, setFocus] = useQueryParam('focus')
+  const [view, setView] = useQueryParam('view', 'graph')
+  const [statusFilter, setStatusFilter] = useQueryParam('status')
+  const [ownerFilter, setOwnerFilter] = useQueryParam('agent')
+  const [q, setQ] = useQueryParam('q')
+  const [addUnder, setAddUnder] = useState<string | null>(null)
 
-  const { data: agents } = useSWR<Agent[]>('agents', fetchAgents)
-
-  // GET /hypotheses accepts an optional platform_experiment_id: omitted, it spans every
-  // platform experiment's pool server-side (ORDER BY created_at DESC LIMIT/OFFSET across all of
-  // them) — this page only ever holds the one page of rows it's currently showing. The
-  // "Platform Experiment" column plus the filter below still makes the underlying per-pool
-  // structure visible even though the read itself is unscoped.
-  const { data: platformExperiments } = useSWR<PlatformExperiment[]>(
+  const { data: platformExperiments, error: peError } = useSWR<PlatformExperiment[]>(
     'platform-experiments-all',
     () => fetchPlatformExperiments(),
     { refreshInterval: 30_000 },
   )
-  const peByID = new Map((platformExperiments ?? []).map(pe => [pe.id, pe]))
-
-  const { data, error, isLoading, mutate } = useSWR(
-    ['hypotheses', peID, agentFilter, statusFilter, page],
-    () => fetchHypothesesPage({
-      platform_experiment_id: peID || undefined,
-      agent: agentFilter || undefined,
-      status: statusFilter || undefined,
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE,
-    }),
-    { refreshInterval: 15_000, keepPreviousData: true },
-  )
-  const list = data?.items ?? []
-  const total = data?.total ?? 0
-
-  function setPEFilter(next: string) {
-    setPage(0)
-    if (next) router.push(`/hypotheses?pe=${next}`)
-    else router.push('/hypotheses')
-  }
-
   const sortedPEs = useMemo(
     () => [...(platformExperiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [platformExperiments],
   )
-  const sortedAgentOptions = useMemo(
-    () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [agents],
+  const pe = sortedPEs.find(p => p.id === peID)
+
+  // A graph belongs to one experiment, so the URL always names one: the newest by default.
+  useEffect(() => {
+    if (!peID && sortedPEs.length > 0) router.replace(graphHref(sortedPEs[0].id))
+  }, [peID, sortedPEs, router])
+
+  const { data: graph, error, isLoading, mutate } = useSWR(
+    peID ? ['hypothesis-graph', peID] : null,
+    () => fetchHypothesisGraph(peID),
+    { refreshInterval: 15_000 },
   )
+  const search = useHypothesisSearch(peID, q)
+
+  const positions = useMemo(() => graph && layoutGraph(graph), [graph])
+  const nodeByID = useMemo(() => new Map((graph?.nodes ?? []).map(n => [n.id, n])), [graph])
+  const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
+  const filters = useMemo(() => ({ status: statusFilter, owner: ownerFilter }), [statusFilter, ownerFilter])
+  const ownerOptions = useMemo(() => {
+    const nodes = graph?.nodes ?? []
+    const agents = Array.from(new Set(nodes.filter(n => n.source !== 'human').map(n => n.agent_id))).sort()
+    const options = agents.map(a => ({ value: a, label: a }))
+    if (nodes.some(n => n.source === 'human')) options.push({ value: HUMAN_OWNER, label: 'Humans' })
+    return options
+  }, [graph])
+
+  const selected = focus || graph?.root || ''
+  const rootLabel = pe?.name ?? peID
+  const filtering = statusFilter !== '' || ownerFilter !== ''
+  const matching = graph ? graph.nodes.filter(n => matchesFilters(n, filters)).length : 0
+
+  function selectExperiment(next: string) {
+    const href = graphHref(next)
+    router.push(view === 'graph' ? href : `${href}&view=${view}`)
+  }
+
+  function onAdded(id: string) {
+    setAddUnder(null)
+    mutate()
+    setFocus(id)
+  }
 
   return (
     <div>
       <PageHeader
         title="Hypotheses"
-        description="Registered research claims, scoped per platform experiment — every platform experiment accumulates its own shared idea pool, and every job must reference a hypothesis registered under the same one it's submitted into. Registering text equivalent to an existing hypothesis within the same platform experiment returns the existing row instead of creating a duplicate."
-        actions={
-          <>
-            {peID && <Button size="sm" onClick={() => setAddIdeaOpen(true)}>+ Add idea</Button>}
-            <Button size="sm" onClick={() => mutate()}>Refresh</Button>
-          </>
-        }
+        description="Each platform experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others. Registering text equivalent to an existing hypothesis in the same experiment returns the existing one."
+        actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="uppercase-label">Platform Experiment</span>
         <SearchableSelect
           value={peID}
-          onChange={setPEFilter}
-          allLabel="All"
-          options={sortedPEs.map(pe => ({ value: pe.id, label: pe.name }))}
+          onChange={selectExperiment}
+          hideAllOption
+          placeholder="Select an experiment"
+          style={{ minWidth: 260 }}
+          options={sortedPEs.map(p => ({ value: p.id, label: p.name }))}
         />
-        {peID && <Link href="/hypotheses" className="text-link" style={{ fontSize: 12 }}>Clear filter</Link>}
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }} role="group" aria-label="View">
+          <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
+          <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
+        </div>
+      </div>
 
-        <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
-        <SearchableSelect
-          value={agentFilter}
-          onChange={v => { setAgentFilter(v); setPage(0) }}
-          allLabel="All agents"
-          options={sortedAgentOptions.map(a => ({ value: a.id, label: a.name ?? a.id }))}
-        />
-        {agentFilter && (
-          <Button variant="link" onClick={() => { setAgentFilter(''); setPage(0) }}>Clear</Button>
-        )}
-
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <SearchBox key={peID} initial={q} placeholder="Search hypotheses by text" onSearch={setQ} />
         <span className="uppercase-label" style={{ marginLeft: 8 }}>Status</span>
         <SearchableSelect
           value={statusFilter}
-          onChange={v => { setStatusFilter(v as HypothesisStatus | ''); setPage(0) }}
+          onChange={setStatusFilter}
           allLabel="All"
-          options={STATUS_FILTERS.filter(f => f.value !== '').map(f => ({ value: f.value, label: f.label }))}
+          options={STATUS_OPTIONS}
         />
+        <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
+        <SearchableSelect
+          value={ownerFilter}
+          onChange={setOwnerFilter}
+          allLabel="All agents"
+          options={ownerOptions}
+        />
+        {filtering && graph && (
+          <span className="text-dim">{matching} of {graph.nodes.length} match</span>
+        )}
       </div>
 
-      {peID && (
-        <Dialog open={addIdeaOpen} onClose={() => setAddIdeaOpen(false)} className="wa-dialog">
+      {peError && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
+      {platformExperiments && sortedPEs.length === 0 && (
+        <EmptyState>No platform experiments yet. A hypothesis graph grows inside one.</EmptyState>
+      )}
+      {error && <ErrorMessage>Cannot load the hypothesis graph: {error.message}</ErrorMessage>}
+      {(isLoading || (!peID && !platformExperiments && !peError)) && <Loading />}
+
+      {graph && positions && (
+        <div className="hg-layout">
+          <div className="hg-main">
+            {graph.nodes.length === 0 ? (
+              <EmptyState>
+                No hypotheses in this experiment yet. Agents place each idea under the objective or an
+                earlier hypothesis; you can add one under the objective from the panel.
+              </EmptyState>
+            ) : view === 'outline' ? (
+              <HypothesisOutline
+                graph={graph}
+                rootLabel={rootLabel}
+                selected={selected}
+                hits={hits}
+                filters={filters}
+                onSelect={setFocus}
+              />
+            ) : (
+              <HypothesisGraphCanvas
+                key={graph.root}
+                graph={graph}
+                positions={positions}
+                rootLabel={rootLabel}
+                focus={focus}
+                selected={selected}
+                hits={hits}
+                filters={filters}
+                onSelect={setFocus}
+              />
+            )}
+          </div>
+          <aside className="hg-side">
+            {q && (
+              <Pod>
+                <PodHeader>
+                  Search results
+                  <Button variant="link" style={{ marginLeft: 'auto', fontSize: 11.5 }} onClick={() => setQ('')}>Clear</Button>
+                </PodHeader>
+                <PodContent>
+                  <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
+                </PodContent>
+              </Pod>
+            )}
+            <HypothesisPanel
+              graph={graph}
+              nodeByID={nodeByID}
+              pe={pe}
+              selected={selected}
+              onSelect={setFocus}
+              onAddIdea={setAddUnder}
+            />
+          </aside>
+        </div>
+      )}
+
+      {graph && addUnder !== null && (
+        <Dialog open onClose={() => setAddUnder(null)} className="wa-dialog">
           <div className="wa-dialog-backdrop" aria-hidden="true" />
           <div className="wa-dialog-container">
             <DialogPanel className="wa-dialog-panel">
-              <DialogTitle style={{ fontWeight: 600, marginBottom: 10 }}>Add an idea to the hypothesis pool</DialogTitle>
-              <AddIdeaForm platformExperimentID={peID} onAdded={() => { mutate(); setAddIdeaOpen(false) }} />
+              <DialogTitle style={{ fontWeight: 600, marginBottom: 10 }}>Add an idea</DialogTitle>
+              <AddIdeaForm
+                platformExperimentID={peID}
+                parent={{
+                  id: addUnder,
+                  label: addUnder === graph.root ? `the objective of ${rootLabel}` : nodeByID.get(addUnder)!.text,
+                }}
+                onAdded={onAdded}
+              />
             </DialogPanel>
           </div>
         </Dialog>
       )}
-
-      {isLoading && <Loading />}
-      {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
-
-      <Pod>
-        <PodHeader>
-          Hypothesis Registry
-          {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
-        </PodHeader>
-        <PodContent scrollX>
-          <table className="wa-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Text</th>
-                <th>Status</th>
-                <th>Platform Experiment</th>
-                <th>Registered by</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>
-                    <div className="empty-state">
-                      No hypotheses found
-                      {peID ? ` in "${peByID.get(peID)?.name ?? peID}"` : ''}
-                      {agentFilter ? ` from agent "${agentFilter}"` : ''}.
-                    </div>
-                  </td>
-                </tr>
-              ) : list.map(h => {
-                const pe = peByID.get(h.platform_experiment_id)
-                return (
-                  <tr
-                    key={h.id}
-                    tabIndex={0}
-                    role="link"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => router.push(`/hypotheses/${h.id}`)}
-                    onKeyDown={e => { if (e.key === 'Enter') router.push(`/hypotheses/${h.id}`) }}
-                  >
-                    <td className="mono text-dim" style={{ fontSize: 11 }}>{h.id.slice(0, 8)}…</td>
-                    <td style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.text}>
-                      {h.text}
-                    </td>
-                    <td><Badge status={h.status ?? 'open'}>{h.status ?? 'open'}</Badge></td>
-                    <td style={{ fontSize: 12 }}>
-                      <Link
-                        href={`/platform-experiments/${h.platform_experiment_id}`}
-                        className="text-link"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        {pe?.name ?? h.platform_experiment_id.slice(0, 8) + '…'}
-                      </Link>
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      <PoolAuthor source={h.source} agentID={h.agent_id} author={h.author} />
-                    </td>
-                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{relTime(h.created_at)}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-        </PodContent>
-      </Pod>
     </div>
   )
 }

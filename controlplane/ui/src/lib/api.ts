@@ -11,6 +11,11 @@ import type {
   AgentMetricSeries,
   Hypothesis,
   HypothesisComment,
+  HypothesisGraph,
+  HypothesisLinkInput,
+  HypothesisLinkType,
+  HypothesisListItem,
+  HypothesisStatus,
   HypothesisWithJobs,
 } from '@/types'
 
@@ -199,35 +204,106 @@ export interface HypothesesParams {
   offset?: number
 }
 
-export function fetchHypothesesPage(params?: HypothesesParams): Promise<Page<Hypothesis>> {
+export function fetchHypothesesPage(params?: HypothesesParams): Promise<Page<HypothesisListItem>> {
   const url = new URL(`${API_URL}/hypotheses`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
     }
   }
-  return apiFetchPage<Hypothesis>(url.toString())
+  return apiFetchPage<HypothesisListItem>(url.toString())
 }
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {
   return apiFetch<HypothesisWithJobs>(`${API_URL}/hypotheses/${id}`)
 }
 
-// Registers a human's idea into a platform experiment's pool. `author` is the name the person
-// typed, sent instead of an agent_id — exactly one of the two is accepted, and there is no auth
-// behind either. The row lands in the same pool, under the same dedup, as an agent's: text
-// equivalent to an existing claim returns that row rather than adding a second.
-export async function registerHumanHypothesis(
-  platformExperimentID: string, author: string, text: string,
-): Promise<Hypothesis> {
-  const res = await fetch(`${API_URL}/hypotheses`, {
+export function fetchHypothesisGraph(platformExperimentID: string): Promise<HypothesisGraph> {
+  return apiFetch<HypothesisGraph>(
+    `${API_URL}/hypotheses/graph?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
+  )
+}
+
+export interface HypothesisQueryResult {
+  columns: string[]
+  rows: unknown[][]
+  truncated: boolean
+}
+
+// Read-only Cypher against the hypothesis graph. A Cypher error comes back as a 400 whose body
+// is the database's own message.
+export async function queryHypothesisGraph(cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
+  const res = await fetch(`${API_URL}/hypotheses/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ platform_experiment_id: platformExperimentID, author, text }),
+    body: JSON.stringify({ cypher, params }),
     cache: 'no-store',
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
+}
+
+// The text index name and call syntax are defined by the backend in the POST /hypotheses/query
+// operation description (served at /explore); keep this in step with it.
+const HYPOTHESIS_SEARCH_CYPHER = `
+CALL text_search.search_all('hypothesis_text', $q) YIELD node, score
+WHERE node.platform_experiment_id = $pe
+RETURN node.id AS id, node.text AS text, node.status AS status
+ORDER BY score DESC
+LIMIT 20`
+
+export interface HypothesisSearchHit {
+  id: string
+  text: string
+  status: HypothesisStatus
+}
+
+// The index parses its argument as a query: quotes, colons and brackets are syntax and uppercase
+// AND/OR/NOT are operators, so typed text is passed on as lowercase words only. A literal /u regex
+// needs an es6 target, which this tsconfig is not.
+const NON_WORD = new RegExp('[^\\p{L}\\p{N}]+', 'gu')
+
+export async function searchHypotheses(platformExperimentID: string, q: string): Promise<HypothesisSearchHit[]> {
+  const words = q.toLowerCase().replace(NON_WORD, ' ').trim()
+  if (!words) return []
+  const result = await queryHypothesisGraph(HYPOTHESIS_SEARCH_CYPHER, { pe: platformExperimentID, q: words })
+  return result.rows.map(([id, text, status]) => ({
+    id: id as string, text: text as string, status: status as HypothesisStatus,
+  }))
+}
+
+export interface RegisteredHypothesis extends Hypothesis {
+  already_existed: boolean
+}
+
+// Registers a human's idea, placed in the graph by `links` (at least one builds_on; `to` is a
+// hypothesis id, or the platform_experiment_id for the objective root). `author` is sent instead
+// of an agent_id and there is no auth behind it. Text equivalent to an existing claim returns
+// that row with already_existed set, and the supplied links are not applied.
+export async function registerHumanHypothesis(
+  platformExperimentID: string, author: string, text: string, links: HypothesisLinkInput[],
+): Promise<RegisteredHypothesis> {
+  const res = await fetch(`${API_URL}/hypotheses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform_experiment_id: platformExperimentID, author, text, links }),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// Links are append-only. Only a human-authored hypothesis accepts links from a human.
+export async function addHumanHypothesisLink(
+  hypothesisID: string, author: string, type: HypothesisLinkType, to: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/hypotheses/${hypothesisID}/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ author, type, to }),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(await res.text())
 }
 
 export async function addHumanHypothesisComment(
