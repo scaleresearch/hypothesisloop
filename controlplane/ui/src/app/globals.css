@@ -837,11 +837,20 @@ select:focus-visible,
 /* Hypothesis graph                                                        */
 /* ---------------------------------------------------------------------- */
 
+/* The graph takes what the viewport has left under the controls; 60px is .wa-main's padding. */
+.hg-page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 60px);
+}
+
 .hg-layout {
+  flex: 1 0 0;
+  min-height: 520px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
 }
 
 .hg-layout.with-side {
@@ -849,8 +858,6 @@ select:focus-visible,
 }
 
 .hg-main {
-  height: calc(100vh - 370px);
-  min-height: 520px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -858,8 +865,6 @@ select:focus-visible,
 }
 
 .hg-side {
-  max-height: calc(100vh - 370px);
-  min-height: 520px;
   overflow-y: auto;
 }
 

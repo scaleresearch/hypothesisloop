@@ -98,7 +98,7 @@ function HypothesesPageContent() {
   }
 
   return (
-    <div>
+    <div className="hg-page">
       <PageHeader
         title="Hypotheses"
         description="Each platform experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others. Registering text equivalent to an existing hypothesis returns the existing one; text close to others waits until the submitter has told it apart from them."
