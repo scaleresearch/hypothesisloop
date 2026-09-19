@@ -83,9 +83,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
   // The env settings that are not the same in every job here: what this hypothesis's runs varied.
-  const variedEnv = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {}))))
-    .filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
-    .sort()
+  // With nothing varied, every setting is shown.
+  const envKeys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
+  const variedEnv = envKeys.filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
+  const shownEnv = variedEnv.length > 0 ? variedEnv : envKeys
   const primaryMetric = pe?.metrics?.[0]
 
   return (
@@ -100,7 +101,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
             ← {pe?.name ?? data.platform_experiment_id.slice(0, 12) + '…'}
           </div>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', wordBreak: 'break-word' }}>
-            <span className="mono text-dim" style={{ fontSize: 14 }}>{data.id.slice(0, 8)}…</span>
+            <span className="mono text-dim" style={{ fontSize: 14 }}>{data.id}</span>
             <Badge status={data.status ?? 'open'}>{data.status ?? 'open'}</Badge>
           </h1>
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
@@ -236,7 +237,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>Job ID</th>
                 <th>Agent</th>
                 <th>Status</th>
-                <th>Varied settings</th>
+                <th>{variedEnv.length > 0 ? 'Varied settings' : 'Settings'}</th>
                 <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
                 <th style={{ textAlign: 'right' }}>Best {primaryMetric?.key ?? 'Metric'}</th>
@@ -267,7 +268,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     <td className="mono">{job.agent_id}</td>
                     <td><Badge status={status}>{status}</Badge></td>
                     <td className="mono" style={{ fontSize: 11 }}>
-                      {variedEnv.filter(k => j.job?.env?.[k] !== undefined).map(k => `${k}=${j.job!.env![k]}`).join(' ') || '—'}
+                      {shownEnv.map(k => j.job?.env?.[k] === undefined ? `${k} not set` : `${k}=${j.job.env[k]}`).join(' ') || '—'}
                     </td>
                     <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
