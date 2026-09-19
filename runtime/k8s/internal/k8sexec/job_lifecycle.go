@@ -852,21 +852,6 @@ func jobPhase(job *batchv1.Job) workload.JobPhase {
 	return workload.JobPhasePending
 }
 
-// GetAdmittedAcceleratorType reports which accelerator type this experiment's Job actually landed on. When
-// AcceptableAcceleratorTypes lists more than one flavor, the k8s scheduler picks the node, so
-// the only way to know which was chosen is to read it back from the live cluster (see
-// ResolveAdmittedAcceleratorType). Missing actual placement is an error; callers retry.
-func (c *JobWorkloadClient) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
-	resolved, _, _, err := c.ResolveAdmittedAcceleratorType(ctx, exp.ID)
-	if err != nil {
-		return "", err
-	}
-	if resolved == "" {
-		return "", fmt.Errorf("workload: accelerator type for %s is not observed yet", exp.ID)
-	}
-	return resolved, nil
-}
-
 // ResolveAdmittedAcceleratorType inspects experimentID's currently-scheduled pod(s) and returns the accelerator
 // type actually admitted, reverse-mapping the assigned node's accelerator product label back to
 // a configured type name (acceleratorNodeAffinity's mapping, in reverse). This is the only way

@@ -238,17 +238,6 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 	return "", "", true, nil
 }
 
-func (e *Executor) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
-	t, _, _, err := e.ResolveAdmittedAcceleratorType(ctx, exp.ID)
-	if err != nil {
-		return "", err
-	}
-	if t == "" {
-		return "", fmt.Errorf("podexec: accelerator type for %s is not observed yet", exp.ID)
-	}
-	return t, nil
-}
-
 // ReapTerminal removes containers that are stopped and whose experiment ID is not a key of
 // desired — the exported entry point reconcile.go calls once per tick.
 func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error {
