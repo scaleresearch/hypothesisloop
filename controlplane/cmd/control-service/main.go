@@ -33,10 +33,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-type noopAgentProvisioner struct{}
-
-func (noopAgentProvisioner) ProvisionAgent(context.Context, string) error { return nil }
-
 // control-service serves the entire agent- and UI-facing API from one listener: quota,
 // scheduler and registry operations share one router, one /openapi.json and one /explore, so a
 // caller needs a single base URL and never has to know which package implements a path.
@@ -142,11 +138,8 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph 
 	if err != nil {
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
-	// Native Kubernetes Jobs need no per-agent object; keeps agent registration
-	// independent from the scheduler backend.
-	provisioner := quota.AgentProvisioner(noopAgentProvisioner{})
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
-	svc := quota.NewService(store, provisioner, logger)
+	svc := quota.NewService(store, logger)
 	handler := quota.NewHandler(svc, logger)
 
 	// One observation cadence for the whole process: the quota service, the settler, the

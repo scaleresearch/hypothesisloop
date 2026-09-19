@@ -335,6 +335,3 @@ func minimumFootprint(a, b domain.Footprint) domain.Footprint {
 	}
 	return out
 }
-
-// ProvisionAgent is a no-op: the native scheduling model has no per-agent k8s object to create.
-func (b *Backend) ProvisionAgent(_ context.Context, _ string) error { return nil }

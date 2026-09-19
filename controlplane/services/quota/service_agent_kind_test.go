@@ -27,16 +27,12 @@ func (f *fakeAgentStore) CountAgents(ctx context.Context) (int, error) {
 	return len(f.created), nil
 }
 
-type noopProvisioner struct{}
-
-func (noopProvisioner) ProvisionAgent(ctx context.Context, agentID string) error { return nil }
-
 // TestRegisterAgent_KindDefaultsToAgent covers the backward-compat path: every existing caller
 // never sends a kind, and must keep getting an AgentKindAgent row exactly as before this field
 // existed.
 func TestRegisterAgent_KindDefaultsToAgent(t *testing.T) {
 	store := &fakeAgentStore{}
-	svc := NewService(store, noopProvisioner{}, zap.NewNop())
+	svc := NewService(store, zap.NewNop())
 
 	agent, err := svc.RegisterAgent(context.Background(), "agent-1", "Agent One", "")
 	if err != nil {
@@ -53,7 +49,7 @@ func TestRegisterAgent_KindDefaultsToAgent(t *testing.T) {
 // TestRegisterAgent_KindHuman covers the new path: a real person registering as a participant.
 func TestRegisterAgent_KindHuman(t *testing.T) {
 	store := &fakeAgentStore{}
-	svc := NewService(store, noopProvisioner{}, zap.NewNop())
+	svc := NewService(store, zap.NewNop())
 
 	agent, err := svc.RegisterAgent(context.Background(), "human-1", "Ada", domain.AgentKindHuman)
 	if err != nil {
