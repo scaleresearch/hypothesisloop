@@ -191,7 +191,7 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	// silently treats every first checkpoint of a trailing stretch as a continuation of one that
 	// never happened. A lookback sized to underperformSiblingStaleness keeps the grid close enough
 	// to real sample timestamps for that edge to be trustworthy, at the same query cost.
-	series, err := s.GetPlatformExperimentTimeseries(ctx, exp.PlatformExperimentID, metricName, underperformSiblingStaleness+5*time.Minute)
+	series, err := s.GetPlatformExperimentTimeseries(ctx, exp.PlatformExperimentID, metricName, underperformSiblingStaleness+5*time.Minute, time.Time{})
 	if err != nil {
 		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
 		return
@@ -346,12 +346,15 @@ func validMetricLabel(field, value string) error {
 // GetPlatformExperimentTimeseries returns the full metric history (not just the latest
 // value) for every job in platformExpID, one AgentMetricSeries per job — the data a
 // competing-agents-over-time dashboard plots. Uses a PromQL range query, since an instant
-// query (GetTimeseries) only ever returns the latest sample per series.
-func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformExpID, metricName string, lookback time.Duration) ([]*domain.AgentMetricSeries, error) {
+// query (GetTimeseries) only ever returns the latest sample per series. The window is the lookback
+// before end; an end that is zero or still ahead means now.
+func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformExpID, metricName string, lookback time.Duration, end time.Time) ([]*domain.AgentMetricSeries, error) {
 	if lookback <= 0 {
 		lookback = 24 * time.Hour
 	}
-	end := time.Now().UTC()
+	if now := time.Now().UTC(); end.IsZero() || end.After(now) {
+		end = now
+	}
 	start := end.Add(-lookback)
 	step := lookback / 500 // cap at ~500 points/series regardless of window size
 	if step < time.Second {

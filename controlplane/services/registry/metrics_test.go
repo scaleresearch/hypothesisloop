@@ -112,3 +112,46 @@ func TestGetTimeseriesKeepsEachSamplesOwnFractionWhenNodesReportInsideOneSecond(
 		}
 	}
 }
+
+// A finished platform experiment's history is read over its own run: the window ends where the
+// caller says, so the same request answers with the same grid however long ago the run ended.
+func TestPlatformExperimentTimeseriesEndsItsWindowWhereAskedAndNeverAhead(t *testing.T) {
+	var gotStart, gotEnd, gotStep string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		gotStart, gotEnd, gotStep = r.Form.Get("start"), r.Form.Get("end"), r.Form.Get("step")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+	}))
+	defer srv.Close()
+	svc := New(nil, nil, nil, srv.URL, nil)
+	unix := func(s string) time.Time {
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			t.Fatalf("query bound %q is not a unix time: %v", s, err)
+		}
+		return time.Unix(int64(f), 0).UTC()
+	}
+
+	end := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
+	if _, err := svc.GetPlatformExperimentTimeseries(context.Background(), "pe-1", "score", 10*time.Minute, end); err != nil {
+		t.Fatalf("GetPlatformExperimentTimeseries: %v", err)
+	}
+	if got := unix(gotEnd); !got.Equal(end) {
+		t.Errorf("window end: got = %v, want %v", got, end)
+	}
+	if got, want := unix(gotStart), end.Add(-10*time.Minute); !got.Equal(want) {
+		t.Errorf("window start: got = %v, want %v", got, want)
+	}
+	if gotStep == "" {
+		t.Errorf("step: got none")
+	}
+
+	before := time.Now().UTC().Add(-time.Second)
+	if _, err := svc.GetPlatformExperimentTimeseries(context.Background(), "pe-1", "score", 10*time.Minute, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("GetPlatformExperimentTimeseries: %v", err)
+	}
+	if got := unix(gotEnd); got.Before(before) || got.After(time.Now().UTC().Add(time.Second)) {
+		t.Errorf("window end for an end still ahead: got = %v, want now", got)
+	}
+}

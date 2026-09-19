@@ -197,23 +197,23 @@ export function fetchExperimentLogs(id: string, n = 200): Promise<string[]> {
   return apiFetch<string[]>(`${API_URL}/experiments/${id}/logs?n=${n}`)
 }
 
-// Full metric history for every competing job in a platform experiment — one series per
-// job/agent — for a leaderboard/competition-over-time dashboard.
+// Metric history of every job in a platform experiment over its own run, one series per job. The
+// window reaches from the start to the end, or to now while it runs: each series comes back as
+// about 500 points whatever the window, so a wider one costs resolution. Quarter hours keep the
+// sampling grid still from one poll to the next.
 export function fetchPlatformExperimentTimeseries(
-  platformExpID: string,
+  pe: PlatformExperiment,
   metricName: string,
-  lookbackHours = 24,
 ): Promise<{ series: AgentMetricSeries[] }> {
-  return apiFetch<{ series: AgentMetricSeries[] }>(
-    `${API_URL}/platform-experiments/${platformExpID}/metrics-timeseries?metric_name=${encodeURIComponent(metricName)}&lookback_hours=${lookbackHours}`,
-  )
-}
-
-// The window from an experiment's start to now. Each series comes back as about 500 points
-// whatever the window, so a wider one costs resolution. Quarter hours keep it still as a SWR key.
-export function lookbackHoursSince(startsAt: string | undefined): number {
-  if (isZeroDate(startsAt)) return 24
-  return Math.max(0.25, Math.ceil((Date.now() - new Date(startsAt as string).getTime()) / 900_000) / 4)
+  const url = new URL(`${API_URL}/platform-experiments/${pe.id}/metrics-timeseries`)
+  url.searchParams.set('metric_name', metricName)
+  if (!isZeroDate(pe.starts_at)) {
+    const end = Math.min(Date.now(), new Date(pe.ends_at as string).getTime())
+    const quarters = Math.ceil((end - new Date(pe.starts_at as string).getTime()) / 900_000)
+    url.searchParams.set('lookback_hours', String(Math.max(1, quarters) / 4))
+    url.searchParams.set('end', new Date(pe.ends_at as string).toISOString())
+  }
+  return apiFetch<{ series: AgentMetricSeries[] }>(url.toString())
 }
 
 // ---------------------------------------------------------------------------

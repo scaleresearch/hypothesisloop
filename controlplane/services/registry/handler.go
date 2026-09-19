@@ -255,11 +255,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "platform-experiment-timeseries", Method: "GET",
 		Path:    "/platform-experiments/{id}/metrics-timeseries",
 		Summary: "Get per-job metric history across a platform experiment", Tags: []string{"metrics"},
-		Description: "One series per job so a dashboard can plot competing agents. Requires ?metric_name; optional ?lookback_hours (default 24).",
+		Description: "One series per job so a dashboard can plot competing agents. Requires ?metric_name; optional ?lookback_hours (default 24) before ?end (default now).",
 	}, func(ctx context.Context, in *struct {
 		ID            string  `path:"id"`
 		MetricName    string  `query:"metric_name" doc:"Required. One of the metric keys this platform experiment declares (GET /platform-experiments/{id} -> metrics[].key)."`
 		LookbackHours float64 `query:"lookback_hours" doc:"How far back to plot, default 24. Each series is downsampled to about 500 points regardless of the window, so a longer window costs resolution rather than response size."`
+		End           string  `query:"end" doc:"RFC3339. Where the window ends, default now; a time still ahead means now. Pass a finished platform experiment's ends_at so the window stays on its run."`
 	}) (*struct {
 		Body struct {
 			Series []*domain.AgentMetricSeries `json:"series"`
@@ -272,7 +273,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.LookbackHours > 0 {
 			lookback = time.Duration(in.LookbackHours * float64(time.Hour))
 		}
-		series, err := h.svc.GetPlatformExperimentTimeseries(ctx, in.ID, in.MetricName, lookback)
+		var end time.Time
+		if in.End != "" {
+			parsed, err := time.Parse(time.RFC3339, in.End)
+			if err != nil {
+				return nil, huma.Error400BadRequest("end must be RFC3339")
+			}
+			end = parsed
+		}
+		series, err := h.svc.GetPlatformExperimentTimeseries(ctx, in.ID, in.MetricName, lookback, end)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

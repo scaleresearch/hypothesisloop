@@ -19,7 +19,6 @@ import {
   fetchStages,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
-  lookbackHoursSince,
   fetchHypothesisStats,
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
@@ -616,11 +615,10 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // The history of every declared metric, for the chart. The heaviest read on the page, so it
   // polls slower than the rest.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
-  const lookbackHours = lookbackHoursSince(pe?.starts_at)
   const { data: allMetricSeries, error: metricSeriesError } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
-    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), lookbackHours] : null,
+    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), pe.starts_at, pe.ends_at] : null,
     () => Promise.all(peMetricKeys.map(k =>
-      fetchPlatformExperimentTimeseries(id, k, lookbackHours).then(r => ({ key: k, series: r.series })),
+      fetchPlatformExperimentTimeseries(pe!, k).then(r => ({ key: k, series: r.series })),
     )),
     { refreshInterval: 30_000 },
   )
