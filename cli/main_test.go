@@ -211,6 +211,34 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	}
 }
 
+func TestJobSubmitRefusedForSummariesNamesEachCommand(t *testing.T) {
+	var listQuery string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			listQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`[{"id":"job-1"},{"id":"job-2"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"reason":"summary_required","message":"agent has completed jobs without summaries"}`))
+	})
+	setAPIURL(t, url)
+	dir := t.TempDir()
+	jobFile := dir + "/job.yaml"
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
+	if code != 1 || listQuery != "agent=jane&needs_summary=true&platform_experiment_id=pe-1" {
+		t.Fatalf("exit %d, list query %q, stderr %s", code, listQuery, stderr.String())
+	}
+	got := stderr.String()
+	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "hl job summary job-1 --text T; hl job summary job-2 --text T\n") {
+		t.Fatalf("stderr = %q, want one line ending in the summary command of each job", got)
+	}
+}
+
 func TestJobSubmitKeepsExplicitID(t *testing.T) {
 	var gotBody map[string]any
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {

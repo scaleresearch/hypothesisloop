@@ -137,6 +137,10 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	body["metadata"] = metadata
 	var out json.RawMessage
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
+		if missing := missingSummaries(c, metadata, err); missing != "" {
+			fmt.Fprintln(stderr, "hl: job submit: refused until each of your COMPLETED jobs has a summary; file these, then submit again: "+missing)
+			return 1
+		}
 		return fail(stderr, err)
 	}
 	if err := printLine(stdout, out, jobDrop...); err != nil {
@@ -144,6 +148,32 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	}
 	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 	return 0
+}
+
+// missingSummaries is the summary command of every job behind a submit refused as
+// summary_required, and empty for any other err.
+func missingSummaries(c *apiclient.Client, metadata map[string]any, err error) string {
+	var refused *apiclient.HTTPError
+	var reply struct {
+		Reason string `json:"reason"`
+	}
+	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil || reply.Reason != "summary_required" {
+		return ""
+	}
+	q := url.Values{"needs_summary": {"true"}}
+	q.Set("agent", fmt.Sprint(metadata["agent_id"]))
+	q.Set("platform_experiment_id", fmt.Sprint(metadata["platform_experiment_id"]))
+	var jobs []struct {
+		ID string `json:"id"`
+	}
+	if c.Do("GET", "/experiments?"+q.Encode(), nil, &jobs) != nil {
+		return ""
+	}
+	commands := make([]string, len(jobs))
+	for i, job := range jobs {
+		commands[i] = "hl job summary " + job.ID + " --text T"
+	}
+	return strings.Join(commands, "; ")
 }
 
 const resultArrives = "the result arrives as an update when you end your turn"
