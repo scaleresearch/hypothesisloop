@@ -168,6 +168,30 @@ _COMPACTION_PROMPT = (
 )
 
 
+# Longest silence a healthy turn can produce between two CLI messages: Claude Code caps one Bash
+# call at 10 min (BASH_MAX_TIMEOUT_MS) and one API request at 10 min (API_TIMEOUT_MS). Seen live:
+# an agent got no model response after a tool result and sat silent until stopped.
+_TURN_SILENCE_TIMEOUT_S = 900
+
+
+class TurnStalled(Exception):
+    pass
+
+
+async def _receive_turn(client):
+    """client.receive_response(), failing with TurnStalled when the CLI goes silent."""
+    messages = client.receive_response().__aiter__()
+    while True:
+        try:
+            async with asyncio.timeout(_TURN_SILENCE_TIMEOUT_S):
+                message = await anext(messages)
+        except StopAsyncIteration:
+            return
+        except TimeoutError:
+            raise TurnStalled(f"no message from the CLI for {_TURN_SILENCE_TIMEOUT_S}s") from None
+        yield message
+
+
 def _context_tokens(usage: dict | None) -> int:
     """Context carried by one model call, from its usage block."""
     if not usage:
@@ -219,7 +243,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             turn_is_error = False
             turn_used_tool = False
             context_tokens = 0
-            async for message in client.receive_response():
+            async for message in _receive_turn(client):
                 if _log_message(message):
                     turn_used_tool = True
                 if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
@@ -268,7 +292,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await client.query(_COMPACTION_PROMPT)
                 handoff_parts = []
                 handoff_result = None
-                async for message in client.receive_response():
+                async for message in _receive_turn(client):
                     _log_message(message)
                     if isinstance(message, AssistantMessage):
                         handoff_parts.extend(
