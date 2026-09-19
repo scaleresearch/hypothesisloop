@@ -560,6 +560,9 @@ description (/explore). Examples:
 	if strings.TrimSpace(cypher) == "" {
 		return parseExit(misuse(fs, "empty query"))
 	}
+	if strings.HasPrefix(strings.TrimSpace(cypher), "{") {
+		return parseExit(misuse(fs, "want the Cypher text itself, got a JSON object"))
+	}
 	*pe = orEnv(*pe, platformExperimentEnv)
 	if *pe == "" {
 		return parseExit(misuse(fs, "--platform-experiment is required (or set PLATFORM_EXPERIMENT_ID)"))

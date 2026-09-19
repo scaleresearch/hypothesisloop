@@ -416,6 +416,7 @@ func TestHypothesisQueryUsageErrors(t *testing.T) {
 		{"MATCH (n) RETURN n", "--platform-experiment", "pe-1", "extra"},
 		{"MATCH (n) RETURN n", "--platform-experiment", "pe-1", "--param", "novalue"},
 		{"   ", "--platform-experiment", "pe-1"},
+		{`{"cypher":"MATCH (n) RETURN n"}`, "--platform-experiment", "pe-1"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(append([]string{"hypothesis", "query"}, args...), &stdout, &stderr); code != 2 {
