@@ -266,7 +266,7 @@ func (s *Store) outLinks(ctx context.Context, id string) ([]domain.Link, error) 
 	return links.Out, nil
 }
 
-// ListFilter scopes ListHypotheses and CountHypotheses. Empty fields do not filter; an empty
+// ListFilter scopes ListHypotheses and HypothesisStats. Empty fields do not filter; an empty
 // PlatformExperimentID spans every platform experiment.
 type ListFilter struct {
 	PlatformExperimentID string
@@ -326,20 +326,22 @@ WITH h ORDER BY h.created_at DESC, h.id DESC SKIP $offset LIMIT $limit`+itemTail
 	return out.([]*domain.HypothesisListItem), nil
 }
 
-// CountHypotheses returns how many hypotheses match f, ignoring Limit and Offset.
-func (s *Store) CountHypotheses(ctx context.Context, f ListFilter) (int, error) {
+// HypothesisStats counts the hypotheses matching f by status, ignoring Limit and Offset.
+func (s *Store) HypothesisStats(ctx context.Context, f ListFilter) (*domain.HypothesisStats, error) {
 	where, params := f.where()
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		records, err := collect(ctx, tx, `MATCH (h:Hypothesis) WHERE `+where+` RETURN count(h)`, params)
-		if err != nil {
-			return nil, err
-		}
-		return records[0].Values[0].(int64), nil
+		return collect(ctx, tx, `MATCH (h:Hypothesis) WHERE `+where+` RETURN h.status, count(h)`, params)
 	})
 	if err != nil {
-		return 0, fmt.Errorf("graphdb.CountHypotheses: %w", err)
+		return nil, fmt.Errorf("graphdb.HypothesisStats: %w", err)
 	}
-	return int(out.(int64)), nil
+	stats := &domain.HypothesisStats{ByStatus: map[domain.HypothesisStatus]int{}}
+	for _, record := range out.([]*neo4j.Record) {
+		n := int(record.Values[1].(int64))
+		stats.ByStatus[domain.HypothesisStatus(record.Values[0].(string))] = n
+		stats.Total += n
+	}
+	return stats, nil
 }
 
 // ExperimentGraph returns the whole hypothesis graph of one platform experiment: every hypothesis as a list

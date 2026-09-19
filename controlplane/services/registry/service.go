@@ -47,7 +47,7 @@ type Graph interface {
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
 	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
-	CountHypotheses(ctx context.Context, f graphdb.ListFilter) (int, error)
+	HypothesisStats(ctx context.Context, f graphdb.ListFilter) (*domain.HypothesisStats, error)
 	ExperimentGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error)
 	Query(ctx context.Context, platformExperimentID, cypher string, params map[string]any) (*graphdb.QueryResult, error)
 }

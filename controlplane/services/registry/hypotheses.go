@@ -151,13 +151,13 @@ func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*
 	return items, nil
 }
 
-// CountHypotheses returns the total matching the same filters, ignoring limit/offset.
-func (s *Service) CountHypotheses(ctx context.Context, f graphdb.ListFilter) (int, error) {
-	total, err := s.graph.CountHypotheses(ctx, f)
+// HypothesisStats counts the hypotheses matching the same filters by status, ignoring limit/offset.
+func (s *Service) HypothesisStats(ctx context.Context, f graphdb.ListFilter) (*domain.HypothesisStats, error) {
+	stats, err := s.graph.HypothesisStats(ctx, f)
 	if err != nil {
-		return 0, fmt.Errorf("registry.CountHypotheses: %w", err)
+		return nil, fmt.Errorf("registry.HypothesisStats: %w", err)
 	}
-	return total, nil
+	return stats, nil
 }
 
 // HypothesisGraph returns the whole hypothesis graph of one platform experiment.

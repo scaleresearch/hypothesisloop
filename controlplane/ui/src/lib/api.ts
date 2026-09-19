@@ -241,12 +241,16 @@ export function fetchHypothesesPage(params?: HypothesesParams): Promise<Page<Hyp
 
 export const HYPOTHESIS_STATUSES: HypothesisStatus[] = ['open', 'confirmed', 'refuted', 'inconclusive']
 
-// How many hypotheses hold each verdict: one X-Total-Count per status, each off a one-row page.
-export async function fetchHypothesisVerdictCounts(platformExperimentID: string): Promise<Record<HypothesisStatus, number>> {
-  const pages = await Promise.all(HYPOTHESIS_STATUSES.map(status =>
-    fetchHypothesesPage({ platform_experiment_id: platformExperimentID, status, limit: 1 }),
-  ))
-  return Object.fromEntries(HYPOTHESIS_STATUSES.map((s, i) => [s, pages[i].total])) as Record<HypothesisStatus, number>
+export interface HypothesisStats {
+  total: number
+  /** A status no hypothesis holds is absent. */
+  by_status: Partial<Record<HypothesisStatus, number>>
+}
+
+export function fetchHypothesisStats(platformExperimentID: string): Promise<HypothesisStats> {
+  return apiFetch<HypothesisStats>(
+    `${API_URL}/hypotheses/stats?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
+  )
 }
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {

@@ -454,14 +454,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		total, err := h.svc.CountHypotheses(ctx, filter)
+		stats, err := h.svc.HypothesisStats(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct {
 			Body       []*domain.HypothesisListItem
 			TotalCount int `header:"X-Total-Count"`
-		}{Body: hs, TotalCount: total}, nil
+		}{Body: hs, TotalCount: stats.Total}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "hypothesis-stats", Method: "GET", Path: "/hypotheses/stats",
+		Summary: "Count hypotheses by status", Tags: []string{"hypotheses"},
+		Description: "total and by_status over the hypotheses the ?platform_experiment_id and ?agent filters of " +
+			"GET /hypotheses match. A status no hypothesis holds is absent.",
+	}, func(ctx context.Context, in *struct {
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Restrict to one platform experiment."`
+		Agent                string `query:"agent" doc:"Only hypotheses registered by this agent."`
+	}) (*struct{ Body *domain.HypothesisStats }, error) {
+		stats, err := h.svc.HypothesisStats(ctx, graphdb.ListFilter{PlatformExperimentID: in.PlatformExperimentID, AgentID: in.Agent})
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body *domain.HypothesisStats }{Body: stats}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

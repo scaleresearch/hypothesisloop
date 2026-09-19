@@ -19,7 +19,7 @@ import {
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
   lookbackHoursSince,
-  fetchHypothesisVerdictCounts,
+  fetchHypothesisStats,
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
 import type { ExperimentStats, StagesStatus } from '@/lib/api'
@@ -715,8 +715,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   )
 
   const { data: verdicts, error: hypothesesError } = useSWR(
-    ['pe-hypothesis-verdicts', id],
-    () => fetchHypothesisVerdictCounts(id),
+    ['pe-hypothesis-stats', id],
+    () => fetchHypothesisStats(id),
     { refreshInterval: 15_000 },
   )
 
@@ -786,9 +786,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
   const scoreboard = buildScoreboard(jobsByAgent, quotas ?? [], metrics, metricBestsByAgent, nonRawAgentIdsByMetric)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
-  const hypothesisCount = HYPOTHESIS_STATUSES.reduce((n, v) => n + (verdicts?.[v] ?? 0), 0)
+  const hypothesisCount = verdicts?.total ?? 0
   const hypothesisSub = [
-    HYPOTHESIS_STATUSES.map(v => `${verdicts?.[v] ?? 0} ${v}`).join(' · '),
+    HYPOTHESIS_STATUSES.map(v => `${verdicts?.by_status[v] ?? 0} ${v}`).join(' · '),
     hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}),
   ].filter(Boolean).join(' · ')
 

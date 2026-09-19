@@ -164,6 +164,12 @@ type HypothesisListItem struct {
 	CommentCount int      `json:"comment_count"`
 }
 
+// HypothesisStats counts a set of hypotheses by status. A status with no hypothesis is absent.
+type HypothesisStats struct {
+	Total    int                      `json:"total"`
+	ByStatus map[HypothesisStatus]int `json:"by_status"`
+}
+
 // GraphEdge is one edge of a platform experiment's hypothesis graph, with who created it and when.
 type GraphEdge struct {
 	From      string    `json:"from"`

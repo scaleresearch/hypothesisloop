@@ -9,7 +9,7 @@ import {
   fetchPlatformExperimentsPage,
   fetchPlatformExperimentQuotas,
   fetchExperimentStats,
-  fetchHypothesisVerdictCounts,
+  fetchHypothesisStats,
   HYPOTHESIS_STATUSES,
   createPlatformExperiment,
   updatePlatformExperiment,
@@ -76,8 +76,8 @@ function ExperimentCard({
   )
 
   const { data: verdicts } = useSWR(
-    ['pe-hypothesis-verdicts', pe.id],
-    () => fetchHypothesisVerdictCounts(pe.id),
+    ['pe-hypothesis-stats', pe.id],
+    () => fetchHypothesisStats(pe.id),
     { refreshInterval: 15_000 },
   )
   const { data: hypothesisStats } = useSWR(
@@ -85,7 +85,7 @@ function ExperimentCard({
     () => fetchExperimentStats({ platform_experiment_id: pe.id, group_by: 'hypothesis' }),
     { refreshInterval: 15_000 },
   )
-  const hypothesisCount = HYPOTHESIS_STATUSES.reduce((n, v) => n + (verdicts?.[v] ?? 0), 0)
+  const hypothesisCount = verdicts?.total ?? 0
   const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {})
 
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
@@ -166,7 +166,7 @@ function ExperimentCard({
             <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
               {HYPOTHESIS_STATUSES.map(v => (
                 <span key={v} className="mono" style={{ fontSize: 13, color: hypothesisStatusColors[v] }}>
-                  {verdicts?.[v] ?? 0} <span className="text-muted" style={{ fontSize: 10 }}>{v}</span>
+                  {verdicts?.by_status[v] ?? 0} <span className="text-muted" style={{ fontSize: 10 }}>{v}</span>
                 </span>
               ))}
             </div>

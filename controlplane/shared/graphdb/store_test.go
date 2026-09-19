@@ -148,8 +148,8 @@ func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
 	if got := similarIDs(t, err); len(got) != 2 || got[bs8.ID] != "close_text" || got[bs4.ID] != "close_text" {
 		t.Fatalf("similar: got = %v, want %s and %s as close_text", got, bs8.ID, bs4.ID)
 	}
-	if total, _ := s.CountHypotheses(ctx, ListFilter{PlatformExperimentID: pe}); total != 3 {
-		t.Fatalf("hypotheses after a held-back registration: got = %d, want 3", total)
+	if stats, _ := s.HypothesisStats(ctx, ListFilter{PlatformExperimentID: pe}); stats.Total != 3 {
+		t.Fatalf("hypotheses after a held-back registration: got = %d, want 3", stats.Total)
 	}
 	contra.Links = append(contra.Links, domain.LinkSpec{Type: domain.LinkContradicts, To: bs8.ID})
 	contra.DistinctFrom = []string{bs4.ID}
@@ -241,8 +241,8 @@ func TestConcurrentRegistrationsOfTheSameClaimYieldOneHypothesis(t *testing.T) {
 	if newCount != 1 {
 		t.Errorf("registrations that created the hypothesis: got = %v, want 1", newCount)
 	}
-	if total, err := s.CountHypotheses(context.Background(), ListFilter{PlatformExperimentID: pe}); err != nil || total != 1 {
-		t.Errorf("hypotheses in the experiment: got = (%v, %v), want (1, nil)", total, err)
+	if stats, err := s.HypothesisStats(context.Background(), ListFilter{PlatformExperimentID: pe}); err != nil || stats.Total != 1 {
+		t.Errorf("hypotheses in the experiment: got = (%v, %v), want (1, nil)", stats, err)
 	}
 }
 
@@ -268,8 +268,8 @@ func TestRegisterRefusesAHypothesisWithNoPlaceInTheGraph(t *testing.T) {
 			t.Errorf("%s: got = %v, want %v", name, err, ErrInvalidLink)
 		}
 	}
-	if total, _ := s.CountHypotheses(context.Background(), ListFilter{PlatformExperimentID: pe}); total != 1 {
-		t.Errorf("hypotheses after refused registrations: got = %v, want 1", total)
+	if stats, _ := s.HypothesisStats(context.Background(), ListFilter{PlatformExperimentID: pe}); stats.Total != 1 {
+		t.Errorf("hypotheses after refused registrations: got = %v, want 1", stats.Total)
 	}
 }
 
@@ -441,6 +441,13 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 	}
 	if _, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted, stampAt(1)); err != nil || changed {
 		t.Errorf("same status again: got = (%v, %v), want (false, nil)", changed, err)
+	}
+
+	register(t, s, pe, "agent-1", "b", onRoot(pe))
+	stats, err := s.HypothesisStats(ctx, ListFilter{PlatformExperimentID: pe})
+	if err != nil || stats.Total != 2 || len(stats.ByStatus) != 2 ||
+		stats.ByStatus[domain.HypothesisRefuted] != 1 || stats.ByStatus[domain.HypothesisOpen] != 1 {
+		t.Errorf("HypothesisStats: got = (%+v, %v), want total 2 with 1 refuted and 1 open", stats, err)
 	}
 }
 

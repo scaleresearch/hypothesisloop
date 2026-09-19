@@ -80,7 +80,7 @@ func TestConcurrentNearDuplicateRegistrationsCreateOne(t *testing.T) {
 			t.Fatalf("Register %d: got = %v, want nil or %v", i, err, ErrSimilar)
 		}
 	}
-	if total, err := s.CountHypotheses(context.Background(), ListFilter{PlatformExperimentID: pe}); err != nil || total != 1 {
-		t.Errorf("hypotheses in the experiment: got = (%v, %v), want (1, nil)", total, err)
+	if stats, err := s.HypothesisStats(context.Background(), ListFilter{PlatformExperimentID: pe}); err != nil || stats.Total != 1 {
+		t.Errorf("hypotheses in the experiment: got = (%v, %v), want (1, nil)", stats, err)
 	}
 }
