@@ -22,6 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
 
 
+def workload_image() -> str:
+    """The generic workload as cluster nodes pull it: from the local registry at the host address
+    `make render-settings` detected (nodes cannot reach the host's localhost)."""
+    host = (REPO_ROOT / "localdev" / ".registry-host-ip").read_text().strip()
+    return f"{host}:5000/hypothesisloop-workload:latest"
+
+
 def load_yaml(path: Path, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     """Load a YAML config (mirroring `hl`'s own config shape) and apply a shallow dict of
     overrides on top. `None` in overrides deletes the key, matching mk_body.py's JOB_OVERRIDE_JSON
@@ -70,6 +77,7 @@ class JobRequest:
     def to_yaml(self) -> str:
         doc = load_yaml(JOB_SPEC_PATH)
         job = dict(doc.get("job", doc))
+        job["image"] = workload_image()
         for k, v in self.job_overrides.items():
             if v is None:
                 job.pop(k, None)

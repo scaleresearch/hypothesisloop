@@ -16,11 +16,13 @@ import json
 import subprocess
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import yaml
 
 from conftest import TEST_ACCELERATOR_TYPE, make_agent
+from support.api import workload_image
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -78,6 +80,7 @@ def test_cli_full_flow_happy_path(api, run_id, deadline):
         "max_agents": 1,
         "report_interval_seconds": 10,
         "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
+        "ends_at": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     pe_create_out = api.hl("platform-experiments", "create", "-", input=yaml.safe_dump(pe_body, sort_keys=False))
     pe_id = json.loads(pe_create_out)["id"]
@@ -130,7 +133,7 @@ def test_cli_full_flow_happy_path(api, run_id, deadline):
             "capacity_tier": "guaranteed",
         },
         "job": {
-            "image": "localhost/hypothesisloop-workload:latest",
+            "image": workload_image(),
             "cpu": "250m",
             "memory": "128Mi",
             "storage": "512Mi",

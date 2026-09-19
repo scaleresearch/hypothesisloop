@@ -36,6 +36,7 @@ job:
   # here would double the accelerator-hours cost per submission and starve the budget. The
   # distributed-training path (num_nodes, topology, acceptable_accelerator_types) is verified
   # separately via direct API calls, not through this shared smoke-test fixture.
+  # The e2e harness replaces this with the local registry's address (tests/support/api.py).
   image: localhost/hypothesisloop-workload:latest
 
   # Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster would
