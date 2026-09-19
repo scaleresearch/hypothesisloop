@@ -264,6 +264,33 @@ hypotheses: [{text: one}, {text: two}]
 	}
 }
 
+func TestHypothesisSubmitHeldListsTheCloseOnesAndBothWaysOn(t *testing.T) {
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":409,"detail":"Nothing was registered","similar":[` +
+			`{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"},` +
+			`{"id":"hyp-2","author":"ann","status":"refuted","text":"two","reason":"refuted_parent"}]}`))
+	})
+	setAPIURL(t, url)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--builds-on", "hyp-2"}, &stdout, &stderr)
+	got := lines(stderr.String())
+	if code != 1 || stdout.Len() != 0 || len(got) != 4 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	if got[1] != `{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"}` {
+		t.Fatalf("held hypothesis line: %s", got[1])
+	}
+	for _, want := range []string{"hl job submit FILE --hypothesis ID", "--distinct-from hyp-1,hyp-2", "--contradicts ID"} {
+		if !strings.Contains(got[3], want) {
+			t.Fatalf("the ways on do not name %q: %s", want, got[3])
+		}
+	}
+	if strings.Contains(stderr.String(), "Nothing was registered") {
+		t.Fatalf("the reply body is printed as well: %s", stderr.String())
+	}
+}
+
 func TestHypothesisList(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return []map[string]any{{"id": "hyp-1", "child_count": 2}, {"id": "hyp-2", "child_count": 0}}

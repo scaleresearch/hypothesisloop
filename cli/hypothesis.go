@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -171,10 +172,14 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		}
 		var out json.RawMessage
 		if err := c.Do("POST", "/hypotheses", body, &out); err != nil {
+			item := ""
 			if len(bodies) > 1 {
-				return fail(stderr, fmt.Errorf("item %d: %w", i, err))
+				item = fmt.Sprintf("item %d: ", i)
 			}
-			return fail(stderr, err)
+			if reportHold(stderr, item, err) {
+				return 1
+			}
+			return fail(stderr, fmt.Errorf("%s%w", item, err))
 		}
 		var created struct {
 			ID             string `json:"id"`
@@ -197,6 +202,33 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		}
 	}
 	return 0
+}
+
+// reportHold answers a submit held back for the hypotheses in the reply's similar list with those
+// hypotheses, one per line, and the two ways on. It reports whether err was such a hold.
+func reportHold(stderr io.Writer, item string, err error) bool {
+	var refused *apiclient.HTTPError
+	var reply struct {
+		Similar []json.RawMessage `json:"similar"`
+	}
+	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil || len(reply.Similar) == 0 {
+		return false
+	}
+	fmt.Fprintf(stderr, "hl: hypothesis submit: %snothing registered, yours reads close to these or builds on a refuted one:\n", item)
+	ids := make([]string, len(reply.Similar))
+	for i, raw := range reply.Similar {
+		var h struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(raw, &h)
+		ids[i] = h.ID
+		_ = printLine(stderr, raw)
+	}
+	fmt.Fprintf(stderr, "hl: hypothesis submit: judge each. The same claim as yours: register nothing and test it with "+
+		"hl job submit FILE --hypothesis ID; its verdict stays its author's. A different claim, narrower and broader ones "+
+		"included: rerun adding --distinct-from %s, with --contradicts ID instead for one that cannot hold together with yours.\n",
+		strings.Join(ids, ","))
+	return true
 }
 
 type submitBody struct {
