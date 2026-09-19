@@ -182,7 +182,11 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
     // row for two nodes of one row, low in the gap for neighbouring rows. Only a link that skips
     // a row has to cross it, from side to side.
     const rows = (b.y - a.y) / ROW
-    const [sourceHandle, targetHandle] = hierarchy || rows === 1 ? ['bottom', 'top']
+    // A node hangs one row under its deepest parent, so a builds_on that skips a row is a further
+    // parent: it curves into the child's side, dashed and labelled, clear of the tree's own lines.
+    const further = hierarchy && rows > 1
+    const [sourceHandle, targetHandle] = further ? ['bottom', a.x < b.x ? 'left' : 'right']
+      : hierarchy || rows === 1 ? ['bottom', 'top']
       : rows === 0 ? ['bottom', 'bottom']
       : a.x < b.x ? ['right', 'left'] : ['left', 'right']
     return {
@@ -191,16 +195,17 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
       target,
       sourceHandle,
       targetHandle,
-      type: hierarchy || rows <= 1 ? 'smoothstep' : 'default',
+      type: further || rows > 1 ? 'default' : 'smoothstep',
       pathOptions: hierarchy ? undefined : { stepPosition: 1 },
-      label: hierarchy ? undefined : s.label,
-      zIndex: hierarchy ? 0 : 1,
+      label: hierarchy && !further ? undefined : s.label,
+      zIndex: hierarchy && !further ? 0 : 1,
       labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600, opacity },
       labelBgStyle: { fill: 'var(--surface)' },
       labelBgPadding: [4, 2] as [number, number],
       style: {
         stroke: s.color,
         strokeWidth: hierarchy ? 1.5 : 2,
+        strokeDasharray: further ? '6 4' : undefined,
         opacity,
       },
     }
