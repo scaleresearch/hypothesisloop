@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -125,7 +126,7 @@ Items are submitted in order; top-level fields default onto every item. Prints o
 per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "hl: hypothesis submit: unexpected argument %q\n", fs.Arg(0))
@@ -393,7 +394,7 @@ func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer
 Adds one link from your own hypothesis. Links are append-only. Prints the updated outgoing links.`)
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *agent == "" || *from == "" || *typ == "" || *to == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis link: --agent, --from, --type and --to are required")
@@ -424,9 +425,9 @@ func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Wri
 
 A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision.`)
 	}
-	id, ok := parseWithID(fs, args)
-	if !ok {
-		return 2
+	id, err := parseWithID(fs, args)
+	if err != nil {
+		return parseExit(err)
 	}
 	if *agent == "" || *text == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis comment: --agent and --text are required")
@@ -452,9 +453,9 @@ func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writ
 
 Sets the verdict on your own hypothesis, or on a human-submitted one.`)
 	}
-	id, ok := parseWithID(fs, args)
-	if !ok {
-		return 2
+	id, err := parseWithID(fs, args)
+	if err != nil {
+		return parseExit(err)
 	}
 	if *agent == "" || *status == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis status: --agent and --status are required")
@@ -471,11 +472,11 @@ Sets the verdict on your own hypothesis, or on a human-submitted one.`)
 }
 
 // parseWithID parses flags placed before or after the one positional argument.
-func parseWithID(fs *flag.FlagSet, args []string) (string, bool) {
+func parseWithID(fs *flag.FlagSet, args []string) (string, error) {
 	var positional []string
 	for len(args) > 0 {
 		if err := fs.Parse(args); err != nil {
-			return "", false
+			return "", err
 		}
 		args = fs.Args()
 		if len(args) > 0 {
@@ -485,9 +486,9 @@ func parseWithID(fs *flag.FlagSet, args []string) (string, bool) {
 	}
 	if len(positional) != 1 {
 		fs.Usage()
-		return "", false
+		return "", errors.New("want one positional argument")
 	}
-	return positional[0], true
+	return positional[0], nil
 }
 
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -505,7 +506,7 @@ Most recent first, one JSON object per line with builds_on, child_count, finding
 comment_count. For structure or text search use 'hl hypothesis query'.`)
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *pe == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis list: --platform-experiment is required")
@@ -537,8 +538,13 @@ comment_count. For structure or text search use 'hl hypothesis query'.`)
 }
 
 func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	const usage = "usage: hl hypothesis get ID\n\nOne hypothesis with its links (in and out), jobs, findings and comments."
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Fprintln(stdout, usage)
+		return 0
+	}
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		fmt.Fprintln(stderr, "usage: hl hypothesis get ID\n\nOne hypothesis with its links (in and out), jobs, findings and comments.")
+		fmt.Fprintln(stderr, usage)
 		return 2
 	}
 	var out json.RawMessage
@@ -570,9 +576,9 @@ the POST /hypotheses/query description (/explore). Example, the children of a hy
   hl hypothesis query 'MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id})
     RETURN c.id, c.text, c.status' --param id=HYP_ID`)
 	}
-	cypher, ok := parseWithID(fs, args)
-	if !ok {
-		return 2
+	cypher, err := parseWithID(fs, args)
+	if err != nil {
+		return parseExit(err)
 	}
 	if cypher == "-" {
 		raw, err := io.ReadAll(os.Stdin)

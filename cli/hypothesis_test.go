@@ -506,6 +506,19 @@ func TestHelpGoesToStdout(t *testing.T) {
 	}
 }
 
+func TestSubcommandHelpExitsZero(t *testing.T) {
+	t.Setenv("API_URL", "http://example.invalid")
+	for _, args := range [][]string{
+		{"job", "submit", "--help"}, {"job", "list", "-h"}, {"hypothesis", "query", "--help"},
+		{"hypothesis", "get", "--help"}, {"platform-experiments", "update", "--help"}, {"watch", "--help"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(strings.ToLower(stdout.String()+stderr.String()), "usage") {
+			t.Fatalf("%v: exit %d, output %q", args, code, stdout.String()+stderr.String())
+		}
+	}
+}
+
 func TestHypothesisSubmitSendsDistinctFrom(t *testing.T) {
 	got := recordingServer(t, func(n int, r recorded) any { return map[string]any{"id": fmt.Sprintf("hyp-%d", n)} })
 	var stdout, stderr bytes.Buffer

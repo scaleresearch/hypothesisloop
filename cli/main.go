@@ -34,6 +34,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -117,7 +118,7 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	name := fs.String("name", "", "human-readable display name; defaults to id")
 	kind := fs.String("kind", "human", "agent or human")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *id == "" {
 		fmt.Fprintln(stderr, "hl: register: --id is required")
@@ -145,7 +146,7 @@ func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	quotaTier := fs.String("quota-tier", "", "override this signup's guaranteed-vs-burst-only split "+
 		"(\"guaranteed\" or \"burst_only\"); omit to use the platform experiment's default_quota_tier")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *pe == "" || *agent == "" {
 		fmt.Fprintln(stderr, "hl: signup: --platform-experiment and --agent are required")
@@ -186,7 +187,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 	fs.SetOutput(stderr)
 	limit := fs.Int("limit", 20, "max results")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	var out any
 	if err := c.Do("GET", fmt.Sprintf("/platform-experiments?limit=%d", *limit), nil, &out); err != nil {
@@ -232,7 +233,7 @@ A bare top-level YAML list of mappings works the same way, without shared defaul
 See controlplane/settings/examples/experiment.yaml for the full DSL reference.`)
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	path := "-"
 	if fs.NArg() > 0 {
@@ -283,7 +284,7 @@ and any other field that differs from the live value is rejected, so update from
 experiment was created with (or set the named fields to the live values).`)
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *id == "" {
 		fmt.Fprintln(stderr, "hl: platform-experiments update: --id is required")
@@ -317,7 +318,7 @@ func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stder
 	fs.SetOutput(stderr)
 	id := fs.String("id", "", "platform experiment id (required)")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *id == "" {
 		fmt.Fprintln(stderr, "hl: platform-experiments get: --id is required")
@@ -336,7 +337,7 @@ func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, std
 	fs.SetOutput(stderr)
 	id := fs.String("id", "", "platform experiment id (required)")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *id == "" {
 		fmt.Fprintln(stderr, "hl: platform-experiments start: --id is required")
@@ -390,7 +391,7 @@ hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis pat
 See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`)
 		}
 		if err := fs.Parse(rest); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		if *agent == "" {
 			fmt.Fprintln(stderr, "hl: job submit: --agent is required")
@@ -424,7 +425,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		pe := fs.String("platform-experiment", "", "narrow to one platform experiment")
 		needsSummary := fs.Bool("needs-summary", false, "only finished jobs still missing a summary, the set that blocks your next submit")
 		if err := fs.Parse(rest); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		if *agent == "" {
 			fmt.Fprintln(stderr, "hl: job list: --agent is required")
@@ -453,7 +454,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		id := fs.String("id", "", "job id (required)")
 		text := fs.String("text", "", "what changed, what the metric did, what it means (required)")
 		if err := fs.Parse(rest); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		if *id == "" || *text == "" {
 			fmt.Fprintln(stderr, "hl: job summary: --id and --text are required")
@@ -477,7 +478,7 @@ func jobGet(c *apiclient.Client, name, suffix string, args []string, stdout, std
 	fs.SetOutput(stderr)
 	id := fs.String("id", "", "job id (required)")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *id == "" {
 		fmt.Fprintf(stderr, "hl: %s: --id is required\n", name)
@@ -596,7 +597,7 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	since := fs.Int64("since", 0, "resume from the largest cursor printed by an earlier watch: replays from it, the events at it included, before going live")
 	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 
 	watchURL := *urlFlag
@@ -620,4 +621,12 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 		Stdout:             stdout,
 		Stderr:             stderr,
 	})
+}
+
+// parseExit is the exit code for a flag parse error: 0 for an explicit -h or --help.
+func parseExit(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	return 2
 }
