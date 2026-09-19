@@ -1,4 +1,5 @@
 import { ExperimentStatus } from '@/types'
+import type { Experiment } from '@/types'
 import type { ExperimentStats } from '@/lib/api'
 
 export const TERMINAL: string[] = [
@@ -27,4 +28,14 @@ export function hypothesisActivity(
 // A finding filed after the verdict is evidence the verdict did not weigh.
 export function filedAfterVerdict(h: { status_changed_at: string | null }, findingAt: string): boolean {
   return h.status_changed_at != null && new Date(findingAt).getTime() > new Date(h.status_changed_at).getTime()
+}
+
+// The env settings that are not the same in every one of the jobs: what a hypothesis's runs varied.
+export function variedEnvKeys(jobs: Experiment[]): string[] {
+  const keys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
+  return keys.filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
+}
+
+export function envSettings(job: Experiment, keys: string[]): string {
+  return keys.map(k => job.job?.env?.[k] === undefined ? `${k} not set` : `${k}=${job.job.env[k]}`).join(' ')
 }

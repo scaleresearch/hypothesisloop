@@ -20,6 +20,7 @@ import { semantic } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useQueryParam } from '@/lib/query-state'
+import { envSettings, variedEnvKeys } from '@/lib/hypothesis-progress'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -110,6 +111,12 @@ function JobsPageContent() {
 
   const visible = data?.items ?? []
   const total = data?.total ?? 0
+  // What tells one hypothesis's jobs on this page apart: the settings they do not share.
+  const variedByHypothesis = useMemo(() => {
+    const groups = new Map<string, Experiment[]>()
+    for (const j of visible) groups.set(j.hypothesis_id, [...(groups.get(j.hypothesis_id) ?? []), j])
+    return new Map(Array.from(groups, ([id, jobs]) => [id, variedEnvKeys(jobs)]))
+  }, [visible])
 
   // The tiles count the whole filtered set, server-side — the same filters this page's list
   // read uses, minus its paging. Tallying the visible rows instead would report the page's
@@ -195,7 +202,7 @@ function JobsPageContent() {
                 <th style={{ width: 130 }}>Accelerator</th>
                 <th style={{ width: 120, textAlign: 'right' }}>Best metric</th>
                 <th style={{ width: 92, textAlign: 'right' }}>Est. Cost</th>
-                <th>Hypothesis</th>
+                <th title="Under each hypothesis: the settings that differ between this page's jobs of it">Hypothesis · varied settings</th>
                 <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} width={104} />
                 <th style={{ width: 80 }}></th>
               </tr>
@@ -284,6 +291,9 @@ function JobsPageContent() {
                       }}
                     >
                       {j.hypothesis}
+                      <div className="mono text-muted" style={{ fontSize: 10, marginTop: 3, whiteSpace: 'normal' }}>
+                        {envSettings(j, variedByHypothesis.get(j.hypothesis_id) ?? [])}
+                      </div>
                     </td>
                     <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                       {relTime(j.created_at)}

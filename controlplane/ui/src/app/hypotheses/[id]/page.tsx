@@ -11,7 +11,7 @@ import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
-import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
 import { semantic } from '@/lib/colors'
 
 function LinkRow({ link, platformExperimentID, pe }: {
@@ -65,11 +65,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const jobByID = new Map(jobs.map(j => [j.id, j]))
   const summarized = new Set(findings.map(f => f.experiment_id))
   const sinceVerdict = findings.filter(f => filedAfterVerdict(data, f.created_at)).length
-  // The env settings that are not the same in every job here: what this hypothesis's runs varied.
   // With nothing varied, every setting is shown.
-  const envKeys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
-  const variedEnv = envKeys.filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
-  const shownEnv = variedEnv.length > 0 ? variedEnv : envKeys
+  const variedEnv = variedEnvKeys(jobs)
+  const shownEnv = variedEnv.length > 0 ? variedEnv : Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
   const metricName = jobs.find(j => j.metric)?.metric?.name
 
   return (
@@ -260,7 +258,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                       {status === 'COMPLETED' && data.finding_count === findings.length && !summarized.has(job.id) && <NoSummary style={{ marginLeft: 6 }} />}
                     </td>
                     <td className="mono" style={{ fontSize: 11 }}>
-                      {shownEnv.map(k => j.job?.env?.[k] === undefined ? `${k} not set` : `${k}=${j.job.env[k]}`).join(' ') || '—'}
+                      {envSettings(j, shownEnv) || '—'}
                     </td>
                     <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
