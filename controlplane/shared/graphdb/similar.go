@@ -32,8 +32,7 @@ func (e *SimilarError) Unwrap() error { return ErrSimilar }
 
 const (
 	// similarThreshold is the TF-IDF cosine at which two hypotheses read alike. Chosen on the
-	// dummy demo agent runs: reworded duplicates scored 0.37 to 0.45, and about a third of all
-	// registrations had some hypothesis at or above 0.35, mostly the parent they refine.
+	// dummy demo agent runs: reworded duplicates scored 0.37 to 0.45.
 	similarThreshold = 0.35
 	maxSimilar       = 5
 )
@@ -100,9 +99,10 @@ func similarities(text string, docs []string) []float64 {
 }
 
 // untoldSimilar returns the hypotheses of n's platform experiment that n must be told apart from:
-// those whose text reads close to n's and those n builds on that are refuted, minus every one n
-// names in DistinctFrom or in a contradicts or related link. Refuted parents first, then closest
-// first, at most maxSimilar.
+// those whose text reads close to n's, except the ones n builds on, which a refinement is expected
+// to read close to, and those n builds on that are refuted, minus every one n names in
+// DistinctFrom or in a contradicts or related link. Refuted parents first, then closest first, at
+// most maxSimilar.
 func untoldSimilar(ctx context.Context, tx neo4j.ManagedTransaction, n NewHypothesis) ([]domain.SimilarHypothesis, error) {
 	told := map[string]bool{}
 	parents := map[string]bool{}
@@ -142,7 +142,7 @@ RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]
 		switch {
 		case parents[h.ID] && h.Status == domain.HypothesisRefuted:
 			h.Reason = "refuted_parent"
-		case scores[i] >= similarThreshold:
+		case scores[i] >= similarThreshold && !parents[h.ID]:
 			h.Reason = "close_text"
 		default:
 			continue

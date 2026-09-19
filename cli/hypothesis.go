@@ -52,8 +52,8 @@ const submitUsage = `usage: hl hypothesis submit [--agent A] [--platform-experim
    or: hl hypothesis submit --file hypothesis.yaml [flags above override every item]
 
 Every hypothesis builds on the objective (root) or on existing hypotheses; several --builds-on
-mean a combination. While your text reads close to existing hypotheses, or a --builds-on target is
-refuted, nothing is registered and the reply lists them: test the one you meant under its id, or
+mean a combination. While your text reads close to hypotheses it does not build on, or a
+--builds-on target is refuted, nothing is registered and the reply lists them: test the one you meant under its id, or
 resubmit naming each with --contradicts or --distinct-from. FILE shape:
 
   agent_id: agent-123

@@ -133,32 +133,26 @@ func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
 	pe := testExperiment(t, s)
 	ctx := context.Background()
 	bs8 := register(t, s, pe, "agent-1", "batch size 8 beats batch size 32 at the same epoch budget", onRoot(pe))
-	other := register(t, s, pe, "agent-1", "label noise caps validation accuracy", onRoot(pe))
-	bs4 := NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-2", PlatformExperimentID: pe,
-		Text: "batch size 4 beats batch size 8 at the same epoch budget", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: bs8.ID}}}
+	register(t, s, pe, "agent-1", "label noise caps validation accuracy", onRoot(pe))
 
-	_, _, _, _, err := s.Register(ctx, bs4)
-	if got := similarIDs(t, err); len(got) != 1 || got[bs8.ID] != "close_text" {
-		t.Fatalf("similar: got = %v, want only its parent %s as close_text", got, bs8.ID)
-	}
-	if total, _ := s.CountHypotheses(ctx, ListFilter{PlatformExperimentID: pe}); total != 2 {
-		t.Fatalf("hypotheses after a held-back registration: got = %d, want 2", total)
-	}
-
-	bs4.DistinctFrom = []string{other.ID, bs8.ID}
-	created, _, existed, _, err := s.Register(ctx, bs4)
+	// A refinement reads close to the parent it names, and that is no reason to hold it.
+	bs4, _, existed, _, err := s.Register(ctx, NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-2", PlatformExperimentID: pe,
+		Text: "batch size 4 beats batch size 8 at the same epoch budget", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: bs8.ID}}})
 	if err != nil || existed {
-		t.Fatalf("Register told apart: got = (%v, existed=%v), want (nil, false)", err, existed)
+		t.Fatalf("Register on a close parent: got = (%v, existed=%v), want (nil, false)", err, existed)
 	}
 
 	contra := NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-3", PlatformExperimentID: pe,
 		Text: "batch size 8 does not beat batch size 32 at the same epoch budget", Links: onRoot(pe)}
 	_, _, _, _, err = s.Register(ctx, contra)
-	if got := similarIDs(t, err); got[bs8.ID] != "close_text" {
-		t.Fatalf("similar: got = %v, want %s listed", got, bs8.ID)
+	if got := similarIDs(t, err); len(got) != 2 || got[bs8.ID] != "close_text" || got[bs4.ID] != "close_text" {
+		t.Fatalf("similar: got = %v, want %s and %s as close_text", got, bs8.ID, bs4.ID)
+	}
+	if total, _ := s.CountHypotheses(ctx, ListFilter{PlatformExperimentID: pe}); total != 3 {
+		t.Fatalf("hypotheses after a held-back registration: got = %d, want 3", total)
 	}
 	contra.Links = append(contra.Links, domain.LinkSpec{Type: domain.LinkContradicts, To: bs8.ID})
-	contra.DistinctFrom = []string{created.ID}
+	contra.DistinctFrom = []string{bs4.ID}
 	if _, _, existed, _, err := s.Register(ctx, contra); err != nil || existed {
 		t.Fatalf("Register with a contradicts link: got = (%v, existed=%v), want (nil, false)", err, existed)
 	}
