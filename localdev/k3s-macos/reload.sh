@@ -23,7 +23,7 @@ echo "==> Recreating control-plane containers..."
 TAG="${TAG}" podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" \
   up -d --force-recreate control-service metrics-service >/dev/null
 wait_for 20 1 "control-service to accept connections" \
-curl -sf -o /dev/null "http://localhost:8081/health"
+curl -sf -o /dev/null "http://localhost:${API_HOST_PORT:-8081}/health"
 
 if kubectl --context "${CONTEXT_NAME}" get deploy/hypothesisloop-cluster-agent -n hypothesisloop &>/dev/null; then
 echo "==> Restarting cluster-agent/node-agent pods..."

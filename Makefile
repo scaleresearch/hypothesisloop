@@ -59,7 +59,7 @@ registry-prune:
 
 controlplane-up: registry-up render-settings images
 	podman compose -f $(COMPOSE_FILE) up -d
-	@until curl -fsS -o /dev/null http://localhost:8081/health; do sleep 1; done
+	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 
 # Stops and removes the control-plane containers but KEEPS the data volumes, so `down` + `up` is

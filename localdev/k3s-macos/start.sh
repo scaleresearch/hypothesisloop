@@ -45,7 +45,7 @@ kubectl config use-context "${CONTEXT_NAME}" >/dev/null
 echo "==> Starting control plane..."
 podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" start
 wait_for 20 1 "control-service to accept connections" \
-  curl -sf -o /dev/null "http://localhost:8081/health"
+  curl -sf -o /dev/null "http://localhost:${API_HOST_PORT:-8081}/health"
 wait_for 20 1 "metrics-service to accept connections" \
   curl -sf -o /dev/null "http://localhost:8084/health"
 
