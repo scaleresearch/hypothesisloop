@@ -378,7 +378,7 @@ func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 }
 
 // A watch whose timeout ends inside the settle window still returns what it read and saves the
-// cursor: the harness drains waiting events this way between an agent's tool calls.
+// cursor.
 func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -415,5 +415,62 @@ func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testi
 	state, err := loadCursor(cursorFile)
 	if err != nil || state.Cursor != 10 {
 		t.Errorf("saved cursor: got = %d (%v), want = 10", state.Cursor, err)
+	}
+}
+
+// A NoWait watch returns as soon as the server has answered the frame sent after connecting: what
+// was waiting is printed and the cursor saved, and an empty one costs no listening time.
+func TestNoWaitReturnsWhatWaitsAtOnce(t *testing.T) {
+	event := `{"kind":"experiment.status","value":"COMPLETED","position":10,"cursor":10}`
+	for _, waiting := range []string{event, ""} {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ln.Close()
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			reader := bufio.NewReader(conn)
+			req, err := http.ReadRequest(reader)
+			if err != nil {
+				return
+			}
+			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+				"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+			if waiting != "" {
+				_, _ = conn.Write(serverTextFrame(waiting))
+			}
+			if _, err := reader.ReadByte(); err != nil {
+				return
+			}
+			_, _ = conn.Write(serverTextFrame(`{"subscription":{"since":0}}`))
+			time.Sleep(5 * time.Second)
+		}()
+
+		cursorFile := filepath.Join(t.TempDir(), "cursor.json")
+		var stdout, stderr bytes.Buffer
+		start := time.Now()
+		code := Run(Options{URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a", NoWait: true,
+			Timeout: 10 * time.Second, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+		}
+		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+			t.Errorf("returned after %s, want = at once", elapsed)
+		}
+		want, wantCursor := "", int64(0)
+		if waiting != "" {
+			want, wantCursor = waiting+"\n", 10
+		}
+		if got := stdout.String(); got != want {
+			t.Errorf("output: got = %q, want = %q", got, want)
+		}
+		if state, err := loadCursor(cursorFile); err != nil || state.Cursor != wantCursor {
+			t.Errorf("saved cursor: got = %d (%v), want = %d", state.Cursor, err, wantCursor)
+		}
 	}
 }

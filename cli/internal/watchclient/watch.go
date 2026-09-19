@@ -61,7 +61,9 @@ type Options struct {
 	ShowSubscription   bool
 	Until              string
 	// Follow streams until the timeout instead of returning with the first batch.
-	Follow  bool
+	Follow bool
+	// NoWait returns once the events already waiting have been printed.
+	NoWait  bool
 	Timeout time.Duration
 	Since   int64
 	// CursorFile, when set, is where the cursor is resumed from and saved to (see cursorState).
@@ -198,7 +200,9 @@ func (w *watch) until(deadline time.Time) time.Time {
 // stream reads frames from one connection until it closes, the watch stops or --until is
 // satisfied. It returns true when the watch is done, false to reconnect or end on the deadline.
 func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
-	if w.opts.ShowSubscription {
+	// The server answers this frame after its replay, so in a NoWait watch the answer marks the
+	// end of what was waiting.
+	if w.opts.ShowSubscription || w.opts.NoWait {
 		_ = ws.sendText("{}")
 	}
 	for time.Now().Before(w.until(deadline)) {
@@ -217,6 +221,9 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 			continue
 		}
 		c, isEvent := event["cursor"].(float64)
+		if _, caughtUp := event["subscription"]; caughtUp && w.opts.NoWait {
+			return true
+		}
 		if isEvent {
 			delete(event, "cursor")
 			identity, _ := json.Marshal(event)

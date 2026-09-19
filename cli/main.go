@@ -712,7 +712,7 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 // --- watch -----------------------------------------------------------------------------------------
 
 func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("watch", `usage: hl watch [--agent A | --all] [--platform-experiment PE] [--kinds K,...] [--follow]
+	fs := newFlags("watch", `usage: hl watch [--agent A | --all] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
 Prints events, one JSON object per line. With $AGENT_ID set and no --experiment or --all, the
@@ -724,6 +724,7 @@ agent's own resources, resuming from where its last watch stopped.`, stderr)
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
+	noWait := fs.Bool("no-wait", false, "print the events already waiting and return at once, without listening for more")
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
 	since := fs.Int64("since", 0, "resume from this cursor instead of the saved one: replays from it, the events at it included, before going live")
@@ -768,6 +769,7 @@ agent's own resources, resuming from where its last watch stopped.`, stderr)
 		ShowSubscription:   *showSubscription,
 		Until:              *until,
 		Follow:             *follow,
+		NoWait:             *noWait,
 		Timeout:            time.Duration(*timeout * float64(time.Second)),
 		Since:              *since,
 		CursorFile:         cursorFile,

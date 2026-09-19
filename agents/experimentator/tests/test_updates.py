@@ -62,8 +62,8 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
 
 
 class DrainTest(unittest.IsolatedAsyncioTestCase):
-    async def test_a_drain_returns_what_waits_within_a_short_timeout(self):
-        command, _ = fake_hl(f"[ \"$2 $3\" = '--timeout 1' ] || exit 2\necho '{COMPLETED}'\n")
+    async def test_a_drain_returns_what_waits_without_listening_for_more(self):
+        command, _ = fake_hl(f"[ \"$2\" = '--no-wait' ] || exit 2\necho '{COMPLETED}'\n")
         events = await updates.drain(os.environ.copy(), command=command)
         self.assertEqual([e["subject"] for e in events], ["exp-1"])
 

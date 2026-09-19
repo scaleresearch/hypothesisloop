@@ -18,8 +18,8 @@ log = logging.getLogger("llm_agent")
 
 HL_WATCH = ["hl", "watch"]
 _RETRY_S = 30.0
-# How long a drain listens: the platform replays what the cursor missed as soon as hl connects.
-_DRAIN_S = 1
+# A drain gives up after this long on a platform that does not answer.
+_DRAIN_S = 5
 
 # How long an agent that ended its turn waits without any update before it is nudged: one that
 # ended its turn with nothing in flight would otherwise wait for an update that never comes.
@@ -64,7 +64,7 @@ def _events(stdout: str) -> list[dict]:
 
 async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict]:
     """The events already waiting on the cursor, without waiting for more."""
-    _, stdout = await _run_watch([*command, "--timeout", str(_DRAIN_S)], env, lambda: False)
+    _, stdout = await _run_watch([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False)
     return _events(stdout)
 
 
