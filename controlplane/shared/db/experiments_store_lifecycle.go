@@ -148,13 +148,6 @@ WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
 	return tag.RowsAffected() > 0, nil
 }
 
-// UpdateEvictionReason sets the eviction_reason field without changing status.
-func (s *ExperimentsStore) UpdateEvictionReason(ctx context.Context, id, reason string) error {
-	const q = `UPDATE experiments SET eviction_reason = $2, updated_at = NOW() WHERE id = $1`
-	_, err := s.pool.pool.Exec(ctx, q, id, reason)
-	return err
-}
-
 // UpdateNotAdmittedReason replaces the explanation only while the job is still QUEUED.
 // ClaimSubmitted clears it in the same statement that changes the lifecycle, so a stale
 // scheduler decision can never attach a queue reason to an admitted job.

@@ -25,7 +25,6 @@ type Store interface {
 	// callers that need whole-set totals rather than a page of rows.
 	ExperimentStats(ctx context.Context, filter domain.ExperimentFilter) (*domain.ExperimentStats, error)
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
-	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	MarkQueued(ctx context.Context, id, reason string) error
 	GetRunningAndQueued(ctx context.Context) ([]*domain.Experiment, error)
 	// Platform experiment lookups for admission validation.

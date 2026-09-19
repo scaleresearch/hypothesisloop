@@ -39,7 +39,6 @@ type LoopStore interface {
 	// estimate with the caller's proportionally rescaled remaining amounts — see the store
 	// implementation's doc comment for why both must move together.
 	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error)
-	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	UpdateNotAdmittedReason(ctx context.Context, id, reason string) error
 	// HasUnsummarizedCompleted enforces the summary gate during admission so batch-submitted
 	// jobs cannot bypass it.

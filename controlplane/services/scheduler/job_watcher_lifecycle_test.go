@@ -66,7 +66,6 @@ func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ do
 	s.terminalReasons = append(s.terminalReasons, reason)
 	return domain.TerminationWritten, nil
 }
-func (*lifecycleStore) UpdateEvictionReason(context.Context, string, string) error { return nil }
 func (s *lifecycleStore) GetClusterSettings(context.Context, string) (*domain.ClusterSettings, error) {
 	return nil, nil
 }

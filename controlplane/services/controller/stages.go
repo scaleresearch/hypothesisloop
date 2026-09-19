@@ -39,7 +39,6 @@ type StagesStore interface {
 	// Job control for cut agents.
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
-	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	// ResolveTermination atomically transitions status and records the reason. Does not write
 	// usage; the caller settles separately (see Controller.settleAndMark).
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)

@@ -18,7 +18,6 @@ import (
 type Store interface {
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error)
-	UpdateEvictionReason(ctx context.Context, id, reason string) error
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	// GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent.
 	// Both are pre-run: their reservations must be returned when the budget is exhausted.
