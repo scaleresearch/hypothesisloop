@@ -115,8 +115,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"changed since a previous session), ?search (substring match " +
 			"against hypothesis/objective/theory), ?needs_summary (finished experiments still missing " +
 			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 200), ?offset. ?sort selects order: created_at, " +
-			"priority_score, or status, optionally prefixed with - for descending (default -created_at " +
-			"is NOT the default order — omit ?sort to keep the historical priority-then-recency order). " +
+			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
+			"-priority_score is the order the scheduler considers queued jobs in). " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent" doc:"Only this agent's experiments."`
@@ -129,7 +129,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
-		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Omit to keep the scheduler's own priority-then-recency order, which is NOT the same as -created_at."`
+		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Default -created_at, newest first."`
 	}) (*struct {
 		Body       []*domain.Experiment
 		TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
@@ -139,6 +139,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		if !domain.ValidSortField(in.Sort, domain.ExperimentSortFields) {
 			return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
+		}
+		if in.Sort == "" {
+			in.Sort = "-created_at"
 		}
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
