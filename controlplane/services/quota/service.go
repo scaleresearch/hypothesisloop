@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"go.uber.org/zap"
 )
@@ -12,8 +13,8 @@ import (
 // Store is the persistence interface required by the quota Service.
 type Store interface {
 	CreateAgent(ctx context.Context, agent *domain.Agent) error
-	ListAgents(ctx context.Context, limit, offset int) ([]*domain.Agent, error)
-	CountAgents(ctx context.Context) (int, error)
+	ListAgents(ctx context.Context, filter db.AgentsFilter) ([]*domain.Agent, error)
+	CountAgents(ctx context.Context, filter db.AgentsFilter) (int, error)
 }
 
 // Service implements the quota domain logic.

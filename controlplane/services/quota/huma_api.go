@@ -72,11 +72,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
-		Description: "Optional ?limit (default 20, max 200) and ?offset, oldest first. Total " +
-			"registered count is returned in the X-Total-Count response header.",
+		Description: "Filter with ?platform_experiment_id (the agents signed up to it) and ?q (search id/name). " +
+			"Optional ?limit (default 20, max 200) and ?offset, oldest first. Total match count is " +
+			"returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Limit  int `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
-		Offset int `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only the agents signed up to this platform experiment."`
+		Search               string `query:"q" doc:"Case-insensitive substring match against id and name."`
+		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*domain.Agent
 		TotalCount int `header:"X-Total-Count"`
@@ -84,11 +87,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		agents, err := h.svc.store.ListAgents(ctx, in.Limit, in.Offset)
+		filter := db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search, Limit: in.Limit, Offset: in.Offset}
+		agents, err := h.svc.store.ListAgents(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list agents")
 		}
-		total, err := h.svc.store.CountAgents(ctx)
+		total, err := h.svc.store.CountAgents(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to count agents")
 		}

@@ -62,7 +62,6 @@ type PlatformExperimentsStore interface {
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
 	ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error)
 	GetAgent(ctx context.Context, agentID string) (*domain.Agent, error)
-	ListAgents(ctx context.Context, limit, offset int) ([]*domain.Agent, error)
 	UpdateAgent(ctx context.Context, agent *domain.Agent) error
 	// FulfillDonationTx performs a donation transfer atomically and idempotently — locking the
 	// donation + both quota rows, verifying the donation is still open and the donor has headroom,

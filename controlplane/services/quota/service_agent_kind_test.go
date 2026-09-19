@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"go.uber.org/zap"
 )
@@ -19,11 +20,11 @@ func (f *fakeAgentStore) CreateAgent(ctx context.Context, agent *domain.Agent) e
 	return nil
 }
 
-func (f *fakeAgentStore) ListAgents(ctx context.Context, limit, offset int) ([]*domain.Agent, error) {
+func (f *fakeAgentStore) ListAgents(ctx context.Context, filter db.AgentsFilter) ([]*domain.Agent, error) {
 	return f.created, nil
 }
 
-func (f *fakeAgentStore) CountAgents(ctx context.Context) (int, error) {
+func (f *fakeAgentStore) CountAgents(ctx context.Context, filter db.AgentsFilter) (int, error) {
 	return len(f.created), nil
 }
 

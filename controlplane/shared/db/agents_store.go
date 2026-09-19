@@ -82,25 +82,51 @@ const (
 	maxAgentListLimit     = 200
 )
 
-// ListAgents returns agents ordered by created_at, including top3_count from experiment_top3.
-// limit is defaulted and clamped to [1, maxAgentListLimit]; limit<=0 uses the default.
-func (s *AgentsStore) ListAgents(ctx context.Context, limit, offset int) ([]*domain.Agent, error) {
+// AgentsFilter narrows ListAgents and CountAgents. Limit and Offset apply to ListAgents only.
+type AgentsFilter struct {
+	// PlatformExperimentID keeps the agents signed up to that platform experiment.
+	PlatformExperimentID string
+	// Search matches id and name, case-insensitively, substring match.
+	Search string
+	Limit  int
+	Offset int
+}
+
+func agentFilterClauses(filter AgentsFilter) (string, []any) {
+	where := "TRUE"
+	args := []any{}
+	if filter.PlatformExperimentID != "" {
+		args = append(args, filter.PlatformExperimentID)
+		where += fmt.Sprintf(" AND a.id IN (SELECT agent_id FROM experiment_signups WHERE platform_experiment_id = $%d)", len(args))
+	}
+	if filter.Search != "" {
+		args = append(args, "%"+filter.Search+"%")
+		where += fmt.Sprintf(" AND (a.id ILIKE $%d OR a.name ILIKE $%d)", len(args), len(args))
+	}
+	return where, args
+}
+
+// ListAgents returns the agents matching filter ordered by created_at, including top3_count from
+// experiment_top3. Limit is defaulted and clamped to [1, maxAgentListLimit]; limit<=0 uses the default.
+func (s *AgentsStore) ListAgents(ctx context.Context, filter AgentsFilter) ([]*domain.Agent, error) {
+	limit := filter.Limit
 	if limit <= 0 {
 		limit = defaultAgentListLimit
 	} else if limit > maxAgentListLimit {
 		limit = maxAgentListLimit
 	}
 
-	const q = `
+	where, args := agentFilterClauses(filter)
+	args = append(args, limit, filter.Offset)
+	q := fmt.Sprintf(`
 SELECT a.id, a.name, a.kind, a.performance_score, a.created_at,
-       COUNT(t.agent_id) AS top3_count
+       (SELECT COUNT(*) FROM experiment_top3 t WHERE t.agent_id = a.id) AS top3_count
 FROM agents a
-LEFT JOIN experiment_top3 t ON t.agent_id = a.id
-GROUP BY a.id, a.name, a.kind, a.performance_score, a.created_at
+WHERE %s
 ORDER BY a.created_at ASC
-LIMIT $1 OFFSET $2`
+LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 
-	rows, err := s.pool.pool.Query(ctx, q, limit, offset)
+	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("agents_store.ListAgents: %w", err)
 	}
@@ -123,11 +149,12 @@ LIMIT $1 OFFSET $2`
 	return agents, nil
 }
 
-// CountAgents returns the total number of registered agents, ignoring limit/offset — the
+// CountAgents returns the number of agents matching filter, ignoring limit/offset — the
 // X-Total-Count a paginating caller shows.
-func (s *AgentsStore) CountAgents(ctx context.Context) (int, error) {
+func (s *AgentsStore) CountAgents(ctx context.Context, filter AgentsFilter) (int, error) {
+	where, args := agentFilterClauses(filter)
 	var total int
-	if err := s.pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM agents`).Scan(&total); err != nil {
+	if err := s.pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM agents a WHERE `+where, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("agents_store.CountAgents: %w", err)
 	}
 	return total, nil
