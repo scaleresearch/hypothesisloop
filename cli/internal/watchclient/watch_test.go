@@ -267,3 +267,60 @@ func TestTheWatchWindowEndingIsNotAReconnect(t *testing.T) {
 		t.Fatalf("the window ending was reported as a dropped stream: %s", stderr.String())
 	}
 }
+
+// A reconnect resumes from the largest cursor seen, and the server replays from it, the event at
+// it included. That repeat must not reach the output a second time.
+func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	queued := `{"kind":"experiment.status","subject":"exp-1","value":"QUEUED","position":12,"cursor":12}`
+	running := `{"kind":"experiment.status","subject":"exp-1","value":"RUNNING","position":12,"cursor":9}`
+	completed := `{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","position":15,"cursor":14}`
+	sinces := make(chan string, 2)
+	go func() {
+		for _, frames := range [][]string{
+			{queued, running},
+			{`{"kind":"experiment.status","subject":"exp-1","value":"QUEUED","position":12,"cursor":11}`, completed},
+		} {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			req, err := http.ReadRequest(bufio.NewReader(conn))
+			if err != nil {
+				conn.Close()
+				return
+			}
+			sinces <- req.URL.Query().Get("since")
+			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+				"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+			for _, frame := range frames {
+				_, _ = conn.Write(serverTextFrame(frame))
+			}
+			_, _ = conn.Write([]byte{0x88, 0x00})
+			conn.Close()
+		}
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{
+		URL:        "ws://" + ln.Addr().String(),
+		Experiment: "exp-1",
+		Until:      "status in COMPLETED",
+		Timeout:    10 * time.Second,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if first, second := <-sinces, <-sinces; first != "" || second != "12" {
+		t.Errorf("since on connect and on reconnect: got = %q, %q, want = none, then the largest cursor 12", first, second)
+	}
+	if got, want := stdout.String(), queued+"\n"+running+"\n"+completed+"\n"; got != want {
+		t.Errorf("output: got = %q, want = %q", got, want)
+	}
+}

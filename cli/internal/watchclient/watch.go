@@ -101,6 +101,7 @@ func Run(opts Options) int {
 
 	deadline := time.Now().Add(timeout)
 	cursor := opts.Since
+	seen := map[string]bool{}
 	for time.Now().Before(deadline) {
 		q := url.Values{}
 		for k, v := range query {
@@ -124,7 +125,7 @@ func Run(opts Options) int {
 		}
 
 		fmt.Fprintln(opts.Stderr, "hl watch: connected")
-		done, code := streamOne(ws, opts, deadline, satisfied, &cursor)
+		done, code := streamOne(ws, opts, deadline, satisfied, &cursor, seen)
 		ws.close()
 		if done {
 			return code
@@ -140,7 +141,9 @@ func Run(opts Options) int {
 
 // streamOne reads frames from one connection until it closes, the deadline passes, or --until is
 // satisfied. Returns (true, code) when the caller should stop entirely, (false, _) to reconnect.
-func streamOne(ws *webSocket, opts Options, deadline time.Time, satisfied func(map[string]any) bool, cursor *int64) (bool, int) {
+// A reconnect replays from the cursor, which can repeat events already printed; seen holds the
+// identity (the event without its cursor) of each one printed, so a repeat is dropped.
+func streamOne(ws *webSocket, opts Options, deadline time.Time, satisfied func(map[string]any) bool, cursor *int64, seen map[string]bool) (bool, int) {
 	if opts.ShowSubscription {
 		_ = ws.sendText("{}")
 	}
@@ -154,14 +157,24 @@ func streamOne(ws *webSocket, opts Options, deadline time.Time, satisfied func(m
 			sleepUntil(deadline, reconnectDelay)
 			return false, 0
 		}
-		fmt.Fprintln(opts.Stdout, line)
 		var event map[string]any
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			fmt.Fprintln(opts.Stdout, line)
 			continue
 		}
-		if c, ok := event["cursor"].(float64); ok && int64(c) > *cursor {
-			*cursor = int64(c)
+		c, isEvent := event["cursor"].(float64)
+		if isEvent {
+			delete(event, "cursor")
+			identity, _ := json.Marshal(event)
+			if seen[string(identity)] {
+				continue
+			}
+			seen[string(identity)] = true
+			if int64(c) > *cursor {
+				*cursor = int64(c)
+			}
 		}
+		fmt.Fprintln(opts.Stdout, line)
 		if satisfied != nil && satisfied(event) {
 			return true, 0
 		}

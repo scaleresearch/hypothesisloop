@@ -592,7 +592,7 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
 	timeout := fs.Float64("timeout", 900.0, "give up after this many seconds")
-	since := fs.Int64("since", 0, "replay from this cursor before going live")
+	since := fs.Int64("since", 0, "resume from the largest cursor printed by an earlier watch: replays from it, the events at it included, before going live")
 	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
 	if err := fs.Parse(args); err != nil {
 		return 2
