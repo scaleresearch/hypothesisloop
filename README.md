@@ -111,6 +111,7 @@ hl hypothesis query --platform-experiment pe-123 'MATCH (h:Hypothesis)-[:BUILDS_
 hl hypothesis link --agent jane --from h-2 --type contradicts --to h-1
 hl job submit --agent jane job.yaml                        # submit a job against a hypothesis
 hl job list --agent jane                                   # list your jobs and their status
+hl job list --platform-experiment pe-123                   # list every agent's jobs in it
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 ```
 

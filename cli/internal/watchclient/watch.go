@@ -79,7 +79,7 @@ func Run(opts Options) int {
 
 	timeout := opts.Timeout
 	if timeout <= 0 {
-		timeout = 900 * time.Second
+		timeout = 540 * time.Second
 	}
 
 	query := url.Values{}

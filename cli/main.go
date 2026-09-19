@@ -28,6 +28,7 @@
 //	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --param pe=pe-123
 //	hl job submit --agent jane job.yaml
 //	hl job list --agent jane
+//	hl job list --platform-experiment pe-123
 //	hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 //	hl watch --platform-experiment pe-123 --kinds hypothesis.new,hypothesis.status,finding.new,comment.new
 package main
@@ -59,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer) int {
   signup                --platform-experiment PE --agent A
   platform-experiments  [list] | get --id PE | create | start | update
   hypothesis            submit | link | comment | status | list | get | query
-  job                   submit | list [--needs-summary] | status | metrics | summary
+  job                   submit | list [--agent A] [--needs-summary] | status | metrics | summary
   watch                 --experiment JOB | --platform-experiment PE [--agent A] [--until ...]
 
 Run hl <command> --help for its flags.`
@@ -421,25 +422,24 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	case "list":
 		fs := flag.NewFlagSet("job list", flag.ContinueOnError)
 		fs.SetOutput(stderr)
-		agent := fs.String("agent", "", "agent id (required)")
+		agent := fs.String("agent", "", "narrow to one agent; omit to see every agent's jobs")
 		pe := fs.String("platform-experiment", "", "narrow to one platform experiment")
 		needsSummary := fs.Bool("needs-summary", false, "only finished jobs still missing a summary, the set that blocks your next submit")
 		if err := fs.Parse(rest); err != nil {
 			return parseExit(err)
 		}
-		if *agent == "" {
-			fmt.Fprintln(stderr, "hl: job list: --agent is required")
-			return 2
+		q := url.Values{}
+		if *agent != "" {
+			q.Set("agent", *agent)
 		}
-		q := "?agent=" + url.QueryEscape(*agent)
 		if *pe != "" {
-			q += "&platform_experiment_id=" + url.QueryEscape(*pe)
+			q.Set("platform_experiment_id", *pe)
 		}
 		if *needsSummary {
-			q += "&needs_summary=true"
+			q.Set("needs_summary", "true")
 		}
 		var out any
-		if err := c.Do("GET", "/experiments"+q, nil, &out); err != nil {
+		if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &out); err != nil {
 			return fail(stderr, err)
 		}
 		printJSON(stdout, out)
@@ -593,7 +593,7 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	kinds := fs.String("kinds", "", "comma-separated event kinds to subscribe to instead of the default set (e.g. hypothesis.new,hypothesis.status,finding.new,comment.new,metric.point) — see GET /watch/kinds for the full vocabulary")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
-	timeout := fs.Float64("timeout", 900.0, "give up after this many seconds")
+	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
 	since := fs.Int64("since", 0, "resume from the largest cursor printed by an earlier watch: replays from it, the events at it included, before going live")
 	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
 	if err := fs.Parse(args); err != nil {

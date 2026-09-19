@@ -289,7 +289,26 @@ func TestJobListNeedsSummary(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if gotQuery != "agent=a&platform_experiment_id=pe-1&needs_summary=true" {
+	if gotQuery != "agent=a&needs_summary=true&platform_experiment_id=pe-1" {
+		t.Fatalf("got query %s", gotQuery)
+	}
+}
+
+func TestJobListWithoutAgentListsWholePlatformExperiment(t *testing.T) {
+	var gotQuery string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
+	setAPIURL(t, url)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "list", "--platform-experiment", "pe-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if gotQuery != "platform_experiment_id=pe-1" {
 		t.Fatalf("got query %s", gotQuery)
 	}
 }

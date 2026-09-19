@@ -61,7 +61,7 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      {platform_experiment_id}`. Read its `description` completely, with its `metrics`, `stages`
      and `current_stage`: the stage advances between your restarts, so re-read rather than assume
      what a past session concluded. While its status is still `open` jobs are refused; wait with
-       hl watch --platform-experiment {platform_experiment_id} --until 'status in running' --timeout 540
+       hl watch --platform-experiment {platform_experiment_id} --until 'status in running'
   1. Unless the description fixes it, pick your accelerator_type from the live capacity listing,
      copied verbatim and with available > 0 — a type with none queues forever and never errors.
   2. One-time: clone {code_repo_url} and work on branch `{agent_id}-{platform_experiment_id}`
@@ -128,7 +128,7 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
      prints one JSON event per line (kind, subject, new value, cursor); each is a pointer, never a
      payload: follow it with `hl job status --id J`, `hl job metrics --id J` or `hl hypothesis get
      <id>` when you want the detail. One command covers the loop above:
-       hl watch --platform-experiment {platform_experiment_id} --agent {agent_id} --until 'status in COMPLETED,FAILED,EVICTED,closed' --timeout 540
+       hl watch --platform-experiment {platform_experiment_id} --agent {agent_id} --until 'status in COMPLETED,FAILED,EVICTED,closed'
      It returns when any job of yours ends or the run closes for everyone, and prints what
      happened meanwhile. Act on these:
        - `experiment.blocked`: why a queued job still waits; the reason can change while the
