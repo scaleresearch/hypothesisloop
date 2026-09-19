@@ -188,9 +188,10 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	jobFile := dir + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("job:\n  image: foo:latest\n"), 0o644); err != nil {
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\njob:\n  image: foo:latest\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
@@ -198,8 +199,8 @@ func TestJobSubmitFromYAML(t *testing.T) {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	metadata, ok := gotBody["metadata"].(map[string]any)
-	if !ok || metadata["agent_id"] != "jane" {
-		t.Fatalf("agent_id not stamped onto metadata: %+v", gotBody)
+	if !ok || metadata["agent_id"] != "jane" || metadata["platform_experiment_id"] != "pe-env" {
+		t.Fatalf("agent_id and platform_experiment_id not stamped onto metadata: %+v", gotBody)
 	}
 }
 

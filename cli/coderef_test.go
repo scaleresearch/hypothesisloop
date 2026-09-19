@@ -103,13 +103,13 @@ func TestJobSubmitKeepsExplicitCodeRef(t *testing.T) {
 	}
 }
 
-func TestJobSubmitOutsideRepoLeavesCodeRefEmpty(t *testing.T) {
+func TestJobSubmitOutsideRepoWithoutCodeRefFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	t.Chdir(dir)
 	writeJob(t, "job.yaml", "metadata:\n  hypothesis_id: h1\njob:\n  image: foo\n")
-	code, stderr, sent := submit(t, "job.yaml")
-	if code != 0 || sent != nil {
-		t.Fatalf("exit code = %d, code_ref = %v, stderr = %s", code, sent, stderr)
+	code, stderr, _ := submit(t, "job.yaml")
+	if code != 1 || !strings.Contains(stderr, "submit from your clone") {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
 }

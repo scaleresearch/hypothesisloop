@@ -8,7 +8,7 @@ import (
 )
 
 // fillCodeRef sets an empty metadata.code_ref to "<origin url>@<HEAD sha>" of the git repository
-// in dir. Outside a repository it leaves code_ref as it is.
+// in dir.
 func fillCodeRef(metadata map[string]any, dir string) error {
 	if v := metadata["code_ref"]; v != nil && v != "" {
 		return nil
@@ -16,7 +16,7 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 	if _, err := git(dir, "rev-parse", "--is-inside-work-tree"); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil
+			return errors.New("metadata.code_ref is empty and this is not a git repository: submit from your clone, or set code_ref")
 		}
 		return err
 	}
