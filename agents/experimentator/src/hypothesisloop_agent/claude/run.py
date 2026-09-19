@@ -220,7 +220,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
         # The 2 min default backgrounds long commands, and agents then poll their output files.
-        env={"BASH_DEFAULT_TIMEOUT_MS": "600000"},
+        # Without background tasks Bash has no run_in_background to wait in.
+        env={"BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"},
         hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(watch_env, cfg.agent_id)])]},
     )
 
