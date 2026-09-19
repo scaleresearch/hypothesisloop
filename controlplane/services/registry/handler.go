@@ -71,9 +71,10 @@ func (e *similarHypothesesError) Error() string  { return e.Detail }
 func (e *similarHypothesesError) GetStatus() int { return e.Status }
 
 const similarDetail = "Nothing was registered: your hypothesis reads close to the ones in `similar` " +
-	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one is the claim you meant, " +
-	"register nothing and test it under its id. Otherwise resubmit naming each one: as a contradicts link when " +
-	"yours cannot hold together with it, else in distinct_from (hl: --distinct-from), also when you build on it."
+	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one states the same claim as " +
+	"yours, register nothing and test it under its id; only its author sets its status. A narrower, broader or " +
+	"otherwise different claim is yours to register: resubmit naming each one, as a contradicts link when yours " +
+	"cannot hold together with it, else in distinct_from (hl: --distinct-from), also when you build on it."
 
 // hypothesisWriteError maps the errors a hypothesis write can return to the status an agent can
 // act on, keeping the message.

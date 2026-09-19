@@ -3,7 +3,9 @@ package registry
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -553,5 +555,20 @@ func TestQueryGraphBindsTheTestedHypotheses(t *testing.T) {
 	}
 	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN 1", map[string]any{"tested": "x"}); !errors.Is(err, graphdb.ErrInvalidQuery) {
 		t.Fatalf("caller $tested: err = %v, want ErrInvalidQuery", err)
+	}
+}
+
+// In r7 a held agent ran its jobs under the close hypothesis and was then refused setting its
+// status. The hold has to say whose verdict that is and that a narrower claim is its own.
+func TestASimilarityHoldSaysWhoseVerdictTheCloseHypothesisIsAndThatANarrowerClaimIsNew(t *testing.T) {
+	err := hypothesisWriteError(&graphdb.SimilarError{Similar: []domain.SimilarHypothesis{{ID: "h-1"}}})
+	var hold *similarHypothesesError
+	if !errors.As(err, &hold) || hold.Status != http.StatusConflict || len(hold.Similar) != 1 {
+		t.Fatalf("hypothesisWriteError(SimilarError) = %#v, want a 409 carrying the similar hypotheses", err)
+	}
+	for _, want := range []string{"only its author sets its status", "narrower, broader", "distinct_from"} {
+		if !strings.Contains(hold.Detail, want) {
+			t.Errorf("detail %q does not say %q", hold.Detail, want)
+		}
 	}
 }
