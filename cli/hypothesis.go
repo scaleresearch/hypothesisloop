@@ -159,6 +159,11 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 			AgentID        string `json:"agent_id"`
 			Author         string `json:"author"`
 			AlreadyExisted bool   `json:"already_existed"`
+			Links          []struct {
+				Type         string `json:"type"`
+				HypothesisID string `json:"hypothesis_id"`
+				Status       string `json:"status"`
+			} `json:"links"`
 		}
 		if err := json.Unmarshal(out, &created); err != nil || created.ID == "" {
 			return fail(stderr, fmt.Errorf("item %d: response carries no id: %s", i, out))
@@ -172,6 +177,13 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 		if created.AlreadyExisted {
 			fmt.Fprintf(stderr, "hl: hypothesis submit: already registered as %s by %s; your links were not applied, its own are in \"links\". "+
 				"Test it as it is, or register a refinement with --builds-on %s\n", created.ID, created.AgentID+created.Author, created.ID)
+			continue
+		}
+		for _, l := range created.Links {
+			if l.Type == "builds_on" && l.Status == "refuted" {
+				fmt.Fprintf(stderr, "hl: hypothesis submit: %s builds on %s, which is refuted. If yours claims the opposite, link it: "+
+					"hl hypothesis link --agent %s --from %s --type contradicts --to %s\n", created.ID, l.HypothesisID, created.AgentID, created.ID, l.HypothesisID)
+			}
 		}
 	}
 	return 0

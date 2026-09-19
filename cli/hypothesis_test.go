@@ -500,3 +500,24 @@ func TestHelpGoesToStdout(t *testing.T) {
 		}
 	}
 }
+
+func TestHypothesisSubmitOnARefutedParentSuggestsContradicts(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"id": "hyp-2", "agent_id": "jane", "links": []map[string]any{
+			{"type": "builds_on", "hypothesis_id": "hyp-1", "status": "refuted"},
+			{"type": "builds_on", "hypothesis_id": "hyp-3", "status": "confirmed"},
+		}}
+	})
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "lr 0.2 wins",
+		"--builds-on", "hyp-1", "--builds-on", "hyp-3"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if want := "hl hypothesis link --agent jane --from hyp-2 --type contradicts --to hyp-1"; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr does not suggest %q: %s", want, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "hyp-3") {
+		t.Fatalf("a confirmed parent drew a note: %s", stderr.String())
+	}
+}
