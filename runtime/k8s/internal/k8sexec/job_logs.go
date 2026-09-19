@@ -14,7 +14,7 @@ import (
 )
 
 // FetchLogTail returns the last maxLines lines of experimentID's pod output, read live from the
-// Kubernetes API (never cached, never stored by this executor itself — see agentloop.LogTailer).
+// Kubernetes API (never cached, never stored by this executor itself).
 // Returns (nil, nil) rather than an error if the pod doesn't exist yet or has no container
 // started (e.g. still Pending): that's an ordinary transient state for a job that was just
 // admitted, not a failure worth logging every reconcile tick.

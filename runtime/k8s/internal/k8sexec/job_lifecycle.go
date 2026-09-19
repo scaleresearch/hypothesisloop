@@ -195,7 +195,7 @@ func (c *JobWorkloadClient) ListManagedJobs(ctx context.Context) ([]string, erro
 // snapshot, and the control plane reads an experiment missing from one as its workload having
 // vanished. A drift-delete-then-recreate leaves the Job terminating for a moment, and reporting
 // that as "not here" told the control plane real, still-running training had disappeared. The
-// honest report is that the Job is present and not yet Running — which is what PollJobPhaseAndUID
+// honest report is that the Job is present and not yet Running — which is what PollJobStatus
 // returns for it once its pods are gone, so no phase mapping is needed here, only the inclusion.
 func (c *JobWorkloadClient) ListManagedJobsForStatus(ctx context.Context) ([]string, error) {
 	jobs, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{

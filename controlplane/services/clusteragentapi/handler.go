@@ -394,8 +394,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 					ExperimentID: rep.ExperimentID, At: now, ExtraLabels: labels,
 				})
 			}
-			// LogTail is optional per report (nil when the executor has nothing new, or
-			// doesn't implement LogTailer) -- only write when the agent actually sent one, so a
+			// LogTail is optional per report (nil when the executor has nothing new)
+			// -- only write when the agent actually sent one, so a
 			// job with no fresh output this tick doesn't wipe out its last-known tail.
 			if rep.LogTail != nil {
 				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, h.maxLogLineChars), now); err != nil {

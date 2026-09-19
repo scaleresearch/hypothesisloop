@@ -14,7 +14,7 @@ import (
 
 // FetchLogTail returns the last maxLines lines of experimentID's own container's current
 // stdout/stderr, read live from the container engine (never cached, never stored by this
-// executor itself — see agentloop.LogTailer). Returns (nil, nil) rather than an error if no
+// executor itself). Returns (nil, nil) rather than an error if no
 // managed container exists for experimentID, including one removed between the listing and the
 // log read: an ordinary transient state, not a failure worth logging every reconcile tick.
 func (e *Executor) FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error) {

@@ -130,7 +130,7 @@ func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
 // ListManagedJobsForStatus returns every managed experiment ID regardless of container state —
 // unlike ListManagedJobs (which only answers "does the desired container still need creating?"
 // and so excludes exited containers), status reporting must see an exited container at least
-// once so its terminal phase (PollJobPhaseAndUID's Succeeded/Failed) reaches the control plane
+// once so its terminal phase (PollJobStatus's Succeeded/Failed) reaches the control plane
 // before reapTerminal prunes it.
 func (e *Executor) ListManagedJobsForStatus(ctx context.Context) ([]string, error) {
 	containers, err := e.listManagedContainers(ctx)

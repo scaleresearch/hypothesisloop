@@ -72,7 +72,7 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 //
 // They are separate Jobs only because Kubernetes has no single object for "N pods of shape A plus
 // M pods of shape B". They remain one gang: each carries the same FailJob-on-any-non-zero-exit
-// policy §1 established, and PollJobPhaseAndUID reports the SET's phase, so a failure anywhere
+// policy §1 established, and PollJobStatus reports the SET's phase, so a failure anywhere
 // ends the experiment and takes every group's pods with it.
 func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement AcceleratorPlacement) ([]*batchv1.Job, error) {
 	// EffectiveJob, never exp.Job directly: an admitted experiment's literal CPU/memory/storage
