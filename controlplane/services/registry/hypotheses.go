@@ -162,6 +162,13 @@ func (s *Service) CountHypotheses(ctx context.Context, f graphdb.ListFilter) (in
 
 // HypothesisGraph returns the whole hypothesis graph of one platform experiment.
 func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error) {
+	_, _, found, err := s.store.GetPlatformExperimentSubmitPolicies(ctx, platformExperimentID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+	}
+	if !found {
+		return nil, nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
+	}
 	nodes, edges, err := s.graph.ExperimentGraph(ctx, platformExperimentID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)

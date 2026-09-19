@@ -412,6 +412,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("platform_experiment_id is required")
 		}
 		nodes, edges, err := h.svc.HypothesisGraph(ctx, in.PlatformExperimentID)
+		if errors.Is(err, ErrUnknownPlatformExperiment) {
+			return nil, huma.Error404NotFound(err.Error())
+		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
