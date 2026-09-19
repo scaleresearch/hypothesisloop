@@ -1,4 +1,4 @@
-.PHONY: reset build test e2e-py lint check images sparse-sdpa-workload-image \
+.PHONY: reset build test agent-test e2e-py lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag registry-up registry-prune \
 	helm-prepare helm-lint helm-template \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
@@ -277,6 +277,9 @@ build:
 test:
 	go test ./... -timeout 60s
 
+agent-test:
+	cd agents/experimentator && uv run python -m unittest discover -s tests
+
 # Portable e2e suite (pytest), API-only/parallel lane -- fast local loop. See tests/improve.md for
 # the marker scheme (parallel/exclusive/slow/hardware/accelerator) and the migration this replaces.
 e2e-py:
@@ -285,6 +288,6 @@ e2e-py:
 lint:
 	golangci-lint run ./...
 
-check: build test helm-lint
+check: build test agent-test helm-lint
 	go vet ./...
 	cd controlplane/ui && npm run build

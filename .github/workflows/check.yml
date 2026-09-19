@@ -18,5 +18,6 @@ jobs:
           cache: npm
           cache-dependency-path: controlplane/ui/package-lock.json
       - uses: azure/setup-helm@v4
+      - uses: astral-sh/setup-uv@v6
       - run: npm ci --prefix controlplane/ui
       - run: make check
