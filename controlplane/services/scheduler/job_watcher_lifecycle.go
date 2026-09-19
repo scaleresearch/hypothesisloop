@@ -284,7 +284,7 @@ func (w *JobWatcher) backfillStartedFromObservations(ctx context.Context, exp *d
 		// Already left SUBMITTED/ADMITTED by some other path — nothing to backfill.
 		return false, nil
 	}
-	w.logger.Warn("job_watcher: backfilling lifecycle state, metrics show it ran", zap.String("id", exp.ID))
+	w.logger.Info("job_watcher: backfilling lifecycle state, metrics show it ran", zap.String("id", exp.ID))
 	exp.Status = domain.StatusRunning
 	return true, nil
 }
