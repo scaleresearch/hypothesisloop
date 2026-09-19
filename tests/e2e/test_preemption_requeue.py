@@ -620,6 +620,10 @@ def test_checkpoint_resume_and_window_cap(api, pe3, deadline):
     stints = api.metric_distinct_count(job_ckpt, "resume_step")
     assert resume_step is not None, "the job never reported resume_step -- there is no evidence about where the second stint began"
     assert resume_step > 0.5, f"the second stint began at step {resume_step} -- the job restarted from zero and the rescaled estimate bills for work it redid"
+    # Checkpoints only move forward, so the furthest resume is at least the step the job had
+    # reported before it was preempted. A stint that started before the checkpoint landed resumes
+    # from an earlier step and overwrites it.
+    assert resume_step >= step_at_preemption, f"the furthest resume was from step {resume_step}, behind step {step_at_preemption} reported before the preemption -- checkpointed work was redone"
     # Exactly 2 is the clean case (one preemption, one resume) and is what the bash original
     # asserted. Under real contention it can legitimately be more -- confirmed live to reach as
     # high as 12 across repeated runs against this shared dev stack: loop_preempt.go's requeue is

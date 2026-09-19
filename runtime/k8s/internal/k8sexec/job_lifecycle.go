@@ -25,6 +25,19 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 	if err := c.ensureNamespace(ctx, HypothesisLoopNamespace); err != nil {
 		return err
 	}
+	// Reconcile calls this only when no live Job exists for the experiment, so any pod still
+	// carrying its identity belongs to the previous generation and may be inside its checkpoint
+	// window. A new pod started now would read the store before that checkpoint lands, restart
+	// from zero and later overwrite it. The next pass retries.
+	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, exp.ID),
+	})
+	if err != nil {
+		return fmt.Errorf("workload: list pods for %s: %w", exp.ID, err)
+	}
+	if len(pods.Items) > 0 {
+		return fmt.Errorf("workload: %d pod(s) of the previous generation of %s still terminating; retry creation", len(pods.Items), exp.ID)
+	}
 	// No admission handshake here: the scheduler loop already decided this experiment fits
 	// available capacity before calling CreateWorkload, so the Job is created ready-to-run.
 	placement, err := c.resolvePlacementFor(ctx, exp)
