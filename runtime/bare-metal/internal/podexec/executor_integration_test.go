@@ -15,6 +15,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 func newTestExecutor(t *testing.T) *Executor {
@@ -39,6 +40,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 	defer cancel()
 
 	exp := &domain.Experiment{
+		Data:         testDataAccess(),
 		ID:           "it-" + filepath.Base(t.TempDir()),
 		AgentID:      "agent-1",
 		ProjectID:    "proj-1",
@@ -85,19 +87,19 @@ func TestIntegrationLifecycle(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(30 * time.Second)
-	var phase workload.JobPhase
+	var status agentexec.JobStatus
 	for time.Now().Before(deadline) {
-		phase, _, err = e.PollJobPhaseAndUID(ctx, exp.ID)
+		status, err = e.PollJobStatus(ctx, exp.ID)
 		if err != nil {
-			t.Fatalf("PollJobPhaseAndUID: %v", err)
+			t.Fatalf("PollJobStatus: %v", err)
 		}
-		if phase == workload.JobPhaseSucceeded || phase == workload.JobPhaseFailed {
+		if status.Phase == workload.JobPhaseSucceeded || status.Phase == workload.JobPhaseFailed {
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if phase != workload.JobPhaseSucceeded {
-		t.Fatalf("expected phase succeeded, got %v", phase)
+	if status.Phase != workload.JobPhaseSucceeded {
+		t.Fatalf("expected phase succeeded, got %v", status.Phase)
 	}
 
 	if err := e.DeleteWorkload(ctx, exp.ID, false); err != nil {
@@ -106,12 +108,12 @@ func TestIntegrationLifecycle(t *testing.T) {
 	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{}); err != nil {
 		t.Fatalf("ReapTerminal: %v", err)
 	}
-	phase, _, err = e.PollJobPhaseAndUID(ctx, exp.ID)
+	status, err = e.PollJobStatus(ctx, exp.ID)
 	if err != nil {
-		t.Fatalf("PollJobPhaseAndUID after delete: %v", err)
+		t.Fatalf("PollJobStatus after delete: %v", err)
 	}
-	if phase != workload.JobPhaseGone {
-		t.Fatalf("expected phase gone after reap, got %v", phase)
+	if status.Phase != workload.JobPhaseGone {
+		t.Fatalf("expected phase gone after reap, got %v", status.Phase)
 	}
 }
 
@@ -156,7 +158,7 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5), NumNodes: 2,
 	}
-	exp := &domain.Experiment{ID: "reject-num-nodes", Job: spec}
+	exp := &domain.Experiment{ID: "reject-num-nodes", Job: spec, Data: testDataAccess()}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err == nil {
 		t.Fatal("expected rejection for num_nodes>1")
 	}
@@ -195,7 +197,7 @@ func TestIntegrationIgnoresK8sOnlyFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			exp := &domain.Experiment{ID: "ignore-" + tc.name, Job: tc.spec}
+			exp := &domain.Experiment{ID: "ignore-" + tc.name, Job: tc.spec, Data: testDataAccess()}
 			if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
 				t.Fatalf("expected %s to be ignored, not rejected: %v", tc.name, err)
 			}
