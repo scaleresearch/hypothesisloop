@@ -117,12 +117,24 @@ func isUniqueViolation(err error, constraint string) bool {
 // derived from the stored value, so truncating here keeps a live event and its replayed twin equal.
 func now() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }
 
-func str(v any) string {
-	s, _ := v.(string)
+// decoder reads stored values and keeps the first one of the wrong type as err, so a bad property
+// fails the read that met it.
+type decoder struct {
+	err error
+}
+
+func (d *decoder) str(v any) string {
+	s, ok := v.(string)
+	if !ok && d.err == nil {
+		d.err = fmt.Errorf("graphdb: want a string, got %T", v)
+	}
 	return s
 }
 
-func timeOf(v any) time.Time {
-	t, _ := v.(time.Time)
+func (d *decoder) time(v any) time.Time {
+	t, ok := v.(time.Time)
+	if !ok && d.err == nil {
+		d.err = fmt.Errorf("graphdb: want a timestamp, got %T", v)
+	}
 	return t.UTC()
 }

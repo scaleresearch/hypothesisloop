@@ -158,11 +158,12 @@ func jsonValue(v any) any {
 func endpointIDs(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any) (map[int64]string, error) {
 	ids := map[int64]string{}
 	var missing []int64
+	var d decoder
 	var walk func(v any)
 	walk = func(v any) {
 		switch t := v.(type) {
 		case neo4j.Node:
-			ids[t.Id] = str(t.Props["id"])
+			ids[t.Id] = d.str(t.Props["id"])
 		case neo4j.Relationship:
 			missing = append(missing, t.StartId, t.EndId)
 		case neo4j.Path:
@@ -191,7 +192,7 @@ func endpointIDs(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 		}
 	}
 	if len(lookup) == 0 {
-		return ids, nil
+		return ids, d.err
 	}
 	result, err := tx.Run(ctx, `MATCH (n) WHERE id(n) IN $ids RETURN id(n), n.id`, map[string]any{"ids": lookup})
 	if err != nil {
@@ -202,9 +203,9 @@ func endpointIDs(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 		return nil, err
 	}
 	for _, r := range records {
-		ids[r.Values[0].(int64)] = str(r.Values[1])
+		ids[r.Values[0].(int64)] = d.str(r.Values[1])
 	}
-	return ids, nil
+	return ids, d.err
 }
 
 func mapValue(v any, ids map[int64]string) any {

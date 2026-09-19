@@ -610,6 +610,22 @@ func TestAQueryIsStoppedAtItsMemoryLimit(t *testing.T) {
 	}
 }
 
+func TestAPropertyOfTheWrongTypeFailsTheRead(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	h := register(t, s, pe, "agent-a", "a claim whose timestamp gets broken", onRoot(pe))
+	ctx := context.Background()
+	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.created_at = 'yesterday'`, map[string]any{"id": h.ID})
+	})
+	if err != nil {
+		t.Fatalf("break created_at: got = %v, want nil", err)
+	}
+	if got, err := s.GetHypothesis(ctx, h.ID); err == nil || !strings.Contains(err.Error(), "want a timestamp, got string") {
+		t.Errorf("GetHypothesis: got = %v, %v, want an error naming the wrong type", got, err)
+	}
+}
+
 // Replay is what turns a dropped /watch connection into a delay rather than a gap. Hypothesis
 // events are derived from the graph's own timestamps, and links given at registration ride on
 // hypothesis.new, so replay must not invent a hypothesis.link for them.

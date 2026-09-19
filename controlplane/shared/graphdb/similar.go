@@ -122,9 +122,10 @@ RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]
 	if err != nil {
 		return nil, err
 	}
+	var d decoder
 	texts := make([]string, len(records))
 	for i, r := range records {
-		texts[i] = str(r.Values[4])
+		texts[i] = d.str(r.Values[4])
 	}
 	scores := similarities(n.Text, texts)
 	type scored struct {
@@ -133,8 +134,8 @@ RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]
 	}
 	var found []scored
 	for i, r := range records {
-		h := domain.SimilarHypothesis{ID: str(r.Values[0]), AgentID: str(r.Values[1]), Author: str(r.Values[2]),
-			Status: domain.HypothesisStatus(str(r.Values[3])), Text: texts[i], BuildsOn: []string{}}
+		h := domain.SimilarHypothesis{ID: d.str(r.Values[0]), AgentID: d.str(r.Values[1]), Author: d.str(r.Values[2]),
+			Status: domain.HypothesisStatus(d.str(r.Values[3])), Text: texts[i], BuildsOn: []string{}}
 		if told[h.ID] {
 			continue
 		}
@@ -147,9 +148,12 @@ RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]
 			continue
 		}
 		for _, id := range r.Values[5].([]any) {
-			h.BuildsOn = append(h.BuildsOn, str(id))
+			h.BuildsOn = append(h.BuildsOn, d.str(id))
 		}
 		found = append(found, scored{h, scores[i]})
+	}
+	if d.err != nil {
+		return nil, d.err
 	}
 	sort.Slice(found, func(a, b int) bool {
 		if ra, rb := found[a].h.Reason == "refuted_parent", found[b].h.Reason == "refuted_parent"; ra != rb {

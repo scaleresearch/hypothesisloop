@@ -31,16 +31,20 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 			if err != nil {
 				return nil, err
 			}
+			var d decoder
 			for _, r := range records {
 				events = append(events, db.Event{
-					Kind:                 str(r.Values[0]),
-					Subject:              str(r.Values[1]),
-					Value:                str(r.Values[2]),
-					Detail:               str(r.Values[3]),
+					Kind:                 d.str(r.Values[0]),
+					Subject:              d.str(r.Values[1]),
+					Value:                d.str(r.Values[2]),
+					Detail:               d.str(r.Values[3]),
 					PlatformExperimentID: platformExperimentID,
-					AgentID:              str(r.Values[4]),
-					Cursor:               db.NewCursor(timeOf(r.Values[5])),
+					AgentID:              d.str(r.Values[4]),
+					Cursor:               db.NewCursor(d.time(r.Values[5])),
 				})
+			}
+			if d.err != nil {
+				return nil, d.err
 			}
 		}
 		return events, nil

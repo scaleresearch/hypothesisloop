@@ -97,8 +97,7 @@ RETURN h`, map[string]any{
 				return nil, err
 			}
 		}
-		created := hypothesisFromNode(records[0].Values[0].(neo4j.Node))
-		return created, nil
+		return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 	})
 	switch {
 	case isUniqueViolation(err, dedupConstraint):
@@ -204,7 +203,7 @@ func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, stat
 			return nil, err
 		}
 		changed = true
-		return hypothesisFromNode(records[0].Values[0].(neo4j.Node)), nil
+		return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 	})
 	if err != nil {
 		return nil, false, wrap("graphdb.UpdateStatus", err)
@@ -345,10 +344,14 @@ RETURN a.id, b.id, type(r), r.agent_id, r.author, r.created_at ORDER BY r.create
 		if err != nil {
 			return nil, err
 		}
+		var d decoder
 		edges := make([]domain.GraphEdge, 0, len(records))
 		for _, r := range records {
-			edges = append(edges, domain.GraphEdge{From: str(r.Values[0]), To: str(r.Values[1]), Type: linkTypeOf(str(r.Values[2])),
-				AgentID: str(r.Values[3]), Author: str(r.Values[4]), CreatedAt: timeOf(r.Values[5])})
+			edges = append(edges, domain.GraphEdge{From: d.str(r.Values[0]), To: d.str(r.Values[1]), Type: linkTypeOf(d.str(r.Values[2])),
+				AgentID: d.str(r.Values[3]), Author: d.str(r.Values[4]), CreatedAt: d.time(r.Values[5])})
+		}
+		if d.err != nil {
+			return nil, d.err
 		}
 		return graph{nodes: nodes, edges: edges}, nil
 	})
@@ -428,7 +431,7 @@ func oneHypothesis(ctx context.Context, tx neo4j.ManagedTransaction, cypher stri
 	if err != nil || len(records) == 0 {
 		return nil, err
 	}
-	return hypothesisFromNode(records[0].Values[0].(neo4j.Node)), nil
+	return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 }
 
 // validateLinks checks what can be checked without the graph. The objective root, named by the
@@ -472,9 +475,13 @@ func checkTargets(ctx context.Context, tx neo4j.ManagedTransaction, platformExpe
 	if err != nil {
 		return err
 	}
+	var d decoder
 	found := make(map[string]string, len(records))
 	for _, r := range records {
-		found[str(r.Values[0])] = str(r.Values[1])
+		found[d.str(r.Values[0])] = d.str(r.Values[1])
+	}
+	if d.err != nil {
+		return d.err
 	}
 	for _, id := range ids {
 		pe, ok := found[id]
@@ -529,24 +536,25 @@ func linksTx(ctx context.Context, tx neo4j.ManagedTransaction, cypher, id string
 	if err != nil {
 		return nil, err
 	}
+	var d decoder
 	links := make([]domain.Link, 0, len(records))
 	for _, r := range records {
 		t := r.Values[1].(neo4j.Node)
 		rel := r.Values[2].(neo4j.Relationship)
 		link := domain.Link{
-			Type:         linkTypeOf(str(r.Values[0])),
-			HypothesisID: str(t.Props["id"]),
-			AgentID:      str(rel.Props["agent_id"]),
-			Author:       str(rel.Props["author"]),
-			CreatedAt:    timeOf(rel.Props["created_at"]),
+			Type:         linkTypeOf(d.str(r.Values[0])),
+			HypothesisID: d.str(t.Props["id"]),
+			AgentID:      d.str(rel.Props["agent_id"]),
+			Author:       d.str(rel.Props["author"]),
+			CreatedAt:    d.time(rel.Props["created_at"]),
 		}
 		if slices.Contains(t.Labels, "Hypothesis") {
-			link.Text = str(t.Props["text"])
-			link.Status = str(t.Props["status"])
+			link.Text = d.str(t.Props["text"])
+			link.Status = d.str(t.Props["status"])
 		}
 		links = append(links, link)
 	}
-	return links, nil
+	return links, d.err
 }
 
 func listItems(ctx context.Context, tx neo4j.ManagedTransaction, cypher string, params map[string]any) ([]*domain.HypothesisListItem, error) {
@@ -554,35 +562,44 @@ func listItems(ctx context.Context, tx neo4j.ManagedTransaction, cypher string, 
 	if err != nil {
 		return nil, err
 	}
+	var d decoder
 	items := make([]*domain.HypothesisListItem, 0, len(records))
 	for _, r := range records {
-		item := &domain.HypothesisListItem{Hypothesis: hypothesisFromNode(r.Values[0].(neo4j.Node)), BuildsOn: []string{}}
+		h, err := hypothesisFromNode(r.Values[0].(neo4j.Node))
+		if err != nil {
+			return nil, err
+		}
+		item := &domain.HypothesisListItem{Hypothesis: h, BuildsOn: []string{}}
 		for _, id := range r.Values[1].([]any) {
-			item.BuildsOn = append(item.BuildsOn, str(id))
+			item.BuildsOn = append(item.BuildsOn, d.str(id))
 		}
 		item.ChildCount = int(r.Values[2].(int64))
 		items = append(items, item)
 	}
-	return items, nil
+	return items, d.err
 }
 
-func hypothesisFromNode(n neo4j.Node) *domain.Hypothesis {
+func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 	p := n.Props
+	var d decoder
 	h := &domain.Hypothesis{
-		ID:                   str(p["id"]),
-		AgentID:              str(p["agent_id"]),
-		Source:               domain.HypothesisSource(str(p["source"])),
-		Author:               str(p["author"]),
-		PlatformExperimentID: str(p["platform_experiment_id"]),
-		Text:                 str(p["text"]),
-		Status:               domain.HypothesisStatus(str(p["status"])),
-		CreatedAt:            timeOf(p["created_at"]),
+		ID:                   d.str(p["id"]),
+		AgentID:              d.str(p["agent_id"]),
+		Source:               domain.HypothesisSource(d.str(p["source"])),
+		Author:               d.str(p["author"]),
+		PlatformExperimentID: d.str(p["platform_experiment_id"]),
+		Text:                 d.str(p["text"]),
+		Status:               domain.HypothesisStatus(d.str(p["status"])),
+		CreatedAt:            d.time(p["created_at"]),
 	}
-	if t, ok := p["status_changed_at"].(time.Time); ok {
-		changed := t.UTC()
+	if v, ok := p["status_changed_at"]; ok && v != nil {
+		changed := d.time(v)
 		h.StatusChangedAt = &changed
 	}
-	return h
+	if d.err != nil {
+		return nil, fmt.Errorf("hypothesis %v: %w", p["id"], d.err)
+	}
+	return h, nil
 }
 
 // wrap prefixes err with op unless it is one of this package's own sentinel errors, whose message
