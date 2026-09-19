@@ -1013,11 +1013,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stats row */}
       <Pod>
         <PodContent>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile
               label="Accelerators In Flight"
-              value={`${inFlightAccelerators} / ${pe.max_concurrent_accelerators ?? 'uncapped'}`}
+              value={pe.max_concurrent_accelerators == null ? `${inFlightAccelerators}` : `${inFlightAccelerators} / ${pe.max_concurrent_accelerators}`}
               color={pe.max_concurrent_accelerators != null && inFlightAccelerators >= pe.max_concurrent_accelerators ? semantic.accent : undefined}
               sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />

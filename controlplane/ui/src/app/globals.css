@@ -543,10 +543,6 @@ select:focus-visible,
   font-size: 10.5px;
   color: var(--dim-fg);
   margin-top: 3px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Buttons — refined depth, tactile press */
