@@ -138,8 +138,9 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then `hl platform-experiments update --id
   $PLATFORM_EXPERIMENT_ID agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`, immediately,
   same turn as the file edit — never batched for later. (While the platform experiment is
-  `running`, only `name`/`description` are actually amended by this call — see `hl
-  platform-experiments update --help` — which is exactly what a description sync needs.) Then `hl
+  `running`, only `name`/`description` may change; any other field that differs from the live
+  value is rejected and the error names it, so keep the file's other fields as created, or set
+  the named ones to the live values.) Then `hl
   platform-experiments list` or `GET $API_URL/platform-experiments/{id}` and diff its
   `description` against the file's block before moving on; treat any mismatch as a blocker, not a
   note-for-later. This has

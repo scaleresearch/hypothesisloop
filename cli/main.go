@@ -278,8 +278,9 @@ func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, st
 
 FILE is shaped exactly like 'hl platform-experiments create's body (see
 controlplane/settings/examples/experiment.yaml). While the platform experiment is still open,
-every field including metrics is editable; once running, only name and description are amended,
-the rest is ignored.`)
+every field including metrics is editable; once running, only name and description may change
+and any other field that differs from the live value is rejected, so update from the file the
+experiment was created with (or set the named fields to the live values).`)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
