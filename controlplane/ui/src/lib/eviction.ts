@@ -25,9 +25,10 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
 // job hasn't started yet. Same "code: detail" convention and same fallback-to-raw-code behavior as
 // eviction reasons; use notAdmittedLabel to render.
 const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
+  awaiting_admission: 'Waiting for the scheduler’s first look',
   capacity_unavailable: 'No capacity available',
   outranked: 'Outranked by a higher-priority job',
-  summary_gate: 'Waiting on summary gate',
+  summary_gate: 'Held until its agent files the summaries it owes for finished jobs',
   stage_cut: 'Cut at stage boundary',
   job_too_long: 'Would run past the stage job-length limit',
   workload_creation_failed: 'Workload creation failed',
