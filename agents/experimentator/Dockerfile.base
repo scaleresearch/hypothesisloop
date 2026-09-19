@@ -40,13 +40,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Non-interactive git auth, baked so the agent never handles credentials: a helper emits $GIT_TOKEN
 # (injected at runtime as a secret, never baked) for HTTPS clone/push to CODE_REPO_URL, plus a
-# default commit identity so commits don't fail on a fresh container. The agent hands the same
-# token to job pods via job.env, so the pod can clone the code_ref it runs.
+# default commit identity so commits don't fail on a fresh container, and a first push of a new
+# branch that needs no -u. The agent hands the same token to job pods via job.env, so the pod can
+# clone the code_ref it runs.
 RUN git config --system credential.helper \
       '!f() { echo "username=${GIT_USER:-x-access-token}"; echo "password=${GIT_TOKEN}"; }; f' \
  && git config --system user.name  "hypothesisloop-agent" \
  && git config --system user.email "agent@hypothesisloop.local" \
- && git config --system init.defaultBranch main
+ && git config --system init.defaultBranch main \
+ && git config --system push.autoSetupRemote true
 
 # permission_mode="bypassPermissions" (unrestricted tool use — the whole point of this agent)
 # maps to the CLI's --dangerously-skip-permissions, which refuses to run as root/sudo as a

@@ -242,12 +242,16 @@ func parseExit(err error) int {
 }
 
 // printLines prints a JSON response compactly: an array one element per line, anything else on
-// one line, each through compactJSON.
-func printLines(stdout io.Writer, raw json.RawMessage, drop ...string) error {
+// one line, each through compactJSON. An empty array prints none to stderr, so that no output is
+// never mistaken for a command that did nothing.
+func printLines(stdout, stderr io.Writer, none string, raw json.RawMessage, drop ...string) error {
 	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
 		var items []json.RawMessage
 		if err := json.Unmarshal(trimmed, &items); err != nil {
 			return fmt.Errorf("response is not JSON: %w", err)
+		}
+		if len(items) == 0 {
+			fmt.Fprintf(stderr, "hl: %s\n", none)
 		}
 		for _, item := range items {
 			if err := printLine(stdout, item, drop...); err != nil {
@@ -362,11 +366,13 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	if body["name"] == "" {
 		body["name"] = *id
 	}
-	var out any
+	var out json.RawMessage
 	if err := c.Do("POST", "/agents", body, &out); err != nil {
 		return fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	if err := printLine(stdout, out); err != nil {
+		return fail(stderr, err)
+	}
 	return 0
 }
 
@@ -394,11 +400,13 @@ func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	if *quotaTier != "" {
 		body["quota_tier"] = *quotaTier
 	}
-	var out any
-	if err := c.Do("POST", "/platform-experiments/"+*pe+"/signup", body, &out); err != nil {
+	var out json.RawMessage
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/signup", body, &out); err != nil {
 		return fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	if err := printLine(stdout, out); err != nil {
+		return fail(stderr, err)
+	}
 	return 0
 }
 

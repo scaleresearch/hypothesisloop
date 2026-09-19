@@ -105,7 +105,7 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 	case "query":
 		return hypothesisQuery(c, rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "hl: hypothesis: unknown subcommand %q\n", sub)
+		fmt.Fprintf(stderr, "hl: hypothesis: unknown subcommand %q\n\n%s\n", sub, hypothesisUsage)
 		return 2
 	}
 }
@@ -486,14 +486,12 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 	if *offset != 0 {
 		q.Set("offset", strconv.Itoa(*offset))
 	}
-	var out []json.RawMessage
+	var out json.RawMessage
 	if err := c.Do("GET", "/hypotheses?"+q.Encode(), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	for _, item := range out {
-		if err := printLine(stdout, item); err != nil {
-			return fail(stderr, err)
-		}
+	if err := printLines(stdout, stderr, "hypothesis list: no hypothesis matches", out); err != nil {
+		return fail(stderr, err)
 	}
 	return 0
 }
@@ -587,6 +585,9 @@ description (/explore). Examples:
 			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 		}
 		fmt.Fprintf(stdout, "%s\n", b.Bytes())
+	}
+	if len(out.Rows) == 0 {
+		fmt.Fprintln(stderr, "hl: hypothesis query: no rows")
 	}
 	if out.Truncated {
 		fmt.Fprintf(stderr, "hl: hypothesis query: truncated at %d rows; narrow the query or add LIMIT/SKIP\n", len(out.Rows))

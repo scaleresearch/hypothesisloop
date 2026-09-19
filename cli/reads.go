@@ -39,7 +39,7 @@ running jobs.`, stderr)
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, out, "id", "platform_experiment_id", "created_at"); err != nil {
+	if err := printLines(stdout, stderr, "quota: no agent signed up", out, "id", "platform_experiment_id", "created_at"); err != nil {
 		return fail(stderr, err)
 	}
 	return 0
@@ -219,7 +219,7 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	if err := c.Do(method, path, body, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, out); err != nil {
+	if err := printLines(stdout, stderr, "donation "+sub+": none", out); err != nil {
 		return fail(stderr, err)
 	}
 	return 0

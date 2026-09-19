@@ -111,11 +111,13 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	body["metadata"] = metadata
-	var out any
+	var out json.RawMessage
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		return fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	if err := printLine(stdout, out, jobDrop...); err != nil {
+		return fail(stderr, err)
+	}
 	return 0
 }
 
@@ -158,7 +160,7 @@ One job per line, in the scheduler's order. Without --agent, every agent's jobs.
 	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, out, jobDrop...); err != nil {
+	if err := printLines(stdout, stderr, "job list: no job matches", out, jobDrop...); err != nil {
 		return fail(stderr, err)
 	}
 	return 0
@@ -169,7 +171,7 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 
 One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED or
 REJECTED), not_admitted_reason while queued, eviction_reason, phase_detail, and the spec.`, stderr)
-	ids, err := parseOperands(fs, args, "id")
+	ids, err := parseOperands(fs, args, "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -213,7 +215,7 @@ func jobMetrics(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 One line per reported metric: points reported, the last value and the fraction_complete it was
 reported at, and the min and max over the run. --points prints every point instead.`, stderr)
 	points := fs.Bool("points", false, "print every reported point, oldest first")
-	id, err := parseOne(fs, args, "ID", "", "id")
+	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -222,7 +224,7 @@ reported at, and the min and max over the run. --points prints every point inste
 		return fail(stderr, err)
 	}
 	if *points {
-		if err := printLines(stdout, out, "experiment_id"); err != nil {
+		if err := printLines(stdout, stderr, "job metrics: no metric reported yet", out, "experiment_id"); err != nil {
 			return fail(stderr, err)
 		}
 		return 0
@@ -263,7 +265,7 @@ COMPLETED job needs one before your next submit.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
 	fs.StringVar(&text, "summary", "", "")
-	id, err := parseOne(fs, args, "ID", "", "id")
+	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -283,7 +285,7 @@ COMPLETED job needs one before your next submit.`, stderr)
 func jobLogs(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job logs", "usage: hl job logs ID [--lines N]\n\nThe last log lines the job's cluster reported, oldest first.", stderr)
 	n := fs.Int("lines", 50, "how many of the last reported lines")
-	id, err := parseOne(fs, args, "ID", "", "id")
+	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -303,7 +305,7 @@ func jobLogs(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 // jobRead prints GET /experiments/{id}<suffix>.
 func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job "+name, "usage: hl job "+name+" ID\n\n"+help+".", stderr)
-	id, err := parseOne(fs, args, "ID", "", "id")
+	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -311,7 +313,7 @@ func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdo
 	if err := c.Do("GET", "/experiments/"+url.PathEscape(id)+suffix, nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, out); err != nil {
+	if err := printLines(stdout, stderr, "job "+name+": none", out); err != nil {
 		return fail(stderr, err)
 	}
 	return 0
@@ -319,7 +321,7 @@ func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdo
 
 func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a QUEUED or RUNNING job; its credits are refunded.", stderr)
-	id, err := parseOne(fs, args, "ID", "", "id")
+	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
