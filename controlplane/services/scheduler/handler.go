@@ -117,6 +117,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
+			"Each carries metric: its best value on the platform experiment's first ranking metric, absent until it reports one. " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent" doc:"Only this agent's experiments."`
@@ -181,6 +182,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		if err := h.svc.mergePhaseDetails(ctx, exps); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if err := h.svc.mergeMetrics(ctx, exps); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct {
@@ -249,7 +253,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
 		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED. " +
-			"Carries phase_detail: the runtime's latest reason a job hasn't started or is restarting.",
+			"Carries phase_detail: the runtime's latest reason a job hasn't started or is restarting, " +
+			"and metric: its best value on the platform experiment's first ranking metric.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.Experiment }, error) {

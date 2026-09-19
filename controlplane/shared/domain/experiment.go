@@ -67,6 +67,9 @@ type Experiment struct {
 	// never persisted to PostgreSQL (metrics only in the metrics store, important.md #3). Nil
 	// when nothing has been reported yet.
 	PhaseDetail *PhaseDetail `json:"phase_detail,omitempty"`
+	// Metric is the job's best value on its platform experiment's first ranking metric, merged in
+	// live from the metrics store like PhaseDetail. Nil until the job reports that metric.
+	Metric *JobMetric `json:"metric,omitempty"`
 	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
 	// Nil on every other read of an experiment.
 	Data *DataAccess `json:"data,omitempty"`

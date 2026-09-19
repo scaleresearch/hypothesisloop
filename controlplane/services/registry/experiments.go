@@ -5,13 +5,17 @@ import (
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// List returns experiments matching the filter — used internally (e.g. a hypothesis's jobs), not
-// exposed as its own list-experiments endpoint (that's GET /experiments on the scheduler service).
+// List returns the experiments matching the filter, each with its best ranking metric: a
+// hypothesis's jobs. GET /experiments is the scheduler service's.
 func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	exps, err := s.store.ListExperiments(ctx, filter)
 	if err != nil {
+		return nil, fmt.Errorf("registry.List: %w", err)
+	}
+	if err := metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, s.store.GetPlatformExperimentMetrics, exps); err != nil {
 		return nil, fmt.Errorf("registry.List: %w", err)
 	}
 	return exps, nil

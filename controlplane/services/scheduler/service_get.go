@@ -27,7 +27,22 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if found {
 		exp.PhaseDetail = &domain.PhaseDetail{Reason: reason, Message: message, RestartCount: restartCount}
 	}
+	if err := s.mergeMetrics(ctx, []*domain.Experiment{exp}); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
+	}
 	return exp, nil
+}
+
+// mergeMetrics attaches each experiment's best value on its platform experiment's first ranking
+// metric, read live from the metrics store.
+func (s *Service) mergeMetrics(ctx context.Context, exps []*domain.Experiment) error {
+	return metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, func(ctx context.Context, id string) ([]domain.MetricDefinition, bool, error) {
+		pe, err := s.store.GetPlatformExperiment(ctx, id)
+		if err != nil || pe == nil {
+			return nil, false, err
+		}
+		return pe.Metrics, true, nil
+	}, exps)
 }
 
 // mergePhaseDetails attaches each experiment's latest phase detail in one batched metrics-store
