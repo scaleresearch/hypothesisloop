@@ -240,7 +240,7 @@ STAGE_T0=$(date +%s)
 HOST_IP="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')"
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://${HOST_IP}:8081" METRICS_URL="http://${HOST_IP}:8084" \
-  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG:-latest}" \
+  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "${REGISTRY_HOST_IP}" > "${SCRIPT_DIR}/../.registry-host-ip"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"

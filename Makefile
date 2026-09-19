@@ -22,6 +22,7 @@ REGISTRY_HOST_IP_FILE := localdev/.registry-host-ip
 REGISTRY ?= localhost:5000
 GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null)
 TAG ?= $(GIT_SHA)
+export TAG
 REGISTRY_TLS_VERIFY ?= false
 
 # Refuses a dirty tree rather than tagging a build with an ambiguous `-dirty` suffix: a mutable
@@ -67,7 +68,7 @@ registry-prune:
 	bash localdev/controlplane/registry-prune.sh
 
 controlplane-up: registry-up render-settings images
-	TAG=$(TAG) podman compose -f $(COMPOSE_FILE) up -d
+	podman compose -f $(COMPOSE_FILE) up -d
 	@until curl -fsS -o /dev/null http://localhost:8081/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 

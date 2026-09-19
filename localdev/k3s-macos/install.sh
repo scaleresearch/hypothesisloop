@@ -231,7 +231,7 @@ kubectl --context "${CONTEXT_NAME}" get nodes
 echo "==> Installing cluster-agent bundle onto local cluster..."
 STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG:-latest}" \
+  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 

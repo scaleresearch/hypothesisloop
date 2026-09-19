@@ -115,7 +115,7 @@ services:
     restart: "no"
 
   control-service:
-    image: localhost:5000/hypothesisloop-control-service:${TAG:-latest}
+    image: localhost:5000/hypothesisloop-control-service:${TAG:?TAG must name the image tag make images pushed}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
@@ -134,7 +134,7 @@ services:
         condition: service_completed_successfully
 
   metrics-service:
-    image: localhost:5000/hypothesisloop-metrics-service:${TAG:-latest}
+    image: localhost:5000/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make images pushed}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable

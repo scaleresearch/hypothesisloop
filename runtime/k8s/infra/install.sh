@@ -10,7 +10,7 @@
 # Run this once per target cluster. It is idempotent — safe to re-run against
 # a cluster that already has the bundle installed (e.g. after an upgrade).
 #
-# Parameters (env vars, all optional):
+# Parameters (env vars, optional unless marked required):
 #   CLUSTER_NAME      — label identifying this target cluster (default: local)
 #   API_URL           — control-plane API base URL. The cluster-agent polls it, and it is
 #                       also handed to training pods to push metrics to, so it must be reachable from
@@ -28,8 +28,7 @@
 #                       network needs) is the cluster provisioner's job, not this script's; it
 #                       only names the address, same as API_URL/METRICS_URL (default: localhost:5000,
 #                       the local dev registry from localdev/controlplane/docker-compose.yml)
-#   TAG               — image tag to deploy, normally the git SHA `make images` just pushed
-#                       (default: latest)
+#   TAG               — image tag to deploy, the git SHA `make images` just pushed (required)
 #   KUBECONFIG_PATH   — kubeconfig file to use (default: $HOME/.kube/config)
 #   KUBE_CONTEXT      — kubectl context to target (default: current-context)
 set -euo pipefail
@@ -39,7 +38,7 @@ API_URL="${API_URL:-http://host.containers.internal:8081}"
 AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"
 METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
 REGISTRY_URL="${REGISTRY_URL:-localhost:5000}"
-TAG="${TAG:-latest}"
+TAG="${TAG:?TAG must name the image tag make images pushed}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 

@@ -95,9 +95,7 @@ docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi -L   #
 
 ## 6. Reach your local control plane from the rented node
 
-The control plane normally runs locally (`make controlplane-up`, or
-`podman compose -f localdev/controlplane/docker-compose.yml start` to resume an existing stopped
-stack). The rented node
+The control plane normally runs locally (`make controlplane-up`). The rented node
 needs outbound URLs that actually reach it — use Cloudflare Quick Tunnels:
 
 ```bash
