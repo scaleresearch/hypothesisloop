@@ -61,7 +61,7 @@ rules you work under, and it outranks this briefing. Roughly, not a rigid script
        hl watch --platform-experiment {platform_experiment_id} --until 'status in running' --timeout 540
   1. Unless the description fixes it, pick your accelerator_type from the live capacity listing,
      copied verbatim and with available > 0 — a type with none queues forever and never errors.
-  2. One-time: clone {code_repo_url} and work on branch `agent-{agent_id}-{platform_experiment_id}`
+  2. One-time: clone {code_repo_url} and work on branch `{agent_id}-{platform_experiment_id}`
      (create it off current `main`, or check it out after a restart). Auth is set up, so `git push`
      just works.
      That branch is the purge-safe home for your workload code, harnesses, job specs and

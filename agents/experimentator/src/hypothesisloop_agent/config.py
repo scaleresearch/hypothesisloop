@@ -44,7 +44,7 @@ class Config:
     platform_experiment_id: str = field(default_factory=lambda: _env("PLATFORM_EXPERIMENT_ID", ""))
 
     # THE shared code repo, pre-created by the operator — every agent clones the same one and works
-    # on its own branch (agent-{agent_id}). Must be a real remote pods can clone: code_ref =
+    # on its own branch ({agent_id}-{platform_experiment_id}). Must be a real remote pods can clone: code_ref =
     # "{code_repo_url}@<sha>" is the commit a job pod checks out to run. Auth via GIT_TOKEN (see the
     # Dockerfile's git credential helper); a local git:// remote needs no token.
     code_repo_url: str = field(default_factory=lambda: _env(
