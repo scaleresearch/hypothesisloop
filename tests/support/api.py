@@ -308,22 +308,27 @@ class API:
     # ---- hypotheses ----------------------------------------------------------------------------
 
     def post_hypothesis(
-        self, pe_id: str, text: str = "", agent_id: str = "", author: str = "", links: list[dict] | None = None
+        self, pe_id: str, text: str = "", agent_id: str = "", author: str = "", links: list[dict] | None = None,
+        distinct_from: list[str] | None = None,
     ) -> requests.Response:
-        """links=None places the hypothesis on the objective root; pass [] to send none."""
+        """links=None places the hypothesis on the objective root; pass [] to send none. The default
+        text is one word per submitter, so two submitters' defaults never read alike."""
         return self.post(
             "/hypotheses",
             {
                 "agent_id": agent_id,
                 "author": author,
                 "platform_experiment_id": pe_id,
-                "text": text or f"e2e {agent_id or author}",
+                "text": text or f"e2e_{(agent_id or author).replace('-', '_')}",
                 "links": [link("builds_on", pe_id)] if links is None else links,
+                "distinct_from": distinct_from or [],
             },
         )
 
-    def register_hypothesis(self, pe_id: str, agent_id: str, text: str = "", links: list[dict] | None = None) -> dict:
-        r = self.post_hypothesis(pe_id, text, agent_id=agent_id, links=links)
+    def register_hypothesis(
+        self, pe_id: str, agent_id: str, text: str = "", links: list[dict] | None = None, distinct_from: list[str] | None = None
+    ) -> dict:
+        r = self.post_hypothesis(pe_id, text, agent_id=agent_id, links=links, distinct_from=distinct_from)
         r.raise_for_status()
         return r.json()
 

@@ -83,9 +83,10 @@ def test_tree_combination_and_cross_links(api, graph_pe, run_id):
     assert _out_of_response(root_child) == {("builds_on", pe_id)}
 
     grandchild = api.register_hypothesis(
-        pe_id, agent_a, f"longer warmup helps more {run_id}", links=[link("builds_on", root_child["id"])]
+        pe_id, agent_a, f"longer warmup helps more {run_id}", links=[link("builds_on", root_child["id"])],
+        distinct_from=[root_child["id"]],
     )
-    sibling = api.register_hypothesis(pe_id, agent_b, f"higher lr helps {run_id}")
+    sibling = api.register_hypothesis(pe_id, agent_b, f"higher lr helps {run_id}", distinct_from=[root_child["id"], grandchild["id"]])
     combined = api.register_hypothesis(
         pe_id,
         agent_b,
@@ -96,6 +97,7 @@ def test_tree_combination_and_cross_links(api, graph_pe, run_id):
             link("contradicts", grandchild["id"]),
             link("related", grandchild["id"]),
         ],
+        distinct_from=[root_child["id"], sibling["id"]],
     )
 
     combined_view = api.hypothesis(combined["id"])
@@ -145,9 +147,9 @@ def test_tree_combination_and_cross_links(api, graph_pe, run_id):
 
 def test_link_rules(api, graph_pe, experiment, run_id):
     pe_id, agent_a, agent_b = graph_pe
-    a = api.register_hypothesis(pe_id, agent_a, f"link rules a {run_id}")
-    b = api.register_hypothesis(pe_id, agent_a, f"link rules b {run_id}", links=[link("builds_on", a["id"])])
-    theirs = api.register_hypothesis(pe_id, agent_b, f"link rules theirs {run_id}")
+    a = api.register_hypothesis(pe_id, agent_a, f"dropout reduces overfitting {run_id}")
+    b = api.register_hypothesis(pe_id, agent_a, f"weight decay stabilizes long runs {run_id}", links=[link("builds_on", a["id"])])
+    theirs = api.register_hypothesis(pe_id, agent_b, f"larger batches need warmup {run_id}")
 
     r = api.post_hypothesis_link(b["id"], "related", theirs["id"], agent_id=agent_a)
     assert r.status_code == 201, r.text
@@ -190,8 +192,8 @@ platform_experiment_id: {pe_id}
 links: [{{type: builds_on, to: root}}]
 hypotheses:
   - key: base
-    text: "cli tree base {run_id}"
-  - text: "cli tree child {run_id}"
+    text: "two seeds agree within noise {run_id}"
+  - text: "the baseline reaches ninety percent {run_id}"
     links: [{{type: builds_on, to: base}}]
 """
     )
@@ -214,7 +216,7 @@ hypotheses:
 
     sibling = json.loads(
         api.hl("hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id,
-               "--text", f"cli tree sibling {run_id}", "--builds-on", "root", "--related", base["id"])
+               "--text", f"cosine schedules beat step schedules {run_id}", "--builds-on", "root", "--related", base["id"])
     )
     api.hl("hypothesis", "link", "--agent", agent_a, "--from", sibling["id"], "--type", "contradicts", "--to", child["id"])
     assert _out(api.hypothesis(sibling["id"])) == {("builds_on", pe_id), ("related", base["id"]), ("contradicts", child["id"])}
@@ -225,7 +227,7 @@ hypotheses:
     assert got["status"] == "refuted" and [c["text"] for c in got["comments"]] == [f"dead end {run_id}"]
 
     opposite = ["hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id,
-                "--text", f"cli tree opposite {run_id}", "--builds-on", base["id"]]
+                "--text", f"seeds disagree beyond noise {run_id}", "--builds-on", base["id"]]
     held = api.hl_expect(*opposite)
     assert held.returncode != 0 and "refuted_parent" in held.stderr and base["id"] in held.stderr, held.stderr
     created = json.loads(api.hl(*opposite, "--contradicts", base["id"], "--distinct-from", f"{child['id']},{sibling['id']}"))
@@ -278,8 +280,8 @@ def test_query_text_search_and_status(api, graph_pe, run_id):
 
 def test_query_value_mapping(api, graph_pe, run_id):
     pe_id, agent_a, _ = graph_pe
-    parent = api.register_hypothesis(pe_id, agent_a, f"mapping parent {run_id}")
-    child = api.register_hypothesis(pe_id, agent_a, f"mapping child {run_id}", links=[link("builds_on", parent["id"])])
+    parent = api.register_hypothesis(pe_id, agent_a, f"momentum speeds convergence {run_id}")
+    child = api.register_hypothesis(pe_id, agent_a, f"label noise caps accuracy {run_id}", links=[link("builds_on", parent["id"])])
 
     rows = api.query_rows(
         "MATCH (c:Hypothesis {id: $id})-[r:BUILDS_ON]->(p) RETURN c, r, p.id AS parent",
@@ -336,8 +338,8 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
 @pytest.mark.accelerator
 def test_job_against_a_graph_hypothesis_is_accepted(api, graph_pe, run_id):
     pe_id, agent_a, _ = graph_pe
-    parent = api.register_hypothesis(pe_id, agent_a, f"job parent {run_id}")
-    child = api.register_hypothesis(pe_id, agent_a, f"job child {run_id}", links=[link("builds_on", parent["id"])])
+    parent = api.register_hypothesis(pe_id, agent_a, f"residual connections help depth {run_id}")
+    child = api.register_hypothesis(pe_id, agent_a, f"mixed precision halves memory {run_id}", links=[link("builds_on", parent["id"])])
     code, job = api.submit_job_expect(pe_id, agent_a, hours=0.02, hyp_id=child["id"])
     assert code == 202, f"a job against a placed grandchild hypothesis was refused ({code})"
     assert api.experiment(job)["hypothesis_id"] == child["id"]
@@ -373,8 +375,8 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
     try:
         eventually("hl watch to connect", err_path.read_text, accept=lambda t: "hl watch: connected" in t, deadline=deadline)
 
-        a = api.register_hypothesis(pe_id, agent_a, f"watch a {run_id}")
-        b = api.register_hypothesis(pe_id, agent_b, f"watch b {run_id}", links=[link("builds_on", a["id"])])
+        a = api.register_hypothesis(pe_id, agent_a, f"early stopping saves compute {run_id}")
+        b = api.register_hypothesis(pe_id, agent_b, f"augmentation improves recall {run_id}", links=[link("builds_on", a["id"])])
         assert api.post_hypothesis_link(b["id"], "contradicts", a["id"], agent_id=agent_b).status_code == 201
 
         live = eventually(
