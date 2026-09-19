@@ -252,14 +252,6 @@ func (l *Loop) WithSpeculation(triedClusterTTL time.Duration) *Loop {
 	return l
 }
 
-// WithEvictionTTL overrides evictionTTL, the window a disbalance-evicted experiment's freed
-// capacity is credited as "pending" even though it hasn't yet shown up in a fresh capacity read.
-// Mainly for tests that need to observe expiry without waiting a full minute.
-func (l *Loop) WithEvictionTTL(d time.Duration) *Loop {
-	l.evictionTTL = d
-	return l
-}
-
 func (l *Loop) WithHeartbeat(d time.Duration) *Loop {
 	l.heartbeat = d
 	return l
