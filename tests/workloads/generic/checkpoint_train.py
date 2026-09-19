@@ -22,15 +22,13 @@ The step series itself is reported as `train_step`, one point per step, so a sce
 whether the series CONTINUED across the two stints (STEPS_TOTAL points in all) or RESTARTED
 (more than that, with the early steps reported twice).
 
-S3 is spoken through data_stage.py's signer rather than a second one. The signing is not
-incidental — the session token is part of the signature, so a checkpoint this file writes is
-written under the scoped session the platform handed the job, into the prefix keyed on the
-job's experiment id. That the id survives a requeue is what makes resumption need no platform
+S3 is spoken through data_stage.py's signer rather than a second one, with the job's own key,
+into the prefix keyed on the job's experiment id. That the id survives a requeue is what makes resumption need no platform
 state at all.
 
 Environment (injected by the runtime, see runtime/k8s/internal/k8sexec/job_build.go):
   HYPOTHESISLOOP_DATA_URI     s3://bucket/<pe>/<agent>/<experiment>/ — same address on both stints
-  AWS_*                       the scoped session data_stage.sign() signs every request with
+  AWS_*                       the job's own key data_stage.sign() signs every request with
   HYPOTHESISLOOP_ATTEMPT      which attempt this is; reported, never used to decide anything
 """
 

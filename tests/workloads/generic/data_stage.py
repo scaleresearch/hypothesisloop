@@ -13,18 +13,10 @@ Two modes, one file, because the pair only means anything together:
 
 S3 is spoken directly over stdlib HTTP with a hand-rolled SigV4 signer, for the same reason
 controlplane/shared/objectstore does it: the workload image is python:3.13-slim with no SDK in it
-(and no `aws`/`mc` binary either), and two request shapes do not justify one. Signing here is not
-incidental to what is under test — the session token is part of the signature, so a request this
-file sends is a request made with the scoped session the platform handed the job, not with some
-ambient credential.
+(and no `aws`/`mc` binary either), and two request shapes do not justify one. Every request is
+signed with the job's own key, the one the platform created for this job alone and the store
+scopes to its prefixes. Read mode reports, from the one client with the one key:
 
-Every S3 call is signed with AWS_SESSION_TOKEN and the read mode REFUSES TO RUN without one. That
-is what makes "a write into the parent's prefix is refused" mean the store enforced the session's
-policy: a client holding only key/secret would be refused for a different reason entirely, and
-would make the same assertion pass while proving nothing. Read mode therefore reports, from the
-one client with the one set of credentials:
-
-  session_token_present   1, or the job exits non-zero — never a silent fallback
   shared_read_status      200: this client CAN read the parent's object across prefixes
   own_prefix_write_status 200: this client CAN write, in its own prefix
   foreign_write_status    403 expected: the same client, same credentials, same endpoint, one
@@ -33,7 +25,7 @@ one client with the one set of credentials:
 Environment (injected by the runtime, see runtime/k8s/internal/k8sexec/job_build.go):
   HYPOTHESISLOOP_DATA_URI     s3://bucket/<pe>/<agent>/<experiment>/ — the only writable prefix
   HYPOTHESISLOOP_DATA_SHARED  s3://bucket/<pe>/ — readable across the platform experiment
-  AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+  AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
   HYPOTHESISLOOP_RANK_OFFSET / _GROUP_RANK   grouped job: this pod's two rank terms
   RANK / HYPOTHESISLOOP_RANK                 ungrouped job: this pod's rank outright
 """
@@ -64,7 +56,6 @@ ENDPOINT = (os.environ.get("AWS_ENDPOINT_URL") or "").rstrip("/")
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", "")
 SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-SESSION_TOKEN = os.environ.get("AWS_SESSION_TOKEN", "")
 
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
@@ -108,9 +99,7 @@ def split_s3_uri(uri: str) -> tuple[str, str]:
 
 
 def sign(method: str, path: str, query: dict[str, str], body: bytes) -> dict[str, str]:
-    """SigV4 headers for one request. The session token is signed, not merely attached: the
-    store rejects a signature that does not cover it, so a request that reaches the store at all
-    is one made under the job's scoped session."""
+    """SigV4 headers for one request, signed with the job's own key."""
     payload_hash = hashlib.sha256(body).hexdigest() if body else EMPTY_SHA256
     now = datetime.now(timezone.utc)
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
@@ -126,11 +115,6 @@ def sign(method: str, path: str, query: dict[str, str], body: bytes) -> dict[str
         "x-amz-content-sha256": payload_hash,
         "x-amz-date": amz_date,
     }
-    # The session token is signed rather than merely attached, which is what makes a refusal
-    # meaningful: the store validates the signature over it, so this request is unambiguously
-    # made under the session the platform scoped to this job.
-    if SESSION_TOKEN:
-        to_sign["x-amz-security-token"] = SESSION_TOKEN
     signed_headers = ";".join(sorted(to_sign))
     canonical_headers = "".join(f"{k}:{to_sign[k]}\n" for k in sorted(to_sign))
     canonical_request = "\n".join(
@@ -223,16 +207,6 @@ def do_write() -> None:
 
 
 def do_read() -> None:
-    # No token, no run. A client with only key/secret would be refused a cross-prefix write by
-    # the store as well — for a completely different reason — so a read stage that quietly ran
-    # without a session would report a passing foreign_write_status that means nothing.
-    if not SESSION_TOKEN:
-        raise SystemExit(
-            "AWS_SESSION_TOKEN is empty: this job did not receive a scoped session, so nothing "
-            "it observes about what it may write says anything about the scoping"
-        )
-    post_metric("session_token_present", 1.0)
-
     shared_bucket, shared_prefix = split_s3_uri(DATA_SHARED)
     if not PARENT_ID:
         raise SystemExit("STAGE_PARENT_ID is unset: there is no parent stage to read from")
@@ -259,7 +233,7 @@ def do_read() -> None:
     post_metric("checkpoint_value", float(body.decode().strip()))
 
     # The same client, the same credentials, one key away: this one is inside the prefix this
-    # job's session was scoped to, so it must succeed. If it did not, the refusal below would be
+    # job's key is scoped to, so it must succeed. If it did not, the refusal below would be
     # about a broken client rather than about the store's policy.
     own_bucket, own_prefix = split_s3_uri(DATA_URI)
     own_status, own_body = s3(

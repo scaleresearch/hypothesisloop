@@ -61,7 +61,6 @@ CHAIN_METRICS = [
     {"key": "stage_rank", "direction": "maximize"},
     {"key": "checkpoint_write_status", "direction": "maximize"},
     {"key": "checkpoint_value", "direction": "maximize"},
-    {"key": "session_token_present", "direction": "maximize"},
     {"key": "shared_read_status", "direction": "maximize"},
     {"key": "own_prefix_write_status", "direction": "maximize"},
     {"key": "foreign_write_status", "direction": "maximize"},
@@ -218,20 +217,13 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
     )
 
     # --- the write into A's prefix, and why its refusal means what it says ---
-    # Three facts have to hold before the refusal is evidence of anything. Each is reported by the
-    # same process, using one client and one set of credentials:
-    #   1. the job holds a session token at all. Without one it is not running under a scoped
-    #      session, and the store would refuse a cross-prefix write for an entirely different
-    #      reason -- the assertion would pass while proving nothing.
-    #   2. that client CAN read A's object across prefixes: the endpoint, the signature and the
-    #      credentials all work, so a later refusal is not a broken client.
-    #   3. that client CAN write -- in its own prefix. So the refusal is about WHERE, not about
+    # Two facts have to hold before the refusal is evidence of anything. Each is reported by the
+    # same process, using one client and the job's own key:
+    #   1. that client CAN read A's object across prefixes: the endpoint, the signature and the
+    #      key all work, so a later refusal is not a broken client or a missing key.
+    #   2. that client CAN write -- in its own prefix. So the refusal is about WHERE, not about
     #      whether this job may write at all.
-    # Only then does 403 on A's prefix mean the session's policy is what stopped it.
-    token = api.metric_max(job_b, "session_token_present")
-    assert token == pytest.approx(1.0, abs=0.001), (
-        "stage B did not report a session token -- every credential assertion below would be about the wrong thing"
-    )
+    # Only then does 403 on A's prefix mean the key's policy is what stopped it.
     read_status = api.metric_max(job_b, "shared_read_status")
     assert read_status == pytest.approx(200.0, abs=0.001), (
         f"cross-prefix read returned {read_status}, want 200 -- the same client should read A's object across prefixes"
