@@ -400,7 +400,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "get-platform-experiment-results", Method: "GET", Path: "/platform-experiments/{id}/results",
 		Summary: "Final standings and operator summary", Tags: []string{"platform-experiments"},
 		Description: "Per-metric standings, best-first, derived from the metrics store on every read " +
-			"(never frozen into PostgreSQL), plus the operator's narrative summary.",
+			"(never frozen into PostgreSQL), plus the operator's narrative summary. bests lists, for every " +
+			"declared metric whatever its role, each reporting agent's best raw value and the job that set it, unranked.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *PlatformExperimentResults }, error) {

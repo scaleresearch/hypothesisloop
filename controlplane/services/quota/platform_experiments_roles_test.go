@@ -205,6 +205,37 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 	}
 }
 
+// The standings rank competitors on ranking metrics. A scoreboard also shows the attribute metrics
+// and the baseline's numbers, and reads them here exactly, not off a downsampled history.
+func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
+	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 99, "c1": 50, "c2": 40})
+	defer srv.Close()
+	store := &standingsStore{competitors: []string{"c1", "c2"}}
+	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
+		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
+		{Key: "loss", Direction: "minimize", Role: domain.MetricRoleAttribute},
+	}}
+	svc := newSignupTestService(t, store)
+	svc.metricsDBURL = srv.URL
+
+	results, err := svc.Results(context.Background(), "pe-1")
+	if err != nil {
+		t.Fatalf("Results err = %v, want nil", err)
+	}
+	if len(results.Metrics) != 1 || results.Metrics[0].Metric != "score" || len(results.Metrics[0].Standings) != 2 {
+		t.Errorf("metrics = %+v, want standings of the 2 competitors on score only", results.Metrics)
+	}
+	if len(results.Bests) != 2 || results.Bests[0].Metric != "score" || results.Bests[1].Metric != "loss" {
+		t.Fatalf("bests = %+v, want score then loss", results.Bests)
+	}
+	want := []AgentBest{{"baseline", 99, "job-baseline"}, {"c1", 50, "job-c1"}, {"c2", 40, "job-c2"}}
+	for _, bests := range results.Bests {
+		if fmt.Sprint(bests.Agents) != fmt.Sprint(want) {
+			t.Errorf("bests on %s = %+v, want %+v", bests.Metric, bests.Agents, want)
+		}
+	}
+}
+
 // bestPerAgentMetricServer answers BestPerAgentOnMetric's single PromQL query with one sample per
 // agent.
 func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest.Server {

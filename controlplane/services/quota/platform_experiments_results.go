@@ -39,8 +39,23 @@ type MetricStandings struct {
 	NonRawBasisAgents []string `json:"non_raw_basis_agents,omitempty"`
 }
 
+// AgentBest is one agent's best "raw"-basis value on a metric and the job that set it.
+type AgentBest struct {
+	AgentID      string  `json:"agent_id"`
+	Best         float64 `json:"best"`
+	ExperimentID string  `json:"experiment_id,omitempty"`
+}
+
+// MetricBests is what every agent measured on one declared metric, whatever the metric's role or
+// the agent's: Standings say who ranks, this says what was reported.
+type MetricBests struct {
+	Metric            string      `json:"metric"`
+	Agents            []AgentBest `json:"agents"`
+	NonRawBasisAgents []string    `json:"non_raw_basis_agents,omitempty"`
+}
+
 // PlatformExperimentResults is what a finished run amounts to: the operator's narrative plus the
-// standings on every declared metric. The standings are computed from the metrics store on every
+// standings on every ranking metric and each agent's best on every declared one. The standings are computed from the metrics store on every
 // read rather than frozen into PostgreSQL at close — one source of truth for a number, and a
 // result stays correct if a late metric lands or a metric is re-queried over a different window.
 type PlatformExperimentResults struct {
@@ -49,6 +64,7 @@ type PlatformExperimentResults struct {
 	Status               string            `json:"status"`
 	Summary              string            `json:"summary,omitempty"`
 	Metrics              []MetricStandings `json:"metrics"`
+	Bests                []MetricBests     `json:"bests"`
 }
 
 // Results derives the standings for a platform experiment from the metrics store.
@@ -72,12 +88,23 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		Status:               string(pe.Status),
 		Summary:              pe.Summary,
 		Metrics:              make([]MetricStandings, 0, len(pe.Metrics)),
+		Bests:                make([]MetricBests, 0, len(pe.Metrics)),
 	}
 	for _, metric := range pe.Metrics {
+		best, nonRawAgents, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
+		if err != nil {
+			return nil, fmt.Errorf("results: %w", err)
+		}
+		bests := MetricBests{Metric: metric.Key, Agents: make([]AgentBest, 0, len(best)), NonRawBasisAgents: nonRawAgents}
+		for agentID, b := range best {
+			bests.Agents = append(bests.Agents, AgentBest{AgentID: agentID, Best: b.Value, ExperimentID: b.ExperimentID})
+		}
+		sort.Slice(bests.Agents, func(i, j int) bool { return bests.Agents[i].AgentID < bests.Agents[j].AgentID })
+		out.Bests = append(out.Bests, bests)
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
-		standings, nonRawAgents, err := s.standingsOnMetric(ctx, pe, metric)
+		standings, err := s.rank(ctx, pe, metric, best)
 		if err != nil {
 			return nil, err
 		}
@@ -166,21 +193,26 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 
 // standingsOnMetric ranks every agent by its best "raw"-basis value on one metric, best-first.
 // The ranking itself is metricsdb.BestPerAgentOnMetric — the same call the stage ladder cuts with,
-// so a run's final standings and its mid-run cuts can never disagree about who is ahead. This
-// function only presents it: attaches each winner's code ref, sorts, and assigns ranks.
+// so a run's final standings and its mid-run cuts can never disagree about who is ahead.
 func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) ([]AgentStanding, []string, error) {
 	best, nonRawAgents, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
 	if err != nil {
 		return nil, nil, fmt.Errorf("results: %w", err)
 	}
+	standings, err := s.rank(ctx, pe, metric, best)
+	return standings, nonRawAgents, err
+}
 
+// rank presents the competitors' bests on one metric as standings: attaches each one's job, sorts
+// and assigns ranks.
+func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest) ([]AgentStanding, error) {
 	// Only competitors are ranked. The metrics store answers for every agent that reported —
 	// which is the point, a baseline's numbers stay fully readable — so the roles are applied
 	// here rather than to the query, and every caller of this function (Results,
 	// derivedTopResults and through it the top-3 bonus, constraintIneligibleAgents) inherits it.
 	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
 	if err != nil {
-		return nil, nil, fmt.Errorf("results: %w", err)
+		return nil, fmt.Errorf("results: %w", err)
 	}
 	isCompetitor := make(map[string]bool, len(competitors))
 	for _, agentID := range competitors {
@@ -196,7 +228,7 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *
 		if b.ExperimentID != "" {
 			exp, err := s.store.GetExperiment(ctx, b.ExperimentID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("results: %s: job %s: %w", metric.Key, b.ExperimentID, err)
+				return nil, fmt.Errorf("results: %s: job %s: %w", metric.Key, b.ExperimentID, err)
 			}
 			if exp != nil {
 				st.CodeRef, st.HypothesisID, st.Env = exp.CodeRef, exp.HypothesisID, exp.Job.Env
@@ -216,5 +248,5 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *
 	for i := range standings {
 		standings[i].Rank = i + 1
 	}
-	return standings, nonRawAgents, nil
+	return standings, nil
 }

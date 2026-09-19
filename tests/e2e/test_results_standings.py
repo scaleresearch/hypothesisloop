@@ -63,6 +63,10 @@ def test_unreported_constraint_excludes_every_agent(api, experiment, run_id, dea
     ranking = next(m for m in results["metrics"] if m["metric"] == "val_accuracy")
     assert len(ranking["standings"]) == 0, "agents that never reported the declared constraint must be excluded"
 
+    bests = {b["metric"]: b["agents"] for b in results["bests"]}
+    assert sorted(a["agent_id"] for a in bests["val_accuracy"]) == sorted(agents), "what an excluded agent measured stays readable"
+    assert bests["never_emitted_budget"] == []
+
 
 def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadline):
     agents = [make_agent(api, run_id, f"results-b-{i}") for i in range(2)]
@@ -103,3 +107,8 @@ def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadl
         job = listed[s["experiment_id"]]
         assert (s["hypothesis_id"], s["env"]) == (job["hypothesis_id"], job["job"]["env"]), s
         assert job["metric"] == {"name": "val_accuracy", "best": s["best"], "basis": "raw"}, job.get("metric")
+
+    (bests,) = results["bests"]
+    assert bests["metric"] == "val_accuracy"
+    assert sorted(bests["agents"], key=lambda a: a["agent_id"]) == sorted(
+        ({k: s[k] for k in ("agent_id", "best", "experiment_id")} for s in standings), key=lambda a: a["agent_id"])
