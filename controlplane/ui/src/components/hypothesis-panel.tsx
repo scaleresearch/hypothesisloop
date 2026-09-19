@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { HypothesisGraph, HypothesisLinkType, HypothesisListItem, PlatformExperiment } from '@/types'
+import type { HypothesisEvidence } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,12 +10,14 @@ import { EmptyState } from '@/components/ui/status-message'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { PoolAuthor } from '@/components/human-idea'
 import { linkGroups } from '@/lib/hypothesis-graph'
-import { hypothesisStatusColors } from '@/lib/colors'
+import { hypothesisStatusColors, semantic } from '@/lib/colors'
+import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
 
 interface HypothesisPanelProps {
   graph: HypothesisGraph
   nodeByID: Map<string, HypothesisListItem>
+  evidence: Map<string, HypothesisEvidence>
   selected: string
   onSelect: (id: string) => void
   onAddIdea: (parentID: string) => void
@@ -45,7 +48,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   )
 }
 
-export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
+export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
   const node = nodeByID.get(selected)
   if (!node) {
     return (
@@ -61,6 +64,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
     )
   }
 
+  const { finding, best_job: bestJob } = evidence.get(node.id) ?? {}
   const out = graph.edges.filter(e => e.from === node.id).map(e => ({ type: e.type, id: e.to }))
   const incoming = graph.edges.filter(e => e.to === node.id).map(e => ({ type: e.type, id: e.from }))
 
@@ -80,6 +84,23 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
         <div className="text-muted mono" style={{ fontSize: 11 }}>
           {node.finding_count} findings · {node.comment_count} comments · built on by {node.child_count}
         </div>
+        {bestJob && (
+          <div className="mono" style={{ fontSize: 12 }}>
+            <span className="text-muted">Best job </span>
+            <Link href={`/jobs/${bestJob.id}`} className="text-link">{bestJob.metric.name} {bestJob.metric.best.toFixed(4)}</Link>
+          </div>
+        )}
+        {finding && (
+          <div className="hg-stack" style={{ gap: 4 }}>
+            <span className="uppercase-label">
+              Newest finding
+              {filedAfterVerdict(node, finding.created_at) && <span style={{ color: semantic.warning }}> · filed after the verdict</span>}
+            </span>
+            <p style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: 160, overflowY: 'auto' }}>
+              {finding.summary}
+            </p>
+          </div>
+        )}
         {linkGroups(out, incoming).map(group => (
           <div key={group.label} className="hg-stack" style={{ gap: 4 }}>
             <span className="uppercase-label">{group.label}</span>

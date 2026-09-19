@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
-import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchFindings, fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -62,6 +62,12 @@ function HypothesesPageContent() {
     { refreshInterval: 15_000 },
   )
   const search = useHypothesisSearch(peID, q)
+  const { data: findings } = useSWR(
+    peID ? ['pe-findings', peID] : null,
+    () => fetchFindings(peID),
+    { refreshInterval: 15_000 },
+  )
+  const evidence = useMemo(() => new Map((findings ?? []).map(h => [h.id, h])), [findings])
 
   const positions = useMemo(() => graph && layoutGraph(graph), [graph])
   const nodeByID = useMemo(() => new Map((graph?.nodes ?? []).map(n => [n.id, n])), [graph])
@@ -155,6 +161,7 @@ function HypothesesPageContent() {
               <HypothesisOutline
                 graph={graph}
                 rootLabel={pe.name}
+                evidence={evidence}
                 selected={selected}
                 hits={hits}
                 filters={filters}
@@ -166,6 +173,7 @@ function HypothesesPageContent() {
                 graph={graph}
                 positions={positions}
                 rootLabel={pe.name}
+                evidence={evidence}
                 focus={focus}
                 selected={selected}
                 hits={hits}
@@ -190,6 +198,7 @@ function HypothesesPageContent() {
               <HypothesisPanel
                 graph={graph}
                 nodeByID={nodeByID}
+                evidence={evidence}
                 selected={selected}
                 onSelect={setFocus}
                 onAddIdea={setAddUnder}

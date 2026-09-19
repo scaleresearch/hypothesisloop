@@ -10,24 +10,38 @@ import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare } from 'lucide-react'
 import type { HypothesisGraph, HypothesisListItem } from '@/types'
-import { hypothesisLinkStyles, hypothesisStatusColors } from '@/lib/colors'
+import type { HypothesisEvidence } from '@/lib/api'
+import { hypothesisLinkStyles, hypothesisStatusColors, semantic } from '@/lib/colors'
+import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
-/** Owner and evidence counts, shared by graph nodes and outline rows. */
-export function NodeMeta({ item }: { item: HypothesisListItem }) {
+/** Owner, evidence counts and best result, shared by graph nodes and outline rows. */
+export function NodeMeta({ item, evidence }: { item: HypothesisListItem; evidence?: HypothesisEvidence }) {
+  const newer = evidence?.finding !== undefined && filedAfterVerdict(item, evidence.finding.created_at)
   return (
     <span className="hg-meta">
       {item.source === 'human'
         ? <span className="hg-meta-human hg-meta-owner" title={`human: ${item.author}`}>{item.author}</span>
         : <span className="hg-meta-owner" title={item.agent_id}>{item.agent_id}</span>}
-      <span className="hg-count" title={`${item.finding_count} findings`}><FileText size={11} /> {item.finding_count}</span>
+      <span
+        className="hg-count"
+        style={newer ? { color: semantic.warning } : undefined}
+        title={`${item.finding_count} findings${newer ? ', the newest filed after the verdict' : ''}`}
+      >
+        <FileText size={11} /> {item.finding_count}
+      </span>
       <span className="hg-count" title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
+      {evidence?.best_job && (
+        <span className="hg-count accent" title={`Best ${evidence.best_job.metric.name} of its jobs`}>
+          {evidence.best_job.metric.best.toFixed(4)}
+        </span>
+      )}
     </span>
   )
 }
 
-type HypothesisNodeData = { item: HypothesisListItem }
+type HypothesisNodeData = { item: HypothesisListItem; evidence?: HypothesisEvidence }
 type ObjectiveNodeData = { label: string }
 
 // Kept out of node data so that selecting or filtering re-renders only the drawn nodes instead of
@@ -46,7 +60,7 @@ function HiddenHandles() {
 }
 
 const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<HypothesisNodeData>>) {
-  const { item } = data
+  const { item, evidence } = data
   const { selected, hits, dimmed } = useContext(Highlight)
   const color = hypothesisStatusColors[item.status]
   return (
@@ -59,7 +73,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       <div className="hg-node-text">{item.text}</div>
       <div className="hg-node-foot">
         <span className="hg-node-status" style={{ color }}>{item.status}</span>
-        <NodeMeta item={item} />
+        <NodeMeta item={item} evidence={evidence} />
       </div>
     </div>
   )
@@ -106,6 +120,7 @@ interface HypothesisGraphCanvasProps {
   graph: HypothesisGraph
   positions: Map<string, Position>
   rootLabel: string
+  evidence: Map<string, HypothesisEvidence>
   /** The id named in the URL, centred on whenever it changes, so the side panel opening never hides it. */
   focus: string
   selected: string
@@ -122,7 +137,7 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
   )
 }
 
-function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, onSelect }: HypothesisGraphCanvasProps) {
+function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, filters, onSelect }: HypothesisGraphCanvasProps) {
   const { setCenter, setViewport, getZoom } = useReactFlow()
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
@@ -149,9 +164,9 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       position: positions.get(item.id)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      data: { item },
+      data: { item, evidence: evidence.get(item.id) },
     })),
-  ], [graph, positions, rootLabel])
+  ], [graph, positions, rootLabel, evidence])
   const highlight = useMemo(() => ({ selected, hits, dimmed }), [selected, hits, dimmed])
 
   const edges = useMemo<Edge[]>(() => graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
