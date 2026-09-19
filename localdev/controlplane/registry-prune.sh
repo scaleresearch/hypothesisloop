@@ -21,8 +21,8 @@ for repo in $repositories; do
     # header alone gets MANIFEST_UNKNOWN back from registry:2 for those, so both media types are
     # offered and the registry picks whichever it actually stored.
     #
-    # `latest` and the git-SHA tag this repo's own build targets push always share one digest
-    # (Makefile tags both before pushing), so deleting the SHA tag as stale already removes
+    # `latest` and the TAG this repo's own build targets push always share one digest
+    # (Makefile tags both before pushing), so deleting the TAG as stale already removes
     # `latest`'s manifest too -- this tag is then legitimately gone by the time its own turn
     # comes up, not a failure, so a 404 here is skipped rather than aborting the whole run.
     http_code=$(curl -sS -o /tmp/manifest.$$ -D /tmp/headers.$$ -w '%{http_code}' \

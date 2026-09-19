@@ -1,5 +1,5 @@
 .PHONY: up down reset build test e2e-py lint check images sparse-sdpa-workload-image \
-	experimentator-base-image experimentator-image check-clean-tree registry-up registry-prune \
+	experimentator-base-image experimentator-image check-tag registry-up registry-prune \
 	helm-prepare helm-push helm-lint helm-template \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down \
@@ -15,26 +15,20 @@ REGISTRY_HOST_IP_FILE := localdev/.registry-host-ip
 
 # In production REGISTRY names a real registry the operator provisioned and every cluster
 # node already has network access to (see runtime/k8s/infra/install.sh's REGISTRY_URL) --
-# this default is dev-only. TAG is the git SHA of the tree that was actually built: content-
-# addressed, so a manifest that pins one tag can never silently start running different bytes
-# under imagePullPolicy: IfNotPresent. REGISTRY_TLS_VERIFY=false only because the dev registry
+# this default is dev-only. TAG names the tree content that was built (localdev/lib/image-tag.sh),
+# so a manifest that pins one tag can never silently start running different bytes under
+# imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
+# image reads it from make. REGISTRY_TLS_VERIFY=false only because the dev registry
 # in docker-compose.yml serves plain HTTP; a prod REGISTRY with real TLS overrides it to true.
 REGISTRY ?= localhost:5000
-GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null)
-TAG ?= $(GIT_SHA)
+ifndef TAG
+TAG := $(shell bash localdev/lib/image-tag.sh)
+endif
 export TAG
 REGISTRY_TLS_VERIFY ?= false
 
-# Refuses a dirty tree rather than tagging a build with an ambiguous `-dirty` suffix: a mutable
-# tag defeats the whole point of pinning DaemonSet/Deployment/Job manifests to a SHA, since two
-# builds from a dirty tree at different times could tag identically while differing in bytes.
-check-clean-tree:
-	@test -n "$(GIT_SHA)" || { echo "make: not a git repository -- can't compute an image TAG" >&2; exit 1; }
-	@git diff --quiet && git diff --cached --quiet || { \
-		echo "make: git tree is dirty -- commit or stash before building images (make images)." >&2; \
-		echo "  A tag built from a dirty tree can't be trusted to mean one fixed set of bytes." >&2; \
-		exit 1; \
-	}
+check-tag:
+	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
 
 # data_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
 # REPLACE-WITH-HOST-LAN-IP placeholder rather than an address, because a k3s job pod has its own
@@ -142,12 +136,10 @@ full-stop:
 full-start:
 	bash localdev/k3s-macos/start.sh
 
-# Rebuild every image from current source and push it into every place that caches one
-# (podman store, k3s server, each dev node container), then bounce the control-plane
-# containers and cluster-agent/node-agent pods so they run it. Use this after a Go change,
-# before re-running the e2e suites — faster than a manual images+import+restart chain since
-# every step polls for readiness instead of sleeping a fixed guess.
-reload:
+# Rebuild every image from current source and push it to the registry, then bounce the
+# control-plane containers and cluster-agent/node-agent pods so they run it under the new TAG.
+# Use this after a Go change, before re-running the e2e suites.
+reload: images
 	bash localdev/k3s-macos/reload.sh
 
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
@@ -172,7 +164,7 @@ tt-dev-nodes-up:
 # Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the box-a
 # k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
 # image; no more local save/import.
-tt-hardware-image: check-clean-tree
+tt-hardware-image: check-tag
 	podman build -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
 	podman tag $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
@@ -181,10 +173,8 @@ tt-hardware-image: check-clean-tree
 tt-e2e: tt-hardware-image
 	bash localdev/k3s-tenstorrent/run-e2e.sh
 
-# Counterpart to `reload` for the real Tenstorrent host: rebuild every image, import into
-# k3s's own containerd (native on Linux, no podman-machine hop), and bounce cluster-agent/
-# node-agent so they run current code.
-tt-reload:
+# Counterpart to `reload` for the real Tenstorrent host.
+tt-reload: images
 	bash localdev/k3s-tenstorrent/reload.sh
 
 # Detaches it again, returning the cluster to control-plane-only so real training work outside
@@ -218,8 +208,8 @@ tt-stop:
 tt-start:
 	bash localdev/k3s-tenstorrent/start.sh
 
-# Builds every platform image and pushes it to $(REGISTRY) under two tags: $(TAG) (the git SHA
-# that produced it -- the one every manifest pins) and latest (a mutable convenience pointer for
+# Builds every platform image and pushes it to $(REGISTRY) under two tags: $(TAG) (the tree
+# content that produced it -- the one every manifest pins) and latest (a mutable convenience pointer for
 # interactive dev, never referenced by a manifest). Every consumer (k3s nodes via
 # registries.yaml, the Helm chart's images.registry) pulls normally instead of the old
 # podman-save-pipe-ctr-import sideload, which is what left an unpinned image ID for kubelet's
@@ -230,7 +220,7 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
-images: check-clean-tree registry-up
+images: check-tag registry-up
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
@@ -262,7 +252,7 @@ experimentator-image: experimentator-base-image
 # sparse_sdpa test-utils baked in -- see agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload)
 # so every job an agent submits starts instantly with zero per-job setup. Run this once before
 # starting a sparse-sdpa platform experiment, same as experimentator-image.
-sparse-sdpa-workload-image: check-clean-tree registry-up
+sparse-sdpa-workload-image: check-tag registry-up
 	podman build -f agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload \
 		-t $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) agents/coordinator/experiments/sparse-sdpa/seed/
 	podman tag $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:latest

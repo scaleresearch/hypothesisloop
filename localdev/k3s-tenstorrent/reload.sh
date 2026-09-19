@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# Counterpart to k3s-macos/reload.sh for this host: rebuilds every image and pushes it to the
-# local registry under a fresh git-SHA tag, re-applies the node-agent/cluster-agent manifests
-# pinned to that new tag (so the pull actually happens under imagePullPolicy: IfNotPresent),
-# force-recreates the control-plane containers, and bounces the pods so they run current code.
+# Counterpart to k3s-macos/reload.sh for this host, run by `make tt-reload` once it has rebuilt
+# and pushed every image under TAG: re-installs the node-agent/cluster-agent pinned to TAG (so the
+# pull actually happens under imagePullPolicy: IfNotPresent), force-recreates the control-plane
+# containers, and bounces the pods so they run current code.
 set -euo pipefail
 
 CONTEXT_NAME="k3s-tt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
 
-echo "==> Rebuilding and pushing all images..."
-(cd "${SCRIPT_DIR}/../.." && make images)
-TAG="$(cd "${SCRIPT_DIR}/../.." && git rev-parse --short HEAD)"
+TAG="${TAG:?run make tt-reload, which builds the images and exports their TAG}"
 
 REGISTRY_HOST_IP="$(cat "${SCRIPT_DIR}/../.registry-host-ip")"
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \

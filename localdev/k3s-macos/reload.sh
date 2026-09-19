@@ -1,27 +1,17 @@
 #!/usr/bin/env bash
-# Rebuilds every image from current source and pushes it to the local registry
-# (localdev/controlplane/docker-compose.yml) under a fresh git-SHA tag. Every node -- k3s
-# server and every fake worker container -- already trusts that registry via the
-# registries.yaml install.sh/dev-nodes-up.sh wrote into it, so there is nothing left to copy by
-# hand: `kubectl delete pods` below is enough to make each pod re-pull. Then force-recreates the
-# control-plane containers and bounces the cluster-agent/node-agent pods so they actually run
-# the freshly pushed image instead of stale code.
-#
-# Use this after any Go/Dockerfile change, in place of the old manual `make images` + ad hoc
-# `podman exec ... ctr images import` + pod deletes — every wait below polls for the actual
-# condition instead of sleeping a fixed guess, so this finishes as soon as the cluster is
-# actually ready rather than after some worst-case timeout.
+# Run by `make reload` once it has rebuilt and pushed every image under TAG: re-installs the
+# node-agent/cluster-agent pinned to TAG, force-recreates the control-plane containers and
+# bounces the pods so they run the new images. Every node already pulls from the registry via
+# the registries.yaml install.sh/dev-nodes-up.sh wrote. Every wait polls for the actual condition.
 set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
 
-echo "==> Rebuilding and pushing all images..."
-(cd "${SCRIPT_DIR}/../.." && make images)
-TAG="$(cd "${SCRIPT_DIR}/../.." && git rev-parse --short HEAD)"
+TAG="${TAG:?run make reload, which builds the images and exports their TAG}"
 
-# node-agent/cluster-agent run as manifests pinned to a SHA tag (runtime/k8s/infra/install.sh's
+# node-agent/cluster-agent run as manifests pinned to a tag (runtime/k8s/infra/install.sh's
 # TAG), so a plain pod restart alone would keep pulling the OLD tag under IfNotPresent -- the
 # manifest itself must be re-applied with the new TAG for a delete+recreate to fetch anything.
 REGISTRY_HOST_IP="$(cat "${SCRIPT_DIR}/../.registry-host-ip")"
