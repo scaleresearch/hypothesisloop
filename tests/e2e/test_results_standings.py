@@ -97,3 +97,9 @@ def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadl
     job_ids = set(jobs)
     traceable = sum(1 for s in standings if s.get("experiment_id") in job_ids and s.get("code_ref"))
     assert traceable == len(standings), "every standing must name one of this run's own jobs and its code_ref"
+
+    listed = {j["id"]: j for j in api.get_json(f"/experiments?platform_experiment_id={pe_id}")}
+    for s in standings:
+        job = listed[s["experiment_id"]]
+        assert (s["hypothesis_id"], s["env"]) == (job["hypothesis_id"], job["job"]["env"]), s
+        assert job["metric"] == {"name": "val_accuracy", "best": s["best"], "basis": "raw"}, job.get("metric")

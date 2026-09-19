@@ -247,11 +247,18 @@ def test_registration_waits_until_close_hypotheses_are_told_apart(api, graph_pe,
     assert "distinct_from" in body["detail"]
     assert [n["id"] for n in api.hypothesis_graph(pe_id)["nodes"]] == [bs8["id"]], "a held-back registration created a node"
 
-    submit = ["hypothesis", "submit", "--agent", agent_b, "--platform-experiment", pe_id, "--text", reworded, "--builds-on", bs8["id"]]
+    submit = ["hypothesis", "submit", "--agent", agent_b, "--platform-experiment", pe_id, "--text", reworded, "--builds-on", "root"]
     cli_held = api.hl_expect(*submit)
     assert cli_held.returncode != 0 and bs8["id"] in cli_held.stderr, cli_held.stderr
     created = json.loads(api.hl(*submit, "--distinct-from", bs8["id"]))
-    assert _out(api.hypothesis(created["id"])) == {("builds_on", bs8["id"])}
+    assert _out(api.hypothesis(created["id"])) == {("builds_on", pe_id)}
+
+    # A refinement reads close to the parent it names: that alone holds nothing back.
+    refined = json.loads(api.hl(
+        "hypothesis", "submit", "--agent", agent_b, "--platform-experiment", pe_id, "--builds-on", bs8["id"],
+        "--text", f"batch size 4 beats batch size 8 at the same epoch budget {run_id}", "--distinct-from", created["id"],
+    ))
+    assert _out(api.hypothesis(refined["id"])) == {("builds_on", bs8["id"])}
 
 
 def test_query_text_search_and_status(api, graph_pe, run_id):
