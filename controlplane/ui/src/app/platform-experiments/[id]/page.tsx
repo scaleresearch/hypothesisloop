@@ -946,7 +946,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 STAGE {stagesStatus.current_stage} OF {stagesStatus.stages.length}
               </div>
               <span className="text-dim">
-                {Math.round(stagesStatus.progress * 100)}% through the experiment
+                {Math.round(Math.min(1, stagesStatus.progress) * 100)}% through the experiment
                 {stagesStatus.current_stage < stagesStatus.stages.length && (
                   <> — next boundary at {Math.round(stagesStatus.next_boundary_progress * 100)}%,
                     cutting {stagesStatus.stages[stagesStatus.current_stage - 1].evict_pct}% of survivors</>
