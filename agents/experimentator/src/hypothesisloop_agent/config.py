@@ -53,9 +53,9 @@ class Config:
 
     # Which specialization this agent runs: the coordinator decides it and passes it in, the agent
     # never picks its own. Every flavor competes identically — nothing here is a ranking axis — it
-    # only selects which brief the agent reads at $FLAVOR_BRIEFS/{flavor}.md
-    # (prompts/flavors/<flavor>.md), which holds the specialized approach: what kind of trial to
-    # run, what to vary, what "winning" looks like for that specialization.
+    # only selects which brief is inlined into the prompt (prompts/flavors/<flavor>.md), which
+    # holds the specialized approach: what kind of trial to run, what to vary, what "winning"
+    # looks like for that specialization.
     flavor: str = field(default_factory=lambda: _env("AGENT_FLAVOR", "generalist"))
 
     # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) the

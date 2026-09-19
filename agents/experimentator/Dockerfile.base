@@ -73,7 +73,6 @@ COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked
 
 COPY agents/experimentator/src/ src/
-ENV FLAVOR_BRIEFS=/agent/src/hypothesisloop_agent/prompts/flavors
 # No docs/ copy: the API contract is fetched live from each service's /llms.txt at runtime
 # (see api_client.PlatformClient.fetch_api_guide), not baked into the image.
 RUN mkdir -p /agent/workspace && chown -R agent:agent /agent

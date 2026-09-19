@@ -43,12 +43,13 @@ Your assignment:
   agent_id: {agent_id}
   platform_experiment_id: {platform_experiment_id}
   flavor: {flavor}
-  flavor brief: $FLAVOR_BRIEFS/{flavor}.md
   hyperparameters: {hyperparameters}
 
-Read that flavor brief before you act, and re-read it after a restart. Everything in this briefing
-applies to you; the brief is short and holds only the specialized approach your flavor takes —
-what kind of trial you run, what you vary, what to look for. Where the two differ, the brief wins.
+Your flavor brief follows. It holds only the specialized approach your flavor takes: what kind of
+trial you run, what you vary, what to look for. Where it and this briefing differ, the brief wins.
+
+{flavor_brief}
+
 hyperparameters is a JSON object handed to you at launch on top of your flavor — decide for
 yourself what each key changes about how you work.
 

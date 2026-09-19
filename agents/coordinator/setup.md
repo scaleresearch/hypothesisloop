@@ -172,7 +172,7 @@ admitted, billed, evicted and settled by identical code.
 
 What differs between agents is two independent things, both decided here and set at launch:
 
-- `AGENT_FLAVOR` picks which specialization the agent reads from
+- `AGENT_FLAVOR` picks which specialization the harness inlines into the agent's prompt from
   `agents/experimentator/src/hypothesisloop_agent/prompts/flavors/<flavor>.md` — what kind of
   trial it runs and what it varies (`generalist`, `hyperparameter-search`, `architecture-search`,
   `data-search`; add a new file for a new specialization). Decide the flavor mix before spawning

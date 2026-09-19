@@ -25,7 +25,7 @@ log = logging.getLogger("llm_agent")
 # silently-drifting copy of a contract this file cannot see.
 #
 # One briefing shared by every flavor; the specialization lives in prompts/flavors/<flavor>.md,
-# read by the agent itself at $FLAVOR_BRIEFS.
+# spliced in as {flavor_brief}.
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
@@ -80,6 +80,7 @@ def prepare() -> RunSetup:
     template = (_PROMPTS_DIR / "system_prompt.md").read_text()
     system_prompt = template.format(
         api_guide=api_guide, agent_id=cfg.agent_id, flavor=cfg.flavor,
+        flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip(),
         platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,
         hyperparameters=json.dumps(cfg.hyperparameters),
     )
