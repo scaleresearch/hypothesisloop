@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
@@ -405,7 +406,13 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			burstRunning := filterTierCluster(running, domain.CapacityBurst, cluster)
 			shortage := preemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
-			l.logger.Info("guaranteed job needs preemption",
+			// With no burst job to preempt this is a full cluster and a job waiting its turn, every
+			// tick until capacity frees: the row's not_admitted_reason says so once.
+			level := zapcore.DebugLevel
+			if len(burstRunning) > 0 {
+				level = zapcore.InfoLevel
+			}
+			l.logger.Log(level, "guaranteed job needs preemption",
 				zap.String("exp", exp.ID), zap.String("cluster", cluster),
 				zap.String("avail", footprintStr(gAvail[cluster])), zap.String("need", footprintStr(fp)),
 				zap.String("shortage", footprintStr(shortage)),
