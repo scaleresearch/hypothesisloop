@@ -205,7 +205,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if pe == nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
-		signups, _ := peh.svc.store.ListSignups(ctx, in.ID)
+		signups, err := peh.svc.store.ListSignups(ctx, in.ID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
