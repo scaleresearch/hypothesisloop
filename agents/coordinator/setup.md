@@ -87,9 +87,9 @@ silently improvise.
    (`localdev/controlplane/docker-compose.yml`'s `registry` service) and pulled normally
    (`imagePullPolicy: IfNotPresent`) — a build that never made it past `podman build` (no
    `podman push`) is invisible to every cluster node the same way a typo'd tag is. Build with
-   the per-experiment `seed/build_and_push.sh` where one exists (it pushes and renders the
+   the per-experiment `seed/build_and_push.sh` where one exists (it takes the registry from `localdev/.host-address`, pushes and renders the
    job.yaml's placeholder image ref into `job.rendered.yaml`; push that to `$CODE_REPO_URL` with
-   the rest of `seed/`), or `make <name>-workload-image` for the platform's
+   the rest of `seed/`, and run it again whenever the host address changes), or `make <name>-workload-image` for the platform's
    own images. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
    `localdev/.host-address`) from any cluster node before spawning any agents.
 5. `make git-daemon-start` (safe to re-run).
