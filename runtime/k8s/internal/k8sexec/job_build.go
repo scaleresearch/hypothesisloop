@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -268,59 +269,15 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		resources.Limits[corev1.ResourceName(name)] = q
 	}
 
-	// Durable data is desired state, not a cluster-side setting: the control plane computes the
-	// address and hands it over with the credentials, so a job's checkpoint prefix is identical
-	// whichever cluster admission placed it on. Absent means the control plane is misconfigured,
-	// and a job that silently runs without a place to save is worse than one that never starts.
-	if exp.Data == nil {
-		return nil, fmt.Errorf("workload: experiment %s has no durable-data access in desired state", exp.ID)
+	platform, err := workloadenv.Platform(exp, group, c.apiURL, func(url string) string { return url })
+	if err != nil {
+		return nil, fmt.Errorf("workload: %w", err)
 	}
-	env := []corev1.EnvVar{
-		{Name: "AWS_ACCESS_KEY_ID", Value: exp.Data.AccessKeyID},
-		{Name: "AWS_ENDPOINT_URL", Value: exp.Data.Endpoint},
-		{Name: "AWS_ENDPOINT_URL_S3", Value: exp.Data.Endpoint},
-		{Name: "AWS_REGION", Value: exp.Data.Region},
-		{Name: "AWS_SECRET_ACCESS_KEY", Value: exp.Data.SecretAccessKey},
-		{Name: "HYPOTHESISLOOP_DATA_SHARED", Value: exp.Data.Shared},
-		{Name: "HYPOTHESISLOOP_DATA_URI", Value: exp.Data.URI},
-		{Name: "HYPOTHESISLOOP_EXPERIMENT_ID", Value: exp.ID},
-		{Name: "HYPOTHESISLOOP_AGENT_ID", Value: exp.AgentID},
-		{Name: "HYPOTHESISLOOP_PROJECT_ID", Value: exp.ProjectID},
-		{Name: "HYPOTHESISLOOP_CODE_REF", Value: exp.CodeRef},
-		{Name: "HYPOTHESISLOOP_CONFIG_HASH", Value: exp.ConfigHash},
-		{Name: "HYPOTHESISLOOP_DATA_REF", Value: exp.DataRef},
-		{Name: "HYPOTHESISLOOP_API_URL", Value: c.apiURL},
-		{Name: "HYPOTHESISLOOP_ACCELERATOR_TYPE", Value: string(exp.AcceleratorType)},
-		// spec.AcceleratorCount (per node), not exp.AcceleratorCount (the job total across
-		// nodes). A pod only ever holds the per-node count, so at accelerator_count 4 /
-		// num_nodes 2 the total told every pod it had 8 devices, and anything sizing
-		// --nproc_per_node from it launched four times the processes it had hardware for.
-		// The total stays on the experiment, where billing and admission read it.
-		{Name: "HYPOTHESISLOOP_ACCELERATOR_COUNT", Value: fmt.Sprintf("%d", group.AcceleratorCount)},
-		{Name: "HYPOTHESISLOOP_DURATION_SECONDS", Value: fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
-		// Which attempt this is, 0 on the first. Always 0 for a single-pod job, whose retries are
-		// the runtime's own and never re-enter this path.
-		//
-		// This is load-bearing beyond telling the workload, and the reason is worth stating: a
-		// gang retry requeues the same experiment id, so the rebuilt Job has the same name as the
-		// terminal one still sitting in the cluster. Without the attempt in desired state the
-		// spec hash is byte-identical, the reconciler reads the FAILED Job as matching desired
-		// state, and nothing is ever recreated — the watcher then re-observes that same dead Job
-		// and spends the whole retry budget without running a single new attempt. Carrying the
-		// attempt here makes each one a genuinely different desired state, so the existing
-		// drift-repair path deletes and recreates the Job with no new mechanism.
-		{Name: "HYPOTHESISLOOP_ATTEMPT", Value: fmt.Sprintf("%d", exp.AttemptCount)},
-		{Name: "TRACEPARENT", Value: traceparentFromID(exp.ID)},
+	env := make([]corev1.EnvVar, 0, len(platform))
+	for _, v := range platform {
+		env = append(env, corev1.EnvVar{Name: v.Name, Value: v.Value})
 	}
-	// The job's shared environment, with this group's own entries layered over it: the job-level
-	// map says what is true of every node, the group's says what is true of its role.
-	merged := make(map[string]string, len(spec.Env)+len(group.Env))
-	for k, v := range spec.Env {
-		merged[k] = v
-	}
-	for k, v := range group.Env {
-		merged[k] = v
-	}
+	merged := workloadenv.Job(spec, group)
 	envNames := make([]string, 0, len(merged))
 	for name := range merged {
 		envNames = append(envNames, name)

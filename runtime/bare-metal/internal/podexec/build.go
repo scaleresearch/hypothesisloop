@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
 // containerHostAlias is the podman/docker-assigned DNS name that resolves, from inside a
@@ -197,48 +198,15 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		shmSizeBytes = shmQty.Value()
 	}
 
-	// Same two variables, same source, as the k8s runtime: durable-data addressing arrives in
-	// desired state so a job reads and writes the same prefixes wherever it was placed.
-	if exp.Data == nil {
-		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no durable-data access in desired state", exp.ID)
+	platform, err := workloadenv.Platform(exp, group, e.apiURL, containerReachable)
+	if err != nil {
+		return containerSpec{}, fmt.Errorf("podexec: %w", err)
 	}
-	env := map[string]string{
-		"AWS_ACCESS_KEY_ID":               exp.Data.AccessKeyID,
-		"AWS_ENDPOINT_URL":                containerReachable(exp.Data.Endpoint),
-		"AWS_ENDPOINT_URL_S3":             containerReachable(exp.Data.Endpoint),
-		"AWS_REGION":                      exp.Data.Region,
-		"AWS_SECRET_ACCESS_KEY":           exp.Data.SecretAccessKey,
-		"HYPOTHESISLOOP_DATA_SHARED":      exp.Data.Shared,
-		"HYPOTHESISLOOP_DATA_URI":         exp.Data.URI,
-		"HYPOTHESISLOOP_EXPERIMENT_ID":    exp.ID,
-		"HYPOTHESISLOOP_AGENT_ID":         exp.AgentID,
-		"HYPOTHESISLOOP_PROJECT_ID":       exp.ProjectID,
-		"HYPOTHESISLOOP_CODE_REF":         exp.CodeRef,
-		"HYPOTHESISLOOP_CONFIG_HASH":      exp.ConfigHash,
-		"HYPOTHESISLOOP_DATA_REF":         exp.DataRef,
-		"HYPOTHESISLOOP_API_URL":          containerReachable(e.apiURL),
-		"HYPOTHESISLOOP_ACCELERATOR_TYPE": string(exp.AcceleratorType),
-		// Per node (spec), never the job total (exp) — see the same variable in the k8s
-		// runtime's job_build.go for the failure this caused. Single-node-only today makes the
-		// two equal in practice; taking it from the spec is what keeps that an accident rather
-		// than something the next multi-node change has to remember.
-		"HYPOTHESISLOOP_ACCELERATOR_COUNT": fmt.Sprintf("%d", group.AcceleratorCount),
-		"HYPOTHESISLOOP_DURATION_SECONDS":  fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600)),
-		// Always 0 here: this runtime is single-node, and a single-pod job's retries never reach
-		// the control-plane gang retry that increments it. Injected anyway so both runtimes hand a
-		// workload the same vocabulary, and so it lands in this executor's desired-spec hash for
-		// the same delete-and-recreate reason the k8s runtime documents.
-		"HYPOTHESISLOOP_ATTEMPT": fmt.Sprintf("%d", exp.AttemptCount),
-		"TRACEPARENT":            traceparentFromID(exp.ID),
-	}
-	// Job-level environment first, then the group's own over it — the same layering the k8s
-	// runtime applies. An ungrouped job's synthetic group carries the job-level map, so this is
-	// spec.Env exactly as before.
-	for k, v := range spec.Env {
-		env[k] = v
-	}
-	for k, v := range group.Env {
-		env[k] = v
+	env := workloadenv.Job(spec, group)
+	for _, v := range platform {
+		if _, set := env[v.Name]; !set {
+			env[v.Name] = v.Value
+		}
 	}
 
 	// The group's own process when it names one, the job's shared entrypoint otherwise — same

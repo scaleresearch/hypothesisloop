@@ -84,8 +84,3 @@ func sanitizeName(s string) string {
 	}
 	return b.String()
 }
-
-func traceparentFromID(id string) string {
-	h := sha256.Sum256([]byte(id))
-	return fmt.Sprintf("00-%x-%x-01", h[:16], h[16:24])
-}

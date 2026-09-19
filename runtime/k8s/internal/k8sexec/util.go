@@ -99,8 +99,3 @@ func loadRestConfig(kubeconfigPath, context string) (*rest.Config, error) {
 	}
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides).ClientConfig()
 }
-
-func traceparentFromID(id string) string {
-	h := sha256.Sum256([]byte(id))
-	return fmt.Sprintf("00-%x-%x-01", h[:16], h[16:24])
-}
