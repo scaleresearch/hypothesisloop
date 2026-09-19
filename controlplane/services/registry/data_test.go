@@ -51,3 +51,27 @@ func TestListDataReturnsEmptyForAJobThatWroteNothing(t *testing.T) {
 		t.Fatalf("ListData returned %d objects, want 0", len(objects))
 	}
 }
+
+func TestListDataGivesEachObjectItsS3URI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>pe-1/agent/job-1/ckpt.pt</Key><Size>7</Size></Contents></ListBucketResult>`))
+	}))
+	defer srv.Close()
+	client, err := objectstore.New(srv.URL, "us-east-1", "hl-data", "key", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{
+		store:     emptyBucketStore{exp: &domain.Experiment{ID: "job-1", AgentID: "agent", PlatformExperimentID: "pe-1"}},
+		dataStore: client,
+	}
+
+	objects, err := svc.ListData(context.Background(), "job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "s3://hl-data/pe-1/agent/job-1/ckpt.pt"; len(objects) != 1 || objects[0].URI != want {
+		t.Fatalf("objects = %+v, want one with uri %s", objects, want)
+	}
+}

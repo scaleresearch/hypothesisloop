@@ -23,6 +23,7 @@ import (
 // Object is one stored object under a prefix.
 type Object struct {
 	Key          string    `json:"key"`
+	URI          string    `json:"uri" doc:"s3:// address of the object, as a job's own S3 client resolves it."`
 	SizeBytes    int64     `json:"size_bytes"`
 	LastModified time.Time `json:"last_modified"`
 }
@@ -130,7 +131,7 @@ func (c *Client) listPage(ctx context.Context, prefix, token string) ([]Object, 
 	}
 	objects := make([]Object, 0, len(result.Contents))
 	for _, item := range result.Contents {
-		objects = append(objects, Object{Key: item.Key, SizeBytes: item.Size, LastModified: item.LastModified})
+		objects = append(objects, Object{Key: item.Key, URI: c.URI(item.Key), SizeBytes: item.Size, LastModified: item.LastModified})
 	}
 	next := ""
 	if result.IsTruncated {
