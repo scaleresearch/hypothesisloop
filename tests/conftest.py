@@ -83,8 +83,13 @@ def preflight() -> None:
 
 
 @pytest.fixture(scope="session")
-def api(preflight: None) -> API:
-    return API(API_URL, _build_hl_binary())
+def api(preflight: None):
+    """Closes at session end every platform experiment created through it, which catches the ones
+    a test created directly and failed before closing."""
+    client = API(API_URL, _build_hl_binary())
+    yield client
+    for pe_id in client.created_platform_experiments:
+        client.close_platform_experiment(pe_id)
 
 
 @pytest.fixture

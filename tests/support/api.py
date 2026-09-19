@@ -118,6 +118,8 @@ class API:
         self.base_url = base_url.rstrip("/")
         self.hl_bin = hl_bin
         self.session = requests.Session()
+        # Every platform experiment created through hl, for conftest's per-test close.
+        self.created_platform_experiments: list[str] = []
 
     # ---- hl CLI -----------------------------------------------------------------------------
 
@@ -133,6 +135,8 @@ class API:
         )
         if proc.returncode != 0:
             raise HLError(cmd, proc.returncode, (proc.stdout or "") + (proc.stderr or ""))
+        if args[:2] == ("platform-experiments", "create"):
+            self.created_platform_experiments.append(json.loads(proc.stdout)["id"])
         return proc.stdout
 
     def hl_env(self) -> dict[str, str]:
