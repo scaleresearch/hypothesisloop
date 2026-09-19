@@ -15,17 +15,8 @@ import (
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
 func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
-	// 1. Structural validation.
-	if err := ValidateExperiment(exp, s.credits); err != nil {
-		return err
-	}
-
-	// Default capacity tier so quota debit and DB insert agree.
-	if exp.CapacityTier == "" {
-		exp.CapacityTier = domain.CapacityGuaranteed
-	}
-
-	// 2. Validate platform experiment reference.
+	// 1. The platform experiment and its state, before the spec: a job sent before the start is
+	// told so at once, whatever else is wrong with it.
 	if exp.PlatformExperimentID == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "platform_experiment_id is required"}
 	}
@@ -52,6 +43,17 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Message: fmt.Sprintf("platform experiment %s is over; jobs are accepted only while it is running", pe.ID),
 		}
 	}
+
+	// 2. Structural validation.
+	if err := ValidateExperiment(exp, s.credits); err != nil {
+		return err
+	}
+
+	// Default capacity tier so quota debit and DB insert agree.
+	if exp.CapacityTier == "" {
+		exp.CapacityTier = domain.CapacityGuaranteed
+	}
+
 	signedUp, err := s.store.IsSignedUp(ctx, exp.PlatformExperimentID, exp.AgentID)
 	if err != nil {
 		return fmt.Errorf("scheduler: check signup: %w", err)

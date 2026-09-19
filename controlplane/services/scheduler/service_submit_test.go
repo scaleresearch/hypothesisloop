@@ -197,9 +197,14 @@ func (openStore) GetPlatformExperiment(_ context.Context, id string) (*domain.Pl
 func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
 	s := &Service{store: openStore{}, hypotheses: humanHypothesis("pe-1")}
 
-	var admission *AdmissionError
-	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
-		t.Fatalf("Submit to an open platform experiment: got = %v, want a message saying it has not started", err)
+	// An incomplete spec too: the start is what the agent must wait for, before any field.
+	incomplete := humanIdeaSubmission()
+	incomplete.Theory = ""
+	for _, exp := range []*domain.Experiment{humanIdeaSubmission(), incomplete} {
+		var admission *AdmissionError
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
+			t.Fatalf("Submit to an open platform experiment: got = %v, want a message saying it has not started", err)
+		}
 	}
 }
 
