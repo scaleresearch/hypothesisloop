@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -66,7 +65,7 @@ func (c *JobWorkloadClient) createJob(ctx context.Context, exp *domain.Experimen
 	_, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		// Job names are deterministic per experiment ID, so re-admission after preemption
-		// collides with the prior Job object if WaitForJobDeletion's background-propagation
+		// collides with the prior Job object if its background-propagation
 		// delete hasn't removed it yet — observed live as exp stuck SUBMITTED for 3+min
 		// because this branch treated the stale, still-terminating object as a safe no-op.
 		// A DeletionTimestamp means it's the old, dying object: surface an error so submitJob
@@ -742,29 +741,6 @@ func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID str
 	return stderrors.Join(append(jobErrs, signalErr, listErr, svcErr, claimErr)...)
 }
 
-func (c *JobWorkloadClient) WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		// Every group has to be gone, not just the first: recreating the experiment while one
-		// group's Job still exists collides on that name and wedges the new generation.
-		jobs, err := c.managedJobsFor(ctx, experimentID)
-		if err == nil && len(jobs) == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("workload: timed out waiting for job %s deletion", jobName(experimentID))
-}
-
-func (c *JobWorkloadClient) PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error) {
-	status, err := c.PollJobStatus(ctx, experimentID)
-	return status.Phase, err
-}
-
 // PollJobStatus reports the phase of the experiment's whole workload, a UID that changes
 // whenever any part of it is recreated ("" if nothing exists), and the generation it was created
 // for. One List instead of a Get per
@@ -953,11 +929,6 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 	}
 	return acceleratorType, node, consistent, nil
 }
-
-// acceleratorTypeFromNodeLabels reverse-maps a node's labels back to the configured accelerator
-// type — the inverse of acceleratorNodeAffinity's type-to-label translation. Returns "" if no
-// configured type matches.
-func (c *JobWorkloadClient) ProvisionAgent(_ context.Context, _ string) error { return nil }
 
 // SupportsMultiNodeJobs is true: Kubernetes runs a job's nodes as an Indexed Job (or one per
 // group), with a headless Service giving every node a resolvable name. Reported to the control

@@ -7,7 +7,6 @@ package agentexec
 
 import (
 	"context"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -31,7 +30,6 @@ type Executor interface {
 	// the runtime is told which workloads get their window, and knows how long that window is
 	// only because it compiled the job's own declaration into the workload when it created it.
 	DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error
-	WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error
 
 	ListManagedJobs(ctx context.Context) ([]string, error)
 	// ListManagedJobsForStatus is the set a status push reports on, which is not the set
@@ -60,7 +58,6 @@ type Executor interface {
 	// counted toward the current attempt's scheduled_nodes.
 	PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error)
 
-	PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error)
 	// PollJobStatus is one coherent read of a managed workload. Phase, identity and generation
 	// come from the same look at the same object on purpose: read separately, a
 	// delete-and-recreate landing between them pairs the old generation's phase with the new
@@ -101,8 +98,6 @@ type Executor interface {
 	// is what the control plane keys per-cluster settings and failover history on — it survives a
 	// rename. Sent on every reconcile and status push. See autoscaler.md's "Cluster identity".
 	GetClusterID(ctx context.Context) (string, error)
-
-	ProvisionAgent(ctx context.Context, agentID string) error
 }
 
 // JobStatus is what one poll of a managed workload observed.

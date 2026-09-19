@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"time"
 
 	"github.com/moby/moby/client"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -58,7 +57,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 
 // DeleteWorkload stops (but does not remove) exp's container — the container that remains
 // stopped IS the "gone" record until pruneTerminal removes it (different-backend.md §4.6).
-// A naive remove-on-delete would mean WaitForJobDeletion / status reporting could never observe
+// A naive remove-on-delete would mean status reporting could never observe
 // a "gone" phase for a container that no longer exists to be listed.
 func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error {
 	containers, err := e.listManagedContainers(ctx)
@@ -93,28 +92,6 @@ func (e *Executor) stopGrace(labels map[string]string, grantCheckpointWindow boo
 		grace = w
 	}
 	return grace
-}
-
-// WaitForJobDeletion blocks until experimentID's container reports JobPhaseGone (stopped and no
-// longer desired) or timeout elapses — the workload.Backend contract's confirmation hook for
-// preemption/eviction.
-func (e *Executor) WaitForJobDeletion(ctx context.Context, experimentID string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		status, err := e.PollJobStatus(ctx, experimentID)
-		if err != nil {
-			return err
-		}
-		if phase := status.Phase; phase == workload.JobPhaseGone || phase == workload.JobPhaseSucceeded || phase == workload.JobPhaseFailed {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("podexec: timed out waiting for %s to stop", experimentID)
 }
 
 // ListManagedJobs returns the experiment IDs of every container this executor manages that is
@@ -194,12 +171,6 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 		return c.Labels[LabelDesiredSpecHash] == desired.Labels[LabelDesiredSpecHash], nil
 	}
 	return false, nil
-}
-
-// PollJobPhase reports experimentID's current lifecycle phase.
-func (e *Executor) PollJobPhase(ctx context.Context, experimentID string) (workload.JobPhase, error) {
-	status, err := e.PollJobStatus(ctx, experimentID)
-	return status.Phase, err
 }
 
 // PollJobStatus inspects experimentID's container state. The container ID itself stands

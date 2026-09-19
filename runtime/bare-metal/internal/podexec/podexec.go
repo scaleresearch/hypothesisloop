@@ -152,8 +152,6 @@ func (e *Executor) Engine() string { return e.engineName }
 // k8sexec.JobWorkloadClient.
 func (e *Executor) SetupCluster(_ context.Context) error { return nil }
 
-func (e *Executor) ProvisionAgent(_ context.Context, _ string) error { return nil }
-
 // GetClusterID returns the host's /etc/machine-id: set once at OS install, stable for the
 // machine's life, the bare-metal equivalent of the k8s runtime's kube-system namespace UID. See
 // autoscaler.md's "Cluster identity".
