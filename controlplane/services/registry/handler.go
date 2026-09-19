@@ -115,7 +115,7 @@ var queryDescription = "Read-only Cypher against the hypothesis graph (Memgraph)
 	"Nodes come back as their properties plus _labels, relationships as properties plus _type, _from and _to, paths as lists. " +
 	"Nothing a query writes persists (writes go through POST /hypotheses and POST /hypotheses/{id}/links). " +
 	"LOAD CSV, periodic commits and procedures other than text_search.* are refused. Limits: " +
-	fmt.Sprintf("%s per query, %d rows (truncated=true when cut). ", graphdb.QueryTimeout, graphdb.QueryRowCap) +
+	fmt.Sprintf("%s and %d MB of memory per query, %d rows (truncated=true when cut). ", graphdb.QueryTimeout, graphdb.QueryMemoryLimitMB, graphdb.QueryRowCap) +
 	"A Cypher error comes back as 400 with Memgraph's message. Findings, comments and jobs are not in the graph: " +
 	"GET /hypotheses/{id} returns them."
 

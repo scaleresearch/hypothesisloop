@@ -593,6 +593,23 @@ func TestAQueryIsStoppedAtItsTimeout(t *testing.T) {
 	}
 }
 
+func TestAQueryIsStoppedAtItsMemoryLimit(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	_, err := s.Query(ctx, `UNWIND range(1, 100000000) AS i WITH collect(i) AS c RETURN size(c)`, nil)
+	if !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "Memory limit exceeded") {
+		t.Fatalf("large query: got = %v, want %v naming the memory limit", err, ErrInvalidQuery)
+	}
+	for _, q := range []string{"RETURN 1;", "RETURN 1 // trailing comment"} {
+		if _, err := s.Query(ctx, q, nil); err != nil {
+			t.Errorf("Query(%q): got = %v, want nil", q, err)
+		}
+	}
+	if _, err := s.Query(ctx, "RETURN 1 QUERY MEMORY UNLIMITED", nil); !errors.Is(err, ErrInvalidQuery) {
+		t.Errorf("query lifting the limit: got = %v, want %v", err, ErrInvalidQuery)
+	}
+}
+
 // Replay is what turns a dropped /watch connection into a delay rather than a gap. Hypothesis
 // events are derived from the graph's own timestamps, and links given at registration ride on
 // hypothesis.new, so replay must not invent a hypothesis.link for them.

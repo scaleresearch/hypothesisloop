@@ -17,6 +17,8 @@ const (
 	QueryTimeout = 5 * time.Second
 	// QueryRowCap is the most rows one read query returns; more sets QueryResult.Truncated.
 	QueryRowCap = 200
+	// QueryMemoryLimitMB is how much memory one read query may allocate on the server.
+	QueryMemoryLimitMB = 256
 )
 
 // QueryProcedures are the only procedures a read query may CALL. Every other procedure is refused
@@ -60,7 +62,7 @@ func (s *Store) Query(ctx context.Context, cypher string, params map[string]any)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	result, err := tx.Run(ctx, cypher, jsonParams(params))
+	result, err := tx.Run(ctx, withMemoryLimit(cypher), jsonParams(params))
 	if err != nil {
 		return nil, queryError(err)
 	}
@@ -94,6 +96,14 @@ func (s *Store) Query(ctx context.Context, cypher string, params map[string]any)
 	return out, nil
 }
 
+// withMemoryLimit appends Memgraph's QUERY MEMORY LIMIT clause on a new line, so a trailing line
+// comment cannot swallow it. Trailing semicolons are dropped because Memgraph refuses the clause
+// after one. A query that sets its own limit is refused for having two.
+func withMemoryLimit(cypher string) string {
+	cypher = strings.TrimRight(cypher, "; \t\r\n")
+	return fmt.Sprintf("%s\nQUERY MEMORY LIMIT %d MB", cypher, QueryMemoryLimitMB)
+}
+
 func queryError(err error) error {
 	var ne *neo4j.Neo4jError
 	if errors.As(err, &ne) && (strings.Contains(ne.Code, "ClientError") || strings.Contains(ne.Code, "TransientError")) {
@@ -103,6 +113,9 @@ func queryError(err error) error {
 		}
 		if strings.Contains(msg, "timeout") {
 			msg = fmt.Sprintf("%s (queries are limited to %s)", msg, QueryTimeout)
+		}
+		if strings.Contains(msg, "Memory limit exceeded") {
+			msg = fmt.Sprintf("%s (queries are limited to %d MB)", msg, QueryMemoryLimitMB)
 		}
 		return fmt.Errorf("%w: %s", ErrInvalidQuery, msg)
 	}
