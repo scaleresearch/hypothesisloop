@@ -106,25 +106,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
-	// 3a. Summary gate: block submissions when the agent has COMPLETED experiments without
-	// a summary. Only successful runs are gated — FAILED/EVICTED are excluded because
-	// documenting infrastructure failures adds little signal and unfairly penalises noisy
-	// environments. Agents unblock themselves via POST /experiments/{id}/summary.
-	unsummarized, err := s.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
-	if err != nil {
-		return fmt.Errorf("scheduler: check unsummarized terminal: %w", err)
-	}
-	if unsummarized {
-		return &AdmissionError{
-			Reason: ReasonSummaryRequired,
-			Message: fmt.Sprintf(
-				"agent has completed jobs without summaries: list them with "+
-					"`hl job list --needs-summary --agent %s` and file each one with "+
-					"`hl job summary ID --text ...` before submitting new jobs",
-				exp.AgentID),
-		}
-	}
-
 	// 2b. Validate hypothesis reference: every experiment must test a specific,
 	// previously-registered hypothesis (POST /hypotheses) rather than restating
 	// free text ad hoc. Denormalize its text onto the experiment for cheap reads.

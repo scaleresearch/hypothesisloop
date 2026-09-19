@@ -398,3 +398,38 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 		})
 	}
 }
+
+type summaryOwedStore struct{ noRunningListStore }
+
+func (s *summaryOwedStore) HasUnsummarizedCompleted(_ context.Context, agentID, _ string) (bool, error) {
+	return agentID == "agent-owing", nil
+}
+
+func TestTickHoldsEveryQueuedJobOfAnAgentThatOwesASummary(t *testing.T) {
+	job := func(id, agent string) *domain.Experiment {
+		return &domain.Experiment{
+			ID: id, AgentID: agent, PlatformExperimentID: "pe-1", CapacityTier: domain.CapacityGuaranteed,
+			AcceleratorType: h100, AcceleratorCount: 1,
+			Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
+		}
+	}
+	store := &summaryOwedStore{noRunningListStore{t: t, queued: []*domain.Experiment{
+		job("exp-1", "agent-owing"), job("exp-2", "agent-owing"), job("exp-3", "agent-clear"),
+	}}}
+	l := NewLoop(store, tickQuota{}, shareWorkload{}, testGraceLimits, zap.NewNop())
+	l.evictor = noopEvictor{}
+	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.reprioritizer = noopReprioritizer{}
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatalf("tick() = %v, want nil", err)
+	}
+	for _, id := range []string{"exp-1", "exp-2"} {
+		if got := store.notAdmitted[id]; got != domain.NotAdmittedSummaryGate {
+			t.Errorf("not_admitted_reason of %s = %q, want %q", id, got, domain.NotAdmittedSummaryGate)
+		}
+	}
+	if got := store.notAdmitted["exp-3"]; got == domain.NotAdmittedSummaryGate {
+		t.Errorf("exp-3 of an agent owing nothing was held by the summary gate")
+	}
+}

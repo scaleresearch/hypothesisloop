@@ -25,8 +25,8 @@ def mixed_pe(api, experiment, run_id):
 
 
 def _finish_if_completed(api, job_id, deadline):
-    """Files a finding once a job completes -- otherwise the next submission for the same
-    agent+PE gets 403 summary_required (see tests/lib/api.sh's needs_summary comment)."""
+    """Files a finding once a job completes -- otherwise the next job of the same agent+PE
+    is held in the queue with not_admitted_reason summary_gate."""
     final = eventually(
         f"{job_id} to reach a terminal status",
         lambda: api.experiment(job_id),

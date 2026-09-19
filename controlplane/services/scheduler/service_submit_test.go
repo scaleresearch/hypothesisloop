@@ -85,9 +85,6 @@ func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 }
 func (poolOnlyStore) IsSignedUp(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
-func (poolOnlyStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
-	return false, nil
-}
 func (poolOnlyStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
 	return &domain.Agent{ID: id, Kind: domain.AgentKindAgent}, nil
 }
@@ -165,26 +162,6 @@ func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t
 	}
 	if admission.Reason != ReasonMalformed {
 		t.Errorf("reason: got = %v, want %v", admission.Reason, ReasonMalformed)
-	}
-}
-
-type unsummarizedStore struct{ poolOnlyStore }
-
-func (unsummarizedStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
-	return true, nil
-}
-
-func TestSummaryGateNamesTheHlCommandsThatClearIt(t *testing.T) {
-	s := &Service{store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
-
-	var admission *AdmissionError
-	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != ReasonSummaryRequired {
-		t.Fatalf("Submit with unsummarized jobs: got = %v, want %s", err, ReasonSummaryRequired)
-	}
-	for _, want := range []string{"hl job list --needs-summary --agent agent-1", "hl job summary"} {
-		if !strings.Contains(admission.Message, want) {
-			t.Errorf("message %q does not name %q", admission.Message, want)
-		}
 	}
 }
 

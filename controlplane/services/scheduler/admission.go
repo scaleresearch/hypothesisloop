@@ -26,7 +26,6 @@ const (
 	ReasonInsufficientCredits = "insufficient_credits"
 	ReasonDuplicate           = "duplicate"
 	ReasonMalformed           = "malformed"
-	ReasonSummaryRequired     = "summary_required"
 	ReasonRateLimited         = "rate_limited"
 	ReasonJobTooLong          = "job_too_long"
 	ReasonDataQuotaExceeded   = "data_quota_exceeded"

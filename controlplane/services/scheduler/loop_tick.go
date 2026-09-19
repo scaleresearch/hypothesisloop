@@ -172,8 +172,6 @@ func (l *Loop) tick(ctx context.Context) error {
 	}
 
 	// 3a. Enforce the summary gate: skip agents with COMPLETED experiments missing a summary.
-	// The gate also runs at submission time, but a batch submitted before any run completes is
-	// already QUEUED, so re-check here to pause the rest until summaries are written.
 	// 3b. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
 	// was running must not slip through after the ladder tightened. Held, not rejected — a later
 	// stage may lift the cap, and then it admits normally.
@@ -223,24 +221,21 @@ func (l *Loop) tick(ctx context.Context) error {
 			continue
 		}
 		key := exp.AgentID + "/" + exp.PlatformExperimentID
-		if blocked, seen := summaryBlocked[key]; seen {
-			if !blocked {
-				filtered = append(filtered, exp)
+		blocked, seen := summaryBlocked[key]
+		if !seen {
+			blocked, err = l.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
+			if err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
+				continue
 			}
-			continue
+			summaryBlocked[key] = blocked
 		}
-		blocked, err := l.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
-		if err != nil {
-			l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
-			continue
-		}
-		summaryBlocked[key] = blocked
 		if !blocked {
 			filtered = append(filtered, exp)
-		} else {
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedSummaryGate); err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark summary gate: %w", err))
-			}
+			continue
+		}
+		if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedSummaryGate); err != nil {
+			l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark summary gate: %w", err))
 		}
 	}
 	queued = filtered

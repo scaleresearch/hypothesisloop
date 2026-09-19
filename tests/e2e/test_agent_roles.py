@@ -135,19 +135,17 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     for job in comp_jobs:
         api.file_finding(job)
 
-    # The summary gate applies to the baseline exactly like a competitor: its next submission is
-    # refused until it files the finding for its completed job.
-    blocked_code, _ = api.submit_job_expect(pe_id, baseline, hours=JOB_HOURS)
-    assert blocked_code == 403, (
-        f"the baseline's submission answered {blocked_code}, want 403 -- the reference run needs "
-        "a finding as much as a treatment does"
+    # The summary gate applies to the baseline exactly like a competitor: its next job is held in
+    # the queue while it owes the finding for its completed job.
+    held_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS)
+    eventually(
+        f"the baseline's {held_job} to be held by the summary gate -- the reference run needs a finding as much as a treatment does",
+        lambda: api.experiment(held_job),
+        accept=lambda e: e["status"] == "QUEUED" and e.get("not_admitted_reason") == "summary_gate",
+        deadline=deadline,
     )
+    api.cancel_job(held_job)
     api.file_finding(baseline_job)
-    allowed_code, allowed_job = api.submit_job_expect(pe_id, baseline, hours=JOB_HOURS)
-    assert allowed_code < 400, (
-        f"the baseline's submission still answered {allowed_code} after filing its finding -- the gate never opens"
-    )
-    api.cancel_job(allowed_job)
 
     baseline_best = api.metric_max(baseline_job, "val_accuracy")
     reviewer_best = api.metric_max(reviewer_job, "val_accuracy")

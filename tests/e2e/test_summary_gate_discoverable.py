@@ -1,11 +1,12 @@
 """The summary gate must be answerable, not just enforceable. Ported 1:1 from
 tests/scenarios/summary-gate-discoverable.sh.
 
-An agent may not submit into a platform experiment while it still has a finished job there with no
-write-up filed. That rule is enforced at admission, but a rule an agent cannot inspect is a dead
-end -- so the same set the gate reads is listable: GET /experiments?needs_summary=true. This
-checks the two halves agree -- the job that blocks submission is exactly the job the filter
-returns, and clearing it clears both.
+An agent's queued jobs are not admitted while it still has a finished job in the platform
+experiment with no write-up filed. Submission itself is accepted: a job that completed during the
+agent's turn is unknown to it until the turn ends, so a refusal would hit every submit of a batch.
+A rule an agent cannot inspect is a dead end -- so the same set the gate reads is listable:
+GET /experiments?needs_summary=true. This checks the two halves agree -- the job that holds the
+queue is exactly the job the filter returns, and clearing it clears both.
 
 API-only, one accelerator, parallel-safe: own agent and platform experiment.
 
@@ -46,8 +47,14 @@ def test_summary_gate_matches_needs_summary_listing(api, experiment, run_id, dea
         deadline=deadline,
     )
 
-    blocked_code, _ = api.submit_job_expect(pe_id, agent, hours=0.01)
-    assert blocked_code == 403, "a further submission must be refused while the write-up is owed"
+    held_code, held = api.submit_job_expect(pe_id, agent, hours=0.01)
+    assert held_code < 400, f"a further submission answered {held_code}; it must be accepted and held in the queue"
+    eventually(
+        f"{held} to be held by the summary gate",
+        lambda: api.experiment(held),
+        accept=lambda e: e["status"] == "QUEUED" and e.get("not_admitted_reason") == "summary_gate",
+        deadline=deadline,
+    )
 
     api.file_finding(job)
     eventually(
@@ -57,5 +64,9 @@ def test_summary_gate_matches_needs_summary_listing(api, experiment, run_id, dea
         deadline=deadline,
     )
 
-    after_code, _ = api.submit_job_expect(pe_id, agent, hours=0.01)
-    assert after_code < 400, "submission must be accepted again once nothing is owed"
+    eventually(
+        f"{held} to be admitted once nothing is owed",
+        lambda: api.experiment(held),
+        accept=lambda e: e["status"] != "QUEUED",
+        deadline=deadline,
+    )

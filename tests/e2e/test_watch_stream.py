@@ -223,8 +223,8 @@ def test_watch_before_submit_sees_ordered_sequence_and_until_exits_on_terminal(a
     )
     assert final["status"] == "COMPLETED", f"job ended as {final['status']}; the terminal-state assertions below describe a completed run"
     completed_at = time.monotonic()
-    # Required after any job waited to COMPLETED: only a COMPLETED job gates the agent's next
-    # submission on a filed summary.
+    # Required after any job waited to COMPLETED: a COMPLETED job without a filed summary
+    # holds the agent's queued jobs.
     api.file_finding(job)
 
     rc = await_exit("hl watch --until to exit on the terminal event", all_watcher, deadline)
