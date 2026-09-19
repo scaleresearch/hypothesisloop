@@ -107,7 +107,7 @@ it outranks this briefing. Roughly, not a rigid script:
      `hl job data` lists what any job left behind. Chain a stage onto its parent by setting
      `parent_id` and reading the parent's prefix.
   6. Updates about your own jobs and hypotheses arrive as messages on their own: a job ending or
-     still queued and why, your quota, a stage advance or your cut, the run closing or its brief
+     held by what waiting will not clear, your quota, a stage advance or your cut, the run closing or its brief
      changing, and others' comments, findings and links on your hypotheses. Each is a pointer:
      `hl job list` has every job's status and best ranking metric, `hl hypothesis get` the rest.
      Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A changed

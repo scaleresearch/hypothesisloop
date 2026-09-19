@@ -97,6 +97,19 @@ const (
 	TerminationRequeued
 )
 
+// QueueReasonClearsByWaiting reports whether a not_admitted_reason describes a job that only
+// waits its turn: for the scheduler's first look, an owed summary, free capacity or a scale-up.
+// Every other reason stays until its agent changes the job.
+func QueueReasonClearsByWaiting(reason string) bool {
+	code, _, _ := strings.Cut(reason, ":")
+	switch code {
+	case NotAdmittedAwaitingAdmission, NotAdmittedSummaryGate, NotAdmittedCapacityUnavailable, NotAdmittedOutranked,
+		NotAdmittedWaitingForScaleUp, NotAdmittedNoScalableCapacity, NotAdmittedConcurrencyCap:
+		return true
+	}
+	return false
+}
+
 // EvictionReason classifies why a job was terminated early.
 type EvictionReason string
 

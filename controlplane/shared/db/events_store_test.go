@@ -720,15 +720,17 @@ func TestTheAdvertisedDefaultFlagIsTheSetTheServerWouldApply(t *testing.T) {
 	}
 }
 
-// An agent scope keeps what the agent must act on: its own jobs' outcomes and queue reasons, its
-// allocation and cut. A rival's are private state and would wake it for nothing, and a job moving
-// through QUEUED, SUBMITTED or RUNNING asks nothing of it.
+// An agent scope keeps what the agent must act on: its own jobs' outcomes, the queue reasons that
+// waiting will not clear, its allocation and cut. A rival's are private state and would wake it
+// for nothing, and a job moving through QUEUED, SUBMITTED or RUNNING, or waiting in the queue for
+// capacity, asks nothing of it.
 func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *testing.T) {
 	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
 	admitted := []Event{
 		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"},
 		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-a"},
 		{Kind: EventAgentCut, Value: "1", AgentID: "agent-a"},
 		{Kind: EventStageBoundary, Value: "1", Detail: "advanced"},
@@ -742,7 +744,10 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 		{Kind: EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", AgentID: "agent-b"},
+		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"},
+		{Kind: EventExperimentBlocked, Value: "capacity_unavailable: short {accelerator:nvidia.com/gpu.product=nvidia-l40=1}", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"},
 		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
 		{Kind: EventAgentCut, Value: "1", AgentID: "agent-b"},
 		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"},

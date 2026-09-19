@@ -534,7 +534,7 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 			"Omit `since` (or pass 0) and you get the current snapshot of everything your subscription admits before " +
 			"going live.\n\n" +
 			"`agent` scopes the stream to that agent's own resources, as `agent_scope` below says per kind: the terminal " +
-			"status and queue reason of its jobs, its quota and cut, ladder advances, the run's status and brief, and " +
+			"status of its jobs and a queue reason that waiting will not clear, its quota and cut, ladder advances, the run's status and brief, and " +
 			"other people's comments, findings and links on hypotheses it registered. Its own actions are not echoed back. " +
 			"Without `agent` you get the whole platform experiment.\n\n" +
 			"Omit `kinds` and you get every kind marked `default` below; only `metric.point` is left out, the " +

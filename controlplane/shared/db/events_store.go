@@ -104,7 +104,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED",
 		Description: "Your job moved. detail carries the eviction reason when there is one; the queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
-		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent."},
+		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
 		Description: "A grant, a donation or a stage move landed. What it is made of comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
@@ -214,6 +214,8 @@ func agentScope(kind string) string {
 	switch {
 	case kind == EventExperimentStatus:
 		return "terminal statuses of your own jobs"
+	case kind == EventExperimentBlocked:
+		return "your own jobs, and only a reason that waiting will not clear"
 	case isAgentOwned(kind):
 		return "your own"
 	case kind == EventHypothesisNew:
@@ -232,8 +234,9 @@ func agentScope(kind string) string {
 // receiving before the connection broke.
 //
 // An agent filter scopes the stream to what that agent has to act on, so it never needs to poll
-// its own resources: its jobs' terminal statuses and queue reasons, its allocation and cut, ladder
-// advances, the run's status and brief, and other people's activity on hypotheses it registered.
+// its own resources: its jobs' terminal statuses and the queue reasons waiting will not clear,
+// its allocation and cut, ladder advances, the run's status and brief, and other people's
+// activity on hypotheses it registered. A job waiting its turn for capacity is no news.
 // Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
 // by EventsStore.Concerns; Matches only drops the agent's own echo. Without an agent the stream is
 // the whole platform experiment.
@@ -251,9 +254,12 @@ func (f EventFilter) Matches(e Event) bool {
 		return true
 	}
 	switch {
+	case e.Kind == EventExperimentStatus:
+		return e.AgentID == f.AgentID && domain.ExperimentStatus(e.Value).IsTerminal()
+	case e.Kind == EventExperimentBlocked:
+		return e.AgentID == f.AgentID && !domain.QueueReasonClearsByWaiting(e.Value)
 	case isAgentOwned(e.Kind):
-		return e.AgentID == f.AgentID &&
-			(e.Kind != EventExperimentStatus || domain.ExperimentStatus(e.Value).IsTerminal())
+		return e.AgentID == f.AgentID
 	case isHypothesisActivity(e.Kind):
 		return e.AgentID != f.AgentID
 	case e.Kind == EventStageBoundary:
