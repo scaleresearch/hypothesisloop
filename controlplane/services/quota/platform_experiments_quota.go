@@ -122,9 +122,8 @@ func (e *concurrencyCapError) ConcurrencyCapExceeded() bool { return true }
 // possible: concurrent submissions observe a strict before-or-after ordering.
 // AdmitExperiment reports what the transaction decided: whether the desired-state row was
 // inserted, or the id was already QUEUED and this is a legal re-submission the caller should
-// answer by refreshing priority alone. createDataKey runs only for an inserted row, inside the
-// transaction (see db.AdmitExperimentTx).
-func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error) {
+// answer by refreshing priority alone.
+func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) (db.AdmitDecision, error) {
 	decision, reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
 		pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
@@ -138,7 +137,7 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 			return nil, err
 		}
 		return aq, nil
-	}, rateLimit, createDataKey)
+	}, rateLimit)
 	if err != nil {
 		return decision, err
 	}

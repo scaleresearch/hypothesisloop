@@ -85,8 +85,8 @@ services:
       timeout: 3s
       retries: 30
 
-  # Silo, the maintained MinIO fork: the S3 server plus the MinIO admin API that shared/objectstore
-  # creates each job's key with (a service account with an inline policy). MinIO's own images are gone.
+  # Silo, the maintained MinIO fork: the S3 server plus the MinIO-style STS AssumeRole with an inline
+  # session policy that shared/objectstore mints per-job credentials with. MinIO's own images are gone.
   minio:
     image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     restart: unless-stopped

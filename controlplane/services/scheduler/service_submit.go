@@ -217,17 +217,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		MaxPerHour: s.credits.MaxSubmissionsPerHour,
 		Window:     submissionRateLimitWindow,
 	}
-	// The job's one permanent store key. It is drawn here and written with the row, and the store
-	// is asked to create it only once the transaction has decided to insert: a store outage then
-	// refuses this submission alone and never reaches the cluster reconcile answer.
-	dataKey, err := objectstore.NewDataKey()
-	if err != nil {
-		return fmt.Errorf("scheduler: %w", err)
-	}
-	exp.DataKey = dataKey
-	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit, func(ctx context.Context) error {
-		return s.dataStore.CreateDataKey(ctx, dataKey, exp.PlatformExperimentID, exp.AgentID, exp.ID)
-	})
+	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit)
 	if err != nil {
 		var insufficient interface{ InsufficientQuota() bool }
 		if !errors.As(err, &insufficient) {

@@ -282,6 +282,7 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, dataStore,
+		time.Duration(pcfg.DataStore.SessionDurationSeconds)*time.Second,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second, logger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "")
@@ -292,7 +293,7 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 }
 
 // openGraph connects to the hypothesis graph, makes sure its schema exists, and moves any
-// hypotheses still in the retired Postgres table into it (see db.LegacyHypotheses).
+// hypotheses still in the retired Postgres table into it (see db.MoveLegacyHypotheses).
 func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, error) {
 	graph, err := graphdb.Open(ctx, url)
 	if err != nil {
@@ -302,12 +303,9 @@ func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, 
 		graph.Close(ctx) //nolint:errcheck
 		return nil, err
 	}
-	legacy, found, err := db.LegacyHypotheses(ctx, pool)
-	if err == nil && found {
-		if err = graph.ImportLegacy(ctx, legacy); err == nil {
-			err = db.DropLegacyHypotheses(ctx, pool)
-		}
-	}
+	err = db.MoveLegacyHypotheses(ctx, pool, func(rows []*domain.Hypothesis) error {
+		return graph.ImportLegacy(ctx, rows)
+	})
 	if err != nil {
 		graph.Close(ctx) //nolint:errcheck
 		return nil, fmt.Errorf("move hypotheses from postgres to the graph: %w", err)

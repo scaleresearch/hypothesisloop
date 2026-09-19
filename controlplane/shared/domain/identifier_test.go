@@ -3,7 +3,7 @@ package domain
 import "testing"
 
 // The characters this rejects are not cosmetic. An id reaches two places that interpret it as a
-// pattern rather than a name: Kubernetes object names, and the object-store key policy that
+// pattern rather than a name: Kubernetes object names, and the object-store session policy that
 // decides what a job may write. IAM expands '*' and '?' anywhere in a policy value, so an agent
 // registered as "agent-*" would hold credentials able to write into every other agent's prefix.
 func TestValidateIdentifierRejectsCharactersThatWidenAnAccessPolicy(t *testing.T) {

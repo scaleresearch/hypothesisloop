@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// PolicyStatement is one statement of an IAM policy. Exported so the policy a job is
+// PolicyStatement is one statement of an IAM session policy. Exported so the policy a job is
 // actually granted can be asserted on directly, rather than inferred from a live store's
 // behaviour after the fact.
 type PolicyStatement struct {
@@ -51,7 +51,7 @@ func matchesAny(patterns []string, value string) bool {
 	return false
 }
 
-// JobPolicy is the grant one job runs under: write confined to its own prefix, read spanning
+// SessionPolicy is the grant one job runs under: write confined to its own prefix, read spanning
 // the platform experiment it belongs to. This is what makes "any agent can load the checkpoint
 // behind any claim, and no agent can overwrite another's evidence" a property of the store rather
 // than a convention jobs are asked to observe — a job holds credentials that cannot write
@@ -66,7 +66,7 @@ func matchesAny(patterns []string, value string) bool {
 // such an id (domain.ValidateIdentifier), and this is the second lock on the same door: this
 // function decides what a job may touch, so it must not be reachable with input that changes the
 // meaning of what it emits, whatever a future caller does upstream.
-func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Policy, error) {
+func SessionPolicy(bucket, platformExperimentID, agentID, experimentID string) (Policy, error) {
 	for _, part := range []struct{ kind, value string }{
 		{"bucket", bucket},
 		{"platform_experiment_id", platformExperimentID},
@@ -75,11 +75,11 @@ func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Poli
 	} {
 		if strings.ContainsAny(part.value, "*?") {
 			return Policy{}, fmt.Errorf(
-				"objectstore: refusing to build a job policy from %s %q: IAM reads '*' and '?' as wildcards, so this would widen what the job may reach",
+				"objectstore: refusing to build a session policy from %s %q: IAM reads '*' and '?' as wildcards, so this would widen what the job may reach",
 				part.kind, part.value)
 		}
 		if part.value == "" {
-			return Policy{}, fmt.Errorf("objectstore: job policy needs a non-empty %s", part.kind)
+			return Policy{}, fmt.Errorf("objectstore: session policy needs a non-empty %s", part.kind)
 		}
 	}
 	bucketARN := "arn:aws:s3:::" + bucket
@@ -113,11 +113,11 @@ func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Poli
 	}, nil
 }
 
-// JSON renders the policy as the compact document the store takes as a key's inline policy.
+// JSON renders the policy as the compact document STS takes as its session policy.
 func (p Policy) JSON() (string, error) {
 	buf, err := json.Marshal(p)
 	if err != nil {
-		return "", fmt.Errorf("objectstore: encode job policy: %w", err)
+		return "", fmt.Errorf("objectstore: encode session policy: %w", err)
 	}
 	return string(buf), nil
 }

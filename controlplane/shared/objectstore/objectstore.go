@@ -1,7 +1,7 @@
 // Package objectstore is the only place the durable-data object store is queried from. It speaks
 // S3's ListObjectsV2 over net/http with a hand-rolled SigV4 signer rather than pulling in an SDK:
-// the control plane never moves a byte of job data — it lists and measures prefixes and creates
-// one key per job — and a vendored SDK is a large dependency for two request shapes.
+// the control plane never moves a byte of job data — it only lists and measures prefixes — and a
+// vendored AWS SDK is a large dependency for two request shapes.
 package objectstore
 
 import (
@@ -108,7 +108,7 @@ func (c *Client) listPage(ctx context.Context, prefix, token string) ([]Object, 
 	if token != "" {
 		query["continuation-token"] = token
 	}
-	req, err := c.signedRequest(ctx, http.MethodGet, "/"+c.Bucket, query, nil)
+	req, err := c.signedRequest(ctx, http.MethodGet, "s3", "/"+c.Bucket, query, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -141,8 +141,10 @@ func (c *Client) listPage(ctx context.Context, prefix, token string) ([]Object, 
 
 const emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-// signedRequest signs one request with SigV4 in the s3 scope, which the admin API shares.
-func (c *Client) signedRequest(ctx context.Context, method, path string, query map[string]string, body []byte) (*http.Request, error) {
+// signedRequest signs one request with SigV4. service selects the signing scope: "s3" for bucket
+// operations, "sts" for AssumeRole — the two share an endpoint but not a signing scope, and
+// signing an STS call as s3 fails with a signature mismatch that says nothing about why.
+func (c *Client) signedRequest(ctx context.Context, method, service, path string, query map[string]string, body []byte) (*http.Request, error) {
 	canonicalQuery := encodeCanonicalQuery(query)
 	url := c.Endpoint + path
 	if canonicalQuery != "" {
@@ -153,28 +155,32 @@ func (c *Client) signedRequest(ctx context.Context, method, path string, query m
 		return nil, fmt.Errorf("objectstore: build request: %w", err)
 	}
 	payloadHash := emptyPayloadSHA256
+	signedHeaders := "host;x-amz-content-sha256;x-amz-date"
+	canonicalHeaders := ""
 	if len(body) > 0 {
 		payloadHash = sha256Hex(string(body))
+		req.Header.Set("Content-Type", formContentType)
+		signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date"
+		canonicalHeaders = "content-type:" + formContentType + "\n"
 	}
-	const signedHeaders = "host;x-amz-content-sha256;x-amz-date"
 	now := time.Now().UTC()
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")
 	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 	req.Header.Set("X-Amz-Date", amzDate)
-	canonicalHeaders := "host:" + req.URL.Host + "\nx-amz-content-sha256:" + payloadHash + "\nx-amz-date:" + amzDate + "\n"
+	canonicalHeaders += "host:" + req.URL.Host + "\nx-amz-content-sha256:" + payloadHash + "\nx-amz-date:" + amzDate + "\n"
 
 	canonicalRequest := strings.Join([]string{
 		method, path, canonicalQuery, canonicalHeaders, signedHeaders, payloadHash,
 	}, "\n")
-	scope := dateStamp + "/" + c.Region + "/s3/aws4_request"
+	scope := dateStamp + "/" + c.Region + "/" + service + "/aws4_request"
 	stringToSign := strings.Join([]string{
 		"AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonicalRequest),
 	}, "\n")
 
 	key := hmacSHA256([]byte("AWS4"+c.SecretAccessKey), dateStamp)
 	key = hmacSHA256(key, c.Region)
-	key = hmacSHA256(key, "s3")
+	key = hmacSHA256(key, service)
 	key = hmacSHA256(key, "aws4_request")
 	signature := hex.EncodeToString(hmacSHA256(key, stringToSign))
 

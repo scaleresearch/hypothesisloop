@@ -11,7 +11,7 @@ import (
 // It exists because these ids are not just database keys. They are pasted verbatim into names and
 // patterns that other systems interpret — Kubernetes object names, and object-store prefixes that
 // become IAM Resource and StringLike patterns. IAM treats '*' and '?' as wildcards ANYWHERE in a
-// pattern, so an agent that registered as "agent-*" would be handed a key policy whose write
+// pattern, so an agent that registered as "agent-*" would be handed a session policy whose write
 // resource read "<pe>/agent-*/<job>/*" and could write into every other agent's prefix. Rejecting
 // the character at the door is the only place that costs nothing; every layer below has to
 // assume its input is already safe.

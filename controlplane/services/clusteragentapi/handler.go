@@ -19,6 +19,7 @@ package clusteragentapi
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -55,9 +56,13 @@ type Handler struct {
 	connectedWithin time.Duration
 	// metricsDBURL is where live per-cluster accelerator capacity is written.
 	metricsDBURL string
-	// dataStore supplies the durable-data addressing attached to every desired workload on its
-	// way out. Only the address is read from it; the reconcile pass never calls the store.
+	// dataStore supplies the durable-data addressing and credentials attached to every desired
+	// workload on its way out. This is the only surface that hands credentials to a runtime.
 	dataStore *objectstore.Client
+	// dataSessionDuration is how long a minted session stays valid. A job outliving its session
+	// loses write access mid-run, so this is sized against the longest job the ladder allows,
+	// not against the reconcile cadence.
+	dataSessionDuration time.Duration
 	// maxCheckpointGrace is how far back a reconcile pass looks for workloads that have just
 	// left the desired set. It is the configured ceiling on a checkpoint window, which is the
 	// longest a granted window can possibly still be running: past it, the grant has expired on
@@ -67,26 +72,42 @@ type Handler struct {
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, logger *zap.Logger) *Handler {
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, dataSessionDuration time.Duration, maxCheckpointGrace time.Duration, logger *zap.Logger) *Handler {
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL,
-		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace, logger: logger}
+		dataStore: dataStore, dataSessionDuration: dataSessionDuration,
+		maxCheckpointGrace: maxCheckpointGrace, logger: logger}
 }
 
-// attachDataAccess hands each workload its durable-data address, derived from the experiment's
-// own identity (platform experiment, agent, job), and the job's permanent key stored with it. The
-// store already limits that key to writing the job's own prefix and reading its platform
-// experiment's, so no agent can overwrite another's evidence whatever code it runs.
-func (h *Handler) attachDataAccess(exps []*domain.Experiment) {
+// attachDataAccess computes each workload's durable-data address from the experiment's own
+// identity — platform experiment, agent, job — and mints credentials scoped to it. It is derived
+// on the way out and never stored: three columns already say where the bytes belong, and a
+// session is worth less than the time it takes to write it down.
+//
+// The credentials are a fresh STS session per job per pass, restricted by objectstore.SessionPolicy
+// to writing its own prefix and reading its platform experiment's. That is what makes "no agent
+// can overwrite another's evidence" a property of the store rather than a convention: a job
+// physically holds no key that can write anywhere else.
+func (h *Handler) attachDataAccess(ctx context.Context, exps []*domain.Experiment) error {
 	for _, exp := range exps {
+		policy, err := objectstore.SessionPolicy(h.dataStore.Bucket, exp.PlatformExperimentID, exp.AgentID, exp.ID)
+		if err != nil {
+			return fmt.Errorf("durable-data credentials for %s: %w", exp.ID, err)
+		}
+		creds, err := h.dataStore.AssumeRole(ctx, policy, h.dataSessionDuration)
+		if err != nil {
+			return fmt.Errorf("durable-data credentials for %s: %w", exp.ID, err)
+		}
 		exp.Data = &domain.DataAccess{
 			URI:             h.dataStore.URI(objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID)),
 			Shared:          h.dataStore.URI(objectstore.PlatformExperimentPrefix(exp.PlatformExperimentID)),
 			Endpoint:        h.dataStore.Endpoint,
 			Region:          h.dataStore.Region,
-			AccessKeyID:     exp.DataKey.AccessKeyID,
-			SecretAccessKey: exp.DataKey.SecretAccessKey,
+			AccessKeyID:     creds.AccessKeyID,
+			SecretAccessKey: creds.SecretAccessKey,
+			SessionToken:    creds.SessionToken,
 		}
 	}
+	return nil
 }
 
 // RegisterHuma registers the cluster-agent-facing operations on doc. Paths are relative to
@@ -279,7 +300,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		resp := &struct {
 			Body reconcileBody
 		}{}
-		h.attachDataAccess(exps)
+		// A workload without usable credentials is not returned at all: the pass fails and the
+		// cluster-agent retries in a couple of seconds, leaving every running job untouched.
+		// Returning it anyway would start a job that cannot save what it produces.
+		if err := h.attachDataAccess(ctx, exps); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		resp.Body.Experiments = exps
 		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
 		return resp, nil

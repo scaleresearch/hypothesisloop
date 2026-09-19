@@ -67,12 +67,9 @@ type Experiment struct {
 	// never persisted to PostgreSQL (metrics only in the metrics store, important.md #3). Nil
 	// when nothing has been reported yet.
 	PhaseDetail *PhaseDetail `json:"phase_detail,omitempty"`
-	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
-	// Nil on every other read of an experiment.
+	// Data is the job's durable-data addressing and credentials, computed on the way out to a
+	// runtime and never stored. Nil on every other read of an experiment.
 	Data *DataAccess `json:"data,omitempty"`
-	// DataKey is the job's permanent object-store key, created at submission and stored with
-	// the row. Never serialized: only Data carries it, and only to the runtime.
-	DataKey DataKey `json:"-"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.

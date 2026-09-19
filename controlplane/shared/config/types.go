@@ -171,10 +171,8 @@ type ServicesConfig struct {
 }
 
 // DataStoreConfig addresses the S3-compatible object store jobs write checkpoints and datasets
-// to. The control plane creates one key per job, hands out the address and that key, and never
-// sits in the data path: beyond the keys it lists prefixes and measures them, nothing more. The
-// configured key creates the job keys, so it must be allowed to create service accounts (the
-// store's root user does). Expiring a closed platform
+// to. The control plane hands out the address and the credentials and never sits in the data
+// path: it lists prefixes and measures them, nothing more. Expiring a closed platform
 // experiment's prefix is a lifecycle rule configured on the bucket itself, not a sweeper here.
 type DataStoreConfig struct {
 	Endpoint        string `yaml:"endpoint"`
@@ -187,6 +185,11 @@ type DataStoreConfig struct {
 	// mid-write: that would need a gateway in the data path, and a job killed as it saves loses
 	// the run it was about to preserve. 0 means unlimited.
 	MaxBytesPerAgent int64 `yaml:"max_bytes_per_agent"`
+	// SessionDurationSeconds is how long a job's scoped credentials stay valid. A job outliving
+	// its session loses write access mid-run and cannot save what it produced, so this must
+	// comfortably exceed the longest job the stage ladder allows — it is not a security dial to
+	// turn down. Bounded by what the store accepts (objectstore.STSMinDuration/STSMaxDuration).
+	SessionDurationSeconds int `yaml:"session_duration_seconds"`
 }
 
 // Config is the top-level parsed config from hypothesisloop.yaml.

@@ -6,10 +6,12 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
 // Load reads the YAML file at path and returns a validated Config.
@@ -97,6 +99,11 @@ func (c *Config) build() error {
 	}
 	if c.DataStore.MaxBytesPerAgent < 0 {
 		return fmt.Errorf("data_store max_bytes_per_agent must not be negative (0 means unlimited)")
+	}
+	sessionDuration := time.Duration(c.DataStore.SessionDurationSeconds) * time.Second
+	if sessionDuration < objectstore.STSMinDuration || sessionDuration > objectstore.STSMaxDuration {
+		return fmt.Errorf("data_store session_duration_seconds must be between %d and %d",
+			int(objectstore.STSMinDuration.Seconds()), int(objectstore.STSMaxDuration.Seconds()))
 	}
 	// A job pod resolves this endpoint from inside its own network namespace, which is not the
 	// control plane's. A loopback address works from every container that shares the host's

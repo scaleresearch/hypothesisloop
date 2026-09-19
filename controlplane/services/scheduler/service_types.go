@@ -60,7 +60,7 @@ type QuotaService interface {
 	// GetAgentQuota looks up (agentID, platformExpID)'s quota row — used by computePriority to
 	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
-	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error)
+	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit) (db.AdmitDecision, error)
 	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
 }
 
@@ -119,10 +119,10 @@ type Service struct {
 	settler      QuotaSettler
 	metricsDBURL string
 	logger       *zap.Logger
-	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
-	// durable-data ceiling: how much one agent already holds in this platform experiment is asked
-	// of the store at admission and nowhere else. Not enforced mid-write — that needs a gateway in
-	// the data path, and a job killed as it saves loses the run it was about to preserve.
+	// dataStore and maxDataBytesPerAgent are the durable-data ceiling: how much one agent
+	// already holds in this platform experiment is asked of the store at admission and nowhere
+	// else. Not enforced mid-write — that needs a gateway in the data path, and a job killed as
+	// it saves loses the run it was about to preserve.
 	dataStore            *objectstore.Client
 	maxDataBytesPerAgent int64
 }
@@ -165,8 +165,8 @@ func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 	return s
 }
 
-// WithDataStore wires the store job keys are created in and the durable-data ceiling. A ceiling
-// of 0 is unlimited, like every other per-job cap, and then the store is never measured.
+// WithDataStore wires the durable-data ceiling. A ceiling of 0 is unlimited, like every other
+// per-job cap, and then the store is never asked.
 func (s *Service) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *Service {
 	s.dataStore = client
 	s.maxDataBytesPerAgent = maxBytesPerAgent

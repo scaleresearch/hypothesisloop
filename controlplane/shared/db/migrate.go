@@ -62,43 +62,54 @@ func ApplySchema(ctx context.Context, pool *Pool) error {
 	return nil
 }
 
-// LegacyHypotheses returns every row of the Postgres hypotheses table, which predates the graph
-// store, or found=false once that table has been dropped. Part of the one-time move of hypotheses
-// into the graph: the caller copies these rows there and then calls DropLegacyHypotheses.
-func LegacyHypotheses(ctx context.Context, pool *Pool) (rows []*domain.Hypothesis, found bool, err error) {
-	if err := pool.pool.QueryRow(ctx, `SELECT to_regclass('hypotheses') IS NOT NULL`).Scan(&found); err != nil {
-		return nil, false, fmt.Errorf("db.LegacyHypotheses: %w", err)
+// legacyMoveLockKey serialises MoveLegacyHypotheses across control-service replicas.
+const legacyMoveLockKey = 8125_2027
+
+// MoveLegacyHypotheses moves the rows of the Postgres hypotheses table, which predates the graph
+// store, into the graph with importRows, then backfills platform_experiment_id on findings and
+// comments from it and drops the table (its triggers and every foreign key pointing at it go with
+// it), its trigger functions and its enum. All of it runs in one transaction holding an advisory
+// lock, so a second replica starting at the same time waits and then finds the table gone, and a
+// crash part way leaves the table for the next start. importRows must be idempotent: after such a
+// crash it sees rows it already imported. Without the table it does nothing.
+func MoveLegacyHypotheses(ctx context.Context, pool *Pool, importRows func([]*domain.Hypothesis) error) error {
+	tx, err := pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("db.MoveLegacyHypotheses: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", legacyMoveLockKey); err != nil {
+		return fmt.Errorf("db.MoveLegacyHypotheses: lock: %w", err)
+	}
+	var found bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('hypotheses') IS NOT NULL`).Scan(&found); err != nil {
+		return fmt.Errorf("db.MoveLegacyHypotheses: %w", err)
 	}
 	if !found {
-		return nil, false, nil
+		return nil
 	}
-	r, err := pool.pool.Query(ctx, `SELECT id, COALESCE(agent_id, ''), source, author, platform_experiment_id, text,
+	r, err := tx.Query(ctx, `SELECT id, COALESCE(agent_id, ''), source, author, platform_experiment_id, text,
        status::text, created_at, status_changed_at FROM hypotheses ORDER BY created_at`)
 	if err != nil {
-		return nil, false, fmt.Errorf("db.LegacyHypotheses: %w", err)
+		return fmt.Errorf("db.MoveLegacyHypotheses: %w", err)
 	}
-	defer r.Close()
+	var rows []*domain.Hypothesis
 	for r.Next() {
 		h := &domain.Hypothesis{}
 		if err := r.Scan(&h.ID, &h.AgentID, &h.Source, &h.Author, &h.PlatformExperimentID, &h.Text,
 			&h.Status, &h.CreatedAt, &h.StatusChangedAt); err != nil {
-			return nil, false, fmt.Errorf("db.LegacyHypotheses: scan: %w", err)
+			r.Close()
+			return fmt.Errorf("db.MoveLegacyHypotheses: scan: %w", err)
 		}
 		rows = append(rows, h)
 	}
-	return rows, true, r.Err()
-}
-
-// DropLegacyHypotheses finishes the move of hypotheses into the graph store: it backfills
-// platform_experiment_id on findings and comments from the old table, then drops the table (its
-// triggers and every foreign key pointing at it go with it), its trigger functions and its enum.
-// Call it only after LegacyHypotheses' rows are safely in the graph.
-func DropLegacyHypotheses(ctx context.Context, pool *Pool) error {
-	tx, err := pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("db.DropLegacyHypotheses: begin: %w", err)
+	r.Close()
+	if err := r.Err(); err != nil {
+		return fmt.Errorf("db.MoveLegacyHypotheses: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := importRows(rows); err != nil {
+		return fmt.Errorf("db.MoveLegacyHypotheses: import: %w", err)
+	}
 	for _, q := range []string{
 		`UPDATE hypothesis_findings f SET platform_experiment_id = h.platform_experiment_id
 FROM hypotheses h WHERE h.id = f.hypothesis_id AND f.platform_experiment_id IS NULL`,
@@ -111,11 +122,11 @@ FROM hypotheses h WHERE h.id = c.hypothesis_id AND c.platform_experiment_id IS N
 		`DROP TYPE IF EXISTS hypothesis_status`,
 	} {
 		if _, err := tx.Exec(ctx, q); err != nil {
-			return fmt.Errorf("db.DropLegacyHypotheses: %s: %w", q, err)
+			return fmt.Errorf("db.MoveLegacyHypotheses: %s: %w", q, err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("db.DropLegacyHypotheses: commit: %w", err)
+		return fmt.Errorf("db.MoveLegacyHypotheses: commit: %w", err)
 	}
 	return nil
 }

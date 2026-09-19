@@ -54,7 +54,6 @@ const experimentColumns = `
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
 	quota_settled_at, attempt_count, infra_requeue_count, tried_clusters,
-	data_access_key_id, data_secret_access_key,
 	created_at, updated_at
 `
 
@@ -89,7 +88,6 @@ INSERT INTO experiments (
 	estimated_duration_hours, estimated_cost_acch,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, not_admitted_reason,
-	data_access_key_id, data_secret_access_key,
 	created_at, updated_at
 ) VALUES (
 	$1, $2, $3, $4, $5, $6,
@@ -99,8 +97,7 @@ INSERT INTO experiments (
 	$17, $18,
 	$19, $20, $21, $22,
 	$23, NULLIF($24, ''),
-	$25, $26,
-	$27, $28
+	$25, $26
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -120,7 +117,6 @@ INSERT INTO experiments (
 		exp.EstimatedDurationHours, exp.EstimatedCostAccH,
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
 		exp.CreatedAt, exp.NotAdmittedReason,
-		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey,
 		exp.CreatedAt, exp.UpdatedAt,
 	)
 	if err != nil {

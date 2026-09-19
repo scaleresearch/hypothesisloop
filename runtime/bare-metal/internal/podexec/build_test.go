@@ -122,7 +122,7 @@ func testDataAccess() *domain.DataAccess {
 	return &domain.DataAccess{
 		URI: "s3://hl-data/pe-1/agent/exp-1/", Shared: "s3://hl-data/pe-1/",
 		Endpoint: "http://store.invalid:9000", Region: "us-east-1",
-		AccessKeyID: "key", SecretAccessKey: "secret",
+		AccessKeyID: "key", SecretAccessKey: "secret", SessionToken: "session-token",
 	}
 }
 
@@ -161,36 +161,46 @@ func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.
 	if got := cs.Env["AWS_SECRET_ACCESS_KEY"]; got != exp.Data.SecretAccessKey {
 		t.Fatalf("AWS_SECRET_ACCESS_KEY = %q, want %q — an address the job has no credentials for is not an address", got, exp.Data.SecretAccessKey)
 	}
-	if got := cs.Env["AWS_ACCESS_KEY_ID"]; got != exp.Data.AccessKeyID {
-		t.Fatalf("AWS_ACCESS_KEY_ID = %q, want %q — the job's own key, straight from desired state", got, exp.Data.AccessKeyID)
-	}
-	if _, ok := cs.Env["AWS_SESSION_TOKEN"]; ok {
-		t.Fatal("AWS_SESSION_TOKEN is set: a permanent key has no session, and S3 clients reject a key paired with a stray token")
+	if got := cs.Env["AWS_SESSION_TOKEN"]; got != exp.Data.SessionToken {
+		t.Fatalf("AWS_SESSION_TOKEN = %q, want %q — without the session token the scoped credentials are unusable", got, exp.Data.SessionToken)
 	}
 }
 
-// A job's key is permanent and stored with it, so it is desired state like the prefix.
-func TestHashContainerSpecDetectsDurableDataKeyDrift(t *testing.T) {
+// Same reason as the k8s runtime: a fresh session arrives on every reconcile pass, and reconcile
+// compares this hash against the running container's label to decide whether to recreate it. A
+// hashed session means every running container is destroyed and rebuilt every few seconds.
+func TestHashContainerSpecIgnoresRotatingDurableDataCredentials(t *testing.T) {
 	base := containerSpec{
 		Name:  "test-container",
 		Image: "example/image:latest",
-		Env:   map[string]string{"AWS_ACCESS_KEY_ID": "key", "AWS_SECRET_ACCESS_KEY": "secret"},
+		Env: map[string]string{
+			"HYPOTHESISLOOP_DATA_URI": "s3://hl-data/pe-1/agent/exp-1/",
+			"AWS_ACCESS_KEY_ID":       "key",
+			"AWS_SECRET_ACCESS_KEY":   "secret",
+			"AWS_SESSION_TOKEN":       "session-token",
+		},
 	}
-	rekeyed := containerSpec{
+	rotated := containerSpec{
 		Name:  "test-container",
 		Image: "example/image:latest",
-		Env:   map[string]string{"AWS_ACCESS_KEY_ID": "other-key", "AWS_SECRET_ACCESS_KEY": "other-secret"},
+		Env: map[string]string{
+			"HYPOTHESISLOOP_DATA_URI": "s3://hl-data/pe-1/agent/exp-1/",
+			"AWS_ACCESS_KEY_ID":       "next-key",
+			"AWS_SECRET_ACCESS_KEY":   "next-secret",
+			"AWS_SESSION_TOKEN":       "next-session-token",
+		},
 	}
+
 	baseHash, err := hashContainerSpec(base)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashContainerSpec(base): unexpected error: %v", err)
 	}
-	rekeyedHash, err := hashContainerSpec(rekeyed)
+	rotatedHash, err := hashContainerSpec(rotated)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashContainerSpec(rotated): unexpected error: %v", err)
 	}
-	if baseHash == rekeyedHash {
-		t.Fatal("a different durable-data key left the hash unchanged — a container would keep running with a key that is no longer its own")
+	if baseHash != rotatedHash {
+		t.Fatal("hashContainerSpec: a rotated durable-data session changed the hash — reconcile will recreate every running container every pass")
 	}
 }
 

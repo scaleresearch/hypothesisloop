@@ -26,7 +26,6 @@ func (r fakeExperimentRow) Scan(dest ...any) error {
 		0.0, 0.0, "guaranteed", "SUBMITTED",
 		&now, &now, (*string)(nil), (*string)(nil),
 		(*time.Time)(nil), 0, 0, []byte("[]"),
-		"AK", "SK",
 		now, now,
 	}
 	if len(values) != len(dest) {
