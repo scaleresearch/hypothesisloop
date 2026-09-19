@@ -78,7 +78,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   if (!data) return <Loading />
 
-  const jobs = data.jobs ?? []
+  const jobs = [...(data.jobs ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const findings = data.findings ?? []
   const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
