@@ -215,37 +215,82 @@ func TestJobSubmitBadYAML(t *testing.T) {
 	}
 }
 
-func TestJobStatusFound(t *testing.T) {
+func TestJobGetters(t *testing.T) {
+	var gotPath string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]string{
-			{"id": "job-1", "status": "RUNNING"},
-			{"id": "job-2", "status": "QUEUED"},
-		})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-2", "status": "QUEUED"})
 	})
 	setAPIURL(t, url)
 
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "status", "--agent", "jane", "--id", "job-2"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "QUEUED") {
-		t.Fatalf("did not print matched job: %s", stdout.String())
+	for _, tc := range []struct {
+		args []string
+		path string
+	}{
+		{[]string{"job", "status", "--id", "job-2"}, "/experiments/job-2"},
+		{[]string{"job", "metrics", "--id", "job-2"}, "/experiments/job-2/metrics"},
+		{[]string{"platform-experiments", "get", "--id", "pe-1"}, "/platform-experiments/pe-1"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit code = %d, stderr = %s", tc.args, code, stderr.String())
+		}
+		if gotPath != tc.path || !strings.Contains(stdout.String(), "QUEUED") {
+			t.Fatalf("%v: got path %s, stdout %s", tc.args, gotPath, stdout.String())
+		}
 	}
 }
 
 func TestJobStatusNotFound(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "job-1"}})
+		http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)
 	})
 	setAPIURL(t, url)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "status", "--agent", "jane", "--id", "missing"}, &stdout, &stderr)
-	if code != 1 {
+	if code := run([]string{"job", "status", "--id", "missing"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+}
+
+func TestJobSummary(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	setAPIURL(t, url)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "summary", "--id", "job-1", "--text", `LR 0.1 "won": +2%`}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if gotMethod != "POST" || gotPath != "/experiments/job-1/summary" || gotBody["summary"] != `LR 0.1 "won": +2%` {
+		t.Fatalf("got %s %s %+v", gotMethod, gotPath, gotBody)
+	}
+}
+
+func TestJobListNeedsSummary(t *testing.T) {
+	var gotQuery string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
+	setAPIURL(t, url)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "list", "--agent", "a", "--platform-experiment", "pe-1", "--needs-summary"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if gotQuery != "agent=a&platform_experiment_id=pe-1&needs_summary=true" {
+		t.Fatalf("got query %s", gotQuery)
 	}
 }
 

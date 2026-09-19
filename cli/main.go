@@ -37,6 +37,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"time"
 
@@ -51,7 +52,16 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: hl <register|signup|platform-experiments|hypothesis|job|watch> ...\n\nRun hl <command> --help for its usage."
+	const usage = `usage: hl <command> ...
+
+  register              --id ID --kind agent|human
+  signup                --platform-experiment PE --agent A
+  platform-experiments  [list] | get --id PE | create | start | update
+  hypothesis            submit | link | comment | status | list | get | query
+  job                   submit | list [--needs-summary] | status | metrics | summary
+  watch                 --experiment JOB | --platform-experiment PE [--agent A] [--until ...]
+
+Run hl <command> --help for its flags.`
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -168,6 +178,8 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsStart(c, args[1:], stdout, stderr)
 		case "update":
 			return cmdPlatformExperimentsUpdate(c, args[1:], stdout, stderr)
+		case "get":
+			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
 		}
 	}
 	fs := flag.NewFlagSet("platform-experiments", flag.ContinueOnError)
@@ -299,6 +311,25 @@ the rest is ignored.`)
 	return 0
 }
 
+func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("platform-experiments get", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	id := fs.String("id", "", "platform experiment id (required)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *id == "" {
+		fmt.Fprintln(stderr, "hl: platform-experiments get: --id is required")
+		return 2
+	}
+	var out any
+	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(*id), nil, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
+}
+
 func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("platform-experiments start", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -321,7 +352,7 @@ func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, std
 // --- job -------------------------------------------------------------------------------------------
 
 func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: hl job <submit|list|status> ...\n\nRun hl job <command> --help for its flags."
+	const usage = "usage: hl job <submit|list|status|metrics|summary> ...\n\nRun hl job <command> --help for its flags."
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -390,6 +421,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		fs.SetOutput(stderr)
 		agent := fs.String("agent", "", "agent id (required)")
 		pe := fs.String("platform-experiment", "", "narrow to one platform experiment")
+		needsSummary := fs.Bool("needs-summary", false, "only finished jobs still missing a summary, the set that blocks your next submit")
 		if err := fs.Parse(rest); err != nil {
 			return 2
 		}
@@ -397,9 +429,12 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 			fmt.Fprintln(stderr, "hl: job list: --agent is required")
 			return 2
 		}
-		q := "?agent=" + *agent
+		q := "?agent=" + url.QueryEscape(*agent)
 		if *pe != "" {
-			q += "&platform_experiment_id=" + *pe
+			q += "&platform_experiment_id=" + url.QueryEscape(*pe)
+		}
+		if *needsSummary {
+			q += "&needs_summary=true"
 		}
 		var out any
 		if err := c.Do("GET", "/experiments"+q, nil, &out); err != nil {
@@ -408,51 +443,51 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		printJSON(stdout, out)
 		return 0
 	case "status":
-		fs := flag.NewFlagSet("job status", flag.ContinueOnError)
+		return jobGet(c, "job status", "", rest, stdout, stderr)
+	case "metrics":
+		return jobGet(c, "job metrics", "/metrics", rest, stdout, stderr)
+	case "summary":
+		fs := flag.NewFlagSet("job summary", flag.ContinueOnError)
 		fs.SetOutput(stderr)
-		agent := fs.String("agent", "", "agent id (required)")
 		id := fs.String("id", "", "job id (required)")
+		text := fs.String("text", "", "what changed, what the metric did, what it means (required)")
 		if err := fs.Parse(rest); err != nil {
 			return 2
 		}
-		if *agent == "" || *id == "" {
-			fmt.Fprintln(stderr, "hl: job status: --agent and --id are required")
+		if *id == "" || *text == "" {
+			fmt.Fprintln(stderr, "hl: job summary: --id and --text are required")
 			return 2
 		}
-		var resp any
-		if err := c.Do("GET", "/experiments?agent="+*agent+"&limit=200", nil, &resp); err != nil {
+		var out any
+		if err := c.Do("POST", "/experiments/"+url.PathEscape(*id)+"/summary", map[string]string{"summary": *text}, &out); err != nil {
 			return fail(stderr, err)
 		}
-		items := itemsOf(resp)
-		for _, item := range items {
-			m, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if idVal, _ := m["id"].(string); idVal == *id {
-				printJSON(stdout, m)
-				return 0
-			}
-		}
-		fmt.Fprintf(stderr, "hl: no job %q found for agent %q\n", *id, *agent)
-		return 1
+		printJSON(stdout, out)
+		return 0
 	default:
 		fmt.Fprintf(stderr, "hl: job: unknown subcommand %q\n", sub)
 		return 2
 	}
 }
 
-// itemsOf normalizes a list response that may be a bare array or an {"items": [...]} envelope.
-func itemsOf(resp any) []any {
-	switch v := resp.(type) {
-	case []any:
-		return v
-	case map[string]any:
-		if items, ok := v["items"].([]any); ok {
-			return items
-		}
+// jobGet prints GET /experiments/{id}<suffix>.
+func jobGet(c *apiclient.Client, name, suffix string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	id := fs.String("id", "", "job id (required)")
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
-	return nil
+	if *id == "" {
+		fmt.Fprintf(stderr, "hl: %s: --id is required\n", name)
+		return 2
+	}
+	var out any
+	if err := c.Do("GET", "/experiments/"+url.PathEscape(*id)+suffix, nil, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
 }
 
 func readYAMLBody(path string) (map[string]any, error) {

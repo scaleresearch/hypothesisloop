@@ -161,7 +161,7 @@ def test_cli_full_flow_happy_path(api, run_id, deadline):
     list_jobs_out = api.hl("job", "list", "--agent", agent, "--platform-experiment", pe_id)
     assert job_id in list_jobs_out, f"hl job list: submitted job missing from listing: {list_jobs_out}"
 
-    status_out = api.hl("job", "status", "--agent", agent, "--id", job_id)
+    status_out = api.hl("job", "status", "--id", job_id)
     status_job_id = json.loads(status_out)["id"]
     assert status_job_id == job_id, f"hl job status: expected id {job_id}, got {status_job_id}"
 
