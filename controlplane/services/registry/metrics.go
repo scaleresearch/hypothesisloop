@@ -274,7 +274,6 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		Detail:               "trailing its cohort on this ranking metric",
 		PlatformExperimentID: exp.PlatformExperimentID,
 		AgentID:              exp.AgentID,
-		Cursor:               db.NewCursor(time.Now().UTC()),
 	})
 	if err != nil {
 		s.logger.Warn("registry: notify underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
@@ -301,7 +300,6 @@ func (s *Service) notifyMetricArrived(ctx context.Context, experimentID, platfor
 		Detail:               strconv.FormatFloat(fractionComplete, 'g', -1, 64),
 		PlatformExperimentID: platformExperimentID,
 		AgentID:              agentID,
-		Cursor:               db.NewCursor(time.Now().UTC()),
 	})
 	if err != nil {
 		s.logger.Warn("registry: notify metric arrival", zap.String("experiment_id", experimentID), zap.Error(err))

@@ -67,13 +67,21 @@ var schemaStatements = []string{
 	"CREATE TEXT INDEX " + TextIndex + " ON :Hypothesis(text)",
 }
 
+// positionBackfill gives what was written before writes carried a position (see
+// db.EventsStore.Emit) position 0, below every cursor, so replay still finds it.
+var positionBackfill = []string{
+	"MATCH (h:Hypothesis) WHERE h.created_xid IS NULL SET h.created_xid = 0",
+	"MATCH (h:Hypothesis) WHERE h.status_changed_at IS NOT NULL AND h.status_changed_xid IS NULL SET h.status_changed_xid = 0",
+	"MATCH (:Hypothesis)-[r]->() WHERE r.created_xid IS NULL SET r.created_xid = 0",
+}
+
 // EnsureSchema creates the constraints and indexes the store relies on. Every statement is a
 // no-op when its object already exists, so it runs on every start.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	// Memgraph refuses schema changes inside an explicit transaction, so these run auto-commit.
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
-	for _, stmt := range schemaStatements {
+	for _, stmt := range append(schemaStatements, positionBackfill...) {
 		result, err := session.Run(ctx, stmt, nil)
 		if err == nil {
 			_, err = result.Consume(ctx)
@@ -113,8 +121,8 @@ func isUniqueViolation(err error, constraint string) bool {
 	return errors.As(err, &ne) && strings.Contains(ne.Msg, "unique constraint violation on "+constraint)
 }
 
-// now is the timestamp every write stamps. Memgraph stores microseconds, and an event's cursor is
-// derived from the stored value, so truncating here keeps a live event and its replayed twin equal.
+// now is the timestamp every write stamps. Memgraph stores microseconds, and writes compare the
+// stored value with this one, so it is truncated to match.
 func now() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }
 
 // decoder reads stored values and keeps the first one of the wrong type as err, so a bad property
@@ -129,6 +137,14 @@ func (d *decoder) str(v any) string {
 		d.err = fmt.Errorf("graphdb: want a string, got %T", v)
 	}
 	return s
+}
+
+func (d *decoder) int(v any) int64 {
+	i, ok := v.(int64)
+	if !ok && d.err == nil {
+		d.err = fmt.Errorf("graphdb: want an integer, got %T", v)
+	}
+	return i
 }
 
 func (d *decoder) time(v any) time.Time {

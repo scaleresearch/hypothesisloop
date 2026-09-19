@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,7 +178,7 @@ VALUES ($1, $2, $3, 'watch test comment')`, hypothesisID, peID, agentID); err !=
 // replay.
 type noHypothesisEvents struct{}
 
-func (noHypothesisEvents) ReplayEvents(context.Context, string, time.Time) ([]Event, error) {
+func (noHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event, error) {
 	return nil, nil
 }
 
@@ -229,8 +230,8 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 			if e.PlatformExperimentID != "watch-test-pe-commit" {
 				continue
 			}
-			if e.Cursor <= 0 {
-				t.Errorf("event cursor: got = %v, want = a positive microsecond timestamp", e.Cursor)
+			if e.Position <= 0 || e.Cursor <= 0 || e.Cursor > e.Position {
+				t.Errorf("event position and cursor: got = %v and %v, want = a transaction id and a cursor at or below it", e.Position, e.Cursor)
 			}
 			return
 		case <-deadline:
@@ -239,13 +240,23 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 	}
 }
 
+// cursorNow is the cursor a client would hold had it seen everything committed so far.
+func cursorNow(t *testing.T, pool *Pool) int64 {
+	t.Helper()
+	var cursor int64
+	if err := pool.pool.QueryRow(context.Background(), `SELECT pg_snapshot_xmin(pg_current_snapshot())::text::bigint`).Scan(&cursor); err != nil {
+		t.Fatalf("current cursor: got = %v, want = nil", err)
+	}
+	return cursor
+}
+
 // insertJob writes one experiment row and walks it QUEUED -> SUBMITTED -> RUNNING, the way the
 // scheduler does, returning a cursor from just before the first transition.
 func insertJob(t *testing.T, pool *Pool, agentID, peID, hypothesisID, jobID string) int64 {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	before := NewCursor(time.Now().UTC().Add(-time.Second))
+	before := cursorNow(t, pool)
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO experiments
 (id, agent_id, project_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
@@ -267,10 +278,10 @@ VALUES ($1, $2, 'p', $3, 'r@0', 'h', 'd', $4, 'claim', 'objective', 'test-accele
 }
 
 // Replay is what makes a dropped connection a delay rather than a gap, and it is derived from the
-// experiment row's own timestamps rather than from any stored event log — the whole argument for
+// experiment row's own columns rather than from any stored event log — the whole argument for
 // not writing the same state twice. If those columns cannot reproduce the sequence, the argument
 // fails and this stream would need a log after all.
-func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnTimestamps(t *testing.T) {
+func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnColumns(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, hypothesisID := seedRun(t, pool, "replay", true)
 	before := insertJob(t, pool, agentID, peID, hypothesisID, "watch-test-job-replay")
@@ -290,10 +301,9 @@ func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnTimestamps(t *testin
 	}
 }
 
-// A client hands back the cursor of the last event it saw, and must be told what happened after
-// that and nothing else. Re-delivering what it already has would make an agent count the same
-// transition twice; delivering less would put it back to polling.
-func TestReplayReturnsOnlyWhatHappenedAfterTheGivenCursor(t *testing.T) {
+// A client hands back the cursor of the last event it saw. It must be told everything from that
+// event's transaction on, which may repeat that event, and nothing from before it.
+func TestReplayFromAnEventsCursorReturnsThatEventAndWhatCameAfterIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, hypothesisID := seedRun(t, pool, "cursor", true)
 	before := insertJob(t, pool, agentID, peID, hypothesisID, "watch-test-job-cursor")
@@ -311,11 +321,8 @@ func TestReplayReturnsOnlyWhatHappenedAfterTheGivenCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replay from the second-to-last cursor: got = %v, want = nil", err)
 	}
-	if len(rest) != 1 {
-		t.Fatalf("events after the second-to-last cursor: got = %v, want = %v", len(rest), 1)
-	}
-	if rest[0].Value != all[len(all)-1].Value {
-		t.Errorf("event after the second-to-last cursor: got = %v, want = %v", rest[0].Value, all[len(all)-1].Value)
+	if len(rest) != 2 || rest[0].Identity() != all[len(all)-2].Identity() || rest[1].Identity() != all[len(all)-1].Identity() {
+		t.Errorf("events from the second-to-last cursor: got = %+v, want = the last two of %+v", rest, all)
 	}
 }
 
@@ -447,10 +454,10 @@ VALUES ('` + peID + `', '` + agentID + `', 1)`,
 // Replay is what makes a dropped connection a delay rather than a gap, and it has to cover the
 // whole vocabulary: a kind that is only ever live is a kind an agent silently misses across every
 // reconnect, which puts it straight back to polling for exactly that thing. These are derived
-// from the changed row's own timestamps, with no event log to fall back on.
-func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnTimestamps(t *testing.T) {
+// from the changed row's own columns, with no event log to fall back on.
+func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnColumns(t *testing.T) {
 	pool := eventsTestDB(t)
-	before := NewCursor(time.Now().UTC().Add(-time.Second))
+	before := cursorNow(t, pool)
 	agentID, peID, hypothesisID := seedRun(t, pool, "newkinds-replay", true)
 
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = $1`, peID)
@@ -477,31 +484,137 @@ VALUES ($1, $2, 1)`, peID, agentID)
 	}
 }
 
-// The cursor is the whole contract of a reconnect: hand back the last one seen and be told what
-// happened after it, nothing before. A run-wide kind derived from a column rather than from a row
-// per event is where an off-by-one shows up as an agent being told the run closed every single
-// time it reconnects.
+// The cursor is the whole contract of a reconnect: be told what happened from it on, nothing
+// before. A run-wide kind derived from a column rather than from a row per event is where an
+// off-by-one shows up as an agent being told the run closed every single time it reconnects.
 func TestReplayDoesNotReturnARunWideChangeThatHappenedBeforeTheGivenCursor(t *testing.T) {
 	pool := eventsTestDB(t)
+	before := cursorNow(t, pool)
 	_, peID, _ := seedRun(t, pool, "newkinds-cursor", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
 
 	store := NewEventsStore(pool, noHypothesisEvents{})
-	all, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
-		Kinds: map[string]bool{EventPlatformExperimentStatus: true}}, NewCursor(time.Now().UTC().Add(-time.Second)))
+	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventPlatformExperimentStatus: true}}
+	all, err := store.Replay(context.Background(), filter, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
 	if len(all) != 1 {
 		t.Fatalf("replayed run status changes: got = %v, want = %v", len(all), 1)
 	}
-	rest, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
-		Kinds: map[string]bool{EventPlatformExperimentStatus: true}}, all[0].Cursor)
+	rest, err := store.Replay(context.Background(), filter, cursorNow(t, pool))
 	if err != nil {
-		t.Fatalf("replay from the last cursor: got = %v, want = nil", err)
+		t.Fatalf("replay from a cursor taken after the change: got = %v, want = nil", err)
 	}
 	if len(rest) != 0 {
-		t.Errorf("events after the last cursor: got = %v, want = %v", len(rest), 0)
+		t.Errorf("events from a cursor taken after the change: got = %v, want = %v", len(rest), 0)
+	}
+}
+
+// The resume bug this cursor exists to fix. A transaction that writes first and commits last
+// carries the smaller position, and a client that saw the later one's event before disconnecting
+// must still be given it. A timestamp cursor (transaction start, replayed with >) skipped it.
+func TestAnEventCommittedAfterALaterOneIsReplayedFromTheLaterOnesCursor(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, hypothesisID := seedRun(t, pool, "out-of-order", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	insert := `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, text) VALUES ($1, $2, $3, $4)`
+
+	early, err := pool.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: got = %v, want = nil", err)
+	}
+	defer early.Rollback(ctx) //nolint:errcheck
+	if _, err := early.Exec(ctx, insert, hypothesisID+"-early", peID, agentID, "written first, committed last"); err != nil {
+		t.Fatalf("insert in the open transaction: got = %v, want = nil", err)
+	}
+	exec(t, pool, insert, hypothesisID+"-late", peID, agentID, "written second, committed first")
+	seen := awaitEvent(t, events, EventCommentNew, hypothesisID+"-late")
+	if err := early.Commit(ctx); err != nil {
+		t.Fatalf("commit: got = %v, want = nil", err)
+	}
+	committedLast := awaitEvent(t, events, EventCommentNew, hypothesisID+"-early")
+	if seen.Cursor > committedLast.Position {
+		t.Errorf("cursor of the event committed first: got = %v, want = at most %v, the open transaction's position", seen.Cursor, committedLast.Position)
+	}
+
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx,
+		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventCommentNew: true}}, seen.Cursor)
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	for _, e := range replayed {
+		if e.Identity() == committedLast.Identity() {
+			return
+		}
+	}
+	t.Errorf("replay from the cursor of the event committed first: got = %+v, want = it to include %+v", replayed, committedLast)
+}
+
+// One transaction writes several events that a timestamp cursor gave the same value: a cut is a
+// stage.boundary and an agent.cut. A client that saw only the first before disconnecting must be
+// given the rest.
+func TestEveryEventOfATransactionIsReplayedFromTheCursorOfAnyOfThem(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, _ := seedRun(t, pool, "same-tx", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, peID, agentID)
+	first := awaitEvent(t, events, EventStageBoundary, peID)
+
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
+		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventStageBoundary: true, EventAgentCut: true}}, first.Cursor)
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	kinds := map[string]bool{}
+	for _, e := range replayed {
+		if e.Position == first.Position {
+			kinds[e.Kind] = true
+		}
+	}
+	if !kinds[EventStageBoundary] || !kinds[EventAgentCut] {
+		t.Errorf("replayed kinds of the cut's transaction: got = %v, want = stage.boundary and agent.cut", kinds)
+	}
+}
+
+// A write to another store is fenced by the Postgres transaction Emit holds open: while it runs,
+// no cursor can pass its position, so a client cannot resume past a graph write still in flight.
+func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
+	pool := eventsTestDB(t)
+	_, peID, hypothesisID := seedRun(t, pool, "emit", true)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	var position, during int64
+	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(p int64) ([]Event, error) {
+		position, during = p, cursorNow(t, pool)
+		return []Event{{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID}}, nil
+	})
+	if err != nil {
+		t.Fatalf("Emit: got = %v, want = nil", err)
+	}
+	if during > position {
+		t.Errorf("cursor while the write was in flight: got = %v, want = at most its position %v", during, position)
+	}
+	if got := awaitEvent(t, events, EventHypothesisNew, hypothesisID); got.Position != position || got.Cursor > position {
+		t.Errorf("emitted event: got = position %v cursor %v, want = position %v and a cursor at or below it", got.Position, got.Cursor, position)
+	}
+}
+
+// A cursor from before cursors were transaction ids is a microsecond timestamp, far above any
+// transaction id. Answering it with an empty replay would silently skip everything.
+func TestReplayRefusesACursorThisDatabaseCannotHaveIssued(t *testing.T) {
+	pool := eventsTestDB(t)
+	store := NewEventsStore(pool, noHypothesisEvents{})
+	for _, since := range []int64{time.Now().UnixMicro(), -1} {
+		if _, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: "pe"}, since); !errors.Is(err, ErrUnknownCursor) {
+			t.Errorf("Replay(since=%d): got = %v, want = %v", since, err, ErrUnknownCursor)
+		}
 	}
 }
 
@@ -648,21 +761,25 @@ func TestAnnotateLeavesAnAgentsOwnEmptyDetailEmpty(t *testing.T) {
 
 type fixedHypothesisEvents []Event
 
-func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, time.Time) ([]Event, error) {
+func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event, error) {
 	return f, nil
 }
 
 // Hypothesis events come from the graph store, everything else from Postgres, and a reconnecting
 // client must still get one stream: both halves filtered by the same subscription and interleaved
-// in cursor order.
-func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInCursorOrder(t *testing.T) {
+// in position order.
+func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInPositionOrder(t *testing.T) {
 	pool := eventsTestDB(t)
-	before := NewCursor(time.Now().UTC().Add(-time.Second))
+	before := cursorNow(t, pool)
 	_, peID, hypothesisID := seedRun(t, pool, "graph-merge", true)
+	var commentPosition int64
+	if err := pool.pool.QueryRow(context.Background(), `SELECT created_xid FROM hypothesis_comments WHERE platform_experiment_id = $1`, peID).Scan(&commentPosition); err != nil {
+		t.Fatalf("comment position: got = %v, want = nil", err)
+	}
 	graph := fixedHypothesisEvents{
-		{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID, Cursor: before + 1},
-		{Kind: EventHypothesisLink, Subject: hypothesisID, Value: "related", PlatformExperimentID: peID, Cursor: NewCursor(time.Now().UTC().Add(time.Hour))},
-		{Kind: EventHypothesisStatus, Subject: hypothesisID, Value: "refuted", PlatformExperimentID: peID, Cursor: before - 1},
+		{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID, Position: commentPosition + 1},
+		{Kind: EventHypothesisLink, Subject: hypothesisID, Value: "related", PlatformExperimentID: peID, Position: commentPosition + 1000},
+		{Kind: EventHypothesisStatus, Subject: hypothesisID, Value: "refuted", PlatformExperimentID: peID, Position: before - 1},
 	}
 
 	events, err := NewEventsStore(pool, graph).Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
@@ -674,7 +791,7 @@ func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInCursorOrd
 	for _, e := range events {
 		kinds = append(kinds, e.Kind)
 	}
-	want := "hypothesis.new comment.new hypothesis.link"
+	want := "comment.new hypothesis.new hypothesis.link"
 	if got := strings.Join(kinds, " "); got != want {
 		t.Errorf("replayed kinds: got = %v, want = %v", got, want)
 	}

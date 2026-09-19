@@ -27,7 +27,7 @@ func TestConcurrentLinksCannotCloseAMultiHopCycle(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, errs[i] = s.AddLink(ctx, l[0], "agent-1", "", domain.LinkSpec{Type: domain.LinkBuildsOn, To: l[1]})
+				_, errs[i] = s.AddLink(ctx, l[0], "agent-1", "", domain.LinkSpec{Type: domain.LinkBuildsOn, To: l[1]}, 1)
 			}()
 		}
 		wg.Wait()

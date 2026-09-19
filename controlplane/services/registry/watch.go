@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -277,6 +278,10 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.hub.unsubscribe(sub)
 
 	replayed, err := h.source.Replay(r.Context(), filter, since)
+	if errors.Is(err, db.ErrUnknownCursor) {
+		writeWatchError(w, http.StatusBadRequest, err.Error()+"; reconnect without since to start from the current state")
+		return
+	}
 	if err != nil {
 		h.logger.Error("watch: replay", zap.Error(err))
 		writeWatchError(w, http.StatusInternalServerError, "replay failed")
@@ -311,12 +316,12 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// It is stack-local to this connection and vanishes with it, like the subscription itself.
-	delivered := &served{floor: map[string]int64{}, replayed: map[db.Event]bool{}}
+	delivered := &served{floor: map[string]int64{}, sent: map[db.Event]bool{}}
 	for kind := range filter.Kinds {
 		delivered.floor[kind] = since
 	}
 	for _, e := range replayed {
-		if err := delivered.send(conn, filter, e, true); err != nil {
+		if err := delivered.send(conn, filter, e); err != nil {
 			return
 		}
 	}
@@ -328,7 +333,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case e := <-sub.events:
 			// Replay and the live stream overlap by construction — the subscription was open
 			// while the replay ran. send drops what the replay already carried.
-			if err := delivered.send(conn, filter, e, false); err != nil {
+			if err := delivered.send(conn, filter, e); err != nil {
 				return
 			}
 		case payload := <-controls:
@@ -357,27 +362,25 @@ func writeEvent(conn *wsConn, e db.Event) error {
 	return conn.WriteText(payload, watchWriteTimeout)
 }
 
-// served is what one connection has been sent. floor is, per kind, the newest cursor delivered: a
+// served is what one connection has been sent. floor is, per kind, the largest cursor delivered: a
 // kind is carried from its own floor because after a filter change one stream-wide cursor would
-// repeat or skip. replayed holds every event a replay sent, because the live stream repeats the
-// ones that happened while the replay ran. Only an exact repeat is dropped: one transaction
-// writes several events with the same cursor (a stage cut per agent, a quota donation pair), so a
-// live event at or below the floor can still be news.
+// skip. sent holds the identity of every event sent, because a replay resends what is at its
+// cursor and the live stream repeats what committed while a replay ran. Only a repeat of the same
+// identity is dropped: one transaction writes several events (a stage cut per agent, a quota
+// donation pair), and each is news.
 type served struct {
-	floor    map[string]int64
-	replayed map[db.Event]bool
+	floor map[string]int64
+	sent  map[db.Event]bool
 }
 
-func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event, fromReplay bool) error {
-	if !fromReplay && s.replayed[e] {
+func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event) error {
+	if s.sent[e.Identity()] {
 		return nil
 	}
 	if err := writeEvent(conn, filter.Annotate(e)); err != nil {
 		return err
 	}
-	if fromReplay {
-		s.replayed[e] = true
-	}
+	s.sent[e.Identity()] = true
 	if e.Cursor > s.floor[e.Kind] {
 		s.floor[e.Kind] = e.Cursor
 	}
@@ -457,10 +460,10 @@ func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subs
 			events, err := h.source.Replay(ctx, replayFilter, floor)
 			if err != nil {
 				h.logger.Error("watch: replay after widening a subscription", zap.Error(err))
-				return writeFrame(conn, watchFrame{Error: "could not replay the kinds you added; reconnect with since=<your last cursor>"})
+				return writeFrame(conn, watchFrame{Error: "could not replay the kinds you added; reconnect with since=<largest cursor you saw>"})
 			}
 			for _, e := range events {
-				if err := delivered.send(conn, replayFilter, e, true); err != nil {
+				if err := delivered.send(conn, replayFilter, e); err != nil {
 					return err
 				}
 			}
@@ -506,11 +509,13 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
 		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
-		Description: "GET /watch is a WebSocket that pushes small typed records — kind, subject, value, detail, cursor — " +
+		Description: "GET /watch is a WebSocket that pushes small typed records — kind, subject, value, detail, position, cursor — " +
 			"so you can wait on a change instead of polling for it. Every event is a pointer, never a copy: follow one " +
 			"with the ordinary GET when you want detail.\n\n" +
 			"Scope a subscription with `platform_experiment_id` or `experiment_id` (one is required), narrow it with " +
-			"`agent` and a comma-separated `kinds`, and resume it with `since=<cursor of the last event you saw>`. " +
+			"`agent` and a comma-separated `kinds`, and resume it with `since=<largest cursor you saw>`. A resume never " +
+			"skips an event; it can repeat ones you already have, which carry the same `position` (the transaction " +
+			"that made the change). " +
 			"Omit `since` (or pass 0) and you get the current snapshot of everything your filter admits before going " +
 			"live — watching a job that already finished answers right away instead of waiting on an event that will " +
 			"never come. " +
@@ -567,7 +572,7 @@ func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {
 	var since int64
 	if raw := q.Get("since"); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil {
+		if err != nil || parsed < 0 {
 			return filter, 0, errWatch("since must be a cursor returned by a previous event")
 		}
 		since = parsed

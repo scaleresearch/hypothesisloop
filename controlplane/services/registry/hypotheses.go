@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -63,16 +62,20 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 		}
 	}
 
-	h, out, alreadyExisted, err = s.graph.Register(ctx, graphdb.NewHypothesis{
-		Source: source, AgentID: agentID, Author: author,
-		PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
+	err = s.events.Emit(ctx, func(position int64) ([]db.Event, error) {
+		h, out, alreadyExisted, err = s.graph.Register(ctx, graphdb.NewHypothesis{
+			Source: source, AgentID: agentID, Author: author,
+			PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
+			Position: position,
+		})
+		if err != nil || alreadyExisted {
+			return nil, err
+		}
+		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Source),
+			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
-	}
-	if !alreadyExisted {
-		s.notify(ctx, db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Source),
-			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID, Cursor: db.NewCursor(h.CreatedAt)})
 	}
 	s.logger.Info("hypothesis registered",
 		zap.String("id", h.ID), zap.String("agent", agentID), zap.String("author", author),
@@ -93,13 +96,18 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID, author str
 			return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
 		}
 	}
-	result, err := s.graph.AddLink(ctx, id, agentID, author, spec)
+	var result *graphdb.LinkResult
+	err = s.events.Emit(ctx, func(position int64) ([]db.Event, error) {
+		var err error
+		result, err = s.graph.AddLink(ctx, id, agentID, author, spec, position)
+		if err != nil || !result.Created {
+			return nil, err
+		}
+		return []db.Event{{Kind: db.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
+			PlatformExperimentID: result.From.PlatformExperimentID, AgentID: agentID}}, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
-	}
-	if result.Created {
-		s.notify(ctx, db.Event{Kind: db.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
-			PlatformExperimentID: result.From.PlatformExperimentID, AgentID: agentID, Cursor: db.NewCursor(result.CreatedAt)})
 	}
 	s.logger.Info("hypothesis link added",
 		zap.String("from", id), zap.String("type", string(spec.Type)), zap.String("to", spec.To),
@@ -195,13 +203,19 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	if !domain.ValidHypothesisStatus(status) {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: invalid status %q", status)
 	}
-	h, changed, err := s.graph.UpdateStatus(ctx, id, callerAgentID, status)
+	var h *domain.Hypothesis
+	var changed bool
+	err := s.events.Emit(ctx, func(position int64) ([]db.Event, error) {
+		var err error
+		h, changed, err = s.graph.UpdateStatus(ctx, id, callerAgentID, status, position)
+		if err != nil || !changed {
+			return nil, err
+		}
+		return []db.Event{{Kind: db.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
+			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
-	}
-	if changed {
-		s.notify(ctx, db.Event{Kind: db.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
-			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID, Cursor: db.NewCursor(*h.StatusChangedAt)})
 	}
 	s.logger.Info("hypothesis status updated",
 		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("changed", changed))
@@ -270,18 +284,4 @@ func (s *Service) requireAgent(ctx context.Context, agentID string) error {
 		return fmt.Errorf("%w: %s", db.ErrUnknownAgent, agentID)
 	}
 	return nil
-}
-
-// notify announces a hypothesis change on the watch stream. The graph write it describes has
-// already committed, so a failure here loses only the live event: a reconnecting watcher replays
-// it from the graph.
-func (s *Service) notify(ctx context.Context, e db.Event) {
-	if s.events == nil {
-		return
-	}
-	notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := s.events.NotifyEvent(notifyCtx, e); err != nil {
-		s.logger.Warn("registry: notify hypothesis event", zap.String("kind", e.Kind), zap.String("subject", e.Subject), zap.Error(err))
-	}
 }

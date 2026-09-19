@@ -42,6 +42,8 @@ type NewHypothesis struct {
 	// DistinctFrom names hypotheses the caller has read and judged a different claim, so they no
 	// longer hold the registration back (see untoldSimilar).
 	DistinctFrom []string
+	// Position is the watch stream position of this write (see db.EventsStore.Emit).
+	Position int64
 }
 
 // Register creates a hypothesis and its outgoing links in one transaction, or returns the existing
@@ -85,16 +87,17 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
-  source: $source, author: $author, text: $text, normalized_text: $normalized, status: $status, created_at: $at})
+  source: $source, author: $author, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
 RETURN h`, map[string]any{
 			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID, "source": string(n.Source),
 			"author": n.Author, "text": n.Text, "normalized": normalized, "status": string(domain.HypothesisOpen), "at": at,
+			"position": n.Position,
 		})
 		if err != nil {
 			return nil, err
 		}
 		for _, spec := range n.Links {
-			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, n.AgentID, n.Author, at); err != nil {
+			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, n.AgentID, n.Author, at, n.Position); err != nil {
 				return nil, err
 			}
 		}
@@ -121,9 +124,10 @@ type LinkResult struct {
 	Out       []domain.Link
 }
 
-// AddLink adds one outgoing link from an existing hypothesis. Only its registering agent may, or
-// anyone when it was submitted by a human. Links are append-only.
-func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec) (*LinkResult, error) {
+// AddLink adds one outgoing link from an existing hypothesis at watch stream position position.
+// Only its registering agent may, or anyone when it was submitted by a human. Links are
+// append-only.
+func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec, position int64) (*LinkResult, error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		from, err := getHypothesis(ctx, tx, fromID)
@@ -150,7 +154,7 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spe
 				return nil, err
 			}
 		}
-		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, agentID, author, at)
+		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, agentID, author, at, position)
 		if err != nil {
 			return nil, err
 		}
@@ -170,10 +174,10 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spe
 	return result, nil
 }
 
-// UpdateStatus sets a hypothesis's status on behalf of callerAgentID: the owning agent's verdict on
-// its own claim, or anyone's on a human-submitted one. changed is false when the status already
-// held that value, which writes nothing.
-func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (h *domain.Hypothesis, changed bool, err error) {
+// UpdateStatus sets a hypothesis's status on behalf of callerAgentID, at watch stream position
+// position: the owning agent's verdict on its own claim, or anyone's on a human-submitted one.
+// changed is false when the status already held that value, which writes nothing.
+func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus, position int64) (h *domain.Hypothesis, changed bool, err error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		h, err := getHypothesis(ctx, tx, id)
@@ -192,8 +196,8 @@ func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, stat
 		if err := lockExperiment(ctx, tx, h.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at RETURN h`,
-			map[string]any{"id": id, "status": string(status), "at": at})
+		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at, h.status_changed_xid = $position RETURN h`,
+			map[string]any{"id": id, "status": string(status), "at": at, "position": position})
 		if err != nil {
 			return nil, err
 		}
@@ -379,9 +383,10 @@ MERGE (o:Objective {id: row.pe})
 MERGE (h:Hypothesis {id: row.id})
 ON CREATE SET h.platform_experiment_id = row.pe, h.agent_id = row.agent_id, h.source = row.source,
   h.author = row.author, h.text = row.text, h.normalized_text = row.normalized, h.status = row.status,
-  h.created_at = row.created_at, h.status_changed_at = row.status_changed_at
+  h.created_at = row.created_at, h.status_changed_at = row.status_changed_at, h.created_xid = 0,
+  h.status_changed_xid = CASE WHEN row.status_changed_at IS NULL THEN null ELSE 0 END
 MERGE (h)-[r:BUILDS_ON]->(o)
-ON CREATE SET r.agent_id = row.agent_id, r.author = row.author, r.created_at = row.created_at`, map[string]any{"rows": params})
+ON CREATE SET r.agent_id = row.agent_id, r.author = row.author, r.created_at = row.created_at, r.created_xid = 0`, map[string]any{"rows": params})
 	})
 	if err != nil {
 		return fmt.Errorf("graphdb.ImportLegacy: %w", err)
@@ -514,15 +519,15 @@ MATCH p = (t)-[:BUILDS_ON *BFS]->(f) RETURN count(p)`, map[string]any{"from": fr
 // createLink merges one edge from fromID, reporting whether it was new. The relationship type is
 // spliced into the statement because Cypher cannot parameterise it; it only ever comes from
 // relTypes, after validateLinks.
-func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, agentID, author string, at time.Time) (bool, error) {
+func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, agentID, author string, at time.Time, position int64) (bool, error) {
 	target := "(t:Hypothesis {id: $to})"
 	if spec.To == platformExperimentID {
 		target = "(t:Objective {id: $to})"
 	}
 	records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $from}), `+target+`
 MERGE (h)-[r:`+relTypes[spec.Type]+`]->(t)
-ON CREATE SET r.agent_id = $agent_id, r.author = $author, r.created_at = $at
-RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID, "author": author, "at": at})
+ON CREATE SET r.agent_id = $agent_id, r.author = $author, r.created_at = $at, r.created_xid = $position
+RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID, "author": author, "at": at, "position": position})
 	if err != nil {
 		return false, err
 	}

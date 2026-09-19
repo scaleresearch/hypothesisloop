@@ -164,7 +164,7 @@ func TestRegisterHoldsBackAClaimBuildingOnARefutedOne(t *testing.T) {
 	pe := testExperiment(t, s)
 	ctx := context.Background()
 	parent := register(t, s, pe, "agent-1", "learning rate 0.2 overshoots", onRoot(pe))
-	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", domain.HypothesisRefuted); err != nil {
+	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", domain.HypothesisRefuted, 1); err != nil {
 		t.Fatal(err)
 	}
 	child := NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-1", PlatformExperimentID: pe,
@@ -294,21 +294,21 @@ func TestAddLinkRefusesCyclesSelfLinksAndOtherExperiments(t *testing.T) {
 		"other experiment": {a.ID, domain.LinkSpec{Type: domain.LinkRelated, To: foreign.ID}},
 		"unknown target":   {a.ID, domain.LinkSpec{Type: domain.LinkContradicts, To: "nope"}},
 	} {
-		if _, err := s.AddLink(ctx, spec.from, "agent-1", "", spec.link); !errors.Is(err, ErrInvalidLink) {
+		if _, err := s.AddLink(ctx, spec.from, "agent-1", "", spec.link, 1); !errors.Is(err, ErrInvalidLink) {
 			t.Errorf("%s: got = %v, want %v", name, err, ErrInvalidLink)
 		}
 	}
-	if _, err := s.AddLink(ctx, "nope", "agent-1", "", domain.LinkSpec{Type: domain.LinkRelated, To: a.ID}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.AddLink(ctx, "nope", "agent-1", "", domain.LinkSpec{Type: domain.LinkRelated, To: a.ID}, 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("link from an unknown hypothesis: got = %v, want %v", err, ErrNotFound)
 	}
 
 	// The reverse direction of a cycle is fine as a non-builds_on link, and a second builds_on parent
 	// that closes no loop is a combination.
-	if _, err := s.AddLink(ctx, a.ID, "agent-1", "", domain.LinkSpec{Type: domain.LinkContradicts, To: c.ID}); err != nil {
+	if _, err := s.AddLink(ctx, a.ID, "agent-1", "", domain.LinkSpec{Type: domain.LinkContradicts, To: c.ID}, 1); err != nil {
 		t.Errorf("contradicts back up the chain: got = %v, want nil", err)
 	}
 	d := register(t, s, pe, "agent-1", "d", onRoot(pe))
-	if _, err := s.AddLink(ctx, c.ID, "agent-1", "", domain.LinkSpec{Type: domain.LinkBuildsOn, To: d.ID}); err != nil {
+	if _, err := s.AddLink(ctx, c.ID, "agent-1", "", domain.LinkSpec{Type: domain.LinkBuildsOn, To: d.ID}, 1); err != nil {
 		t.Errorf("second builds_on parent: got = %v, want nil", err)
 	}
 }
@@ -327,17 +327,17 @@ func TestAddLinkFollowsTheOwnershipRuleAndIsIdempotent(t *testing.T) {
 	}
 	link := domain.LinkSpec{Type: domain.LinkRelated, To: target.ID}
 
-	if _, err := s.AddLink(ctx, owned.ID, "agent-2", "", link); !errors.Is(err, ErrNotOwner) {
+	if _, err := s.AddLink(ctx, owned.ID, "agent-2", "", link, 1); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("link from another agent's hypothesis: got = %v, want %v", err, ErrNotOwner)
 	}
-	if _, err := s.AddLink(ctx, owned.ID, "", "Ada", link); !errors.Is(err, ErrNotOwner) {
+	if _, err := s.AddLink(ctx, owned.ID, "", "Ada", link, 1); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("human linking an agent's hypothesis: got = %v, want %v", err, ErrNotOwner)
 	}
-	first, err := s.AddLink(ctx, human.ID, "agent-2", "", link)
+	first, err := s.AddLink(ctx, human.ID, "agent-2", "", link, 1)
 	if err != nil || !first.Created || first.CreatedAt.IsZero() {
 		t.Fatalf("link from a human hypothesis: got = (%+v, %v), want a new link", first, err)
 	}
-	again, err := s.AddLink(ctx, human.ID, "agent-1", "", link)
+	again, err := s.AddLink(ctx, human.ID, "agent-1", "", link, 1)
 	if err != nil || again.Created {
 		t.Fatalf("repeated link: got = (%+v, %v), want an unchanged no-op", again, err)
 	}
@@ -400,7 +400,7 @@ func TestLinksAndGraphEdgesCarryWhoMadeThemAndWhen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register human: got = %v, want nil", err)
 	}
-	linked, err := s.AddLink(ctx, human.ID, "", "dana", domain.LinkSpec{Type: domain.LinkRelated, To: a.ID})
+	linked, err := s.AddLink(ctx, human.ID, "", "dana", domain.LinkSpec{Type: domain.LinkRelated, To: a.ID}, 1)
 	if err != nil {
 		t.Fatalf("AddLink: got = %v, want nil", err)
 	}
@@ -430,17 +430,17 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 	ctx := context.Background()
 	h := register(t, s, pe, "agent-1", "a", onRoot(pe))
 
-	if _, _, err := s.UpdateStatus(ctx, h.ID, "agent-2", domain.HypothesisRefuted); !errors.Is(err, ErrNotOwner) {
+	if _, _, err := s.UpdateStatus(ctx, h.ID, "agent-2", domain.HypothesisRefuted, 1); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("non-owner: got = %v, want %v", err, ErrNotOwner)
 	}
-	if _, _, err := s.UpdateStatus(ctx, "nope", "agent-1", domain.HypothesisRefuted); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.UpdateStatus(ctx, "nope", "agent-1", domain.HypothesisRefuted, 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown: got = %v, want %v", err, ErrNotFound)
 	}
-	got, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted)
+	got, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted, 1)
 	if err != nil || !changed || got.Status != domain.HypothesisRefuted || got.StatusChangedAt == nil {
 		t.Fatalf("owner: got = (%+v, %v, %v), want refuted with status_changed_at", got, changed, err)
 	}
-	if _, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted); err != nil || changed {
+	if _, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted, 1); err != nil || changed {
 		t.Errorf("same status again: got = (%v, %v), want (false, nil)", changed, err)
 	}
 }
@@ -627,33 +627,38 @@ func TestAPropertyOfTheWrongTypeFailsTheRead(t *testing.T) {
 }
 
 // Replay is what turns a dropped /watch connection into a delay rather than a gap. Hypothesis
-// events are derived from the graph's own timestamps, and links given at registration ride on
-// hypothesis.new, so replay must not invent a hypothesis.link for them.
-func TestReplayDerivesHypothesisEventsFromTheGraphsTimestamps(t *testing.T) {
+// events are derived from the positions each graph write was stamped with, and links given at
+// registration ride on hypothesis.new, so replay must not invent a hypothesis.link for them.
+func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
 	ctx := context.Background()
-	since := time.Now().UTC().Add(-time.Second)
-	a := register(t, s, pe, "agent-1", "a", onRoot(pe))
-	b := register(t, s, pe, "agent-2", "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}})
-	linked, err := s.AddLink(ctx, b.ID, "agent-2", "", domain.LinkSpec{Type: domain.LinkContradicts, To: a.ID})
-	if err != nil {
+	registerAt := func(agentID, text string, links []domain.LinkSpec, position int64) *domain.Hypothesis {
+		h, _, _, err := s.Register(ctx, NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: agentID,
+			PlatformExperimentID: pe, Text: text, Links: links, Position: position})
+		if err != nil {
+			t.Fatalf("Register %q: got = %v, want nil", text, err)
+		}
+		return h
+	}
+	a := registerAt("agent-1", "a", onRoot(pe), 11)
+	b := registerAt("agent-2", "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}}, 10)
+	if _, err := s.AddLink(ctx, b.ID, "agent-2", "", domain.LinkSpec{Type: domain.LinkContradicts, To: a.ID}, 12); err != nil {
 		t.Fatalf("AddLink: got = %v, want nil", err)
 	}
-	settled, _, err := s.UpdateStatus(ctx, a.ID, "agent-1", domain.HypothesisConfirmed)
-	if err != nil {
+	if _, _, err := s.UpdateStatus(ctx, a.ID, "agent-1", domain.HypothesisConfirmed, 13); err != nil {
 		t.Fatalf("UpdateStatus: got = %v, want nil", err)
 	}
 
-	events, err := s.ReplayEvents(ctx, pe, since)
+	events, err := s.ReplayEvents(ctx, pe, 10)
 	if err != nil {
 		t.Fatalf("ReplayEvents: got = %v, want nil", err)
 	}
 	want := map[db.Event]bool{
-		{Kind: db.EventHypothesisNew, Subject: a.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-1", Cursor: db.NewCursor(a.CreatedAt)}:                           true,
-		{Kind: db.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Cursor: db.NewCursor(b.CreatedAt)}:                           true,
-		{Kind: db.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Cursor: db.NewCursor(linked.CreatedAt)}: true,
-		{Kind: db.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Cursor: db.NewCursor(*settled.StatusChangedAt)}:       true,
+		{Kind: db.EventHypothesisNew, Subject: a.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                      true,
+		{Kind: db.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                      true,
+		{Kind: db.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 12}: true,
+		{Kind: db.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Position: 13}:               true,
 	}
 	if len(events) != len(want) {
 		t.Errorf("replayed events: got %d (%+v), want %d", len(events), events, len(want))
@@ -664,9 +669,34 @@ func TestReplayDerivesHypothesisEventsFromTheGraphsTimestamps(t *testing.T) {
 		}
 	}
 
-	later, err := s.ReplayEvents(ctx, pe, *settled.StatusChangedAt)
+	at, err := s.ReplayEvents(ctx, pe, 13)
+	if err != nil || len(at) != 1 || at[0].Kind != db.EventHypothesisStatus {
+		t.Errorf("replay from the last write's position: got = (%v, %v), want that write's hypothesis.status", at, err)
+	}
+	later, err := s.ReplayEvents(ctx, pe, 14)
 	if err != nil || len(later) != 0 {
-		t.Errorf("replay after the last change: got = (%v, %v), want nothing", later, err)
+		t.Errorf("replay after the last write: got = (%v, %v), want nothing", later, err)
+	}
+}
+
+// A hypothesis written before writes carried a position must still be in a snapshot replay.
+func TestEnsureSchemaGivesAHypothesisWrittenWithoutAPositionPositionZero(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	h := register(t, s, pe, "agent-1", "written before positions", onRoot(pe))
+	ctx := context.Background()
+	if _, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) REMOVE h.created_xid`, map[string]any{"id": h.ID})
+	}); err != nil {
+		t.Fatalf("remove created_xid: got = %v, want nil", err)
+	}
+	if err := s.EnsureSchema(ctx); err != nil {
+		t.Fatalf("EnsureSchema: got = %v, want nil", err)
+	}
+
+	events, err := s.ReplayEvents(ctx, pe, 0)
+	if err != nil || len(events) != 1 || events[0].Subject != h.ID || events[0].Position != 0 {
+		t.Errorf("snapshot replay: got = (%+v, %v), want = hypothesis.new for %s at position 0", events, err, h.ID)
 	}
 }
 

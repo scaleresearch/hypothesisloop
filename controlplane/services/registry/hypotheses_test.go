@@ -47,11 +47,13 @@ type fakeGraph struct {
 	rows  map[string]*domain.Hypothesis
 	links map[string]bool
 	clock time.Time
+	// positions is the watch stream position each write was stamped with, by hypothesis id.
+	positions map[string][]int64
 }
 
 func newFakeGraph() *fakeGraph {
 	return &fakeGraph{rows: map[string]*domain.Hypothesis{}, links: map[string]bool{},
-		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), positions: map[string][]int64{}}
 }
 
 func (g *fakeGraph) tick() time.Time {
@@ -69,6 +71,7 @@ func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domai
 		PlatformExperimentID: n.PlatformExperimentID, Text: n.Text, Status: domain.HypothesisOpen, CreatedAt: g.tick(),
 	}
 	g.rows[id] = h
+	g.positions[id] = append(g.positions[id], n.Position)
 	return h, []domain.Link{}, false, nil
 }
 
@@ -76,7 +79,7 @@ func (g *fakeGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothe
 	return g.rows[id], nil
 }
 
-func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, bool, error) {
+func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus, position int64) (*domain.Hypothesis, bool, error) {
 	h, ok := g.rows[id]
 	if !ok {
 		return nil, false, graphdb.ErrNotFound
@@ -89,10 +92,11 @@ func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, st
 	}
 	at := g.tick()
 	h.Status, h.StatusChangedAt = status, &at
+	g.positions[id] = append(g.positions[id], position)
 	return h, true, nil
 }
 
-func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec domain.LinkSpec) (*graphdb.LinkResult, error) {
+func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec domain.LinkSpec, position int64) (*graphdb.LinkResult, error) {
 	h, ok := g.rows[fromID]
 	if !ok {
 		return nil, graphdb.ErrNotFound
@@ -104,21 +108,39 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID, _ string, spec d
 	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Out: []domain.Link{}}
 	if result.Created {
 		result.CreatedAt = g.tick()
+		g.positions[fromID] = append(g.positions[fromID], position)
 	}
 	g.links[key] = true
 	return result, nil
 }
 
-// recordedEvents is the watch stream as the registry sees it.
-type recordedEvents struct{ events []db.Event }
+// recordedEvents is the watch stream as the registry sees it. Emit hands out positions 1, 2, ...
+// and stamps them on the events, as Postgres would.
+type recordedEvents struct {
+	events   []db.Event
+	position int64
+}
 
 func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
 	r.events = append(r.events, e)
 	return nil
 }
 
+func (r *recordedEvents) Emit(_ context.Context, write func(position int64) ([]db.Event, error)) error {
+	r.position++
+	events, err := write(r.position)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		e.Position = r.position
+		r.events = append(r.events, e)
+	}
+	return nil
+}
+
 func poolService(store Store) *Service {
-	return &Service{store: store, graph: newFakeGraph(), logger: zap.NewNop()}
+	return &Service{store: store, graph: newFakeGraph(), logger: zap.NewNop(), events: &recordedEvents{}}
 }
 
 var buildOnRoot = []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}
@@ -267,22 +289,25 @@ func TestAddHypothesisCommentRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *te
 	}
 }
 
-// The graph has no NOTIFY, so the registry is what tells /watch about a new idea. The event has to
-// carry the graph's own timestamp as its cursor: replay derives the same event from that stored
-// value, and a reconnecting watcher must see one event, not a live one and a differently-cursored
-// twin.
-func TestRegisteringANewHypothesisAnnouncesItWithTheStoredCreationTimeAsCursor(t *testing.T) {
+// The graph has no NOTIFY, so the registry is what tells /watch about a new idea. The graph write
+// has to carry the position its event is emitted at: replay derives the same event from that
+// stored value, and a reconnecting watcher must see one event, not two.
+func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *testing.T) {
 	events := &recordedEvents{}
 	svc := poolService(newPoolStore()).WithEvents(events)
+	graph := svc.graph.(*fakeGraph)
 
 	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: "agent", PlatformExperimentID: "pe-1",
-		AgentID: "agent-1", Cursor: db.NewCursor(h.CreatedAt)}
+		AgentID: "agent-1", Position: 1}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)
+	}
+	if got := graph.positions[h.ID]; len(got) != 1 || got[0] != 1 {
+		t.Errorf("graph write positions: got = %v, want = [1]", got)
 	}
 }
 
@@ -321,8 +346,9 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 		t.Fatalf("events: got = %v, want = %v (hypothesis.new, then one hypothesis.status)", len(events.events), 2)
 	}
 	got := events.events[1]
-	if got.Kind != db.EventHypothesisStatus || got.Value != "refuted" || got.Cursor != db.NewCursor(*h.StatusChangedAt) {
-		t.Errorf("status event: got = %+v, want = hypothesis.status refuted at status_changed_at", got)
+	positions := svc.graph.(*fakeGraph).positions[h.ID]
+	if got.Kind != db.EventHypothesisStatus || got.Value != "refuted" || len(positions) != 2 || got.Position != positions[1] {
+		t.Errorf("status event: got = %+v (graph positions %v), want = hypothesis.status refuted at the status write's position", got, positions)
 	}
 }
 

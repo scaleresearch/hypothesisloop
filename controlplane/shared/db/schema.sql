@@ -539,9 +539,12 @@ CREATE TABLE IF NOT EXISTS cluster_settings (
 -- scoping ids, and a cursor — never a copy of the row. A client wanting detail follows with a
 -- normal GET, so no read path is duplicated here and nothing is persisted twice.
 --
--- The cursor is the changed row's own timestamp in microseconds. Replay (see db.EventsStore)
--- re-derives events from those same timestamp columns, so a live event and its replayed twin
--- carry the identical cursor and a reconnecting client can pick up exactly where it stopped.
+-- An event's position is the id of the transaction that wrote it, recorded in the *_xid column
+-- beside each timestamp replay reads. Its cursor is the xmin of the writer's snapshot: every
+-- transaction below it had finished, so its NOTIFY was delivered first, and a client resuming
+-- from it misses nothing. Replay (see db.EventsStore) re-derives events from the *_xid columns,
+-- so a live event and its replayed twin carry the same position. Timestamps are not commit
+-- ordered and are not used for this.
 --
 -- The columns below exist for that second half and live here, beside the triggers that maintain
 -- them, because that is the only thing they are for. Each records WHEN one field of its own row
@@ -553,10 +556,26 @@ CREATE TABLE IF NOT EXISTS cluster_settings (
 -- moment — and no Go writer sets them: one clock per column, and no write path can forget it.
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS status_changed_at      TIMESTAMPTZ;
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_at TIMESTAMPTZ;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS status_changed_xid      BIGINT;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_xid BIGINT;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS queued_xid    BIGINT;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS submitted_xid BIGINT;
+ALTER TABLE agent_quotas          ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE hypothesis_findings   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE hypothesis_comments   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE platform_experiment_stage_advances ADD COLUMN IF NOT EXISTS advanced_xid BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE platform_experiment_cuts           ADD COLUMN IF NOT EXISTS cut_xid      BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+UPDATE platform_experiments SET status_changed_xid = pg_current_xact_id()::text::bigint
+    WHERE status_changed_at IS NOT NULL AND status_changed_xid IS NULL;
+UPDATE platform_experiments SET description_changed_xid = pg_current_xact_id()::text::bigint
+    WHERE description_changed_at IS NOT NULL AND description_changed_xid IS NULL;
+UPDATE experiments SET queued_xid = pg_current_xact_id()::text::bigint WHERE queued_at IS NOT NULL AND queued_xid IS NULL;
+UPDATE experiments SET submitted_xid = pg_current_xact_id()::text::bigint WHERE submitted_at IS NOT NULL AND submitted_xid IS NULL;
 
 CREATE OR REPLACE FUNCTION hypothesisloop_notify_event(
     kind TEXT, subject TEXT, new_value TEXT, detail TEXT,
-    pe_id TEXT, owner_agent_id TEXT, at TIMESTAMPTZ
+    pe_id TEXT, owner_agent_id TEXT
 ) RETURNS void AS $$
 BEGIN
     PERFORM pg_notify('hypothesisloop_events', json_build_object(
@@ -566,24 +585,46 @@ BEGIN
         'detail', COALESCE(detail, ''),
         'platform_experiment_id', pe_id,
         'agent_id', COALESCE(owner_agent_id, ''),
-        'cursor', (EXTRACT(EPOCH FROM at) * 1000000)::bigint
+        'position', pg_current_xact_id()::text::bigint,
+        'cursor', pg_snapshot_xmin(pg_current_snapshot())::text::bigint
     )::text);
 END;
 $$ LANGUAGE plpgsql;
+
+DROP FUNCTION IF EXISTS hypothesisloop_notify_event(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ);
+
+-- updated_xid moves on every write, as updated_at does. A waypoint's xid moves when its
+-- timestamp does; a waypoint is only ever set from NULL, so the comparison is exact.
+CREATE OR REPLACE FUNCTION hypothesisloop_experiments_touch() RETURNS trigger AS $$
+BEGIN
+    NEW.updated_xid := pg_current_xact_id()::text::bigint;
+    IF TG_OP = 'INSERT' OR NEW.queued_at IS DISTINCT FROM OLD.queued_at THEN
+        NEW.queued_xid := CASE WHEN NEW.queued_at IS NULL THEN NULL ELSE NEW.updated_xid END;
+    END IF;
+    IF TG_OP = 'INSERT' OR NEW.submitted_at IS DISTINCT FROM OLD.submitted_at THEN
+        NEW.submitted_xid := CASE WHEN NEW.submitted_at IS NULL THEN NULL ELSE NEW.updated_xid END;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS experiments_touch ON experiments;
+CREATE TRIGGER experiments_touch BEFORE INSERT OR UPDATE ON experiments
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_experiments_touch();
 
 CREATE OR REPLACE FUNCTION hypothesisloop_experiments_notify() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
         PERFORM hypothesisloop_notify_event('experiment.status', NEW.id, NEW.status::text,
             COALESCE(NEW.eviction_reason, NEW.not_admitted_reason, ''),
-            NEW.platform_experiment_id, NEW.agent_id, NEW.updated_at);
+            NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     -- The queue reason is what an agent polls hardest for: it changes while the status does not,
     -- so it needs an event of its own or a waiting agent learns nothing until admission.
     IF NEW.not_admitted_reason IS NOT NULL
        AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
         PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id, NEW.not_admitted_reason, '',
-            NEW.platform_experiment_id, NEW.agent_id, NEW.updated_at);
+            NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     RETURN NULL;
 END;
@@ -596,6 +637,7 @@ CREATE TRIGGER experiments_notify AFTER INSERT OR UPDATE ON experiments
 CREATE OR REPLACE FUNCTION hypothesisloop_agent_quotas_touch() RETURNS trigger AS $$
 BEGIN
     NEW.updated_at := now();
+    NEW.updated_xid := pg_current_xact_id()::text::bigint;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -610,7 +652,7 @@ BEGIN
     -- see a grant, a donation or a stage move land. What it is made of comes from GET /quota.
     PERFORM hypothesisloop_notify_event('quota.changed', NEW.agent_id,
         (NEW.guaranteed_accelerator_hours + NEW.burst_accelerator_hours)::text, '',
-        NEW.platform_experiment_id, NEW.agent_id, NEW.updated_at);
+        NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -623,9 +665,11 @@ CREATE OR REPLACE FUNCTION hypothesisloop_platform_experiments_touch() RETURNS t
 BEGIN
     IF NEW.status IS DISTINCT FROM OLD.status THEN
         NEW.status_changed_at := now();
+        NEW.status_changed_xid := pg_current_xact_id()::text::bigint;
     END IF;
     IF NEW.description IS DISTINCT FROM OLD.description THEN
         NEW.description_changed_at := now();
+        NEW.description_changed_xid := pg_current_xact_id()::text::bigint;
     END IF;
     RETURN NEW;
 END;
@@ -641,7 +685,7 @@ BEGIN
     -- and nothing told them: a closed platform experiment looked exactly like a quiet one.
     IF NEW.status IS DISTINCT FROM OLD.status THEN
         PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text, '',
-            NEW.id, '', NEW.status_changed_at);
+            NEW.id, '');
     END IF;
     -- The brief is the question every agent is working on, and it is edited mid-run when the
     -- coordinator resolves or redirects something. The new text is deliberately NOT carried: a
@@ -649,7 +693,7 @@ BEGIN
     -- ordinary GET, exactly as it would have anyway.
     IF NEW.description IS DISTINCT FROM OLD.description THEN
         PERFORM hypothesisloop_notify_event('platform_experiment.description', NEW.id, '', '',
-            NEW.id, '', NEW.description_changed_at);
+            NEW.id, '');
     END IF;
     RETURN NULL;
 END;
@@ -664,7 +708,7 @@ CREATE TRIGGER platform_experiments_notify AFTER UPDATE ON platform_experiments
 CREATE OR REPLACE FUNCTION hypothesisloop_findings_notify() RETURNS trigger AS $$
 BEGIN
     PERFORM hypothesisloop_notify_event('finding.new', NEW.hypothesis_id, NEW.experiment_id, '',
-        NEW.platform_experiment_id, NEW.agent_id, NEW.created_at);
+        NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -676,7 +720,7 @@ CREATE TRIGGER hypothesis_findings_notify AFTER INSERT ON hypothesis_findings
 CREATE OR REPLACE FUNCTION hypothesisloop_comments_notify() RETURNS trigger AS $$
 BEGIN
     PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, NEW.source, '',
-        NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''), NEW.created_at);
+        NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -688,7 +732,7 @@ CREATE TRIGGER hypothesis_comments_notify AFTER INSERT ON hypothesis_comments
 CREATE OR REPLACE FUNCTION hypothesisloop_stage_advance_notify() RETURNS trigger AS $$
 BEGIN
     PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
-        NEW.stage_index::text, 'advanced', NEW.platform_experiment_id, '', NEW.advanced_at);
+        NEW.stage_index::text, 'advanced', NEW.platform_experiment_id, '');
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -702,13 +746,13 @@ CREATE TRIGGER stage_advances_notify AFTER INSERT ON platform_experiment_stage_a
 CREATE OR REPLACE FUNCTION hypothesisloop_cuts_notify() RETURNS trigger AS $$
 BEGIN
     PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
-        NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id, NEW.cut_at);
+        NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id);
     -- The same row, said the other way round. stage.boundary is about the ladder and reaches
     -- everyone; agent.cut is about one agent and is the only event that tells it, without a GET,
     -- that the run is over for IT. It is agent-owned, so an agent's own subscription receives its
     -- own cut and is not woken by every rival's.
     PERFORM hypothesisloop_notify_event('agent.cut', NEW.agent_id,
-        NEW.stage_index::text, '', NEW.platform_experiment_id, NEW.agent_id, NEW.cut_at);
+        NEW.stage_index::text, '', NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

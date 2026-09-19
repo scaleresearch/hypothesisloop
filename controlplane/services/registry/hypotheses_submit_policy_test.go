@@ -22,7 +22,7 @@ func (s *policyStore) GetPlatformExperimentSubmitPolicies(_ context.Context, _ s
 }
 
 func newPolicyTestService(policy domain.SubmitterPolicy) *Service {
-	return New(&policyStore{poolStore: *newPoolStore(), hypothesisPolicy: policy}, newFakeGraph(), zap.NewNop(), "", nil)
+	return New(&policyStore{poolStore: *newPoolStore(), hypothesisPolicy: policy}, newFakeGraph(), zap.NewNop(), "", nil).WithEvents(&recordedEvents{})
 }
 
 // A human_only platform experiment must refuse an autonomous agent's submission with a message

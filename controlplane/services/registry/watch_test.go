@@ -25,7 +25,7 @@ import (
 )
 
 // fakeEvents is the change stream reduced to the two rules the real one guarantees: replay
-// returns the matching events after a cursor, in cursor order, and the live stream carries
+// returns the matching events at or after a cursor, in position order, and the live stream carries
 // whatever the database announced. It applies db.EventFilter itself rather than a test-local
 // approximation, so a test here fails for the same reason production would.
 type fakeEvents struct {
@@ -43,7 +43,7 @@ func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int6
 		since = 0
 	}
 	for _, e := range f.stored {
-		if e.Cursor > since && filter.Matches(e) {
+		if e.Position >= since && filter.Matches(e) {
 			out = append(out, e)
 		}
 	}
@@ -207,14 +207,14 @@ func (c *watchClient) nextRaw(t *testing.T) []byte {
 
 func statusEvent(subject, value, agentID string, cursor int64) db.Event {
 	return db.Event{Kind: db.EventExperimentStatus, Subject: subject, Value: value,
-		PlatformExperimentID: "pe-1", AgentID: agentID, Cursor: cursor}
+		PlatformExperimentID: "pe-1", AgentID: agentID, Position: cursor, Cursor: cursor}
 }
 
 // A dropped connection must cost a client a delay and never a fact. An agent that reconnects and
 // silently skips the transition it was disconnected across would go back to polling full state,
 // which is the exact failure this stream exists to end — so replay has to return every event
-// after the cursor and start the live stream from where it stopped.
-func TestAReconnectWithTheLastCursorReplaysExactlyTheEventsMissedWhileDisconnected(t *testing.T) {
+// from the cursor on, the one at the cursor included, and start the live stream where it stopped.
+func TestAReconnectFromTheLargestCursorSeenReplaysEveryEventFromThatCursorOn(t *testing.T) {
 	source := newFakeEvents(
 		statusEvent("exp-1", "QUEUED", "agent-a", 100),
 		statusEvent("exp-1", "SUBMITTED", "agent-a", 200),
@@ -223,7 +223,7 @@ func TestAReconnectWithTheLastCursorReplaysExactlyTheEventsMissedWhileDisconnect
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"since":                  {"100"},
+		"since":                  {"200"},
 	})
 
 	for _, want := range []string{"SUBMITTED", "RUNNING"} {
@@ -291,7 +291,7 @@ func TestAnEventAlreadyReplayedIsNotSentAgainWhenTheLiveStreamRepeatsIt(t *testi
 // be dropped from the live stream, never its siblings.
 func TestEventsSharingACursorAreAllDeliveredAndOnlyTheReplayedOneIsDropped(t *testing.T) {
 	cut := func(agentID string) db.Event {
-		return db.Event{Kind: db.EventAgentCut, Subject: agentID, Value: "1", PlatformExperimentID: "pe-1", AgentID: agentID, Cursor: 500}
+		return db.Event{Kind: db.EventAgentCut, Subject: agentID, Value: "1", PlatformExperimentID: "pe-1", AgentID: agentID, Position: 500, Cursor: 500}
 	}
 	source := newFakeEvents(cut("agent-a"))
 	server := watchServer(t, source)
@@ -326,9 +326,9 @@ func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
 	})
 
 	source.live <- db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1",
-		PlatformExperimentID: "pe-1", Cursor: 100}
+		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
 	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1",
-		PlatformExperimentID: "pe-1", Cursor: 150}
+		PlatformExperimentID: "pe-1", Position: 150, Cursor: 150}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 
 	got := client.next(t)
@@ -354,7 +354,7 @@ func TestAnAgentScopedSubscriptionHidesAnotherAgentsJobsAndKeepsPoolActivity(t *
 
 	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)
 	source.live <- db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 200}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 200, Cursor: 200}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
 
 	if got := client.next(t); got.Kind != db.EventHypothesisNew {
@@ -540,9 +540,9 @@ func TestHLWatchDistinguishesItsOwnStageCutFromAnotherAgentsWithAnFYIPrefix(t *t
 		now := time.Now().UnixMicro()
 		// One boundary row produces both agents' cut events, exactly as the real ladder does.
 		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: now}
+			PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: now, Cursor: now}
 		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: now}
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: now, Cursor: now}
 	}()
 
 	var wg sync.WaitGroup
@@ -600,9 +600,9 @@ func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 	})
 
 	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
 	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-a", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 
 	if got := client.next(t).Subject; got != "agent-a" {
 		t.Errorf("first delivered cut: got = %v, want = %v", got, "agent-a")
@@ -622,11 +622,11 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 	})
 
 	source.live <- db.Event{Kind: db.EventHypothesisStatus, Subject: "hyp-1", Value: "refuted",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
 	source.live <- db.Event{Kind: db.EventPlatformExperimentDescription, Subject: "pe-1",
-		PlatformExperimentID: "pe-1", Cursor: 200}
+		PlatformExperimentID: "pe-1", Position: 200, Cursor: 200}
 	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
-		PlatformExperimentID: "pe-1", Cursor: 300}
+		PlatformExperimentID: "pe-1", Position: 300, Cursor: 300}
 
 	for _, want := range []string{db.EventHypothesisStatus, db.EventPlatformExperimentDescription, db.EventPlatformExperimentStatus} {
 		if got := client.next(t).Kind; got != want {
@@ -642,7 +642,7 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 func TestASharedEventFromAnotherAgentIsDeliveredWithAnFYIPrefixLiveAndOnReplay(t *testing.T) {
 	source := newFakeEvents(
 		db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 50},
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 50, Cursor: 50},
 	)
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
@@ -657,11 +657,11 @@ func TestASharedEventFromAnotherAgentIsDeliveredWithAnFYIPrefixLiveAndOnReplay(t
 	}
 
 	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "2", Detail: "cut",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
 	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "3", Detail: "cut",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1", Value: "agent", Detail: "",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 300}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 300, Cursor: 300}
 
 	if got := client.next(t); got.Detail != "FYI: cut" || got.Value != "2" {
 		t.Errorf("live stage.boundary for another agent's cut: got = %+v, want detail = %q", got, "FYI: cut")
@@ -687,9 +687,9 @@ func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
 	client := dialWatch(t, server, url.Values{"experiment_id": {"exp-1"}})
 
 	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
-		PlatformExperimentID: "pe-1", Cursor: 100}
+		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
 	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-a", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
 
 	if got := client.next(t).Kind; got != db.EventExperimentStatus {
@@ -751,7 +751,7 @@ func TestASubscriptionNamingNoKindsCarriesEverythingTheAgentLoopWouldOtherwisePo
 	}
 	for i, kind := range wanted {
 		source.live <- db.Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1",
-			AgentID: "agent-a", Cursor: int64(100 + i)}
+			AgentID: "agent-a", Position: int64(100 + i), Cursor: int64(100 + i)}
 	}
 	for _, want := range wanted {
 		if got := client.next(t).Kind; got != want {
@@ -770,7 +770,7 @@ func TestTheDefaultSubscriptionLeavesOutTheMetricPointerFirehose(t *testing.T) {
 	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
 
 	source.live <- db.Event{Kind: db.EventMetricPoint, Subject: "exp-1", Value: "loss",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 100}
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 100, Cursor: 100}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 
 	if got := client.next(t).Kind; got != db.EventExperimentStatus {
@@ -791,7 +791,7 @@ func TestNamingMetricPointExplicitlyStillDeliversItAndNothingElse(t *testing.T) 
 
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 100)
 	source.live <- db.Event{Kind: db.EventMetricPoint, Subject: "exp-1", Value: "loss",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 
 	if got := client.next(t).Kind; got != db.EventMetricPoint {
 		t.Errorf("first delivered kind for an explicit kinds=metric.point: got = %v, want = %v", got, db.EventMetricPoint)
@@ -854,7 +854,7 @@ func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidN
 func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThanGoingLiveOnly(t *testing.T) {
 	source := newFakeEvents(
 		db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 150},
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150},
 	)
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
@@ -877,6 +877,35 @@ func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThan
 	}
 	if got := readSubscription(t, client); len(got.Kinds) != 2 {
 		t.Errorf("reported kinds after widening: got = %v, want = the two named", got.Kinds)
+	}
+}
+
+// A replay starts at the floor it resumes from, the event that set the floor included. One this
+// connection already received live must not be sent again when a narrowed kind is re-added.
+func TestReAddingANarrowedKindDoesNotResendTheEventsItAlreadyDeliveredLive(t *testing.T) {
+	pool := db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
+	source := newFakeEvents()
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"kinds":                  {"experiment.status,hypothesis.new"},
+		"since":                  {"100"},
+	})
+
+	source.stored = append(source.stored, pool)
+	source.live <- pool
+	if got := client.next(t); got.Subject != "hyp-1" {
+		t.Fatalf("live pool event: got = %v, want = %v", got.Subject, "hyp-1")
+	}
+	client.sendText(t, `{"kinds": "experiment.status"}`)
+	readSubscription(t, client)
+	client.sendText(t, `{"kinds": "experiment.status,hypothesis.new"}`)
+	readSubscription(t, client)
+
+	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
+	if got := client.next(t); got.Kind != db.EventExperimentStatus {
+		t.Errorf("next frame after re-adding the kind: got = %v %v, want = the live status, with no repeat of hyp-1", got.Kind, got.Subject)
 	}
 }
 
@@ -932,7 +961,7 @@ func TestNarrowingAFilterStopsTheDroppedKindAndKeepsTheOnesLeft(t *testing.T) {
 	}
 
 	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1", Value: "agent",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 100}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 
 	if got := client.next(t).Kind; got != db.EventExperimentStatus {
@@ -1021,11 +1050,11 @@ func TestTheDefaultSubscriptionScopedToAnAgentStillNeverCarriesAnotherAgentsOwnE
 
 	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)
 	source.live <- db.Event{Kind: db.EventQuotaChanged, Subject: "agent-b", Value: "9",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 150}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
 	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: 175}
+		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 175, Cursor: 175}
 	source.live <- db.Event{Kind: db.EventQuotaChanged, Subject: "agent-a", Value: "4",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: 200}
+		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 
 	got := client.next(t)
 	if got.Kind != db.EventQuotaChanged || got.Subject != "agent-a" {

@@ -43,6 +43,10 @@ func (n *capturingNotifier) NotifyEvent(_ context.Context, e db.Event) error {
 	return nil
 }
 
+func (n *capturingNotifier) Emit(context.Context, func(int64) ([]db.Event, error)) error {
+	panic("the underperformance check writes nothing to the graph")
+}
+
 // cohortSeriesServer answers a PromQL range query with one series for "exp-1" (the job under
 // test, one point older than the 2s "just written" cutoff) and three sibling series, regardless
 // of the actual query string — the same shortcut recordedSamplesServer uses in metrics_test.go.
