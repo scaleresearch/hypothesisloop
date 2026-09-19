@@ -112,6 +112,12 @@ func staleCohortServer(selfPrevValue float64, siblingValues []float64) *httptest
 	}))
 }
 
+// admittedAgo is the job under test, admitted that long before now.
+func admittedAgo(d time.Duration) *domain.Experiment {
+	at := time.Now().UTC().Add(-d)
+	return &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", SubmittedAt: &at}
+}
+
 func rankingMetric(key, direction string) []domain.MetricDefinition {
 	return []domain.MetricDefinition{{Key: key, Direction: direction}}
 }
@@ -125,14 +131,14 @@ func TestUnderperformanceFiresOncePerJobOnTheTransitionIntoTrailing(t *testing.T
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize"), told: map[string]bool{}},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), told: map[string]bool{}},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
 	for _, fraction := range []float64{0.5, 0.7} {
-		svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", fraction, 0.5, time.Now().UTC())
+		svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", fraction, 0.5, time.Now().UTC())
 	}
 
 	if len(notifier.events) != 1 {
@@ -152,13 +158,13 @@ func TestUnderperformanceDoesNotRepeatWithinTheSameStretch(t *testing.T) {
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.5, 0.5, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (already trailing last checkpoint)", len(notifier.events))
@@ -173,13 +179,13 @@ func TestUnderperformanceNeedsAMinimumCohort(t *testing.T) {
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.5, 0.5, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (cohort too small)", len(notifier.events))
@@ -194,13 +200,13 @@ func TestUnderperformanceIgnoresStaleSiblings(t *testing.T) {
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.5, 0.5, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (siblings all stale, cohort too small)", len(notifier.events))
@@ -215,13 +221,13 @@ func TestUnderperformanceSkipsEarlyProgress(t *testing.T) {
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.05, 0.01, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.05, 0.01, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (below min fraction)", len(notifier.events))
@@ -238,13 +244,13 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
 	}
 
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.5, 0.88, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.88, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (2%% gap against a tied cohort is not a real straggler)", len(notifier.events))
@@ -264,7 +270,7 @@ func TestUnderperformanceEdgeCheckIsNotFooledByCloselyTimedCheckpoints(t *testin
 
 	notifier := &capturingNotifier{}
 	svc := &Service{
-		store:        underperformStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 		events:       notifier,
@@ -273,9 +279,35 @@ func TestUnderperformanceEdgeCheckIsNotFooledByCloselyTimedCheckpoints(t *testin
 	// The self series' one stored point (0.3, timestamped an hour ago by cohortSeriesServer) is
 	// older than `at`, so it is read back as the previous checkpoint regardless of how close
 	// together the two RecordMetric calls actually were in wall-clock time.
-	svc.checkUnderperformance(context.Background(), &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1"}, "acc", 0.6, 0.3, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.6, 0.3, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (same stretch as the previous checkpoint, however close in time)", len(notifier.events))
+	}
+}
+
+// A job about to end gives its agent nothing to save by cancelling it: half done after 20 seconds
+// leaves 20 seconds, less than the agent needs to read the advisory. The same half after an hour
+// leaves an hour, and fires.
+func TestUnderperformanceStaysSilentWhenTheJobIsAboutToEnd(t *testing.T) {
+	server := cohortSeriesServer(0.87, []float64{0.9, 0.85, 0.88})
+	defer server.Close()
+
+	for _, tc := range []struct {
+		admitted time.Duration
+		fraction float64
+		want     int
+	}{{20 * time.Second, 0.5, 0}, {time.Hour, 0.5, 1}, {10 * time.Minute, 0.9, 0}, {10 * time.Hour, 0.9, 1}} {
+		notifier := &capturingNotifier{}
+		svc := &Service{
+			store:        underperformStore{exp: admittedAgo(tc.admitted), metrics: rankingMetric("acc", "maximize")},
+			metricsDBURL: server.URL,
+			logger:       zap.NewNop(),
+			events:       notifier,
+		}
+		svc.checkUnderperformance(context.Background(), admittedAgo(tc.admitted), "acc", tc.fraction, 0.5, time.Now().UTC())
+		if len(notifier.events) != tc.want {
+			t.Fatalf("admitted %s ago at fraction %v: events = %d, want %d", tc.admitted, tc.fraction, len(notifier.events), tc.want)
+		}
 	}
 }

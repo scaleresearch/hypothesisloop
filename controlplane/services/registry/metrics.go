@@ -124,12 +124,16 @@ const (
 	// job against a sibling that finished or stalled an hour ago — a different phase of the run,
 	// not a fair comparison of "right now."
 	underperformSiblingStaleness = 15 * time.Minute
+	// underperformMinRemaining is how much of the run must be left, at its pace since admission,
+	// for the advisory to be sent: cancelling a job that ends before its agent has read the
+	// advisory saves nothing, and reading it costs the agent a turn.
+	underperformMinRemaining = 2 * time.Minute
 )
 
 // checkUnderperformance looks at how this job's just-recorded ranking-metric sample compares to
 // its cohort (every other job in the same platform experiment reporting the same metric) and, if
-// it just became the clear straggler, tells only the owning agent so — once per job, never a
-// command. See db.EventJobUnderperforming.
+// it just became the clear straggler with underperformMinRemaining of its run still ahead, tells
+// only the owning agent so — once per job, never a command. See db.EventJobUnderperforming.
 //
 // Both "is this job trailing now" and "was it trailing as of its own previous sample" are
 // recomputed from the metrics store every time; the only thing kept is the marker on the job's
@@ -150,6 +154,12 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		return
 	}
 	if fractionComplete < underperformMinFraction {
+		return
+	}
+	if exp.SubmittedAt == nil {
+		return
+	}
+	if remaining := time.Duration(float64(at.Sub(*exp.SubmittedAt)) * (1 - fractionComplete) / fractionComplete); remaining < underperformMinRemaining {
 		return
 	}
 	// Only evaluate near a checkpoint (see underperformCheckpointWidth) — this is the throttle,
