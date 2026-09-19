@@ -25,12 +25,8 @@ ANY explicit CPU/memory/storage number at admission time against the exact same 
 fair share (domain.FairShare, divisor = accelerators installed on the node) that
 loop_disbalance.go's eviction pass later measures a RUNNING job against, at the identical
 DefaultDisbalanceTolerance = 1.0. An explicit number that exceeds it is never admitted --
-resolveOrValidateDimension (loop_resolve.go ~229) returns an error, resolveClusterLocalResources
-returns fits=false, and the job is left QUEUED forever with a not_admitted_reason
-("capacity_unavailable: short {...}") indistinguishable from ordinary capacity shortage; the
-specific "exceeds cluster-local fair share of Xm" message resolveOrValidateDimension computes is
-discarded rather than surfaced, so the agent has no way to learn why (worth fixing separately, but
-it is an observability gap, not what blocks this scenario).
+resolveClusterLocalResources reports a misfit, and the job is left QUEUED forever with the
+not_admitted_reason "exceeds_accelerator_share: cpu N is above the Xm that 1 accelerator(s) get".
 
 Verified empirically against this live stack (fake-l40-3: 8 accelerators, ~15875m free CPU, fair
 share ~1984m/accelerator): a job requesting 1900m (under the fair share) is admitted immediately;
@@ -115,10 +111,8 @@ def test_resource_disbalance_evicts_and_explains_itself(api, run_id, deadline):
     # point -- see RATIO above) at the same tolerance loop_resolve.go's admission-time validation
     # now enforces (see this file's header comment). Detect that specific, currently-live conflict
     # fast rather than burning the whole deadline on a job that structurally cannot ever leave
-    # QUEUED: give it a short window, then check whether it is exactly the "short = the entire
-    # request" fingerprint that fingerprints a resolveClusterLocalResources rejection (a genuine
-    # capacity shortage always exists on this idle node, so any other shortage points at something
-    # else and is left to fail loudly below instead of being explained away).
+    # QUEUED: give it a short window, then check whether its reason is exactly that misfit for the
+    # hog's own CPU request; any other reason is left to fail loudly below.
     probe_deadline = Deadline.in_seconds(min(30.0, deadline.remaining()))
     try:
         hog_running = eventually(
@@ -131,12 +125,11 @@ def test_resource_disbalance_evicts_and_explains_itself(api, run_id, deadline):
     except DeadlineExceeded:
         stuck = api.experiment(hog)
         reason = stuck.get("not_admitted_reason") or ""
-        hog_cpu_milli = hog_cpu * 1000
-        if stuck["status"] == "QUEUED" and reason.startswith("capacity_unavailable") and f"cpu:={hog_cpu_milli}" in reason:
+        if stuck["status"] == "QUEUED" and reason.startswith("exceeds_accelerator_share") and f"cpu {hog_cpu} " in reason:
             api.cancel_job(hog)
             api.close_platform_experiment(pe_id)
             pytest.skip(
-                f"hog stuck QUEUED with the entire request reported short ({reason!r}) -- this is "
+                f"hog stuck QUEUED as exceeding its accelerator share ({reason!r}) -- this is "
                 "the fingerprint of loop_resolve.go's admission-time fair-share validation "
                 "rejecting an explicit CPU number that exceeds the cluster-local fair share (see "
                 "this file's header comment); the hog can never be admitted under current platform "
