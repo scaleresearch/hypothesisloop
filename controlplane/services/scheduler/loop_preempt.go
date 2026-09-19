@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -32,6 +33,15 @@ func notAdmittedReasonForSubmitError(err error) string {
 	default:
 		return domain.NotAdmittedWorkloadCreation
 	}
+}
+
+// submitErrorLevel logs a lost race for the last free capacity at info: the job stays queued and
+// the next tick admits it, so it is no error.
+func submitErrorLevel(err error) zapcore.Level {
+	if errors.Is(err, errAdmissionCapacityChanged) {
+		return zapcore.InfoLevel
+	}
+	return zapcore.ErrorLevel
 }
 
 // preempt selects and requeues burst victims sufficient to cover needed, a shortage Footprint

@@ -3,10 +3,12 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -327,4 +329,13 @@ func (f failingFor) LatestExperimentNode(ctx context.Context, id string, created
 		return "", false, errors.New("no series for " + id)
 	}
 	return f.inner.LatestExperimentNode(ctx, id, createdAt, now)
+}
+
+func TestSubmitErrorLevelLogsALostCapacityRaceAsInfo(t *testing.T) {
+	if got := submitErrorLevel(fmt.Errorf("submit: %w", errAdmissionCapacityChanged)); got != zapcore.InfoLevel {
+		t.Errorf("lost capacity race: got = %v, want info", got)
+	}
+	if got := submitErrorLevel(errors.New("create workload: boom")); got != zapcore.ErrorLevel {
+		t.Errorf("other submit failure: got = %v, want error", got)
+	}
 }

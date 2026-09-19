@@ -375,7 +375,7 @@ func (l *Loop) tick(ctx context.Context) error {
 					exp.ResolvedJob = resolvedJob
 				}
 				if err := l.submitJobTo(ctx, exp, specCluster, clusterIDs[specCluster], persistedFlavor, true, provenFitByCluster[specCluster]); err != nil {
-					l.logger.Error("speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
+					l.logger.Log(submitErrorLevel(err), "speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
 					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 					reason := notAdmittedReasonForSubmitError(err)
 					if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
@@ -485,7 +485,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			continue
 		}
 		if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
-			l.logger.Error("submit guaranteed job", zap.String("exp", exp.ID), zap.Error(err))
+			l.logger.Log(submitErrorLevel(err), "submit guaranteed job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			reason := notAdmittedReasonForSubmitError(err)
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
@@ -601,7 +601,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			continue
 		}
 		if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
-			l.logger.Error("submit burst job", zap.String("exp", exp.ID), zap.Error(err))
+			l.logger.Log(submitErrorLevel(err), "submit burst job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			reason := notAdmittedReasonForSubmitError(err)
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
