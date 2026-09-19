@@ -7,6 +7,9 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
@@ -66,14 +69,13 @@ func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("job submit", `usage: hl job submit [--agent AGENT] [FILE|-]
 
 FILE is a YAML file shaped exactly like the POST /experiments body: id, metadata, job.
-metadata.hypothesis_id is REQUIRED: every job tests a specific, previously-registered
+An empty id is generated. metadata.hypothesis_id is REQUIRED: every job tests a specific, previously-registered
 hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis path.
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
 $PLATFORM_EXPERIMENT_ID. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
 files and HEAD pushed to origin: commit, git push, submit. Minimal shape:
 
-  id: job-123
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
     project_id: my-project
@@ -102,6 +104,9 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	metadata, _ := body["metadata"].(map[string]any)
 	if metadata == nil {
 		metadata = map[string]any{}
+	}
+	if v := body["id"]; v == nil || v == "" {
+		body["id"] = "job-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	}
 	metadata["agent_id"] = *agent
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
