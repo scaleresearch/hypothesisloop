@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { fetchHypothesis, fetchPlatformExperiment, fetchExperimentMetrics } from '@/lib/api'
 import type { PlatformExperiment, MetricDefinition, HypothesisLink } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Badge, TierBadge } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
@@ -82,6 +82,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const findings = data.findings ?? []
   const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
+  // The env settings that are not the same in every job here: what this hypothesis's runs varied.
+  const variedEnv = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {}))))
+    .filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
+    .sort()
   const primaryMetric = pe?.metrics?.[0]
 
   return (
@@ -232,7 +236,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>Job ID</th>
                 <th>Agent</th>
                 <th>Status</th>
-                <th>Tier</th>
+                <th>Varied settings</th>
                 <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
                 <th style={{ textAlign: 'right' }}>Best {primaryMetric?.key ?? 'Metric'}</th>
@@ -262,7 +266,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     <td className="mono text-dim" style={{ fontSize: 11 }}>{job.id.slice(0, 8)}…</td>
                     <td className="mono">{job.agent_id}</td>
                     <td><Badge status={status}>{status}</Badge></td>
-                    <td><TierBadge tier={j.capacity_tier} /></td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {variedEnv.filter(k => j.job?.env?.[k] !== undefined).map(k => `${k}=${j.job!.env![k]}`).join(' ') || '—'}
+                    </td>
                     <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
                       {cost != null ? `${cost} AccH` : '—'}
