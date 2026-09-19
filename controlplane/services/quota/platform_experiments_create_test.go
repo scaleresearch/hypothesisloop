@@ -2,9 +2,14 @@ package quota
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -34,5 +39,29 @@ func TestCreatePlatformExperimentMarksRequestErrorsInvalid(t *testing.T) {
 				t.Fatalf("Create: got %v, want ErrInvalidPlatformExperiment", err)
 			}
 		})
+	}
+}
+
+// The example is what an operator copies, so the server must accept it as written.
+func TestTheExamplePlatformExperimentIsAccepted(t *testing.T) {
+	raw, err := os.ReadFile("../../settings/examples/experiment.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := yaml.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req CreatePlatformExperimentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewPlatformExperimentsService(&createStore{}, domain.QuotaConfig{DefaultStages: domain.DefaultStages}, zap.NewNop(), "", time.Minute)
+	if _, err := svc.Create(context.Background(), req); err != nil {
+		t.Fatalf("Create from the example: %v", err)
 	}
 }

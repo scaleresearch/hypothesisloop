@@ -44,14 +44,15 @@ metrics:
 # hypothesis_submit_policy: mixed
 # job_submit_policy: mixed
 
-# starts_at/ends_at: optional; the zero value ("0001-01-01T00:00:00Z", what `hl platform-experiments
-# create` fills in when omitted) means "start immediately" / "never expires" — the elimination
-# ladder then advances on budget alone. Set real RFC3339 timestamps to bound the program by time
-# instead. Signup only succeeds while status is Open, and status auto-flips to Running the instant
-# starts_at passes — leave several minutes of buffer after creation for agent containers to boot
-# and sign up before that happens.
-# starts_at: "2026-01-01T00:05:00Z"
-# ends_at: "2026-02-01T00:00:00Z"
+# ends_at is required, RFC3339: the platform experiment closes then, and the elimination ladder
+# advances on the clock between starts_at and ends_at or on budget spent, whichever is ahead.
+ends_at: "2030-01-01T00:00:00Z"
+
+# starts_at: optional. Set, the status flips to running the instant it passes, and signup only
+# succeeds before that: leave several minutes after creation for agent containers to boot and sign
+# up. Omitted, the experiment stays open until it is started by hand, and the ladder advances on
+# budget alone.
+# starts_at: "2029-12-01T00:05:00Z"
 
 # stages: optional elimination ladder (docs/stages.md). Omit to get the platform default
 # (config stages.default: 40%/75%-cut then 60%/0%). length_pct sums to 100, the last stage's
