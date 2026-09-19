@@ -84,7 +84,7 @@ function Legend() {
         return (
           <span key={type}>
             <svg width="26" height="8" aria-hidden="true">
-              <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={s.dash} />
+              <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" />
             </svg>
             {s.label}
           </span>
@@ -163,7 +163,6 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       style: {
         stroke: s.color,
         strokeWidth: hierarchy ? 1.5 : 2,
-        strokeDasharray: s.dash,
         opacity: dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1,
       },
     }

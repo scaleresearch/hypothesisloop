@@ -53,9 +53,13 @@ export const hypothesisStatusColors: Record<string, string> = {
   inconclusive: semantic.neutral,
 }
 
-/** Hypothesis graph edges. builds_on is the hierarchy; the two cross links stand out from it. */
+/**
+ * Hypothesis graph edges. builds_on is the hierarchy; the two cross links stand out from it by
+ * colour alone: a dashed stroke is generated along the whole path, offscreen parts included, and
+ * long cross links in a graph of thousands made every pan frame take seconds.
+ */
 export const hypothesisLinkStyles = {
-  builds_on: { color: 'rgba(255, 255, 255, 0.28)', dash: undefined, label: 'builds on' },
-  contradicts: { color: semantic.danger, dash: '6 4', label: 'contradicts' },
-  related: { color: semantic.info, dash: '2 4', label: 'related' },
+  builds_on: { color: 'rgba(255, 255, 255, 0.28)', label: 'builds on' },
+  contradicts: { color: semantic.danger, label: 'contradicts' },
+  related: { color: semantic.info, label: 'related' },
 } as const
