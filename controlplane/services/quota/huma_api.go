@@ -426,6 +426,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		ID string `path:"id"`
 	}) (*struct{ Body []*domain.AgentQuota }, error) {
 		quotas, err := peh.svc.ListQuotas(ctx, in.ID)
+		if errors.Is(err, ErrPlatformExperimentNotFound) {
+			return nil, huma.Error404NotFound(err.Error())
+		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

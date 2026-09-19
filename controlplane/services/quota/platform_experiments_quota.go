@@ -90,7 +90,7 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: get platform experiment: %w", err)
 	}
 	if pe == nil {
-		return nil, fmt.Errorf("platform_experiments.ListQuotas: platform experiment %s not found", platformExpID)
+		return nil, ErrPlatformExperimentNotFound
 	}
 	if err := metricsdb.PopulateUsage(ctx, s.usage.URL(), pe.CreatedAt, platformExpID, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: populate usage: %w", err)

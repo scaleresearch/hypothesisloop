@@ -16,6 +16,8 @@ import (
 // ErrInvalidPlatformExperiment wraps every Create rejection of the request itself.
 var ErrInvalidPlatformExperiment = errors.New("invalid platform experiment")
 
+var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
+
 func invalidPlatformExperiment(err error) error {
 	return fmt.Errorf("platform_experiments.Create: %w: %w", ErrInvalidPlatformExperiment, err)
 }
