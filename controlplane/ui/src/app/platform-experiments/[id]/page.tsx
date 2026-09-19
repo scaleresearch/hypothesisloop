@@ -1222,6 +1222,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <th>ID</th>
                   <th>Agent</th>
                   <th>Status</th>
+                  <th>Hypothesis</th>
                   <th style={{ textAlign: 'right' }}>Final Metric{rankingMetric ? ` (${rankingMetric.key})` : ''}</th>
                   <th style={{ textAlign: 'right' }}>Est. Cost</th>
                   <th>Submitted</th>
@@ -1247,6 +1248,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                             {evictionText}
                           </div>
                         )}
+                      </td>
+                      <td style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }} title={exp.hypothesis}>
+                        {exp.hypothesis_id
+                          ? <Link href={`/hypotheses/${exp.hypothesis_id}`} className="text-link">{exp.hypothesis}</Link>
+                          : exp.hypothesis}
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{metric != null ? metric.toFixed(4) : '—'}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
