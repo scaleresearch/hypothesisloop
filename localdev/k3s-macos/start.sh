@@ -51,4 +51,8 @@ wait_for 20 1 "metrics-service to accept connections" \
 
 bash "${SCRIPT_DIR}/dev-nodes-up.sh"
 
+echo "==> Waiting for cluster-agent and node-agent pods..."
+kubectl --context "${CONTEXT_NAME}" -n hypothesisloop rollout status --timeout=300s \
+  deploy/hypothesisloop-cluster-agent ds/hypothesisloop-node-agent
+
 echo "==> Local dev started. Context: ${CONTEXT_NAME}"
