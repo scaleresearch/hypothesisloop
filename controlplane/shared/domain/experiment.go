@@ -70,6 +70,8 @@ type Experiment struct {
 	// Metric is the job's best value on its platform experiment's first ranking metric, merged in
 	// live from the metrics store like PhaseDetail. Nil until the job reports that metric.
 	Metric *JobMetric `json:"metric,omitempty"`
+	// Summary is the write-up the job's agent filed for it. Set on a read of one job only.
+	Summary string `json:"summary,omitempty"`
 	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
 	// Nil on every other read of an experiment.
 	Data *DataAccess `json:"data,omitempty"`
@@ -106,6 +108,10 @@ type Experiment struct {
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+	// FinishedAt is when the job reached its terminal status, nil while it can still run. Nothing
+	// writes updated_at on a terminal row but the transition that ended it, a requeue aside,
+	// which makes the row non-terminal again.
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
 // EffectiveJob returns e.Job as it should actually be run: e's own ResolvedJob if admission has

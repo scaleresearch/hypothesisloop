@@ -154,6 +154,10 @@ export interface Experiment {
   // The job's best value on its platform experiment's first ranking metric, read live from the
   // metrics store. Absent until the job reports that metric.
   metric?: { name: string; best: number; basis: string }
+  // The write-up its agent filed, on a read of one job only.
+  summary?: string
+  // When the job reached its terminal status; absent while it can still run.
+  finished_at?: string
   // Lineage
   code_ref?: string
   config_hash?: string

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -94,6 +95,16 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
 	}
 	return f, nil
+}
+
+// FindingSummary returns the summary filed for a job, empty when none was.
+func (s *HypothesesStore) FindingSummary(ctx context.Context, experimentID string) (string, error) {
+	var summary string
+	err := s.pool.pool.QueryRow(ctx, `SELECT summary FROM hypothesis_findings WHERE experiment_id = $1`, experimentID).Scan(&summary)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("hypotheses_store.FindingSummary: %w", err)
+	}
+	return summary, nil
 }
 
 // ListFindingsByHypothesis returns one page of the findings filed against a hypothesis, oldest

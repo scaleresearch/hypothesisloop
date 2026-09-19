@@ -8,10 +8,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// GetExperiment returns one experiment with the runtime's latest phase detail (why a non-running
-// job's container hasn't started) merged in live from the metrics store — never persisted to
-// PostgreSQL, so a stale explanation can never outlive what actually happened. Returns nil when
-// no such experiment exists.
+// GetExperiment returns one experiment with its filed summary and the runtime's latest phase
+// detail (why a non-running job's container hasn't started) merged in live from the metrics
+// store — never persisted to PostgreSQL, so a stale explanation can never outlive what actually
+// happened. Returns nil when no such experiment exists.
 func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {
@@ -19,6 +19,9 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	}
 	if exp == nil {
 		return nil, nil
+	}
+	if exp.Summary, err = s.store.FindingSummary(ctx, id); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
 	reason, message, restartCount, found, err := metricsdb.GetLatestPhaseDetail(ctx, s.metricsDBURL, id, exp.ClusterName, exp.AttemptCount)
 	if err != nil {

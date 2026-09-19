@@ -67,6 +67,10 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	}
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
+	if exp.Status.IsTerminal() {
+		finished := exp.UpdatedAt
+		exp.FinishedAt = &finished
+	}
 	// exp.Job.AcceleratorType stays the type the agent originally asked for while
 	// exp.AcceleratorType tracks the flavor admission actually chose. Do not collapse the two
 	// here: the scheduler compares them to undo a substitution whose flavor quota can no longer

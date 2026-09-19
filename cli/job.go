@@ -313,7 +313,7 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
 One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED or
-REJECTED), metric, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
+REJECTED), metric, finished_at, summary, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
 what the job waits for: awaiting_admission for the scheduler's first look at it, summary_gate
 for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")

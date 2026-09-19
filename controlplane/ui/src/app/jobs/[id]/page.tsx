@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs, fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
+import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -15,7 +15,6 @@ import { semantic, agentPalette } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
 import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
 import { graphHref } from '@/lib/hypothesis-graph'
-import { TERMINAL } from '@/lib/hypothesis-progress'
 
 function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
   return (
@@ -40,17 +39,6 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     () => fetchExperimentMetrics(id),
     { refreshInterval: 10_000 },
   )
-  const { data: pe } = useSWR(
-    job ? ['pe', job.platform_experiment_id] : null,
-    () => fetchPlatformExperiment(job!.platform_experiment_id),
-  )
-  // A job's summary is filed as a finding on its hypothesis; there is no read of it by job.
-  const { data: hypothesis } = useSWR(
-    job?.hypothesis_id ? job.hypothesis_id : null,
-    fetchHypothesis,
-    { refreshInterval: 10_000 },
-  )
-
   if (error) return (
     <div>
       <div className="wa-title"><h1>Job Not Found</h1></div>
@@ -69,8 +57,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   // Jobs report one or more metrics (the ranking metric plus any secondary ones the workload
   // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
   // own chart instead of interleaving unrelated scales on a single line.
-  const rankingMetric = pe?.metrics?.find(m => m.role === 'ranking') ?? pe?.metrics?.[0]
-  const primaryMetricName = rankingMetric?.key
+  const primaryMetricName = j.metric?.name
   // The API appends one contiguous block per underlying series (metric_name, or per retry
   // attempt if a retry changed agent_id) rather than a single time-ordered stream, so a job
   // with a retry has two blocks for the same metric_name back to back. Sort each metric's
@@ -85,7 +72,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   // visible next to the chart, not silently plotted as one uniform line.
   const basesByMetric = new Map<string, Set<string>>()
   for (const p of sortedMetrics) {
-    const name = p.metric_name ?? primaryMetricName ?? 'metric'
+    const name = p.metric_name
     if (!seriesByMetric.has(name)) seriesByMetric.set(name, [])
     seriesByMetric.get(name)!.push({
       frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
@@ -101,15 +88,6 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   })
 
   const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
-  // The job's metric comes from the metrics store, never from the job record — the record
-  // has no such field, and metric values live in one place (important.md #3). The series is
-  // already sorted by recorded_at above.
-  const primaryValues = (primaryMetricName ? seriesByMetric.get(primaryMetricName) ?? [] : []).map(p => p.value)
-  const bestPrimaryMetric = primaryValues.length === 0 ? null
-    : rankingMetric!.direction === 'maximize' ? Math.max(...primaryValues) : Math.min(...primaryValues)
-  const findings = (hypothesis?.findings ?? []).filter(f => f.experiment_id === j.id)
-  const finished = TERMINAL.includes(j.status)
-
   const axisColor = 'rgba(255,255,255,.45)'
   const gridColor = 'rgba(255,255,255,.08)'
 
@@ -206,21 +184,19 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {(bestPrimaryMetric != null || findings.length > 0) && (
+      {(j.metric || j.summary) && (
         <Pod style={{ marginBottom: 12 }}>
           <PodHeader>Result</PodHeader>
           <PodContent>
-            {bestPrimaryMetric != null && (
-              <div className="mono" style={{ marginBottom: findings.length > 0 ? 10 : 0 }}>
-                <span style={{ fontSize: 22, fontWeight: 700, color: semantic.success }}>{bestPrimaryMetric.toFixed(4)}</span>
+            {j.metric && (
+              <div className="mono" style={{ marginBottom: j.summary ? 10 : 0 }}>
+                <span style={{ fontSize: 22, fontWeight: 700, color: semantic.success }}>{j.metric.best.toFixed(4)}</span>
                 <span className="text-muted" style={{ marginLeft: 8, fontSize: 12 }}>
-                  best {primaryMetricName} · final {primaryValues[primaryValues.length - 1].toFixed(4)}
+                  best {j.metric.name}{j.metric.basis !== 'raw' && ` · basis ${j.metric.basis}`}
                 </span>
               </div>
             )}
-            {findings.map(f => (
-              <p key={f.id} style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxWidth: 900 }}>{f.summary}</p>
-            ))}
+            {j.summary && <p style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxWidth: 900 }}>{j.summary}</p>}
           </PodContent>
         </Pod>
       )}
@@ -241,11 +217,11 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} AccH` : '—'} />
               <Row label="Submitted" value={new Date(j.created_at).toLocaleString()} />
               {j.submitted_at && <Row label="Sent to cluster" value={new Date(j.submitted_at).toLocaleString()} />}
-              {finished && (
+              {j.finished_at && (
                 <Row label="Finished" value={
                   <>
-                    {new Date(j.updated_at).toLocaleString()}
-                    {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.updated_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
+                    {new Date(j.finished_at).toLocaleString()}
+                    {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.finished_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
                   </>
                 } />
               )}

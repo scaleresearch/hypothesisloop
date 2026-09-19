@@ -19,6 +19,8 @@ guaranteed-tier job submission 402s with insufficient_guaranteed_quota).
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from conftest import make_agent
@@ -113,9 +115,13 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     assert code == 202, "a job against a human-owned hypothesis must be admitted"
     assert api.experiment(human_job)["agent_id"] == agent_b
 
-    _completed(api, human_job, deadline)
+    done = _completed(api, human_job, deadline)
+    assert done["finished_at"] == done["updated_at"] and "summary" not in done, done
     human_finding = f"Warmup held task_success_rate steady -- filed by {agent_b} on the human's idea"
     api.file_finding(human_job, human_finding)
+    # The job read, and so hl job status, carries its own summary and keeps its finish time.
+    status = json.loads(api.hl("job", "status", human_job))
+    assert (status["summary"], status["finished_at"]) == (human_finding, done["finished_at"]), status
     finding_row = next(
         (f for f in api.hypothesis(human["id"]).get("findings") or [] if human_finding in (f.get("summary") or "")),
         None,

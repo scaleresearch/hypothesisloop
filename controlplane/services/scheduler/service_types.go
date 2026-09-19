@@ -42,6 +42,8 @@ type Store interface {
 	// CreateHypothesisFinding records the agent's post-run write-up, attached to the
 	// hypothesis the completed job tested (see domain.HypothesisFinding).
 	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
+	// FindingSummary returns the summary filed for a job, empty when none was.
+	FindingSummary(ctx context.Context, experimentID string) (string, error)
 	// TransitionStatus atomically updates status only when current status matches from.
 	// Returns true if updated, false if already changed by a concurrent request.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
