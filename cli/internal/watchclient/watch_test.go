@@ -324,3 +324,54 @@ func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T
 		t.Errorf("output: got = %q, want = %q", got, want)
 	}
 }
+
+// Without --until a watch returns with its first batch: what arrives within the settle window after
+// the first event, and nothing after it.
+func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
+	defer func(d time.Duration) { settleWindow = d }(settleWindow)
+	settleWindow = 300 * time.Millisecond
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	first := `{"kind":"experiment.status","value":"COMPLETED","position":10,"cursor":10}`
+	second := `{"kind":"comment.new","subject":"hyp-1","position":11,"cursor":11}`
+	late := `{"kind":"experiment.status","value":"FAILED","position":12,"cursor":12}`
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+		time.Sleep(200 * time.Millisecond)
+		_, _ = conn.Write(serverTextFrame(first))
+		time.Sleep(100 * time.Millisecond)
+		_, _ = conn.Write(serverTextFrame(second))
+		time.Sleep(time.Second)
+		_, _ = conn.Write(serverTextFrame(late))
+		time.Sleep(time.Second)
+	}()
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	code := Run(Options{URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
+		Timeout: 10 * time.Second, Stdout: &stdout, Stderr: &stderr})
+	elapsed := time.Since(start)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if got, want := stdout.String(), first+"\n"+second+"\n"; got != want {
+		t.Errorf("output: got = %q, want = %q", got, want)
+	}
+	if elapsed > 1200*time.Millisecond {
+		t.Errorf("returned after %s, want = soon after the settle window", elapsed)
+	}
+}

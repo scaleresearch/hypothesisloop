@@ -53,3 +53,27 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 	}
 	return out.([]db.Event), nil
 }
+
+// ConcernsAgent reports whether a hypothesis event concerns a hypothesis agentID registered: the
+// subject of a comment, finding or status, the target of a link, or a target of the links a new
+// hypothesis was registered with.
+func (s *Store) ConcernsAgent(ctx context.Context, agentID string, e db.Event) (bool, error) {
+	q, id := `MATCH (t:Hypothesis {id: $id, agent_id: $agent}) RETURN count(t) > 0`, e.Subject
+	switch e.Kind {
+	case db.EventHypothesisNew:
+		q = `MATCH (:Hypothesis {id: $id})-->(t:Hypothesis {agent_id: $agent}) RETURN count(t) > 0`
+	case db.EventHypothesisLink:
+		id = e.Detail
+	}
+	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		records, err := collect(ctx, tx, q, map[string]any{"id": id, "agent": agentID})
+		if err != nil {
+			return nil, err
+		}
+		return records[0].Values[0].(bool), nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("graphdb.ConcernsAgent: %w", err)
+	}
+	return out.(bool), nil
+}

@@ -854,3 +854,33 @@ func TestAQueryReadsOnePlatformExperiment(t *testing.T) {
 		t.Errorf("Query without a platform experiment: got = %v, want %v", err, ErrInvalidQuery)
 	}
 }
+
+// An agent's watch carries other people's activity on hypotheses it registered: a comment or
+// finding on one, a link to one, a new hypothesis building on one. The graph is the only place
+// that knows who registered what.
+func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	mine := register(t, s, pe, "agent-1", "label smoothing helps", onRoot(pe))
+	theirs := register(t, s, pe, "agent-2", "gradient clipping stabilises training", onRoot(pe))
+	child := register(t, s, pe, "agent-2", "a smoothing factor of 0.2 beats 0.1",
+		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: mine.ID}})
+
+	cases := []struct {
+		e    db.Event
+		want bool
+	}{
+		{db.Event{Kind: db.EventCommentNew, Subject: mine.ID}, true},
+		{db.Event{Kind: db.EventFindingNew, Subject: theirs.ID}, false},
+		{db.Event{Kind: db.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}, true},
+		{db.Event{Kind: db.EventHypothesisLink, Subject: theirs.ID, Detail: pe}, false},
+		{db.Event{Kind: db.EventHypothesisNew, Subject: child.ID}, true},
+		{db.Event{Kind: db.EventHypothesisNew, Subject: theirs.ID}, false},
+	}
+	for _, c := range cases {
+		got, err := s.ConcernsAgent(context.Background(), "agent-1", c.e)
+		if err != nil || got != c.want {
+			t.Errorf("ConcernsAgent(agent-1, %+v): got = %v, %v, want = %v, nil", c.e, got, err, c.want)
+		}
+	}
+}

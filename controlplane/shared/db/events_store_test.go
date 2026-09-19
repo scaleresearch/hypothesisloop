@@ -182,6 +182,10 @@ func (noHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event,
 	return nil, nil
 }
 
+func (noHypothesisEvents) ConcernsAgent(context.Context, string, Event) (bool, error) {
+	return false, nil
+}
+
 // This is the whole reason the events are emitted by a trigger inside the writing transaction. A
 // stream that can announce a state the database then threw away is worse than no stream at all:
 // an agent would act on a job it believes exists, and no later event would ever correct it,
@@ -736,34 +740,101 @@ func TestTheAdvertisedDefaultFlagIsTheSetTheServerWouldApply(t *testing.T) {
 	}
 }
 
-// The default set is wide, and wide is exactly where the agent scoping rule is easiest to lose: it
-// admits every agent-owned kind at once. An agent's default subscription reading a rival's job
-// timeline or allocation would hand it a competitor's private state, and being woken by a rival's
-// cut would fire its own stop condition on someone else's elimination.
-func TestADefaultSubscriptionScopedToAnAgentAdmitsItsOwnAgentOwnedEventsAndNoRivals(t *testing.T) {
+// An agent scope keeps what the agent must act on: its own jobs' outcomes and queue reasons, its
+// allocation and cut. A rival's are private state and would wake it for nothing, and a job moving
+// through QUEUED, SUBMITTED or RUNNING asks nothing of it.
+func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *testing.T) {
 	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
-	for _, kind := range []string{EventExperimentStatus, EventExperimentBlocked, EventQuotaChanged, EventAgentCut} {
-		mine := Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1", AgentID: "agent-a"}
-		if !filter.Matches(mine) {
-			t.Errorf("own %v on a default subscription: got = %v, want = %v", kind, false, true)
+	admitted := []Event{
+		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", AgentID: "agent-a"},
+		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-a"},
+		{Kind: EventAgentCut, Value: "1", AgentID: "agent-a"},
+		{Kind: EventStageBoundary, Value: "1", Detail: "advanced"},
+		{Kind: EventPlatformExperimentStatus, Value: "closed"},
+		{Kind: EventPlatformExperimentDescription},
+		{Kind: EventCommentNew, Value: "agent", AgentID: "agent-b"},
+		{Kind: EventCommentNew, Value: "human"},
+	}
+	refused := []Event{
+		{Kind: EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"},
+		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", AgentID: "agent-b"},
+		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
+		{Kind: EventAgentCut, Value: "1", AgentID: "agent-b"},
+		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"},
+		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
+		{Kind: EventMetricPoint, Value: "loss", AgentID: "agent-a"},
+	}
+	for _, e := range admitted {
+		e.PlatformExperimentID = "pe-1"
+		if !filter.Matches(e) {
+			t.Errorf("Matches(%+v): got = false, want = true", e)
 		}
-		theirs := Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1", AgentID: "agent-b"}
-		if filter.Matches(theirs) {
-			t.Errorf("another agent's %v on a default subscription: got = %v, want = %v", kind, true, false)
+	}
+	for _, e := range refused {
+		e.PlatformExperimentID = "pe-1"
+		if filter.Matches(e) {
+			t.Errorf("Matches(%+v): got = true, want = false", e)
 		}
 	}
 }
 
-// The shared half of the same filter. A default subscription that hid the pool because the rows
-// carry someone else's name would leave an agent watching a competition it can no longer see —
-// the settled claim it must not retest, and the closure it must stop on, are both written by others.
-func TestADefaultSubscriptionScopedToAnAgentStillCarriesTheSharedKindsWhoeverWroteThem(t *testing.T) {
+// The agent's own writes to the pool are echoes of what it just did; waking it for them is spam.
+func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
 	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
-	for _, kind := range []string{EventHypothesisNew, EventHypothesisStatus, EventFindingNew,
-		EventCommentNew, EventStageBoundary, EventPlatformExperimentStatus, EventPlatformExperimentDescription} {
-		e := Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1", AgentID: "agent-b"}
+	for _, kind := range []string{EventHypothesisNew, EventHypothesisStatus, EventHypothesisLink, EventFindingNew, EventCommentNew} {
+		if filter.Matches(Event{Kind: kind, Subject: "hyp-1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}) {
+			t.Errorf("own %v on an agent scope: got = true, want = false", kind)
+		}
+	}
+}
+
+// Without an agent the stream is the whole platform experiment, whoever wrote each row.
+func TestASubscriptionWithoutAnAgentCarriesEveryAgentsEvents(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", Kinds: DefaultKinds()}
+	for _, e := range []Event{
+		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
+		{Kind: EventHypothesisNew, AgentID: "agent-b"},
+		{Kind: EventStageBoundary, Detail: "cut", AgentID: "agent-b"},
+	} {
+		e.PlatformExperimentID = "pe-1"
 		if !filter.Matches(e) {
-			t.Errorf("another agent's %v on a default subscription: got = %v, want = %v", kind, false, true)
+			t.Errorf("Matches(%+v): got = false, want = true", e)
+		}
+	}
+}
+
+type ownedHypotheses map[string]string
+
+func (ownedHypotheses) ReplayEvents(context.Context, string, int64) ([]Event, error) { return nil, nil }
+
+func (o ownedHypotheses) ConcernsAgent(_ context.Context, agentID string, e Event) (bool, error) {
+	return o[e.Subject] == agentID, nil
+}
+
+// Concerns asks the graph only about hypothesis events on an agent scope; everything else Matches
+// admitted stands.
+func TestConcernsAsksTheGraphOnlyAboutHypothesisEventsOnAnAgentScope(t *testing.T) {
+	store := NewEventsStore(nil, ownedHypotheses{"hyp-a": "agent-a"})
+	scoped := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
+	cases := []struct {
+		filter EventFilter
+		e      Event
+		want   bool
+	}{
+		{scoped, Event{Kind: EventCommentNew, Subject: "hyp-a", AgentID: "agent-b"}, true},
+		{scoped, Event{Kind: EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}, false},
+		{scoped, Event{Kind: EventExperimentStatus, Subject: "exp-1", Value: "COMPLETED", AgentID: "agent-a"}, true},
+		{EventFilter{PlatformExperimentID: "pe-1"}, Event{Kind: EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}, true},
+	}
+	for _, c := range cases {
+		got, err := store.Concerns(context.Background(), c.filter, c.e)
+		if err != nil || got != c.want {
+			t.Errorf("Concerns(%+v, %+v): got = %v, %v, want = %v, nil", c.filter, c.e, got, err, c.want)
 		}
 	}
 }
@@ -781,72 +852,14 @@ func TestAnExplicitKindSetMeansExactlyWhatItNamesEvenWhenItNamesTheExcludedKind(
 	}
 }
 
-// An agent's own event never gets flagged as ambient, whether it is agent-owned (its job status)
-// or shared but authored by it (a comment it left on the pool).
-func TestAnnotateLeavesAnAgentsOwnEventUnmarked(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
-	for _, e := range []Event{
-		{Kind: EventExperimentStatus, Subject: "exp-1", Detail: "evicted for OOM", AgentID: "agent-a"},
-		{Kind: EventCommentNew, Subject: "hyp-1", Detail: "left a comment", AgentID: "agent-a"},
-	} {
-		got := filter.Annotate(e)
-		if got.Detail != e.Detail {
-			t.Errorf("Annotate(%+v).Detail = %q, want unchanged %q", e, got.Detail, e.Detail)
-		}
-	}
-}
-
-// A shared event authored by a different agent's job is ambient context, not this subscription's
-// own concern, and Annotate says so with the one word an agent's loop can grep for.
-func TestAnnotateFlagsAnotherAgentsSharedEventAsFYI(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
-	e := Event{Kind: EventStageBoundary, Subject: "pe-1", Value: "2", Detail: "cut", AgentID: "agent-b"}
-	got := filter.Annotate(e)
-	if got.Detail != "FYI: cut" {
-		t.Errorf("Annotate(%+v).Detail = %q, want %q", e, got.Detail, "FYI: cut")
-	}
-}
-
-// A subscription with no agent scope — watching a whole platform experiment or one experiment id
-// rather than one agent's slice of it — has no "own" to compare against, so Annotate leaves every
-// Detail as it found it rather than guessing.
-func TestAnnotateLeavesEverythingUnmarkedWithNoAgentScope(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1"}
-	e := Event{Kind: EventStageBoundary, Subject: "pe-1", Detail: "cut", AgentID: "agent-b"}
-	got := filter.Annotate(e)
-	if got.Detail != "cut" {
-		t.Errorf("Annotate(%+v).Detail = %q, want unchanged %q", e, got.Detail, "cut")
-	}
-}
-
-// hypothesis.new and most other kinds never carry Detail text at all (they're pointers, not
-// copies — see the package doc). An agent-scoped subscriber must still be able to tell another
-// agent's hypothesis.new apart from its own without a prefix to strip a non-existent string onto,
-// so an empty Detail becomes the bare word "FYI" rather than staying invisible.
-func TestAnnotateFlagsAnotherAgentsEmptyDetailEventAsFYI(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
-	e := Event{Kind: EventHypothesisNew, Subject: "hyp-1", AgentID: "agent-b"}
-	got := filter.Annotate(e)
-	if got.Detail != "FYI" {
-		t.Errorf("Annotate(%+v).Detail = %q, want %q", e, got.Detail, "FYI")
-	}
-}
-
-// The agent's own empty-Detail event is left exactly as it is — nothing to flag about your own
-// work.
-func TestAnnotateLeavesAnAgentsOwnEmptyDetailEmpty(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}
-	e := Event{Kind: EventHypothesisNew, Subject: "hyp-1", AgentID: "agent-a"}
-	got := filter.Annotate(e)
-	if got.Detail != "" {
-		t.Errorf("Annotate(%+v).Detail = %q, want empty", e, got.Detail)
-	}
-}
-
 type fixedHypothesisEvents []Event
 
 func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event, error) {
 	return f, nil
+}
+
+func (fixedHypothesisEvents) ConcernsAgent(context.Context, string, Event) (bool, error) {
+	return false, nil
 }
 
 // Hypothesis events come from the graph store, everything else from Postgres, and a reconnecting

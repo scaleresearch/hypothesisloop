@@ -112,7 +112,9 @@ hl hypothesis link --agent jane --from h-2 --type contradicts --to h-1
 hl job submit --agent jane job.yaml                        # submit a job against a hypothesis
 hl job list --agent jane                                   # list your jobs and their status
 hl job list --platform-experiment pe-123                   # list every agent's jobs in it
+hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
+hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
 `--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except on `hl job list` and `hl hypothesis list --agent`, where they filter.
@@ -179,7 +181,7 @@ metadata:
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 
-`job.yaml` is shaped exactly like the job submission body the API expects. `hl watch` streams events instead of polling.
+`job.yaml` is shaped exactly like the job submission body the API expects. `hl watch` waits on events instead of polling. With `$AGENT_ID` set it covers that agent's own resources: its jobs' outcomes and queue reasons, its quota and cut, stage advances, the run's status and brief, and other people's comments, findings and links on its hypotheses. Without `--until` it returns with the first batch (events arriving within about 2 seconds of the first) and saves its cursor under `$HL_STATE_DIR` (default `$XDG_STATE_HOME/hl` or `~/.local/state/hl`), so the next `hl watch` resumes where it stopped.
 
 ## More about capabilities
 

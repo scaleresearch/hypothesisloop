@@ -13,7 +13,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +30,13 @@ const (
 	reconnectDelay = 2 * time.Second
 )
 
-var readTimeout = 45 * time.Second
+var (
+	readTimeout = 45 * time.Second
+	// settleWindow is how long a watch without --until keeps collecting after its first event, so
+	// events that arrive together (a replay after a reconnect, one transaction's several events)
+	// come back as one batch.
+	settleWindow = 2 * time.Second
+)
 
 // Closed means the connection ended, or the server was momentarily unable. Reconnect and replay.
 type Closed struct{ msg string }
@@ -34,7 +44,10 @@ type Closed struct{ msg string }
 func (e *Closed) Error() string { return e.msg }
 
 // Refused means the platform rejected this subscription. The request is wrong and will stay wrong.
-type Refused struct{ msg string }
+type Refused struct {
+	msg  string
+	code int
+}
 
 func (e *Refused) Error() string { return e.msg }
 
@@ -47,16 +60,22 @@ type Options struct {
 	Kinds              string
 	ShowSubscription   bool
 	Until              string
-	Timeout            time.Duration
-	Since              int64
+	// Follow streams until the timeout instead of returning with the first batch.
+	Follow  bool
+	Timeout time.Duration
+	Since   int64
+	// CursorFile, when set, is where the cursor is resumed from and saved to (see cursorState).
+	CursorFile string
 
 	// Stdout/Stderr let callers (and tests) capture output instead of the process streams.
 	Stdout io.Writer
 	Stderr io.Writer
 }
 
-// Run executes the watch loop and returns the process exit code: 0 on --until becoming true (or the window elapsing without --until), 124 on timeout with
-// --until still unmet, 2 on a usage error or a refused subscription.
+// Run executes the watch and returns the process exit code: 0 once a batch of events was printed
+// (no --until), --until became true, or the window elapsed (no --until); 124 on timeout with
+// --until still unmet; 2 on a usage error or a refused subscription; 1 when the cursor could not be
+// saved.
 func Run(opts Options) int {
 	if opts.URL == "" {
 		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL or pass --url)")
@@ -67,116 +86,218 @@ func Run(opts Options) int {
 		return UsageExitCode
 	}
 
-	var satisfied func(event map[string]any) bool
+	w := &watch{opts: opts, cursor: opts.Since, seen: map[string]int64{}}
 	if opts.Until != "" {
 		fn, err := parseUntil(opts.Until)
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "hl watch: %s\n", err)
 			return UsageExitCode
 		}
-		satisfied = fn
+		w.satisfied = fn
+	}
+	if opts.CursorFile != "" && opts.Since == 0 {
+		state, err := loadCursor(opts.CursorFile)
+		if err != nil {
+			fmt.Fprintf(opts.Stderr, "hl watch: %s\n", err)
+			return UsageExitCode
+		}
+		w.cursor, w.seen, w.resumed = state.Cursor, state.seen(), state.Cursor != 0
 	}
 
-	timeout := opts.Timeout
+	code := w.run()
+	if code != UsageExitCode && opts.CursorFile != "" && w.printed {
+		if err := saveCursor(opts.CursorFile, w.cursor, w.seen); err != nil {
+			fmt.Fprintf(opts.Stderr, "hl watch: %s\n", err)
+			return 1
+		}
+	}
+	return code
+}
+
+// watch is one hl watch invocation: the cursor it resumes from, the identity and position of every
+// event it printed (a replay repeats the events at its cursor), and when it stops.
+type watch struct {
+	opts      Options
+	satisfied func(event map[string]any) bool
+	cursor    int64
+	seen      map[string]int64
+	// resumed is true while the cursor came from the cursor file, so an unknown one falls back to
+	// the snapshot once instead of failing.
+	resumed  bool
+	printed  bool
+	settleBy time.Time
+}
+
+func (w *watch) run() int {
+	timeout := w.opts.Timeout
 	if timeout <= 0 {
 		timeout = 540 * time.Second
 	}
-
 	query := url.Values{}
-	if opts.Experiment != "" {
-		query.Set("experiment_id", opts.Experiment)
+	if w.opts.Experiment != "" {
+		query.Set("experiment_id", w.opts.Experiment)
 	}
-	if opts.PlatformExperiment != "" {
-		query.Set("platform_experiment_id", opts.PlatformExperiment)
+	if w.opts.PlatformExperiment != "" {
+		query.Set("platform_experiment_id", w.opts.PlatformExperiment)
 	}
-	if opts.Agent != "" {
-		query.Set("agent", opts.Agent)
+	if w.opts.Agent != "" {
+		query.Set("agent", w.opts.Agent)
 	}
-	if opts.Kinds != "" {
-		query.Set("kinds", opts.Kinds)
+	if w.opts.Kinds != "" {
+		query.Set("kinds", w.opts.Kinds)
 	}
 
 	deadline := time.Now().Add(timeout)
-	cursor := opts.Since
-	seen := map[string]bool{}
-	for time.Now().Before(deadline) {
-		q := url.Values{}
-		for k, v := range query {
-			q[k] = v
+	for time.Now().Before(w.until(deadline)) {
+		if w.cursor != 0 {
+			query.Set("since", strconv.FormatInt(w.cursor, 10))
+		} else {
+			query.Del("since")
 		}
-		if cursor != 0 {
-			q.Set("since", strconv.FormatInt(cursor, 10))
-		}
-		path := "/watch?" + q.Encode()
-
-		ws, err := connect(opts.URL, path, deadline.Sub(time.Now()))
+		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), deadline.Sub(time.Now()))
 		if err != nil {
 			var refused *Refused
+			if errors.As(err, &refused) && refused.code == http.StatusGone && w.resumed {
+				fmt.Fprintf(w.opts.Stderr, "hl watch: the platform does not know saved cursor %d; starting from the current state\n", w.cursor)
+				w.cursor, w.seen, w.resumed = 0, map[string]int64{}, false
+				continue
+			}
 			if errors.As(err, &refused) {
-				fmt.Fprintf(opts.Stderr, "hl watch: %s\n", refused)
+				fmt.Fprintf(w.opts.Stderr, "hl watch: %s\n", refused)
 				return UsageExitCode
 			}
-			fmt.Fprintf(opts.Stderr, "hl watch: connect: %s\n", err)
-			sleepUntil(deadline, reconnectDelay)
+			fmt.Fprintf(w.opts.Stderr, "hl watch: connect: %s\n", err)
+			sleepUntil(w.until(deadline), reconnectDelay)
 			continue
 		}
 
-		fmt.Fprintln(opts.Stderr, "hl watch: connected")
-		done, code := streamOne(ws, opts, deadline, satisfied, &cursor, seen)
+		fmt.Fprintln(w.opts.Stderr, "hl watch: connected")
+		done := w.stream(ws, deadline)
 		ws.close()
 		if done {
-			return code
+			return 0
 		}
 	}
 
-	if satisfied != nil {
-		fmt.Fprintf(opts.Stderr, "hl watch: timed out after %gs without: %s\n", timeout.Seconds(), opts.Until)
+	if w.satisfied != nil {
+		fmt.Fprintf(w.opts.Stderr, "hl watch: timed out after %gs without: %s\n", timeout.Seconds(), w.opts.Until)
 		return TimeoutExitCode
 	}
 	return 0
 }
 
-// streamOne reads frames from one connection until it closes, the deadline passes, or --until is
-// satisfied. Returns (true, code) when the caller should stop entirely, (false, _) to reconnect.
-// A reconnect replays from the cursor, which can repeat events already printed; seen holds the
-// identity (the event without its cursor) of each one printed, so a repeat is dropped.
-func streamOne(ws *webSocket, opts Options, deadline time.Time, satisfied func(map[string]any) bool, cursor *int64, seen map[string]bool) (bool, int) {
-	if opts.ShowSubscription {
+// until is when this watch stops: the deadline, or the end of the settle window once a batch has
+// started.
+func (w *watch) until(deadline time.Time) time.Time {
+	if !w.settleBy.IsZero() {
+		return minTime(deadline, w.settleBy)
+	}
+	return deadline
+}
+
+// stream reads frames from one connection until it closes, the watch stops or --until is
+// satisfied. It returns true when the watch is done, false to reconnect or end on the deadline.
+func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
+	if w.opts.ShowSubscription {
 		_ = ws.sendText("{}")
 	}
-	for time.Now().Before(deadline) {
-		line, err := ws.nextText(deadline)
+	for time.Now().Before(w.until(deadline)) {
+		line, err := ws.nextText(w.until(deadline))
 		if err != nil {
-			if !time.Now().Before(deadline) {
-				return false, 0
+			if !time.Now().Before(w.until(deadline)) {
+				return !w.settleBy.IsZero()
 			}
-			fmt.Fprintf(opts.Stderr, "hl watch: stream ended (%s) — reconnecting from cursor %d\n", err, *cursor)
-			sleepUntil(deadline, reconnectDelay)
-			return false, 0
+			fmt.Fprintf(w.opts.Stderr, "hl watch: stream ended (%s), reconnecting from cursor %d\n", err, w.cursor)
+			sleepUntil(w.until(deadline), reconnectDelay)
+			return false
 		}
 		var event map[string]any
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			fmt.Fprintln(opts.Stdout, line)
+			fmt.Fprintln(w.opts.Stdout, line)
 			continue
 		}
 		c, isEvent := event["cursor"].(float64)
 		if isEvent {
 			delete(event, "cursor")
 			identity, _ := json.Marshal(event)
-			if seen[string(identity)] {
+			if _, repeat := w.seen[string(identity)]; repeat {
 				continue
 			}
-			seen[string(identity)] = true
-			if int64(c) > *cursor {
-				*cursor = int64(c)
+			position, _ := event["position"].(float64)
+			w.seen[string(identity)] = int64(position)
+			if int64(c) > w.cursor {
+				w.cursor = int64(c)
+			}
+			w.printed = true
+			if w.satisfied == nil && !w.opts.Follow && w.settleBy.IsZero() {
+				w.settleBy = time.Now().Add(settleWindow)
 			}
 		}
-		fmt.Fprintln(opts.Stdout, line)
-		if satisfied != nil && satisfied(event) {
-			return true, 0
+		fmt.Fprintln(w.opts.Stdout, line)
+		if w.satisfied != nil && w.satisfied(event) {
+			return true
 		}
 	}
-	return false, 0
+	return !w.settleBy.IsZero()
+}
+
+// cursorState is what the cursor file holds: the largest cursor printed, and the identity of each
+// printed event at or above it, the only ones a resume can replay again.
+type cursorState struct {
+	Cursor int64             `json:"cursor"`
+	Seen   []json.RawMessage `json:"seen"`
+}
+
+func (s cursorState) seen() map[string]int64 {
+	seen := make(map[string]int64, len(s.Seen))
+	for _, identity := range s.Seen {
+		var event struct {
+			Position int64 `json:"position"`
+		}
+		_ = json.Unmarshal(identity, &event)
+		seen[string(identity)] = event.Position
+	}
+	return seen
+}
+
+func loadCursor(path string) (cursorState, error) {
+	var state cursorState
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return state, fmt.Errorf("cursor file: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return state, nil
+	}
+	if err != nil {
+		return state, fmt.Errorf("cursor file: %w", err)
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, fmt.Errorf("cursor file %s: %w", path, err)
+	}
+	return state, nil
+}
+
+func saveCursor(path string, cursor int64, seen map[string]int64) error {
+	state := cursorState{Cursor: cursor, Seen: []json.RawMessage{}}
+	for identity, position := range seen {
+		if position >= cursor {
+			state.Seen = append(state.Seen, json.RawMessage(identity))
+		}
+	}
+	sort.Slice(state.Seen, func(i, j int) bool { return string(state.Seen[i]) < string(state.Seen[j]) })
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("save cursor: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("save cursor: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("save cursor: %w", err)
+	}
+	return nil
 }
 
 func minTime(a, b time.Time) time.Time {
@@ -195,7 +316,7 @@ func sleepUntil(deadline time.Time, d time.Duration) {
 
 // parseUntil turns "status in A,B,C" into a predicate over one job or platform experiment status
 // event (their values never overlap: jobs are upper case, runs lower case), the only form hl watch
-// understands — a wait that can never end is the failure this tool exists to remove, so an
+// understands. A wait that can never end is the failure this tool exists to remove, so an
 // expression that isn't this shape is a usage error rather than a condition that quietly never
 // fires.
 func parseUntil(expr string) (func(map[string]any) bool, error) {
@@ -291,7 +412,7 @@ func connect(base, path string, budget time.Duration) (*webSocket, error) {
 	conn.Close()
 	msg := fmt.Sprintf("the platform refused this subscription: %s%s", strings.TrimSpace(statusLine), detail)
 	if code >= 400 && code < 500 {
-		return nil, &Refused{msg: msg}
+		return nil, &Refused{msg: msg, code: code}
 	}
 	return nil, &Closed{msg: fmt.Sprintf("handshake failed: %s%s", strings.TrimSpace(statusLine), detail)}
 }

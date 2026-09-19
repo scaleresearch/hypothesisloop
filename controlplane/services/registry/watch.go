@@ -21,10 +21,11 @@ import (
 
 // EventSource is the change stream this service serves. Both halves come from the one store that
 // owns them (db.EventsStore): the live one from Postgres LISTEN/NOTIFY, the catch-up one derived
-// from the rows the events describe.
+// from the rows the events describe. Concerns completes db.EventFilter.Matches for an agent filter.
 type EventSource interface {
 	ListenEvents(ctx context.Context, out chan<- db.Event) error
 	Replay(ctx context.Context, filter db.EventFilter, since int64) ([]db.Event, error)
+	Concerns(ctx context.Context, filter db.EventFilter, e db.Event) (bool, error)
 }
 
 const (
@@ -279,7 +280,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	replayed, err := h.source.Replay(r.Context(), filter, since)
 	if errors.Is(err, db.ErrUnknownCursor) {
-		writeWatchError(w, http.StatusBadRequest, err.Error()+"; reconnect without since to start from the current state")
+		writeWatchError(w, http.StatusGone, err.Error()+"; reconnect without since to start from the current state")
 		return
 	}
 	if err != nil {
@@ -316,7 +317,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// It is stack-local to this connection and vanishes with it, like the subscription itself.
-	delivered := &served{floor: map[string]int64{}, sent: map[db.Event]bool{}}
+	delivered := &served{ctx: r.Context(), source: h.source, logger: h.logger, floor: map[string]int64{}, sent: map[db.Event]bool{}}
 	for kind := range filter.Kinds {
 		delivered.floor[kind] = since
 	}
@@ -367,17 +368,29 @@ func writeEvent(conn *wsConn, e db.Event) error {
 // skip. sent holds the identity of every event sent, because a replay resends what is at its
 // cursor and the live stream repeats what committed while a replay ran. Only a repeat of the same
 // identity is dropped: one transaction writes several events (a stage cut per agent, a quota
-// donation pair), and each is news.
+// donation pair), and each is news. Every event this connection writes passes through send, so
+// it is where source.Concerns completes the filter, for replay and live alike.
 type served struct {
-	floor map[string]int64
-	sent  map[db.Event]bool
+	ctx    context.Context
+	source EventSource
+	logger *zap.Logger
+	floor  map[string]int64
+	sent   map[db.Event]bool
 }
 
 func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event) error {
 	if s.sent[e.Identity()] {
 		return nil
 	}
-	if err := writeEvent(conn, filter.Annotate(e)); err != nil {
+	concerns, err := s.source.Concerns(s.ctx, filter, e)
+	if err != nil {
+		s.logger.Error("watch: scope an event to its agent", zap.Error(err))
+		return err
+	}
+	if !concerns {
+		return nil
+	}
+	if err := writeEvent(conn, e); err != nil {
 		return err
 	}
 	s.sent[e.Identity()] = true
@@ -509,28 +522,27 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
 		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
-		Description: "GET /watch is a WebSocket that pushes small typed records — kind, subject, value, detail, position, cursor — " +
+		Description: "GET /watch is a WebSocket that pushes small typed records (kind, subject, value, detail, position, cursor) " +
 			"so you can wait on a change instead of polling for it. Every event is a pointer, never a copy: follow one " +
 			"with the ordinary GET when you want detail.\n\n" +
 			"Scope a subscription with `platform_experiment_id` or `experiment_id` (one is required), narrow it with " +
 			"`agent` and a comma-separated `kinds`, and resume it with `since=<largest cursor you saw>`. A resume never " +
 			"skips an event; it can repeat ones you already have, which carry the same `position` (the transaction " +
-			"that made the change). " +
-			"Omit `since` (or pass 0) and you get the current snapshot of everything your filter admits before going " +
-			"live — watching a job that already finished answers right away instead of waiting on an event that will " +
-			"never come. " +
-			"An `agent` filter narrows only the kinds marked agent_owned below; shared kinds still reach you whoever " +
-			"wrote them. An unknown kind is refused rather than ignored.\n\n" +
-			"Omit `kinds` and you get every kind marked `default` below — everything an agent's loop would otherwise " +
-			"poll for. Only `metric.point` is left out of it: it is the highest-volume kind, it fires for every sample " +
-			"of every job in the run, and it is the one kind a reconnect cannot replay. Name it in `kinds` when you " +
-			"are watching one job's progress. A `kinds` you write out means exactly what it says and nothing else.\n\n" +
+			"that made the change). A `since` this platform never issued is refused with 410: reconnect without it. " +
+			"Omit `since` (or pass 0) and you get the current snapshot of everything your subscription admits before " +
+			"going live.\n\n" +
+			"`agent` scopes the stream to that agent's own resources, as `agent_scope` below says per kind: the terminal " +
+			"status and queue reason of its jobs, its quota and cut, ladder advances, the run's status and brief, and " +
+			"other people's comments, findings and links on hypotheses it registered. Its own actions are not echoed back. " +
+			"Without `agent` you get the whole platform experiment.\n\n" +
+			"Omit `kinds` and you get every kind marked `default` below; only `metric.point` is left out, the " +
+			"highest-volume kind and the one a reconnect cannot replay. An unknown kind is refused.\n\n" +
 			"A connected client can inspect and re-scope itself without reconnecting: send a text frame `{}` to be " +
-			"told the filter actually in force, or `{\"kinds\": \"a,b\"}` to change it (`{\"kinds\": \"\"}` restores the " +
-			"default). The answer is a `{\"subscription\": {...}}` frame — distinguishable from an event, which always " +
-			"has a `kind`. Widening replays the kinds you added from where you last saw them, so a change costs you " +
-			"nothing you were entitled to; narrowing simply stops delivery. Nothing else may be sent up the socket.\n\n" +
-			"Hold the socket with `hl watch`, which exits on a condition or a timeout — a tool call cannot keep one open.",
+			"told the filter in force, or `{\"kinds\": \"a,b\"}` to change it (`{\"kinds\": \"\"}` restores the " +
+			"default). The answer is a `{\"subscription\": {...}}` frame. Widening replays the added kinds from where " +
+			"you last saw them; narrowing stops delivery. Nothing else may be sent up the socket.\n\n" +
+			"`hl watch` holds the socket for you: with your identity in the environment it watches your own resources, " +
+			"resumes from the cursor it saved last time, and returns with the first batch of events.",
 	}, func(context.Context, *struct{}) (*struct{ Body []db.EventKindDoc }, error) {
 		return &struct{ Body []db.EventKindDoc }{Body: db.EventKinds}, nil
 	})

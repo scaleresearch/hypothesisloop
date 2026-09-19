@@ -32,8 +32,9 @@
 //	hl job submit --agent jane job.yaml
 //	hl job list --agent jane
 //	hl job list --platform-experiment pe-123
+//	hl watch
 //	hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
-//	hl watch --platform-experiment pe-123 --kinds hypothesis.new,hypothesis.status,finding.new,comment.new
+//	hl watch --platform-experiment pe-123 --all --follow
 package main
 
 import (
@@ -44,6 +45,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -64,7 +66,7 @@ func run(args []string, stdout, stderr io.Writer) int {
   platform-experiments  [list] | get --id PE | create | start | update
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list [--agent A] [--needs-summary] | status | metrics | summary
-  watch                 --experiment JOB | [--platform-experiment PE] [--agent A] [--until ...]
+  watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
 
 --agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID,
 except on job list and hypothesis list --agent. Run hl <command> --help for its flags.`
@@ -612,23 +614,38 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch one job (domain.Experiment id)")
-	platformExperiment := fs.String("platform-experiment", "", "watch a whole platform experiment: quota, stage boundaries, agent cuts, hypothesis/comment/finding events, platform-experiment status — everything but metric.point (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
-	agent := fs.String("agent", "", "narrow job and quota events to this agent (default $AGENT_ID unless --experiment is set)")
-	kinds := fs.String("kinds", "", "comma-separated event kinds to subscribe to instead of the default set (e.g. hypothesis.new,hypothesis.status,finding.new,comment.new,metric.point) — see GET /watch/kinds for the full vocabulary")
+	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
+	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
+	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and queue reasons, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
+	all := fs.Bool("all", false, "watch the whole platform experiment instead of one agent's resources")
+	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
+	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
-	since := fs.Int64("since", 0, "resume from the largest cursor printed by an earlier watch: replays from it, the events at it included, before going live")
+	since := fs.Int64("since", 0, "resume from this cursor instead of the saved one: replays from it, the events at it included, before going live")
 	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 
-	// An agent filter would drop the job events of another agent's job.
 	if *experiment == "" {
 		*platformExperiment = orEnv(*platformExperiment, platformExperimentEnv)
-		*agent = orEnv(*agent, agentEnv)
+		if !*all {
+			*agent = orEnv(*agent, agentEnv)
+		}
+	}
+
+	// An agent watching its own resources with the default kinds resumes where its last watch
+	// stopped. Any other subscription would skip events of kinds it did not carry.
+	var cursorFile string
+	if *agent != "" && *platformExperiment != "" && *experiment == "" && *kinds == "" {
+		dir, err := stateDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "hl watch: %s\n", err)
+			return 2
+		}
+		cursorFile = filepath.Join(dir, "watch-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
 	}
 
 	watchURL := *urlFlag
@@ -647,11 +664,29 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 		Kinds:              *kinds,
 		ShowSubscription:   *showSubscription,
 		Until:              *until,
+		Follow:             *follow,
 		Timeout:            time.Duration(*timeout * float64(time.Second)),
 		Since:              *since,
+		CursorFile:         cursorFile,
 		Stdout:             stdout,
 		Stderr:             stderr,
 	})
+}
+
+// stateDir is where hl keeps state between runs: $HL_STATE_DIR, else $XDG_STATE_HOME/hl, else
+// ~/.local/state/hl.
+func stateDir() (string, error) {
+	if dir := os.Getenv("HL_STATE_DIR"); dir != "" {
+		return dir, nil
+	}
+	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+		return filepath.Join(dir, "hl"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no state directory: set HL_STATE_DIR (%w)", err)
+	}
+	return filepath.Join(home, ".local", "state", "hl"), nil
 }
 
 // parseExit is the exit code for a flag parse error: 0 for an explicit -h or --help.

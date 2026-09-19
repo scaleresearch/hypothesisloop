@@ -33,6 +33,12 @@ import (
 type fakeEvents struct {
 	stored []db.Event
 	live   chan db.Event
+	// owner maps a hypothesis id to the agent that registered it; links maps a hypothesis id to the
+	// ids it links to. Together they answer Concerns as the graph does.
+	owner map[string]string
+	links map[string][]string
+	// next, when set, is the largest cursor this database could have issued.
+	next int64
 }
 
 func newFakeEvents(stored ...db.Event) *fakeEvents {
@@ -41,6 +47,9 @@ func newFakeEvents(stored ...db.Event) *fakeEvents {
 
 func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int64) ([]db.Event, error) {
 	var out []db.Event
+	if f.next != 0 && since > f.next {
+		return nil, db.ErrUnknownCursor
+	}
 	if since < 0 {
 		since = 0
 	}
@@ -50,6 +59,24 @@ func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int6
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeEvents) Concerns(_ context.Context, filter db.EventFilter, e db.Event) (bool, error) {
+	switch {
+	case filter.AgentID == "" || !strings.HasPrefix(e.Subject, "hyp-"):
+		return true, nil
+	case e.Kind == db.EventHypothesisNew:
+		for _, to := range f.links[e.Subject] {
+			if f.owner[to] == filter.AgentID {
+				return true, nil
+			}
+		}
+		return false, nil
+	case e.Kind == db.EventHypothesisLink:
+		return f.owner[e.Detail] == filter.AgentID, nil
+	default:
+		return f.owner[e.Subject] == filter.AgentID, nil
+	}
 }
 
 func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- db.Event) error {
@@ -342,28 +369,54 @@ func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
 	}
 }
 
-// An agent subscribes to its own jobs plus the shared pool, which is one filter doing two things:
-// it must hide another agent's job events and must not hide pool activity that happens to carry
-// someone else's name. Getting this backwards either leaks a competitor's job timeline or hides
-// the notebook the whole platform is organised around.
-func TestAnAgentScopedSubscriptionHidesAnotherAgentsJobsAndKeepsPoolActivity(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
-	})
+func hypEvent(kind, subject, detail, agentID string, position int64) db.Event {
+	return db.Event{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1",
+		AgentID: agentID, Position: position, Cursor: position}
+}
 
-	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)
-	source.live <- db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 200, Cursor: 200}
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
-
-	if got := client.next(t); got.Kind != db.EventHypothesisNew {
-		t.Errorf("first delivered kind: got = %v, want = %v", got.Kind, db.EventHypothesisNew)
+// An agent scope carries its own outcomes and what other people do to hypotheses it registered: a
+// comment, a finding, a link to one, a new hypothesis building on one. A rival's job, activity on
+// someone else's hypothesis and the echo of the agent's own writes stay off it. Replay and live go
+// through the same rule, so a reconnect cannot widen or narrow what the agent is told.
+func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromThePool(t *testing.T) {
+	events := []db.Event{
+		statusEvent("exp-2", "COMPLETED", "agent-b", 100),
+		hypEvent(db.EventCommentNew, "hyp-b", "", "agent-c", 110),
+		hypEvent(db.EventCommentNew, "hyp-a", "", "agent-a", 120),
+		hypEvent(db.EventCommentNew, "hyp-a", "", "agent-b", 130),
+		hypEvent(db.EventFindingNew, "hyp-a", "", "agent-b", 140),
+		hypEvent(db.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b", 150),
+		hypEvent(db.EventHypothesisLink, "hyp-b", "pe-1", "agent-b", 160),
+		hypEvent(db.EventHypothesisNew, "hyp-c", "", "agent-b", 170),
+		hypEvent(db.EventHypothesisNew, "hyp-d", "", "agent-b", 180),
+		hypEvent(db.EventHypothesisStatus, "hyp-a", "", "agent-a", 190),
+		statusEvent("exp-1", "RUNNING", "agent-a", 200),
+		statusEvent("exp-1", "COMPLETED", "agent-a", 210),
 	}
-	if got := client.next(t); got.Subject != "exp-1" {
-		t.Errorf("second delivered subject: got = %v, want = %v", got.Subject, "exp-1")
+	want := []int64{130, 140, 150, 170, 210}
+	scope := func(source *fakeEvents) *fakeEvents {
+		source.owner = map[string]string{"hyp-a": "agent-a", "hyp-b": "agent-b"}
+		source.links = map[string][]string{"hyp-c": {"hyp-a"}, "hyp-d": {"hyp-b"}}
+		return source
+	}
+	query := url.Values{"platform_experiment_id": {"pe-1"}, "agent": {"agent-a"}}
+
+	replayed := dialWatch(t, watchServer(t, scope(newFakeEvents(events...))), query)
+	for _, position := range want {
+		if got := replayed.next(t).Position; got != position {
+			t.Errorf("replayed position: got = %v, want = %v", got, position)
+		}
+	}
+
+	source := scope(newFakeEvents())
+	live := dialWatch(t, watchServer(t, source), query)
+	for _, e := range events {
+		source.live <- e
+	}
+	for _, position := range want {
+		if got := live.next(t).Position; got != position {
+			t.Errorf("live position: got = %v, want = %v", got, position)
+		}
 	}
 }
 
@@ -408,6 +461,12 @@ var (
 // code, stdout and stderr: what an agent branching on this tool actually sees.
 func runHLWatch(t *testing.T, serverURL string, args ...string) (int, string, string) {
 	t.Helper()
+	return runHLWatchEnv(t, nil, serverURL, args...)
+}
+
+// runHLWatchEnv is runHLWatch with env added to the process environment.
+func runHLWatchEnv(t *testing.T, env []string, serverURL string, args ...string) (int, string, string) {
+	t.Helper()
 	hlBinaryOnce.Do(func() {
 		dir, err := os.MkdirTemp("", "hl watch-test-")
 		if err != nil {
@@ -426,6 +485,7 @@ func runHLWatch(t *testing.T, serverURL string, args ...string) (int, string, st
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, hlBinary, append([]string{"watch", "--url", serverURL}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -529,79 +589,6 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 	}
 }
 
-// The real battle test: two agents' jobs under one platform experiment, each running the actual
-// hl watch against the actual server. Each agent's own stage cut must arrive unmarked, and
-// the other agent's must arrive "FYI: cut" — proving the prefix survives the real WebSocket
-// handshake and framing, not just the in-process db.EventFilter unit tests above, and that each
-// agent still receives the full picture rather than having the other's news withheld.
-func TestHLWatchDistinguishesItsOwnStageCutFromAnotherAgentsWithAnFYIPrefix(t *testing.T) {
-	source := newFakeEvents()
-	handler := NewWatchHandler(source,
-		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	handler.Start(ctx)
-	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
-	defer server.Close()
-
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for len(handler.hub.list("pe-1", "agent-a")) == 0 || len(handler.hub.list("pe-1", "agent-b")) == 0 {
-			if time.Now().After(deadline) {
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		now := time.Now().UnixMicro()
-		// One boundary row produces both agents' cut events, exactly as the real ladder does.
-		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: now, Cursor: now}
-		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: now, Cursor: now}
-	}()
-
-	var wg sync.WaitGroup
-	var outA, outB string
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_, outA, _ = runHLWatch(t, server.URL, "--platform-experiment", "pe-1", "--agent", "agent-a",
-			"--kinds", db.EventStageBoundary, "--timeout", "5")
-	}()
-	go func() {
-		defer wg.Done()
-		_, outB, _ = runHLWatch(t, server.URL, "--platform-experiment", "pe-1", "--agent", "agent-b",
-			"--kinds", db.EventStageBoundary, "--timeout", "5")
-	}()
-	wg.Wait()
-
-	linesFor := func(agentID, output string) []string {
-		var lines []string
-		for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
-			if strings.Contains(line, `"agent_id":"`+agentID+`"`) {
-				lines = append(lines, line)
-			}
-		}
-		return lines
-	}
-
-	// Agent A: sees both cuts (the ladder is shared), its own unmarked and agent-b's flagged.
-	if lines := linesFor("agent-a", outA); len(lines) != 1 || strings.Contains(lines[0], "FYI") {
-		t.Errorf("agent-a's own cut in its own watch output: got = %v, want = one unmarked line", lines)
-	}
-	if lines := linesFor("agent-b", outA); len(lines) != 1 || !strings.Contains(lines[0], `"detail":"FYI: cut"`) {
-		t.Errorf("agent-b's cut in agent-a's watch output: got = %v, want = one line with detail FYI: cut", lines)
-	}
-
-	// Agent B: the mirror image — every agent gets the full picture, distinguished by the prefix.
-	if lines := linesFor("agent-b", outB); len(lines) != 1 || strings.Contains(lines[0], "FYI") {
-		t.Errorf("agent-b's own cut in its own watch output: got = %v, want = one unmarked line", lines)
-	}
-	if lines := linesFor("agent-a", outB); len(lines) != 1 || !strings.Contains(lines[0], `"detail":"FYI: cut"`) {
-		t.Errorf("agent-a's cut in agent-b's watch output: got = %v, want = one line with detail FYI: cut", lines)
-	}
-}
-
 // agent.cut is the one new kind that is agent-owned, and that is the whole reason it exists: an
 // agent watching for its own stop condition must not be woken by every rival's elimination, and
 // must never conclude from one that it was cut itself. Getting this wrong turns a stop condition
@@ -624,9 +611,8 @@ func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 	}
 }
 
-// The other three new kinds are shared, and an agent-scoped subscription is the case that would
-// hide them: a verdict, a closure and a brief change concern everyone in the run whoever wrote the
-// row. An agent narrowing to its own jobs and thereby going blind to the run closing would be back
+// The run-wide kinds are shared, and an agent-scoped subscription is the case that would hide
+// them: a ladder advance, a closure and a brief change concern everyone in the run. An agent narrowing to its own jobs and thereby going blind to the run closing would be back
 // to polling for the very thing it stopped polling for.
 func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing.T) {
 	source := newFakeEvents()
@@ -636,59 +622,17 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 		"agent":                  {"agent-a"},
 	})
 
-	source.live <- db.Event{Kind: db.EventHypothesisStatus, Subject: "hyp-1", Value: "refuted",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
+	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced",
+		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
 	source.live <- db.Event{Kind: db.EventPlatformExperimentDescription, Subject: "pe-1",
 		PlatformExperimentID: "pe-1", Position: 200, Cursor: 200}
 	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
 		PlatformExperimentID: "pe-1", Position: 300, Cursor: 300}
 
-	for _, want := range []string{db.EventHypothesisStatus, db.EventPlatformExperimentDescription, db.EventPlatformExperimentStatus} {
+	for _, want := range []string{db.EventStageBoundary, db.EventPlatformExperimentDescription, db.EventPlatformExperimentStatus} {
 		if got := client.next(t).Kind; got != want {
 			t.Errorf("delivered kind: got = %v, want = %v", got, want)
 		}
-	}
-}
-
-// A shared event that names a different agent's job is ambient context, not this connection's own
-// concern, and the server marks it so on delivery — live and on replay both — so an agent's loop
-// can tell "act on this" from "FYI" without a second GET. Its own events, whether agent-owned or
-// shared but self-authored, are never marked.
-func TestASharedEventFromAnotherAgentIsDeliveredWithAnFYIPrefixLiveAndOnReplay(t *testing.T) {
-	source := newFakeEvents(
-		db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 50, Cursor: 50},
-	)
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
-		"since":                  {"10"},
-	})
-
-	// Replayed: another agent's stage cut is ambient, this agent's own is not.
-	if got := client.next(t); got.Detail != "FYI: cut" {
-		t.Errorf("replayed stage.boundary detail for another agent's cut: got = %q, want = %q", got.Detail, "FYI: cut")
-	}
-
-	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "2", Detail: "cut",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
-	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "3", Detail: "cut",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
-	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1", Value: "agent", Detail: "",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 300, Cursor: 300}
-
-	if got := client.next(t); got.Detail != "FYI: cut" || got.Value != "2" {
-		t.Errorf("live stage.boundary for another agent's cut: got = %+v, want detail = %q", got, "FYI: cut")
-	}
-	if got := client.next(t); got.Detail != "cut" || got.Value != "3" {
-		t.Errorf("live stage.boundary for this agent's own cut: got = %+v, want detail = %q (unmarked)", got, "cut")
-	}
-	// hypothesis.new, comment.new and most other kinds never carry Detail text at all — without
-	// a bare "FYI" for the empty case, another agent's activity on these kinds would be silently
-	// indistinguishable from this subscriber's own in the printed line, defeating the point.
-	if got := client.next(t); got.Detail != "FYI" {
-		t.Errorf("another agent's event with no detail: got = %q, want = %q", got.Detail, "FYI")
 	}
 }
 
@@ -753,10 +697,7 @@ func TestEveryKindASubscriptionMayNameIsAlsoAdvertised(t *testing.T) {
 func TestASubscriptionNamingNoKindsCarriesEverythingTheAgentLoopWouldOtherwisePollFor(t *testing.T) {
 	source := newFakeEvents()
 	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
-	})
+	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
 
 	wanted := []string{
 		db.EventExperimentStatus, db.EventExperimentBlocked, db.EventQuotaChanged,
@@ -1109,5 +1050,84 @@ func TestHLWatchPrintsWhatTheServerSaysThisConnectionIsSubscribedTo(t *testing.T
 	}
 	if !strings.Contains(output, `"experiment.status"`) {
 		t.Errorf("hl watch --show-subscription output: got = %v, want = one naming the kind in force", output)
+	}
+}
+
+func eventLines(output string) []db.Event {
+	var events []db.Event
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		var e db.Event
+		if json.Unmarshal([]byte(line), &e) == nil && e.Kind != "" {
+			events = append(events, e)
+		}
+	}
+	return events
+}
+
+func positions(events []db.Event) []int64 {
+	out := []int64{}
+	for _, e := range events {
+		out = append(out, e.Position)
+	}
+	return out
+}
+
+func agentEnv(t *testing.T) []string {
+	return []string{"AGENT_ID=agent-a", "PLATFORM_EXPERIMENT_ID=pe-1", "HL_STATE_DIR=" + t.TempDir()}
+}
+
+// A plain hl watch with no saved cursor returns the current snapshot of the agent's resources. The
+// next one resumes from the cursor the first saved: it prints what happened in between and nothing
+// the first already printed, though the server replays the events at that cursor again.
+func TestHLWatchResumesFromItsSavedCursorWithoutRepeatsOrGaps(t *testing.T) {
+	source := newFakeEvents(
+		statusEvent("exp-1", "COMPLETED", "agent-a", 100),
+		db.Event{Kind: db.EventExperimentStatus, Subject: "exp-2", Value: "FAILED", PlatformExperimentID: "pe-1",
+			AgentID: "agent-a", Position: 110, Cursor: 105},
+	)
+	server := watchServer(t, source)
+	env := agentEnv(t)
+
+	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--timeout", "10")
+	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[100 110]" {
+		t.Fatalf("first watch: got = exit %v, positions %v, want = exit 0, [100 110] (stderr: %s)", code, got, stderr)
+	}
+
+	source.stored = append(source.stored, statusEvent("exp-3", "EVICTED", "agent-a", 120))
+	code, out, stderr = runHLWatchEnv(t, env, server.URL, "--timeout", "10")
+	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[120]" {
+		t.Errorf("second watch: got = exit %v, positions %v, want = exit 0, [120] (stderr: %s)", code, got, stderr)
+	}
+}
+
+// A saved cursor this database never issued (it was reset, say) falls back to the snapshot once
+// instead of failing the watch.
+func TestHLWatchFallsBackToTheSnapshotWhenTheSavedCursorIsUnknown(t *testing.T) {
+	source := newFakeEvents(statusEvent("exp-1", "COMPLETED", "agent-a", 100))
+	source.next = 200
+	server := watchServer(t, source)
+	env := agentEnv(t)
+	dir := strings.TrimPrefix(env[2], "HL_STATE_DIR=")
+	if err := os.WriteFile(filepath.Join(dir, "watch-pe-1-agent-a.json"), []byte(`{"cursor":5000,"seen":[]}`), 0o644); err != nil {
+		t.Fatalf("write cursor file: got = %v, want = nil", err)
+	}
+
+	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--timeout", "10")
+	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[100]" {
+		t.Errorf("watch from an unknown cursor: got = exit %v, positions %v, want = exit 0, [100] (stderr: %s)", code, got, stderr)
+	}
+}
+
+// An explicit --since is the caller's statement of where to start, and wins over the saved cursor.
+func TestHLWatchExplicitSinceWinsOverTheSavedCursor(t *testing.T) {
+	source := newFakeEvents(statusEvent("exp-1", "COMPLETED", "agent-a", 100), statusEvent("exp-2", "COMPLETED", "agent-a", 200))
+	server := watchServer(t, source)
+	env := agentEnv(t)
+	if code, _, stderr := runHLWatchEnv(t, env, server.URL, "--timeout", "10"); code != 0 {
+		t.Fatalf("first watch: got = exit %v, want = 0 (stderr: %s)", code, stderr)
+	}
+	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--since", "150", "--timeout", "10")
+	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[200]" {
+		t.Errorf("watch with --since 150: got = exit %v, positions %v, want = exit 0, [200] (stderr: %s)", code, got, stderr)
 	}
 }

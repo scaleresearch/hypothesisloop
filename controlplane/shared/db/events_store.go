@@ -8,6 +8,8 @@ import (
 	"sort"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Event is one change, described as small as it can be described: what kind of thing changed,
@@ -84,12 +86,10 @@ type EventKindDoc struct {
 	Subject     string `json:"subject"`
 	Value       string `json:"value"`
 	Description string `json:"description"`
-	// AgentOwned is true when an `agent` filter narrows this kind to that agent's own, false
-	// when it is shared and reaches every subscriber whoever wrote it. It is not written in the
-	// table below: it is filled in from isAgentOwned, which is what the filter actually consults,
-	// so the documented scope cannot describe a rule the server does not apply.
-	AgentOwned bool `json:"agent_owned"`
-	// Default is true when a subscription that names no kinds carries this one. Like AgentOwned it
+	// AgentScope says what an `agent` filter keeps of this kind. It is filled in from agentScope,
+	// written beside the rule Matches applies, so the documented scope and the applied one sit together.
+	AgentScope string `json:"agent_scope"`
+	// Default is true when a subscription that names no kinds carries this one. Like AgentScope it
 	// is filled in from the predicate the server actually consults (isDefaultKind), so the default
 	// set cannot be advertised here and be a different set on the wire.
 	Default bool `json:"default"`
@@ -132,7 +132,7 @@ var EventKinds = []EventKindDoc{
 
 func init() {
 	for i := range EventKinds {
-		EventKinds[i].AgentOwned = isAgentOwned(EventKinds[i].Kind)
+		EventKinds[i].AgentScope = agentScope(EventKinds[i].Kind)
 		EventKinds[i].Default = isDefaultKind(EventKinds[i].Kind)
 	}
 }
@@ -187,13 +187,9 @@ func isExperimentSubject(kind string) bool {
 	}
 }
 
-// isAgentOwned reports the kinds that describe one agent's own property — its jobs and its
-// allocation. Everything else on the stream is shared: the idea pool and the stage ladder belong
-// to the platform experiment, not to whoever happened to write the row.
-//
-// agent.cut is here and stage.boundary is not, though one row emits both: the boundary is news
-// for everyone, while the cut is the one agent's stop condition and would be noise on every other
-// agent's subscription.
+// isAgentOwned reports the kinds that describe one agent's own property: its jobs and its
+// allocation. agent.cut is here and stage.boundary is not, though one row emits both: the cut is the
+// one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
 	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventJobUnderperforming:
@@ -203,14 +199,43 @@ func isAgentOwned(kind string) bool {
 	}
 }
 
+// isHypothesisActivity reports the kinds whose subject is a hypothesis.
+func isHypothesisActivity(kind string) bool {
+	switch kind {
+	case EventHypothesisNew, EventHypothesisStatus, EventHypothesisLink, EventFindingNew, EventCommentNew:
+		return true
+	default:
+		return false
+	}
+}
+
+func agentScope(kind string) string {
+	switch {
+	case kind == EventExperimentStatus:
+		return "terminal statuses of your own jobs"
+	case isAgentOwned(kind):
+		return "your own"
+	case kind == EventHypothesisNew:
+		return "someone else's hypothesis linking to one you registered"
+	case isHypothesisActivity(kind):
+		return "someone else's, on a hypothesis you registered"
+	case kind == EventStageBoundary:
+		return "advances only; your own cut is agent.cut"
+	default:
+		return "every one"
+	}
+}
+
 // Matches decides whether one event belongs on one subscription. Live fan-out and replay both
 // go through it, so a reconnecting client cannot receive a differently-scoped set than it was
 // receiving before the connection broke.
 //
-// The agent rule narrows only the kinds that describe that agent's own property. An agent asking
-// for its own jobs still receives pool activity and stage boundaries whoever wrote them, because
-// those are the shared notebook and the shared ladder — filtering them by author would leave an
-// agent watching a competition it can no longer see.
+// An agent filter scopes the stream to what that agent has to act on, so it never needs to poll
+// its own resources: its jobs' terminal statuses and queue reasons, its allocation and cut, ladder
+// advances, the run's status and brief, and other people's activity on hypotheses it registered.
+// Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
+// by EventsStore.Concerns; Matches only drops the agent's own echo. Without an agent the stream is
+// the whole platform experiment.
 func (f EventFilter) Matches(e Event) bool {
 	if len(f.Kinds) > 0 && !f.Kinds[e.Kind] {
 		return false
@@ -221,36 +246,20 @@ func (f EventFilter) Matches(e Event) bool {
 	if f.ExperimentID != "" && (!isExperimentSubject(e.Kind) || e.Subject != f.ExperimentID) {
 		return false
 	}
-	if f.AgentID != "" && isAgentOwned(e.Kind) && e.AgentID != f.AgentID {
-		return false
+	if f.AgentID == "" {
+		return true
 	}
-	return true
-}
-
-// Annotate marks an event as ambient rather than addressed to this subscription: it prefixes
-// Detail with "FYI: " when the event names an agent other than the one this filter is scoped to.
-//
-// It only ever adds a prefix to Detail, never new text — the pointer stays a pointer, and a
-// subscriber that wants the finding or comment itself still follows with the ordinary GET. It is
-// deliberately narrow: without an AgentID a filter has no "own" to compare against (a subscription
-// scoped only to a platform experiment or an experiment id is watching the whole thing, not one
-// agent's slice of it), and an event with no AgentID names nobody in particular (a human-authored
-// hypothesis, a platform-wide status) so there is no "someone else" to flag it against.
-//
-// Agent-owned kinds (see isAgentOwned) never reach here already prefixed: Matches admits them to
-// an agent-scoped subscription only when e.AgentID equals f.AgentID, so every one an agent-scoped
-// connection is delivered is already its own. The prefix therefore only ever lands on the shared
-// kinds — the pool, the ladder, the run — when they were written by somebody else's job.
-func (f EventFilter) Annotate(e Event) Event {
-	if f.AgentID == "" || e.AgentID == "" || e.AgentID == f.AgentID {
-		return e
+	switch {
+	case isAgentOwned(e.Kind):
+		return e.AgentID == f.AgentID &&
+			(e.Kind != EventExperimentStatus || domain.ExperimentStatus(e.Value).IsTerminal())
+	case isHypothesisActivity(e.Kind):
+		return e.AgentID != f.AgentID
+	case e.Kind == EventStageBoundary:
+		return e.AgentID == ""
+	default:
+		return true
 	}
-	if e.Detail == "" {
-		e.Detail = "FYI"
-		return e
-	}
-	e.Detail = "FYI: " + e.Detail
-	return e
 }
 
 // EventsStore is the only path to the change stream: it listens for live events and derives the
@@ -263,9 +272,11 @@ type EventsStore struct {
 }
 
 // HypothesisEvents derives the hypothesis.new, hypothesis.status and hypothesis.link events of one
-// platform experiment at a position of at least since (see graphdb.Store.ReplayEvents).
+// platform experiment at a position of at least since (see graphdb.Store.ReplayEvents), and answers
+// whether a hypothesis event concerns a hypothesis an agent registered (graphdb.Store.ConcernsAgent).
 type HypothesisEvents interface {
 	ReplayEvents(ctx context.Context, platformExperimentID string, since int64) ([]Event, error)
+	ConcernsAgent(ctx context.Context, agentID string, e Event) (bool, error)
 }
 
 // NewEventsStore returns an EventsStore backed by pool and the graph store's hypothesis events.
@@ -302,6 +313,15 @@ func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event) error 
 			return ctx.Err()
 		}
 	}
+}
+
+// Concerns completes Matches for an agent filter: a hypothesis event belongs on it only when it
+// concerns a hypothesis that agent registered. Every other event that Matches admits, it admits.
+func (s *EventsStore) Concerns(ctx context.Context, filter EventFilter, e Event) (bool, error) {
+	if filter.AgentID == "" || !isHypothesisActivity(e.Kind) {
+		return true, nil
+	}
+	return s.hypotheses.ConcernsAgent(ctx, filter.AgentID, e)
 }
 
 const notifySQL = "SELECT hypothesisloop_notify_event($1, $2, $3, $4, $5, $6)"

@@ -384,7 +384,7 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
     pe_id, agent_a, agent_b = graph_pe
     deadline = Deadline.in_seconds(60)
     proc, out_path, err_path = _start_watch(
-        api, tmp_path, "live", "--platform-experiment", pe_id, "--kinds", "hypothesis.new,hypothesis.link", "--timeout", "60"
+        api, tmp_path, "live", "--platform-experiment", pe_id, "--kinds", "hypothesis.new,hypothesis.link", "--follow", "--timeout", "60"
     )
     try:
         eventually("hl watch to connect", err_path.read_text, accept=lambda t: "hl watch: connected" in t, deadline=deadline)
@@ -428,4 +428,40 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
     resent = [json.loads(line) for line in after.stdout.splitlines() if line.startswith("{")]
     assert [e["position"] for e in resent] == [position], (
         f"replay from the link's own cursor returned something other than the link once: {after.stdout}"
+    )
+
+
+def _watch_as(api, agent: str, pe_id: str, state_dir: Path) -> subprocess.CompletedProcess:
+    env = {**api.hl_env(), "AGENT_ID": agent, "PLATFORM_EXPERIMENT_ID": pe_id, "HL_STATE_DIR": str(state_dir)}
+    return subprocess.run([str(api.hl_bin), "watch", "--url", api.base_url, "--timeout", "10"],
+                          capture_output=True, text=True, env=env, timeout=30)
+
+
+def test_agent_watch_carries_others_activity_on_its_hypotheses_and_resumes(api, experiment, run_id, tmp_path: Path):
+    agent_a = make_agent(api, run_id, "watch-a")
+    agent_b = make_agent(api, run_id, "watch-b")
+    pe_id = experiment("agent-watch", [agent_a, agent_b], budget=BUDGET)
+    mine = api.register_hypothesis(pe_id, agent_a, f"weight decay 0.1 regularises best {run_id}")
+    theirs = api.register_hypothesis(pe_id, agent_b, f"dropout before the head helps {run_id}")
+    api.post_hypothesis_comment(mine["id"], f"own note {run_id}", agent_id=agent_a).raise_for_status()
+    api.post_hypothesis_comment(theirs["id"], f"unrelated {run_id}", agent_id=agent_a).raise_for_status()
+    api.post_hypothesis_comment(mine["id"], f"does it hold at depth 24? {run_id}", agent_id=agent_b).raise_for_status()
+    assert api.post_hypothesis_link(theirs["id"], "related", mine["id"], agent_id=agent_b).status_code == 201
+
+    first = _watch_as(api, agent_a, pe_id, tmp_path)
+    assert first.returncode == 0, first.stderr
+    events = [json.loads(line) for line in first.stdout.splitlines() if line.startswith("{")]
+    hypothesis_events = [(e["kind"], e["subject"], e["agent_id"]) for e in events
+                         if e["kind"] in ("hypothesis.new", "hypothesis.link", "comment.new", "finding.new")]
+    assert sorted(hypothesis_events) == sorted([
+        ("comment.new", mine["id"], agent_b),
+        ("hypothesis.link", theirs["id"], agent_b),
+    ]), f"agent watch did not carry exactly others' activity on its own hypothesis: {first.stdout}"
+
+    api.post_hypothesis_comment(mine["id"], f"and at depth 48? {run_id}", agent_id=agent_b).raise_for_status()
+    second = _watch_as(api, agent_a, pe_id, tmp_path)
+    assert second.returncode == 0, second.stderr
+    resumed = [json.loads(line) for line in second.stdout.splitlines() if line.startswith("{")]
+    assert [(e["kind"], e["subject"]) for e in resumed] == [("comment.new", mine["id"])], (
+        f"a resumed agent watch repeated or missed events: {second.stdout}"
     )
