@@ -36,7 +36,7 @@ export function PlatformExperimentSelect({ value, onChange, allLabel, placeholde
       hideAllOption={hideAllOption}
       style={style}
       options={(selected && !listed.some(p => p.id === selected.id) ? [selected, ...listed] : listed)
-        .map(p => ({ value: p.id, label: p.name }))}
+        .map(p => ({ value: p.id, label: `${p.name} (${p.status})` }))}
       hint={more > 0 ? `${more} more, type to search` : undefined}
     />
   )
