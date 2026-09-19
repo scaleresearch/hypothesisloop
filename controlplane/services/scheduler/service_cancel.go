@@ -131,25 +131,35 @@ func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment)
 // other agents see when deciding whether to test the same hypothesis again. Only allowed on
 // COMPLETED, FAILED, EVICTED, or REJECTED experiments so that agents summarise what they
 // learned — findings are visible to other agents via GET /hypotheses/{id}.
-func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string) error {
+//
+// Returns the hypothesis's id while its verdict is open and the job's agent may set it (its own
+// hypothesis, or a human's), else "".
+func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string) (openHypothesisID string, err error) {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {
-		return fmt.Errorf("summary: get experiment: %w", err)
+		return "", fmt.Errorf("summary: get experiment: %w", err)
 	}
 	if exp == nil {
-		return &AdmissionError{Reason: "not_found", Message: "experiment not found"}
+		return "", &AdmissionError{Reason: "not_found", Message: "experiment not found"}
 	}
 	switch exp.Status {
 	case domain.StatusCompleted, domain.StatusFailed, domain.StatusEvicted, domain.StatusRejected:
 		// ok
 	default:
-		return &AdmissionError{
+		return "", &AdmissionError{
 			Reason:  "invalid_state",
 			Message: fmt.Sprintf("summary can only be written on terminal experiments (got %s)", exp.Status),
 		}
 	}
-	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, summary); err != nil {
-		return fmt.Errorf("summary: create finding: %w", err)
+	h, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
+	if err != nil {
+		return "", fmt.Errorf("summary: get hypothesis: %w", err)
 	}
-	return nil
+	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, summary); err != nil {
+		return "", fmt.Errorf("summary: create finding: %w", err)
+	}
+	if h != nil && h.Status == domain.HypothesisOpen && (h.AgentID == exp.AgentID || h.Source == domain.HypothesisSourceHuman) {
+		return h.ID, nil
+	}
+	return "", nil
 }

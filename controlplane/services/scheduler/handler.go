@@ -41,6 +41,11 @@ type reasonError struct {
 func (e *reasonError) Error() string  { return e.Message }
 func (e *reasonError) GetStatus() int { return e.status }
 
+type summaryReply struct {
+	Status           string `json:"status"`
+	OpenHypothesisID string `json:"open_hypothesis_id,omitempty"`
+}
+
 // submitRequest is the wire shape for POST /experiments.
 type submitRequest struct {
 	ID       string                `json:"id"`
@@ -310,33 +315,25 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
-		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}.",
+		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}. " +
+			"open_hypothesis_id names the job's hypothesis while its verdict is open and yours to set.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			Summary string `json:"summary"`
 		}
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
+	}) (*struct{ Body summaryReply }, error) {
 		if in.Body.Summary == "" {
 			return nil, huma.Error400BadRequest("summary is required")
 		}
-		if err := h.svc.WriteExperimentSummary(ctx, in.ID, in.Body.Summary); err != nil {
+		open, err := h.svc.WriteExperimentSummary(ctx, in.ID, in.Body.Summary)
+		if err != nil {
 			if e := admissionStatusError(err); e != nil {
 				return nil, e
 			}
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "ok"
-		return out, nil
+		return &struct{ Body summaryReply }{Body: summaryReply{Status: "ok", OpenHypothesisID: open}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{

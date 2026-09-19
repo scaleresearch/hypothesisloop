@@ -244,6 +244,19 @@ func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	}
 }
 
+func TestJobSummaryPointsAtTheOpenVerdict(t *testing.T) {
+	open := "hyp-1"
+	recordingServer(t, func(int, recorded) any { return map[string]any{"status": "ok", "open_hypothesis_id": open} })
+	for _, want := range []string{"hl: job summary: the verdict of hyp-1 is open and yours to set: hl hypothesis status hyp-1 confirmed|refuted|inconclusive\n", ""} {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"job", "summary", "job-1", "--text", "it held"}, &stdout, &stderr)
+		if code != 0 || stdout.String() != `{"status":"ok"}`+"\n" || stderr.String() != want {
+			t.Fatalf("open %q: exit %d, stdout %q, stderr %q", open, code, stdout.String(), stderr.String())
+		}
+		open = ""
+	}
+}
+
 func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)

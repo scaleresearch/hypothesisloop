@@ -458,12 +458,16 @@ COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 	if text == "" {
 		return parseExit(misuse(fs, "--text is required"))
 	}
-	var out json.RawMessage
+	var out struct {
+		Status string `json:"status"`
+		Open   string `json:"open_hypothesis_id"`
+	}
 	if err := c.Do("POST", "/experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": text}, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLine(stdout, out); err != nil {
-		return fail(stderr, err)
+	fmt.Fprintf(stdout, "{\"status\":%q}\n", out.Status)
+	if out.Open != "" {
+		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s confirmed|refuted|inconclusive\n", out.Open, out.Open)
 	}
 	return 0
 }

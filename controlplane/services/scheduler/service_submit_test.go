@@ -202,3 +202,38 @@ func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
 		t.Fatalf("Submit to an open platform experiment: got = %v, want a message saying it has not started", err)
 	}
 }
+
+type finishedJobStore struct {
+	poolOnlyStore
+	filed int
+}
+
+func (*finishedJobStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
+	return &domain.Experiment{ID: id, AgentID: "agent-1", HypothesisID: "hyp-1", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted}, nil
+}
+
+func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _, _ string) (*domain.HypothesisFinding, error) {
+	s.filed++
+	return &domain.HypothesisFinding{}, nil
+}
+
+// The summary is where an agent has the evidence in hand, so its reply names the hypothesis
+// whose verdict that agent may set and has not: its own or a human's, never another agent's.
+func TestASummaryNamesTheHypothesisWhoseVerdictIsStillOpen(t *testing.T) {
+	for _, tc := range []struct {
+		h    domain.Hypothesis
+		want string
+	}{
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, "hyp-1"},
+		{domain.Hypothesis{ID: "hyp-1", Author: "jane", Source: domain.HypothesisSourceHuman, Status: domain.HypothesisOpen}, "hyp-1"},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, ""},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisConfirmed}, ""},
+	} {
+		store := &finishedJobStore{}
+		s := &Service{store: store, hypotheses: oneHypothesis{h: &tc.h}}
+		got, err := s.WriteExperimentSummary(context.Background(), "job-1", "it held")
+		if err != nil || got != tc.want || store.filed != 1 {
+			t.Fatalf("%+v: got = (%q, %v), filed %d, want (%q, nil), filed 1", tc.h, got, err, store.filed, tc.want)
+		}
+	}
+}
