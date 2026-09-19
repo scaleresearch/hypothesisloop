@@ -102,6 +102,19 @@ export function fetchAgentsPage(params?: AgentsParams): Promise<Page<Agent>> {
   return apiFetchPage<Agent>(url.toString())
 }
 
+// Whole-set figures for the filters fetchAgentsPage accepts, aggregated server-side.
+export interface AgentStats {
+  total: number
+  top3_eligible: number
+  avg_performance_score: number
+}
+
+export function fetchAgentStats(platformExperimentID: string): Promise<AgentStats> {
+  const url = new URL(`${API_URL}/agents/stats`)
+  if (platformExperimentID) url.searchParams.set('platform_experiment_id', platformExperimentID)
+  return apiFetch<AgentStats>(url.toString())
+}
+
 
 // ---------------------------------------------------------------------------
 // Registry / Experiments
@@ -148,9 +161,15 @@ export interface ExperimentStats {
   // ('workload'), the environment's ('infrastructure'), or the platform's own decision
   // ('policy'). Derived server-side from the same tally; see shared/domain/fault_class.go.
   evictions_by_class: Record<string, number>
+  // accelerator_count summed over SUBMITTED and RUNNING jobs.
+  in_flight_accelerators: number
+  // Present only when group_by was asked for: the same stats per agent or hypothesis id.
+  groups?: Record<string, ExperimentStats>
 }
 
-export function fetchExperimentStats(params?: Omit<ExperimentsParams, 'limit' | 'offset' | 'sort'>): Promise<ExperimentStats> {
+export function fetchExperimentStats(
+  params?: Omit<ExperimentsParams, 'limit' | 'offset' | 'sort'> & { group_by?: 'agent' | 'hypothesis' },
+): Promise<ExperimentStats> {
   const url = new URL(`${API_URL}/experiments/stats`)
   if (params) {
     for (const [k, v] of Object.entries(params)) {

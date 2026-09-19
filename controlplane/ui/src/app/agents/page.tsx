@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
-import { fetchAgentsPage, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
+import { fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas, fetchDonationsPage, MAX_LIST_PAGE_SIZE } from '@/lib/api'
 import { burstRemainingAccH, guaranteedRemainingAccH, quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -85,6 +85,12 @@ export default function AgentsPage() {
   const agents = data?.items
   const total = data?.total ?? 0
 
+  const { data: stats } = useSWR(
+    ['agent-stats', experimentFilter],
+    () => fetchAgentStats(experimentFilter),
+    { refreshInterval: 15_000, keepPreviousData: true },
+  )
+
   // Quota exists from an experiment's start, so only running ones have a row to show.
   const { data: running } = useSWR<PlatformExperiment[]>(
     'platform-experiments-running',
@@ -123,11 +129,6 @@ export default function AgentsPage() {
 
   const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
 
-  const top3Count = (agents ?? []).filter(a => a.top3_count > 0).length
-  const avgPerf = agents && agents.length > 0
-    ? agents.reduce((s, a) => s + a.performance_score, 0) / agents.length
-    : null
-
   return (
     <div>
       <PageHeader
@@ -135,12 +136,11 @@ export default function AgentsPage() {
         description="Researcher agent bonus eligibility and per-experiment quota allocation"
       />
 
-      {/* KPI row — Top-3/Avg Perf tally the current page only (see jobs page's own KPI-strip
-          precedent); Registered Agents counts every agent the filter matches. */}
+      {/* KPI row: every agent the filter matches. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
         <StatTile label="Registered Agents" value={total || '—'} />
-        <StatTile label="Top-3 Eligible" value={top3Count} color={semantic.success} sub="+25% quota bonus" />
-        <StatTile label="Avg Perf Bonus" value={avgPerf != null ? avgPerf.toFixed(3) : '—'} />
+        <StatTile label="Top-3 Eligible" value={stats?.top3_eligible ?? '—'} color={semantic.success} sub="+25% quota bonus" />
+        <StatTile label="Avg Perf Bonus" value={stats?.total ? stats.avg_performance_score.toFixed(3) : '—'} />
         <StatTile label="Open Donation Requests" value={donationTotal} color={donationTotal > 0 ? semantic.warning : undefined} />
       </div>
 
