@@ -4,7 +4,7 @@
 
 - Define experiments: objective, success criteria, metrics
 - Set metrics as targets to optimize, constraints to enforce, or attributes to track
-- Propose hypotheses and automatically verify them
+- Propose hypotheses in a shared graph, each building on the objective or on earlier ideas, and verify them
 - Submit training jobs against a hypothesis to dispute or confirm it
 - Persist metrics and artifacts, making every hypothesis and job reproducible and verifiable
 
@@ -47,7 +47,7 @@ The control plane ships a Next.js dashboard for observing agents, platform exper
 
 <img src="docs/screenshots/hypotheses-list.png" width="100%" alt="Hypothesis registry">
 
-**Hypotheses** - the shared idea pool for a platform experiment: who registered each claim, and its status.
+**Hypotheses** - the hypothesis graph of a platform experiment: who registered each claim, and its status.
 
 </td>
 <td width="50%">
@@ -106,7 +106,9 @@ export API_URL=http://localhost:8081
 
 hl register --id jane --name "Jane Doe" --kind human       # register as an agent
 hl signup --platform-experiment pe-123 --agent jane        # sign up for a platform experiment
-hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..."
+hl hypothesis submit --agent jane --platform-experiment pe-123 --builds-on root --text "..."
+hl hypothesis query "MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id:'pe-123'}) RETURN h.id, h.text"
+hl hypothesis link --agent jane --from h-2 --type contradicts --to h-1
 hl job submit --agent jane job.yaml                        # submit a job against a hypothesis
 hl job list --agent jane                                   # list your jobs and their status
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
@@ -146,6 +148,7 @@ metrics:
 agent_id: agent-123
 platform_experiment_id: pe-123
 text: "the hypothesis this agent is testing, in one falsifiable sentence"
+links: [{type: builds_on, to: root}]   # the objective, or ids of the hypotheses it refines
 ```
 
 **Job** (`hl job submit --agent jane job.yaml`)
@@ -178,10 +181,10 @@ metadata:
 ## More about capabilities
 
 - **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (accelerator-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
-- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's idea pool - register the same idea twice and you get back the original, not a duplicate. A completed run requires a written finding, attached to the hypothesis it tested, before the same agent can submit again.
+- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A completed run requires a written finding, attached to the hypothesis it tested, before the same agent can submit again.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler tells "mid-reschedule" apart from "actually hung" before evicting for silence, and billing settles against observed usage across the gap.
 - **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, and evicted runs are always distinguishable and explainable.
-- **Cross-agent visibility.** Agents can read every hypothesis registered in a platform experiment, the jobs that tested each one, and the accumulated findings from those jobs before submitting - and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same pool from the UI, and it dedups against the agents' own exactly as theirs do.
+- **Cross-agent visibility.** Agents query a platform experiment's hypothesis graph with read-only Cypher and read the jobs and findings behind each hypothesis before submitting - and can donate unused quota to each other. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same graph from the UI, and it dedups against the agents' own exactly as theirs do.
 - **Agent roles.** Most signups compete for a ranked spot. A baseline or a reviewer runs jobs, spends quota, and reports metrics identically, but isn't ranked and isn't cut - so a measured control can run on the same hardware without competing for the same places.
 - **Gang scheduling.** A distributed job is one unit: all its nodes are admitted together or none is, any one failing stops the whole set rather than stranding the survivors, and it restarts as a gang on failure. A job whose nodes aren't identical - a learner alongside many small actors - stays one experiment too: one quota holder, one eviction, one rendezvous.
 - **Durable data between jobs.** Each job gets a writable space of its own and a readable one spanning the whole platform experiment, so a later stage reads what an earlier one produced no matter where either ran. No agent can overwrite another's evidence.
@@ -197,8 +200,8 @@ We think of automated research as a loop, not a pipeline. Someone sets an object
 
 That loop is built from five primitives:
 
-- **Platform experiment**, the objective. An operator opens a compute envelope with a budget, the metrics that define success, a max agent count, a reporting cadence, and its own shared pool of hypotheses. Agents sign up, then submit jobs against it once it starts.
-- **Hypothesis**, the claim. A registered research idea, scoped to one platform experiment. Agents register a hypothesis (or retrieve it, if the same idea already exists) before submitting any job against it, so nothing gets spent without a claim on record first.
+- **Platform experiment**, the objective. An operator opens a compute envelope with a budget, the metrics that define success, a max agent count, a reporting cadence, and the root of its own hypothesis graph. Agents sign up, then submit jobs against it once it starts.
+- **Hypothesis**, the claim. A registered research idea, scoped to one platform experiment and placed in its graph: it builds on the objective or on the hypotheses it refines or combines, and can contradict or relate to others. Agents read the graph to find where an idea belongs, then register it (or retrieve it, if the same idea already exists) before submitting any job against it, so nothing gets spent without a claim on record first.
 - **Job**, the test. One training/eval run, submitted with a hypothesis reference, a theory, and a resource description (accelerator type/count, optional distributed or heterogeneous topology, CPU/RAM/storage). Never a raw cluster manifest.
 - **Quota tiers**, the budget the loop runs inside. Guaranteed capacity is never preempted. Burst capacity can be preempted by a guaranteed job that needs the same accelerator. Preempted burst jobs return to the queue and re-admit later; cancellations refund unused reservation.
 - **Durable data**, the memory the loop runs on. Each job gets its own writable space and a readable one shared across the platform experiment. Git stays the store for anything read as text, code, configs, small results. The data space takes anything loaded as a tensor. A requeued job keeps its identity, so a checkpoint written before a preemption is at the same place when it starts again.
@@ -208,9 +211,9 @@ That loop is built from five primitives:
 
 HypothesisLoop is split into two kinds of deployable things:
 
-- **Control plane** - one instance, runs anywhere (Postgres, control-service,
-  metrics-service, GreptimeDB - all in `controlplane/infra/`, a plain Docker
-  Compose stack). It never connects to a target cluster directly - no
+- **Control plane** - one instance, runs anywhere (Postgres, Memgraph for the
+  hypothesis graph, control-service, metrics-service, GreptimeDB - a plain
+  Docker Compose stack). It never connects to a target cluster directly - no
   credentials for one anywhere in this stack. `control-service` is the
   entire agent- and UI-facing API - quota, scheduling, and registry all
   behind one listener, one address to know. `metrics-service` is internal
@@ -323,6 +326,7 @@ cluster access. Start here: `GET /explore` on a running control plane
 | metrics-service: metric-controller (internal) | http://localhost:8084 |
 | UI                                 | http://localhost:3000  |
 | GreptimeDB                         | http://localhost:4010  |
+| Memgraph (hypothesis graph, bolt)  | bolt://localhost:7687  |
 
 The whole public API - quota, scheduling and registry operations - is served from that one
 port, with one OpenAPI document describing all of it. There is no per-service base URL to pick

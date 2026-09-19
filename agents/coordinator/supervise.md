@@ -32,10 +32,16 @@ Every 5-10 min at first, widen once behavior looks steady.
 boundary crossed (or a hypothesis newly `confirmed` with a clear metric lead) is also a checkpoint
 to ask whether the *next* wave of agents should still be spawned with the same flavor mix. Broad
 (`generalist` + one of each targeted flavor) while no region is promising yet; narrowed toward
-whichever axis the pool's own findings say is winning once one is. This never touches an agent
-already running — it only changes what flavor the next `podman run` uses — so check the pool
-before every new wave, not just at kickoff, and log the mix and its reasoning in `$FINDINGS_FILE`
-each time it changes, the same way the initial mix is logged.
+the axis whose branch of the hypothesis graph is confirmed once one is, away from refuted
+branches. This never touches an agent already running; it only changes what flavor the next
+`podman run` uses. So read the graph before every new wave, not just at kickoff, e.g. statuses per
+direction:
+
+    hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective {id:'$PLATFORM_EXPERIMENT_ID'})
+      OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d) RETURN d.id, d.text, h.status, count(h)"
+
+and log the mix and its reasoning in `$FINDINGS_FILE` each time it changes, the same way the
+initial mix is logged.
 
 ## When something actually blocks research
 

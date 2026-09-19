@@ -14,7 +14,7 @@
 
 # Builder stage for the Go `hl` CLI (cli/) -- the platform's own client. The agent uses it (not
 # raw curl) for everything a human would do through it too: hl register/signup, hl hypothesis
-# submit --file hypothesis.yaml, hl job submit job.yaml, hl watch. Built from the repo root
+# query/submit/link, hl job submit job.yaml, hl watch. Built from the repo root
 # (build context — see Makefile `experimentator-base-image`), same module as the controlplane.
 FROM golang:1.25-bookworm AS hl-builder
 WORKDIR /src
@@ -58,7 +58,7 @@ COPY agents/coordinator/experiments $WORKLOAD_SAMPLES
 
 # The `hl` CLI, built in the hl-builder stage above. This is how the agent talks to the platform
 # for everything a human would use it for too -- hl register/signup, hl platform-experiments
-# create/start, hl hypothesis submit --file hypothesis.yaml, hl job submit job.yaml, hl watch
+# create/start, hl hypothesis query/submit/link, hl job submit job.yaml, hl watch
 # (which replaces the old standalone hl-watch script: `hl watch --experiment ID --until '...'`
 # holds a websocket open and exits when the platform says the thing happened). A job image that
 # wants it too can COPY it in the same way it copies a seed workload.

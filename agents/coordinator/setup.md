@@ -126,6 +126,10 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   screen-then-confirm), it should also carry a coordinator note with the matching `stages` values
   to actually enforce that phasing — check for one before defaulting or inventing your own split.
 - Record the returned `id` as `PLATFORM_EXPERIMENT_ID`.
+- If the experiment's `hypothesis.yaml` is a seed tree (`author:` set, entries building on `root`
+  or on each other's `key`), submit it before spawning: `hl hypothesis submit --platform-experiment
+  $PLATFORM_EXPERIMENT_ID --file agents/coordinator/experiments/$EXPERIMENT/hypothesis.yaml`. A
+  human-authored seed needs `hypothesis_submit_policy: mixed`.
 - **Description sync is not optional, ever.** Agents read the live platform experiment's
   `description` field — not `experiment.md`, not `FINAL_RESULT.md`. Any edit to either of those
   files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is
@@ -173,19 +177,19 @@ What differs between agents is two independent things, both decided here and set
   and write the reason into the run's notes, since it's what the results mean.
 - **The mix is a per-stage decision, not a one-time one.** Pick it deliberately for where the
   research actually is, not once at launch and then forgotten:
-  - **Early / no promising region yet** (before the first stage cut, or whenever the pool has no
-    finding worth converging on): bias toward breadth — `generalist` agents plus one of each
-    targeted flavor, so the fleet explores hyperparameters, architecture, and data at once instead
-    of guessing which axis matters before any evidence exists. E.g. for 4 agents: 1 generalist + 1
-    hyperparameter-search + 1 architecture-search + 1 data-search.
-  - **Once a promising region is found** (a hypothesis confirmed, or a clear leader in the pool
-    the coordinator can name with a hypothesis_id) — narrow: spawn the *next* wave's agents
-    weighted toward the axis that region's own finding says moved the metric, and drop or reduce
-    `generalist` slots. If the leading result was a data change, the next wave is mostly
-    `data-search` (plus a `hyperparameter-search` or two to harden it), not another blind spread.
+  - **Early / no promising region yet** (before the first stage cut, or whenever no branch of the
+    hypothesis graph has a finding worth converging on): bias toward breadth — `generalist`
+    agents plus one of each targeted flavor, so the fleet explores hyperparameters, architecture,
+    and data at once instead of guessing which axis matters before any evidence exists. E.g. for
+    4 agents: 1 generalist + 1 hyperparameter-search + 1 architecture-search + 1 data-search.
+  - **Once a promising region is found** (a confirmed branch, or a clear leader the coordinator
+    can name with a hypothesis_id) — narrow: spawn the *next* wave's agents weighted toward the
+    axis that region's own finding says moved the metric, and drop or reduce `generalist` slots.
+    If the leading result was a data change, the next wave is mostly `data-search` (plus a
+    `hyperparameter-search` or two to harden it), not another blind spread.
   - Re-decide at every stage boundary (`GET .../stages` — see supervise.md), not just once:
-    a stage cut is a checkpoint to look at what's actually in the pool and adjust the *next*
-    wave's flavor mix accordingly, the same way it decides who gets cut.
+    a stage cut is a checkpoint to read which branches of the graph are confirmed or refuted and
+    adjust the *next* wave's flavor mix accordingly, the same way it decides who gets cut.
   - You cannot change a running agent's flavor (it's read once at launch) — narrowing means new
     agents spawned with a different mix, or letting a cut thin out the earlier, broader wave
     rather than retroactively editing it. Existing agents keep competing under their original
