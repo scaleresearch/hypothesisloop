@@ -87,8 +87,8 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
       <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
         <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={formatTime} tick={CHART_TICK} />
-        {hasBounded && <YAxis yAxisId="left" domain={[0, 1]} tick={CHART_TICK} width={40} />}
-        {hasUnbounded && <YAxis yAxisId="right" orientation="right" tick={CHART_TICK} width={40} />}
+        {hasBounded && <YAxis yAxisId="left" domain={['auto', 'auto']} tick={CHART_TICK} width={40} />}
+        {hasUnbounded && <YAxis yAxisId="right" orientation="right" domain={['auto', 'auto']} tick={CHART_TICK} width={40} />}
         <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={formatTime} contentStyle={CHART_TOOLTIP_STYLE} />
         <Legend wrapperStyle={{ fontSize: 10 }} />
         {metricNames.map((name, i) => (
@@ -456,7 +456,7 @@ function CompetingAgentsChart({
       <LineChart data={rows} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
         <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={CHART_TICK} />
-        <YAxis tick={CHART_TICK} />
+        <YAxis domain={['auto', 'auto']} tick={CHART_TICK} />
         <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={CHART_TOOLTIP_STYLE} />
         {(boundaries ?? []).map(b => (
           <ReferenceLine

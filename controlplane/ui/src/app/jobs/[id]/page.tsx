@@ -268,7 +268,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                         stroke={gridColor}
                         label={{ value: 'Training progress', position: 'insideBottom', offset: -2, fontSize: 11, fill: axisColor }}
                       />
-                      <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} />
+                      <YAxis domain={['auto', 'auto']} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} />
                       <Tooltip
                         formatter={(v: number) => v.toFixed(4)}
                         labelFormatter={(l) => `${l}% complete`}
