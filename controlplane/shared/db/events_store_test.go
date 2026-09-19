@@ -422,6 +422,31 @@ func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
 	}
 }
 
+// A grant tells its agent what it was granted, both parts, so that the start of a run costs it no
+// quota read. The trigger and the replay each spell that detail, and a connection drops a repeat
+// only when the two spellings are one.
+func TestAQuotaGrantIsAnnouncedWithItsPartsAndReplayedAsItsLiveTwin(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, _ := seedRun(t, pool, "quota-twin", true)
+	before := cursorNow(t, pool)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `INSERT INTO agent_quotas (id, agent_id, platform_experiment_id, guaranteed_accelerator_hours, burst_accelerator_hours, created_at)
+VALUES ($1, $1, $2, 2, 4.5, now())`, agentID, peID)
+	t.Cleanup(func() { exec(t, pool, `DELETE FROM agent_quotas WHERE id = $1`, agentID) })
+
+	live := awaitEvent(t, events, EventQuotaChanged, agentID)
+	if live.Value != "6.5" || live.Detail != "guaranteed 2 burst 4.5" {
+		t.Fatalf("live event: got = %q %q, want = 6.5 and its two parts", live.Value, live.Detail)
+	}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
+		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventQuotaChanged: true}}, before)
+	if err != nil || len(replayed) != 1 || replayed[0].Identity() != live.Identity() {
+		t.Fatalf("replay: got = (%+v, %v), want = the live event %+v", replayed, err, live)
+	}
+}
+
 // One cut row says two different things to two different audiences: the ladder moved, which is
 // news for everyone, and this agent is done, which only that agent can act on. Emitting only the
 // boundary left every agent GETting to find out whether the cut was its own — the poll this event

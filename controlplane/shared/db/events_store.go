@@ -106,7 +106,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
 		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
-		Description: "A grant, a donation or a stage move landed. What it is made of comes from GET /quota."},
+		Description: "A grant, a donation or a stage move landed. detail is its guaranteed and burst parts; what is used of it comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
@@ -557,7 +557,7 @@ func dedupe(events []Event) []Event {
 }
 
 func replayQuotas(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
-	const q = `SELECT agent_id, guaranteed_accelerator_hours + burst_accelerator_hours, updated_xid
+	const q = `SELECT agent_id, guaranteed_accelerator_hours, burst_accelerator_hours, updated_xid
 FROM agent_quotas WHERE platform_experiment_id = $1 AND updated_xid >= $2`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
@@ -568,13 +568,14 @@ FROM agent_quotas WHERE platform_experiment_id = $1 AND updated_xid >= $2`
 	var events []Event
 	for rows.Next() {
 		var agentID string
-		var hours float64
+		var guaranteed, burst float64
 		var position int64
-		if err := rows.Scan(&agentID, &hours, &position); err != nil {
+		if err := rows.Scan(&agentID, &guaranteed, &burst, &position); err != nil {
 			return nil, fmt.Errorf("events_store.replayQuotas: scan: %w", err)
 		}
-		events = append(events, Event{Kind: EventQuotaChanged, Subject: agentID,
-			Value: formatHours(hours), PlatformExperimentID: peID, AgentID: agentID, Position: position})
+		events = append(events, Event{Kind: EventQuotaChanged, Subject: agentID, Value: formatHours(guaranteed + burst),
+			Detail:               "guaranteed " + formatHours(guaranteed) + " burst " + formatHours(burst),
+			PlatformExperimentID: peID, AgentID: agentID, Position: position})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("events_store.replayQuotas: %w", err)

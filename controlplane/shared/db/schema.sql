@@ -671,10 +671,12 @@ CREATE TRIGGER agent_quotas_touch BEFORE UPDATE ON agent_quotas
 
 CREATE OR REPLACE FUNCTION hypothesisloop_agent_quotas_notify() RETURNS trigger AS $$
 BEGIN
-    -- The value is the agent's total allocated accelerator hours: enough for a waiting agent to
-    -- see a grant, a donation or a stage move land. What it is made of comes from GET /quota.
+    -- The value is the agent's total allocated accelerator hours and the detail its two parts:
+    -- enough for a waiting agent to see a grant, a donation or a stage move land without a read.
+    -- What is used of it comes from GET /quota. replayQuotas spells the same detail.
     PERFORM hypothesisloop_notify_event('quota.changed', NEW.agent_id,
-        (NEW.guaranteed_accelerator_hours + NEW.burst_accelerator_hours)::text, '',
+        (NEW.guaranteed_accelerator_hours + NEW.burst_accelerator_hours)::text,
+        'guaranteed ' || NEW.guaranteed_accelerator_hours::text || ' burst ' || NEW.burst_accelerator_hours::text,
         NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
