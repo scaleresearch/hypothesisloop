@@ -143,59 +143,52 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		CodeRef       string  `json:"code_ref,omitempty"`
 		CapacityTier  string  `json:"capacity_tier,omitempty"`
 		EstimatedCost float64 `json:"estimated_cost_acch,omitempty"`
+		Reason        string  `json:"not_admitted_reason,omitempty"`
 	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
-		if missing := missingSummaries(c, metadata, err); missing != "" {
-			fmt.Fprintln(stderr, "hl: job submit: refused until each of your COMPLETED jobs has a summary; file these, then submit again: "+missing)
-			return 1
-		}
 		return fail(stderr, err)
 	}
+	held := out.Reason == summaryGate
+	out.Reason = ""
 	line, _ := json.Marshal(out)
 	fmt.Fprintf(stdout, "%s\n", line)
-	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
+	if !held {
+		fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
+		return 0
+	}
+	q := url.Values{"needs_summary": {"true"}, "agent": {*agent}}
+	q.Set("platform_experiment_id", fmt.Sprint(metadata["platform_experiment_id"]))
+	var owed []struct {
+		ID string `json:"id"`
+	}
+	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &owed); err != nil {
+		fail(stderr, err)
+	}
+	commands := make([]string, len(owed))
+	for i, job := range owed {
+		commands[i] = "hl job summary " + job.ID + " --text T"
+	}
+	fmt.Fprintln(stderr, "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: "+strings.Join(commands, "; "))
 	return 0
 }
 
-// missingSummaries is the summary command of every job behind a submit refused as
-// summary_required, and empty for any other err.
-func missingSummaries(c *apiclient.Client, metadata map[string]any, err error) string {
-	var refused *apiclient.HTTPError
-	var reply struct {
-		Reason string `json:"reason"`
-	}
-	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil || reply.Reason != "summary_required" {
-		return ""
-	}
-	q := url.Values{"needs_summary": {"true"}}
-	q.Set("agent", fmt.Sprint(metadata["agent_id"]))
-	q.Set("platform_experiment_id", fmt.Sprint(metadata["platform_experiment_id"]))
-	var jobs []struct {
-		ID string `json:"id"`
-	}
-	if c.Do("GET", "/experiments?"+q.Encode(), nil, &jobs) != nil {
-		return ""
-	}
-	commands := make([]string, len(jobs))
-	for i, job := range jobs {
-		commands[i] = "hl job summary " + job.ID + " --text T"
-	}
-	return strings.Join(commands, "; ")
-}
+// summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.
+const summaryGate = "summary_gate"
 
 const resultArrives = "the result arrives as an update when you end your turn"
 
-// unfinished reports whether a job can still change status.
-func unfinished(raw json.RawMessage) bool {
+// progress reports whether a job can still change status, and whether an owed summary holds it.
+func progress(raw json.RawMessage) (unfinished, held bool) {
 	var job struct {
 		Status string `json:"status"`
+		Reason string `json:"not_admitted_reason"`
 	}
 	_ = json.Unmarshal(raw, &job)
 	switch job.Status {
 	case "COMPLETED", "FAILED", "EVICTED", "REJECTED":
-		return false
+		return false, false
 	}
-	return true
+	return true, job.Reason == summaryGate
 }
 
 // setJobEnv applies K=V pairs onto body's job.env.
@@ -236,7 +229,7 @@ One job per line, in the scheduler's order. Without --agent, every agent's jobs.
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, ADMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED")
-	needsSummary := fs.Bool("needs-summary", false, "only finished jobs still missing a summary, the set that blocks your next submit")
+	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds your queued jobs back")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -274,7 +267,9 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
 One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED or
-REJECTED), not_admitted_reason while queued, eviction_reason, phase_detail, and the spec.`, stderr)
+REJECTED), eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
+what the job waits for: awaiting_admission for the scheduler's first look at it, summary_gate
+for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
 	if err != nil {
 		return parseExit(err)
@@ -282,7 +277,7 @@ REJECTED), not_admitted_reason while queued, eviction_reason, phase_detail, and 
 	if len(ids) == 0 {
 		return parseExit(misuse(fs, "want at least one ID"))
 	}
-	code, pending := 0, false
+	code, pending, held := 0, false, false
 	for _, id := range ids {
 		var out json.RawMessage
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &out); err != nil {
@@ -292,9 +287,12 @@ REJECTED), not_admitted_reason while queued, eviction_reason, phase_detail, and 
 		if err := printLine(stdout, out, jobDrop...); err != nil {
 			return fail(stderr, err)
 		}
-		pending = pending || unfinished(out)
+		unfinished, gated := progress(out)
+		pending, held = pending || unfinished, held || gated
 	}
-	if pending {
+	if held {
+		fmt.Fprintln(stderr, "hl: job status: summary_gate: it starts once each COMPLETED job of its agent has a summary; hl job list --needs-summary --agent A lists them")
+	} else if pending {
 		fmt.Fprintln(stderr, "hl: job status: unfinished; "+resultArrives)
 	}
 	return code
@@ -369,8 +367,8 @@ reported at, and the min and max over the run. --points prints every point inste
 func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job summary", `usage: hl job summary ID --text T
 
-Files the write-up of a finished job: what changed, what the metric did, what it means. Every
-COMPLETED job needs one before your next submit.`, stderr)
+Files the write-up of a finished job: what changed, what the metric did, what it means. While a
+COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
 	fs.StringVar(&text, "summary", "", "")

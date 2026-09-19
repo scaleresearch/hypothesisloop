@@ -215,7 +215,7 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	}
 }
 
-func TestJobSubmitRefusedForSummariesNamesEachCommand(t *testing.T) {
+func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	var listQuery string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
@@ -223,19 +223,20 @@ func TestJobSubmitRefusedForSummariesNamesEachCommand(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":"job-1"},{"id":"job-2"}]`))
 			return
 		}
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"reason":"summary_required","message":"agent has completed jobs without summaries"}`))
+		_, _ = w.Write([]byte(`{"id":"job-3","status":"QUEUED","not_admitted_reason":"summary_gate"}`))
 	})
 	setAPIURL(t, url)
-	dir := t.TempDir()
-	jobFile := dir + "/job.yaml"
+	jobFile := t.TempDir() + "/job.yaml"
 	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	if code != 1 || listQuery != "agent=jane&needs_summary=true&platform_experiment_id=pe-1" {
+	if code != 0 || listQuery != "agent=jane&needs_summary=true&platform_experiment_id=pe-1" {
 		t.Fatalf("exit %d, list query %q, stderr %s", code, listQuery, stderr.String())
+	}
+	if want := `{"id":"job-3","status":"QUEUED"}` + "\n"; stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 	got := stderr.String()
 	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "hl job summary job-1 --text T; hl job summary job-2 --text T\n") {
@@ -622,6 +623,19 @@ func TestUnfinishedJobSaysTheResultArrivesAsAnUpdate(t *testing.T) {
 		if strings.Contains(stdout.String(), note) {
 			t.Fatalf("%s: note on stdout: %q", tc.status, stdout.String())
 		}
+	}
+}
+
+func TestJobHeldForASummarySaysWhatReleasesIt(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"id": "job-1", "status": "QUEUED", "not_admitted_reason": "summary_gate"}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if got := stderr.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, "hl job list --needs-summary") {
+		t.Fatalf("stderr = %q, want one line naming hl job list --needs-summary", got)
 	}
 }
 
