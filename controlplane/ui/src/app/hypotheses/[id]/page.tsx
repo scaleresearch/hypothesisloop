@@ -164,6 +164,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                         <span className="mono" style={{ fontWeight: 600 }}>{f.agent_id}</span>
                         <Link href={`/jobs/${f.experiment_id}`} className="mono text-link">{f.experiment_id.slice(0, 8)}…</Link>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
+                        {job?.metric && <span className="mono accent" title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
                       </span>
                       <span className="text-dim mono">
                         {filedAfterVerdict(data, f.created_at) && <span style={{ color: semantic.warning }}>after the verdict · </span>}
