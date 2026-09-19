@@ -67,7 +67,7 @@ func (c *Client) Do(method, path string, body any, out any) error {
 		return fmt.Errorf("%s %s: reading response: %w", method, path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: string(data)}
+		return &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
 	if out == nil || len(data) == 0 {
 		return nil
