@@ -244,6 +244,22 @@ func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	}
 }
 
+func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)
+	})
+	setAPIURL(t, url)
+	jobFile := t.TempDir() + "/job.yaml"
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
+	if want := "hl: job submit: " + notStarted + "\n"; code != 1 || stdout.Len() != 0 || stderr.String() != want {
+		t.Fatalf("exit %d, stdout %q, stderr %q, want %q", code, stdout.String(), stderr.String(), want)
+	}
+}
+
 func TestJobSubmitHeldForSummariesStaysOneAcceptedLineWhenTheLookupFails(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
@@ -663,7 +679,7 @@ func TestJobHeldForASummarySaysWhatReleasesIt(t *testing.T) {
 func TestOpenPlatformExperimentSaysTheStartArrivesAsAnUpdate(t *testing.T) {
 	status := "open"
 	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "pe-1", "status": status} })
-	note := "the start arrives as an update when you end your turn"
+	note := notStarted
 	for _, tc := range []struct {
 		status string
 		want   bool

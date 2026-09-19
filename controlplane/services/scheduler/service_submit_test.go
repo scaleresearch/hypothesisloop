@@ -198,7 +198,7 @@ func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
 	s := &Service{store: openStore{}, hypotheses: humanHypothesis("pe-1")}
 
 	var admission *AdmissionError
-	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || !strings.Contains(admission.Message, "has not started") {
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
 		t.Fatalf("Submit to an open platform experiment: got = %v, want a message saying it has not started", err)
 	}
 }

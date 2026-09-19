@@ -39,10 +39,17 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Message: fmt.Sprintf("platform experiment %s not found", exp.PlatformExperimentID),
 		}
 	}
-	if pe.Status != domain.PlatformExpRunning {
+	switch pe.Status {
+	case domain.PlatformExpRunning:
+	case domain.PlatformExpOpen:
 		return &AdmissionError{
-			Reason:  "experiment_not_running",
-			Message: fmt.Sprintf("platform experiment %s is %s (open: it has not started yet, closed: it is over); jobs are accepted only while it is running", pe.ID, pe.Status),
+			Reason:  "experiment_not_started",
+			Message: fmt.Sprintf("platform experiment %s has not started; jobs are accepted only while it is running", pe.ID),
+		}
+	default:
+		return &AdmissionError{
+			Reason:  "experiment_closed",
+			Message: fmt.Sprintf("platform experiment %s is over; jobs are accepted only while it is running", pe.ID),
 		}
 	}
 	signedUp, err := s.store.IsSignedUp(ctx, exp.PlatformExperimentID, exp.AgentID)

@@ -126,6 +126,9 @@ An ID is a positional argument (hl job status ID); --id ID works too. --agent an
 --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, except where --agent
 filters a list. Run hl <command> --help for its flags.`
 
+// notStarted is what an agent can do about an open platform experiment: nothing but wait.
+const notStarted = "not started: every job submit is refused until it runs; prepare, then end your turn and the start arrives as an update"
+
 const (
 	agentEnv              = "AGENT_ID"
 	platformExperimentEnv = "PLATFORM_EXPERIMENT_ID"
@@ -600,7 +603,7 @@ stages and current_stage.`, stderr)
 	delete(out, "$schema")
 	printJSON(stdout, out)
 	if out["status"] == "open" {
-		fmt.Fprintln(stderr, "hl: platform-experiments get: not started; the start arrives as an update when you end your turn")
+		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notStarted)
 	}
 	return 0
 }

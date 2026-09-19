@@ -147,6 +147,11 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		Reason        string  `json:"not_admitted_reason,omitempty"`
 	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
+		var refused *apiclient.HTTPError
+		if errors.As(err, &refused) && strings.Contains(refused.Body, `"experiment_not_started"`) {
+			fmt.Fprintln(stderr, "hl: job submit: "+notStarted)
+			return 1
+		}
 		return fail(stderr, err)
 	}
 	held := out.Reason == summaryGate
