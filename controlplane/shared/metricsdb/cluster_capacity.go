@@ -57,7 +57,6 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 	labels := map[string]string{"cluster_name": snapshot.ClusterName}
 	heartbeatLabels := map[string]string{"cluster_name": snapshot.ClusterName, "cluster_id": snapshot.ClusterID}
 	samples := []GaugeSample{
-		{MetricName: clusterHeartbeatMetric, Labels: heartbeatLabels, Value: 1, At: snapshot.At},
 		{MetricName: clusterCPUAvailableMetric, Labels: labels, Value: snapshot.CPUAvailable, At: snapshot.At},
 		{MetricName: clusterCPUTotalMetric, Labels: labels, Value: snapshot.CPUTotal, At: snapshot.At},
 		{MetricName: clusterRAMAvailableMetric, Labels: labels, Value: float64(snapshot.RAMAvailable), At: snapshot.At},
@@ -95,6 +94,12 @@ func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot C
 	}
 	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
 		return fmt.Errorf("metricsdb.RecordClusterCapacitySnapshot: %w", err)
+	}
+	// Readers take a snapshot at its heartbeat's timestamp, and one write is not atomic across
+	// metric tables, so the heartbeat is written only once every sample it vouches for is stored.
+	heartbeat := []GaugeSample{{MetricName: clusterHeartbeatMetric, Labels: heartbeatLabels, Value: 1, At: snapshot.At}}
+	if err := WriteGaugesAt(ctx, dbURL, heartbeat); err != nil {
+		return fmt.Errorf("metricsdb.RecordClusterCapacitySnapshot: heartbeat: %w", err)
 	}
 	return nil
 }
