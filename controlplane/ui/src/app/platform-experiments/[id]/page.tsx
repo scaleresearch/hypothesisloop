@@ -684,6 +684,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   )
   const experiments = experimentsPage?.items
 
+  // Asked for by status: a job that outlived the newest page of jobs is still running.
+  const { data: runningPage, error: runningError } = useSWR(
+    ['pe-running', id],
+    () => fetchExperimentsPage({ platform_experiment_id: id, status: 'RUNNING', sort: '-created_at' }),
+    { refreshInterval: 15_000 },
+  )
+
   // Whole-experiment job counts, grouped server-side. The job list above is one bounded page,
   // so tallying it would report the page's shape under a label that reads as the experiment's.
   const { data: stats, error: statsError } = useSWR(
@@ -747,7 +754,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const failed = [
     peError && 'the experiment',
     quotasError && 'quotas',
-    experimentsError && 'jobs',
+    (experimentsError || runningError) && 'jobs',
     stagesError && 'stage status',
     hypothesesError && 'hypotheses',
     metricSeriesError && 'metric history',
@@ -794,7 +801,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
-  const running = (experiments ?? []).filter(e => e.status === 'RUNNING')
+  const running = runningPage?.items ?? []
   const recent = (experiments ?? []).slice(0, 20)
 
   // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
@@ -1159,7 +1166,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Running jobs */}
       {running.length > 0 && (
         <Pod>
-          <PodHeader>Currently Running Jobs ({running.length})</PodHeader>
+          <PodHeader>Currently Running Jobs ({runningPage?.total ?? running.length})</PodHeader>
           <PodContent scrollX>
             <table className="wa-table">
               <thead>
