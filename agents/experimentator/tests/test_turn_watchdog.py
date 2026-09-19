@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import io
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -74,6 +75,7 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
     async def stop_mid_turn(self, hangs: bool) -> StoppableClient:
         stop_flag = [False]
         with mock.patch.object(run, "ClaudeSDKClient", StoppableClient), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
                 mock.patch.object(StoppableClient, "hangs", hangs), \
                 mock.patch.object(run, "_SHUTDOWN_TURN_S", 0.05), \
                 mock.patch.object(run.asyncio, "sleep", mock.AsyncMock(side_effect=lambda _: stop_flag.__setitem__(0, True))), \
@@ -91,6 +93,41 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
         client = await self.stop_mid_turn(hangs=True)
         self.assertEqual(client.queries, ["Begin.", run._SHUTDOWN_PROMPT])
         self.assertTrue(client.disconnected)
+
+
+class IdleClient(StoppableClient):
+    """Ends every turn at once."""
+
+    async def receive_response(self):
+        yield _result()
+
+
+class IdleStopTest(unittest.IsolatedAsyncioTestCase):
+    async def stop_while_idle(self, waiting: list[dict], finished_since: list[dict]) -> list[str]:
+        stop_flag = [False]
+
+        async def stopped_while_waiting(env, stopped, idle_s):
+            stop_flag[0] = True
+            return waiting
+
+        setup = _setup()
+        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"})
+        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(run.updates, "next_batch", stopped_while_waiting), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=finished_since)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
+        return HangingClient.instances[-1].queries
+
+    async def test_a_stop_between_turns_gives_one_last_turn(self):
+        self.assertEqual(await self.stop_while_idle([], []), ["Begin.", run._SHUTDOWN_PROMPT])
+
+    async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
+        done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc best 0.9 last 0.9"}
+        comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
+        self.assertEqual(await self.stop_while_idle([comment], [done]), [
+            "Begin.", run._SHUTDOWN_PROMPT + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
+                                            "experiment.status exp-1 COMPLETED acc best 0.9 last 0.9"])
 
 
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):

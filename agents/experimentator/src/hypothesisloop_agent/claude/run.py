@@ -161,13 +161,14 @@ _COMPACTION_PROMPT = (
 _TURN_SILENCE_TIMEOUT_S = 900
 
 
-# On a stop the turn in flight is interrupted and the agent gets one turn of this length to
-# write down what it already knows. `podman stop` must allow for it: -t 90.
+# On a stop a turn in flight is interrupted and the agent, working or idle, gets one turn of this
+# length to write down what it already knows. `podman stop` must allow for it: -t 90. Jobs still
+# in flight are left running and without a summary: nothing of theirs can be written yet.
 _SHUTDOWN_TURN_S = 60
 _SHUTDOWN_PROMPT = (
-    "You are being stopped and this is your last turn, about a minute long. Start nothing new: no "
-    "job, no hypothesis, no research. File the summaries you owe on finished jobs and set the "
-    "verdicts your evidence already supports, then end your turn."
+    "You are being stopped and this is your last turn, about a minute long. Start nothing new and "
+    "leave unfinished jobs running: they cannot be summarised yet. File the summaries you owe on "
+    "finished jobs and set the verdicts your evidence already supports, then end your turn."
 )
 
 
@@ -185,8 +186,12 @@ async def _interrupt_on_stop(client, stopped) -> None:
         log.warning("could not interrupt the turn (%s): it runs to its own end", e)
 
 
-async def _last_turn(client, agent: str) -> None:
-    await client.query(_SHUTDOWN_PROMPT)
+async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list[dict]) -> None:
+    """The shutdown turn, opened with events and whatever else finished since the last delivery."""
+    events = [*events, *await updates.drain(watch_env)]
+    for line in activity.event_lines(events, agent):
+        print(line, flush=True)
+    await client.query(_SHUTDOWN_PROMPT + ("\n\n" + updates.message(events, agent) if events else ""))
     try:
         async with asyncio.timeout(_SHUTDOWN_TURN_S):
             async for message in client.receive_response():
@@ -288,7 +293,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
             if stopped() and got_result and not rate_limited_resets_at:
                 log.info("stopping: turn interrupted, one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id)
+                await _last_turn(client, cfg.agent_id, watch_env, [])
                 return resume_id, None, None
 
             if rate_limited_resets_at:
@@ -351,6 +356,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             # The agent ended its turn: wait for the next batch of updates about its own jobs and
             # hypotheses and hand it over on the same connection.
             events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
+            if stopped():
+                log.info("stopping: one last turn to file what is owed")
+                await _last_turn(client, cfg.agent_id, watch_env, events)
+                return resume_id, None, None
             if events:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)

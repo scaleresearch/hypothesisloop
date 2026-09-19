@@ -218,6 +218,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                                                     max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
             await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
         self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED", run._SHUTDOWN_PROMPT])
