@@ -3,35 +3,14 @@
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchHypothesis, fetchPlatformExperiment, fetchExperimentMetrics } from '@/lib/api'
-import type { PlatformExperiment, MetricDefinition, HypothesisLink } from '@/types'
+import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
+import type { PlatformExperiment, HypothesisLink } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
-
-// The registry's job record has no final_metric_value field at all (confirmed against the live
-// API — it was always undefined, rendering "—" for every job regardless of outcome). The real
-// per-job metric history lives in the metrics store, keyed by metric_name — this fetches it for
-// one job and reduces to the platform experiment's primary metric's best-known value (max for
-// "maximize", min for "minimize"), matching how the platform-experiment scoreboard derives a
-// job's result rather than trusting a job-record field that was never populated.
-function JobFinalMetric({ jobId, primaryMetric }: { jobId: string; primaryMetric?: MetricDefinition }) {
-  const { data } = useSWR(
-    primaryMetric ? ['job-metrics', jobId] : null,
-    () => fetchExperimentMetrics(jobId),
-    { refreshInterval: 15_000 },
-  )
-  if (!primaryMetric) return <span className="text-muted">—</span>
-  const values = (data ?? [])
-    .filter(p => p.metric_name === primaryMetric.key)
-    .map(p => p.metric_value)
-  if (values.length === 0) return <span className="text-muted">—</span>
-  const best = primaryMetric.direction === 'maximize' ? Math.max(...values) : Math.min(...values)
-  return <span className="accent">{best.toFixed(4)}</span>
-}
 
 function LinkRow({ link, platformExperimentID, pe }: {
   link: HypothesisLink
@@ -87,7 +66,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const envKeys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
   const variedEnv = envKeys.filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
   const shownEnv = variedEnv.length > 0 ? variedEnv : envKeys
-  const primaryMetric = pe?.metrics?.[0]
+  const metricName = jobs.find(j => j.metric)?.metric?.name
 
   return (
     <div>
@@ -240,7 +219,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>{variedEnv.length > 0 ? 'Varied settings' : 'Settings'}</th>
                 <th>Accelerator</th>
                 <th style={{ textAlign: 'right' }}>Est. Cost</th>
-                <th style={{ textAlign: 'right' }}>Best {primaryMetric?.key ?? 'Metric'}</th>
+                <th style={{ textAlign: 'right' }}>Best {metricName ?? 'metric'}</th>
                 <th>Submitted</th>
               </tr>
             </thead>
@@ -275,7 +254,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>
-                      <JobFinalMetric jobId={job.id} primaryMetric={primaryMetric} />
+                      {j.metric ? <span className="accent">{j.metric.best.toFixed(4)}</span> : <span className="text-muted">—</span>}
                     </td>
                     <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                       {relTime(j.submitted_at ?? j.created_at)}
