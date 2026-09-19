@@ -93,7 +93,15 @@ def test_cli_full_flow_happy_path(api, run_id, deadline):
     hyp_text = f"Higher batch size improves throughput without hurting val_accuracy (cli-{run_id})"
     hyp_yaml_path = api.hl_bin.parent / f"cli-hypothesis-{run_id}.yaml"
     hyp_yaml_path.write_text(
-        yaml.safe_dump({"agent_id": agent, "platform_experiment_id": pe_id, "text": hyp_text}, sort_keys=False)
+        yaml.safe_dump(
+            {
+                "agent_id": agent,
+                "platform_experiment_id": pe_id,
+                "text": hyp_text,
+                "links": [{"type": "builds_on", "to": "root"}],
+            },
+            sort_keys=False,
+        )
     )
     try:
         submit_out = api.hl("hypothesis", "submit", "--file", str(hyp_yaml_path))
@@ -155,7 +163,9 @@ def test_cli_full_flow_happy_path(api, run_id, deadline):
     assert '"kind":"experiment.status"' in out, f"hl watch: no experiment.status event printed: {out}"
 
     # -- hl hypothesis submit: dedup --
-    dedup_out = api.hl("hypothesis", "submit", "--agent", agent, "--platform-experiment", pe_id, "--text", hyp_text)
+    dedup_out = api.hl(
+        "hypothesis", "submit", "--agent", agent, "--platform-experiment", pe_id, "--text", hyp_text, "--builds-on", "root"
+    )
     dedup = json.loads(dedup_out)
     assert dedup["already_existed"] is True
     assert dedup["id"] == hyp_id, f"hl hypothesis submit: dedup returned {dedup['id']}, want {hyp_id}"

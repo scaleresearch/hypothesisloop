@@ -1,19 +1,45 @@
 # Example request body for POST /hypotheses (register one or more claims under a platform
-# experiment). Submit with `hl hypothesis submit --file hypothesis.yaml` -- one POST per entry in
-# hypotheses:. --agent/--platform-experiment/--text on the command line override every entry.
+# experiment). Submit with `hl hypothesis submit --file hypothesis.yaml`: one POST per entry in
+# hypotheses:, in order. Flags on the command line (--agent, --platform-experiment, --text,
+# --builds-on, --contradicts, --related) override every entry; any link flag replaces its links.
 #
-# A hypothesis is a registered claim scoped to one platform experiment; jobs (domain.Experiment)
-# reference it by id via metadata.hypothesis_id (see experiment-submission.yaml). Re-submitting
-# the same text for the same agent+platform experiment returns the existing hypothesis
-# (already_existed: true) instead of creating a duplicate.
+# Hypotheses form a graph per platform experiment. Every hypothesis must be placed: at least one
+# builds_on link, to the experiment's objective (`to: root`) or to existing hypotheses it refines,
+# extends or combines (several builds_on links mean a combination). Optional links:
+#   contradicts  a competing claim; both cannot hold
+#   related      a cross-reference to another branch
+# Every target must be in the same platform experiment. Find where an idea belongs first with
+# `hl hypothesis query` (read-only Cypher) or `hl hypothesis list`, and inspect one with
+# `hl hypothesis get ID`. Add a link to your own hypothesis later with `hl hypothesis link`.
+#
+# Jobs reference a hypothesis by id via metadata.hypothesis_id (see experiment-submission.yaml).
+# Re-submitting equivalent text in the same platform experiment returns the existing hypothesis
+# (already_existed: true) and ignores the links you supplied.
 
 agent_id: agent-123
 platform_experiment_id: pe-123
 
+# Top-level fields, links included, default onto every entry that does not set its own.
+links:
+  - type: builds_on
+    to: root
+
 hypotheses:
-  - text: "the first idea this agent is testing, in one falsifiable sentence"
-  - text: "a second idea, in the same call"
-  # - text: "a third idea, overriding agent_id and authored by a human instead"
-  #   author: jane
+  # key: a local name, valid only inside this file, so a later entry can link to this one before
+  # its id exists. Entries are submitted in order, so a parent comes before its children.
+  - key: warmup
+    text: "a 500-step linear warmup raises val_accuracy at batch 512, because early updates are noisy"
+  - key: lr
+    text: "doubling the peak learning rate raises val_accuracy, because the current run underfits"
+  - text: "doubling the peak learning rate only helps with the 500-step warmup in place"
+    links:
+      - type: builds_on
+        to: warmup
+      - type: builds_on
+        to: lr
+      # - type: contradicts
+      #   to: 0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c   # an existing hypothesis id
+  # - text: "an idea authored by a human instead of an agent"
+  #   author: jane # mutually exclusive with agent_id
 
 # A bare top-level YAML list of mappings (no wrapping hypotheses:, no shared defaults) also works.

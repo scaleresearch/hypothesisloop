@@ -24,7 +24,8 @@
 //	hl register --id jane --name "Jane Doe" --kind human
 //	hl signup --platform-experiment pe-123 --agent jane
 //	hl signup --platform-experiment pe-123 --agent bot-1 --quota-tier guaranteed
-//	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..."
+//	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
+//	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --param pe=pe-123
 //	hl job submit --agent jane job.yaml
 //	hl job list --agent jane
 //	hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
@@ -127,7 +128,7 @@ func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	pe := fs.String("platform-experiment", "", "platform experiment id (required)")
 	agent := fs.String("agent", "", "agent id (required)")
 	quotaTier := fs.String("quota-tier", "", "override this signup's guaranteed-vs-burst-only split "+
-		"(\"guaranteed\" or \"burst_only\"); omit to use the agent's kind default")
+		"(\"guaranteed\" or \"burst_only\"); omit to use the platform experiment's default_quota_tier")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -310,126 +311,6 @@ func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, std
 	}
 	printJSON(stdout, out)
 	return 0
-}
-
-// --- hypothesis ------------------------------------------------------------------------------------
-
-func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: hl hypothesis <submit|list> ...")
-		return 2
-	}
-	sub, rest := args[0], args[1:]
-	switch sub {
-	case "submit":
-		fs := flag.NewFlagSet("hypothesis submit", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		agent := fs.String("agent", "", "agent id (required unless set in --file)")
-		pe := fs.String("platform-experiment", "", "platform experiment id (required unless set in --file)")
-		text := fs.String("text", "", "hypothesis text (required unless set in --file)")
-		file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body (see controlplane/settings/examples/hypothesis.yaml); flags above override its fields. May also hold a top-level list, or a `hypotheses:` list, to submit many in one call")
-		fs.Usage = func() {
-			fmt.Fprintln(stderr, `usage: hl hypothesis submit --agent AGENT --platform-experiment PE --text TEXT
-   or: hl hypothesis submit --file hypothesis.yaml [--agent AGENT] [--platform-experiment PE] [--text TEXT]
-
-FILE is a YAML file shaped like the POST /hypotheses body. Minimal shape:
-
-  agent_id: agent-123
-  platform_experiment_id: pe-123
-  text: "the hypothesis this agent is testing"
-
-To submit several hypotheses in one call, use a hypotheses: list -- fields set alongside the
-list (e.g. a shared agent_id/platform_experiment_id) default onto every item that doesn't set
-its own:
-
-  agent_id: agent-123
-  platform_experiment_id: pe-123
-  hypotheses:
-    - text: "idea one"
-    - text: "idea two"
-
-A bare top-level YAML list of mappings works the same way, without shared defaults.
-
-Any flag given on the command line overrides the corresponding field in every item from FILE.
-See controlplane/settings/examples/hypothesis.yaml for the full DSL reference.`)
-		}
-		if err := fs.Parse(rest); err != nil {
-			return 2
-		}
-		var items []map[string]any
-		if *file != "" {
-			raw, err := readYAMLItems(*file, "hypotheses")
-			if err != nil {
-				fmt.Fprintf(stderr, "hl: %s\n", err)
-				return 2
-			}
-			items = raw
-		} else {
-			items = []map[string]any{{}}
-		}
-		results := make([]any, 0, len(items))
-		for i, raw := range items {
-			body := map[string]string{}
-			for _, key := range []string{"agent_id", "platform_experiment_id", "text", "author"} {
-				if v, ok := raw[key].(string); ok && v != "" {
-					body[key] = v
-				}
-			}
-			if *agent != "" {
-				body["agent_id"] = *agent
-			}
-			if *pe != "" {
-				body["platform_experiment_id"] = *pe
-			}
-			if *text != "" {
-				body["text"] = *text
-			}
-			if body["agent_id"] == "" || body["platform_experiment_id"] == "" || body["text"] == "" {
-				prefix := "hl: hypothesis submit: "
-				if len(items) > 1 {
-					prefix = fmt.Sprintf("hl: hypothesis submit: item %d: ", i)
-				}
-				fmt.Fprintln(stderr, prefix+"agent_id, platform_experiment_id and text are required (via --agent/--platform-experiment/--text or --file)")
-				return 2
-			}
-			var out any
-			if err := c.Do("POST", "/hypotheses", body, &out); err != nil {
-				return fail(stderr, err)
-			}
-			results = append(results, out)
-		}
-		if len(results) == 1 {
-			printJSON(stdout, results[0])
-		} else {
-			printJSON(stdout, results)
-		}
-		return 0
-	case "list":
-		fs := flag.NewFlagSet("hypothesis list", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		pe := fs.String("platform-experiment", "", "platform experiment id (required)")
-		agent := fs.String("agent", "", "narrow to one agent")
-		if err := fs.Parse(rest); err != nil {
-			return 2
-		}
-		if *pe == "" {
-			fmt.Fprintln(stderr, "hl: hypothesis list: --platform-experiment is required")
-			return 2
-		}
-		q := "?platform_experiment_id=" + *pe
-		if *agent != "" {
-			q += "&agent=" + *agent
-		}
-		var out any
-		if err := c.Do("GET", "/hypotheses"+q, nil, &out); err != nil {
-			return fail(stderr, err)
-		}
-		printJSON(stdout, out)
-		return 0
-	default:
-		fmt.Fprintf(stderr, "hl: hypothesis: unknown subcommand %q\n", sub)
-		return 2
-	}
 }
 
 // --- job -------------------------------------------------------------------------------------------

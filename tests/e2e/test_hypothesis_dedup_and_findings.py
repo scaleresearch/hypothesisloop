@@ -2,7 +2,7 @@
 hypotheses; agents can read every hypothesis, the jobs that tested it, and the findings). Ported
 1:1 from tests/scenarios/hypothesis-dedup-and-findings.sh:
   1. registering equivalent hypothesis text twice returns the SAME row (already_existed=true,
-     identical id), not a duplicate.
+     identical id), not a duplicate, and the second caller's links are not applied.
   2. a finding filed by one agent against a hypothesis is visible to a DIFFERENT agent that reads
      the same hypothesis afterward.
   3. the pool is shared with humans: a UI-posted idea under a typed name lands in the same listing
@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import link
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -47,11 +48,16 @@ def test_registering_equivalent_text_twice_returns_the_same_row(api, experiment,
     first = api.register_hypothesis(pe_id, agent_a, text)
     assert first["already_existed"] is False
 
-    second_resp = api.post_hypothesis(pe_id, text, agent_id=agent_b)
+    other = api.register_hypothesis(pe_id, agent_b, f"Cosine decay beats step decay {run_id}")
+    second_resp = api.post_hypothesis(pe_id, text, agent_id=agent_b, links=[link("builds_on", other["id"])])
     second_resp.raise_for_status()
     second = second_resp.json()
     assert second["id"] == first["id"], "re-registering identical text returned a different id"
     assert second["already_existed"] is True
+
+    # A dedup hit returns the existing node as it was: the links the second caller supplied are not applied.
+    out = [(lk["type"], lk["hypothesis_id"]) for lk in api.hypothesis(first["id"])["links"]["out"]]
+    assert out == [("builds_on", pe_id)], f"dedup hit changed the existing node's links: {out}"
 
 
 def test_finding_is_visible_to_a_different_agent(api, experiment, run_id, deadline):
