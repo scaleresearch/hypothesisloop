@@ -218,7 +218,9 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
+# The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here.
 images: check-tag registry-up
+	go mod vendor
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
