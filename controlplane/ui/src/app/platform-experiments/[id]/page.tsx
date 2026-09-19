@@ -18,7 +18,8 @@ import {
   fetchStages,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
-  fetchHypothesesPage,
+  fetchHypothesisVerdictCounts,
+  HYPOTHESIS_STATUSES,
 } from '@/lib/api'
 import type { ExperimentStats, StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
@@ -34,7 +35,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { semantic, agentPalette } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
+import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 
 const CHART_GRID = 'rgba(255,255,255,0.08)'
@@ -716,10 +717,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  // Asked for one row: only the total in X-Total-Count is used.
-  const { data: hypothesesPage, error: hypothesesError } = useSWR(
-    ['pe-hypothesis-count', id],
-    () => fetchHypothesesPage({ platform_experiment_id: id, limit: 1 }),
+  const { data: verdicts, error: hypothesesError } = useSWR(
+    ['pe-hypothesis-verdicts', id],
+    () => fetchHypothesisVerdictCounts(id),
     { refreshInterval: 15_000 },
   )
 
@@ -793,7 +793,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
   const scoreboard = buildScoreboard(jobsByAgent, quotas ?? [], metrics, metricBestsByAgent, nonRawAgentIdsByMetric)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
-  const hypothesisProgress = hypothesisProgressCounts(hypothesesPage?.total ?? 0, hypothesisStats?.groups ?? {})
+  const hypothesisCount = HYPOTHESIS_STATUSES.reduce((n, v) => n + (verdicts?.[v] ?? 0), 0)
+  const hypothesisSub = [
+    HYPOTHESIS_STATUSES.map(v => `${verdicts?.[v] ?? 0} ${v}`).join(' · '),
+    hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}),
+  ].filter(Boolean).join(' · ')
 
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const inFlightAccelerators = stats?.in_flight_accelerators ?? 0
@@ -866,7 +870,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               </span>
             )}
             <Link href={graphHref(pe.id)} className="text-link" style={{ fontSize: 12 }}>
-              {hypothesesPage?.total ?? 0} Hypotheses →
+              {hypothesisCount} Hypotheses →
             </Link>
             <SubmitPolicyChips pe={pe} />
           </div>
@@ -1045,9 +1049,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             />
             <StatTile
               label="Hypotheses"
-              value={(hypothesesPage?.total ?? 0).toString()}
+              value={hypothesisCount.toString()}
               color={semantic.accent}
-              sub={`${hypothesisProgress.finished} finished · ${hypothesisProgress.in_flight} in flight · ${hypothesisProgress.pending} pending`}
+              sub={hypothesisSub}
               href={graphHref(pe.id)}
             />
           </div>

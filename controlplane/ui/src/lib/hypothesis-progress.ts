@@ -8,27 +8,18 @@ const TERMINAL: string[] = [
   ExperimentStatus.REJECTED,
 ]
 
-export interface HypothesisProgressCounts {
-  finished: number
-  in_flight: number
-  pending: number
-}
-
-// A hypothesis has no status of its own for "is it done running": HypothesisStatus is an agent's
-// verdict on the claim. Run progress comes from the statuses of the jobs testing it, where running
-// beats queued beats terminal. jobsByHypothesis is the stats endpoint's group_by=hypothesis, which
-// has a group only for a hypothesis with jobs, so the rest of hypothesisCount is pending.
-export function hypothesisProgressCounts(
+// Job activity is separate from the verdict: a hypothesis whose jobs all ended is still open until
+// its owner rules on it. jobsByHypothesis is the stats endpoint's group_by=hypothesis, which has a
+// group only for a hypothesis with jobs.
+export function hypothesisActivity(
   hypothesisCount: number,
   jobsByHypothesis: Record<string, ExperimentStats>,
-): HypothesisProgressCounts {
+): string {
   const groups = Object.values(jobsByHypothesis)
-  const counts: HypothesisProgressCounts = { finished: 0, in_flight: 0, pending: hypothesisCount - groups.length }
-  for (const { by_status } of groups) {
-    if (by_status[ExperimentStatus.RUNNING]) counts.in_flight++
-    else if (by_status[ExperimentStatus.QUEUED]) counts.pending++
-    else if (Object.keys(by_status).every(s => TERMINAL.includes(s))) counts.finished++
-    else counts.pending++
-  }
-  return counts
+  const inFlight = groups.filter(g => Object.keys(g.by_status).some(s => !TERMINAL.includes(s))).length
+  const untested = hypothesisCount - groups.length
+  return [
+    inFlight > 0 && `${inFlight} with jobs in flight`,
+    untested > 0 && `${untested} without jobs`,
+  ].filter(Boolean).join(' · ')
 }

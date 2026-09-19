@@ -9,7 +9,8 @@ import {
   fetchPlatformExperimentsPage,
   fetchPlatformExperimentQuotas,
   fetchExperimentStats,
-  fetchHypothesesPage,
+  fetchHypothesisVerdictCounts,
+  HYPOTHESIS_STATUSES,
   createPlatformExperiment,
   updatePlatformExperiment,
 } from '@/lib/api'
@@ -18,7 +19,7 @@ import { PlatformExperimentStatus } from '@/types'
 import type { Stage } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import { COMMON_ML_METRICS } from '@/types'
-import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
+import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { formatDate, isZeroDate } from '@/lib/format'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -27,7 +28,7 @@ import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
-import { semantic } from '@/lib/colors'
+import { semantic, hypothesisStatusColors } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 
 function StatusBadge({ status }: { status: string }) {
@@ -74,10 +75,9 @@ function ExperimentCard({
     { refreshInterval: 10_000 },
   )
 
-  // Asked for one row: only the total in X-Total-Count is used.
-  const { data: hypotheses } = useSWR(
-    ['pe-hypothesis-count', pe.id],
-    () => fetchHypothesesPage({ platform_experiment_id: pe.id, limit: 1 }),
+  const { data: verdicts } = useSWR(
+    ['pe-hypothesis-verdicts', pe.id],
+    () => fetchHypothesisVerdictCounts(pe.id),
     { refreshInterval: 15_000 },
   )
   const { data: hypothesisStats } = useSWR(
@@ -85,7 +85,8 @@ function ExperimentCard({
     () => fetchExperimentStats({ platform_experiment_id: pe.id, group_by: 'hypothesis' }),
     { refreshInterval: 15_000 },
   )
-  const progress = hypothesisProgressCounts(hypotheses?.total ?? 0, hypothesisStats?.groups ?? {})
+  const hypothesisCount = HYPOTHESIS_STATUSES.reduce((n, v) => n + (verdicts?.[v] ?? 0), 0)
+  const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {})
 
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const daysLeft = !isZeroDate(pe.ends_at)
@@ -163,16 +164,13 @@ function ExperimentCard({
           <div>
             <div className="uppercase-label">Hypotheses</div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-              <span className="mono" style={{ fontSize: 13, color: semantic.success }}>
-                {progress.finished} <span className="text-muted" style={{ fontSize: 10 }}>finished</span>
-              </span>
-              <span className="mono" style={{ fontSize: 13, color: semantic.accent }}>
-                {progress.in_flight} <span className="text-muted" style={{ fontSize: 10 }}>in flight</span>
-              </span>
-              <span className="mono" style={{ fontSize: 13, color: 'var(--muted-fg)' }}>
-                {progress.pending} <span className="text-muted" style={{ fontSize: 10 }}>pending</span>
-              </span>
+              {HYPOTHESIS_STATUSES.map(v => (
+                <span key={v} className="mono" style={{ fontSize: 13, color: hypothesisStatusColors[v] }}>
+                  {verdicts?.[v] ?? 0} <span className="text-muted" style={{ fontSize: 10 }}>{v}</span>
+                </span>
+              ))}
             </div>
+            {activity && <div className="text-muted" style={{ fontSize: 10 }}>{activity}</div>}
           </div>
         </div>
 
