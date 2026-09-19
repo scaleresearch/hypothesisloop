@@ -590,7 +590,7 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	agent := fs.String("agent", "", "narrow job and quota events to this agent")
 	kinds := fs.String("kinds", "", "comma-separated event kinds to subscribe to instead of the default set (e.g. hypothesis.new,hypothesis.status,finding.new,comment.new,metric.point) — see GET /watch/kinds for the full vocabulary")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
-	until := fs.String("until", "", "stop when true; one form only: 'status in COMPLETED,FAILED,EVICTED'")
+	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
 	timeout := fs.Float64("timeout", 900.0, "give up after this many seconds")
 	since := fs.Int64("since", 0, "replay from this cursor before going live")
 	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")

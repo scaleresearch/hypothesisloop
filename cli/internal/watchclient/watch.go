@@ -183,7 +183,8 @@ func sleepUntil(deadline time.Time, d time.Duration) {
 	time.Sleep(d)
 }
 
-// parseUntil turns "status in A,B,C" into a predicate over one event, the only form hl-watch
+// parseUntil turns "status in A,B,C" into a predicate over one job or platform experiment status
+// event (their values never overlap: jobs are upper case, runs lower case), the only form hl-watch
 // understands — a wait that can never end is the failure this tool exists to remove, so an
 // expression that isn't this shape is a usage error rather than a condition that quietly never
 // fires.
@@ -206,7 +207,7 @@ func parseUntil(expr string) (func(map[string]any) bool, error) {
 	return func(event map[string]any) bool {
 		kind, _ := event["kind"].(string)
 		value, _ := event["value"].(string)
-		return kind == "experiment.status" && wanted[value]
+		return (kind == "experiment.status" || kind == "platform_experiment.status") && wanted[value]
 	}, nil
 }
 

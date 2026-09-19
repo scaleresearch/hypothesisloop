@@ -28,6 +28,10 @@ func TestParseUntil(t *testing.T) {
 	if fn(map[string]any{"kind": "quota.snapshot", "value": "COMPLETED"}) {
 		t.Fatal("wrong kind should not match")
 	}
+	running, _ := parseUntil("status in running")
+	if !running(map[string]any{"kind": "platform_experiment.status", "value": "running"}) {
+		t.Fatal("expected match on a platform experiment reaching running")
+	}
 }
 
 func TestParseUntilRejectsOtherForms(t *testing.T) {
