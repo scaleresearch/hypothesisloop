@@ -125,6 +125,7 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
 function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, onSelect }: HypothesisGraphCanvasProps) {
   const { setCenter, setViewport, getZoom } = useReactFlow()
   const width = useStore(s => s.width)
+  const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)
   const centered = useRef('')
 
@@ -190,8 +191,8 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
     }
   }), [graph, positions, dimmed])
 
-  // Without a focus the view opens on the objective at the top centre: a few hundred nodes
-  // framed at once are unreadable.
+  // Without a focus the view opens on the whole graph under the objective, or on its top when
+  // the whole would be too small to read.
   useEffect(() => {
     if (!ready || width === 0) return
     const target = positions.has(focus) ? focus : graph.root
@@ -201,9 +202,13 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
     if (target === focus) {
       setCenter(p.x + NODE_WIDTH / 2, p.y + NODE_HEIGHT / 2, { zoom: Math.max(getZoom(), 0.8), duration: 300 })
     } else {
-      setViewport({ x: width / 2 - (p.x + NODE_WIDTH / 2) * 0.8, y: 80 - p.y * 0.8, zoom: 0.8 })
+      const all = Array.from(positions.values())
+      const halfWidth = Math.max(...all.map(q => Math.abs(q.x - p.x))) + NODE_WIDTH / 2
+      const depth = Math.max(...all.map(q => q.y)) + NODE_HEIGHT
+      const zoom = Math.min(0.8, Math.max(0.4, Math.min((width / 2 - 20) / halfWidth, (height - 60) / depth)))
+      setViewport({ x: width / 2 - (p.x + NODE_WIDTH / 2) * zoom, y: 40 - p.y * zoom, zoom })
     }
-  }, [ready, focus, graph.root, positions, width, setCenter, setViewport, getZoom])
+  }, [ready, focus, graph.root, positions, width, height, setCenter, setViewport, getZoom])
 
   return (
     <Highlight.Provider value={highlight}>
