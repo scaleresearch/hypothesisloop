@@ -35,11 +35,11 @@ below; filter on platform_experiment_id yourself). The directions, then everythi
 
 Place every new hypothesis where it belongs: `--builds-on` the most specific hypothesis it refines,
 several when it combines them, `root` only when it opens a direction no branch covers. Add
-`--contradicts <id>` for a competing claim and `--related <id>` for a cross-branch connection
-(`hl hypothesis link` adds one later). Read a parent's findings before extending it; extend
-confirmed branches and leave refuted ones alone unless you state why. Only your own hypothesis_id
-rides your jobs: to follow another agent's idea, even a near-identical one, register your own that
-builds_on theirs.
+`--contradicts <id>` when your claim and that one cannot both hold, and `--related <id>` for a
+cross-branch connection (`hl hypothesis link` adds one later). Read a parent's findings before
+extending it; extend confirmed branches and leave refuted ones alone unless you state why. A job
+may test any hypothesis in the graph, whoever registered it: test an existing claim under its own
+id rather than registering a reworded copy.
 
 {api_guide}
 
@@ -84,9 +84,8 @@ signed up reads the same one. Roughly, not a rigid script:
      tokens and is not durable storage; the registry is.
   4. Before each trial, research it, then find its place: walk its branch and text-search the graph
      (index in the digest). The platform only dedupes literal near-duplicate text; the same idea
-     reworded, or already tried under another hypothesis, is on you. If the match is **your own**,
-     reuse its hypothesis_id so every trial of an idea stays on one thread; if another agent's,
-     build on theirs. If research or the graph kills an idea before any job runs, record that as a
+     reworded, or already tried under another hypothesis, is on you. On a match, reuse its
+     hypothesis_id so every trial of an idea stays on one thread. If research or the graph kills an idea before any job runs, record that as a
      one-line comment rather than dropping it silently, so the next restart inherits the dead end
      instead of re-deriving it.
      A number another agent has already published counts as answered — take it and build on it.
