@@ -232,3 +232,34 @@ func TestPingsKeepAQuietStreamOpen(t *testing.T) {
 		t.Fatalf("a stream carrying only pings was dropped: %s", stderr.String())
 	}
 }
+
+func TestTheWatchWindowEndingIsNotAReconnect(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+		time.Sleep(time.Second)
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{URL: "ws://" + ln.Addr().String(), Experiment: "exp-1", Timeout: 300 * time.Millisecond, Stdout: &stdout, Stderr: &stderr})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "stream ended") {
+		t.Fatalf("the window ending was reported as a dropped stream: %s", stderr.String())
+	}
+}

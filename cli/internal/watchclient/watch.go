@@ -147,6 +147,9 @@ func streamOne(ws *webSocket, opts Options, deadline time.Time, satisfied func(m
 	for time.Now().Before(deadline) {
 		line, err := ws.nextText(deadline)
 		if err != nil {
+			if !time.Now().Before(deadline) {
+				return false, 0
+			}
 			fmt.Fprintf(opts.Stderr, "hl watch: stream ended (%s) — reconnecting from cursor %d\n", err, *cursor)
 			sleepUntil(deadline, reconnectDelay)
 			return false, 0
