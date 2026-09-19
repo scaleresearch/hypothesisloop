@@ -279,10 +279,10 @@ helm-prepare:
 	cp controlplane/settings/hypothesisloop.yaml $(HELM_CHART)/files/hypothesisloop.yaml
 
 helm-lint: helm-prepare
-	helm lint $(HELM_CHART)
+	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
 
 helm-template: helm-prepare
-	helm template hypothesisloop $(HELM_CHART)
+	helm template hypothesisloop $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
 
 # `make images` already builds and pushes every image the chart references (control-service,
 # metrics-service, cluster-agent, node-agent) to $(REGISTRY):$(TAG) -- this is only a named
