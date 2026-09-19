@@ -175,7 +175,7 @@ func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID stri
 // QueryGraph runs one read-only Cypher query against one platform experiment's hypothesis graph.
 func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher string, params map[string]any) (*graphdb.QueryResult, error) {
 	if _, ok := params["tested"]; ok {
-		return nil, fmt.Errorf("%w: $tested is bound to the hypotheses a job tests, use another parameter name", graphdb.ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: $tested is already bound to the hypotheses a job tests: use $tested in the query without passing it, and name your own parameter differently", graphdb.ErrInvalidQuery)
 	}
 	tested, err := s.store.TestedHypotheses(ctx, platformExperimentID)
 	if err != nil {

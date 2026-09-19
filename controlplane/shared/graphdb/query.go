@@ -59,7 +59,7 @@ func (s *Store) Query(ctx context.Context, platformExperimentID, cypher string, 
 		return nil, fmt.Errorf("%w: a query reads one platform experiment, name it", ErrInvalidQuery)
 	}
 	if _, ok := params["pe"]; ok {
-		return nil, fmt.Errorf("%w: $pe is bound to the platform experiment the query reads, use another parameter name", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: $pe is already bound to the platform experiment: use $pe in the query without passing it, and name your own parameter differently", ErrInvalidQuery)
 	}
 	if err := checkReadOnly(cypher); err != nil {
 		return nil, err
