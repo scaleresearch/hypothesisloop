@@ -310,18 +310,13 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// delivered is the per-kind floor: for each kind this connection carries, the cursor up to
-	// which it has been served. It replaces a single stream-wide cursor because a filter change
-	// makes one number a lie — a kind added later has been served up to a different point than a
-	// kind carried since the handshake, and one floor for both either repeats or skips.
-	//
 	// It is stack-local to this connection and vanishes with it, like the subscription itself.
-	delivered := map[string]int64{}
+	delivered := &served{floor: map[string]int64{}, replayed: map[db.Event]bool{}}
 	for kind := range filter.Kinds {
-		delivered[kind] = since
+		delivered.floor[kind] = since
 	}
 	for _, e := range replayed {
-		if err := deliver(conn, filter.Annotate(e), delivered); err != nil {
+		if err := delivered.send(conn, filter, e, true); err != nil {
 			return
 		}
 	}
@@ -332,8 +327,8 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		select {
 		case e := <-sub.events:
 			// Replay and the live stream overlap by construction — the subscription was open
-			// while the replay ran. The floor for that kind is what removes the overlap.
-			if err := deliver(conn, filter.Annotate(e), delivered); err != nil {
+			// while the replay ran. send drops what the replay already carried.
+			if err := delivered.send(conn, filter, e, false); err != nil {
 				return
 			}
 		case payload := <-controls:
@@ -362,19 +357,29 @@ func writeEvent(conn *wsConn, e db.Event) error {
 	return conn.WriteText(payload, watchWriteTimeout)
 }
 
-// deliver writes one event unless this connection has already been served that kind up to that
-// cursor, and records how far it has now been served. A kind with no floor cannot reach here — the
-// filter only admits kinds the connection carries, and every one of those is given a floor when it
-// is added.
-func deliver(conn *wsConn, e db.Event, delivered map[string]int64) error {
-	if floor, carried := delivered[e.Kind]; carried && e.Cursor <= floor {
+// served is what one connection has been sent. floor is, per kind, the newest cursor delivered: a
+// kind is carried from its own floor because after a filter change one stream-wide cursor would
+// repeat or skip. replayed holds every event a replay sent, because the live stream repeats the
+// ones that happened while the replay ran. Only an exact repeat is dropped: one transaction
+// writes several events with the same cursor (a stage cut per agent, a quota donation pair), so a
+// live event at or below the floor can still be news.
+type served struct {
+	floor    map[string]int64
+	replayed map[db.Event]bool
+}
+
+func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event, fromReplay bool) error {
+	if !fromReplay && s.replayed[e] {
 		return nil
 	}
-	if err := writeEvent(conn, e); err != nil {
+	if err := writeEvent(conn, filter.Annotate(e)); err != nil {
 		return err
 	}
-	if e.Cursor > delivered[e.Kind] {
-		delivered[e.Kind] = e.Cursor
+	if fromReplay {
+		s.replayed[e] = true
+	}
+	if e.Cursor > s.floor[e.Kind] {
+		s.floor[e.Kind] = e.Cursor
 	}
 	return nil
 }
@@ -405,14 +410,14 @@ type watchFrame struct {
 // claim otherwise. The filter is therefore widened FIRST — from that instant the added kinds are
 // buffered for this connection — and only then are they replayed from their own floor: where this
 // connection last saw that kind, or, for a kind it never carried, the cursor it opened at. The
-// overlap between that replay and what the widened filter has been buffering is removed by the
-// same per-kind floor that removes it at handshake time.
+// overlap between that replay and what the widened filter has been buffering is removed the same
+// way as at handshake time (see served).
 //
 // The honest limit here is metric.point and job.underperforming: neither has a row behind it, so
 // widening onto either can only ever start live. Every other kind widens the same way a fresh
 // connection opens -- a connection that carried no floor for it yet is treated as `since=0`,
 // which Replay answers with that kind's current snapshot, not silence.
-func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subscriber, payload []byte, delivered map[string]int64) error {
+func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subscriber, payload []byte, delivered *served) error {
 	var control watchControl
 	if err := json.Unmarshal(payload, &control); err != nil {
 		return writeFrame(conn, watchFrame{Error: "a control frame must be a JSON object, optionally carrying \"kinds\""})
@@ -428,7 +433,7 @@ func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subs
 			if filter.Kinds[kind] {
 				continue
 			}
-			floor, carried := delivered[kind]
+			floor, carried := delivered.floor[kind]
 			if !carried {
 				floor = sub.since
 			}
@@ -436,7 +441,7 @@ func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subs
 				added[floor] = map[string]bool{}
 			}
 			added[floor][kind] = true
-			delivered[kind] = floor
+			delivered.floor[kind] = floor
 		}
 		filter.Kinds = kinds
 		h.hub.setFilter(sub, filter)
@@ -455,7 +460,7 @@ func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subs
 				return writeFrame(conn, watchFrame{Error: "could not replay the kinds you added; reconnect with since=<your last cursor>"})
 			}
 			for _, e := range events {
-				if err := deliver(conn, replayFilter.Annotate(e), delivered); err != nil {
+				if err := delivered.send(conn, replayFilter, e, true); err != nil {
 					return err
 				}
 			}

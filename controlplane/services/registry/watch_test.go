@@ -286,6 +286,34 @@ func TestAnEventAlreadyReplayedIsNotSentAgainWhenTheLiveStreamRepeatsIt(t *testi
 	}
 }
 
+// One transaction can write several events at the same cursor: a stage boundary cuts every agent
+// at one cut_at. Each is news to the agent it names, so only the exact event a replay carried may
+// be dropped from the live stream, never its siblings.
+func TestEventsSharingACursorAreAllDeliveredAndOnlyTheReplayedOneIsDropped(t *testing.T) {
+	cut := func(agentID string) db.Event {
+		return db.Event{Kind: db.EventAgentCut, Subject: agentID, Value: "1", PlatformExperimentID: "pe-1", AgentID: agentID, Cursor: 500}
+	}
+	source := newFakeEvents(cut("agent-a"))
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{
+		"platform_experiment_id": {"pe-1"},
+		"kinds":                  {db.EventAgentCut},
+		"since":                  {"100"},
+	})
+
+	if got := client.next(t).Subject; got != "agent-a" {
+		t.Fatalf("replayed cut: got = %v, want = %v", got, "agent-a")
+	}
+	source.live <- cut("agent-a")
+	source.live <- cut("agent-b")
+	source.live <- cut("agent-c")
+	for _, want := range []string{"agent-b", "agent-c"} {
+		if got := client.next(t).Subject; got != want {
+			t.Errorf("live cut at the replayed cursor: got = %v, want = %v", got, want)
+		}
+	}
+}
+
 // A subscription naming kinds is a promise about what the stream contains. Delivering a kind that
 // was not asked for makes an --until condition fire on an event the caller never meant to wait
 // for, so the filter has to hold on the wire and not merely in the caller's own reading of it.
@@ -504,7 +532,7 @@ func TestHLWatchDistinguishesItsOwnStageCutFromAnotherAgentsWithAnFYIPrefix(t *t
 		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
 			PlatformExperimentID: "pe-1", AgentID: "agent-a", Cursor: now}
 		source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "cut",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: now + 1}
+			PlatformExperimentID: "pe-1", AgentID: "agent-b", Cursor: now}
 	}()
 
 	var wg sync.WaitGroup
