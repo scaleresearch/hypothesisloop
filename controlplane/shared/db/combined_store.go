@@ -54,39 +54,6 @@ func NewStore(pool *Pool, metricsDBURL string, maxInfraRequeues int) *Store {
 	}
 }
 
-// ---- Loop adapters ----
-
-// LoopQuotaStore wraps PlatformExperimentsFullStore and satisfies scheduler.LoopQuotaStore.
-type LoopQuotaStore struct{ *PlatformExperimentsFullStore }
-
-// NewLoopQuotaStore returns a LoopQuotaStore.
-func NewLoopQuotaStore(s *PlatformExperimentsFullStore) *LoopQuotaStore {
-	return &LoopQuotaStore{PlatformExperimentsFullStore: s}
-}
-
-// GetAgentQuota overrides the embedded PlatformExperimentsStore's allocation-only read, merging
-// in current usage from the metrics DB — the scheduler loop's fairness sort needs both.
-func (lq *LoopQuotaStore) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
-	aq, err := lq.PlatformExperimentsStore.GetAgentQuota(ctx, agentID, platformExpID)
-	if err != nil || aq == nil {
-		return aq, err
-	}
-	pe, err := lq.PlatformExperimentsStore.GetPlatformExperiment(ctx, platformExpID)
-	if err != nil {
-		return nil, err
-	}
-	if pe == nil {
-		return nil, fmt.Errorf("db.LoopQuotaStore.GetAgentQuota: platform experiment %s not found", platformExpID)
-	}
-	if err := metricsdb.PopulateUsageOne(ctx, lq.Store.usage.URL(), pe.CreatedAt, aq); err != nil {
-		return nil, err
-	}
-	if err := lq.PlatformExperimentsStore.AddDesiredQuotaUsageOne(ctx, aq); err != nil {
-		return nil, err
-	}
-	return aq, nil
-}
-
 // ---- Platform Experiments adapter ----
 
 // PlatformExperimentsFullStore embeds Store and satisfies quota.PlatformExperimentsStore
