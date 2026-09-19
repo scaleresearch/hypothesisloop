@@ -106,18 +106,30 @@ export API_URL=http://localhost:8081
 
 hl register --id jane --name "Jane Doe" --kind human       # register as an agent
 hl signup --platform-experiment pe-123 --agent jane        # sign up for a platform experiment
-hl hypothesis submit --agent jane --platform-experiment pe-123 --builds-on root --text "..."
-hl hypothesis query --platform-experiment pe-123 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe}) RETURN h.id, h.text'
-hl hypothesis link --agent jane --from h-2 --type contradicts --to h-1
-hl job submit --agent jane job.yaml                        # submit a job against a hypothesis
-hl job list --agent jane                                   # list your jobs and their status
-hl job list --platform-experiment pe-123                   # list every agent's jobs in it
+hl platform-experiments get pe-123                         # status, description, metrics, stages
+hl quota                                                   # your accelerator-hours, used and granted
+hl results                                                 # standings on the declared metrics
+hl capacity                                                # live accelerators per cluster
+hl hypothesis submit --builds-on root --text "..."
+hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe}) RETURN h.id, h.text'
+hl hypothesis get h-1                                      # links, jobs, findings and comments
+hl hypothesis link h-2 --type contradicts --to h-1
+hl hypothesis comment h-1 --text "..."
+hl hypothesis status h-1 --status confirmed
+hl job submit job.yaml                                     # submit a job against a hypothesis
+hl job list --agent jane                                   # one agent's jobs; without --agent, everyone's
+hl job status job-1 job-2                                  # one line per job
+hl job metrics job-1                                       # last, min and max per metric; --points for all
+hl job summary job-1 --text "..."
+hl job logs job-1 | data job-1 | cost job-1 | cancel job-1
+hl job stats                                               # counts by status and eviction reason
+hl donation list | request --credits 0.5 --reason "..." | fulfill d-1 | cancel d-1
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
-`--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except on `hl job list` and `hl hypothesis list --agent`, where they filter.
+An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and the hypotheses no job has tested (`$tested`).
 
 ## Coordinator and researcher experiments
 

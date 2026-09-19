@@ -216,30 +216,108 @@ func TestJobSubmitBadYAML(t *testing.T) {
 	}
 }
 
-func TestJobGetters(t *testing.T) {
-	var gotPath string
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-2", "status": "QUEUED"})
-	})
-	setAPIURL(t, url)
-
+func TestIDIsPositionalOrFlag(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "x", "status": "QUEUED"} })
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	for _, tc := range []struct {
 		args []string
 		path string
 	}{
+		{[]string{"job", "status", "job-2"}, "/experiments/job-2"},
 		{[]string{"job", "status", "--id", "job-2"}, "/experiments/job-2"},
-		{[]string{"job", "metrics", "--id", "job-2"}, "/experiments/job-2/metrics"},
+		{[]string{"job", "cost", "job-2"}, "/experiments/job-2/cost"},
+		{[]string{"job", "data", "--id", "job-2"}, "/experiments/job-2/data"},
+		{[]string{"job", "cancel", "job-2"}, "/experiments/job-2/cancel"},
+		{[]string{"hypothesis", "get", "--id", "h-1"}, "/hypotheses/h-1"},
+		{[]string{"hypothesis", "status", "--id", "h-1", "--agent", "a", "--status", "refuted"}, "/hypotheses/h-1/status"},
+		{[]string{"hypothesis", "comment", "--agent", "a", "--id", "h-1", "--text", "t"}, "/hypotheses/h-1/comments"},
+		{[]string{"hypothesis", "link", "h-1", "--agent", "a", "--type", "related", "--to", "h-2"}, "/hypotheses/h-1/links"},
+		{[]string{"platform-experiments", "get", "pe-1"}, "/platform-experiments/pe-1"},
 		{[]string{"platform-experiments", "get", "--id", "pe-1"}, "/platform-experiments/pe-1"},
+		{[]string{"platform-experiments", "get"}, "/platform-experiments/pe-env"},
+		{[]string{"platform-experiments", "start", "pe-1"}, "/platform-experiments/pe-1/start"},
 	} {
+		*got = nil
 		var stdout, stderr bytes.Buffer
 		if code := run(tc.args, &stdout, &stderr); code != 0 {
 			t.Fatalf("%v: exit code = %d, stderr = %s", tc.args, code, stderr.String())
 		}
-		if gotPath != tc.path || !strings.Contains(stdout.String(), "QUEUED") {
-			t.Fatalf("%v: got path %s, stdout %s", tc.args, gotPath, stdout.String())
+		if len(*got) != 1 || (*got)[0].Path != tc.path {
+			t.Fatalf("%v: requests %+v, want one to %s", tc.args, *got, tc.path)
 		}
+	}
+}
+
+func TestWrongFlagShowsUsageLine(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return nil })
+	for _, tc := range []struct {
+		args  []string
+		usage string
+	}{
+		{[]string{"job", "metrics", "--agent", "a", "job-1"}, "usage: hl job metrics ID"},
+		{[]string{"job", "status"}, "usage: hl job status ID"},
+		{[]string{"hypothesis", "get", "--bogus", "h-1"}, "usage: hl hypothesis get ID"},
+		{[]string{"hypothesis", "status", "h-1", "h-2", "--status", "open"}, "usage: hl hypothesis status ID"},
+		{[]string{"job", "summary", "job-1"}, "usage: hl job summary ID --text T"},
+		{[]string{"quota", "--bogus"}, "usage: hl quota"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), tc.usage) {
+			t.Fatalf("%v: exit %d, stderr %q, want 2 and %q", tc.args, code, stderr.String(), tc.usage)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("misuse sent requests: %+v", *got)
+	}
+}
+
+func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
+	got := recordingServer(t, func(_ int, r recorded) any {
+		return map[string]any{"$schema": "s", "id": strings.TrimPrefix(r.Path, "/experiments/"), "status": "EVICTED",
+			"eviction_reason": "silent", "not_admitted_reason": "", "phase_detail": map[string]any{},
+			"hypothesis": "long text", "resolved_job": map[string]any{"image": "i"}, "job": map[string]any{"image": "i"}, "attempt_count": 0}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "status", "job-1", "job-2"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"attempt_count":0,"eviction_reason":"silent","id":"job-1","job":{"image":"i"},"status":"EVICTED"}` + "\n" +
+		`{"attempt_count":0,"eviction_reason":"silent","id":"job-2","job":{"image":"i"},"status":"EVICTED"}` + "\n"
+	if len(*got) != 2 || stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestCompactJSONKeepsKeyOrder(t *testing.T) {
+	got, err := compactJSON([]byte(`{"z": 1, "a": {"y": "", "b": [], "c": null, "d": "<x>"}, "m": 0.10, "$schema": "s"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"z":1,"a":{"b":[],"d":"<x>"},"m":0.10}`; string(got) != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestJobMetricsSummarizesEachMetric(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return []map[string]any{
+			{"experiment_id": "j", "metric_name": "acc", "fraction_complete": 0.5, "metric_value": 0.8, "metric_basis": "raw"},
+			{"experiment_id": "j", "metric_name": "loss", "fraction_complete": 0.5, "metric_value": 0.4, "metric_basis": "raw"},
+			{"experiment_id": "j", "metric_name": "acc", "fraction_complete": 1, "metric_value": 0.7, "metric_basis": "raw"},
+		}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "metrics", "j"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"metric":"acc","basis":"raw","points":2,"last":0.7,"at":1,"min":0.7,"max":0.8}` + "\n" +
+		`{"metric":"loss","basis":"raw","points":1,"last":0.4,"at":0.5,"min":0.4,"max":0.4}` + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+	stdout.Reset()
+	if code := run([]string{"job", "metrics", "j", "--points"}, &stdout, &stderr); code != 0 || len(lines(stdout.String())) != 3 || strings.Contains(stdout.String(), "experiment_id") {
+		t.Fatalf("--points: exit %d, stdout %q", code, stdout.String())
 	}
 }
 
@@ -267,12 +345,16 @@ func TestJobSummary(t *testing.T) {
 	setAPIURL(t, url)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "summary", "--id", "job-1", "--text", `LR 0.1 "won": +2%`}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if gotMethod != "POST" || gotPath != "/experiments/job-1/summary" || gotBody["summary"] != `LR 0.1 "won": +2%` {
-		t.Fatalf("got %s %s %+v", gotMethod, gotPath, gotBody)
+	for _, args := range [][]string{
+		{"job", "summary", "job-1", "--text", `LR 0.1 "won": +2%`},
+		{"job", "summary", "--id", "job-1", "--summary", `LR 0.1 "won": +2%`},
+	} {
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit code = %d, stderr = %s", args, code, stderr.String())
+		}
+		if gotMethod != "POST" || gotPath != "/experiments/job-1/summary" || gotBody["summary"] != `LR 0.1 "won": +2%` {
+			t.Fatalf("%v: got %s %s %+v", args, gotMethod, gotPath, gotBody)
+		}
 	}
 }
 

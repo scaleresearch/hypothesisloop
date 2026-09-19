@@ -28,16 +28,18 @@
 //	hl signup --platform-experiment pe-123 --agent jane
 //	hl signup --platform-experiment pe-123 --agent bot-1 --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
-//	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --param pe=pe-123
+//	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --platform-experiment pe-123
 //	hl job submit --agent jane job.yaml
-//	hl job list --agent jane
+//	hl job status job-1
 //	hl job list --platform-experiment pe-123
+//	hl quota
 //	hl watch
 //	hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 //	hl watch --platform-experiment pe-123 --all --follow
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -46,6 +48,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -59,17 +63,6 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	const usage = `usage: hl <command> ...
-
-  register              --id ID --kind agent|human
-  signup                [--platform-experiment PE] [--agent A]
-  platform-experiments  [list] | get --id PE | create | start | update
-  hypothesis            submit | link | comment | status | list | get | query
-  job                   submit | list [--agent A] [--needs-summary] | status | metrics | summary
-  watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
-
---agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID,
-except on job list and hypothesis list --agent. Run hl <command> --help for its flags.`
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -90,6 +83,14 @@ except on job list and hypothesis list --agent. Run hl <command> --help for its 
 		return cmdSignup(client, rest, stdout, stderr)
 	case "platform-experiments":
 		return cmdPlatformExperiments(client, rest, stdout, stderr)
+	case "quota":
+		return cmdQuota(client, rest, stdout, stderr)
+	case "results":
+		return cmdResults(client, rest, stdout, stderr)
+	case "capacity":
+		return cmdCapacity(client, rest, stdout, stderr)
+	case "donation":
+		return cmdDonation(client, rest, stdout, stderr)
 	case "hypothesis":
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
@@ -97,10 +98,27 @@ except on job list and hypothesis list --agent. Run hl <command> --help for its 
 	case "watch":
 		return cmdWatch(apiURL, rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "hl: unknown command %q\n", cmd)
+		fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", cmd, usage)
 		return 2
 	}
 }
+
+const usage = `usage: hl <command> ...
+
+  register              --id ID --kind agent|human
+  signup                [--platform-experiment PE] [--agent A]
+  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE]
+  quota                 your accelerator-hours, used and granted; --all for every agent
+  results               standings on the declared metrics
+  capacity              live accelerators per cluster, available and total
+  donation              list | request | fulfill ID | cancel ID
+  hypothesis            submit | link | comment | status | list | get | query
+  job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
+  watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
+
+An ID is a positional argument (hl job status ID); --id ID works too. --agent and
+--platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, except where --agent
+filters a list. Run hl <command> --help for its flags.`
 
 const (
 	agentEnv              = "AGENT_ID"
@@ -129,11 +147,208 @@ func fail(stderr io.Writer, err error) int {
 	return 1
 }
 
+// newFlags is a flag set whose message on -h, on a wrong flag and on any other misuse starts with
+// the command's usage text.
+func newFlags(name, usage string, stderr io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, usage)
+		printFlags(fs, stderr)
+	}
+	return fs
+}
+
+// printFlags lists the flags except the aliases, which are registered with an empty usage.
+func printFlags(fs *flag.FlagSet, w io.Writer) {
+	header := false
+	fs.VisitAll(func(f *flag.Flag) {
+		if f.Usage == "" {
+			return
+		}
+		if !header {
+			fmt.Fprintln(w, "\nflags:")
+			header = true
+		}
+		name, help := flag.UnquoteUsage(f)
+		if name != "" {
+			name = " " + name
+		}
+		fmt.Fprintf(w, "  --%s%s\n      %s\n", f.Name, name, help)
+	})
+}
+
+var errUsage = errors.New("usage")
+
+// misuse reports a wrong invocation followed by the command's usage.
+func misuse(fs *flag.FlagSet, format string, a ...any) error {
+	fmt.Fprintf(fs.Output(), "hl: %s: %s\n\n", fs.Name(), fmt.Sprintf(format, a...))
+	fs.Usage()
+	return errUsage
+}
+
+// parseArgs parses flags placed before, between or after the positional arguments.
+func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 {
+			return positional, nil
+		}
+		positional = append(positional, args[0])
+		args = args[1:]
+	}
+}
+
+// parseOperands returns the positional arguments followed by the values of the alias flags, which
+// take the same arguments so that a first guess at the form works: hl job status ID and --id ID.
+func parseOperands(fs *flag.FlagSet, argv []string, aliases ...string) ([]string, error) {
+	var flagged stringList
+	for _, name := range aliases {
+		fs.Var(&flagged, name, "")
+	}
+	positional, err := parseArgs(fs, argv)
+	if err != nil {
+		return nil, err
+	}
+	return append(positional, flagged...), nil
+}
+
+// parseOne is parseOperands for a command taking exactly one operand; def stands in for a missing
+// one when set.
+func parseOne(fs *flag.FlagSet, argv []string, what, def string, aliases ...string) (string, error) {
+	got, err := parseOperands(fs, argv, aliases...)
+	if err != nil {
+		return "", err
+	}
+	if len(got) == 0 && def != "" {
+		return def, nil
+	}
+	if len(got) != 1 {
+		return "", misuse(fs, "want one %s, got %d", what, len(got))
+	}
+	return got[0], nil
+}
+
+// parseExit is the exit code for a parse error: 0 for an explicit -h or --help, else 2.
+func parseExit(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	return 2
+}
+
+// printLines prints a JSON response compactly: an array one element per line, anything else on
+// one line, each through compactJSON.
+func printLines(stdout io.Writer, raw json.RawMessage, drop ...string) error {
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		var items []json.RawMessage
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return fmt.Errorf("response is not JSON: %w", err)
+		}
+		for _, item := range items {
+			if err := printLine(stdout, item, drop...); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return printLine(stdout, raw, drop...)
+}
+
+func printLine(stdout io.Writer, raw json.RawMessage, drop ...string) error {
+	line, err := compactJSON(raw, drop...)
+	if err != nil {
+		return fmt.Errorf("response is not JSON: %w", err)
+	}
+	_, err = fmt.Fprintf(stdout, "%s\n", line)
+	return err
+}
+
+// compactJSON re-encodes raw on one line in its own key order, leaving out $schema, every null,
+// "" and {} value, and the named keys of the top-level object.
+func compactJSON(raw []byte, drop ...string) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var b bytes.Buffer
+	if err := writeValue(dec, &b, drop); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+func writeValue(dec *json.Decoder, b *bytes.Buffer, drop []string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch t := tok.(type) {
+	case json.Delim:
+		if t == '[' {
+			b.WriteByte('[')
+			for i := 0; dec.More(); i++ {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				if err := writeValue(dec, b, nil); err != nil {
+					return err
+				}
+			}
+			b.WriteByte(']')
+		} else {
+			b.WriteByte('{')
+			n := 0
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, _ := keyTok.(string)
+				var v bytes.Buffer
+				if err := writeValue(dec, &v, nil); err != nil {
+					return err
+				}
+				if s := v.String(); key == "$schema" || slices.Contains(drop, key) || s == "null" || s == `""` || s == "{}" {
+					continue
+				}
+				if n > 0 {
+					b.WriteByte(',')
+				}
+				writeString(b, key)
+				b.WriteByte(':')
+				b.Write(v.Bytes())
+				n++
+			}
+			b.WriteByte('}')
+		}
+		_, err := dec.Token()
+		return err
+	case string:
+		writeString(b, t)
+	case json.Number:
+		b.WriteString(t.String())
+	case bool:
+		b.WriteString(strconv.FormatBool(t))
+	case nil:
+		b.WriteString("null")
+	}
+	return nil
+}
+
+func writeString(b *bytes.Buffer, s string) {
+	enc := json.NewEncoder(b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	b.Truncate(b.Len() - 1)
+}
+
 // --- register ----------------------------------------------------------------------------------
 
 func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("register", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newFlags("register", "usage: hl register --id ID [--name NAME] [--kind agent|human]", stderr)
 	id := fs.String("id", "", "stable unique agent id (required)")
 	name := fs.String("name", "", "human-readable display name; defaults to id")
 	kind := fs.String("kind", "human", "agent or human")
@@ -141,8 +356,7 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 		return parseExit(err)
 	}
 	if *id == "" {
-		fmt.Fprintln(stderr, "hl: register: --id is required")
-		return 2
+		return parseExit(misuse(fs, "--id is required"))
 	}
 	body := map[string]string{"id": *id, "name": *name, "kind": *kind}
 	if body["name"] == "" {
@@ -159,8 +373,7 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 // --- signup --------------------------------------------------------------------------------------
 
 func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("signup", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newFlags("signup", "usage: hl signup [--platform-experiment PE] [--agent A] [--quota-tier guaranteed|burst_only]\n\nSigning up again once signed up succeeds.", stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
 	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
 	quotaTier := fs.String("quota-tier", "", "override this signup's guaranteed-vs-burst-only split "+
@@ -171,8 +384,7 @@ func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	*pe = orEnv(*pe, platformExperimentEnv)
 	*agent = orEnv(*agent, agentEnv)
 	if *pe == "" || *agent == "" {
-		fmt.Fprintln(stderr, "hl: signup: --platform-experiment and --agent are required")
-		return 2
+		return parseExit(misuse(fs, "--platform-experiment and --agent are required"))
 	}
 	if *quotaTier != "" && *quotaTier != "guaranteed" && *quotaTier != "burst_only" {
 		fmt.Fprintln(stderr, "hl: signup: --quota-tier must be \"guaranteed\" or \"burst_only\", got "+*quotaTier)
@@ -205,11 +417,16 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
 		}
 	}
-	fs := flag.NewFlagSet("platform-experiments", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] | get [PE] | create [FILE] | start PE | update PE [FILE]", stderr)
 	limit := fs.Int("limit", 20, "max results")
+	if len(args) > 0 && args[0] == "list" {
+		args = args[1:]
+	}
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
+	}
+	if fs.NArg() > 0 {
+		return parseExit(misuse(fs, "unknown subcommand %q", fs.Arg(0)))
 	}
 	var out any
 	if err := c.Do("GET", fmt.Sprintf("/platform-experiments?limit=%d", *limit), nil, &out); err != nil {
@@ -223,10 +440,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 // file shaped like the POST /platform-experiments body — see
 // controlplane/settings/examples/experiment.yaml for the full DSL reference.
 func cmdPlatformExperimentsCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("platform-experiments create", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl platform-experiments create [FILE|-]
+	fs := newFlags("platform-experiments create", `usage: hl platform-experiments create [FILE|-]
 
 FILE is a YAML file shaped exactly like the POST /platform-experiments body. Minimal shape:
 
@@ -239,7 +453,7 @@ FILE is a YAML file shaped exactly like the POST /platform-experiments body. Min
     - key: val_accuracy
       direction: maximize
 
-To create several platform experiments in one call, use an experiments: list -- fields set
+To create several platform experiments in one call, use an experiments: list. Fields set
 alongside the list (e.g. a shared budget_accelerator_hours) default onto every item that
 doesn't set its own:
 
@@ -252,14 +466,10 @@ doesn't set its own:
 
 A bare top-level YAML list of mappings works the same way, without shared defaults.
 
-See controlplane/settings/examples/experiment.yaml for the full DSL reference.`)
-	}
-	if err := fs.Parse(args); err != nil {
+See controlplane/settings/examples/experiment.yaml for the full DSL reference.`, stderr)
+	path, err := parseOne(fs, args, "FILE", "-")
+	if err != nil {
 		return parseExit(err)
-	}
-	path := "-"
-	if fs.NArg() > 0 {
-		path = fs.Arg(0)
 	}
 	items, err := readYAMLItems(path, "experiments")
 	if err != nil {
@@ -288,33 +498,32 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`)
 	return 0
 }
 
-// cmdPlatformExperimentsUpdate handles `hl platform-experiments update --id ID [FILE|-]`. FILE is
-// a YAML file shaped exactly like the create body (see controlplane/settings/examples/
+// cmdPlatformExperimentsUpdate handles `hl platform-experiments update PE [FILE|-]`. FILE is a
+// YAML file shaped exactly like the create body (see controlplane/settings/examples/
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
 // is editable; once running, only name and description are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("platform-experiments update", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	id := fs.String("id", "", "platform experiment id (required)")
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl platform-experiments update --id ID [FILE|-]
+	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update PE [FILE|-]
 
 FILE is shaped exactly like 'hl platform-experiments create's body (see
 controlplane/settings/examples/experiment.yaml). While the platform experiment is still open,
 every field including metrics is editable; once running, only name and description may change
 and any other field that differs from the live value is rejected, so update from the file the
-experiment was created with (or set the named fields to the live values).`)
-	}
-	if err := fs.Parse(args); err != nil {
+experiment was created with (or set the named fields to the live values).`, stderr)
+	id := fs.String("id", "", "")
+	operands, err := parseArgs(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if *id == "" {
-		fmt.Fprintln(stderr, "hl: platform-experiments update: --id is required")
-		return 2
+	if *id == "" && len(operands) > 0 {
+		*id, operands = operands[0], operands[1:]
+	}
+	if *id == "" || len(operands) > 1 {
+		return parseExit(misuse(fs, "want PE and at most one FILE"))
 	}
 	path := "-"
-	if fs.NArg() > 0 {
-		path = fs.Arg(0)
+	if len(operands) == 1 {
+		path = operands[0]
 	}
 	body, err := readYAMLBody(path)
 	if err != nil {
@@ -328,7 +537,7 @@ experiment was created with (or set the named fields to the live values).`)
 		body["ends_at"] = "0001-01-01T00:00:00Z"
 	}
 	var out any
-	if err := c.Do("PUT", "/platform-experiments/"+*id, body, &out); err != nil {
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(*id), body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
@@ -336,183 +545,31 @@ experiment was created with (or set the named fields to the live values).`)
 }
 
 func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("platform-experiments get", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	id := fs.String("id", "", "platform experiment id (required)")
-	if err := fs.Parse(args); err != nil {
+	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [PE]
+
+The platform experiment (default $PLATFORM_EXPERIMENT_ID): its status, description, metrics,
+stages and current_stage.`, stderr)
+	id, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id")
+	if err != nil {
 		return parseExit(err)
 	}
-	if *id == "" {
-		fmt.Fprintln(stderr, "hl: platform-experiments get: --id is required")
-		return 2
-	}
-	var out any
-	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(*id), nil, &out); err != nil {
+	var out map[string]any
+	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
+	delete(out, "$schema")
 	printJSON(stdout, out)
 	return 0
 }
 
 func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("platform-experiments start", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	id := fs.String("id", "", "platform experiment id (required)")
-	if err := fs.Parse(args); err != nil {
+	fs := newFlags("platform-experiments start", "usage: hl platform-experiments start PE", stderr)
+	id, err := parseOne(fs, args, "PE", "", "id")
+	if err != nil {
 		return parseExit(err)
 	}
-	if *id == "" {
-		fmt.Fprintln(stderr, "hl: platform-experiments start: --id is required")
-		return 2
-	}
 	var out any
-	if err := c.Do("POST", "/platform-experiments/"+*id+"/start", map[string]any{}, &out); err != nil {
-		return fail(stderr, err)
-	}
-	printJSON(stdout, out)
-	return 0
-}
-
-// --- job -------------------------------------------------------------------------------------------
-
-func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: hl job <submit|list|status|metrics|summary> ...\n\nRun hl job <command> --help for its flags."
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, usage)
-		return 2
-	}
-	sub, rest := args[0], args[1:]
-	switch sub {
-	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, usage)
-		return 0
-	case "submit":
-		fs := flag.NewFlagSet("job submit", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		agent := fs.String("agent", "", "stamped onto metadata.agent_id (default $AGENT_ID)")
-		fs.Usage = func() {
-			fmt.Fprintln(stderr, `usage: hl job submit [--agent AGENT] [FILE|-]
-
-FILE is a YAML file shaped exactly like the POST /experiments body — id, metadata, job.
-metadata.hypothesis_id is REQUIRED: every job tests a specific, previously-registered
-hypothesis (see 'hl hypothesis submit'), there is no free-text/no-hypothesis path. An empty
-metadata.code_ref is filled with <origin url>@<HEAD sha> of the git repository in the current
-directory; that repository must have no uncommitted changes to tracked files and HEAD pushed to
-origin. Minimal shape:
-
-  id: job-123
-  metadata:
-    platform_experiment_id: pe-123
-    hypothesis_id: hyp-456        # from 'hl hypothesis submit'
-    project_id: my-project
-    objective: "maximize val_accuracy"
-  job:
-    image: ...
-    accelerator_type: ...
-    accelerator_count: 1
-    ...
-
-See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`)
-		}
-		if err := fs.Parse(rest); err != nil {
-			return parseExit(err)
-		}
-		*agent = orEnv(*agent, agentEnv)
-		if *agent == "" {
-			fmt.Fprintln(stderr, "hl: job submit: --agent is required")
-			return 2
-		}
-		path := "-"
-		if fs.NArg() > 0 {
-			path = fs.Arg(0)
-		}
-		body, err := readYAMLBody(path)
-		if err != nil {
-			fmt.Fprintf(stderr, "hl: %s\n", err)
-			return 2
-		}
-		metadata, _ := body["metadata"].(map[string]any)
-		if metadata == nil {
-			metadata = map[string]any{}
-		}
-		metadata["agent_id"] = *agent
-		if err := fillCodeRef(metadata, ""); err != nil {
-			return fail(stderr, fmt.Errorf("job submit: %w", err))
-		}
-		body["metadata"] = metadata
-		var out any
-		if err := c.Do("POST", "/experiments", body, &out); err != nil {
-			return fail(stderr, err)
-		}
-		printJSON(stdout, out)
-		return 0
-	case "list":
-		fs := flag.NewFlagSet("job list", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		agent := fs.String("agent", "", "narrow to one agent; omit to see every agent's jobs")
-		pe := fs.String("platform-experiment", "", "narrow to one platform experiment")
-		needsSummary := fs.Bool("needs-summary", false, "only finished jobs still missing a summary, the set that blocks your next submit")
-		if err := fs.Parse(rest); err != nil {
-			return parseExit(err)
-		}
-		q := url.Values{}
-		if *agent != "" {
-			q.Set("agent", *agent)
-		}
-		if *pe != "" {
-			q.Set("platform_experiment_id", *pe)
-		}
-		if *needsSummary {
-			q.Set("needs_summary", "true")
-		}
-		var out any
-		if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &out); err != nil {
-			return fail(stderr, err)
-		}
-		printJSON(stdout, out)
-		return 0
-	case "status":
-		return jobGet(c, "job status", "", rest, stdout, stderr)
-	case "metrics":
-		return jobGet(c, "job metrics", "/metrics", rest, stdout, stderr)
-	case "summary":
-		fs := flag.NewFlagSet("job summary", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		id := fs.String("id", "", "job id (required)")
-		text := fs.String("text", "", "what changed, what the metric did, what it means (required)")
-		if err := fs.Parse(rest); err != nil {
-			return parseExit(err)
-		}
-		if *id == "" || *text == "" {
-			fmt.Fprintln(stderr, "hl: job summary: --id and --text are required")
-			return 2
-		}
-		var out any
-		if err := c.Do("POST", "/experiments/"+url.PathEscape(*id)+"/summary", map[string]string{"summary": *text}, &out); err != nil {
-			return fail(stderr, err)
-		}
-		printJSON(stdout, out)
-		return 0
-	default:
-		fmt.Fprintf(stderr, "hl: job: unknown subcommand %q\n", sub)
-		return 2
-	}
-}
-
-// jobGet prints GET /experiments/{id}<suffix>.
-func jobGet(c *apiclient.Client, name, suffix string, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	id := fs.String("id", "", "job id (required)")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
-	}
-	if *id == "" {
-		fmt.Fprintf(stderr, "hl: %s: --id is required\n", name)
-		return 2
-	}
-	var out any
-	if err := c.Do("GET", "/experiments/"+url.PathEscape(*id)+suffix, nil, &out); err != nil {
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/start", map[string]any{}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
@@ -612,8 +669,11 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 // --- watch -----------------------------------------------------------------------------------------
 
 func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newFlags("watch", `usage: hl watch [--agent A | --all] [--platform-experiment PE] [--kinds K,...] [--follow]
+   or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
+
+Prints events, one JSON object per line. With $AGENT_ID set and no --experiment or --all, the
+agent's own resources, resuming from where its last watch stopped.`, stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
 	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and queue reasons, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
@@ -687,12 +747,4 @@ func stateDir() (string, error) {
 		return "", fmt.Errorf("no state directory: set HL_STATE_DIR (%w)", err)
 	}
 	return filepath.Join(home, ".local", "state", "hl"), nil
-}
-
-// parseExit is the exit code for a flag parse error: 0 for an explicit -h or --help.
-func parseExit(err error) int {
-	if errors.Is(err, flag.ErrHelp) {
-		return 0
-	}
-	return 2
 }

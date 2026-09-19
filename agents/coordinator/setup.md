@@ -135,7 +135,7 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   `description` field — not `experiment.md`, not `FINAL_RESULT.md`. Any edit to either of those
   files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is
   mirrored: update `agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`'s `description` to
-  the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then `hl platform-experiments update --id
+  the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then `hl platform-experiments update
   $PLATFORM_EXPERIMENT_ID agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`, immediately,
   same turn as the file edit — never batched for later. (While the platform experiment is
   `running`, only `name`/`description` may change; any other field that differs from the live
