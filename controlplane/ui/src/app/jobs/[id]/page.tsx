@@ -209,6 +209,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               <Row label="Submitted" value={j.created_at ? new Date(j.created_at).toLocaleString() : '—'} />
               {finalPrimaryMetric != null && <Row label="Final metric" value={finalPrimaryMetric.toFixed(4)} highlight={semantic.success} />}
               {j.objective && <Row label="Objective" value={j.objective} />}
+              {j.theory && <Row label="Rationale" value={j.theory} />}
+              {j.job?.env && Object.keys(j.job.env).length > 0 && (
+                <Row label="Environment" value={
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                    {Object.entries(j.job.env).sort().map(([k, v]) => <span key={k}>{k}={v}</span>)}
+                  </div>
+                } />
+              )}
             </tbody>
           </table>
         </PodContent>
@@ -287,12 +295,13 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       </Pod>
 
       {/* Lineage */}
-      {(j.code_ref || j.config_hash || j.data_ref) && (
+      {(j.job?.image || j.code_ref || j.config_hash || j.data_ref) && (
         <Pod style={{ marginBottom: 12 }}>
           <PodHeader>Lineage &amp; Reproducibility</PodHeader>
           <PodContent>
-            <table className="wa-table" style={{ maxWidth: 700 }}>
+            <table className="wa-table">
               <tbody>
+                {j.job?.image && <Row label="Image" value={j.job.image} />}
                 {j.code_ref && <Row label="Code ref (git SHA)" value={j.code_ref} />}
                 {j.config_hash && <Row label="Config hash (sha256)" value={j.config_hash} />}
                 {j.data_ref && <Row label="Data ref" value={j.data_ref} />}
