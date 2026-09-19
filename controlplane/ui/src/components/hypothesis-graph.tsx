@@ -206,7 +206,9 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
         maskColor="rgba(8, 9, 12, 0.7)"
         style={{ background: 'var(--surface-2)' }}
       />
-      <Panel position="top-left">
+      {/* The view opens on the objective at the top and centres a focused node, so the legend sits
+          at the bottom, between the controls and the minimap, where it hides neither. */}
+      <Panel position="bottom-center">
         <Legend />
       </Panel>
     </ReactFlow>
