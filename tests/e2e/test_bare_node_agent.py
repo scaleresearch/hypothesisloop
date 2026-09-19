@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import uuid
 
 import pytest
@@ -32,6 +33,9 @@ from conftest import API_URL, REPO_ROOT
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
+
+if sys.platform != "linux":
+    pytest.skip("the bare-node agent runs on Linux hosts only (/proc, /etc/machine-id)", allow_module_level=True)
 
 CONTAINER_ENGINE_BIN = shutil.which("podman") or shutil.which("docker")
 if CONTAINER_ENGINE_BIN is None:
