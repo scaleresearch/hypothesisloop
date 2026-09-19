@@ -74,7 +74,7 @@ func ValidateStages(stages []Stage) error {
 	return nil
 }
 
-// StageProgress is max(budget consumed, time elapsed) as a fraction — the single monotonic
+// StageProgress is max(budget consumed, time elapsed) as a fraction, at most 1 — the single monotonic
 // clock driving every boundary, so whichever runs out first advances the ladder. consumedAccH
 // must exclude reservations, or a large queued job could trip a boundary.
 func StageProgress(consumedAccH, budgetAccH float64, startsAt, endsAt, now time.Time) float64 {
@@ -89,10 +89,7 @@ func StageProgress(consumedAccH, budgetAccH float64, startsAt, endsAt, now time.
 	if window := endsAt.Sub(startsAt); window > 0 && !startsAt.IsZero() && !endsAt.IsZero() {
 		timeProgress = now.Sub(startsAt).Seconds() / window.Seconds()
 	}
-	if timeProgress > budgetProgress {
-		return timeProgress
-	}
-	return budgetProgress
+	return min(1, max(timeProgress, budgetProgress))
 }
 
 // CurrentMaxJobHours is the job-length cap in force right now: the MaxJobHours of the stage

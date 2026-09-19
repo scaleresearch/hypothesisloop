@@ -77,6 +77,13 @@ func TestStageProgress(t *testing.T) {
 	if got := StageProgress(0, 0, start, end, start.Add(5*time.Hour)); got != 0.5 {
 		t.Errorf("no-budget progress = %v, want 0.5", got)
 	}
+	// Past ends_at, or over budget, the experiment is through and no further.
+	if got := StageProgress(0, 100, start, end, start.Add(48*time.Hour)); got != 1 {
+		t.Errorf("progress past ends_at = %v, want 1", got)
+	}
+	if got := StageProgress(150, 100, start, end, start.Add(time.Hour)); got != 1 {
+		t.Errorf("over-budget progress = %v, want 1", got)
+	}
 }
 
 // Progress must never go backwards across a restart: re-deriving it from the same stored state
