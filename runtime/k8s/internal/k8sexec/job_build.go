@@ -475,6 +475,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
+						workloadkeys.ManagedBy:    workloadkeys.ManagedByValue,
 						workloadkeys.ExperimentID: exp.ID,
 						// Also on the pod, not just the Job: PollPhaseDetail lists PODS filtered
 						// by experiment-id+attempt to fence scheduledNodes to this generation

@@ -74,6 +74,9 @@ func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 	if jobAttempt != "2" {
 		t.Fatalf("Job attempt label = %q, want %q", jobAttempt, "2")
 	}
+	if got := job.Spec.Template.Labels[workloadkeys.ManagedBy]; got != workloadkeys.ManagedByValue {
+		t.Fatalf("pod template managed-by label = %q, want %q (GetNodeTotalCapacity subtracts every pod without it)", got, workloadkeys.ManagedByValue)
+	}
 }
 
 func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
