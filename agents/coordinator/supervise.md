@@ -7,7 +7,8 @@ never act on an agent's behalf.
 
 Every 5-10 min at first, widen once behavior looks steady.
 
-- `podman logs --tail 100 agent-<id>` — progress or stuck loop?
+- `podman logs --tail 100 agent-<id>` (or `tail -100` of its `.activity.log`) — progress or
+  stuck loop? Each line is one `say`, `tool` or `error` action; see setup.md section 4.
 - `GET $API_URL/platform-experiments/{id}/stages` — current stage, progress, cut agents. A job
   stuck past `max_job_hours` is a bug, not just slow.
 - `GET $API_URL/...` — is the ranking metric moving, reporting at `experiment.md`'s cadence?

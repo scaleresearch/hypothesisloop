@@ -230,6 +230,18 @@ on rootless podman only: a rootful podman machine (macOS) rejects `--userns=keep
 `crun: mount sysfs to sys: Operation not permitted`. The SDK prefers the token when both are set.
 Never use `--bare`; it ignores the token.
 
+Each agent prints its activity log to stdout: one line per action (UTC time, agent id, kind,
+summary), where the kind is `say` (its own text), `tool` (a tool call, with the Bash command) or
+`error` (the first line of a failed tool result). Harness logs (turn results, rate limits,
+reconnects) go to stderr and the full transcript stays in the Claude Code session jsonl under
+`~/.claude/projects/` inside the container. For a per-agent activity file, run the container
+attached in the background instead of `-d` and redirect its streams:
+
+    podman run --name agent-<id> ... localhost/hypothesisloop-experimentator-$EXPERIMENT \
+      > /tmp/hlrun/<run>/agent-<id>.activity.log 2> /tmp/hlrun/<run>/agent-<id>.err &
+
+`ANTHROPIC_MODEL` picks the model (default `claude-sonnet-5`).
+
 One shared private `$CODE_REPO_URL`; each agent works on branch
 `agent-<id>-$PLATFORM_EXPERIMENT_ID` (platform experiment id included so a fresh experiment always
 starts from a fresh branch off current `main` — see the agent's own system prompt for why) so

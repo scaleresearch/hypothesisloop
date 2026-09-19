@@ -20,7 +20,6 @@ the same conversation (via `resume=`) rather than starting over cold.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -36,6 +35,7 @@ from claude_agent_sdk import (
 )
 
 from hypothesisloop_agent import core
+from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
 
@@ -49,17 +49,13 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
                      "TaskOutput", "TaskStop"]
 
 
-def _log_message(message) -> bool:
-    """Logs message and returns True iff this message was a tool use (see idle-nudge backoff)."""
-    used_tool = False
-    if isinstance(message, AssistantMessage):
-        for block in message.content:
-            if isinstance(block, TextBlock) and block.text.strip():
-                log.info("assistant: %s", block.text.strip()[:800])
-            elif isinstance(block, ToolUseBlock):
-                log.info("tool_use: %s(%s)", block.name, json.dumps(block.input, default=str)[:400])
-                used_tool = True
-    elif isinstance(message, ResultMessage):
+def _log_message(message, agent: str) -> bool:
+    """Prints the activity lines to stdout, logs the rest, returns True iff a tool was used."""
+    for line in activity.lines(message, agent):
+        print(line, flush=True)
+    used_tool = isinstance(message, AssistantMessage) and any(
+        isinstance(block, ToolUseBlock) for block in message.content)
+    if isinstance(message, ResultMessage):
         log.info(
             "result: subtype=%s turns=%d cost_usd=%s stop_reason=%s",
             message.subtype, message.num_turns, message.total_cost_usd, message.stop_reason,
@@ -246,7 +242,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             turn_used_tool = False
             context_tokens = 0
             async for message in _receive_turn(client):
-                if _log_message(message):
+                if _log_message(message, setup.cfg.agent_id):
                     turn_used_tool = True
                 if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
                     context_tokens = _context_tokens(message.usage)
@@ -295,7 +291,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 handoff_parts = []
                 handoff_result = None
                 async for message in _receive_turn(client):
-                    _log_message(message)
+                    _log_message(message, setup.cfg.agent_id)
                     if isinstance(message, AssistantMessage):
                         handoff_parts.extend(
                             block.text for block in message.content
