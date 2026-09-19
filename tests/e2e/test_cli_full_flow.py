@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -42,6 +41,17 @@ def _hl_popen(api, *args: str) -> subprocess.Popen:
         text=True,
         env=api.hl_env(),
     )
+
+
+def _await_watch_connected(proc: subprocess.Popen) -> None:
+    """Returns once `hl watch` has finished its handshake; the server subscribes before accepting
+    the socket, so nothing posted after this can be missed. Bounded by the watch's own --timeout."""
+    seen = []
+    for line in proc.stderr:
+        if line.strip() == "hl watch: connected":
+            return
+        seen.append(line)
+    raise AssertionError(f"hl watch exited before connecting (stderr: {''.join(seen)})")
 
 
 def _finish_popen(proc: subprocess.Popen, *, timeout: float) -> tuple[int, str, str]:
@@ -190,7 +200,7 @@ def test_watch_comment_new_delivered_live(api, cli_watch_pe, deadline):
 
     proc = _hl_popen(api, "watch", "--platform-experiment", pe_id, "--kinds", "comment.new", "--timeout", "15")
     try:
-        time.sleep(2)  # let the watch connection establish before posting, mirrors the bash scenario's `sleep 2`
+        _await_watch_connected(proc)
         api.post_hypothesis_comment(
             hyp_id, f"does this hold at batch 512 ({uuid.uuid4().hex[:8]})?", agent_id=agent
         ).raise_for_status()
@@ -220,7 +230,7 @@ def test_watch_finding_new_delivered_live_after_job_completion(api, cli_watch_pe
 
     proc = _hl_popen(api, "watch", "--platform-experiment", pe_id, "--kinds", "finding.new", "--timeout", "15")
     try:
-        time.sleep(2)  # let the watch connection establish before filing, mirrors the bash scenario's `sleep 2`
+        _await_watch_connected(proc)
         api.file_finding(job_id, f"cli-full-flow finding ({uuid.uuid4().hex[:8]})")
         code, out, err = _finish_popen(proc, timeout=30)
     except Exception:
