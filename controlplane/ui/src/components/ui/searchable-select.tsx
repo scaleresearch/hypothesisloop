@@ -55,6 +55,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
 
   return (
     <Combobox
+      immediate
       value={value}
       onChange={(v: string | null) => { onChange(v ?? ''); setQuery('') }}
       as="div"
