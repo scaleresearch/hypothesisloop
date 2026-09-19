@@ -782,6 +782,60 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         </Pod>
       )}
 
+      {/* Findings */}
+      {found.length > 0 && (
+        <Pod>
+          <PodHeader>
+            Findings
+            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+              ({found.length} hypotheses with a verdict or a result)
+            </span>
+          </PodHeader>
+          <PodContent scrollX>
+            <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 110 }}>Verdict</th>
+                  <th>Hypothesis</th>
+                  <th>Newest finding</th>
+                  <th style={{ width: 170, textAlign: 'right' }}>Best job</th>
+                </tr>
+              </thead>
+              <tbody>
+                {found.map(h => (
+                  <tr key={h.id} style={{ verticalAlign: 'top' }}>
+                    <td>
+                      <Badge status={h.status}>{h.status}</Badge>
+                      {h.finding && filedAfterVerdict(h, h.finding.created_at) && (
+                        <div style={{ fontSize: 10, marginTop: 3, color: semantic.warning }} title="The newest finding was filed after this verdict was set">
+                          newer finding
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {h.finding
+                        ? <span style={TWO_LINES} title={h.finding.summary}>{h.finding.summary}</span>
+                        : <span className="text-muted">no finding filed</span>}
+                    </td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {h.best_job ? (
+                        <Link href={`/jobs/${h.best_job.id}`} className="text-link" title={h.best_job.id}>
+                          {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
+                        </Link>
+                      ) : <span className="text-muted">—</span>}
+                      {h.best_job && unsummarized?.has(h.best_job.id) && <div><NoSummary /></div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </PodContent>
+        </Pod>
+      )}
+
       {/* Competing agents over time */}
       {metrics.length > 0 && (
         <Pod>
@@ -932,60 +986,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           </div>
         </PodContent>
       </Pod>
-
-      {/* Findings */}
-      {found.length > 0 && (
-        <Pod>
-          <PodHeader>
-            Findings
-            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
-              ({found.length} hypotheses with a verdict or a result)
-            </span>
-          </PodHeader>
-          <PodContent scrollX>
-            <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 760 }}>
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>Verdict</th>
-                  <th>Hypothesis</th>
-                  <th>Newest finding</th>
-                  <th style={{ width: 170, textAlign: 'right' }}>Best job</th>
-                </tr>
-              </thead>
-              <tbody>
-                {found.map(h => (
-                  <tr key={h.id} style={{ verticalAlign: 'top' }}>
-                    <td>
-                      <Badge status={h.status}>{h.status}</Badge>
-                      {h.finding && filedAfterVerdict(h, h.finding.created_at) && (
-                        <div style={{ fontSize: 10, marginTop: 3, color: semantic.warning }} title="The newest finding was filed after this verdict was set">
-                          newer finding
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {h.finding
-                        ? <span style={TWO_LINES} title={h.finding.summary}>{h.finding.summary}</span>
-                        : <span className="text-muted">no finding filed</span>}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      {h.best_job ? (
-                        <Link href={`/jobs/${h.best_job.id}`} className="text-link" title={h.best_job.id}>
-                          {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
-                        </Link>
-                      ) : <span className="text-muted">—</span>}
-                      {h.best_job && unsummarized?.has(h.best_job.id) && <div><NoSummary /></div>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </PodContent>
-        </Pod>
-      )}
 
       {/* Scoreboard */}
       <Pod>
