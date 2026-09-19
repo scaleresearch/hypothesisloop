@@ -18,6 +18,7 @@ import {
   fetchStages,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
+  lookbackHoursSince,
   fetchHypothesisVerdictCounts,
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
@@ -475,7 +476,7 @@ function CompetingAgentsChart({
             stroke={colorFor(agentId)}
             dot={false}
             strokeWidth={2}
-            type="monotone"
+            type="stepAfter"
             connectNulls
           />
         ))}
@@ -726,11 +727,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // cheap fetches above: a 48h-scale run doesn't meaningfully change within any 10s window,
   // and re-fetching/re-sorting the full history that often is pure waste.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
-  // lookback must cover the whole run, not a fixed window: this platform experiment runs for
-  // 48h+, so a fixed 24h default would silently drop the run's early data.
-  const lookbackHours = pe?.starts_at
-    ? Math.max(24, Math.ceil((Date.now() - new Date(pe.starts_at).getTime()) / 3_600_000))
-    : 24
+  const lookbackHours = lookbackHoursSince(pe?.starts_at)
   const { data: allMetricSeries, error: metricSeriesError } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
     pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), lookbackHours] : null,
     () => Promise.all(peMetricKeys.map(k =>

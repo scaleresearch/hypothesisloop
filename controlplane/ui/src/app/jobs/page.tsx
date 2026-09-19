@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchClusters, fetchPlatformExperiment, fetchPlatformExperimentTimeseries } from '@/lib/api'
+import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchClusters, fetchPlatformExperiment, fetchPlatformExperimentTimeseries, lookbackHoursSince } from '@/lib/api'
 import type { Experiment, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { AgentSelect } from '@/components/agent-select'
@@ -124,10 +124,7 @@ function JobsPageContent() {
   const rankingMetric = pe?.metrics?.find(m => m.role === 'ranking') ?? pe?.metrics?.[0]
   const { data: rankingSeries } = useSWR(
     pe && rankingMetric ? ['pe-ranking-series', pe.id, rankingMetric.key] : null,
-    () => fetchPlatformExperimentTimeseries(
-      pe!.id, rankingMetric!.key,
-      Math.max(24, Math.ceil((Date.now() - new Date(pe!.starts_at ?? pe!.created_at).getTime()) / 3_600_000)),
-    ),
+    () => fetchPlatformExperimentTimeseries(pe!.id, rankingMetric!.key, lookbackHoursSince(pe!.starts_at)),
     { refreshInterval: 30_000 },
   )
   const bestByJob = new Map<string, number>()

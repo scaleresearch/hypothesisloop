@@ -19,6 +19,8 @@ import type {
   HypothesisWithJobs,
 } from '@/types'
 
+import { isZeroDate } from '@/lib/format'
+
 // One API, one base URL — quota, scheduler and registry operations are all served together.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081'
 
@@ -205,6 +207,13 @@ export function fetchPlatformExperimentTimeseries(
   return apiFetch<{ series: AgentMetricSeries[] }>(
     `${API_URL}/platform-experiments/${platformExpID}/metrics-timeseries?metric_name=${encodeURIComponent(metricName)}&lookback_hours=${lookbackHours}`,
   )
+}
+
+// The window from an experiment's start to now. Each series comes back as about 500 points
+// whatever the window, so a wider one costs resolution. Quarter hours keep it still as a SWR key.
+export function lookbackHoursSince(startsAt: string | undefined): number {
+  if (isZeroDate(startsAt)) return 24
+  return Math.max(0.25, Math.ceil((Date.now() - new Date(startsAt as string).getTime()) / 900_000) / 4)
 }
 
 // ---------------------------------------------------------------------------
