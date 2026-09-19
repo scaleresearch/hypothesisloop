@@ -148,7 +148,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 // summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.
 const summaryGate = "summary_gate"
 
-const resultArrives = "the result arrives as an update when you end your turn"
+const resultArrives = "the result arrives as an update when you end your turn; hl job list then has its metric"
 
 // progress reports whether a job can still change status, and whether an owed summary holds it.
 func progress(raw json.RawMessage) (unfinished, held bool) {
