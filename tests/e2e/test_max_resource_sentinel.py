@@ -108,8 +108,7 @@ def test_max_resource_sentinel_resolves_to_cluster_local_fair_share(api, run_id,
     if code >= 400:
         pass  # rejected outright at submission
     else:
-        # A queued row is created with capacity_unavailable before the admission loop has looked at
-        # it, so settling means the loop's own verdict replaced that placeholder.
+        # A queued row reads awaiting_admission until the admission loop has looked at it.
         stuck = eventually(
             f"{impossible_job} to settle",
             lambda: api.experiment(impossible_job),

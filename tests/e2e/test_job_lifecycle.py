@@ -50,7 +50,12 @@ def test_cancel_while_queued_is_rejected_and_refunded(api, experiment, run_id, d
     if status not in not_admitted:
         pytest.skip(f"unsatisfiable job settled as {status!r} at submission (also an acceptable fail-closed outcome)")
 
-    exp = api.experiment(stuck)
+    exp = eventually(
+        f"the admission loop's verdict on {stuck}",
+        lambda: api.experiment(stuck),
+        accept=lambda e: e.get("not_admitted_reason") not in (None, "awaiting_admission"),
+        deadline=deadline,
+    )
     assert (exp.get("not_admitted_reason") or "").startswith("capacity_unavailable"), (
         f"queued unsatisfiable job has wrong not_admitted_reason={exp.get('not_admitted_reason')!r}"
     )

@@ -74,7 +74,7 @@ func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Exp
 		exp.CapacityTier = domain.CapacityGuaranteed
 	}
 	if exp.Status == domain.StatusQueued && exp.NotAdmittedReason == "" {
-		exp.NotAdmittedReason = domain.NotAdmittedCapacityUnavailable
+		exp.NotAdmittedReason = domain.NotAdmittedAwaitingAdmission
 	}
 	// ClusterName is deliberately left as-is (usually empty) here: it's assigned by the
 	// admission loop, capacity-aware, at the moment a specific cluster's room is actually

@@ -33,6 +33,9 @@ func ValidExperimentStatus(s ExperimentStatus) bool {
 }
 
 const (
+	// NotAdmittedAwaitingAdmission is the reason of a job the admission loop has not evaluated
+	// since it was queued or requeued. Every other reason is a verdict of that loop.
+	NotAdmittedAwaitingAdmission   = "awaiting_admission"
 	NotAdmittedCapacityUnavailable = "capacity_unavailable"
 	NotAdmittedOutranked           = "outranked"
 	NotAdmittedSummaryGate         = "summary_gate"

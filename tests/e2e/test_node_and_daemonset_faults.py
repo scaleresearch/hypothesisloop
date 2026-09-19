@@ -200,7 +200,8 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     shrink_status = eventually(
         f"{shrink_job} status while H100 capacity is reduced",
         lambda: api.experiment(shrink_job),
-        accept=lambda e: e["status"] in ("QUEUED",) + ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL
+        or (e["status"] == "QUEUED" and e.get("not_admitted_reason") != "awaiting_admission"),
         deadline=deadline,
     )
     assert shrink_status["status"] == "QUEUED", (

@@ -180,7 +180,7 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 		submitted_at = NULL,
 		-- clear cluster_name: job holds no capacity, so next admission tick can place it anywhere.
 		cluster_name = '',
-		not_admitted_reason = 'capacity_unavailable',
+		not_admitted_reason = 'awaiting_admission',
 		updated_at = NOW()
 	WHERE id = $1 AND status = 'RUNNING'`
 	tag, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH,
@@ -220,7 +220,7 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 		-- clear cluster_name: the failed attempt holds no capacity, so the next admission tick
 		-- can place this anywhere, exactly as a preemption requeue does.
 		cluster_name = '',
-		not_admitted_reason = 'capacity_unavailable',
+		not_admitted_reason = 'awaiting_admission',
 		quota_settled_at = NULL,
 		updated_at = NOW()
 	WHERE id = $1 AND status = 'FAILED' AND attempt_count - infra_requeue_count < $2`
@@ -273,7 +273,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 			-- must be free to place this somewhere other than the cluster that just failed it.
 			cluster_name = '',
 			queued_at = COALESCE(queued_at, NOW()),
-			not_admitted_reason = 'capacity_unavailable',
+			not_admitted_reason = 'awaiting_admission',
 			quota_settled_at = NULL,
 			updated_at = NOW()
 		WHERE id = $1 AND status = $2 AND infra_requeue_count < $4`
@@ -296,7 +296,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 		submitted_at = NULL,
 		cluster_name = '',
 		queued_at = COALESCE(queued_at, NOW()),
-		not_admitted_reason = 'capacity_unavailable',
+		not_admitted_reason = 'awaiting_admission',
 		quota_settled_at = NULL,
 		tried_clusters = tried_clusters || $4::jsonb,
 		updated_at = NOW()
