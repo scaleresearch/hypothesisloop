@@ -23,8 +23,6 @@ const (
 	maxLinksPerDirection = 200
 )
 
-const dedupConstraint = ":Hypothesis(platform_experiment_id, normalized_text)"
-
 var relTypes = map[domain.LinkType]string{
 	domain.LinkBuildsOn:    "BUILDS_ON",
 	domain.LinkContradicts: "CONTRADICTS",
@@ -69,6 +67,9 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 	at := now()
 
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		if err := lockExperiment(ctx, tx, n.PlatformExperimentID); err != nil {
+			return nil, err
+		}
 		existing, err := findByNormalizedText(ctx, tx, n.PlatformExperimentID, normalized)
 		if err != nil || existing != nil {
 			return existing, err
@@ -99,23 +100,11 @@ RETURN h`, map[string]any{
 		}
 		return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 	})
-	switch {
-	case isUniqueViolation(err, dedupConstraint):
-		// A concurrent registration of the same claim committed first.
-		h, err = s.findByNormalizedText(ctx, n.PlatformExperimentID, normalized)
-		if err != nil {
-			return nil, nil, false, err
-		}
-		if h == nil {
-			return nil, nil, false, fmt.Errorf("graphdb.Register: lost a dedup race but found no existing hypothesis")
-		}
-		alreadyExisted = true
-	case err != nil:
+	if err != nil {
 		return nil, nil, false, wrap("graphdb.Register", err)
-	default:
-		h = out.(*domain.Hypothesis)
-		alreadyExisted = h.ID != id.String()
 	}
+	h = out.(*domain.Hypothesis)
+	alreadyExisted = h.ID != id.String()
 	links, err = s.outLinks(ctx, h.ID)
 	if err != nil {
 		return nil, nil, false, err
@@ -146,6 +135,9 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spe
 		}
 		if from.AgentID != "" && from.AgentID != agentID {
 			return nil, fmt.Errorf("%w: hypothesis %s belongs to agent %s; register your own hypothesis that builds_on it instead", ErrNotOwner, fromID, from.AgentID)
+		}
+		if err := lockExperiment(ctx, tx, from.PlatformExperimentID); err != nil {
+			return nil, err
 		}
 		if err := validateLinks(from.PlatformExperimentID, []domain.LinkSpec{spec}, false); err != nil {
 			return nil, err
@@ -196,6 +188,9 @@ func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, stat
 		}
 		if h.Status == status {
 			return h, nil
+		}
+		if err := lockExperiment(ctx, tx, h.PlatformExperimentID); err != nil {
+			return nil, err
 		}
 		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at RETURN h`,
 			map[string]any{"id": id, "status": string(status), "at": at})
@@ -407,14 +402,21 @@ func (s *Store) ensureObjective(ctx context.Context, platformExperimentID string
 	return nil
 }
 
-func (s *Store) findByNormalizedText(ctx context.Context, platformExperimentID, normalized string) (*domain.Hypothesis, error) {
-	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		return findByNormalizedText(ctx, tx, platformExperimentID, normalized)
-	})
+// lockExperiment makes tx the only writer of one platform experiment's graph until it ends. Every
+// write transaction modifies the objective first, so Memgraph aborts an overlapping one with a
+// conflict that ExecuteWrite retries once the first has committed. The checks that read before
+// writing (dedup, similarity, cycles) rely on this: two writes that touch no common hypothesis
+// would otherwise both pass them.
+func lockExperiment(ctx context.Context, tx neo4j.ManagedTransaction, platformExperimentID string) error {
+	records, err := collect(ctx, tx, `MATCH (o:Objective {id: $pe}) SET o.revision = coalesce(o.revision, 0) + 1 RETURN o.id`,
+		map[string]any{"pe": platformExperimentID})
 	if err != nil {
-		return nil, fmt.Errorf("graphdb.findByNormalizedText: %w", err)
+		return err
 	}
-	return out.(*domain.Hypothesis), nil
+	if len(records) == 0 {
+		return fmt.Errorf("graphdb: platform experiment %s has no objective", platformExperimentID)
+	}
+	return nil
 }
 
 func findByNormalizedText(ctx context.Context, tx neo4j.ManagedTransaction, platformExperimentID, normalized string) (*domain.Hypothesis, error) {
