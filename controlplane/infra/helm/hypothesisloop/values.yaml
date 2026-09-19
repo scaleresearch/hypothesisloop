@@ -96,25 +96,3 @@ metricsService:
 # the data path). Point this at a real bucket before installing.
 objectStore:
   endpoint: "http://REPLACE-WITH-HOST-LAN-IP:9000"
-
-# The cluster-agent/node-agent bundle (runs training Jobs on this cluster's own nodes).
-# Disabled by default: a cluster may already have this bundle installed via
-# runtime/k8s/infra/install.sh, and installing both would double-register the same
-# cluster with the control plane. Enable only on a cluster that has neither.
-clusterAgentBundle:
-  enabled: false
-  clusterName: local
-  apiURL: "http://control-service:8081"
-  # node-agent POSTs to $HYPOTHESISLOOP_CONTROL_PLANE_URL/internal/node-metrics, which is served
-  # only by metrics-service (controlplane/cmd/metrics-service/main.go), never control-service —
-  # despite the env var's name, this must point at metrics-service or every push 404s silently.
-  metricsURL: "http://metrics-service:8084"
-  clusterAgent:
-    resources:
-      requests: { cpu: 10m, memory: 32Mi }
-      limits: { cpu: 300m, memory: 64Mi }
-  nodeAgent:
-    pushIntervalMs: 2000
-    resources:
-      requests: { cpu: 10m, memory: 16Mi }
-      limits: { cpu: 250m, memory: 32Mi }

@@ -84,15 +84,15 @@ reset:
 	$(MAKE) controlplane-up
 
 # ---- Cluster agent: one per target Kubernetes cluster running jobs ----------
-# Installs/removes the node-agent DaemonSet + cluster-agent Deployment (the
-# only component with real k8s credentials) on the cluster KUBE_CONTEXT/
+# Installs/removes the runtime/k8s/infra/chart helm release (node-agent DaemonSet + cluster-agent
+# Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
 # KUBECONFIG_PATH point at (or current kubectl context).
 # Usage: make cluster-agent-up CLUSTER=<name> [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [API_URL=...]
 cluster-agent-up:
-	CLUSTER_NAME="$(CLUSTER)" bash runtime/k8s/infra/install.sh
+	CLUSTER_NAME="$(CLUSTER)" REGISTRY_URL="$(REGISTRY)" bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
-	CLUSTER_NAME="$(CLUSTER)" bash runtime/k8s/infra/destroy.sh
+	bash runtime/k8s/infra/destroy.sh
 
 # ---- Local dev cluster bootstrap --------------------------------------------
 # Spins up a local k3s cluster (control-plane only, tainted no-workload — see install.sh), then
@@ -271,6 +271,8 @@ helm-prepare:
 
 helm-lint: helm-prepare
 	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
+	helm lint runtime/k8s/infra/chart --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint \
+		--set-string images.registry=$(REGISTRY),images.tag=$(TAG)
 
 helm-template: helm-prepare
 	helm template hypothesisloop $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)

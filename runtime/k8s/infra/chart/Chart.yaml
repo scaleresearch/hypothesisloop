@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hypothesisloop-cluster-agent
+description: HypothesisLoop runtime for one Kubernetes cluster — the cluster-agent Deployment and the node-agent DaemonSet.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

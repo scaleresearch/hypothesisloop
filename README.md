@@ -249,7 +249,7 @@ interface and swaps a constructor call - no other code changes.
 ### Option A - macOS/Linux with local cluster
 
 ```bash
-brew install podman kubectl go
+brew install podman kubectl helm go
 podman machine init --rootful --cpus 4 --memory 4096 --disk-size 40
 podman machine start
 make k3s-up            # bootstraps a local k3s cluster AND installs the cluster-agent bundle onto it (~3 min first run)
@@ -269,10 +269,11 @@ API_URL=https://your-control-plane:8081 \
 make controlplane-up
 ```
 
-`API_URL` just needs to be reachable *outbound* from inside
-the target cluster - the control plane never needs to reach the cluster at all, so
-there's no kubeconfig or credential to hand it. Repeat `make cluster-agent-up
-CLUSTER=<name>` for every additional target cluster. There is nothing to register
+`make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
+and `REGISTRY` must name a registry every node can pull from (`make images` pushes there).
+`API_URL` just needs to be reachable *outbound* from inside the target cluster - the control
+plane never needs to reach the cluster at all, so there's no kubeconfig or credential to hand
+it. Repeat `make cluster-agent-up CLUSTER=<name>` for every additional target cluster. There is nothing to register
 control-plane side: a cluster exists as soon as its agent reports a heartbeat, and its
 capacity is read from those heartbeats. A typo'd `CLUSTER=` therefore produces a second,
 phantom cluster rather than an error - the name the agent reports is the name.

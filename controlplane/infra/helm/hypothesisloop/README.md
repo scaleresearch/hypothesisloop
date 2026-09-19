@@ -34,10 +34,10 @@ helm install hypothesisloop controlplane/infra/helm/hypothesisloop \
 
 ## What this chart does not do
 
-- **Does not install the cluster-agent/node-agent bundle by default** (`clusterAgentBundle.enabled: false`).
-  A cluster may already have that bundle from `runtime/k8s/infra/install.sh` — installing
-  both would double-register the same cluster with the control plane. Enable it only on a
-  cluster with neither.
+- **Does not install the cluster agent.** Training clusters get the runtime's own chart through
+  `make cluster-agent-up CLUSTER=<name>` (`runtime/k8s/infra/install.sh`), including this one if
+  it also runs jobs. Both use the `hypothesisloop` namespace: install this chart first, or pass
+  `--set namespace.create=false` when the cluster agent already created it.
 - **Does not manage the durable-data object store.** Point `objectStore.endpoint` at an
   existing S3-compatible bucket; the platform is deliberately not in the data path (see
   the `data_store` comment in `controlplane/settings/hypothesisloop.yaml`).

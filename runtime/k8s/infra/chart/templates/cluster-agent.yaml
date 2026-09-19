@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: hypothesisloop-cluster-agent
-  namespace: hypothesisloop
+  namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -64,7 +64,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: hypothesisloop-cluster-agent
-    namespace: hypothesisloop
+    namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
   name: hypothesisloop-cluster-agent
@@ -74,7 +74,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hypothesisloop-cluster-agent
-  namespace: hypothesisloop
+  namespace: {{ .Release.Namespace }}
   labels:
     app: hypothesisloop-cluster-agent
 spec:
@@ -93,29 +93,29 @@ spec:
       serviceAccountName: hypothesisloop-cluster-agent
       containers:
         - name: cluster-agent
-          image: __REGISTRY__/hypothesisloop-cluster-agent:__TAG__
+          image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-cluster-agent:{{ required "images.tag is required" .Values.images.tag }}
           imagePullPolicy: IfNotPresent
           env:
             - name: CLUSTER_NAME
-              value: "__CLUSTER_NAME__"
+              value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: API_URL
-              value: "__API_URL__"
+              value: {{ required "apiURL is required" .Values.apiURL | quote }}
             # Operator-set claim that this cluster sits behind a native autoscaler
             # (cluster-autoscaler / Karpenter) that reacts to Pending pods. Fail-closed default
             # false: a false positive here costs a job a wasted scale-up deadline, so this is
             # never heuristically detected. See autoscaler.md.
             - name: AUTOSCALER_ENABLED
-              value: "__AUTOSCALER_ENABLED__"
+              value: {{ .Values.autoscalerEnabled | quote }}
           resources:
             requests:
               cpu: "10m"
               memory: "32Mi"
-            # See node-agent-daemonset.yaml's resources comment: a tight cpu limit starves
+            # See node-agent.yaml's resources comment: a tight cpu limit starves
             # the container's own startup handshake, not just its steady-state work.
             limits:
               cpu: "300m"
               memory: "64Mi"
-      # Same as node-agent-daemonset.yaml: must always have somewhere to run regardless of
+      # Same as node-agent.yaml: must always have somewhere to run regardless of
       # whether any workload node is attached (box-a's no-workload taint).
       tolerations:
         - operator: Exists

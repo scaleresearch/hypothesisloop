@@ -1,19 +1,14 @@
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: hypothesisloop
----
-apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: hypothesisloop-node-agent
-  namespace: hypothesisloop
+  namespace: {{ .Release.Namespace }}
 ---
 # ClusterRole (not a namespaced Role) deliberately: hypothesisloop-jobs — where the pods this
 # agent needs to read actually live — doesn't exist yet at apply time. It's created later,
-# idempotently, by cluster-agent's own startup (see install.sh). A ClusterRole grants the
+# idempotently, by cluster-agent's own startup. A ClusterRole grants the
 # permission cluster-wide up front so it's already in effect whenever that namespace shows up,
-# with no dependency on apply order between this file and cluster-agent's deployment. The agent
+# with no dependency on apply order between this file and cluster-agent.yaml. The agent
 # itself still only ever lists pods in hypothesisloop-jobs on its own node (see
 # podExperimentIDs in main.go) — this is broader than it uses, not broader than it needs to.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -32,7 +27,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: hypothesisloop-node-agent
-    namespace: hypothesisloop
+    namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
   name: hypothesisloop-node-agent-pod-reader
@@ -42,7 +37,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: hypothesisloop-node-agent
-  namespace: hypothesisloop
+  namespace: {{ .Release.Namespace }}
   labels:
     app: hypothesisloop-node-agent
 spec:
@@ -58,7 +53,7 @@ spec:
       hostPID: true
       containers:
         - name: node-agent
-          image: __REGISTRY__/hypothesisloop-node-agent:__TAG__
+          image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-node-agent:{{ required "images.tag is required" .Values.images.tag }}
           imagePullPolicy: IfNotPresent
           env:
             - name: NODE_NAME
@@ -67,12 +62,11 @@ spec:
                   fieldPath: spec.nodeName
             # Identifies which target cluster this agent bundle is reporting for,
             # so the control plane can attribute metrics/quota to the right cluster
-            # once multi-cluster routing lands. Templated by install.sh from
-            # $CLUSTER_NAME. node-agent does not yet read this env var.
+            # once multi-cluster routing lands. node-agent does not yet read this env var.
             - name: CLUSTER_NAME
-              value: "__CLUSTER_NAME__"
+              value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: HYPOTHESISLOOP_CONTROL_PLANE_URL
-              value: "__METRICS_URL__"
+              value: {{ required "metricsURL is required" .Values.metricsURL | quote }}
             - name: PUSH_INTERVAL_MS
               value: "2000"
           volumeMounts:

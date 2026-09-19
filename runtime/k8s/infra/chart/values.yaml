@@ -1,0 +1,21 @@
+# Installed by runtime/k8s/infra/install.sh, which sets every value from its env vars.
+
+# Name this cluster reports to the control plane. The name the agent reports is the cluster:
+# a typo creates a second one.
+clusterName: ""
+# Control-plane API base URL. Handed to training pods as well, so it must be reachable from inside
+# a pod in this cluster.
+apiURL: ""
+# metrics-service base URL node-agents push observations to. node-agent POSTs to
+# <metricsURL>/internal/node-metrics, served only by metrics-service: a control-service URL here
+# makes every push 404 silently.
+metricsURL: ""
+# true only if this cluster runs a native autoscaler (cluster-autoscaler / Karpenter) that reacts
+# to Pending pods. See autoscaler.md.
+autoscalerEnabled: "false"
+
+images:
+  # Registry every node in this cluster can already pull from.
+  registry: ""
+  # The TAG `make images` pushed.
+  tag: ""

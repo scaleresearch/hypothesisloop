@@ -147,13 +147,7 @@ echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # ---- helm ---------------------------------------------------------------
 STAGE_T0=$(date +%s)
-if ! command -v helm &>/dev/null; then
-  echo "==> Installing Helm..."
-  curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
-    | sudo bash
-else
-  echo "==> Helm already installed ($(helm version --short))."
-fi
+lib_ensure_helm
 
 # tt-operator's umbrella chart depends on the upstream NFD chart by repository
 # URL (not OCI) — helm needs that repo registered locally to resolve the

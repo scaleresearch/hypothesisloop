@@ -15,7 +15,7 @@
 #     labels to a local file for real Node Feature Discovery to merge in — NFD isn't installed
 #     here, so this script applies GFD's output to the Node object directly instead of pulling
 #     in all of NFD for one label.
-#   - cluster-agent bundle (runtime/k8s/infra/install.sh).
+#   - helm, then the cluster-agent chart (runtime/k8s/infra/install.sh).
 #
 # Confirmed working end-to-end against a real RTX 4090 (see tests/e2e/test_nvidia_hardware.py's
 # k3s leg): 164+ TFLOPS fp16 matmul via a real k8s-scheduled pod, real device-plugin GPU
@@ -142,6 +142,7 @@ for img in cluster-agent node-agent; do
   docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "localhost:5000/hypothesisloop-${img}:${TAG}" "${ROOT}" >/dev/null
 done
 
+lib_ensure_helm
 echo "==> Installing cluster-agent bundle (API: ${API_URL})..."
 CLUSTER_NAME="${CLUSTER_NAME}" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" \

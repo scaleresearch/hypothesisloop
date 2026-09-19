@@ -183,7 +183,7 @@ echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # The control-plane node donates zero capacity to workloads by default — it never runs
 # training pods, but node-agent's DaemonSet tolerates every taint
-# (runtime/k8s/infra/node-agent-daemonset.yaml) so it still monitors this node. It pulls
+# (runtime/k8s/infra/chart/templates/node-agent.yaml) so it still monitors this node. It pulls
 # hypothesisloop-node-agent from the registry (registries.yaml, written above) the same way
 # every other node does — nothing to import by hand any more.
 CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"

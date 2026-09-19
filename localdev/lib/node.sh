@@ -66,6 +66,14 @@ lib_create_node() {
   lib_wait_node_ready "$context" "$name"
 }
 
+# lib_ensure_helm installs helm on a provisioning host that lacks it (get-helm uses sudo itself
+# when not root).
+lib_ensure_helm() {
+  command -v helm &>/dev/null && return
+  echo "==> Installing Helm..."
+  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+}
+
 # lib_host_ip prints the source address of this host's default route: the address a k3s node or
 # job pod reaches this host's published ports on. The UDP connect sends no packet.
 lib_host_ip() {
@@ -75,7 +83,7 @@ lib_host_ip() {
 # Prints a k3s registries.yaml that mirrors the local registry at <registry_host_ip>:5000
 # as plain HTTP with no TLS verification -- matches docker-compose.yml's registry service, which
 # is dev-only and never TLS-terminated. A remote cluster's own containerd config is the
-# provisioner's responsibility (see runtime/k8s/infra/install.sh's REGISTRY_URL comment), not
+# provisioner's responsibility (see runtime/k8s/infra/install.sh's REGISTRY_URL), not
 # something this repo generates.
 lib_registries_yaml() {
   local registry_host_ip="$1"
