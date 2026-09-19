@@ -271,12 +271,6 @@ ALTER TABLE experiments DROP COLUMN IF EXISTS estimated_ram_gb_hours;
 ALTER TABLE experiments DROP COLUMN IF EXISTS estimated_storage_gb_hours;
 
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS not_admitted_reason TEXT;
-UPDATE experiments
-SET not_admitted_reason = CASE
-    WHEN status = 'QUEUED' THEN COALESCE(not_admitted_reason, 'capacity_unavailable')
-    ELSE NULL
-END
-WHERE (status = 'QUEUED') <> (not_admitted_reason IS NOT NULL);
 DO $$ BEGIN
     ALTER TABLE experiments ADD CONSTRAINT experiments_queue_reason_consistent
         CHECK ((status = 'QUEUED') = (not_admitted_reason IS NOT NULL));
