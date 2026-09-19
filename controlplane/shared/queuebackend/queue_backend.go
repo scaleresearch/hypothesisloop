@@ -25,7 +25,7 @@ type Store interface {
 type Backend struct {
 	store Store
 	// metricsDBURL is where cluster-agents' live per-flavor accelerator capacity lives (see
-	// clusteragentapi.DesiredState / metricsdb.RecordClusterAcceleratorCapacity) — capacity is
+	// metricsdb.RecordClusterCapacitySnapshot) — capacity is
 	// metric data, read live, never duplicated into Postgres.
 	metricsDBURL string
 	// connectedWithin mirrors clusteragentapi.Handler's staleness window

@@ -182,10 +182,6 @@ func LiveClusterIDs(ctx context.Context, dbURL string, window time.Duration) (ma
 	return out, nil
 }
 
-func RecordClusterHeartbeat(ctx context.Context, dbURL, clusterName string, at time.Time) error {
-	return WriteGaugeAt(ctx, dbURL, clusterHeartbeatMetric, map[string]string{"cluster_name": clusterName}, 1, at)
-}
-
 func LiveClusterHeartbeats(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
 	beats, err := lastValuePerCluster(ctx, dbURL, clusterHeartbeatMetric, window)
 	if err != nil {
@@ -196,18 +192,6 @@ func LiveClusterHeartbeats(ctx context.Context, dbURL string, window time.Durati
 		out[cluster] = true
 	}
 	return out, nil
-}
-
-func RecordClusterCPUCapacity(ctx context.Context, dbURL, clusterName string, available, total float64) error {
-	now := time.Now().UTC()
-	samples := []GaugeSample{
-		{MetricName: clusterCPUAvailableMetric, Labels: map[string]string{"cluster_name": clusterName}, Value: available, At: now},
-		{MetricName: clusterCPUTotalMetric, Labels: map[string]string{"cluster_name": clusterName}, Value: total, At: now},
-	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.RecordClusterCPUCapacity: %w", err)
-	}
-	return nil
 }
 
 // lastValuePerCluster is the most recent value of a per-cluster gauge within window, keyed by
@@ -304,31 +288,6 @@ func LiveClusterNodeLabels(ctx context.Context, dbURL string, window time.Durati
 	return out, nil
 }
 
-// RecordClusterNodeTotalCapacity writes each node's capacity available to platform-scheduled jobs
-// — allocatable minus non-platform-resident pod requests (see runtime GetNodeTotalCapacity
-// implementations), keyed by domain.NodeResource*. Mirrors RecordClusterNodeAcceleratorCapacity's
-// shape, for the total/platform-usable series rather than the free/available one.
-func RecordClusterNodeTotalCapacity(ctx context.Context, dbURL, clusterName string, byNode map[string]map[string]int64) error {
-	now := time.Now().UTC()
-	samples := make([]GaugeSample, 0)
-	for node, byResource := range byNode {
-		for resource, total := range byResource {
-			samples = append(samples, GaugeSample{
-				MetricName: clusterNodeResourceTotalMetric,
-				Labels:     map[string]string{"cluster_name": clusterName, "node": node, "resource": resource},
-				Value:      float64(total), At: now,
-			})
-		}
-	}
-	if len(samples) == 0 {
-		return nil
-	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.RecordClusterNodeTotalCapacity: %w", err)
-	}
-	return nil
-}
-
 // LiveClusterNodeTotalCapacity returns each node's fresh capacity available to platform-scheduled
 // jobs as cluster -> node -> resource -> total amount. Mirrors LiveClusterNodeResourceCapacity's
 // shape, for the total/platform-usable series rather than the free/available one.
@@ -359,29 +318,6 @@ func LiveClusterNodeTotalCapacity(ctx context.Context, dbURL string, window time
 		out[cluster][node][resource] = value
 	}
 	return out, nil
-}
-
-// RecordClusterNodeAcceleratorCapacity writes actual free accelerator counts per node and
-// flavor. Node identity is observation metadata only; placement remains Kubernetes-owned.
-func RecordClusterNodeAcceleratorCapacity(ctx context.Context, dbURL, clusterName string, byNode map[string]map[string]int64) error {
-	now := time.Now().UTC()
-	samples := make([]GaugeSample, 0)
-	for node, byType := range byNode {
-		for acceleratorType, available := range byType {
-			samples = append(samples, GaugeSample{
-				MetricName: clusterNodeAcceleratorAvailableMetric,
-				Labels:     map[string]string{"cluster_name": clusterName, "node": node, "accelerator_type": acceleratorType},
-				Value:      float64(available), At: now,
-			})
-		}
-	}
-	if len(samples) == 0 {
-		return nil
-	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.RecordClusterNodeAcceleratorCapacity: %w", err)
-	}
-	return nil
 }
 
 // LiveClusterNodeAcceleratorCapacity returns fresh actual capacity as
@@ -447,56 +383,9 @@ func LiveClusterNodeResourceCapacity(ctx context.Context, dbURL string, window t
 	return out, nil
 }
 
-// RecordClusterAcceleratorCapacity writes one gauge sample per (flavor, available/total) pair for
-// clusterName, all in a single remote-write batch.
-func RecordClusterAcceleratorCapacity(ctx context.Context, dbURL, clusterName string, availableByFlavor, totalByFlavor map[string]int64) error {
-	if len(availableByFlavor) == 0 {
-		return nil
-	}
-	now := time.Now().UTC()
-	samples := make([]GaugeSample, 0, 2*len(availableByFlavor))
-	for acceleratorType, avail := range availableByFlavor {
-		samples = append(samples, GaugeSample{
-			MetricName: clusterAcceleratorAvailableMetric,
-			Labels:     map[string]string{"cluster_name": clusterName, "accelerator_type": acceleratorType},
-			Value:      float64(avail),
-			At:         now,
-		})
-	}
-	for acceleratorType, total := range totalByFlavor {
-		samples = append(samples, GaugeSample{
-			MetricName: clusterAcceleratorTotalMetric,
-			Labels:     map[string]string{"cluster_name": clusterName, "accelerator_type": acceleratorType},
-			Value:      float64(total),
-			At:         now,
-		})
-	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.RecordClusterAcceleratorCapacity: %w", err)
-	}
-	return nil
-}
-
-// LiveClusterAcceleratorCapacity returns the most recently reported accelerator availability per
-// cluster per flavor, restricted to samples within `window` of now — a cluster/flavor with no
-// report inside the window is simply absent from the result (same freshness gating as
-// metricsdb.IsAlive), so a stale or disconnected cluster contributes nothing.
-//
-// Deprecated: callers that also need total capacity must use
-// LiveClusterAcceleratorAvailableAndTotal instead — reading available and total via two separate
-// queries lets each pick a different "latest heartbeat" instant (e.g. while a cluster-agent is
-// mid-registration and a new snapshot lands between the two round trips), which can publish
-// available > total even though no such state ever existed in storage.
-func LiveClusterAcceleratorCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
-	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorAvailableMetric, window)
-}
-
-// LiveClusterAcceleratorTotalCapacity is LiveClusterAcceleratorCapacity's total-capacity
-// counterpart (allocatable, not allocatable-minus-requested) — same per-cluster-per-flavor
-// shape and freshness gating.
-//
-// Deprecated: see LiveClusterAcceleratorCapacity — pair it with LiveClusterAcceleratorAvailableAndTotal
-// instead of calling this alongside LiveClusterAcceleratorCapacity as two separate queries.
+// LiveClusterAcceleratorTotalCapacity returns the most recently reported total (allocatable)
+// accelerator capacity per cluster per flavor within window. A caller that also needs available
+// capacity must use LiveClusterAcceleratorAvailableAndTotal so both come from one snapshot.
 func LiveClusterAcceleratorTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
 	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorTotalMetric, window)
 }
@@ -504,8 +393,7 @@ func LiveClusterAcceleratorTotalCapacity(ctx context.Context, dbURL string, wind
 // LiveClusterAcceleratorAvailableAndTotal returns available and total accelerator capacity per
 // cluster per flavor from a single query against one shared "latest heartbeat per cluster"
 // snapshot, so the two numbers always come from the same instant. Reading them via two separate
-// queries (the old LiveClusterAcceleratorCapacity + LiveClusterAcceleratorTotalCapacity pairing)
-// let each pick its own latest-heartbeat snapshot independently; if a new snapshot lands between
+// queries let each pick its own latest-heartbeat snapshot independently; if a new snapshot lands between
 // the two round trips — most visibly while a cluster-agent is still registering and pushing its
 // first few snapshots in quick succession — available could be read from a newer instant than
 // total, transiently publishing the impossible available > total.
@@ -728,23 +616,8 @@ const (
 	clusterStorageTotalMetric     = "cluster_storage_total_bytes"
 )
 
-// recordClusterScalarCapacity writes one gauge sample each for availMetric/totalMetric, scoped
-// to clusterName — the shared plumbing behind RecordClusterRAMCapacity/RecordClusterStorageCapacity.
-func recordClusterScalarCapacity(ctx context.Context, dbURL, clusterName, availMetric, totalMetric string, availableBytes, totalBytes int64) error {
-	now := time.Now().UTC()
-	samples := []GaugeSample{
-		{MetricName: availMetric, Labels: map[string]string{"cluster_name": clusterName}, Value: float64(availableBytes), At: now},
-		{MetricName: totalMetric, Labels: map[string]string{"cluster_name": clusterName}, Value: float64(totalBytes), At: now},
-	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.recordClusterScalarCapacity(%s): %w", availMetric, err)
-	}
-	return nil
-}
-
 // liveClusterScalarCapacity returns the most recently reported value of availMetric per cluster,
-// restricted to samples within window of now — same staleness gating as
-// LiveClusterAcceleratorCapacity.
+// restricted to samples within window of now.
 func liveClusterScalarCapacity(ctx context.Context, dbURL, availMetric string, window time.Duration) (map[string]int64, error) {
 	raw, err := lastValuePerCluster(ctx, dbURL, availMetric, window)
 	if err != nil {
@@ -768,13 +641,6 @@ func capacityInt64(value float64) (int64, error) {
 	return int64(value), nil
 }
 
-// RecordClusterRAMCapacity/LiveClusterRAMCapacity report and read live per-cluster RAM
-// availability in bytes (allocatable minus requested, only against nodes with an actually
-// assigned scheduled pod — see workload.JobWorkloadClient.GetLiveRAMCapacity).
-func RecordClusterRAMCapacity(ctx context.Context, dbURL, clusterName string, availableBytes, totalBytes int64) error {
-	return recordClusterScalarCapacity(ctx, dbURL, clusterName, clusterRAMAvailableMetric, clusterRAMTotalMetric, availableBytes, totalBytes)
-}
-
 func LiveClusterRAMCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
 	return liveClusterScalarCapacity(ctx, dbURL, clusterRAMAvailableMetric, window)
 }
@@ -783,13 +649,6 @@ func LiveClusterRAMCapacity(ctx context.Context, dbURL string, window time.Durat
 // (allocatable, not allocatable-minus-requested).
 func LiveClusterRAMTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
 	return liveClusterScalarCapacity(ctx, dbURL, clusterRAMTotalMetric, window)
-}
-
-// RecordClusterStorageCapacity/LiveClusterStorageCapacity are RAM's ephemeral-storage
-// counterpart. Kubernetes enforces ephemeral storage through eviction rather than a memory-like
-// hard cgroup ceiling.
-func RecordClusterStorageCapacity(ctx context.Context, dbURL, clusterName string, availableBytes, totalBytes int64) error {
-	return recordClusterScalarCapacity(ctx, dbURL, clusterName, clusterStorageAvailableMetric, clusterStorageTotalMetric, availableBytes, totalBytes)
 }
 
 func LiveClusterStorageCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {

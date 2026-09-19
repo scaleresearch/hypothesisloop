@@ -24,24 +24,15 @@ const (
 	ExperimentMetricFraction = "experiment_metric_fraction"
 )
 
-// RecordObservation writes a single "experimentID was alive" sample at `at` — the agent's own
-// collection time, not receipt time (see WriteGaugeAt). extraLabels (pod_uid, node, ...) are
-// carried for debugging only; every read here collapses across them.
-func RecordObservation(ctx context.Context, dbURL, experimentID string, at time.Time, extraLabels map[string]string) error {
-	return WriteGaugesAt(ctx, dbURL, []GaugeSample{observationSample(experimentID, at, extraLabels)})
-}
-
-// Observation is one pod's "experimentID was alive" reading for RecordObservations' batch write —
-// the same shape as RecordObservation's arguments, just collected up front so every pod a single
-// push payload reports becomes one remote-write request instead of one per pod.
+// Observation is one pod's "experimentID was alive" reading at its collection time. ExtraLabels
+// (pod_uid, node, ...) are carried for debugging only; every read collapses across them.
 type Observation struct {
 	ExperimentID string
 	At           time.Time
 	ExtraLabels  map[string]string
 }
 
-// RecordObservations writes every observation in one Prometheus remote-write request — the batch
-// form of RecordObservation, for a caller (the node-agent push handler) that already has several
+// RecordObservations writes every observation in one Prometheus remote-write request, for a caller (the node-agent push handler) that already has several
 // pods' readings in hand from a single payload and would otherwise issue one HTTP round trip per
 // pod for what is, from GreptimeDB's point of view, one write.
 func RecordObservations(ctx context.Context, dbURL string, observations []Observation) error {

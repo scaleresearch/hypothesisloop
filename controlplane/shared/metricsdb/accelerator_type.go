@@ -17,17 +17,6 @@ import (
 // poll tick never gets an observation at all) and what replaced it.
 const acceleratorTypeMetric = "experiment_accelerator_type_active"
 
-// RecordAcceleratorType marks experimentID as running on acceleratorType as of `at`. Exported
-// for tests/tools that want to seed this metric directly; production writes go through
-// RecordJobStatuses instead.
-func RecordAcceleratorType(ctx context.Context, dbURL, experimentID, acceleratorType string, at time.Time) error {
-	if acceleratorType == "" {
-		return nil
-	}
-	labels := map[string]string{"experiment_id": experimentID, "accelerator_type": acceleratorType}
-	return WriteGaugeAt(ctx, dbURL, acceleratorTypeMetric, labels, 1, at)
-}
-
 // acceleratorTypeChange is one "type became X as of this write" event, resolved from GreptimeDB
 // with its real write timestamp (not a query-grid timestamp).
 type acceleratorTypeChange struct {

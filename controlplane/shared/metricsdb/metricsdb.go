@@ -59,23 +59,6 @@ func (m *rwWriteRequest) Reset()         {}
 func (m *rwWriteRequest) String() string { return fmt.Sprintf("%d series", len(m.Timeseries)) }
 func (m *rwWriteRequest) ProtoMessage()  {}
 
-// WriteGauge pushes a single (metric_name, labels, value) sample to GreptimeDB via Prometheus
-// remote write, timestamped now. For delayed observations use WriteGaugeAt with the observation's
-// collection timestamp.
-func WriteGauge(ctx context.Context, dbURL, metricName string, labels map[string]string, value float64) error {
-	return WriteGaugeAt(ctx, dbURL, metricName, labels, value, time.Now().UTC())
-}
-
-// WriteGaugeAt pushes a single (metric_name, labels, value) sample to GreptimeDB via Prometheus
-// remote write, timestamped at `at` rather than call time. This matters for anything that can be
-// delayed or retried (a node-agent heartbeat buffered through a network blip, a batch flush after
-// an outage): the stored sample must carry the moment the event actually happened, not the moment
-// it happened to arrive, or every downstream query recomputing "how long was this alive" would
-// silently absorb the delivery delay as if it were real elapsed time.
-func WriteGaugeAt(ctx context.Context, dbURL, metricName string, labels map[string]string, value float64, at time.Time) error {
-	return WriteGaugesAt(ctx, dbURL, []GaugeSample{{MetricName: metricName, Labels: labels, Value: value, At: at}})
-}
-
 // GaugeSample is one (metric_name, labels, value, timestamp) point for WriteGaugesAt.
 type GaugeSample struct {
 	MetricName string
@@ -88,8 +71,8 @@ type GaugeSample struct {
 // request. Prometheus remote write is designed to carry a batch of timeseries per request; a
 // caller with several related samples to write at once (e.g. the node-agent's per-node push,
 // which reports every pod on the node in one payload) should batch them here rather than issuing
-// one HTTP round trip per sample — same durability and per-sample timestamp semantics as
-// WriteGaugeAt, just fewer requests for the same data.
+// one HTTP round trip per sample. Each sample carries the moment it
+// was observed, so a delayed delivery is not counted as elapsed time.
 func WriteGaugesAt(ctx context.Context, dbURL string, samples []GaugeSample) error {
 	if len(samples) == 0 {
 		return nil
@@ -319,27 +302,6 @@ func QueryRange(ctx context.Context, dbURL, promQL string, start, end time.Time,
 			series.Points = append(series.Points, RangePoint{Time: time.UnixMilli(int64(tsFloat * 1000)).UTC(), Value: val})
 		}
 		out = append(out, series)
-	}
-	return out, nil
-}
-
-// QueryAgentValues runs an instant PromQL query and returns a map of agent_id → value, for
-// queries whose result vector is grouped by the agent_id label (e.g. "max by (agent_id) (...)").
-func QueryAgentValues(ctx context.Context, dbURL, promQL string) (map[string]float64, error) {
-	samples, err := QueryVector(ctx, dbURL, promQL)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]float64, len(samples))
-	for _, s := range samples {
-		agentID := s.Labels["agent_id"]
-		if agentID == "" {
-			return nil, fmt.Errorf("metricsdb.QueryAgentValues: result missing agent_id")
-		}
-		if _, exists := out[agentID]; exists {
-			return nil, fmt.Errorf("metricsdb.QueryAgentValues: duplicate agent_id %q", agentID)
-		}
-		out[agentID] = s.Value
 	}
 	return out, nil
 }

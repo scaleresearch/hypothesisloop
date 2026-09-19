@@ -17,18 +17,6 @@ import (
 // an admission/billing decision) the metrics store already owns for accelerator type.
 const experimentNodeMetric = "experiment_node_active"
 
-// RecordExperimentNode marks experimentID as running on node as of `at`. Call this every time a
-// status report carries a non-empty node (not just on first observation) — a job rescheduled onto
-// a different node needs a fresh marker, the same way RecordAcceleratorType is re-written on every
-// re-admission.
-func RecordExperimentNode(ctx context.Context, dbURL, experimentID, node string, at time.Time) error {
-	if node == "" {
-		return nil
-	}
-	labels := map[string]string{"experiment_id": experimentID, "node": node}
-	return WriteGaugeAt(ctx, dbURL, experimentNodeMetric, labels, 1, at)
-}
-
 // LatestExperimentNode returns the most recently recorded node for experimentID since its row was
 // created, or ("", false, nil) if nothing was ever recorded — e.g. a job that never got far enough
 // to schedule a pod, or one whose samples have aged out of retention.
