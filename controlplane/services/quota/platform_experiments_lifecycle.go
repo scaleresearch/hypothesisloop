@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,17 +120,23 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 		// unmodified schedule field comes back coarser than what's stored; compare at that
 		// granularity rather than false-flagging every running-status edit as a schedule change.
 		const timePrecision = time.Minute
-		locked := (req.BudgetAcceleratorHours > 0 && req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours) ||
-			(req.MaxAgents > 0 && req.MaxAgents != pe.MaxAgents) ||
-			(req.Metrics != nil && !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics)) ||
-			(req.ReportIntervalSeconds > 0 && req.ReportIntervalSeconds != pe.ReportIntervalSeconds) ||
-			(!req.StartsAt.IsZero() && !req.StartsAt.Truncate(timePrecision).Equal(pe.StartsAt.Truncate(timePrecision))) ||
-			(!req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision))) ||
-			(req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy) ||
-			(req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy) ||
-			(req.MaxConcurrentAccelerators != nil && (pe.MaxConcurrentAccelerators == nil || *req.MaxConcurrentAccelerators != *pe.MaxConcurrentAccelerators))
-		if locked {
-			return nil, fmt.Errorf("experiment_running: only name and description can be amended once running")
+		var locked []string
+		lock := func(field string, changed bool) {
+			if changed {
+				locked = append(locked, field)
+			}
+		}
+		lock("budget_accelerator_hours", req.BudgetAcceleratorHours > 0 && req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours)
+		lock("max_agents", req.MaxAgents > 0 && req.MaxAgents != pe.MaxAgents)
+		lock("metrics", req.Metrics != nil && !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics))
+		lock("report_interval_seconds", req.ReportIntervalSeconds > 0 && req.ReportIntervalSeconds != pe.ReportIntervalSeconds)
+		lock("starts_at", !req.StartsAt.IsZero() && !req.StartsAt.Truncate(timePrecision).Equal(pe.StartsAt.Truncate(timePrecision)))
+		lock("ends_at", !req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision)))
+		lock("hypothesis_submit_policy", req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy)
+		lock("job_submit_policy", req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy)
+		lock("max_concurrent_accelerators", req.MaxConcurrentAccelerators != nil && (pe.MaxConcurrentAccelerators == nil || *req.MaxConcurrentAccelerators != *pe.MaxConcurrentAccelerators))
+		if len(locked) > 0 {
+			return nil, fmt.Errorf("experiment_running: only name and description can be amended once running; these fields differ from the live experiment: %s; set them to the live values", strings.Join(locked, ", "))
 		}
 	} else {
 		if req.BudgetAcceleratorHours > 0 {

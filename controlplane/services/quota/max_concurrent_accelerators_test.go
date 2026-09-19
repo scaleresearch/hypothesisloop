@@ -84,3 +84,30 @@ func TestUpdatePlatformExperimentChangesMaxConcurrentAccelerators(t *testing.T) 
 		t.Fatalf("Update: got MaxConcurrentAccelerators = %v, want 8", pe.MaxConcurrentAccelerators)
 	}
 }
+
+func TestUpdateRunningPlatformExperimentNamesTheLockedFieldsThatDiffer(t *testing.T) {
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	store := &createStore{created: &domain.PlatformExperiment{
+		ID: "pe-1", Status: domain.PlatformExpRunning, Description: "old",
+		BudgetAcceleratorHours: 20, MaxAgents: 4, StartsAt: start, EndsAt: start.Add(time.Hour),
+	}}
+	svc := newSignupTestService(t, store)
+
+	_, err := svc.Update(context.Background(), "pe-1", CreatePlatformExperimentRequest{
+		Description: "new", BudgetAcceleratorHours: 10, MaxAgents: 4, StartsAt: start.Add(-24 * time.Hour),
+	})
+	want := "experiment_running: only name and description can be amended once running; these fields differ from the live experiment: budget_accelerator_hours, starts_at; set them to the live values"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Update error = %v\nwant %s", err, want)
+	}
+
+	pe, err := svc.Update(context.Background(), "pe-1", CreatePlatformExperimentRequest{
+		Description: "new", BudgetAcceleratorHours: 20, StartsAt: start,
+	})
+	if err != nil {
+		t.Fatalf("Update with only live values besides the description: %v", err)
+	}
+	if pe.Description != "new" {
+		t.Fatalf("Description = %q, want %q", pe.Description, "new")
+	}
+}
