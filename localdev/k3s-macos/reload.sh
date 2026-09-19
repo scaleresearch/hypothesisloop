@@ -14,9 +14,9 @@ TAG="${TAG:?run make reload, which builds the images and exports their TAG}"
 # node-agent/cluster-agent run as manifests pinned to a tag (runtime/k8s/infra/install.sh's
 # TAG), so a plain pod restart alone would keep pulling the OLD tag under IfNotPresent -- the
 # manifest itself must be re-applied with the new TAG for a delete+recreate to fetch anything.
-REGISTRY_HOST_IP="$(cat "${SCRIPT_DIR}/../.registry-host-ip")"
+HOST_ADDRESS="$(cat "${SCRIPT_DIR}/../.host-address")"
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG}" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 
 echo "==> Recreating control-plane containers..."

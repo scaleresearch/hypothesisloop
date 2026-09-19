@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/../lib/node.sh"
 
 # k3s pulls images from the local registry (docker-compose.yml) over this address, not
 # localhost, since the VM/native k3s process is not in the host's network namespace.
-REGISTRY_HOST_IP="$(lib_host_ip)"
+HOST_ADDRESS="$(lib_host_address)"
 
 # Pinned to a k3s release bundling k8s 1.36, which introduced native (alpha) gang scheduling —
 # the Job controller auto-creates Workload/PodGroup objects and the in-tree scheduler admits/
@@ -64,8 +64,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
   # base64-piped rather than interpolated into the remote command string: this file's content
   # (colons, quotes) would otherwise need a second layer of shell-quoting through ssh, the exact
   # trap K3S_KUBELET_IMAGE_GC_FLAGS's own escaping comment above warns about.
-  echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
-  REGISTRIES_YAML_B64="$(lib_registries_yaml "${REGISTRY_HOST_IP}" | base64 | tr -d '\n')"
+  echo "==> Writing registries.yaml (registry at ${HOST_ADDRESS}:5000)..."
+  REGISTRIES_YAML_B64="$(lib_registries_yaml "${HOST_ADDRESS}" | base64 | tr -d '\n')"
   vm "sudo mkdir -p /etc/rancher/k3s && echo ${REGISTRIES_YAML_B64} | base64 -d | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null"
   vm "sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true"
 
@@ -133,9 +133,9 @@ sys.stdout.write(re.sub(
 
 # ---- Linux: k3s native ------------------------------------------------------
 else
-  echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
+  echo "==> Writing registries.yaml (registry at ${HOST_ADDRESS}:5000)..."
   sudo mkdir -p /etc/rancher/k3s
-  lib_registries_yaml "${REGISTRY_HOST_IP}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
+  lib_registries_yaml "${HOST_ADDRESS}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
   sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
 
   if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
@@ -189,7 +189,7 @@ echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"
 lib_detach_node "${CONTEXT_NAME}" "${CONTROL_PLANE_NODE}"
 
-echo "${REGISTRY_HOST_IP}" > "${SCRIPT_DIR}/../.registry-host-ip"
+echo "${HOST_ADDRESS}" > "${SCRIPT_DIR}/../.host-address"
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 kubectl --context "${CONTEXT_NAME}" get nodes
@@ -200,7 +200,7 @@ kubectl --context "${CONTEXT_NAME}" get nodes
 echo "==> Installing cluster-agent bundle onto local cluster..."
 STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 

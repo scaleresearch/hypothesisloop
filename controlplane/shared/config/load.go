@@ -108,7 +108,7 @@ func (c *Config) build() error {
 		return fmt.Errorf("data_store endpoint %q is not a URL: %w", c.DataStore.Endpoint, err)
 	}
 	if host := endpointHost.Hostname(); host == "localhost" || net.ParseIP(host).IsLoopback() {
-		return fmt.Errorf("data_store endpoint %q is loopback — job pods run in their own network namespace and cannot reach it. Use the host's LAN address (ip -4 addr show)", c.DataStore.Endpoint)
+		return fmt.Errorf("data_store endpoint %q is loopback — job pods run in their own network namespace and cannot reach it. Use an address job pods reach (host.containers.internal under podman machine, else the host's LAN address)", c.DataStore.Endpoint)
 	}
 	if err := domain.ValidateStages(c.Stages.Default); err != nil {
 		return fmt.Errorf("stages.default: %w", err)

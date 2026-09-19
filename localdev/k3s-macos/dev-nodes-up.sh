@@ -16,9 +16,9 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
 
-REGISTRY_HOST_IP="$(cat "${DIR}/../.registry-host-ip" 2>/dev/null || true)"
-: "${REGISTRY_HOST_IP:?run \`make render-settings\` (or \`make controlplane-up\`) first -- ${DIR}/../.registry-host-ip is missing}"
-export REGISTRY_HOST_IP
+HOST_ADDRESS="$(cat "${DIR}/../.host-address" 2>/dev/null || true)"
+: "${HOST_ADDRESS:?run \`make render-settings\` (or \`make controlplane-up\`) first -- ${DIR}/../.host-address is missing}"
+export HOST_ADDRESS
 
 CONTEXT_NAME="k3s-local"
 NODE_COUNT="${NODE_COUNT:-4}"
@@ -64,7 +64,7 @@ for i in $(seq 1 "${NODE_COUNT}"); do
       podman start "${name}" >/dev/null
     fi
     # A node created before the host changed networks still pulls from the old address.
-    if ! podman exec "${name}" grep -q "${REGISTRY_HOST_IP}:5000" /etc/rancher/k3s/registries.yaml; then
+    if ! podman exec "${name}" grep -q "${HOST_ADDRESS}:5000" /etc/rancher/k3s/registries.yaml; then
       lib_destroy_node "${CONTEXT_NAME}" "${name}"
     fi
   fi

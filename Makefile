@@ -11,13 +11,16 @@
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
 RENDERED_SETTINGS := controlplane/settings/.hypothesisloop.rendered.yaml
-REGISTRY_HOST_IP_FILE := localdev/.registry-host-ip
+HOST_ADDRESS_FILE := localdev/.host-address
 IMAGE_TAG_FILE := localdev/.image-tag
 
-# REGISTRY_HOST_IP is this host's LAN address (localdev/lib/node.sh's lib_host_ip): the local
-# registry publishes on it and every k3s node and job pod reaches the host through it. Never
-# localhost: a node has its own network namespace, and macOS AirPlay holds *:5000.
-REGISTRY_HOST_IP := $(shell bash -c '. localdev/lib/node.sh && lib_host_ip')
+# HOST_ADDRESS is how every k3s node, job pod and container reaches this host's published ports
+# (localdev/lib/node.sh's lib_host_address): host.containers.internal on macOS, which survives
+# the Mac changing networks, and the LAN address on a native Linux k3s. REGISTRY_PUBLISH_IP is
+# where the registry publishes: the Mac's loopback, which host.containers.internal leads to, or
+# the LAN address on Linux. Never *:5000, which macOS AirPlay holds.
+HOST_ADDRESS := $(shell bash -c '. localdev/lib/node.sh && lib_host_address')
+REGISTRY_PUBLISH_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry_publish_ip')
 
 # In production REGISTRY names a real registry the operator provisioned and every cluster
 # node already has network access to (see runtime/k8s/infra/install.sh's REGISTRY_URL) --
@@ -26,32 +29,30 @@ REGISTRY_HOST_IP := $(shell bash -c '. localdev/lib/node.sh && lib_host_ip')
 # imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
 # image reads it from make. REGISTRY_TLS_VERIFY=false only because the dev registry
 # in docker-compose.yml serves plain HTTP; a prod REGISTRY with real TLS overrides it to true.
-REGISTRY ?= $(REGISTRY_HOST_IP):5000
+REGISTRY ?= $(HOST_ADDRESS):5000
 ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
-export REGISTRY_HOST_IP REGISTRY TAG
+export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
 REGISTRY_TLS_VERIFY ?= false
 
 check-tag:
 	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
 
 # data_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
-# REPLACE-WITH-HOST-LAN-IP placeholder rather than an address, because a k3s job pod has its own
-# network namespace and can't reach the host's loopback -- the real address is specific to
-# whichever machine runs this stack, and baking one host's address into a tracked file breaks it
-# for every other. This renders the real address in at start-up; the control plane rejects a
-# loopback endpoint outright, so a host where detection picks the wrong interface fails here,
-# not hours into a run with nothing saved.
-# REGISTRY_HOST_IP_FILE hands the same address to the scripts and tests that run outside make.
+# REPLACE-WITH-HOST-ADDRESS placeholder rather than an address, because a k3s job pod has its own
+# network namespace and can't reach the host's loopback, and the address differs between macOS
+# and Linux hosts. This renders HOST_ADDRESS in at start-up; the control plane rejects a
+# loopback endpoint outright, so a wrong address fails here, not hours into a run with nothing saved.
+# HOST_ADDRESS_FILE hands the same address to the scripts and tests that run outside make.
 render-settings:
-	@test -n "$(REGISTRY_HOST_IP)" || { echo "make: could not detect this host's LAN address" >&2; exit 1; }
-	sed "s|REPLACE-WITH-HOST-LAN-IP|$(REGISTRY_HOST_IP)|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS)
-	echo "$(REGISTRY_HOST_IP)" > $(REGISTRY_HOST_IP_FILE)
+	@test -n "$(HOST_ADDRESS)" || { echo "make: could not detect this host's address" >&2; exit 1; }
+	sed "s|REPLACE-WITH-HOST-ADDRESS|$(HOST_ADDRESS)|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS)
+	echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
 
 registry-up:
 	podman compose -f $(COMPOSE_FILE) up -d registry
-	@until curl -fsS -o /dev/null http://$(REGISTRY_HOST_IP):5000/v2/; do sleep 1; done
+	@until curl -fsS -o /dev/null http://$(REGISTRY_PUBLISH_IP):5000/v2/; do sleep 1; done
 
 registry-prune:
 	bash localdev/controlplane/registry-prune.sh

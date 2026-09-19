@@ -2,7 +2,7 @@
 {{- if not $raw }}
 {{- fail "files/hypothesisloop.yaml is missing — run `make helm-prepare` before installing this chart" }}
 {{- end }}
-{{- $raw = regexReplaceAll "endpoint: http://REPLACE-WITH-HOST-LAN-IP:9000" $raw (printf "endpoint: %s" .Values.objectStore.endpoint) }}
+{{- $raw = regexReplaceAll "endpoint: http://REPLACE-WITH-HOST-ADDRESS:9000" $raw (printf "endpoint: %s" .Values.objectStore.endpoint) }}
 {{- $raw = regexReplaceAll "metrics_db_url: http://greptimedb:4000" $raw (printf "metrics_db_url: %s" (include "hypothesisloop.metricsDBURL" .)) }}
 {{- $raw = regexReplaceAll "graph_db_url: bolt://memgraph:7687" $raw (printf "graph_db_url: %s" (include "hypothesisloop.graphDBURL" .)) }}
 apiVersion: v1

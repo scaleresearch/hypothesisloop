@@ -9,8 +9,8 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
 export NODE_PODMAN="sudo podman"
-REGISTRY_HOST_IP="$(cat "${DIR}/../.registry-host-ip")"
-export REGISTRY_HOST_IP
+HOST_ADDRESS="$(cat "${DIR}/../.host-address")"
+export HOST_ADDRESS
 
 CONTEXT="${TT_CONTEXT:-k3s-tt}"
 NODE="${TT_NODE:-box-a}"
@@ -27,7 +27,7 @@ IMAGE="docker.io/rancher/k3s:${K3S_VERSION}"
 # H200 dropped to keep 4 node slots total (other scenarios tolerate zero H200 capacity).
 ACCELERATOR_TYPES=(H100:NVIDIA-H100-80GB-HBM3 H100:NVIDIA-H100-80GB-HBM3 L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIe)
 
-SERVER_URL="https://${REGISTRY_HOST_IP}:6443"
+SERVER_URL="https://${HOST_ADDRESS}:6443"
 TOKEN="$(sudo cat /var/lib/rancher/k3s/server/node-token)"
 
 echo "==> Provisioning ${NODE_COUNT} fake accelerator node(s) (${NODE_CPUS} cpu / ${NODE_MEMORY} each)..."

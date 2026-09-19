@@ -95,4 +95,4 @@ metricsService:
 # controlplane/settings/hypothesisloop.yaml's data_store comment: the platform is not in
 # the data path). Point this at a real bucket before installing.
 objectStore:
-  endpoint: "http://REPLACE-WITH-HOST-LAN-IP:9000"
+  endpoint: "http://REPLACE-WITH-HOST-ADDRESS:9000"

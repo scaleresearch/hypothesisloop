@@ -61,19 +61,21 @@ silently improvise.
    sibling's `seed/` in prose; check `experiment.md` first.
    **`$CODE_REPO_URL` is a separate repo, not a live mirror of this one** — after editing
    `seed/`, push it to `$CODE_REPO_URL`'s `main` too, and diff-check before spawning agents.
-   **`CODE_REPO_URL` must use the host's LAN IP (e.g. `git://192.0.2.10/...`), never
-   `127.0.0.1`.** The coordinator/agent containers run `--network host` so `127.0.0.1` resolves
+   **`CODE_REPO_URL` must use the host address in `localdev/.host-address` (written by
+   `make render-settings`: `host.containers.internal` on macOS, the LAN IP on a Linux host, e.g.
+   `git://host.containers.internal/...`), never `127.0.0.1`.** The coordinator/agent containers run `--network host` so `127.0.0.1` resolves
    there, but a job pod (k3s) is in a separate network namespace and can't reach the host's
    loopback — `code_ref` built from a `127.0.0.1` `CODE_REPO_URL` fails to clone inside every job,
-   with no useful error beyond "connection refused". The LAN IP is in `localdev/.registry-host-ip`
-   (written by `make render-settings`).
+   with no useful error beyond "connection refused". On macOS `host.containers.internal` is
+   answered inside the podman machine with a fixed address that leads to the Mac's loopback, so
+   it keeps working when the Mac changes networks; the git daemon listens on every interface.
    Confirm reachability from *inside a real job pod*, not just from the coordinator container.
    **`data_store.endpoint` in `controlplane/settings/hypothesisloop.yaml` has the same rule and
    the same reason.** Job pods reach the object store directly to write checkpoints (the platform
-   is not in the data path), so it must be the host LAN address too — the shipped value is the
-   placeholder `http://REPLACE-WITH-HOST-LAN-IP:9000`, and loading a config whose endpoint is
+   is not in the data path), so it must be the host address too — the shipped value is the
+   placeholder `http://REPLACE-WITH-HOST-ADDRESS:9000`, and loading a config whose endpoint is
    loopback is refused outright rather than failing later inside a job. `make controlplane-up`
-   publishes the S3 store (Silo) on `:9000` and creates the bucket; the LAN address is reachable from the
+   publishes the S3 store (Silo) on `:9000` and creates the bucket; the host address is reachable from the
    control-plane containers as well, so one value serves both.
 4. **Job image** built before agents start (e.g. `make sparse-sdpa-workload-image`), smoke-tested
    on real hardware (`podman run --device /dev/tenstorrent/0 -v
@@ -88,8 +90,8 @@ silently improvise.
    the per-experiment `seed/build_and_push.sh` where one exists (it pushes and renders the
    job.yaml's placeholder image ref into `job.rendered.yaml`; push that to `$CODE_REPO_URL` with
    the rest of `seed/`), or `make <name>-workload-image` for the platform's
-   own images. Verify with `podman pull --tls-verify=false <LAN IP>:5000/<image>:<tag>` (the address in
-   `localdev/.registry-host-ip`) from any cluster node before spawning any agents.
+   own images. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
+   `localdev/.host-address`) from any cluster node before spawning any agents.
 5. `make git-daemon-start` (safe to re-run).
 
 ## 2. Create the platform experiment

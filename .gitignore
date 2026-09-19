@@ -101,6 +101,6 @@ agents/coordinator/experiments/*/
 !agents/coordinator/experiments/shampoo-family-optimizers/
 controlplane/settings/.hypothesisloop.rendered.yaml
 agents/coordinator/experiments/*/seed/*.rendered.yaml
-localdev/.registry-host-ip
+localdev/.host-address
 localdev/.image-tag
 controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml

@@ -26,8 +26,8 @@ wait_for() {
 # fake nodes don't need, since they only advertise capacity, not enforce real QoS limits.
 # Usage: lib_create_node <context> <name> <image> <server_url> <token> <cpus> <memory> [network] [ip]
 #
-# REGISTRY_HOST_IP (required, env) is the one address every node pulls images through — the
-# lib_host_ip address `make render-settings` writes for data_store.endpoint. k3s reads
+# HOST_ADDRESS (required, env) is the one address every node pulls images through — the
+# lib_host_address `make render-settings` writes for data_store.endpoint. k3s reads
 # registries.yaml at agent-process start, not on a later reload, so it must exist inside the
 # container's filesystem before `agent` runs. It is copied in between create and start: a bind
 # mount of a host temp file disappears with it once removed (macOS virtiofs), and the node then
@@ -37,11 +37,11 @@ lib_create_node() {
   local network="${8:-}" ip="${9:-}"
   local podman_cmd="${NODE_PODMAN:-podman}"
 
-  : "${REGISTRY_HOST_IP:?lib_create_node: REGISTRY_HOST_IP must be set (see Makefile render-settings target)}"
+  : "${HOST_ADDRESS:?lib_create_node: HOST_ADDRESS must be set (see Makefile render-settings target)}"
   local config_dir
   config_dir="$(mktemp -d)"
   mkdir -p "${config_dir}/rancher/k3s"
-  lib_registries_yaml "$REGISTRY_HOST_IP" > "${config_dir}/rancher/k3s/registries.yaml"
+  lib_registries_yaml "$HOST_ADDRESS" > "${config_dir}/rancher/k3s/registries.yaml"
 
   # Expanded below as ${net_args[@]+"${net_args[@]}"}: under `set -u`, macOS's bash 3.2 treats
   # an unset-because-empty array as an unbound variable.
@@ -74,26 +74,39 @@ lib_ensure_helm() {
   curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 }
 
-# lib_host_ip prints the source address of this host's default route: the address a k3s node or
-# job pod reaches this host's published ports on. The UDP connect sends no packet.
+# lib_host_ip prints the source address of this host's default route. The UDP connect sends no packet.
 lib_host_ip() {
   python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("1.1.1.1", 80)); print(s.getsockname()[0])'
 }
 
-# Prints a k3s registries.yaml that mirrors the local registry at <registry_host_ip>:5000
+# lib_host_address prints the name a k3s node, job pod or container reaches this host's published
+# ports on. On macOS every one of them runs in the podman machine, where gvproxy answers
+# host.containers.internal with a fixed address leading to the Mac's loopback, so it holds when
+# the Mac changes networks. A native Linux k3s has no such name; there it is the LAN address.
+lib_host_address() {
+  if [[ "$(uname)" == "Darwin" ]]; then echo host.containers.internal; else lib_host_ip; fi
+}
+
+# lib_registry_publish_ip prints the host address the registry publishes on: the loopback
+# host.containers.internal leads to on macOS, the LAN address on Linux.
+lib_registry_publish_ip() {
+  if [[ "$(uname)" == "Darwin" ]]; then echo 127.0.0.1; else lib_host_ip; fi
+}
+
+# Prints a k3s registries.yaml that mirrors the local registry at <registry_host>:5000
 # as plain HTTP with no TLS verification -- matches docker-compose.yml's registry service, which
 # is dev-only and never TLS-terminated. A remote cluster's own containerd config is the
 # provisioner's responsibility (see runtime/k8s/infra/install.sh's REGISTRY_URL), not
 # something this repo generates.
 lib_registries_yaml() {
-  local registry_host_ip="$1"
+  local registry_host="$1"
   cat <<EOF
 mirrors:
-  "${registry_host_ip}:5000":
+  "${registry_host}:5000":
     endpoint:
-      - "http://${registry_host_ip}:5000"
+      - "http://${registry_host}:5000"
 configs:
-  "${registry_host_ip}:5000":
+  "${registry_host}:5000":
     tls:
       insecure_skip_verify: true
 EOF

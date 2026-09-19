@@ -6,7 +6,7 @@
 # unrelated GC/repair runs and can't be trusted as "when this tag was built".
 set -euo pipefail
 
-REGISTRY="${REGISTRY_HOST_IP:?run make registry-prune, which detects the host LAN address}:5000"
+REGISTRY="${REGISTRY_PUBLISH_IP:?run make registry-prune, which detects the host address}:5000"
 REGISTRY_PRUNE_DAYS="${REGISTRY_PRUNE_DAYS:-7}"
 REGISTRY_CONTAINER="${REGISTRY_CONTAINER:-controlplane-registry-1}"
 

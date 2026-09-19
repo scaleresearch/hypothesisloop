@@ -11,10 +11,10 @@ source "${SCRIPT_DIR}/../lib/node.sh"
 
 TAG="${TAG:?run make tt-reload, which builds the images and exports their TAG}"
 
-REGISTRY_HOST_IP="$(cat "${SCRIPT_DIR}/../.registry-host-ip")"
+HOST_ADDRESS="$(cat "${SCRIPT_DIR}/../.host-address")"
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="http://${REGISTRY_HOST_IP}:8081" METRICS_URL="http://${REGISTRY_HOST_IP}:8084" \
-  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" TAG="${TAG}" \
+  API_URL="http://${HOST_ADDRESS}:8081" METRICS_URL="http://${HOST_ADDRESS}:8084" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 
 echo "==> Recreating control-plane containers..."

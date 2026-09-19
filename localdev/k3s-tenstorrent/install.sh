@@ -43,7 +43,7 @@ source "${SCRIPT_DIR}/../lib/node.sh"
 
 # k3s's containerd pulls images from the local registry (docker-compose.yml) over this address,
 # never localhost.
-REGISTRY_HOST_IP="$(lib_host_ip)"
+HOST_ADDRESS="$(lib_host_address)"
 
 # Matches localdev/k3s-macos/install.sh's pin so both profiles track the same tested k8s
 # minor version. DRA (resource.k8s.io/v1) is GA from k8s 1.34; this is comfortably past
@@ -100,9 +100,9 @@ fi
 
 # ---- k3s: native systemd service, same version pin as localdev --------------
 STAGE_T0=$(date +%s)
-echo "==> Writing registries.yaml (registry at ${REGISTRY_HOST_IP}:5000)..."
+echo "==> Writing registries.yaml (registry at ${HOST_ADDRESS}:5000)..."
 sudo mkdir -p /etc/rancher/k3s
-lib_registries_yaml "${REGISTRY_HOST_IP}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
+lib_registries_yaml "${HOST_ADDRESS}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
 sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
 
 echo "==> Ensuring k3s ${K3S_VERSION} is installed and running..."
@@ -203,10 +203,10 @@ STAGE_T0=$(date +%s)
 # publish on 0.0.0.0 (confirmed via `docker port`), so the host's own real IP reaches them from
 # any pod on this node.
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="http://${REGISTRY_HOST_IP}:8081" METRICS_URL="http://${REGISTRY_HOST_IP}:8084" \
-  REGISTRY_URL="${REGISTRY_HOST_IP}:5000" \
+  API_URL="http://${HOST_ADDRESS}:8081" METRICS_URL="http://${HOST_ADDRESS}:8084" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
-echo "${REGISTRY_HOST_IP}" > "${SCRIPT_DIR}/../.registry-host-ip"
+echo "${HOST_ADDRESS}" > "${SCRIPT_DIR}/../.host-address"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # Donates zero capacity to workloads by default, same as localdev/k3s-macos/install.sh — applied
