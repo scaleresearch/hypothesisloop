@@ -66,11 +66,8 @@ def prepare() -> RunSetup:
     workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
     os.makedirs(workdir, exist_ok=True)
 
-    # Deliberately no register_agent()/signup() calls here — those are platform operations like
-    # any other, described in the live API guide, and the agent decides for itself when/whether
-    # to do them. client is also used for the run loop's own stop-condition check (platform
-    # experiment closed), not for taking actions on the agent's behalf.
     client = api_client.PlatformClient(cfg.api_url)
+    client.join(cfg.agent_id, cfg.platform_experiment_id)
 
     # The API contract, fetched live from the running services rather than checked in anywhere:
     # this is the prompt's only source of endpoints (see system_prompt.md), so it is

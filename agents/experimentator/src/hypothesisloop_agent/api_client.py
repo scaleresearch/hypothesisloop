@@ -1,7 +1,6 @@
-"""Thin stdlib-only HTTP client for the one platform call the outer loop makes itself: checking
-whether its platform experiment has closed. Everything else the agent does it does itself, by
-curling the platform services from its harness's built-in shell tool, so this client stays
-intentionally minimal rather than growing a method per endpoint.
+"""Thin stdlib-only HTTP client for the few platform calls the outer loop makes itself: joining
+its platform experiment before the first turn and checking whether it has closed. Everything else
+the agent does itself through `hl`, so this client stays minimal.
 """
 from __future__ import annotations
 
@@ -35,6 +34,23 @@ def _request(method: str, url: str, payload: dict | None = None, timeout: float 
 class PlatformClient:
     def __init__(self, api_url: str):
         self.api_url = api_url.rstrip("/")
+
+    def join(self, agent_id: str, pe_id: str) -> None:
+        """Registers the agent and signs it up, safe to repeat on restart. A repeat register is a
+        409. A repeat signup is read first because POST refuses an agent already signed up once
+        the experiment is running or full."""
+        try:
+            _request("POST", f"{self.api_url}/agents", {"id": agent_id, "kind": "agent"})
+        except APIError as e:
+            if e.status != 409:
+                raise
+        try:
+            _request("GET", f"{self.api_url}/platform-experiments/{pe_id}/signups/{agent_id}")
+            return
+        except APIError as e:
+            if e.status != 404:
+                raise
+        _request("POST", f"{self.api_url}/platform-experiments/{pe_id}/signup", {"agent_id": agent_id})
 
     def get_platform_experiment(self, pe_id: str) -> dict:
         return _request("GET", f"{self.api_url}/platform-experiments/{pe_id}")

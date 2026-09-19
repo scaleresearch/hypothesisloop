@@ -160,9 +160,9 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
 - `starts_at` must be several minutes in the future, never "now" — signup only succeeds while
   status is `Open`, and it auto-flips to `Running` the instant `starts_at` passes (`SweepAutoStart`
   in `controlplane/services/quota/platform_experiments_lifecycle.go`). An agent container takes
-  ~30-55s to boot (deps install + Claude Code CLI init) before it can call signup; `starts_at=now`
-  leaves a race where a slower agent gets `signup_closed: experiment is running` and never runs a
-  single job. A 3-5 min buffer after creation covers it comfortably.
+  ~30-55s to boot before its harness signs it up; `starts_at=now` leaves a race where a slower
+  agent gets `signup_closed: experiment is running` and exits before its first turn. A 3-5 min
+  buffer after creation covers it comfortably.
 
 ## 3. Decide the flavor mix and the sweep
 
@@ -213,7 +213,10 @@ it as `generalist` with that config as its hyperparameters (or none at all, and 
 `NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)`, one container per agent, unique
 `AGENT_ID`, shared `PLATFORM_EXPERIMENT_ID`, each agent's own `AGENT_FLAVOR` (omit it and the
 agent gets `generalist`) and `AGENT_HYPERPARAMETERS` (a JSON object; omit it and the agent gets
-`{}`). Build once: `make experimentator-image EXPERIMENT=$EXPERIMENT`.
+`{}`). Build once: `make experimentator-image EXPERIMENT=$EXPERIMENT`. Before the agent's first
+turn the harness registers `AGENT_ID` and signs it up to `PLATFORM_EXPERIMENT_ID` (a restart
+skips what is already done), and `hl` in the container reads both as its `--agent` and
+`--platform-experiment` defaults.
 
     podman run -d --name agent-<id> --network host \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
@@ -247,7 +250,7 @@ One shared private `$CODE_REPO_URL`; each agent works on branch
 starts from a fresh branch off current `main` — see the agent's own system prompt for why) so
 `code_ref` (`$CODE_REPO_URL@<sha>`) always resolves to a real commit.
 
-Confirm each agent actually signed up before handing off: `GET
+Confirm each agent is signed up before handing off (the harness exits on a refused signup): `GET
 $API_URL/platform-experiments/{id}/signups/{agent_id}` per agent.
 
 Hand off to `supervise.md` once agents are running.

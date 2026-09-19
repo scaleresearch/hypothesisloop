@@ -24,8 +24,8 @@ Act as the coordinator: `agents/coordinator/setup.md` (capacity, platform-experi
 spawning) then `agents/coordinator/supervise.md` (watch loop, findings, wind-down) — read both,
 they're the operating manual; this file is only the run-specific assignment on top.
 
-- Sign up `$NUM_AGENTS` agents, `$CHIPS_PER_AGENT` chips each, after creating the platform
-  experiment (needs a real id).
+- Spawn `$NUM_AGENTS` agents, `$CHIPS_PER_AGENT` chips each, after creating the platform
+  experiment (needs a real id); each agent's harness signs it up.
 - Push agents to actually pursue the experiment's criteria, not coast on the first working config.
 - Fix blockers as they come up; record anything that'd speed up the next run in `$FINDINGS_FILE`
   — a fact plus why it matters, not a narrative.
