@@ -8,7 +8,7 @@ import type { PlatformExperiment, MetricDefinition, HypothesisLink } from '@/typ
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
-import { formatAccH, relTime } from '@/lib/format'
+import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 
@@ -263,7 +263,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     <td className="mono">{job.agent_id}</td>
                     <td><Badge status={status}>{status}</Badge></td>
                     <td><TierBadge tier={j.capacity_tier} /></td>
-                    <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {j.accelerator_type}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>

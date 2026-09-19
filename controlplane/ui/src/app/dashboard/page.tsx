@@ -15,6 +15,7 @@ import {
 } from 'recharts'
 import { statusColor, semantic } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetail, faultBreakdown } from '@/lib/eviction'
+import { acceleratorLabel } from '@/lib/format'
 
 type Job = Record<string, any>
 
@@ -286,7 +287,7 @@ export default function DashboardPage() {
                       <Badge status="evicted">{evictionCodeLabel(evictionCode(e.eviction_reason))}</Badge>
                       <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>{evictionDetail(e.eviction_reason)}</div>
                     </td>
-                    <td className="mono" style={{ fontSize: 11 }}>{e.accelerator_count}× {e.accelerator_type}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{e.accelerator_count}× {acceleratorLabel(e.accelerator_type)}</td>
                     <td><Badge status={e.capacity_tier ?? 'unknown'}>{e.capacity_tier ?? '—'}</Badge></td>
                   </tr>
                 ))}

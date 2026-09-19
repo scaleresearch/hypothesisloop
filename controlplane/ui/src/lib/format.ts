@@ -33,3 +33,9 @@ export function relTime(iso: string | null | undefined): string {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`
   return then.toLocaleDateString()
 }
+
+// A node label selector names the accelerator after its "=" ("nvidia.com/gpu.product=NVIDIA-L40");
+// tables show that product name and keep the full selector for the job's own page.
+export function acceleratorLabel(type: string): string {
+  return type.slice(type.lastIndexOf('=') + 1)
+}

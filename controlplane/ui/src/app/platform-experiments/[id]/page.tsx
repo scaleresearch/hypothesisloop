@@ -32,7 +32,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
-import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
+import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { hypothesisProgressCounts } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
@@ -1172,7 +1172,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <Link href={`/jobs/${exp.id}`} className="text-link">{exp.id.slice(0, 8)}…</Link>
                     </td>
                     <td className="mono">{exp.agent_id}</td>
-                    <td className="mono">{exp.accelerator_count}× {exp.accelerator_type}</td>
+                    <td className="mono">{exp.accelerator_count}× {acceleratorLabel(exp.accelerator_type)}</td>
                     <td className="mono" style={{ textAlign: 'right' }}>{exp.estimated_cost_acch?.toFixed(1) ?? '—'} AccH</td>
                     <td style={{ fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.hypothesis}</td>
                   </tr>

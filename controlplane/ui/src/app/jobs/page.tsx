@@ -10,31 +10,32 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
-import { Badge, TierBadge } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { semantic } from '@/lib/colors'
-import { formatAccH, relTime } from '@/lib/format'
+import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useQueryParam } from '@/lib/query-state'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
 const PAGE_SIZE = 25
+const ELLIPSIS: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
 type SortKey = 'created_at' | 'priority_score' | 'status'
 
-function SortHeader({ label, sortKey, active, dir, onClick, align }: {
+function SortHeader({ label, sortKey, active, dir, onClick, width }: {
   label: string
   sortKey: SortKey
   active: boolean
   dir: 'asc' | 'desc'
   onClick: (k: SortKey) => void
-  align?: 'right'
+  width: number
 }) {
   return (
-    <th style={{ textAlign: align, cursor: 'pointer', userSelect: 'none' }} onClick={() => onClick(sortKey)}>
+    <th style={{ width, cursor: 'pointer', userSelect: 'none' }} onClick={() => onClick(sortKey)}>
       {label} {active ? (dir === 'desc' ? '▼' : '▲') : ''}
     </th>
   )
@@ -186,26 +187,25 @@ function JobsPageContent() {
           {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
         </PodHeader>
         <PodContent scrollX>
-          <table className="wa-table">
+          {/* Fixed widths for the short columns; experiment and hypothesis share what is left. */}
+          <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 940 }}>
             <thead>
               <tr>
-                <th>Job ID</th>
-                <th>Agent</th>
+                <th style={{ width: 84 }}>Job ID</th>
+                <th style={{ width: 150 }}>Agent</th>
                 <th>Experiment</th>
-                <SortHeader label="Status" sortKey="status" active={sortKey === 'status'} dir={sortDir} onClick={toggleSort} />
-                <th>Cluster</th>
-                <th>Tier</th>
-                <th>Accelerator</th>
-                <th style={{ textAlign: 'right' }}>Est. Cost</th>
+                <SortHeader label="Status" sortKey="status" active={sortKey === 'status'} dir={sortDir} onClick={toggleSort} width={140} />
+                <th style={{ width: 130 }}>Accelerator</th>
+                <th style={{ width: 92, textAlign: 'right' }}>Est. Cost</th>
                 <th>Hypothesis</th>
-                <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} />
-                <th></th>
+                <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} width={104} />
+                <th style={{ width: 80 }}></th>
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={12}>
+                  <td colSpan={9}>
                     <div className="empty-state">
                       No jobs found{statusFilter ? ` for status "${statusFilter}"` : ''}
                       {agentFilter ? ` from agent "${agentFilter}"` : ''}
@@ -227,8 +227,8 @@ function JobsPageContent() {
                     onKeyDown={e => { if (e.key === 'Enter') router.push(`/jobs/${job.id}`) }}
                   >
                     <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{job.id.slice(0, 8)}…</td>
-                    <td className="mono">{job.agent_id}</td>
-                    <td className="mono" style={{ fontSize: 11 }}>
+                    <td className="mono" style={ELLIPSIS} title={job.agent_id}>{job.agent_id}</td>
+                    <td className="mono" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>
                       {j.platform_experiment_id ? (
                         <Link
                           href={`/platform-experiments/${j.platform_experiment_id}`}
@@ -240,34 +240,37 @@ function JobsPageContent() {
                       ) : '—'}
                     </td>
                     <td>
-					  <Badge status={status}>{status}</Badge>
+                      <Badge status={status}>{status}</Badge>
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3 }}>
                           {notAdmittedLabel(j.not_admitted_reason)}
                         </div>
                       )}
+                      {(j.capacity_tier || j.cluster_name) && (
+                        <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3, whiteSpace: 'nowrap' }}>
+                          {j.capacity_tier}
+                          {j.capacity_tier && j.cluster_name && ' · '}
+                          {j.cluster_name && (
+                            <>
+                              <span style={{
+                                width: 6, height: 6, borderRadius: '50%', display: 'inline-block', marginRight: 4,
+                                background: connectedByCluster.get(j.cluster_name) ? semantic.success : semantic.danger,
+                              }} title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'} />
+                              {j.cluster_name}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </td>
-                    <td className="mono" style={{ fontSize: 11 }}>
-                      {j.cluster_name ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{
-                            width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
-                            background: connectedByCluster.get(j.cluster_name) ? semantic.success : semantic.danger,
-                            boxShadow: connectedByCluster.get(j.cluster_name)
-                              ? '0 0 6px rgba(74, 222, 128, 0.6)' : '0 0 6px rgba(242, 89, 107, 0.5)',
-                          }} title={connectedByCluster.get(j.cluster_name) ? 'Connected' : 'Disconnected'} />
-                          {j.cluster_name}
-                        </span>
-                      ) : '—'}
+                    <td className="mono" style={{ ...ELLIPSIS, fontSize: 11 }} title={j.accelerator_type}>
+                      {j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}
                     </td>
-                    <td><TierBadge tier={j.capacity_tier} /></td>
-                    <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {j.accelerator_type}</td>
-                    <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
+                    <td className="mono" style={{ textAlign: 'right', fontSize: 11, whiteSpace: 'nowrap' }}>
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>
                     <td
                       className={j.hypothesis_id ? 'accent' : undefined}
-                      style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, cursor: j.hypothesis_id ? 'pointer' : undefined }}
+                      style={{ ...ELLIPSIS, fontSize: 12, cursor: j.hypothesis_id ? 'pointer' : undefined }}
                       title={j.hypothesis}
                       onClick={e => {
                         if (!j.hypothesis_id) return
