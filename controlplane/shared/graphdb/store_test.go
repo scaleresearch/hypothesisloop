@@ -857,7 +857,8 @@ func TestAQueryReadsOnePlatformExperiment(t *testing.T) {
 
 // An agent's watch carries other people's activity on hypotheses it registered: a comment or
 // finding on one, a link to one, a new hypothesis building on one. The graph is the only place
-// that knows who registered what.
+// that knows who registered what. A hypothesis linked to one of the agent's only later stays out
+// of it: the later link is its own event.
 func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
@@ -865,6 +866,9 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 	theirs := register(t, s, pe, "agent-2", "gradient clipping stabilises training", onRoot(pe))
 	child := register(t, s, pe, "agent-2", "a smoothing factor of 0.2 beats 0.1",
 		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: mine.ID}})
+	if _, err := s.AddLink(context.Background(), theirs.ID, "agent-2", "", domain.LinkSpec{Type: domain.LinkRelated, To: mine.ID}, stampAt(1)); err != nil {
+		t.Fatalf("AddLink: %v", err)
+	}
 
 	cases := []struct {
 		e    db.Event

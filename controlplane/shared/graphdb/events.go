@@ -56,12 +56,14 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 
 // ConcernsAgent reports whether a hypothesis event concerns a hypothesis agentID registered: the
 // subject of a comment, finding or status, the target of a link, or a target of the links a new
-// hypothesis was registered with.
+// hypothesis was registered with. A link added to a new hypothesis later is its own event, so it
+// does not make the hypothesis.new concern the agent, live or in a replay.
 func (s *Store) ConcernsAgent(ctx context.Context, agentID string, e db.Event) (bool, error) {
 	q, id := `MATCH (t:Hypothesis {id: $id, agent_id: $agent}) RETURN count(t) > 0`, e.Subject
 	switch e.Kind {
 	case db.EventHypothesisNew:
-		q = `MATCH (:Hypothesis {id: $id})-->(t:Hypothesis {agent_id: $agent}) RETURN count(t) > 0`
+		q = `MATCH (h:Hypothesis {id: $id})-[r]->(t:Hypothesis {agent_id: $agent}) WHERE r.created_at = h.created_at
+RETURN count(t) > 0`
 	case db.EventHypothesisLink:
 		id = e.Detail
 	}
