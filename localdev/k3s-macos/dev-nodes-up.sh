@@ -10,8 +10,8 @@
 # parallel batch (tests/e2e, `pytest -m "not exclusive and not slow and not hardware"`). Override
 # via env for a smaller laptop.
 #
-# Idempotent: safe to re-run against an already-provisioned cluster (existing node containers
-# are left alone). Tear down with dev-nodes-down.sh.
+# Idempotent: safe to re-run against an already-provisioned cluster (running node containers
+# are left alone, stopped ones are rebuilt). Tear down with dev-nodes-down.sh.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
@@ -56,17 +56,13 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   type="${entry%%:*}" label="${entry#*:}"
   name="fake-$(printf '%s' "${type}" | tr '[:upper:]' '[:lower:]')-${i}"
 
-  if podman inspect "${name}" &>/dev/null && ! kubectl --context "${CONTEXT_NAME}" get node "${name}" &>/dev/null; then
+  # A stopped node gets a new address when started and its k3s agent then shuts down, so it is
+  # rebuilt, as is one whose Node object is gone.
+  if podman inspect "${name}" &>/dev/null && {
+    [[ "$(podman inspect -f '{{.State.Running}}' "${name}")" != true ]] ||
+      ! kubectl --context "${CONTEXT_NAME}" get node "${name}" &>/dev/null
+  }; then
     lib_destroy_node "${CONTEXT_NAME}" "${name}"
-  fi
-  if podman inspect "${name}" &>/dev/null; then
-    if [[ "$(podman inspect -f '{{.State.Running}}' "${name}")" != true ]]; then
-      podman start "${name}" >/dev/null
-    fi
-    # A node created before the host changed networks still pulls from the old address.
-    if ! podman exec "${name}" grep -q "${HOST_ADDRESS}:5000" /etc/rancher/k3s/registries.yaml; then
-      lib_destroy_node "${CONTEXT_NAME}" "${name}"
-    fi
   fi
   if ! podman inspect "${name}" &>/dev/null; then
     lib_create_node "${CONTEXT_NAME}" "${name}" "${IMAGE}" "${SERVER_URL}" "${TOKEN}" "${NODE_CPUS}" "${NODE_MEMORY}"

@@ -276,6 +276,11 @@ make controlplane-up
 On macOS:
 - The podman machine must be rootful: `make k3s-dev-nodes-up` reaches the k3s server over the
   VM's own address, which a rootless machine's node containers cannot reach.
+- Nodes, job pods and containers reach the host (registry, object store, git daemon) as
+  `host.containers.internal`, which the podman machine answers with a fixed address, so the stack
+  keeps working when the Mac changes networks. A Linux host uses its LAN address instead.
+- `make full-start` rebuilds the dev node containers: a stopped k3s agent cannot resume once its
+  address changes.
 
 ### Option B - Existing cluster (GKE, EKS, remote k3s, ...)
 

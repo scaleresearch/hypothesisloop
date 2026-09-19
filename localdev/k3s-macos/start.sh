@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Resume local dev after stop.sh: starts the podman machine, starts k3s back
-# up inside it (or natively on Linux), re-opens the API port-forward, and
-# restarts the control-plane containers. Assumes the cluster was previously
+# up inside it (or natively on Linux), re-opens the API port-forward,
+# restarts the control-plane containers and rebuilds the dev nodes. Assumes the cluster was previously
 # provisioned with install.sh — if no cluster exists yet, run
 # `make k3s-up` / `make full-up` instead.
 set -euo pipefail
@@ -39,7 +39,7 @@ fi
 
 echo "==> Waiting for node..."
 wait_for 40 3 "node ready" kubectl --context "${CONTEXT_NAME}" get nodes
-kubectl --context "${CONTEXT_NAME}" wait node --all --for=condition=Ready --timeout=120s
+kubectl --context "${CONTEXT_NAME}" wait node -l node-role.kubernetes.io/control-plane --for=condition=Ready --timeout=120s
 kubectl config use-context "${CONTEXT_NAME}" >/dev/null
 
 echo "==> Starting control plane..."
@@ -49,5 +49,6 @@ wait_for 20 1 "control-service to accept connections" \
 wait_for 20 1 "metrics-service to accept connections" \
   curl -sf -o /dev/null "http://localhost:8084/health"
 
+bash "${SCRIPT_DIR}/dev-nodes-up.sh"
+
 echo "==> Local dev started. Context: ${CONTEXT_NAME}"
-kubectl --context "${CONTEXT_NAME}" get nodes
