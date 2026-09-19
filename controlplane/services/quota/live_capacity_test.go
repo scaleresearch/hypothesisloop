@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // GET /resource-catalog/capacity used to answer 200 with an empty cluster list when the handler
@@ -43,5 +45,21 @@ func TestLiveCapacityConfiguredDoesNotFailFast(t *testing.T) {
 	_, err := h.liveCapacity(context.Background())
 	if errors.Is(err, ErrLiveCapacityUnconfigured) {
 		t.Fatalf("liveCapacity() still reports unconfigured after WithLiveCapacity was called")
+	}
+}
+
+// A job's cost is its run time times the rate of its accelerator type, so the capacity read an
+// agent picks its type from carries that rate.
+func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
+	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0, "gpu.product=L40": 0.25})
+	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{"h100": 1.0}) })
+
+	clusters := buildClusterCapacity(
+		map[string]map[string]int64{"local": {"gpu.product=L40": 3}},
+		map[string]map[string]int64{"local": {"gpu.product=L40": 8}})
+
+	want := AcceleratorCapacity{AcceleratorType: "gpu.product=L40", Available: 3, Total: 8, AccHPerHour: 0.25}
+	if len(clusters) != 1 || len(clusters[0].Accelerators) != 1 || clusters[0].Accelerators[0] != want {
+		t.Fatalf("capacity = %+v, want one cluster with %+v", clusters, want)
 	}
 }

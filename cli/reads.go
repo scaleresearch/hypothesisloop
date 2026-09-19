@@ -81,8 +81,9 @@ value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, s
 func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("capacity", `usage: hl capacity
 
-Live accelerators per cluster, one line per type: available and total. accelerator_type is the
-exact string a job spec takes; a type with none available queues and never errors.`, stderr)
+Live accelerators per cluster, one line per type: available, total and acch_per_hour, what an
+hour on one of them costs in accelerator hours. accelerator_type is the exact string a job spec
+takes; a type with none available queues and never errors.`, stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}

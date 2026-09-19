@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
@@ -67,6 +68,9 @@ type AcceleratorCapacity struct {
 	AcceleratorType string `json:"accelerator_type"`
 	Available       int64  `json:"available"`
 	Total           int64  `json:"total"`
+	// AccHPerHour is what one accelerator of this type costs per hour of run, in accelerator
+	// hours: the factor between a job's run time and its cost.
+	AccHPerHour float64 `json:"acch_per_hour,omitempty"`
 }
 
 // ErrLiveCapacityUnconfigured means WithLiveCapacity was never called: GET /resource-catalog/capacity
@@ -112,10 +116,12 @@ func buildClusterCapacity(available, total map[string]map[string]int64) []Cluste
 		}
 		accelerators := make([]AcceleratorCapacity, 0, len(typesSeen))
 		for t := range typesSeen {
+			rate, _ := domain.AcceleratorType(t).LookupCost()
 			accelerators = append(accelerators, AcceleratorCapacity{
 				AcceleratorType: t,
 				Available:       available[cluster][t],
 				Total:           total[cluster][t],
+				AccHPerHour:     rate,
 			})
 		}
 		sort.Slice(accelerators, func(i, j int) bool { return accelerators[i].AcceleratorType < accelerators[j].AcceleratorType })
