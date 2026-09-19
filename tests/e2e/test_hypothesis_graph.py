@@ -224,10 +224,32 @@ hypotheses:
     got = json.loads(api.hl("hypothesis", "get", base["id"]))
     assert got["status"] == "refuted" and [c["text"] for c in got["comments"]] == [f"dead end {run_id}"]
 
-    opposite = api.hl_expect("hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id,
-                             "--text", f"cli tree opposite {run_id}", "--builds-on", base["id"])
-    assert opposite.returncode == 0, opposite.stderr
-    assert f"--type contradicts --to {base['id']}" in opposite.stderr
+    opposite = ["hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id,
+                "--text", f"cli tree opposite {run_id}", "--builds-on", base["id"]]
+    held = api.hl_expect(*opposite)
+    assert held.returncode != 0 and "refuted_parent" in held.stderr and base["id"] in held.stderr, held.stderr
+    created = json.loads(api.hl(*opposite, "--contradicts", base["id"], "--distinct-from", f"{child['id']},{sibling['id']}"))
+    assert ("contradicts", base["id"]) in _out(api.hypothesis(created["id"]))
+
+
+def test_registration_waits_until_close_hypotheses_are_told_apart(api, graph_pe, run_id):
+    pe_id, agent_a, agent_b = graph_pe
+    bs8 = api.register_hypothesis(pe_id, agent_a, f"batch size 8 beats batch size 32 at the same epoch budget {run_id}")
+    reworded = f"a batch size of 8 beats 32 within the same epoch budget {run_id}"
+
+    held = api.post_hypothesis(pe_id, reworded, agent_id=agent_b)
+    assert held.status_code == 409, f"reworded duplicate: got {held.status_code} {held.text}"
+    body = held.json()
+    assert [(h["id"], h["reason"]) for h in body["similar"]] == [(bs8["id"], "close_text")], body
+    assert body["similar"][0]["builds_on"] == [pe_id] and body["similar"][0]["agent_id"] == agent_a
+    assert "distinct_from" in body["detail"]
+    assert [n["id"] for n in api.hypothesis_graph(pe_id)["nodes"]] == [bs8["id"]], "a held-back registration created a node"
+
+    submit = ["hypothesis", "submit", "--agent", agent_b, "--platform-experiment", pe_id, "--text", reworded, "--builds-on", bs8["id"]]
+    cli_held = api.hl_expect(*submit)
+    assert cli_held.returncode != 0 and bs8["id"] in cli_held.stderr, cli_held.stderr
+    created = json.loads(api.hl(*submit, "--distinct-from", bs8["id"]))
+    assert _out(api.hypothesis(created["id"])) == {("builds_on", bs8["id"])}
 
 
 def test_query_text_search_and_status(api, graph_pe, run_id):

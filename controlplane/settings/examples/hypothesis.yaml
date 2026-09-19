@@ -1,7 +1,8 @@
 # Example request body for POST /hypotheses (register one or more claims under a platform
 # experiment). Submit with `hl hypothesis submit --file hypothesis.yaml`: one POST per entry in
 # hypotheses:, in order. Flags on the command line (--agent, --platform-experiment, --text,
-# --builds-on, --contradicts, --related) override every entry; any link flag replaces its links.
+# --builds-on, --contradicts, --related, --distinct-from) override every entry; any link flag
+# replaces its links.
 #
 # Hypotheses form a graph per platform experiment. Every hypothesis must be placed: at least one
 # builds_on link, to the experiment's objective (`to: root`) or to existing hypotheses it refines,
@@ -14,7 +15,10 @@
 #
 # Jobs reference a hypothesis by id via metadata.hypothesis_id (see experiment-submission.yaml).
 # Re-submitting equivalent text in the same platform experiment returns the existing hypothesis
-# (already_existed: true) and ignores the links you supplied.
+# (already_existed: true) and ignores the links you supplied. Text that reads close to other
+# hypotheses there, or a builds_on target that is refuted, gets a 409 listing them and registers
+# nothing until each is named in distinct_from (judged a different claim) or in a contradicts or
+# related link.
 
 agent_id: agent-123
 platform_experiment_id: pe-123
@@ -39,6 +43,7 @@ hypotheses:
         to: lr
       # - type: contradicts
       #   to: 0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c   # an existing hypothesis id
+    # distinct_from: [lr]   # after a 409 listed lr: you read it and yours is a different claim
   # - text: "an idea authored by a human instead of an agent"
   #   author: jane # mutually exclusive with agent_id
 

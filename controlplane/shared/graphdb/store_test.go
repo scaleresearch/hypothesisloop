@@ -87,7 +87,8 @@ func TestRegisterCreatesTheHypothesisWithItsLinksInOneStep(t *testing.T) {
 
 	h, links, existed, err := s.Register(context.Background(), NewHypothesis{
 		Source: domain.HypothesisSourceAgent, AgentID: "agent-2", PlatformExperimentID: pe, Text: "warmup with cosine decay",
-		Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}, {Type: domain.LinkBuildsOn, To: b.ID}, {Type: domain.LinkRelated, To: a.ID}},
+		Links:        []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}, {Type: domain.LinkBuildsOn, To: b.ID}, {Type: domain.LinkRelated, To: a.ID}},
+		DistinctFrom: []string{b.ID},
 	})
 	if err != nil || existed {
 		t.Fatalf("Register: got = (%v, existed=%v), want (nil, false)", err, existed)
@@ -106,6 +107,75 @@ func TestRegisterCreatesTheHypothesisWithItsLinksInOneStep(t *testing.T) {
 		if !got[want] {
 			t.Errorf("outgoing links: got = %v, want to include %s", got, want)
 		}
+	}
+}
+
+func similarIDs(t *testing.T, err error) map[string]string {
+	t.Helper()
+	var similar *SimilarError
+	if !errors.As(err, &similar) {
+		t.Fatalf("Register: got = %v, want a *SimilarError", err)
+	}
+	ids := map[string]string{}
+	for _, h := range similar.Similar {
+		ids[h.ID] = h.Reason
+	}
+	return ids
+}
+
+func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	bs8 := register(t, s, pe, "agent-1", "batch size 8 beats batch size 32 at the same epoch budget", onRoot(pe))
+	other := register(t, s, pe, "agent-1", "label noise caps validation accuracy", onRoot(pe))
+	bs4 := NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-2", PlatformExperimentID: pe,
+		Text: "batch size 4 beats batch size 8 at the same epoch budget", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: bs8.ID}}}
+
+	_, _, _, err := s.Register(ctx, bs4)
+	if got := similarIDs(t, err); len(got) != 1 || got[bs8.ID] != "close_text" {
+		t.Fatalf("similar: got = %v, want only its parent %s as close_text", got, bs8.ID)
+	}
+	if total, _ := s.CountHypotheses(ctx, ListFilter{PlatformExperimentID: pe}); total != 2 {
+		t.Fatalf("hypotheses after a held-back registration: got = %d, want 2", total)
+	}
+
+	bs4.DistinctFrom = []string{other.ID, bs8.ID}
+	created, _, existed, err := s.Register(ctx, bs4)
+	if err != nil || existed {
+		t.Fatalf("Register told apart: got = (%v, existed=%v), want (nil, false)", err, existed)
+	}
+
+	contra := NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-3", PlatformExperimentID: pe,
+		Text: "batch size 8 does not beat batch size 32 at the same epoch budget", Links: onRoot(pe)}
+	_, _, _, err = s.Register(ctx, contra)
+	if got := similarIDs(t, err); got[bs8.ID] != "close_text" {
+		t.Fatalf("similar: got = %v, want %s listed", got, bs8.ID)
+	}
+	contra.Links = append(contra.Links, domain.LinkSpec{Type: domain.LinkContradicts, To: bs8.ID})
+	contra.DistinctFrom = []string{created.ID}
+	if _, _, existed, err := s.Register(ctx, contra); err != nil || existed {
+		t.Fatalf("Register with a contradicts link: got = (%v, existed=%v), want (nil, false)", err, existed)
+	}
+}
+
+func TestRegisterHoldsBackAClaimBuildingOnARefutedOne(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	parent := register(t, s, pe, "agent-1", "learning rate 0.2 overshoots", onRoot(pe))
+	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", domain.HypothesisRefuted); err != nil {
+		t.Fatal(err)
+	}
+	child := NewHypothesis{Source: domain.HypothesisSourceAgent, AgentID: "agent-1", PlatformExperimentID: pe,
+		Text: "a larger step wins within forty epochs", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}}}
+	_, _, _, err := s.Register(ctx, child)
+	if got := similarIDs(t, err); len(got) != 1 || got[parent.ID] != "refuted_parent" {
+		t.Fatalf("similar: got = %v, want %s as refuted_parent", got, parent.ID)
+	}
+	child.Links = append(child.Links, domain.LinkSpec{Type: domain.LinkContradicts, To: parent.ID})
+	if _, _, existed, err := s.Register(ctx, child); err != nil || existed {
+		t.Fatalf("Register with a contradicts link: got = (%v, existed=%v), want (nil, false)", err, existed)
 	}
 }
 

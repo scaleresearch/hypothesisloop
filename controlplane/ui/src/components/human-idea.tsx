@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { registerHumanHypothesis, addHumanHypothesisComment, addHumanHypothesisLink } from '@/lib/api'
-import type { HypothesisSearchHit } from '@/lib/api'
+import type { HypothesisSearchHit, SimilarHypothesis } from '@/lib/api'
 import type { HypothesisLinkType, HypothesisWithJobs } from '@/types'
+import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { HypothesisPicker, INPUT_STYLE } from '@/components/hypothesis-search'
 
@@ -63,6 +64,7 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [existingID, setExistingID] = useState('')
+  const [similar, setSimilar] = useState<SimilarHypothesis[]>([])
 
   const picked = [...contradicts, ...related].map(t => t.id)
 
@@ -71,17 +73,19 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
     else setRelated([...related, hit])
   }
 
-  async function submit() {
+  async function submit(distinctFrom: string[] = []) {
     setBusy(true)
     setError('')
     setExistingID('')
+    setSimilar([])
     try {
       const h = await registerHumanHypothesis(platformExperimentID, 'human', text.trim(), [
         { type: 'builds_on', to: parent.id },
         ...contradicts.map(t => ({ type: 'contradicts' as const, to: t.id })),
         ...related.map(t => ({ type: 'related' as const, to: t.id })),
-      ])
-      if (h.already_existed) setExistingID(h.id)
+      ], distinctFrom)
+      if ('similar' in h) setSimilar(h.similar)
+      else if (h.already_existed) setExistingID(h.id)
       else onAdded(h.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -122,7 +126,7 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
         </div>
       </details>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Button size="sm" variant="primary" disabled={busy || text.trim() === ''} onClick={submit}>
+        <Button size="sm" variant="primary" disabled={busy || text.trim() === ''} onClick={() => submit()}>
           {busy ? 'Adding…' : 'Add idea'}
         </Button>
         {existingID && (
@@ -133,6 +137,26 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
         )}
         {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
       </div>
+      {similar.length > 0 && (
+        <div className="hg-stack" style={{ gap: 4, fontSize: 12 }}>
+          <span className="text-muted">
+            Nothing was added yet: these read close to your idea, or it builds on a refuted one.
+            If one is your idea, open it instead; mark one your idea opposes as Contradicts.
+          </span>
+          {similar.map(h => (
+            <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Badge status={h.status}>{h.status}</Badge>
+              <span className="hg-outline-text" title={h.text}>{h.text}</span>
+              <Button variant="link" onClick={() => onAdded(h.id)}>Show it</Button>
+            </div>
+          ))}
+          <div>
+            <Button size="sm" disabled={busy} onClick={() => submit(similar.map(h => h.id))}>
+              None of these is my idea, add it
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

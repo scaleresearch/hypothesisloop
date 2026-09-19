@@ -276,19 +276,33 @@ export interface RegisteredHypothesis extends Hypothesis {
   already_existed: boolean
 }
 
+export interface SimilarHypothesis {
+  id: string
+  status: HypothesisStatus
+  text: string
+  reason: 'close_text' | 'refuted_parent'
+}
+
+/** A registration held back by a 409 until each listed hypothesis is told apart from it. */
+export interface HeldBack {
+  similar: SimilarHypothesis[]
+}
+
 // Registers a human's idea, placed in the graph by `links` (at least one builds_on; `to` is a
 // hypothesis id, or the platform_experiment_id for the objective root). `author` is sent instead
 // of an agent_id and there is no auth behind it. Text equivalent to an existing claim returns
-// that row with already_existed set, and the supplied links are not applied.
+// that row with already_existed set, and the supplied links are not applied. Text close to other
+// hypotheses registers nothing and returns them until their ids are passed in distinctFrom.
 export async function registerHumanHypothesis(
-  platformExperimentID: string, author: string, text: string, links: HypothesisLinkInput[],
-): Promise<RegisteredHypothesis> {
+  platformExperimentID: string, author: string, text: string, links: HypothesisLinkInput[], distinctFrom: string[] = [],
+): Promise<RegisteredHypothesis | HeldBack> {
   const res = await fetch(`${API_URL}/hypotheses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ platform_experiment_id: platformExperimentID, author, text, links }),
+    body: JSON.stringify({ platform_experiment_id: platformExperimentID, author, text, links, distinct_from: distinctFrom }),
     cache: 'no-store',
   })
+  if (res.status === 409) return { similar: (await res.json()).similar }
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

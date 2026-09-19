@@ -216,3 +216,15 @@ func NormalizeHypothesisText(text string) string {
 	fields := strings.Fields(strings.ToLower(strings.TrimSpace(text)))
 	return strings.Join(fields, " ")
 }
+
+// SimilarHypothesis is an existing hypothesis a registration has to be told apart from before it
+// is created: its text reads close to the new one, or the new one builds on it and it is refuted.
+type SimilarHypothesis struct {
+	ID       string           `json:"id"`
+	AgentID  string           `json:"agent_id,omitempty"`
+	Author   string           `json:"author,omitempty"`
+	Status   HypothesisStatus `json:"status"`
+	Text     string           `json:"text"`
+	BuildsOn []string         `json:"builds_on"`
+	Reason   string           `json:"reason" enum:"close_text,refuted_parent"`
+}

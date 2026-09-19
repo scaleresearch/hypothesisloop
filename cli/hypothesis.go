@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -95,17 +96,20 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	pe := fs.String("platform-experiment", "", "platform experiment id")
 	text := fs.String("text", "", "hypothesis text")
 	file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body, or a hypotheses: list of them")
-	var buildsOn, contradicts, related idList
+	var buildsOn, contradicts, related, distinctFrom idList
 	fs.Var(&buildsOn, "builds-on", "hypothesis id this refines, extends or combines, or root for the objective (repeatable or comma-separated, at least one)")
 	fs.Var(&contradicts, "contradicts", "hypothesis id that cannot hold together with this one (repeatable or comma-separated)")
 	fs.Var(&related, "related", "hypothesis id to cross-reference (repeatable or comma-separated)")
+	fs.Var(&distinctFrom, "distinct-from", "hypothesis id a refused submit listed that you judged a different claim (repeatable or comma-separated)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, `usage: hl hypothesis submit --agent A --platform-experiment PE --text T --builds-on ID|root
-         [--builds-on ID ...] [--contradicts ID ...] [--related ID ...]
+         [--builds-on ID ...] [--contradicts ID ...] [--related ID ...] [--distinct-from ID ...]
    or: hl hypothesis submit --file hypothesis.yaml [flags above override every item]
 
 Every hypothesis builds on the objective (root) or on existing hypotheses; several --builds-on
-mean a combination. FILE shape:
+mean a combination. While your text reads close to existing hypotheses, or a --builds-on target is
+refuted, nothing is registered and the reply lists them: test the one you meant under its id, or
+resubmit naming each with --contradicts or --distinct-from. FILE shape:
 
   agent_id: agent-123
   platform_experiment_id: pe-123
@@ -115,6 +119,7 @@ mean a combination. FILE shape:
       links: [{type: builds_on, to: root}]
     - text: "idea two, refining idea one"
       links: [{type: builds_on, to: warmup}, {type: related, to: HYP_ID}]
+      distinct_from: [HYP_ID]     # hypotheses a refused submit listed, judged different
 
 Items are submitted in order; top-level fields default onto every item. Prints one JSON object
 per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
@@ -146,7 +151,7 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 		}
 	}
 
-	bodies, keys, err := buildSubmitBodies(items, flagLinks, map[string]string{
+	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
 		"agent_id": *agent, "platform_experiment_id": *pe, "text": *text,
 	})
 	if err != nil {
@@ -161,6 +166,11 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 				body.Links[j].To = id
 			}
 		}
+		for j, d := range body.DistinctFrom {
+			if id, ok := ids[d]; ok {
+				body.DistinctFrom[j] = id
+			}
+		}
 		var out json.RawMessage
 		if err := c.Do("POST", "/hypotheses", body, &out); err != nil {
 			if len(bodies) > 1 {
@@ -173,11 +183,6 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 			AgentID        string `json:"agent_id"`
 			Author         string `json:"author"`
 			AlreadyExisted bool   `json:"already_existed"`
-			Links          []struct {
-				Type         string `json:"type"`
-				HypothesisID string `json:"hypothesis_id"`
-				Status       string `json:"status"`
-			} `json:"links"`
 		}
 		if err := json.Unmarshal(out, &created); err != nil || created.ID == "" {
 			return fail(stderr, fmt.Errorf("item %d: response carries no id: %s", i, out))
@@ -191,30 +196,24 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 		if created.AlreadyExisted {
 			fmt.Fprintf(stderr, "hl: hypothesis submit: already registered as %s by %s; your links were not applied, its own are in \"links\". "+
 				"Test it as it is, or register a refinement with --builds-on %s\n", created.ID, created.AgentID+created.Author, created.ID)
-			continue
-		}
-		for _, l := range created.Links {
-			if l.Type == "builds_on" && l.Status == "refuted" {
-				fmt.Fprintf(stderr, "hl: hypothesis submit: %s builds on %s, which is refuted. If yours claims the opposite, link it: "+
-					"hl hypothesis link --agent %s --from %s --type contradicts --to %s\n", created.ID, l.HypothesisID, created.AgentID, created.ID, l.HypothesisID)
-			}
 		}
 	}
 	return 0
 }
 
 type submitBody struct {
-	AgentID              string `json:"agent_id,omitempty"`
-	Author               string `json:"author,omitempty"`
-	PlatformExperimentID string `json:"platform_experiment_id"`
-	Text                 string `json:"text"`
-	Links                []link `json:"links"`
+	AgentID              string   `json:"agent_id,omitempty"`
+	Author               string   `json:"author,omitempty"`
+	PlatformExperimentID string   `json:"platform_experiment_id"`
+	Text                 string   `json:"text"`
+	Links                []link   `json:"links"`
+	DistinctFrom         []string `json:"distinct_from,omitempty"`
 }
 
 // buildSubmitBodies validates every item before anything is sent, so a bad item late in a file
 // never leaves the earlier ones half submitted. Links to a local key stay as the key here and are
 // swapped for the id the earlier item came back with at submit time.
-func buildSubmitBodies(items []map[string]any, flagLinks []link, overrides map[string]string) ([]*submitBody, []string, error) {
+func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []string, overrides map[string]string) ([]*submitBody, []string, error) {
 	keyIndex := map[string]int{}
 	keys := make([]string, len(items))
 	for i, item := range items {
@@ -282,12 +281,21 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, overrides map[s
 		if !placed {
 			return nil, nil, itemErr(items, i, fmt.Errorf("at least one --builds-on (or a builds_on entry in links:) is required; %s", placementHelp))
 		}
+		distinct := flagDistinct
+		if len(distinct) == 0 {
+			parsed, err := parseIDs(item["distinct_from"])
+			if err != nil {
+				return nil, nil, itemErr(items, i, err)
+			}
+			distinct = parsed
+		}
 		bodies[i] = &submitBody{
 			AgentID:              fields["agent_id"],
 			Author:               fields["author"],
 			PlatformExperimentID: fields["platform_experiment_id"],
 			Text:                 fields["text"],
 			Links:                resolved,
+			DistinctFrom:         slices.Clone(distinct),
 		}
 	}
 	return bodies, keys, nil
@@ -340,6 +348,25 @@ func parseLinks(v any) ([]link, error) {
 			return nil, fmt.Errorf("links[%d]: %w", j, err)
 		}
 		out = append(out, link{Type: typ, To: to})
+	}
+	return out, nil
+}
+
+func parseIDs(v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("distinct_from must be a list of hypothesis ids")
+	}
+	out := make([]string, 0, len(list))
+	for j, e := range list {
+		id, ok := e.(string)
+		if !ok || id == "" {
+			return nil, fmt.Errorf("distinct_from[%d] must be a hypothesis id", j)
+		}
+		out = append(out, id)
 	}
 	return out, nil
 }

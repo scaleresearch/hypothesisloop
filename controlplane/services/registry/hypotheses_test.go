@@ -130,7 +130,7 @@ var buildOnRoot = []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}
 func TestRegisterHypothesisRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *testing.T) {
 	svc := poolService(newPoolStore())
 
-	_, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "Ada", "pe-1", "warmup helps", buildOnRoot)
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "Ada", "pe-1", "warmup helps", buildOnRoot, nil)
 	if !errors.Is(err, domain.ErrHypothesisOrigin) {
 		t.Fatalf("RegisterHypothesis with both agent_id and author: got = %v, want %v", err, domain.ErrHypothesisOrigin)
 	}
@@ -142,7 +142,7 @@ func TestRegisterHypothesisRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *test
 func TestRegisterHypothesisRejectsARowWithNeitherAnAgentNorAHumanAuthor(t *testing.T) {
 	svc := poolService(newPoolStore())
 
-	_, _, _, err := svc.RegisterHypothesis(context.Background(), "", "", "pe-1", "warmup helps", buildOnRoot)
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if !errors.Is(err, domain.ErrHypothesisOrigin) {
 		t.Fatalf("RegisterHypothesis with neither agent_id nor author: got = %v, want %v", err, domain.ErrHypothesisOrigin)
 	}
@@ -155,7 +155,7 @@ func TestRegisterHypothesisRejectsARowWithNeitherAnAgentNorAHumanAuthor(t *testi
 func TestRegisterHypothesisStoresAHumanRowWithAnEmptyAgentIDAndTheTypedName(t *testing.T) {
 	svc := poolService(newPoolStore())
 
-	h, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot)
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -175,12 +175,12 @@ func TestRegisterHypothesisStoresAHumanRowWithAnEmptyAgentIDAndTheTypedName(t *t
 // the same idea twice and hand every reading agent two entries to reconcile.
 func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *testing.T) {
 	svc := poolService(newPoolStore())
-	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "Warmup   helps.", buildOnRoot)
+	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "Warmup   helps.", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (human): got = %v, want nil", err)
 	}
 
-	agent, _, existed, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps.", buildOnRoot)
+	agent, _, existed, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps.", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (agent): got = %v, want nil", err)
 	}
@@ -198,7 +198,7 @@ func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *te
 // record the verdict, with the findings underneath as the record of who earned it.
 func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 	svc := poolService(newPoolStore())
-	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot)
+	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -219,7 +219,7 @@ func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 // second agent's verdict on it is refused rather than recorded.
 func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testing.T) {
 	svc := poolService(newPoolStore())
-	owned, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	owned, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -239,7 +239,7 @@ func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testi
 // attached, and this test holds that open.
 func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.T) {
 	svc := poolService(newPoolStore())
-	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot)
+	human, _, _, err := svc.RegisterHypothesis(context.Background(), "", "Ada", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -275,7 +275,7 @@ func TestRegisteringANewHypothesisAnnouncesItWithTheStoredCreationTimeAsCursor(t
 	events := &recordedEvents{}
 	svc := poolService(newPoolStore()).WithEvents(events)
 
-	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -291,11 +291,11 @@ func TestRegisteringANewHypothesisAnnouncesItWithTheStoredCreationTimeAsCursor(t
 func TestRegisteringAnExistingHypothesisAnnouncesNothing(t *testing.T) {
 	events := &recordedEvents{}
 	svc := poolService(newPoolStore()).WithEvents(events)
-	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot); err != nil {
+	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil); err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-2", "", "pe-1", "Warmup helps", buildOnRoot); err != nil {
+	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-2", "", "pe-1", "Warmup helps", buildOnRoot, nil); err != nil {
 		t.Fatalf("RegisterHypothesis (duplicate): got = %v, want nil", err)
 	}
 	if len(events.events) != 1 {
@@ -307,7 +307,7 @@ func TestRegisteringAnExistingHypothesisAnnouncesNothing(t *testing.T) {
 func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	events := &recordedEvents{}
 	svc := poolService(newPoolStore()).WithEvents(events)
-	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -331,11 +331,11 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 	events := &recordedEvents{}
 	svc := poolService(newPoolStore()).WithEvents(events)
-	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	b, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-2", "", "pe-1", "cooldown helps", buildOnRoot)
+	b, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-2", "", "pe-1", "cooldown helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -359,7 +359,7 @@ func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 // graph's refusal through as the owner error the HTTP layer turns into 403.
 func TestAddingALinkFromAnotherAgentsHypothesisIsRefused(t *testing.T) {
 	svc := poolService(newPoolStore())
-	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -374,7 +374,7 @@ func TestAddingALinkFromAnotherAgentsHypothesisIsRefused(t *testing.T) {
 // nothing outside its own row; a comment on a hypothesis that does not exist is a 404, not a row.
 func TestAddHypothesisCommentCarriesTheHypothesisPlatformExperimentAndRefusesAnUnknownOne(t *testing.T) {
 	svc := poolService(newPoolStore())
-	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot)
+	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -403,7 +403,7 @@ func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
 	svc := poolService(&missingExperimentStore{})
 
 	_, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", "", "pe-missing", "warmup helps",
-		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-missing"}})
+		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-missing"}}, nil)
 	if !errors.Is(err, ErrUnknownPlatformExperiment) {
 		t.Fatalf("RegisterHypothesis under an unknown platform experiment: got = %v, want %v", err, ErrUnknownPlatformExperiment)
 	}

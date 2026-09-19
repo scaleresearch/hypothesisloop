@@ -27,12 +27,14 @@ var (
 // RegisterHypothesis registers a new hypothesis within a platform experiment, placed in the graph
 // by links (at least one builds_on), or returns the existing one (alreadyExisted=true, links not
 // applied) if an equivalent one by normalized text is already registered in that platform
-// experiment. The returned links are the hypothesis's outgoing links.
+// experiment. The returned links are the hypothesis's outgoing links. While it reads close to
+// hypotheses not named in distinctFrom or a contradicts/related link, nothing is created and the
+// error wraps a *graphdb.SimilarError listing them.
 //
 // A human submitting from the UI passes author instead of agentID. This is the one place the
 // exactly-one-of rule is applied (domain.ClassifyHypothesisOrigin): an invalid pair is an error
 // here, never a value coerced into a row for some later read to interpret.
-func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platformExperimentID, text string, links []domain.LinkSpec) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
+func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
 	source, err := domain.ClassifyHypothesisOrigin(agentID, author)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
@@ -63,7 +65,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 
 	h, out, alreadyExisted, err = s.graph.Register(ctx, graphdb.NewHypothesis{
 		Source: source, AgentID: agentID, Author: author,
-		PlatformExperimentID: platformExperimentID, Text: text, Links: links,
+		PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
 	})
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)

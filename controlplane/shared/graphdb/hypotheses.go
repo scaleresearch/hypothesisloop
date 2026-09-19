@@ -41,11 +41,16 @@ type NewHypothesis struct {
 	PlatformExperimentID string
 	Text                 string
 	Links                []domain.LinkSpec
+	// DistinctFrom names hypotheses the caller has read and judged a different claim, so they no
+	// longer hold the registration back (see untoldSimilar).
+	DistinctFrom []string
 }
 
 // Register creates a hypothesis and its outgoing links in one transaction, or returns the existing
 // hypothesis with equivalent normalized text in the same platform experiment (alreadyExisted=true)
-// without applying the supplied links. links are the hypothesis's outgoing links either way.
+// without applying the supplied links. links are the hypothesis's outgoing links either way. It
+// creates nothing and returns a *SimilarError while other hypotheses read close to the new one and
+// the caller has not told it apart from them.
 func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypothesis, links []domain.Link, alreadyExisted bool, err error) {
 	normalized := domain.NormalizeHypothesisText(n.Text)
 	if normalized == "" {
@@ -70,6 +75,13 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 		}
 		if err := checkTargets(ctx, tx, n.PlatformExperimentID, "", n.Links); err != nil {
 			return nil, err
+		}
+		similar, err := untoldSimilar(ctx, tx, n)
+		if err != nil {
+			return nil, err
+		}
+		if len(similar) > 0 {
+			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
   source: $source, author: $author, text: $text, normalized_text: $normalized, status: $status, created_at: $at})
@@ -576,7 +588,7 @@ func hypothesisFromNode(n neo4j.Node) *domain.Hypothesis {
 // wrap prefixes err with op unless it is one of this package's own sentinel errors, whose message
 // is already written for the caller to act on.
 func wrap(op string, err error) error {
-	for _, sentinel := range []error{ErrNotFound, ErrNotOwner, ErrInvalidLink} {
+	for _, sentinel := range []error{ErrNotFound, ErrNotOwner, ErrInvalidLink, ErrSimilar} {
 		if errors.Is(err, sentinel) {
 			return err
 		}

@@ -58,9 +58,31 @@ type hypothesisGraph struct {
 	Edges []domain.GraphEdge           `json:"edges"`
 }
 
+// similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
+// not been told apart from: the problem details plus the hypotheses themselves.
+type similarHypothesesError struct {
+	Status  int                        `json:"status"`
+	Title   string                     `json:"title"`
+	Detail  string                     `json:"detail"`
+	Similar []domain.SimilarHypothesis `json:"similar"`
+}
+
+func (e *similarHypothesesError) Error() string  { return e.Detail }
+func (e *similarHypothesesError) GetStatus() int { return e.Status }
+
+const similarDetail = "Nothing was registered: your hypothesis reads close to the ones in `similar` " +
+	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one is the claim you meant, " +
+	"register nothing and test it under its id. Otherwise resubmit naming each one: as a contradicts link when " +
+	"yours cannot hold together with it, else in distinct_from (hl: --distinct-from), also when you build on it."
+
 // hypothesisWriteError maps the errors a hypothesis write can return to the status an agent can
 // act on, keeping the message.
 func hypothesisWriteError(err error) error {
+	var similar *graphdb.SimilarError
+	if errors.As(err, &similar) {
+		return &similarHypothesesError{Status: http.StatusConflict, Title: http.StatusText(http.StatusConflict),
+			Detail: similarDetail, Similar: similar.Similar}
+	}
 	switch {
 	case errors.Is(err, domain.ErrHypothesisOrigin), errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
@@ -270,7 +292,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"objective. Several builds_on make a combination of ideas; contradicts and related links may be added too. " +
 			"Find where your idea belongs first with POST /hypotheses/query. Idempotent within a platform_experiment_id: " +
 			"text equivalent to an existing hypothesis (modulo case/whitespace) returns that row with 200 and " +
-			"already_existed=true and your links are not applied; a new one returns 201. The returned id is " +
+			"already_existed=true and your links are not applied; a new one returns 201. While the text reads close to " +
+			"other hypotheses of the platform experiment (word overlap), or a builds_on target is refuted, it answers 409 " +
+			"with them in `similar` and registers nothing until each is named in distinct_from or in a contradicts or " +
+			"related link. The returned id is " +
 			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +
 			"experiment. Exactly one of agent_id (an agent's row) or author (a human's, submitted from the UI) must be set; " +
 			"both sit in the same graph under the same dedup, and any agent may submit a job against either. What a human " +
@@ -285,6 +310,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			PlatformExperimentID string            `json:"platform_experiment_id"`
 			Text                 string            `json:"text"`
 			Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
+			DistinctFrom         []string          `json:"distinct_from,omitempty" required:"false" doc:"Ids of hypotheses a 409 listed that you read and judged a different claim from yours."`
 		}
 	}) (*struct {
 		Status int
@@ -297,7 +323,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if b.Text == "" {
 			return nil, huma.Error400BadRequest("text is required")
 		}
-		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, b.Author, b.PlatformExperimentID, b.Text, b.Links)
+		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, b.Author, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 		if err != nil {
 			h.logger.Info("register hypothesis", zap.Error(err))
 			return nil, hypothesisWriteError(err)

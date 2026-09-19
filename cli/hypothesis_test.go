@@ -501,24 +501,36 @@ func TestHelpGoesToStdout(t *testing.T) {
 	}
 }
 
-func TestHypothesisSubmitOnARefutedParentSuggestsContradicts(t *testing.T) {
-	recordingServer(t, func(int, recorded) any {
-		return map[string]any{"id": "hyp-2", "agent_id": "jane", "links": []map[string]any{
-			{"type": "builds_on", "hypothesis_id": "hyp-1", "status": "refuted"},
-			{"type": "builds_on", "hypothesis_id": "hyp-3", "status": "confirmed"},
-		}}
-	})
+func TestHypothesisSubmitSendsDistinctFrom(t *testing.T) {
+	got := recordingServer(t, func(n int, r recorded) any { return map[string]any{"id": fmt.Sprintf("hyp-%d", n)} })
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "lr 0.2 wins",
-		"--builds-on", "hyp-1", "--builds-on", "hyp-3"}, &stdout, &stderr)
+		"--builds-on", "hyp-1", "--distinct-from", "hyp-1,hyp-3"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	if want := "hl hypothesis link --agent jane --from hyp-2 --type contradicts --to hyp-1"; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("stderr does not suggest %q: %s", want, stderr.String())
+	if want := []any{"hyp-1", "hyp-3"}; !reflect.DeepEqual((*got)[0].Body["distinct_from"], want) {
+		t.Fatalf("distinct_from = %v, want %v", (*got)[0].Body["distinct_from"], want)
 	}
-	if strings.Contains(stderr.String(), "hyp-3") {
-		t.Fatalf("a confirmed parent drew a note: %s", stderr.String())
+
+	file := writeFile(t, `agent_id: jane
+platform_experiment_id: pe-1
+hypotheses:
+  - key: lr
+    text: higher lr
+    links: [{type: builds_on, to: root}]
+  - text: higher lr with warmup
+    links: [{type: builds_on, to: lr}]
+    distinct_from: [lr, hyp-external]
+`)
+	if code := run([]string{"hypothesis", "submit", "--file", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if _, set := (*got)[1].Body["distinct_from"]; set {
+		t.Fatalf("item without distinct_from sent one: %v", (*got)[1].Body)
+	}
+	if want := []any{"hyp-1", "hyp-external"}; !reflect.DeepEqual((*got)[2].Body["distinct_from"], want) {
+		t.Fatalf("file distinct_from = %v, want %v (local key resolved)", (*got)[2].Body["distinct_from"], want)
 	}
 }
 
