@@ -281,8 +281,13 @@ helm-template: helm-prepare
 build:
 	go build ./...
 
+# The graph tests get a throwaway Memgraph: community has one database, so they would otherwise
+# write next to the stack's own graph.
+TEST_MEMGRAPH := hypothesisloop-test-memgraph
 test:
-	go test ./... -timeout 60s
+	podman run -d --rm --name $(TEST_MEMGRAPH) -p 127.0.0.1:7688:7687 docker.io/memgraph/memgraph:3.13.1 --telemetry-enabled=false >/dev/null
+	@until podman exec $(TEST_MEMGRAPH) sh -c "echo 'RETURN 1;' | mgconsole" >/dev/null 2>&1; do sleep 1; done
+	go test ./... -timeout 60s; rc=$$?; podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit $$rc
 
 agent-test:
 	cd agents/experimentator && uv run python -m unittest discover -s tests

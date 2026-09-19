@@ -19,8 +19,8 @@ import (
 
 // These tests run against a real Memgraph or not at all: uniqueness under concurrency, the
 // rollback of a read query and the text index are Memgraph's behaviour, which a fake cannot show.
-// Start one with: podman run -d -p 7687:7687 docker.io/memgraph/memgraph:3.13.1 --telemetry-enabled=false
-const devGraphURL = "bolt://localhost:7687"
+// `make test` starts a throwaway one on this port, never the stack's own on 7687.
+const devGraphURL = "bolt://localhost:7688"
 
 func testGraphURL() string {
 	if url := os.Getenv("HYPOTHESISLOOP_TEST_GRAPH_DB_URL"); url != "" {
