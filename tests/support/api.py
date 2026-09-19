@@ -118,7 +118,7 @@ class API:
         self.base_url = base_url.rstrip("/")
         self.hl_bin = hl_bin
         self.session = requests.Session()
-        # Every platform experiment created through hl, for conftest's per-test close.
+        # Every platform experiment created through hl, closed by conftest at session end.
         self.created_platform_experiments: list[str] = []
 
     # ---- hl CLI -----------------------------------------------------------------------------
