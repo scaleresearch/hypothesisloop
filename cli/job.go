@@ -162,12 +162,13 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	var owed []struct {
 		ID string `json:"id"`
 	}
-	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &owed); err != nil {
-		fail(stderr, err)
-	}
-	commands := make([]string, len(owed))
-	for i, job := range owed {
-		commands[i] = "hl job summary " + job.ID + " --text T"
+	// The job is accepted whatever this read does: a failed one must not print as an error.
+	commands := []string{"hl job list --needs-summary --agent " + *agent + " lists them"}
+	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &owed); err == nil && len(owed) > 0 {
+		commands = commands[:0]
+		for _, job := range owed {
+			commands = append(commands, "hl job summary "+job.ID+" --text T")
+		}
 	}
 	fmt.Fprintln(stderr, "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: "+strings.Join(commands, "; "))
 	return 0

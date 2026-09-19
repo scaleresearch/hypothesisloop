@@ -244,6 +244,27 @@ func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	}
 }
 
+func TestJobSubmitHeldForSummariesStaysOneAcceptedLineWhenTheLookupFails(t *testing.T) {
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			http.Error(w, `{"detail":"failed to list experiments"}`, http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"job-3","status":"QUEUED","not_admitted_reason":"summary_gate"}`))
+	})
+	setAPIURL(t, url)
+	jobFile := t.TempDir() + "/job.yaml"
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
+	want := "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: hl job list --needs-summary --agent jane lists them\n"
+	if code != 0 || stderr.String() != want {
+		t.Fatalf("exit %d, stderr = %q, want exit 0 and %q", code, stderr.String(), want)
+	}
+}
+
 func TestJobSubmitKeepsExplicitID(t *testing.T) {
 	var gotBody map[string]any
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
