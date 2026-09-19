@@ -1,8 +1,7 @@
 // Package apidocs turns each service's Huma-registered operations into a live,
 // self-documenting API surface: an OpenAPI 3.1 document (served by Huma at
 // /openapi.json) plus a compact, LLM-friendly Markdown digest served at
-// /explore. Agents should fetch /explore at startup instead of reading a
-// hand-maintained doc that can drift out of date.
+// /explore, so nobody reads a hand-maintained doc that can drift out of date.
 //
 // Every Register call declares an Audience (agent/coordinator/internal) — required, no
 // default — so /explore can be rendered per audience from the same registrations
@@ -60,8 +59,8 @@ func init() {
 type Audience string
 
 const (
-	// AudienceAgent: research agents (the Python experimentator) — the surface fetched into an
-	// agent's own system prompt at startup, so it must contain nothing an agent shouldn't call.
+	// AudienceAgent: research agents and hl, their client — it must contain nothing an agent
+	// shouldn't call.
 	AudienceAgent Audience = "agent"
 	// AudienceCoordinator: the coordinator/operator/dashboard — experiment lifecycle admin
 	// (create/start/close/summary), donation administration, and other operator-only actions.
@@ -151,6 +150,14 @@ func (d *Doc) MountExploreAudience(r chi.Router, path string, audience Audience)
 	})
 }
 
+// MountRules registers GET path on r, serving the preamble alone: the rules without the operations.
+func (d *Doc) MountRules(r chi.Router, path string) {
+	r.Get(path, func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(d.preamble))
+	})
+}
+
 func sectionOf(op opMeta) string {
 	if len(op.Tags) > 0 {
 		return op.Tags[0]
@@ -210,20 +217,18 @@ func (d *Doc) render(audience Audience) string {
 	return b.String()
 }
 
-// PlatformRules is the cross-cutting rules preamble agents need regardless of which endpoint
-// they hit, embedded in the quota-service /explore (the first service they talk to). It is the
-// single authority for these rules — the experimentator's system prompt defers to it rather than
-// restating them, so a rule changed here reaches every agent without a prompt edit.
+// PlatformRules is the single authority for the rules every agent works under, whatever client it
+// uses: the preamble of /explore and all of /explore/rules, which the experimentator splices into
+// its system prompt. It names no endpoint, so a rule changed here reaches every agent as is.
 const PlatformRules = `## platform rules (read first)
 
-- No quality eviction: nothing kills a job for converging badly, and estimated_duration_hours is not a deadline. Monitoring runs (GET /experiments/{id}/metrics) and stopping unproductive ones (POST /experiments/{id}/cancel) is yours to do — they burn quota, and quota exhaustion stops every job in that tier.
-- If a submitted job stays SUBMITTED/ADMITTED with no metrics arriving, check GET /experiments/{id} for phase_detail before assuming it's just slow to start — a reason there (e.g. an unpullable image) explains why, and a never-self-heals reason evicts and refunds you well before the generic stuck-pending timeout would.
-- Silent-eviction: a job that stops reporting metrics while still RUNNING is killed, eviction_reason silent. A job that never reported a single metric is killed as never_reported_metrics instead — that one means the reporting path itself never worked (wrong URL, a stale metrics helper baked into the image, a swallowed exception), not that training hung, so resubmitting it unchanged fails the same way.
-- Stage ladder: at each stage boundary a share of the surviving agents is cut — jobs stopped, further submissions rejected 422 agent_held for the rest of the run. You survive on your best value on any one metric; your rank is never visible. GET /platform-experiments/{id}/stages.
-- Stage job-length limit: a stage may set max_job_hours (0/absent = unlimited). While it is current, a submission estimating more is rejected job_too_long and a job running past it is evicted job_too_long — measured against observed runtime, so understating estimated_duration_hours does not get you past it. The limit enforced is always the current stage's, which changes as the ladder advances.
-- Metric values are never validated server-side. Never fabricate or inflate one — it invalidates the experiment for everyone relying on the result.
-- Report any metric key a result needs, not only the platform experiment's declared ones — an undeclared key is still stored and shown on the experiment, it just isn't ranked. A declared metric's role decides what it's for: ranking (counts for cuts/standings, the default), constraint (must satisfy a bound or the job is excluded from standings), attribute (shown, never ranked, never gates eligibility).
-- File a real summary (POST /experiments/{id}/summary) after every COMPLETED job, before your next submission.
-- An accepted job stays QUEUED until cluster capacity fits its complete resource and topology request — check /resource-catalog/capacity before submitting; while queued, not_admitted_reason carries the scheduler's current explanation. Admission is scheduler-only: there is no endpoint to request or force it, and QUEUED is normal, not stuck.
-- Stage cuts only fire once a stage's surviving roster is at least 5 agents; below that, evict_pct on a stage is inert and the ladder is purely a job-length schedule.
+- Nothing kills a job for converging badly, and estimated_duration_hours is not a deadline. Watching your jobs' metrics and cancelling unproductive ones is yours to do: they burn quota, and an exhausted quota stops every job in that tier.
+- A job that stays SUBMITTED with no metrics arriving carries the runtime's reason in phase_detail. One whose reason cannot heal is evicted and refunded.
+- A RUNNING job that stops reporting metrics is evicted as silent. One that never reported any is evicted as never_reported_metrics: its reporting path never worked, so resubmitting it unchanged fails the same way.
+- At each stage boundary a share of the surviving agents is cut: their jobs are stopped and further submissions rejected as agent_held for the rest of the run. You survive on your best value on any one ranking metric, and your rank is never visible. Cuts fire only while the surviving roster is at least 5 agents.
+- A stage may set max_job_hours (0 or absent means unlimited). While it is current, a submission estimating more is rejected and a job running past it is evicted, both as job_too_long, on observed runtime.
+- Metric values are never validated. Never fabricate or inflate one: it invalidates the experiment for everyone relying on the result.
+- Report any metric key a result needs. An undeclared key is stored and shown but never ranked. A declared metric's role is ranking (counts for cuts and standings, the default), constraint (must satisfy a bound or the job is excluded from standings) or attribute (shown, never ranked).
+- File a real summary on every COMPLETED job. While one is owed your queued jobs are held, not_admitted_reason summary_gate, and start once it is filed.
+- An accepted job stays QUEUED until cluster capacity fits its complete resource and topology request. not_admitted_reason carries the scheduler's current explanation, awaiting_admission until its first look. Admission is the scheduler's alone and cannot be requested or forced: QUEUED is normal. An accelerator type with no live capacity queues forever and never errors.
 `
