@@ -17,16 +17,19 @@ LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
 # same host-LAN-IP `make render-settings` already resolves for data_store.endpoint (there is
 # exactly one place that detection happens; see Makefile's render-settings). k3s reads
 # registries.yaml at agent-process start, not on a later reload, so it must exist inside the
-# container's filesystem before `agent` runs — mounted in at `podman run` time, not added after.
+# container's filesystem before `agent` runs. It is copied in between create and start: a bind
+# mount of a host temp file disappears with it once removed (macOS virtiofs), and the node then
+# pulls over HTTPS.
 lib_create_node() {
   local context="$1" name="$2" image="$3" server_url="$4" token="$5" cpus="$6" memory="$7"
   local network="${8:-}" ip="${9:-}"
   local podman_cmd="${NODE_PODMAN:-podman}"
 
   : "${REGISTRY_HOST_IP:?lib_create_node: REGISTRY_HOST_IP must be set (see Makefile render-settings target)}"
-  local registries_yaml
-  registries_yaml="$(mktemp)"
-  lib_write_registries_yaml "$registries_yaml" "$REGISTRY_HOST_IP"
+  local config_dir
+  config_dir="$(mktemp -d)"
+  mkdir -p "${config_dir}/rancher/k3s"
+  lib_write_registries_yaml "${config_dir}/rancher/k3s/registries.yaml" "$REGISTRY_HOST_IP"
 
   # Expanded below as ${net_args[@]+"${net_args[@]}"}: under `set -u`, macOS's bash 3.2 treats
   # an unset-because-empty array as an unbound variable.
@@ -34,18 +37,19 @@ lib_create_node() {
   [[ -n "$network" ]] && net_args+=(--network "$network")
   [[ -n "$ip" ]] && net_args+=(--ip "$ip")
 
-  ${podman_cmd} run -d --name "$name" --hostname "$name" \
+  ${podman_cmd} create --name "$name" --hostname "$name" \
     --privileged --cgroupns=host \
     --cpus="$cpus" --memory="$memory" \
     -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /var/run \
-    -v "${registries_yaml}:/etc/rancher/k3s/registries.yaml:ro" \
     ${net_args[@]+"${net_args[@]}"} \
     -e K3S_URL="$server_url" -e K3S_TOKEN="$token" -e K3S_NODE_NAME="$name" \
     "$image" agent --kubelet-arg=feature-gates=KubeletInUserNamespace=true \
     "--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%" \
     --kubelet-arg=cgroups-per-qos=false --kubelet-arg=enforce-node-allocatable= \
     >/dev/null
-  rm -f "${registries_yaml}"
+  ${podman_cmd} cp "${config_dir}/rancher" "${name}:/etc/"
+  rm -rf "${config_dir}"
+  ${podman_cmd} start "$name" >/dev/null
 
   lib_wait_node_ready "$context" "$name"
 }
