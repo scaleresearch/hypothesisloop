@@ -190,7 +190,7 @@ metadata:
 - **Durable data between jobs.** Each job gets a writable space of its own and a readable one spanning the whole platform experiment, so a later stage reads what an earlier one produced no matter where either ran. No agent can overwrite another's evidence.
 - **Fault attribution.** Every terminal outcome is classified as a workload failure, an infrastructure failure, or a policy decision. Only infrastructure failures get refunded and retried for free - so an agent is never eliminated by a bad node, and a stage cut never reads as a failure.
 - **Event streaming.** Agents get a live stream of events as they happen, so a dropped connection costs a delay, never a gap.
-- **Kubernetes or bare metal.** The control plane is a plain set of containers that runs anywhere, including on Kubernetes. Training jobs themselves run on either a Kubernetes cluster (scheduled with native primitives - no external queueing operator required, though the backend is pluggable) or a bare-metal node with nothing but a container engine on it, no cluster at all.
+- **Kubernetes or bare metal.** The control plane is a plain set of containers that runs anywhere, including on Kubernetes. Training jobs themselves run on either a Kubernetes cluster (no queueing operator required, since the control plane schedules) or a bare-metal node with nothing but a container engine on it, no cluster at all.
 
 The agent-facing API reference is served by the control plane itself, generated from the live API so it can't drift from it.
 
@@ -198,14 +198,14 @@ The agent-facing API reference is served by the control plane itself, generated 
 
 We think of automated research as a loop, not a pipeline. Someone sets an objective once. After that, hypotheses get proposed, tested with real compute, and confirmed or killed, over and over, by whoever picks up the thread next, human or agent. The platform's job is to keep that loop running unattended without losing rigor. A claim has to be registered before it costs anything. A run that tests one has to end in a written result. The next hypothesis gets proposed against that full history instead of a blank slate.
 
-That loop is built from five primitives:
+That loop is built from six primitives:
 
 - **Platform experiment**, the objective. An operator opens a compute envelope with a budget, the metrics that define success, a max agent count, a reporting cadence, and the root of its own hypothesis graph. Agents sign up, then submit jobs against it once it starts.
 - **Hypothesis**, the claim. A registered research idea, scoped to one platform experiment and placed in its graph: it builds on the objective or on the hypotheses it refines or combines, and can contradict or relate to others. Agents read the graph to find where an idea belongs, then register it (or retrieve it, if the same idea already exists) before submitting any job against it, so nothing gets spent without a claim on record first.
 - **Job**, the test. One training/eval run, submitted with a hypothesis reference, a theory, and a resource description (accelerator type/count, optional distributed or heterogeneous topology, CPU/RAM/storage). Never a raw cluster manifest.
 - **Quota tiers**, the budget the loop runs inside. Guaranteed capacity is never preempted. Burst capacity can be preempted by a guaranteed job that needs the same accelerator. Preempted burst jobs return to the queue and re-admit later; cancellations refund unused reservation.
 - **Durable data**, the memory the loop runs on. Each job gets its own writable space and a readable one shared across the platform experiment. Git stays the store for anything read as text, code, configs, small results. The data space takes anything loaded as a tensor. A requeued job keeps its identity, so a checkpoint written before a preemption is at the same place when it starts again.
-- **Lineage and findings**, the record the next iteration reads before it starts. Jobs can chain parent to child. Every completed, failed, or evicted job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one. The hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
+- **Lineage and findings**, the record the next iteration reads before it starts. Jobs can chain parent to child. Every completed job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one. The hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
 
 ## Architecture
 
@@ -226,9 +226,9 @@ HypothesisLoop is split into two kinds of deployable things:
   reconcile loop (fetch desired state, diff against actual, converge, report
   back - the same loop a kubelet runs, one level up):
   - **Kubernetes** (`runtime/k8s/`) - a cluster-agent Deployment plus a
-    node-agent DaemonSet for per-node metrics. Admission, priority, and
-    preemption are plain Kubernetes primitives; no external queueing
-    operator required.
+    node-agent DaemonSet for per-node metrics. The control plane decides
+    admission, priority and preemption, so the cluster needs no queueing
+    operator.
   - **Bare metal** (`runtime/bare-metal/`) - a single bare-agent process for
     a node with nothing but a container engine on it, no cluster at all.
     Useful for on-demand hardware you don't want to join to Kubernetes.
