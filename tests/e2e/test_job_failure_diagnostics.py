@@ -17,11 +17,10 @@ PROVEN against the live stack: 3x solo green. Both halves needed quota_tier="gua
 """
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from conftest import make_agent
+from support.cluster import job_resource_absent
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -60,9 +59,12 @@ def test_crashing_jobs_output_outlives_its_workload(api, experiment, run_id, dea
         deadline=deadline,
     )
 
-    # Give the cluster-agent several reconcile passes to remove the workload, then re-read: the
-    # record must still explain the failure.
-    time.sleep(15)
+    eventually(
+        "crashed job's workload to be removed",
+        lambda: job_resource_absent(crash_job),
+        accept=lambda absent: absent,
+        deadline=deadline,
+    )
     assert marker in api.logs(crash_job, n=200), "log tail disappeared once the workload was cleaned up"
 
     exp = api.experiment(crash_job)
