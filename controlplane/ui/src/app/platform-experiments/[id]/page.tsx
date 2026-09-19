@@ -1109,7 +1109,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                     </td>
                     <td className="mono">{exp.agent_id}</td>
                     <td className="mono">{exp.accelerator_count}× {acceleratorLabel(exp.accelerator_type)}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{exp.estimated_cost_acch?.toFixed(1) ?? '—'} AccH</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>{exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} AccH` : '—'}</td>
                     <td style={{ fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.hypothesis}</td>
                   </tr>
                 ))}
