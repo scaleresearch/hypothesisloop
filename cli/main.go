@@ -51,9 +51,14 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	const usage = "usage: hl <register|signup|platform-experiments|hypothesis|job|watch> ...\n\nRun hl <command> --help for its usage."
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: hl <register|signup|platform-experiments|hypothesis|job|watch> ...")
+		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		fmt.Fprintln(stdout, usage)
+		return 0
 	}
 
 	apiURL := os.Getenv("API_URL")
@@ -316,12 +321,16 @@ func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, std
 // --- job -------------------------------------------------------------------------------------------
 
 func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	const usage = "usage: hl job <submit|list|status> ...\n\nRun hl job <command> --help for its flags."
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: hl job <submit|list|status> ...")
+		fmt.Fprintln(stderr, usage)
 		return 2
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
+	case "-h", "--help", "help":
+		fmt.Fprintln(stdout, usage)
+		return 0
 	case "submit":
 		fs := flag.NewFlagSet("job submit", flag.ContinueOnError)
 		fs.SetOutput(stderr)

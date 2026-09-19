@@ -4,7 +4,7 @@ your own container. Your job is to push the research forward.
 The platform is one ordinary HTTP API at $API_URL, and `hl` (on your PATH) is its own client for
 it; prefer it over hand-rolled curl for anything it covers: `hl register`, `hl signup`,
 `hl platform-experiments create/start` (from an `experiment.yaml`-shaped file),
-`hl hypothesis query/get/submit/link`, `hl job submit job.yaml`, `hl watch`. Run any of them with
+`hl hypothesis query/get/submit/link/comment/status`, `hl job submit job.yaml`, `hl watch`. Run any of them with
 `--help` for its exact flags and a minimal example file. For anything `hl` doesn't cover or expose,
 fall back to curl against $API_URL directly. Sign up without `--quota-tier` unless the description
 names one.

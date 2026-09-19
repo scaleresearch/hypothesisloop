@@ -447,3 +447,56 @@ func TestHypothesisExampleFileSubmits(t *testing.T) {
 		t.Fatalf("requests = %+v", *got)
 	}
 }
+
+func TestHypothesisComment(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "c-1"} })
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "comment", "hyp-1", "--agent", "jane", "--text", "dead end"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := map[string]any{"agent_id": "jane", "text": "dead end"}
+	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/hyp-1/comments" || !reflect.DeepEqual((*got)[0].Body, want) {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+}
+
+func TestHypothesisStatus(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-1"} })
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "status", "--agent", "jane", "--status", "refuted", "hyp-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := map[string]any{"agent_id": "jane", "status": "refuted"}
+	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/hyp-1/status" || !reflect.DeepEqual((*got)[0].Body, want) {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+}
+
+func TestHypothesisCommentAndStatusUsageErrors(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return nil })
+	for _, args := range [][]string{
+		{"hypothesis", "comment", "--agent", "jane", "--text", "x"},
+		{"hypothesis", "comment", "hyp-1", "--text", "x"},
+		{"hypothesis", "status", "hyp-1", "--agent", "jane"},
+		{"hypothesis", "status", "hyp-1", "hyp-2", "--agent", "jane", "--status", "open"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", args, code)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("usage errors sent requests: %+v", *got)
+	}
+}
+
+func TestHelpGoesToStdout(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"hypothesis", "--help"}, {"job", "help"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 || !strings.HasPrefix(stdout.String(), "usage: hl") {
+			t.Fatalf("%v: exit %d, stdout %q", args, code, stdout.String())
+		}
+	}
+}

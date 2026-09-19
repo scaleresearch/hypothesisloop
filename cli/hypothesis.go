@@ -32,17 +32,36 @@ type link struct {
 	To   string `json:"to"`
 }
 
+const hypothesisUsage = `usage: hl hypothesis <command> ...
+
+  submit   register an idea under the objective or the hypotheses it builds on
+  link     add a builds_on, contradicts or related link from your own hypothesis
+  comment  add a note to a hypothesis
+  status   set your hypothesis's verdict
+  list     one platform experiment's hypotheses, most recent first
+  get      one hypothesis with its links, jobs, findings and comments
+  query    read-only Cypher over the graph, including its text search
+
+Run hl hypothesis <command> --help for its flags.`
+
 func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: hl hypothesis <submit|link|list|get|query> ...")
+		fmt.Fprintln(stderr, hypothesisUsage)
 		return 2
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
+	case "-h", "--help", "help":
+		fmt.Fprintln(stdout, hypothesisUsage)
+		return 0
 	case "submit":
 		return hypothesisSubmit(c, rest, stdout, stderr)
 	case "link":
 		return hypothesisLink(c, rest, stdout, stderr)
+	case "comment":
+		return hypothesisComment(c, rest, stdout, stderr)
+	case "status":
+		return hypothesisStatus(c, rest, stdout, stderr)
 	case "list":
 		return hypothesisList(c, rest, stdout, stderr)
 	case "get":
@@ -342,6 +361,82 @@ Adds one link from your own hypothesis. Links are append-only. Prints the update
 	return 0
 }
 
+func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hypothesis comment", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	agent := fs.String("agent", "", "agent id")
+	text := fs.String("text", "", "the note")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, `usage: hl hypothesis comment --agent A --text T ID
+
+A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision.`)
+	}
+	id, ok := parseWithID(fs, args)
+	if !ok {
+		return 2
+	}
+	if *agent == "" || *text == "" {
+		fmt.Fprintln(stderr, "hl: hypothesis comment: --agent and --text are required")
+		return 2
+	}
+	var out json.RawMessage
+	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/comments", map[string]string{"agent_id": *agent, "text": *text}, &out); err != nil {
+		return fail(stderr, err)
+	}
+	if err := printCompact(stdout, out); err != nil {
+		return fail(stderr, err)
+	}
+	return 0
+}
+
+func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hypothesis status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	agent := fs.String("agent", "", "agent id; must be the agent that registered ID")
+	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, `usage: hl hypothesis status --agent A --status open|confirmed|refuted|inconclusive ID
+
+Sets the verdict on your own hypothesis, or on a human-submitted one.`)
+	}
+	id, ok := parseWithID(fs, args)
+	if !ok {
+		return 2
+	}
+	if *agent == "" || *status == "" {
+		fmt.Fprintln(stderr, "hl: hypothesis status: --agent and --status are required")
+		return 2
+	}
+	var out json.RawMessage
+	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/status", map[string]string{"agent_id": *agent, "status": *status}, &out); err != nil {
+		return fail(stderr, err)
+	}
+	if err := printCompact(stdout, out); err != nil {
+		return fail(stderr, err)
+	}
+	return 0
+}
+
+// parseWithID parses flags placed before or after the one positional argument.
+func parseWithID(fs *flag.FlagSet, args []string) (string, bool) {
+	var positional []string
+	for len(args) > 0 {
+		if err := fs.Parse(args); err != nil {
+			return "", false
+		}
+		args = fs.Args()
+		if len(args) > 0 {
+			positional = append(positional, args[0])
+			args = args[1:]
+		}
+	}
+	if len(positional) != 1 {
+		fs.Usage()
+		return "", false
+	}
+	return positional[0], true
+}
+
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -419,23 +514,10 @@ description (/explore). Example, the children of a hypothesis:
   hl hypothesis query 'MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id})
     RETURN c.id, c.text, c.status' --param id=HYP_ID`)
 	}
-	// The query comes first and flags after it, so parse around the positional argument.
-	var positional []string
-	for len(args) > 0 {
-		if err := fs.Parse(args); err != nil {
-			return 2
-		}
-		args = fs.Args()
-		if len(args) > 0 {
-			positional = append(positional, args[0])
-			args = args[1:]
-		}
-	}
-	if len(positional) != 1 {
-		fs.Usage()
+	cypher, ok := parseWithID(fs, args)
+	if !ok {
 		return 2
 	}
-	cypher := positional[0]
 	if cypher == "-" {
 		raw, err := io.ReadAll(os.Stdin)
 		if err != nil {
