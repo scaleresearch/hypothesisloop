@@ -3,12 +3,13 @@ use (the Go port of the former agents/coordinator/experiments/hl-watch; see cli/
 Ported 1:1 from tests/scenarios/watch-stream.sh, split one test per independently-diagnosable
 property, per tests/improve.md #7 step 4:
   1. Order and completeness: a subscriber attached BEFORE submission sees QUEUED, SUBMITTED,
-     RUNNING, COMPLETED, each exactly once, in that order, with strictly increasing cursors.
+     RUNNING, COMPLETED, each exactly once, in that order, each from its own transaction (position)
+     with a cursor at or below it.
      Nothing here is satisfied by "the file was non-empty". Combined with `--until` exiting ON the
      terminal event (not on its timeout) in the same test, because both assertions read the same
      subscriber over the same job's whole life -- splitting them would mean paying for a second job
      to re-prove a fact this one subscriber already establishes.
-  2. Replay: kill the connection while the job is RUNNING-bound, reconnect with the last cursor,
+  2. Replay: kill the connection while the job is RUNNING-bound, reconnect with the largest cursor,
      and the transition that happened while disconnected must arrive from replay. See the long
      comment at that step for why this is the guarantee and not the documented limit.
   3. kinds scoping: a subscription naming one kind receives only that kind.
@@ -93,9 +94,9 @@ class Watcher:
     def event_kinds(self) -> set[str]:
         return {e.get("kind", "") for e in self.events()}
 
-    def last_cursor(self) -> int | None:
+    def largest_cursor(self) -> int | None:
         events = self.events()
-        return events[-1]["cursor"] if events else None
+        return max(e["cursor"] for e in events) if events else None
 
 
 @pytest.fixture
@@ -164,7 +165,8 @@ def await_exit(description: str, watcher: Watcher, deadline: Deadline) -> int:
 def order_problems(watcher: Watcher, job_id: str) -> list[str]:
     """Mirrors watch-stream.sh's embedded ORDER_VERDICT python 1:1, just native now that the whole
     scenario is Python: every status the job passed through must be present exactly once, in
-    ascending order of the transition it names, with strictly increasing cursors. ADMITTED is
+    ascending order of the transition it names, each from its own transaction with a cursor at or
+    below its position (positions are transaction ids, not commit ordered). ADMITTED is
     accepted between SUBMITTED and RUNNING because some placement paths use it; it is ranked, not
     ignored."""
     events = [e for e in watcher.events() if e.get("kind") == "experiment.status" and e.get("subject") == job_id]
@@ -182,9 +184,11 @@ def order_problems(watcher: Watcher, job_id: str) -> list[str]:
     ranks = [RANK[v] for v in values if v in RANK]
     if ranks != sorted(ranks):
         problems.append("out of order")
-    cursors = [e["cursor"] for e in events]
-    if cursors != sorted(cursors) or len(set(cursors)) != len(cursors):
-        problems.append("cursors not strictly increasing")
+    positions = [e["position"] for e in events]
+    if len(set(positions)) != len(positions):
+        problems.append("two transitions share a position")
+    if any(e["cursor"] > e["position"] for e in events):
+        problems.append("a cursor above its event's position")
     return problems
 
 
@@ -301,7 +305,7 @@ def test_watch_mid_run_disconnect_and_cursor_replay(api, watch_pe, watch, deadli
         f"stderr: {submitted_watcher.stderr_text()}"
     )
 
-    cursor = submitted_watcher.last_cursor()
+    cursor = submitted_watcher.largest_cursor()
     assert cursor not in (None, 0), "the stream gave the disconnected client no cursor to resume from"
 
     # Now let the job reach RUNNING with nobody connected on that cursor. Polling the REST status
@@ -316,11 +320,11 @@ def test_watch_mid_run_disconnect_and_cursor_replay(api, watch_pe, watch, deadli
     )
     assert reached == "RUNNING", f"job reached {reached} instead of RUNNING; the mid-run reconnect has nothing to replay"
 
-    # Reconnect from the cursor of the last event the killed connection saw.
+    # Reconnect from the largest cursor the killed connection saw, as hl watch itself does.
     #
     # Why RUNNING, and why this is not a test of the documented limit: replay carries no event
     # log. It re-derives events from the rows themselves, so it returns the status the row is IN,
-    # plus the waypoints the row timestamps (queued_at, submitted_at). A status entered AND left
+    # plus the waypoints the row records (queued_xid, submitted_xid). A status entered AND left
     # entirely inside the missed window collapses into the current one -- stated plainly in
     # db.EventsStore.Replay, and a deliberate consequence of not writing the same state twice.
     # Asserting that such a collapsed status replays would be asserting something the design says
@@ -346,19 +350,21 @@ def test_watch_mid_run_disconnect_and_cursor_replay(api, watch_pe, watch, deadli
     )
 
     replayed = replay_watcher.status_values(job)
-    assert replayed and replayed[0] == "RUNNING", (
-        f"expected RUNNING first after reconnect, got: {replayed}"
+    assert replayed and replayed[-1] == "RUNNING", (
+        f"expected the replay to end on RUNNING, got: {replayed}"
     )
-    # Replay must return what was missed and nothing else. QUEUED and SUBMITTED were both seen
-    # before the disconnect and both carry cursors <= the one handed back, so re-delivering either
-    # would mean the cursor does not actually bound the replay.
-    assert not ({"QUEUED", "SUBMITTED"} & set(replayed)), (
-        f"replay re-sent an event the client had already seen: {replayed}"
+    # Replay returns every event at a position at or above the cursor: the transaction the cursor
+    # came from may repeat (same position as before the disconnect), anything older may not.
+    bad_positions = [e for e in replay_watcher.events() if e.get("position", 0) < cursor]
+    assert not bad_positions, (
+        f"{len(bad_positions)} replayed events came from transactions below the resume cursor {cursor}"
     )
-    bad_cursors = [e for e in replay_watcher.events() if e.get("cursor", 0) <= cursor]
-    assert not bad_cursors, (
-        f"{len(bad_cursors)} replayed events carried a cursor at or before the resume point {cursor}"
-    )
+    seen = {e["value"]: e["position"] for e in submitted_watcher.events()
+            if e.get("kind") == "experiment.status" and e.get("subject") == job}
+    changed = [e for e in replay_watcher.events()
+               if e.get("kind") == "experiment.status" and e.get("subject") == job
+               and e["value"] in seen and e["position"] != seen[e["value"]]]
+    assert not changed, f"a repeated status carried a different position than before the disconnect: {changed}"
 
 
 def test_watch_unknown_kind_refused_at_handshake(api, pe, run_id, watch, deadline):

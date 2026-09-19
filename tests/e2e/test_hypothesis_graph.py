@@ -407,7 +407,7 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
     assert [(e["subject"], e["value"], e["detail"]) for e in live] == [(b["id"], "contradicts", a["id"])], (
         f"expected exactly the explicit link; links created with a hypothesis must not emit hypothesis.link: {live}"
     )
-    cursor = live[0]["cursor"]
+    cursor, position = live[0]["cursor"], live[0]["position"]
 
     replay_started = time.monotonic()
     replay = api.hl_expect(
@@ -415,8 +415,8 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
     )
     assert replay.returncode == 0, f"replay watch exited {replay.returncode}: {replay.stderr}"
     replayed = [json.loads(line) for line in replay.stdout.splitlines() if line.startswith("{")]
-    assert [(e["kind"], e["subject"], e["value"], e["detail"], e["cursor"]) for e in replayed] == [
-        ("hypothesis.link", b["id"], "contradicts", a["id"], cursor)
+    assert [(e["kind"], e["subject"], e["value"], e["detail"], e["position"]) for e in replayed] == [
+        ("hypothesis.link", b["id"], "contradicts", a["id"], position)
     ], f"replay from the start did not return exactly the explicit link: {replayed}"
     assert time.monotonic() - replay_started < 15
 
@@ -424,6 +424,8 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
         "watch", "--platform-experiment", pe_id, "--kinds", "hypothesis.link", "--since", str(cursor), "--timeout", "3", timeout=15
     )
     assert after.returncode == 0, after.stderr
-    assert not [line for line in after.stdout.splitlines() if line.startswith("{")], (
-        f"replay from the link's own cursor re-sent it: {after.stdout}"
+    # A resume repeats the transaction at its cursor and nothing older, so the link comes back once.
+    resent = [json.loads(line) for line in after.stdout.splitlines() if line.startswith("{")]
+    assert [e["position"] for e in resent] == [position], (
+        f"replay from the link's own cursor returned something other than the link once: {after.stdout}"
     )
