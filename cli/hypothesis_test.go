@@ -469,13 +469,17 @@ func TestHypothesisComment(t *testing.T) {
 func TestHypothesisStatus(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-1"} })
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"hypothesis", "status", "--agent", "jane", "--status", "refuted", "hyp-1"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit %d, stderr %s", code, stderr.String())
-	}
 	want := map[string]any{"agent_id": "jane", "status": "refuted"}
-	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/hyp-1/status" || !reflect.DeepEqual((*got)[0].Body, want) {
-		t.Fatalf("request = %+v", (*got)[0])
+	for i, args := range [][]string{
+		{"hypothesis", "status", "--agent", "jane", "--status", "refuted", "hyp-1"},
+		{"hypothesis", "status", "hyp-1", "refuted", "--agent", "jane"},
+	} {
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit %d, stderr %s", args, code, stderr.String())
+		}
+		if (*got)[i].Method != "POST" || (*got)[i].Path != "/hypotheses/hyp-1/status" || !reflect.DeepEqual((*got)[i].Body, want) {
+			t.Fatalf("request = %+v", (*got)[i])
+		}
 	}
 }
 

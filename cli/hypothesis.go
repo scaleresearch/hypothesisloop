@@ -430,19 +430,23 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 }
 
 func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID --status open|confirmed|refuted|inconclusive [--agent A]
+	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|confirmed|refuted|inconclusive [--agent A]
 
-Sets the verdict on your own hypothesis, or on a human-submitted one.`, stderr)
+Sets the verdict on your own hypothesis, or on a human-submitted one. --status VERDICT works too.`, stderr)
 	agent := fs.String("agent", "", "agent id, the one that registered ID (default $AGENT_ID)")
-	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
-	id, err := parseOne(fs, args, "ID", "", "id")
+	status := fs.String("status", "", "")
+	operands, err := parseOperands(fs, args, "id")
 	if err != nil {
 		return parseExit(err)
 	}
-	*agent = orEnv(*agent, agentEnv)
-	if *agent == "" || *status == "" {
-		return parseExit(misuse(fs, "--agent and --status are required"))
+	if len(operands) == 2 && *status == "" {
+		*status, operands = operands[1], operands[:1]
 	}
+	*agent = orEnv(*agent, agentEnv)
+	if len(operands) != 1 || *agent == "" || *status == "" {
+		return parseExit(misuse(fs, "want ID and a verdict, with --agent or $AGENT_ID set"))
+	}
+	id := operands[0]
 	var out json.RawMessage
 	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/status", map[string]string{"agent_id": *agent, "status": *status}, &out); err != nil {
 		return fail(stderr, err)
