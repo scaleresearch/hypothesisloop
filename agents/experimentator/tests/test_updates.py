@@ -61,6 +61,64 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.monotonic() - started, 5)
 
 
+class DrainTest(unittest.IsolatedAsyncioTestCase):
+    async def test_a_drain_returns_what_waits_within_a_short_timeout(self):
+        command, _ = fake_hl(f"[ \"$2 $3\" = '--timeout 1' ] || exit 2\necho '{COMPLETED}'\n")
+        events = await updates.drain(os.environ.copy(), command=command)
+        self.assertEqual([e["subject"] for e in events], ["exp-1"])
+
+    async def test_a_failed_drain_returns_nothing(self):
+        command, _ = fake_hl("echo refused >&2; exit 2\n")
+        self.assertEqual(await updates.drain(os.environ.copy(), command=command), [])
+
+
+class HookTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from unittest import mock
+
+        from hypothesisloop_agent.claude import run
+
+        self.waiting = []
+        self.drains = 0
+
+        async def drain(env):
+            self.drains += 1
+            await asyncio.sleep(0)
+            events, self.waiting = self.waiting, []
+            return events
+
+        patch = mock.patch.object(updates, "drain", drain)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.hook = run._updates_hook({}, "agent-a")
+
+    async def call(self, **hook_input):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        with redirect_stdout(StringIO()):
+            return await self.hook({"hook_event_name": "PostToolUse", **hook_input}, "tool-1", {"signal": None})
+
+    async def test_waiting_updates_reach_the_agent_once_with_repeats_collapsed(self):
+        event = {"kind": "job.underperforming", "subject": "job-1", "value": "val_accuracy", "agent_id": "agent-a"}
+        self.waiting = [event, dict(event, position=2)]
+        self.assertEqual(await self.call(), {"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy"}})
+        self.assertEqual(await self.call(), {})
+
+    async def test_parallel_tool_calls_share_one_drain(self):
+        self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
+        outputs = await asyncio.gather(self.call(), self.call(), self.call())
+        self.assertEqual(self.drains, 1)
+        self.assertEqual([bool(o) for o in outputs], [True, False, False])
+
+    async def test_a_subagents_tool_call_leaves_the_updates_waiting(self):
+        self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
+        self.assertEqual(await self.call(agent_id="sub-1"), {})
+        self.assertEqual(self.drains, 0)
+
+
 class FormatTest(unittest.TestCase):
     def test_one_compact_line_per_event_naming_only_other_actors(self):
         events = [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "",

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -373,5 +374,46 @@ func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 	}
 	if elapsed > 1200*time.Millisecond {
 		t.Errorf("returned after %s, want = soon after the settle window", elapsed)
+	}
+}
+
+// A watch whose timeout ends inside the settle window still returns what it read and saves the
+// cursor: the harness drains waiting events this way between an agent's tool calls.
+func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	event := `{"kind":"experiment.status","value":"COMPLETED","position":10,"cursor":10}`
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+		_, _ = conn.Write(serverTextFrame(event))
+		time.Sleep(2 * time.Second)
+	}()
+
+	cursorFile := filepath.Join(t.TempDir(), "cursor.json")
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
+		Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if got, want := stdout.String(), event+"\n"; got != want {
+		t.Errorf("output: got = %q, want = %q", got, want)
+	}
+	state, err := loadCursor(cursorFile)
+	if err != nil || state.Cursor != 10 {
+		t.Errorf("saved cursor: got = %d (%v), want = 10", state.Cursor, err)
 	}
 }

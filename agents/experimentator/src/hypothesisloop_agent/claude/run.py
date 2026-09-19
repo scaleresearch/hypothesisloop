@@ -28,6 +28,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    HookMatcher,
     RateLimitEvent,
     ResultMessage,
     TextBlock,
@@ -63,6 +64,27 @@ def _log_message(message, agent: str) -> None:
             "rate_limit: status=%s type=%s utilization=%s resets_at=%s",
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
+
+
+def _updates_hook(watch_env: dict[str, str], agent_id: str):
+    """A PostToolUse hook that hands the agent the updates that arrived while it worked."""
+    draining = asyncio.Lock()
+
+    async def hook(hook_input, tool_use_id, context) -> dict:
+        # One drain per step: parallel tool calls share it, and a subagent's calls leave the
+        # updates for the agent itself.
+        if draining.locked() or hook_input.get("agent_id"):
+            return {}
+        async with draining:
+            events = await updates.drain(watch_env)
+        if not events:
+            return {}
+        for line in activity.event_lines(events, agent_id):
+            print(line, flush=True)
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                       "additionalContext": updates.message(events, agent_id)}}
+
+    return hook
 
 
 def _session_file(setup: core.RunSetup) -> str:
@@ -175,6 +197,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     Returns (updated resume_id, rate-limit reset time, compaction handoff). A non-None handoff
     means the caller must start a fresh session without resume=.
     """
+    cfg = setup.cfg
+    watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt,
         model=model,
@@ -197,11 +221,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         disallowed_tools=DISALLOWED_TOOLS,
         # The 2 min default backgrounds long commands, and agents then poll their output files.
         env={"BASH_DEFAULT_TIMEOUT_MS": "600000"},
+        hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(watch_env, cfg.agent_id)])]},
     )
 
     rate_limited_resets_at: float | None = None
-    cfg = setup.cfg
-    watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
 
     async with ClaudeSDKClient(options=options) as client:
         first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")

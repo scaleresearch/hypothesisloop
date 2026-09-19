@@ -1,8 +1,9 @@
-"""Platform updates about the agent's own resources, delivered by the harness between turns.
+"""Platform updates about the agent's own resources, delivered by the harness.
 
-The harness runs `hl watch` in the foreground whenever the agent ends its turn: the platform holds
-whatever happened while the agent worked and replays it from the cursor hl saved, so a batch
-waits server-side instead of in this process, and survives a restart.
+The harness runs `hl watch` whenever the agent ends its turn, and briefly after each of its tool
+calls: the platform holds whatever happened while the agent worked and replays it from the cursor
+hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
+delivered once whichever of the two reads it.
 """
 from __future__ import annotations
 
@@ -17,6 +18,8 @@ log = logging.getLogger("llm_agent")
 
 HL_WATCH = ["hl", "watch"]
 _RETRY_S = 30.0
+# How long a drain listens: the platform replays what the cursor missed as soon as hl connects.
+_DRAIN_S = 1
 
 # How long an agent that ended its turn waits without any update before it is nudged: one that
 # ended its turn with nothing in flight would otherwise wait for an update that never comes.
@@ -55,6 +58,16 @@ async def _run_watch(command: list[str], env: dict[str, str], stopped: Callable[
     return proc.returncode, stdout.decode(errors="replace")
 
 
+def _events(stdout: str) -> list[dict]:
+    return [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+
+
+async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict]:
+    """The events already waiting on the cursor, without waiting for more."""
+    _, stdout = await _run_watch([*command, "--timeout", str(_DRAIN_S)], env, lambda: False)
+    return _events(stdout)
+
+
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
                      command: list[str] = HL_WATCH, retry_s: float = _RETRY_S) -> list[dict]:
     """Runs hl watch until it returns events, and returns them. Returns [] once idle_s passes
@@ -62,7 +75,7 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
         code, stdout = await _run_watch(command, env, stopped)
-        events = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+        events = _events(stdout)
         if events:
             return events
         if code not in (0, None):
