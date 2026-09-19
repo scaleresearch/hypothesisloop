@@ -515,8 +515,8 @@ var knownKinds = func() map[string]bool {
 // RegisterWatchHuma documents the change stream in the one place an agent already looks. The
 // socket itself cannot be a Huma operation — an upgrade needs the raw connection, and Huma owns
 // the response of everything registered with it — so its vocabulary is served as an ordinary GET
-// beside it. That makes it discoverable from /explore, which an agent loads into its own prompt at
-// startup, instead of folklore an agent could only learn by being told.
+// beside it. That makes it discoverable from /explore instead of folklore an agent could only
+// learn by being told; an agent's prompt carries only /explore/rules.
 //
 // The body is db.EventKinds itself, the same slice parseWatchQuery validates against, so this
 // cannot describe a stream the server does not serve.
