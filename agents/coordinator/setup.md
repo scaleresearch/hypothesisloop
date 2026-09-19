@@ -88,8 +88,8 @@ silently improvise.
    the per-experiment `seed/build_and_push.sh` where one exists (it pushes and renders the
    job.yaml's placeholder image ref into `job.rendered.yaml`; push that to `$CODE_REPO_URL` with
    the rest of `seed/`), or `make <name>-workload-image` for the platform's
-   own images. Verify with `podman pull --tls-verify=false localhost:5000/<image>:<tag>` from
-   any cluster node before spawning any agents.
+   own images. Verify with `podman pull --tls-verify=false <LAN IP>:5000/<image>:<tag>` (the address in
+   `localdev/.registry-host-ip`) from any cluster node before spawning any agents.
 5. `make git-daemon-start` (safe to re-run).
 
 ## 2. Create the platform experiment

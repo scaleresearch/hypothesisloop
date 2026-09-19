@@ -13,18 +13,23 @@ COMPOSE_FILE := localdev/controlplane/docker-compose.yml
 RENDERED_SETTINGS := controlplane/settings/.hypothesisloop.rendered.yaml
 REGISTRY_HOST_IP_FILE := localdev/.registry-host-ip
 
+# REGISTRY_HOST_IP is this host's LAN address (localdev/lib/node.sh's lib_host_ip): the local
+# registry publishes on it and every k3s node and job pod reaches the host through it. Never
+# localhost: a node has its own network namespace, and macOS AirPlay holds *:5000.
+REGISTRY_HOST_IP := $(shell bash -c '. localdev/lib/node.sh && lib_host_ip')
+
 # In production REGISTRY names a real registry the operator provisioned and every cluster
 # node already has network access to (see runtime/k8s/infra/install.sh's REGISTRY_URL) --
-# this default is dev-only. TAG names the tree content that was built (localdev/lib/image-tag.sh),
+# this default is the local dev registry. TAG names the tree content that was built (localdev/lib/image-tag.sh),
 # so a manifest that pins one tag can never silently start running different bytes under
 # imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
 # image reads it from make. REGISTRY_TLS_VERIFY=false only because the dev registry
 # in docker-compose.yml serves plain HTTP; a prod REGISTRY with real TLS overrides it to true.
-REGISTRY ?= localhost:5000
+REGISTRY ?= $(REGISTRY_HOST_IP):5000
 ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
-export TAG
+export REGISTRY_HOST_IP REGISTRY TAG
 REGISTRY_TLS_VERIFY ?= false
 
 check-tag:
@@ -37,19 +42,15 @@ check-tag:
 # for every other. This renders the real address in at start-up; the control plane rejects a
 # loopback endpoint outright, so a host where detection picks the wrong interface fails here,
 # not hours into a run with nothing saved.
-#
-# The same address (localdev/lib/node.sh's lib_host_ip) is written to REGISTRY_HOST_IP_FILE for
-# the local registry: a k3s node container reaches the compose-published registry the same way it
-# reaches the data store, over the host's LAN address, never localhost/127.0.0.1.
+# REGISTRY_HOST_IP_FILE hands the same address to the scripts and tests that run outside make.
 render-settings:
-	@host_ip=$$(bash -c '. localdev/lib/node.sh && lib_host_ip') || exit 1; \
-	sed "s|REPLACE-WITH-HOST-LAN-IP|$$host_ip|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS); \
-	echo "$$host_ip" > $(REGISTRY_HOST_IP_FILE); \
-	echo "make render-settings: data_store.endpoint and registry host rendered against $$host_ip"
+	@test -n "$(REGISTRY_HOST_IP)" || { echo "make: could not detect this host's LAN address" >&2; exit 1; }
+	sed "s|REPLACE-WITH-HOST-LAN-IP|$(REGISTRY_HOST_IP)|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS)
+	echo "$(REGISTRY_HOST_IP)" > $(REGISTRY_HOST_IP_FILE)
 
 registry-up:
 	podman compose -f $(COMPOSE_FILE) up -d registry
-	@until curl -fsS -o /dev/null http://localhost:5000/v2/; do sleep 1; done
+	@until curl -fsS -o /dev/null http://$(REGISTRY_HOST_IP):5000/v2/; do sleep 1; done
 
 registry-prune:
 	bash localdev/controlplane/registry-prune.sh

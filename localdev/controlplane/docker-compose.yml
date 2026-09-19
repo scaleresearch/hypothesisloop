@@ -22,7 +22,7 @@ services:
       # registry accepts the DELETE (204) but never removes the manifest.
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
     ports:
-      - "5000:5000"
+      - "${REGISTRY_HOST_IP:?run through make, which detects the host LAN address}:5000:5000"
     volumes:
       - registry-data:/var/lib/registry
 
@@ -115,7 +115,7 @@ services:
     restart: "no"
 
   control-service:
-    image: localhost:5000/hypothesisloop-control-service:${TAG:?TAG must name the image tag make images pushed}
+    image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-control-service:${TAG:?TAG must name the image tag make images pushed}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
@@ -134,7 +134,7 @@ services:
         condition: service_completed_successfully
 
   metrics-service:
-    image: localhost:5000/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make images pushed}
+    image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make images pushed}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
