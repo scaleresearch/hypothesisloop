@@ -673,7 +673,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // would only hide where the cut fell.
   const { data: experimentsPage, error: experimentsError } = useSWR(
     ['pe-experiments', id],
-    () => fetchExperimentsPage({ platform_experiment_id: id, limit: MAX_LIST_PAGE_SIZE }),
+    () => fetchExperimentsPage({ platform_experiment_id: id, sort: '-created_at', limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
   const experiments = experimentsPage?.items

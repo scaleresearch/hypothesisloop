@@ -86,7 +86,7 @@ function ExperimentCard({
   )
   const { data: jobs } = useSWR(
     ['pe-experiments', pe.id],
-    () => fetchExperimentsPage({ platform_experiment_id: pe.id, limit: MAX_LIST_PAGE_SIZE }),
+    () => fetchExperimentsPage({ platform_experiment_id: pe.id, sort: '-created_at', limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 10_000 },
   )
   const progress = hypothesisProgressCounts(hypotheses?.items ?? [], jobs?.items ?? [])
