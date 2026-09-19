@@ -365,11 +365,13 @@ func writeEvent(conn *wsConn, e db.Event) error {
 
 // served is what one connection has been sent. floor is, per kind, the largest cursor delivered: a
 // kind is carried from its own floor because after a filter change one stream-wide cursor would
-// skip. sent holds the identity of every event sent, because a replay resends what is at its
-// cursor and the live stream repeats what committed while a replay ran. Only a repeat of the same
-// identity is dropped: one transaction writes several events (a stage cut per agent, a quota
-// donation pair), and each is news. Every event this connection writes passes through send, so
-// it is where source.Concerns completes the filter, for replay and live alike.
+// skip. A replay resends what is at its cursor and the live stream repeats what committed while a
+// replay ran. An event below its kind's floor is such a repeat: its transaction had finished
+// before an event already sent was written, so it came earlier on this stream. At or above the
+// floor only a repeat of the same identity is dropped, which sent holds: one transaction writes
+// several events (a stage cut per agent, a quota donation pair), and each is news. Every event
+// this connection writes passes through send, so it is where source.Concerns completes the
+// filter, for replay and live alike.
 type served struct {
 	ctx    context.Context
 	source EventSource
@@ -379,7 +381,7 @@ type served struct {
 }
 
 func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event) error {
-	if s.sent[e.Identity()] {
+	if e.Position < s.floor[e.Kind] || s.sent[e.Identity()] {
 		return nil
 	}
 	concerns, err := s.source.Concerns(s.ctx, filter, e)
@@ -396,6 +398,11 @@ func (s *served) send(conn *wsConn, filter db.EventFilter, e db.Event) error {
 	s.sent[e.Identity()] = true
 	if e.Cursor > s.floor[e.Kind] {
 		s.floor[e.Kind] = e.Cursor
+		for sent := range s.sent {
+			if sent.Kind == e.Kind && sent.Position < e.Cursor {
+				delete(s.sent, sent)
+			}
+		}
 	}
 	return nil
 }

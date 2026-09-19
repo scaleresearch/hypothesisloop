@@ -1131,3 +1131,49 @@ func TestHLWatchExplicitSinceWinsOverTheSavedCursor(t *testing.T) {
 		t.Errorf("watch with --since 150: got = exit %v, positions %v, want = exit 0, [200] (stderr: %s)", code, got, stderr)
 	}
 }
+
+type countingConn struct {
+	net.Conn
+	writes int
+}
+
+func (c *countingConn) Write(p []byte) (int, error) {
+	c.writes++
+	return len(p), nil
+}
+
+func (c *countingConn) SetWriteDeadline(time.Time) error { return nil }
+
+// A connection that lives for a whole run must not remember every event it ever sent: once a kind's
+// floor passes an event, a repeat of it is recognised by its position.
+func TestAConnectionForgetsTheEventsItsFloorHasPassedAndStillDropsTheirRepeats(t *testing.T) {
+	wire := &countingConn{}
+	conn := &wsConn{conn: wire, rw: bufio.NewReadWriter(bufio.NewReader(strings.NewReader("")), bufio.NewWriter(wire))}
+	delivered := &served{ctx: context.Background(), source: newFakeEvents(), logger: zap.NewNop(),
+		floor: map[string]int64{}, sent: map[db.Event]bool{}}
+	filter := db.EventFilter{PlatformExperimentID: "pe-1"}
+
+	for cursor := int64(1); cursor <= 500; cursor++ {
+		if err := delivered.send(conn, filter, statusEvent("job-1", "RUNNING", "agent-1", cursor)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(delivered.sent) != 1 {
+		t.Errorf("identities remembered after 500 events = %d, want only the one at the floor", len(delivered.sent))
+	}
+	written := wire.writes
+	for _, cursor := range []int64{3, 500} {
+		if err := delivered.send(conn, filter, statusEvent("job-1", "RUNNING", "agent-1", cursor)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if wire.writes != written {
+		t.Errorf("a repeat of an event already sent was written again")
+	}
+	if err := delivered.send(conn, filter, statusEvent("job-2", "RUNNING", "agent-1", 500)); err != nil {
+		t.Fatal(err)
+	}
+	if wire.writes == written {
+		t.Errorf("another event of the transaction at the floor was dropped")
+	}
+}
