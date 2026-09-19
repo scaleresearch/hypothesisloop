@@ -177,11 +177,11 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
   // framed at once are unreadable.
   useEffect(() => {
     if (!ready || width === 0) return
-    const target = focus || graph.root
-    const p = positions.get(target)
-    if (!p || centered.current === target) return
+    const target = positions.has(focus) ? focus : graph.root
+    const p = positions.get(target)!
+    if (centered.current === target) return
     centered.current = target
-    if (focus) {
+    if (target === focus) {
       setCenter(p.x + NODE_WIDTH / 2, p.y + NODE_HEIGHT / 2, { zoom: Math.max(getZoom(), 0.8), duration: 300 })
     } else {
       setViewport({ x: width / 2 - (p.x + NODE_WIDTH / 2) * 0.8, y: 80 - p.y * 0.8, zoom: 0.8 })
