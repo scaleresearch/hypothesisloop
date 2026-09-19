@@ -15,32 +15,37 @@ import { relTime } from '@/lib/format'
 interface HypothesisPanelProps {
   graph: HypothesisGraph
   nodeByID: Map<string, HypothesisListItem>
-  pe: PlatformExperiment | undefined
   selected: string
   onSelect: (id: string) => void
   onAddIdea: (parentID: string) => void
 }
 
-export function HypothesisPanel({ graph, nodeByID, pe, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
-  if (selected === graph.root) {
-    return (
-      <Pod>
-        <PodHeader>Objective</PodHeader>
-        <PodContent className="hg-stack" style={{ gap: 12 }}>
-          <div style={{ fontWeight: 650 }}>{pe?.name ?? graph.root}</div>
-          {pe?.description && <CollapsibleDescription text={pe.description} />}
-          <div className="text-muted">
+export function ObjectiveBar({ graph, pe, onAddIdea }: {
+  graph: HypothesisGraph
+  pe: PlatformExperiment | undefined
+  onAddIdea: (parentID: string) => void
+}) {
+  return (
+    <Pod>
+      <PodContent className="hg-stack">
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+          <span className="uppercase-label">Objective</span>
+          <span style={{ fontWeight: 650 }}>{pe?.name ?? graph.root}</span>
+          <span className="text-muted" style={{ fontSize: 12 }}>
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto' }}>
             <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button>
             <Link href={`/platform-experiments/${graph.root}`} className="text-link" style={{ fontSize: 12 }}>Experiment →</Link>
-          </div>
-        </PodContent>
-      </Pod>
-    )
-  }
+          </span>
+        </div>
+        {pe?.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
+      </PodContent>
+    </Pod>
+  )
+}
 
+export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
   const node = nodeByID.get(selected)
   if (!node) {
     return (

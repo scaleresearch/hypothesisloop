@@ -73,7 +73,7 @@ function ClusterSettingsEditor({ clusterID }: { clusterID: string }) {
 }
 
 function ConnectedClusters() {
-  const { data, error, isLoading, mutate } = useSWR<ClustersResponse>(
+  const { data, error, isLoading } = useSWR<ClustersResponse>(
     'clusters',
     fetchClusters,
     { refreshInterval: 5_000 },
@@ -99,10 +99,7 @@ function ConnectedClusters() {
       </div>
 
       <Pod>
-        <PodHeader style={{ justifyContent: 'space-between' }}>
-          <span>Connected Clusters</span>
-          <Button size="sm" onClick={() => mutate()}>Refresh</Button>
-        </PodHeader>
+        <PodHeader>Connected Clusters</PodHeader>
         <PodContent>
           {isLoading && <Loading />}
           {error && <ErrorMessage>Cannot reach scheduler service — is the stack running?</ErrorMessage>}
@@ -166,7 +163,7 @@ function ConnectedClusters() {
 }
 
 function LiveCapacity() {
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading } = useSWR(
     'resource-capacity',
     fetchResourceCapacity,
     { refreshInterval: 5_000 },
@@ -181,10 +178,7 @@ function LiveCapacity() {
 
   return (
     <Pod>
-      <PodHeader style={{ justifyContent: 'space-between' }}>
-        <span>Capacity</span>
-        <Button size="sm" onClick={() => mutate()}>Refresh</Button>
-      </PodHeader>
+      <PodHeader>Capacity</PodHeader>
       <PodContent>
         {isLoading && <Loading />}
         {error && <ErrorMessage>Cannot reach quota service — is the stack running?</ErrorMessage>}

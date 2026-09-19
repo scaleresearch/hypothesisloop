@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
+import { clsx } from 'clsx'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { fetchHypothesisGraph, fetchPlatformExperiments } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
@@ -14,7 +15,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 import { AddIdeaForm } from '@/components/human-idea'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
-import { HypothesisPanel } from '@/components/hypothesis-panel'
+import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
 import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypothesis-search'
 import { useQueryParam } from '@/lib/query-state'
 import { HUMAN_OWNER, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
@@ -78,6 +79,7 @@ function HypothesesPageContent() {
   const selected = focus || graph?.root || ''
   const rootLabel = pe?.name ?? peID
   const filtering = statusFilter !== '' || ownerFilter !== ''
+  const showSide = graph !== undefined && (q !== '' || selected !== graph.root)
   const matching = graph ? graph.nodes.filter(n => matchesFilters(n, filters)).length : 0
 
   function selectExperiment(next: string) {
@@ -96,7 +98,6 @@ function HypothesesPageContent() {
       <PageHeader
         title="Hypotheses"
         description="Each platform experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others. Registering text equivalent to an existing hypothesis returns the existing one; text close to others waits until the submitter has told it apart from them."
-        actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -143,13 +144,14 @@ function HypothesesPageContent() {
       {error && <ErrorMessage>Cannot load the hypothesis graph: {error.message}</ErrorMessage>}
       {(isLoading || (!peID && !platformExperiments && !peError)) && <Loading />}
 
+      {graph && positions && <ObjectiveBar graph={graph} pe={pe} onAddIdea={setAddUnder} />}
       {graph && positions && (
-        <div className="hg-layout">
+        <div className={clsx('hg-layout', showSide && 'with-side')}>
           <div className="hg-main">
             {graph.nodes.length === 0 ? (
               <EmptyState>
                 No hypotheses in this experiment yet. Agents place each idea under the objective or an
-                earlier hypothesis; you can add one under the objective from the panel.
+                earlier hypothesis; you can add one under the objective above.
               </EmptyState>
             ) : view === 'outline' ? (
               <HypothesisOutline
@@ -174,7 +176,7 @@ function HypothesesPageContent() {
               />
             )}
           </div>
-          <aside className="hg-side">
+          {showSide && <aside className="hg-side">
             {q && (
               <Pod>
                 <PodHeader>
@@ -186,15 +188,16 @@ function HypothesesPageContent() {
                 </PodContent>
               </Pod>
             )}
-            <HypothesisPanel
-              graph={graph}
-              nodeByID={nodeByID}
-              pe={pe}
-              selected={selected}
-              onSelect={setFocus}
-              onAddIdea={setAddUnder}
-            />
-          </aside>
+            {selected !== graph.root && (
+              <HypothesisPanel
+                graph={graph}
+                nodeByID={nodeByID}
+                selected={selected}
+                onSelect={setFocus}
+                onAddIdea={setAddUnder}
+              />
+            )}
+          </aside>}
         </div>
       )}
 

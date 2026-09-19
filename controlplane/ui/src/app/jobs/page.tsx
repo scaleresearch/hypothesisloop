@@ -136,7 +136,6 @@ function JobsPageContent() {
       <PageHeader
         title="Jobs"
         description="Agent-submitted workload runs within Platform Experiments — status, capacity tier, accelerator cost in AccH"
-        actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
       {/* KPI strip */}

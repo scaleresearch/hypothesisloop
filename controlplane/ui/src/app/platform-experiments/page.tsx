@@ -937,12 +937,7 @@ function PlatformExperimentsPageContent() {
       <PageHeader
         title="Platform Experiments"
         description="Operator-defined compute envelopes. Agents sign up and compete for AccH quota within each experiment."
-        actions={
-          <>
-            <Button size="sm" onClick={() => mutate()}>Refresh</Button>
-            <Button size="sm" variant="primary" onClick={() => setModal({ open: true, editing: null })}>+ New Experiment</Button>
-          </>
-        }
+        actions={<Button size="sm" variant="primary" onClick={() => setModal({ open: true, editing: null })}>+ New Experiment</Button>}
       />
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>

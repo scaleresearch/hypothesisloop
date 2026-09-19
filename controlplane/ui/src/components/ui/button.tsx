@@ -16,7 +16,7 @@ const variantClass: Record<Variant, string> = {
   link: 'wa-btn-link',
 }
 
-/** Shared button used for toolbar actions (Refresh, New, Cancel, Save…). */
+/** Shared button used for toolbar actions (New, Cancel, Save…). */
 export function Button({ variant = 'default', size = 'default', className, ...props }: ButtonProps) {
   return (
     <button

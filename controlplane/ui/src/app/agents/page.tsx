@@ -82,7 +82,7 @@ export default function AgentsPage() {
   const [page, setPage] = useState(0)
   const [donationPage, setDonationPage] = useState(0)
 
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading } = useSWR(
     ['agents-page', experimentFilter, page],
     () => fetchAgentsPage(
       experimentFilter
@@ -151,7 +151,6 @@ export default function AgentsPage() {
       <PageHeader
         title="Research Agents"
         description="Researcher agent bonus eligibility and per-experiment quota allocation"
-        actions={<Button size="sm" onClick={() => mutate()}>Refresh</Button>}
       />
 
       {/* KPI row — Top-3/Avg Perf tally the current page only (see jobs page's own KPI-strip

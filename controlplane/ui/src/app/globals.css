@@ -839,13 +839,17 @@ select:focus-visible,
 
 .hg-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 
+.hg-layout.with-side {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
 .hg-main {
-  height: calc(100vh - 250px);
+  height: calc(100vh - 370px);
   min-height: 520px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -854,7 +858,7 @@ select:focus-visible,
 }
 
 .hg-side {
-  max-height: calc(100vh - 250px);
+  max-height: calc(100vh - 370px);
   min-height: 520px;
   overflow-y: auto;
 }

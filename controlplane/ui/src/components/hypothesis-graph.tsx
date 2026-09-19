@@ -104,7 +104,7 @@ interface HypothesisGraphCanvasProps {
   graph: HypothesisGraph
   positions: Map<string, Position>
   rootLabel: string
-  /** The id named in the URL, centred on whenever it changes from outside the canvas. */
+  /** The id named in the URL, centred on whenever it changes, so the side panel opening never hides it. */
   focus: string
   selected: string
   hits: Set<string>
@@ -197,11 +197,8 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        onNodeClick={(_, node) => {
-          centered.current = node.id
-          onSelect(node.id)
-        }}
-        attributionPosition="top-right"
+        onNodeClick={(_, node) => onSelect(node.id)}
+        proOptions={{ hideAttribution: true }}
         style={{ background: 'var(--surface)' }}
       >
         <Background gap={24} color="rgba(255, 255, 255, 0.05)" />
