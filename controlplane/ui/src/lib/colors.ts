@@ -54,9 +54,9 @@ export const hypothesisStatusColors: Record<string, string> = {
 }
 
 /**
- * Hypothesis graph edges. builds_on is the hierarchy; the two cross links stand out from it by
- * colour alone: a dashed stroke is generated along the whole path, offscreen parts included, and
- * long cross links in a graph of thousands made every pan frame take seconds.
+ * Hypothesis graph edges. builds_on is the hierarchy; a cross link carries its label on the edge
+ * and stays solid: a dashed stroke is generated along the whole path, offscreen parts included,
+ * and long cross links in a graph of thousands made every pan frame take seconds.
  */
 export const hypothesisLinkStyles = {
   builds_on: { color: 'rgba(255, 255, 255, 0.28)', label: 'builds on' },

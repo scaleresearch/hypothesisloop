@@ -160,6 +160,11 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, o
       source: hierarchy ? e.to : e.from,
       target: hierarchy ? e.from : e.to,
       type: hierarchy ? 'smoothstep' : 'default',
+      label: hierarchy ? undefined : s.label,
+      zIndex: hierarchy ? 0 : 1,
+      labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600 },
+      labelBgStyle: { fill: 'var(--surface)' },
+      labelBgPadding: [4, 2] as [number, number],
       style: {
         stroke: s.color,
         strokeWidth: hierarchy ? 1.5 : 2,
