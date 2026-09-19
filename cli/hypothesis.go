@@ -119,7 +119,7 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
 	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
 	text := fs.String("text", "", "hypothesis text")
-	file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body, or a hypotheses: list of them")
+	file := fs.String("file", "", "YAML file of one hypothesis, or a hypotheses: list of them (see --help)")
 	var buildsOn, contradicts, related, distinctFrom idList
 	fs.Var(&buildsOn, "builds-on", "hypothesis id this refines, extends or combines, or root for the objective (repeatable or comma-separated, at least one)")
 	fs.Var(&contradicts, "contradicts", "hypothesis id that cannot hold together with this one (repeatable or comma-separated)")
@@ -574,10 +574,20 @@ Read-only Cypher over one platform experiment's hypothesis graph (default
 $PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded, use submit/link instead. Filter
 every MATCH and text search with platform_experiment_id = $pe: a result holding another
 experiment's nodes is refused. $tested holds the ids of its hypotheses that have a job. Prints
-one JSON object per row keyed by column. The schema is in the POST /hypotheses/query
-description (/explore). Examples:
+one JSON object per row keyed by column, 200 rows at most.
 
-  text search, best matches first:
+Schema:
+  (:Objective {id})   the root, id = $pe
+  (:Hypothesis {id, platform_experiment_id, agent_id, source, author, text, status, created_at,
+                status_changed_at})   the times are datetimes: compare with datetime('RFC3339')
+  (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective)
+  (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), (:Hypothesis)-[:RELATED]->(:Hypothesis)
+  every relationship {agent_id, author, created_at}
+Findings, comments and jobs are not in the graph: hl hypothesis get ID has them.
+
+Examples:
+
+  text search on plain words, best matches first:
   hl hypothesis query 'CALL text_search.search_all("hypothesis_text", "learning rate warmup")
     YIELD node, score WHERE node.platform_experiment_id = $pe
     RETURN node.id, node.status, node.text ORDER BY score DESC LIMIT 10'

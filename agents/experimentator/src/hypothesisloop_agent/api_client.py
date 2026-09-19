@@ -1,5 +1,5 @@
 """Thin stdlib-only HTTP client for the few platform calls the outer loop makes itself: joining
-its platform experiment before the first turn and checking whether it has closed. Everything else
+its platform experiment before the first turn, reading the rules and checking whether it has closed. Everything else
 the agent does itself through `hl`, so this client stays minimal.
 """
 from __future__ import annotations
@@ -48,13 +48,10 @@ class PlatformClient:
     def get_platform_experiment(self, pe_id: str) -> dict:
         return _request("GET", f"{self.api_url}/platform-experiments/{pe_id}")
 
-    def fetch_api_guide(self) -> str:
-        """The API's live /explore digest, generated from its registered operations so it can
-        never drift. It also carries the platform rules, which the system prompt treats as
-        binding rather than restating — so a failure to fetch raises instead of embedding a
-        note: an agent briefed without the rules would compete blind.
-        """
-        url = f"{self.api_url}/explore"
+    def fetch_rules(self) -> str:
+        """The platform rules, which the system prompt carries verbatim. A failure raises: an
+        agent briefed without the rules would compete blind."""
+        url = f"{self.api_url}/explore/rules"
         try:
             with urllib.request.urlopen(url, timeout=15.0) as resp:
                 return resp.read().decode(errors="replace")

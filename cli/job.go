@@ -70,10 +70,10 @@ func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--objective T] [--theory T] [--agent AGENT]
 
-FILE is a YAML file shaped exactly like the POST /experiments body: id, metadata, job. The flags
-override it for this one submission, so one committed base spec serves every job that differs
-only in its hypothesis and env, with nothing to edit and nothing to commit. Prints the accepted
-job's id, status, code_ref, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
+FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
+one committed base spec serves every job that differs only in its hypothesis and env, with
+nothing to edit and nothing to commit. Prints the accepted job's id, status, code_ref,
+capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to

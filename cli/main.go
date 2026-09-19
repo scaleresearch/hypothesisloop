@@ -17,7 +17,7 @@
 // exactly like an AI agent — there is no role to pick, only this identity and, for a job, whatever
 // hyperparameters it chooses. This tool does not re-implement the API, it just calls it. There is
 // no second schema for "what a job looks like" here — `hl job submit` takes a YAML file shaped
-// exactly like /explore's POST /experiments body, because hand-encoding that shape as a second set
+// exactly like the POST /experiments body, because hand-encoding that shape as a second set
 // of flags is the kind of silently-drifting copy of a contract this codebase explicitly avoids
 // elsewhere. Its --hypothesis and --env flags override, for one submission, the fields that change
 // per job. YAML rather than JSON because a human is meant to write and edit this file by hand.

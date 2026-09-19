@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,19 +15,29 @@ from hypothesisloop_agent import api_client, config
 
 log = logging.getLogger("llm_agent")
 
-# Backend-agnostic by construction: the prompt names no tool and prescribes no mechanism for
-# reaching the platform. Each harness already knows its own tool set, and every backend gets a
-# byte-identical prompt — so a result difference between backends is the model, not the briefing.
-#
-# API-agnostic the same way, and this one is load-bearing: the prompt names capabilities, never
-# endpoints. The live /explore digests spliced in as {api_guide} are the only place a path,
-# method or query parameter appears, so an endpoint that is renamed, split or added reaches every
-# agent the moment the service serves it. Every path written here instead would be a second,
-# silently-drifting copy of a contract this file cannot see.
-#
-# One briefing shared by every flavor; the specialization lives in prompts/flavors/<flavor>.md,
-# spliced in as {flavor_brief}.
+# One briefing for every backend and flavor. It names hl's commands and repeats neither the
+# platform's rules nor hl's command listing: both are spliced in at startup, the rules from the
+# platform as {rules} and the listing from the hl on this PATH as {hl_commands}, so neither is a
+# copy that can drift. The specialization lives in prompts/flavors/<flavor>.md, spliced in as
+# {flavor_brief}.
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+_HL_HELP = ([], ["job"], ["hypothesis"])
+
+
+def hl_commands() -> str:
+    """hl's own listing of its commands and of the subcommands of job and hypothesis."""
+    return "\n\n".join(
+        subprocess.run(["hl", *group, "--help"], check=True, capture_output=True, text=True).stdout.strip()
+        for group in _HL_HELP)
+
+
+def system_prompt(cfg: config.Config, rules: str, commands: str) -> str:
+    return (_PROMPTS_DIR / "system_prompt.md").read_text().format(
+        rules=rules.strip(), hl_commands=commands, agent_id=cfg.agent_id, flavor=cfg.flavor,
+        flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip(),
+        platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,
+        hyperparameters=json.dumps(cfg.hyperparameters),
+    )
 
 
 def install_signal_handler() -> list:
@@ -52,7 +63,7 @@ class RunSetup:
 
 
 def prepare() -> RunSetup:
-    """Shared startup: logging, .env, config, workdir, platform client, live API guide, prompt."""
+    """Shared startup: logging, .env, config, workdir, platform client, prompt."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load_dotenv(".env")
 
@@ -69,19 +80,8 @@ def prepare() -> RunSetup:
     client = api_client.PlatformClient(cfg.api_url)
     client.join(cfg.agent_id, cfg.platform_experiment_id)
 
-    # The API contract, fetched live from the running services rather than checked in anywhere:
-    # this is the prompt's only source of endpoints (see system_prompt.md), so it is
-    # required, not decorative — fetch_api_guide raises rather than briefing an agent without it.
-    api_guide = client.fetch_api_guide()
-
-    template = (_PROMPTS_DIR / "system_prompt.md").read_text()
-    system_prompt = template.format(
-        api_guide=api_guide, agent_id=cfg.agent_id, flavor=cfg.flavor,
-        flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip(),
-        platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,
-        hyperparameters=json.dumps(cfg.hyperparameters),
-    )
-    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt,
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands())
+    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text,
                     max_turns=max_turns, workdir=workdir)
 
 

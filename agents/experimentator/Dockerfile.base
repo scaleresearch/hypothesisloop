@@ -75,8 +75,7 @@ COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked
 
 COPY agents/experimentator/src/ src/
-# No docs/ copy: the API contract is fetched live from each service's /llms.txt at runtime
-# (see api_client.PlatformClient.fetch_api_guide), not baked into the image.
+# No docs/ copy: the platform rules are fetched live at startup (api_client.PlatformClient.fetch_rules).
 RUN mkdir -p /agent/workspace && chown -R agent:agent /agent
 ENV AGENT_WORKDIR=/agent/workspace
 
