@@ -488,6 +488,7 @@ FILE is a YAML file shaped exactly like the POST /platform-experiments body. Min
   budget_accelerator_hours: 10
   max_agents: 5
   report_interval_seconds: 10
+  ends_at: "2026-02-01T00:00:00Z"
   metrics:
     - key: val_accuracy
       direction: maximize

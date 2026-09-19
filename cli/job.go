@@ -53,9 +53,9 @@ func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	case "logs":
 		return jobLogs(c, rest, stdout, stderr)
 	case "data":
-		return jobRead(c, "data", "/data", "what the job wrote under its data prefix, one object per line", rest, stdout, stderr)
+		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", rest, stdout, stderr)
 	case "cost":
-		return jobRead(c, "cost", "/cost", "actual consumption so far (settled once final) beside the admission-time estimate", rest, stdout, stderr)
+		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", rest, stdout, stderr)
 	case "cancel":
 		return jobCancel(c, rest, stdout, stderr)
 	case "stats":
