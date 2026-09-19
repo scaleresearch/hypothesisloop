@@ -69,6 +69,10 @@ func TestMountRulesServesThePreambleWithoutOperations(t *testing.T) {
 	if w.Code != 200 || w.Body.String() != PlatformRules {
 		t.Fatalf("code = %d, body:\n%s", w.Code, w.Body.String())
 	}
+	// GET /platform-experiments/{id}/results shows every agent's rank.
+	if strings.Contains(PlatformRules, "rank is never visible") {
+		t.Error("the rules call the rank hidden, and the standings show it")
+	}
 	for _, endpoint := range []string{"GET /", "POST /", "/experiments", "/platform-experiments"} {
 		if strings.Contains(PlatformRules, endpoint) {
 			t.Errorf("the rules name an endpoint: %q", endpoint)

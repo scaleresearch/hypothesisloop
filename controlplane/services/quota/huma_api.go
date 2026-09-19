@@ -479,7 +479,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-stages", Method: "GET", Path: "/platform-experiments/{id}/stages",
 		Summary: "Get the stage ladder and current standing of a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Per-agent rank is deliberately not exposed — you can see whether you are cut, not how close you are.",
+		Description: "The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Where the next cut falls is not shown; every agent's best value is, at GET /platform-experiments/{id}/results.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body StagesStatusResponse }, error) {
@@ -690,8 +690,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 }
 
 // StagesStatusResponse is the response body for GET /platform-experiments/{id}/stages.
-// Boundaries are published ahead so agents can plan; live rank is not, so agents cannot time
-// submissions around the cut line instead of improving their metric.
+// Boundaries are published ahead so agents can plan. The cut line is not here; the standings
+// are public at GET /platform-experiments/{id}/results.
 type StagesStatusResponse struct {
 	Stages       []domain.Stage `json:"stages"`
 	CurrentStage int            `json:"current_stage"`
