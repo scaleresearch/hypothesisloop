@@ -93,8 +93,8 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis submit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agent := fs.String("agent", "", "agent id")
-	pe := fs.String("platform-experiment", "", "platform experiment id")
+	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
 	text := fs.String("text", "", "hypothesis text")
 	file := fs.String("file", "", "YAML file shaped like the POST /hypotheses body, or a hypotheses: list of them")
 	var buildsOn, contradicts, related, distinctFrom idList
@@ -103,7 +103,7 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	fs.Var(&related, "related", "hypothesis id to cross-reference (repeatable or comma-separated)")
 	fs.Var(&distinctFrom, "distinct-from", "hypothesis id a refused submit listed that you judged a different claim (repeatable or comma-separated)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl hypothesis submit --agent A --platform-experiment PE --text T --builds-on ID|root
+		fmt.Fprintln(stderr, `usage: hl hypothesis submit [--agent A] [--platform-experiment PE] --text T --builds-on ID|root
          [--builds-on ID ...] [--contradicts ID ...] [--related ID ...] [--distinct-from ID ...]
    or: hl hypothesis submit --file hypothesis.yaml [flags above override every item]
 
@@ -153,7 +153,7 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`)
 	}
 
 	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
-		"agent_id": *agent, "platform_experiment_id": *pe, "text": *text,
+		"agent_id": orEnv(*agent, agentEnv), "platform_experiment_id": orEnv(*pe, platformExperimentEnv), "text": *text,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: hypothesis submit: %s\n", err)
@@ -384,18 +384,19 @@ func validLinkType(t string) bool {
 func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis link", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agent := fs.String("agent", "", "agent id; must be the agent that registered --from")
+	agent := fs.String("agent", "", "agent id, the one that registered --from (default $AGENT_ID)")
 	from := fs.String("from", "", "hypothesis id the link starts at")
 	typ := fs.String("type", "", "builds_on, contradicts or related")
 	to := fs.String("to", "", "hypothesis id the link points at")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl hypothesis link --agent A --from ID --type builds_on|contradicts|related --to ID
+		fmt.Fprintln(stderr, `usage: hl hypothesis link [--agent A] --from ID --type builds_on|contradicts|related --to ID
 
 Adds one link from your own hypothesis. Links are append-only. Prints the updated outgoing links.`)
 	}
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
+	*agent = orEnv(*agent, agentEnv)
 	if *agent == "" || *from == "" || *typ == "" || *to == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis link: --agent, --from, --type and --to are required")
 		return 2
@@ -418,10 +419,10 @@ Adds one link from your own hypothesis. Links are append-only. Prints the update
 func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis comment", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agent := fs.String("agent", "", "agent id")
+	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
 	text := fs.String("text", "", "the note")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl hypothesis comment --agent A --text T ID
+		fmt.Fprintln(stderr, `usage: hl hypothesis comment [--agent A] --text T ID
 
 A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision.`)
 	}
@@ -429,6 +430,7 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 	if err != nil {
 		return parseExit(err)
 	}
+	*agent = orEnv(*agent, agentEnv)
 	if *agent == "" || *text == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis comment: --agent and --text are required")
 		return 2
@@ -446,10 +448,10 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agent := fs.String("agent", "", "agent id; must be the agent that registered ID")
+	agent := fs.String("agent", "", "agent id, the one that registered ID (default $AGENT_ID)")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl hypothesis status --agent A --status open|confirmed|refuted|inconclusive ID
+		fmt.Fprintln(stderr, `usage: hl hypothesis status [--agent A] --status open|confirmed|refuted|inconclusive ID
 
 Sets the verdict on your own hypothesis, or on a human-submitted one.`)
 	}
@@ -457,6 +459,7 @@ Sets the verdict on your own hypothesis, or on a human-submitted one.`)
 	if err != nil {
 		return parseExit(err)
 	}
+	*agent = orEnv(*agent, agentEnv)
 	if *agent == "" || *status == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis status: --agent and --status are required")
 		return 2
@@ -494,13 +497,13 @@ func parseWithID(fs *flag.FlagSet, args []string) (string, error) {
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment id (required)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
 	offset := fs.Int("offset", 0, "rows to skip")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: hl hypothesis list --platform-experiment PE [--agent A] [--status S] [--limit N] [--offset N]
+		fmt.Fprintln(stderr, `usage: hl hypothesis list [--platform-experiment PE] [--agent A] [--status S] [--limit N] [--offset N]
 
 Most recent first, one JSON object per line with builds_on, child_count, finding_count and
 comment_count. For structure or text search use 'hl hypothesis query'.`)
@@ -508,6 +511,7 @@ comment_count. For structure or text search use 'hl hypothesis query'.`)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
+	*pe = orEnv(*pe, platformExperimentEnv)
 	if *pe == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis list: --platform-experiment is required")
 		return 2
@@ -560,7 +564,7 @@ func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hypothesis query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	pe := fs.String("platform-experiment", os.Getenv("PLATFORM_EXPERIMENT_ID"), "platform experiment whose graph is read, bound as $pe (default $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default $PLATFORM_EXPERIMENT_ID)")
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
 	fs.Usage = func() {
@@ -591,6 +595,7 @@ the POST /hypotheses/query description (/explore). Example, the children of a hy
 		fmt.Fprintln(stderr, "hl: hypothesis query: empty query")
 		return 2
 	}
+	*pe = orEnv(*pe, platformExperimentEnv)
 	if *pe == "" {
 		fmt.Fprintln(stderr, "hl: hypothesis query: --platform-experiment is required (or set PLATFORM_EXPERIMENT_ID)")
 		return 2

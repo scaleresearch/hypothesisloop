@@ -338,3 +338,114 @@ func TestUnknownCommand(t *testing.T) {
 		t.Fatalf("exit code = %d, want 2", code)
 	}
 }
+
+func TestIdentityFlagsDefaultToEnv(t *testing.T) {
+	got := recordingServer(t, func(_ int, r recorded) any {
+		if r.Method == "GET" {
+			return []any{}
+		}
+		return map[string]any{"id": "x"}
+	})
+	t.Setenv("AGENT_ID", "agent-env")
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	jobFile := dir + "/job.yaml"
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\njob:\n  image: foo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		args      []string
+		path      string
+		agent, pe string
+	}{
+		{[]string{"signup"}, "/platform-experiments/pe-env/signup", "agent-env", ""},
+		{[]string{"signup", "--agent", "jane", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/signup", "jane", ""},
+		{[]string{"hypothesis", "submit", "--text", "t", "--builds-on", "root"}, "/hypotheses", "agent-env", "pe-env"},
+		{[]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--builds-on", "root"}, "/hypotheses", "jane", "pe-1"},
+		{[]string{"hypothesis", "link", "--from", "h-2", "--type", "related", "--to", "h-1"}, "/hypotheses/h-2/links", "agent-env", ""},
+		{[]string{"hypothesis", "comment", "--text", "t", "h-1"}, "/hypotheses/h-1/comments", "agent-env", ""},
+		{[]string{"hypothesis", "status", "--status", "refuted", "h-1"}, "/hypotheses/h-1/status", "agent-env", ""},
+	} {
+		*got = nil
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit %d, stderr %s", tc.args, code, stderr.String())
+		}
+		body := (*got)[0].Body
+		if (*got)[0].Path != tc.path || body["agent_id"] != tc.agent || (tc.pe != "" && body["platform_experiment_id"] != tc.pe) {
+			t.Fatalf("%v: request = %+v", tc.args, (*got)[0])
+		}
+	}
+
+	*got = nil
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "submit", jobFile}, &stdout, &stderr); code != 0 {
+		t.Fatalf("job submit: exit %d, stderr %s", code, stderr.String())
+	}
+	if metadata, _ := (*got)[0].Body["metadata"].(map[string]any); metadata["agent_id"] != "agent-env" {
+		t.Fatalf("job submit body = %+v", (*got)[0].Body)
+	}
+
+	*got = nil
+	if code := run([]string{"hypothesis", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("hypothesis list: exit %d, stderr %s", code, stderr.String())
+	}
+	if (*got)[0].Query != "platform_experiment_id=pe-env" {
+		t.Fatalf("hypothesis list query = %q", (*got)[0].Query)
+	}
+}
+
+func TestIdentityFlagsRequiredWithoutEnv(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return nil })
+	t.Setenv("AGENT_ID", "")
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
+	for _, args := range [][]string{
+		{"signup"},
+		{"signup", "--agent", "jane"},
+		{"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
+		{"hypothesis", "comment", "--text", "t", "h-1"},
+		{"hypothesis", "list"},
+		{"job", "submit", "job.yaml"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", args, code)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("usage errors sent %d requests", len(*got))
+	}
+}
+
+func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
+	var queries []string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		http.Error(w, `{"error":"refused"}`, http.StatusBadRequest)
+	})
+	setAPIURL(t, url)
+	t.Setenv("HYPOTHESISLOOP_API_URL", "")
+	t.Setenv("HYPOTHESISLOOP_EXPERIMENT_ID", "")
+	t.Setenv("AGENT_ID", "agent-env")
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"watch"}, "agent=agent-env&platform_experiment_id=pe-env"},
+		{[]string{"watch", "--agent", "jane"}, "agent=jane&platform_experiment_id=pe-env"},
+		{[]string{"watch", "--experiment", "job-1"}, "experiment_id=job-1"},
+	} {
+		queries = nil
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit %d, stderr %s", tc.args, code, stderr.String())
+		}
+		if len(queries) != 1 || queries[0] != tc.want {
+			t.Fatalf("%v: queries = %v, want %q", tc.args, queries, tc.want)
+		}
+	}
+}

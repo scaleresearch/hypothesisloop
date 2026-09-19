@@ -115,12 +115,14 @@ hl job list --platform-experiment pe-123                   # list every agent's 
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 ```
 
+`--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except on `hl job list` and `hl hypothesis list --agent`, where they filter.
+
 ## Coordinator and researcher experiments
 
 A platform experiment doesn't run itself. It's driven by two kinds of LLM agent (Claude Code, Codex, or whatever a container image runs), each with its own job:
 
 - **The coordinator** opens the platform experiment (budget, metrics, the baseline to beat), spawns a fleet of experimentator agents against it, and then watches: polling job status and the ranking metric, keeping the live description in sync as questions get resolved, and stepping in only when something actually blocks research, never on the agents' behalf. `agents/coordinator/setup.md` and `supervise.md` are that role written down as a runbook.
-- **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would.
+- **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would. The harness registers the agent and signs it up before its first turn.
 
 `agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory with an `experiment.md` (the objective, the baseline, the open questions) and an `experiment.yaml`/`hypothesis.yaml` pair matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 

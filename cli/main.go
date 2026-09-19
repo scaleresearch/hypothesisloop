@@ -21,6 +21,9 @@
 // of flags is the kind of silently-drifting copy of a contract this codebase explicitly avoids
 // elsewhere. YAML rather than JSON because a human is meant to write and edit this file by hand.
 //
+// --agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, which the
+// experimentator harness sets in an agent's container.
+//
 //	hl register --id jane --name "Jane Doe" --kind human
 //	hl signup --platform-experiment pe-123 --agent jane
 //	hl signup --platform-experiment pe-123 --agent bot-1 --quota-tier guaranteed
@@ -57,13 +60,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	const usage = `usage: hl <command> ...
 
   register              --id ID --kind agent|human
-  signup                --platform-experiment PE --agent A
+  signup                [--platform-experiment PE] [--agent A]
   platform-experiments  [list] | get --id PE | create | start | update
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list [--agent A] [--needs-summary] | status | metrics | summary
-  watch                 --experiment JOB | --platform-experiment PE [--agent A] [--until ...]
+  watch                 --experiment JOB | [--platform-experiment PE] [--agent A] [--until ...]
 
-Run hl <command> --help for its flags.`
+--agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID,
+except on job list and hypothesis list --agent. Run hl <command> --help for its flags.`
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -94,6 +98,19 @@ Run hl <command> --help for its flags.`
 		fmt.Fprintf(stderr, "hl: unknown command %q\n", cmd)
 		return 2
 	}
+}
+
+const (
+	agentEnv              = "AGENT_ID"
+	platformExperimentEnv = "PLATFORM_EXPERIMENT_ID"
+)
+
+// orEnv is a flag's value, or the named environment variable when the flag was omitted.
+func orEnv(flagValue, name string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return os.Getenv(name)
 }
 
 func printJSON(stdout io.Writer, v any) {
@@ -142,13 +159,15 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("signup", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment id (required)")
-	agent := fs.String("agent", "", "agent id (required)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
+	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
 	quotaTier := fs.String("quota-tier", "", "override this signup's guaranteed-vs-burst-only split "+
 		"(\"guaranteed\" or \"burst_only\"); omit to use the platform experiment's default_quota_tier")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
+	*pe = orEnv(*pe, platformExperimentEnv)
+	*agent = orEnv(*agent, agentEnv)
 	if *pe == "" || *agent == "" {
 		fmt.Fprintln(stderr, "hl: signup: --platform-experiment and --agent are required")
 		return 2
@@ -368,9 +387,9 @@ func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	case "submit":
 		fs := flag.NewFlagSet("job submit", flag.ContinueOnError)
 		fs.SetOutput(stderr)
-		agent := fs.String("agent", "", "stamped onto metadata.agent_id (required)")
+		agent := fs.String("agent", "", "stamped onto metadata.agent_id (default $AGENT_ID)")
 		fs.Usage = func() {
-			fmt.Fprintln(stderr, `usage: hl job submit --agent AGENT [FILE|-]
+			fmt.Fprintln(stderr, `usage: hl job submit [--agent AGENT] [FILE|-]
 
 FILE is a YAML file shaped exactly like the POST /experiments body — id, metadata, job.
 metadata.hypothesis_id is REQUIRED: every job tests a specific, previously-registered
@@ -396,6 +415,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		if err := fs.Parse(rest); err != nil {
 			return parseExit(err)
 		}
+		*agent = orEnv(*agent, agentEnv)
 		if *agent == "" {
 			fmt.Fprintln(stderr, "hl: job submit: --agent is required")
 			return 2
@@ -593,8 +613,8 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch one job (domain.Experiment id)")
-	platformExperiment := fs.String("platform-experiment", "", "watch a whole platform experiment: quota, stage boundaries, agent cuts, hypothesis/comment/finding events, platform-experiment status — everything but metric.point")
-	agent := fs.String("agent", "", "narrow job and quota events to this agent")
+	platformExperiment := fs.String("platform-experiment", "", "watch a whole platform experiment: quota, stage boundaries, agent cuts, hypothesis/comment/finding events, platform-experiment status — everything but metric.point (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
+	agent := fs.String("agent", "", "narrow job and quota events to this agent (default $AGENT_ID unless --experiment is set)")
 	kinds := fs.String("kinds", "", "comma-separated event kinds to subscribe to instead of the default set (e.g. hypothesis.new,hypothesis.status,finding.new,comment.new,metric.point) — see GET /watch/kinds for the full vocabulary")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
@@ -603,6 +623,12 @@ func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
 	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
+	}
+
+	// An agent filter would drop the job events of another agent's job.
+	if *experiment == "" {
+		*platformExperiment = orEnv(*platformExperiment, platformExperimentEnv)
+		*agent = orEnv(*agent, agentEnv)
 	}
 
 	watchURL := *urlFlag
