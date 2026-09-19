@@ -515,12 +515,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-donations", Method: "GET", Path: "/donations",
 		Summary: "List donation requests", Tags: []string{"donations"},
-		Description: "Optional ?status filter, ?limit (default 20, max 200) and ?offset, most recent " +
+		Description: "Optional ?platform_experiment_id and ?status filters, ?limit (default 20, max 200) and ?offset, most recent " +
 			"first. Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Status string `query:"status" doc:"open, fulfilled or cancelled."`
-		Limit  int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
-		Offset int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
+		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only requests within this platform experiment."`
+		Status               string `query:"status" doc:"open, fulfilled or cancelled."`
+		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*domain.DonationRequest
 		TotalCount int `header:"X-Total-Count"`
@@ -528,14 +529,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		reqs, err := peh.svc.store.ListDonationRequests(ctx, in.Status, in.Limit, in.Offset)
+		reqs, err := peh.svc.store.ListDonationRequests(ctx, in.PlatformExperimentID, in.Status, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list donations")
 		}
 		if reqs == nil {
 			reqs = []*domain.DonationRequest{}
 		}
-		total, err := peh.svc.store.CountDonationRequests(ctx, in.Status)
+		total, err := peh.svc.store.CountDonationRequests(ctx, in.PlatformExperimentID, in.Status)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to count donations")
 		}
