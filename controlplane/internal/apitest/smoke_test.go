@@ -14,6 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func get(t *testing.T, r chi.Router, path string) (int, string) {
@@ -33,7 +34,7 @@ func TestSmoke(t *testing.T) {
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules)
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, nil))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
+		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, 0))
 	doc.MountExplore(r)
@@ -41,7 +42,7 @@ func TestSmoke(t *testing.T) {
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := chi.NewRouter()
 	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "")
-	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", nil, 0, nil))
+	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", nil, 0, nil, 0, nil))
 	dc.MountExplore(rc)
 
 	for _, tc := range []struct {

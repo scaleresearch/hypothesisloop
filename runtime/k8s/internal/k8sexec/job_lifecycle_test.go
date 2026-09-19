@@ -89,7 +89,7 @@ func TestAGroupedJobResolvesPlacementFromItsGroupsNotItsEmptyTopLevelCount(t *te
 		ID:              "grouped-placement",
 		AcceleratorType: "unqualified-type",
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "unqualified-type",
 			Groups: []domain.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi", AcceleratorCount: 1},
@@ -111,7 +111,7 @@ func TestAJobWithNoAcceleratorsInAnyGroupTakesTheZeroPlacement(t *testing.T) {
 		ID:              "cpu-only",
 		AcceleratorType: "unqualified-type",
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			Groups: []domain.JobGroup{
 				{Name: "worker", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
 			},

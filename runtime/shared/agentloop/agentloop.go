@@ -32,27 +32,6 @@ const DefaultLogTailLines = 100
 // actual job; capturing why they ended is worth a few seconds of it and no more.
 const finalStatusCaptureBudget = 10 * time.Second
 
-// splitLongLines breaks any line over maxLineChars into multiple lines, done once here (client
-// side, before the report ever leaves this process) rather than left to the control plane to
-// truncate silently on ingest -- this way nothing is ever dropped, only wrapped. maxLineChars
-// comes from hypothesisloop.yaml's scheduler.max_log_tail_line_chars (see Agent.MaxLogLineChars)
-// — large enough to keep a real compiler error or stack frame intact, small enough that one
-// pathological line (a base64 blob, a JSON dump with no newlines) can't blow up a status push.
-func splitLongLines(lines []string, maxLineChars int) []string {
-	if maxLineChars <= 0 {
-		return lines
-	}
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		for len(line) > maxLineChars {
-			out = append(out, line[:maxLineChars])
-			line = line[maxLineChars:]
-		}
-		out = append(out, line)
-	}
-	return out
-}
-
 // Agent drives one cluster/node's reconcile and status-report loops against an Executor.
 type Agent struct {
 	ClusterName       string
@@ -64,9 +43,6 @@ type Agent struct {
 	// LogTailLines caps how many trailing lines FetchLogTail is asked for per status push.
 	// Configurable per agent binary; DefaultLogTailLines if unset (zero).
 	LogTailLines int
-	// MaxLogLineChars is hypothesisloop.yaml's scheduler.max_log_tail_line_chars — required
-	// (config validation already enforces > 0), not defaulted here.
-	MaxLogLineChars int
 	// AutoscalerEnabled is the operator's own claim that this cluster sits behind a native
 	// autoscaler (cluster-autoscaler / Karpenter) reacting to Pending pods — AUTOSCALER_ENABLED
 	// env var, default false (fail-closed: a false positive costs a job a wasted scale-up
@@ -422,8 +398,6 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		if err != nil {
 			a.Log("fetch log tail %s: %v", id, err)
 			logTail = nil
-		} else {
-			logTail = splitLongLines(logTail, a.MaxLogLineChars)
 		}
 		reason, message, restartCount, scheduledNodes, schedulingReason, err = a.Executor.PollPhaseDetail(ctx, id, observed.Attempt)
 		if err != nil {

@@ -151,9 +151,9 @@ scheduler:
   # contended accelerators indefinitely by claiming it is still saving.
   max_checkpoint_grace_seconds: 600
 
-  # One line of a job's reported log tail is split (never truncated/dropped) above this many
-  # characters -- large enough to keep a real compiler error or stack frame intact, small enough
-  # that one pathological line can't blow up a single status push.
+  # One line of a job's reported log tail is split on ingest (never truncated/dropped) above this
+  # many characters -- large enough to keep a real compiler error or stack frame intact, small
+  # enough that one pathological line can't blow up a stored tail.
   max_log_tail_line_chars: 2000
 
   # How often the JobWatcher polls a running k8s Job for phase transitions.

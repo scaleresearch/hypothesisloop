@@ -19,7 +19,7 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorPodResources: map[string]string{"hugepages-1Gi": "4Gi"},
 			// The operator requirement must not be weakened by a submitted extra resource.
 			ExtraResources: map[string]string{"hugepages-1Gi": "1Gi"},
@@ -57,7 +57,7 @@ func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 		AttemptCount:           2,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -84,7 +84,7 @@ func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/example"},
 		},
@@ -118,12 +118,11 @@ var nvidiaPlacement = AcceleratorPlacement{
 
 func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL:                               "http://registry",
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		apiURL: "http://registry",
 	}
 	exp := &domain.Experiment{Data: testDataAccess(), ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z", "A_FIRST": "a"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
+		Job: domain.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z", "A_FIRST": "a"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
 	first, err := c.BuildJob(exp, nvidiaPlacement)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +158,7 @@ func jobWithRetries(retries int) *domain.Experiment {
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
-			MaxRetries:       intPtr(retries),
+			MaxRetries: intPtr(retries), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -204,12 +203,11 @@ func TestBuildJobKeepsInPlaceRestartWhenRetriesRequested(t *testing.T) {
 // job of that type, and reconcile drift-deleted them mid-training.
 func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL:                               "http://registry",
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
+		apiURL: "http://registry",
 	}
 	exp := &domain.Experiment{Data: testDataAccess(), ID: "placement-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
+		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
 
 	first, err := c.BuildJob(exp, nvidiaPlacement)
 	if err != nil {
@@ -245,7 +243,7 @@ func TestBuildJobInjectsPerNodeAcceleratorCountNotTheJobTotal(t *testing.T) {
 		AcceleratorCount:       8,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 4, NumNodes: 2,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 		},
@@ -289,7 +287,7 @@ func distributedExperiment(nodes, maxRetries int) *domain.Experiment {
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
-			MaxRetries: intPtr(maxRetries), AcceleratorCount: 1, NumNodes: nodes,
+			MaxRetries: intPtr(maxRetries), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, NumNodes: nodes,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 		},
 	}
@@ -381,7 +379,7 @@ func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -421,7 +419,7 @@ func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -455,7 +453,7 @@ func TestDesiredSpecHashChangesWithDurableDataPrefix(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -487,7 +485,7 @@ func TestBuildJobRefusesAnExperimentWithNoDurableDataAccess(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -506,7 +504,7 @@ func groupedExperiment() *domain.Experiment {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 8,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: intPtr(2),
+			Image: "example.invalid/workload", MaxRetries: intPtr(2), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 			Groups: []domain.JobGroup{
 				{Name: "learner", Replicas: 1, AcceleratorCount: 8, CPU: "16", Memory: "128Gi", Storage: "10Gi",
@@ -683,7 +681,7 @@ func TestAnUngroupedJobStillCompilesToExactlyTheJobItAlwaysDid(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 4,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(2),
+			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(2), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 2, AcceleratorType: "tenstorrent.com/chipArch=blackhole", NumNodes: 2,
 			Command: []string{"python", "train.py"},
 		},
@@ -763,9 +761,7 @@ func int64Ptr(v int64) *int64 { return &v }
 // that every existing submission keeps dying in five seconds rather than in ten minutes.
 func TestPodGraceIsTheOrdinaryShutdownGraceWhenNoCheckpointWindowIsDeclared(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL:                               APIURLDefault,
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
-		maxCheckpointGraceSeconds: 600,
+		apiURL: APIURLDefault,
 	}
 	exp := checkpointWindowExperiment(nil)
 
@@ -784,9 +780,7 @@ func TestPodGraceIsTheOrdinaryShutdownGraceWhenNoCheckpointWindowIsDeclared(t *t
 // declares. A window recorded anywhere else would be a window the job never receives.
 func TestPodGraceIsTheDeclaredCheckpointWindow(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL:                               APIURLDefault,
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
-		maxCheckpointGraceSeconds: 600,
+		apiURL: APIURLDefault,
 	}
 	exp := checkpointWindowExperiment(int64Ptr(300))
 
@@ -799,35 +793,13 @@ func TestPodGraceIsTheDeclaredCheckpointWindow(t *testing.T) {
 	}
 }
 
-// The cap is what keeps the promise honest. Without it a job could hold contended accelerators
-// for as long as it liked simply by claiming it was still saving, which is worse than the lost
-// work the window exists to prevent.
-func TestDeclaredCheckpointWindowIsCappedAtTheConfiguredMaximum(t *testing.T) {
-	c := &JobWorkloadClient{
-		apiURL:                               APIURLDefault,
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
-		maxCheckpointGraceSeconds: 600,
-	}
-	exp := checkpointWindowExperiment(int64Ptr(86400))
-
-	job, err := c.BuildJob(exp, nvidiaPlacement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 600 {
-		t.Fatalf("pod grace = %d, want 600: a job must not be able to hold hardware indefinitely by asking for a longer window", got)
-	}
-}
-
 // The ordinary shutdown grace has to survive on the pod even when the pod's own grace has been
 // widened to hold a checkpoint window, because that is the only number left to shorten the pod
 // back to when a termination earns no window. Losing it would mean an infrastructure failure
 // spending the full checkpoint window on hardware it has nothing to save on.
 func TestPodRecordsItsOrdinaryShutdownGraceAlongsideAWidenedCheckpointWindow(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL:                               APIURLDefault,
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
-		maxCheckpointGraceSeconds: 600,
+		apiURL: APIURLDefault,
 	}
 	exp := checkpointWindowExperiment(int64Ptr(300))
 	exp.Job.TerminationGracePeriodSeconds = int64Ptr(20)
@@ -847,9 +819,7 @@ func TestPodRecordsItsOrdinaryShutdownGraceAlongsideAWidenedCheckpointWindow(t *
 // this platform already refuses to do on failure.
 func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL:                               APIURLDefault,
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30,
-		maxCheckpointGraceSeconds: 600,
+		apiURL: APIURLDefault,
 	}
 	exp := checkpointWindowExperiment(int64Ptr(300))
 	exp.Job.AcceleratorCount = 0
@@ -873,6 +843,15 @@ func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
 	}
 }
 
+// Grace is resolved by the control plane at admission; a job without it is refused.
+func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
+	exp := checkpointWindowExperiment(nil)
+	exp.Job.TerminationGracePeriodSeconds = nil
+	if _, err := (&JobWorkloadClient{apiURL: APIURLDefault}).BuildJob(exp, nvidiaPlacement); err == nil {
+		t.Fatal("built a Job for a job whose grace admission never resolved")
+	}
+}
+
 func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 	return &domain.Experiment{
 		Data: testDataAccess(),
@@ -881,7 +860,7 @@ func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
-			MaxRetries: intPtr(0), AcceleratorCount: 1,
+			MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 			CheckpointGraceSeconds: checkpointGrace,
 		},
@@ -902,7 +881,7 @@ func TestEveryPodOfATwoGroupJobComputesADistinctGlobalRank(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: intPtr(0),
+			Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			Groups: []domain.JobGroup{
 				{Name: "writer", Replicas: 1, CPU: "250m", Memory: "128Mi", Storage: "512Mi", AcceleratorCount: 1},
 				{Name: "helper", Replicas: 2, CPU: "100m", Memory: "64Mi", Storage: "256Mi"},

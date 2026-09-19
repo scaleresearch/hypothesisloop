@@ -449,9 +449,13 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		return nil, huma.Error409Conflict("experiment still has an unresolved job.cpu/memory/storage \"max\" sentinel — manual admission does not resolve it; wait for the ordinary scheduler tick to admit this experiment")
 	}
 
+	resolved, err := h.svc.grace.Resolve(exp.Job)
+	if err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
 	fp := exp.Footprint()
 	clusterActive := false
-	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, nil, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
+	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, &resolved, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 		gAvail, _, err := h.svc.workload.GetFlavorCapacity(ctx)
 		if err != nil {
 			return false, err
@@ -493,6 +497,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	}
 	exp.Status = domain.StatusSubmitted
 	exp.ClusterName = clusterName
+	exp.ResolvedJob = &resolved
 	exp.UpdatedAt = time.Now().UTC()
 	if err := h.svc.workload.CreateWorkload(ctx, exp); err != nil {
 		if rollbackErr := h.svc.store.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation); rollbackErr != nil {

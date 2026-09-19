@@ -91,7 +91,6 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
     env = {
         "CLUSTER_NAME": cluster_name,
         "API_URL": API_URL,
-        "HYPOTHESISLOOP_CONFIG": str(REPO_ROOT / "controlplane" / "settings" / "hypothesisloop.yaml"),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"nvidia-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),

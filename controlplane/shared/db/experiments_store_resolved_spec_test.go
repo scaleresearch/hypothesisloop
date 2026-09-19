@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -111,5 +112,13 @@ func TestScanExperimentLeavesResolvedJobNilWhenColumnIsNull(t *testing.T) {
 	}
 	if exp.EffectiveJob().CPU != domain.MaxResourceSentinel {
 		t.Fatalf("EffectiveJob().CPU = %q, want \"max\" (falls back to Job when ResolvedJob is nil)", exp.EffectiveJob().CPU)
+	}
+}
+
+// Every SUBMITTED row carries the job as the runtime must run it; a claim without one would hand
+// a runtime a job with no resolved grace.
+func TestClaimSubmittedRequiresAResolvedJob(t *testing.T) {
+	if _, err := (&ExperimentsStore{}).ClaimSubmitted(context.Background(), "exp-1", "cluster-a", nil, nil); err == nil {
+		t.Fatal("ClaimSubmitted accepted a nil resolved job")
 	}
 }

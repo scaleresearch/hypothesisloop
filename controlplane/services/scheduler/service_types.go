@@ -117,6 +117,7 @@ type Service struct {
 	credits      domain.CreditConfig
 	loop         Triggerable
 	settler      QuotaSettler
+	grace        domain.GraceLimits
 	metricsDBURL string
 	logger       *zap.Logger
 	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
@@ -136,6 +137,7 @@ func NewService(
 	novelty NoveltyDetector,
 	hypotheses HypothesisStore,
 	settler QuotaSettler,
+	grace domain.GraceLimits,
 	metricsDBURL string,
 	logger *zap.Logger,
 ) *Service {
@@ -152,6 +154,7 @@ func NewService(
 		novelty:      novelty,
 		hypotheses:   hypotheses,
 		settler:      settler,
+		grace:        grace,
 		metricsDBURL: metricsDBURL,
 		logger:       logger,
 		weights:      domain.DefaultSchedulingWeights(),

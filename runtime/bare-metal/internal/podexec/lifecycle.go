@@ -68,7 +68,11 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 		if c.Labels[LabelExperimentID] != experimentID {
 			continue
 		}
-		return e.stopContainer(ctx, c.name(), e.stopGrace(c.Labels, grantCheckpointWindow))
+		grace, err := stopGrace(c.Labels, grantCheckpointWindow)
+		if err != nil {
+			return fmt.Errorf("podexec: container %s: %w", c.name(), err)
+		}
+		return e.stopContainer(ctx, c.name(), grace)
 	}
 	return nil // nothing to delete
 }
@@ -80,18 +84,21 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 // A granted window only ever lengthens the grace. Everything else -- an infrastructure or
 // workload failure, a drift replacement -- stops on the ordinary grace whatever the job
 // declared, because there is nothing to save or nothing left to save it with.
-func (e *Executor) stopGrace(labels map[string]string, grantCheckpointWindow bool) int64 {
-	grace := e.defaultTerminationGracePeriodSeconds
-	if g, err := strconv.ParseInt(labels[LabelGraceSeconds], 10, 64); err == nil && g > 0 {
-		grace = g
+//
+// A container with no readable grace is an error rather than a guess, as in the k8s runtime.
+func stopGrace(labels map[string]string, grantCheckpointWindow bool) (int64, error) {
+	grace, err := strconv.ParseInt(labels[LabelGraceSeconds], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("no readable shutdown grace: %w", err)
 	}
 	if !grantCheckpointWindow {
-		return grace
+		return grace, nil
 	}
-	if w, err := strconv.ParseInt(labels[LabelCheckpointGrace], 10, 64); err == nil && w > grace {
-		grace = w
+	window, err := strconv.ParseInt(labels[LabelCheckpointGrace], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("no readable checkpoint grace: %w", err)
 	}
-	return grace
+	return max(grace, window), nil
 }
 
 // ListManagedJobs returns the experiment IDs of every container this executor manages that is

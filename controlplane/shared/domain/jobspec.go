@@ -149,9 +149,10 @@ type JobSpec struct {
 	// survivors — or fail the Job outright, but has no way to restart a gang.
 	MaxRetries *int `json:"max_retries" yaml:"max_retries"`
 
-	// TerminationGracePeriodSeconds overrides the cluster's default pod shutdown grace period.
+	// TerminationGracePeriodSeconds overrides the platform's default shutdown grace period.
 	// Empty means "use the platform-wide configured default"; capped at the configured max
-	// regardless of what's requested here.
+	// regardless of what's requested here. Admission writes the resolved value into
+	// Experiment.ResolvedJob, which always carries it.
 	TerminationGracePeriodSeconds *int64 `json:"termination_grace_period_seconds,omitempty" yaml:"termination_grace_period_seconds,omitempty"`
 
 	// CheckpointGraceSeconds is how long the job asks for, after it is told termination is

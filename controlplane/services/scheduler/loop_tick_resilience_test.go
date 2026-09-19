@@ -95,7 +95,7 @@ func (resilienceWorkload) GetTotalCapacity(context.Context) (map[string]domain.F
 }
 
 func resilienceLoop(store LoopStore) *Loop {
-	l := NewLoop(store, resilienceQuota{}, resilienceWorkload{}, zap.NewNop())
+	l := NewLoop(store, resilienceQuota{}, resilienceWorkload{}, testGraceLimits, zap.NewNop())
 	l.evictor = noopEvictor{}
 	l.disbalanceTolerance = DefaultDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}

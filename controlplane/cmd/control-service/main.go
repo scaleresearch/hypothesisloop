@@ -244,12 +244,17 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 		WithObservedTimeConfig(metricsDBURL, observedGapCap).
 		WithScaleUpTimeout(time.Duration(pcfg.Scheduler.ScaleUpTimeoutSeconds) * time.Second)
 
+	grace := domain.GraceLimits{
+		DefaultShutdownSeconds: int64(pcfg.Scheduler.DefaultTerminationGracePeriodSeconds),
+		MaxShutdownSeconds:     int64(pcfg.Scheduler.MaxTerminationGracePeriodSeconds),
+		MaxCheckpointSeconds:   int64(pcfg.Scheduler.MaxCheckpointGraceSeconds),
+	}
 	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, graph, settler, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, graph, settler, grace, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
-	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, logger).
+	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, grace, logger).
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
@@ -282,7 +287,8 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, dataStore,
-		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second, logger)
+		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, logger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "")
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)

@@ -20,6 +20,7 @@ package clusteragentapi
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -63,13 +64,58 @@ type Handler struct {
 	// longest a granted window can possibly still be running: past it, the grant has expired on
 	// its own and there is nothing to hold or clear.
 	maxCheckpointGrace time.Duration
+	// pricedAcceleratorTypes holds the catalog's accelerator types, lowercased (driver casing and
+	// catalog casing can differ, see domain.AcceleratorType.MatchesLabels). Hardware publishes
+	// many true facts about itself (arch, board, tray, serial); capacity keeps only the types
+	// that can be billed, since admission refuses anything unpriced.
+	pricedAcceleratorTypes map[string]bool
+	// maxLogLineChars splits longer reported log lines, never truncating them.
+	maxLogLineChars int
 }
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, logger *zap.Logger) *Handler {
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, logger *zap.Logger) *Handler {
+	priced := make(map[string]bool, len(pricedAcceleratorTypes))
+	for _, name := range pricedAcceleratorTypes {
+		priced[strings.ToLower(name)] = true
+	}
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL,
-		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace, logger: logger}
+		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
+		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, logger: logger}
+}
+
+// keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
+func (h *Handler) keepPricedAccelerators(report *capacityReport) {
+	unpriced := func(flavor string) bool { return !h.pricedAcceleratorTypes[strings.ToLower(flavor)] }
+	for _, byFlavor := range []map[string]int64{report.AcceleratorAvailableByFlavor, report.AcceleratorTotalByFlavor} {
+		for flavor := range byFlavor {
+			if unpriced(flavor) {
+				delete(byFlavor, flavor)
+			}
+		}
+	}
+	for _, byFlavor := range report.AcceleratorAvailableByNode {
+		for flavor := range byFlavor {
+			if unpriced(flavor) {
+				delete(byFlavor, flavor)
+			}
+		}
+	}
+}
+
+// splitLongLines breaks any line over maxLineChars into several, so nothing is dropped, only
+// wrapped.
+func splitLongLines(lines []string, maxLineChars int) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for len(line) > maxLineChars {
+			out = append(out, line[:maxLineChars])
+			line = line[maxLineChars:]
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // attachDataAccess hands each workload its durable-data address, derived from the experiment's
@@ -158,7 +204,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
-		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window.",
+		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window.",
 	}, func(ctx context.Context, in *reconcileInput) (*struct {
 		Body reconcileBody
 	}, error) {
@@ -168,6 +214,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
 			return nil, huma.Error400BadRequest("complete accelerator capacity report is required")
 		}
+		h.keepPricedAccelerators(&report)
 		if report.NodeResourcesByNode == nil {
 			return nil, huma.Error400BadRequest("per-node resource capacity report is required")
 		}
@@ -351,7 +398,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// doesn't implement LogTailer) -- only write when the agent actually sent one, so a
 			// job with no fresh output this tick doesn't wipe out its last-known tail.
 			if rep.LogTail != nil {
-				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.LogTail, now); err != nil {
+				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, h.maxLogLineChars), now); err != nil {
 					return nil, huma.Error500InternalServerError(err.Error())
 				}
 			}

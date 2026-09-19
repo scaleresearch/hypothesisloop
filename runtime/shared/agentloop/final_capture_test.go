@@ -142,12 +142,11 @@ func TestReconcilePushesFinalOutputBeforeDeletingAnUndesiredWorkload(t *testing.
 	defer server.Close()
 
 	agent := &Agent{
-		ClusterName:     "test",
-		APIURL:          server.URL,
-		Executor:        exec,
-		HTTPClient:      server.Client(),
-		MaxLogLineChars: 200,
-		Log:             func(string, ...any) {},
+		ClusterName: "test",
+		APIURL:      server.URL,
+		Executor:    exec,
+		HTTPClient:  server.Client(),
+		Log:         func(string, ...any) {},
 	}
 	if err := agent.reconcileOnce(context.Background()); err != nil {
 		t.Fatalf("reconcileOnce: %v", err)
@@ -197,12 +196,11 @@ func TestReportChangedStatusesPushesNothingRatherThanAPartialSnapshot(t *testing
 	defer server.Close()
 
 	agent := &Agent{
-		ClusterName:     "test",
-		APIURL:          server.URL,
-		Executor:        exec,
-		HTTPClient:      server.Client(),
-		MaxLogLineChars: 200,
-		Log:             func(string, ...any) {},
+		ClusterName: "test",
+		APIURL:      server.URL,
+		Executor:    exec,
+		HTTPClient:  server.Client(),
+		Log:         func(string, ...any) {},
 	}
 	agent.reportChangedStatuses(context.Background())
 
@@ -237,12 +235,11 @@ func TestReconcileDeletesUndesiredWorkloadEvenWhenTheFinalPushHangs(t *testing.T
 	}()
 
 	agent := &Agent{
-		ClusterName:     "test",
-		APIURL:          server.URL,
-		Executor:        exec,
-		HTTPClient:      server.Client(),
-		MaxLogLineChars: 200,
-		Log:             func(string, ...any) {},
+		ClusterName: "test",
+		APIURL:      server.URL,
+		Executor:    exec,
+		HTTPClient:  server.Client(),
+		Log:         func(string, ...any) {},
 	}
 
 	// The capture budget is what bounds this; the test's own ceiling is well above it so a

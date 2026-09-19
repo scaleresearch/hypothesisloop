@@ -32,12 +32,11 @@ func newUndesiredStateServer(t *testing.T) *httptest.Server {
 
 func newTestAgent(server *httptest.Server, exec *captureExecutor) *Agent {
 	return &Agent{
-		ClusterName:     "test",
-		APIURL:          server.URL,
-		Executor:        exec,
-		HTTPClient:      server.Client(),
-		MaxLogLineChars: 200,
-		Log:             func(string, ...any) {},
+		ClusterName: "test",
+		APIURL:      server.URL,
+		Executor:    exec,
+		HTTPClient:  server.Client(),
+		Log:         func(string, ...any) {},
 	}
 }
 

@@ -91,7 +91,6 @@ def bare_agent(tmp_path, run_id: str):
     env = {
         "CLUSTER_NAME": cluster_name,
         "API_URL": API_URL,
-        "HYPOTHESISLOOP_CONFIG": str(REPO_ROOT / "controlplane" / "settings" / "hypothesisloop.yaml"),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"bare-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),

@@ -88,9 +88,7 @@ func maxRetriesPtr(v int) *int { return &v }
 // inherit the k8s bug.
 func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 	e := &Executor{
-		apiURL:                               "http://example.invalid:8083",
-		defaultTerminationGracePeriodSeconds: 5,
-		maxTerminationGracePeriodSeconds:     30,
+		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
@@ -101,7 +99,7 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
-			MaxRetries: maxRetriesPtr(0), AcceleratorCount: 2,
+			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 2,
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -131,9 +129,7 @@ func testDataAccess() *domain.DataAccess {
 // the address a job is handed can depend on desired state and on nothing about its runtime.
 func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.T) {
 	e := &Executor{
-		apiURL:                               "http://example.invalid:8083",
-		defaultTerminationGracePeriodSeconds: 5,
-		maxTerminationGracePeriodSeconds:     30,
+		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
@@ -143,7 +139,7 @@ func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
-			MaxRetries: maxRetriesPtr(0), AcceleratorCount: 1,
+			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
@@ -227,16 +223,14 @@ func TestHashContainerSpecDetectsDurableDataPrefixDrift(t *testing.T) {
 // learner with no actors that hangs in its rendezvous rather than a rejection anyone can read.
 func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T) {
 	e := &Executor{
-		apiURL:                               "http://example.invalid:8083",
-		defaultTerminationGracePeriodSeconds: 5,
-		maxTerminationGracePeriodSeconds:     30,
+		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "grouped", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0),
+			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			Groups: []domain.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi"},
 				{Name: "actor", Replicas: 3, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
@@ -258,9 +252,7 @@ func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T)
 // the group, since a grouped spec states them nowhere else.
 func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 	e := &Executor{
-		apiURL:                               "http://example.invalid:8083",
-		defaultTerminationGracePeriodSeconds: 5,
-		maxTerminationGracePeriodSeconds:     30,
+		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
@@ -268,7 +260,7 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 2,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0),
+			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 			Groups: []domain.JobGroup{
 				{Name: "solo", Replicas: 1, AcceleratorCount: 2, CPU: "2", Memory: "8Gi", Storage: "5Gi",
@@ -289,19 +281,16 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 	}
 }
 
-func checkpointGracePtr(v int64) *int64 { return &v }
+func int64Ptr(v int64) *int64 { return &v }
 
 // The window a job declares is recorded on the container it will be stopped with, because the
 // only thing DeleteWorkload is given is an experiment id -- the job's declaration is long gone
 // from desired state by the time the platform decides to stop it.
 func TestContainerRecordsTheDeclaredCheckpointWindow(t *testing.T) {
 	e := &Executor{
-		apiURL:                               "http://example.invalid:8083",
-		defaultTerminationGracePeriodSeconds: 5,
-		maxTerminationGracePeriodSeconds:     30,
-		maxCheckpointGraceSeconds:            600,
+		apiURL: "http://example.invalid:8083",
 	}
-	cs, err := e.BuildContainerSpec(checkpointWindowExperiment(checkpointGracePtr(300)), Placement{DevicePaths: []string{"/dev/tenstorrent/0"}})
+	cs, err := e.BuildContainerSpec(checkpointWindowExperiment(int64Ptr(300)), Placement{DevicePaths: []string{"/dev/tenstorrent/0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,31 +299,12 @@ func TestContainerRecordsTheDeclaredCheckpointWindow(t *testing.T) {
 	}
 }
 
-// The cap is what keeps the promise honest: without it a job could hold this node's accelerators
-// for as long as it liked simply by claiming it was still saving.
-func TestDeclaredCheckpointWindowIsCappedAtTheConfiguredMaximum(t *testing.T) {
-	e := &Executor{
-		apiURL:                               "http://example.invalid:8083",
-		defaultTerminationGracePeriodSeconds: 5,
-		maxTerminationGracePeriodSeconds:     30,
-		maxCheckpointGraceSeconds:            600,
-	}
-	cs, err := e.BuildContainerSpec(checkpointWindowExperiment(checkpointGracePtr(86400)), Placement{DevicePaths: []string{"/dev/tenstorrent/0"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cs.Labels[LabelCheckpointGrace]; got != "600" {
-		t.Fatalf("recorded checkpoint window = %q, want %q: a job must not hold hardware indefinitely by asking for longer", got, "600")
-	}
-}
-
 // A policy-class termination is the platform's own decision about a job that was fine, so the
 // container is signalled and then given the window it declared instead of the ordinary grace.
 func TestAPolicyTerminationStopsTheContainerOnTheCheckpointWindow(t *testing.T) {
-	e := &Executor{defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30, maxCheckpointGraceSeconds: 600}
 	labels := map[string]string{LabelGraceSeconds: "5", LabelCheckpointGrace: "300"}
-	if got := e.stopGrace(labels, true); got != 300 {
-		t.Fatalf("stop grace = %d, want 300: a job the platform chose to stop must get its checkpoint window", got)
+	if got, err := stopGrace(labels, true); err != nil || got != 300 {
+		t.Fatalf("stop grace = (%d, %v), want 300: a job the platform chose to stop must get its checkpoint window", got, err)
 	}
 }
 
@@ -342,10 +312,25 @@ func TestAPolicyTerminationStopsTheContainerOnTheCheckpointWindow(t *testing.T) 
 // left to save it with -- and neither does a drift replacement, which is not a termination at
 // all and would only be delaying its own recreation.
 func TestANonPolicyTerminationStopsTheContainerOnTheOrdinaryGrace(t *testing.T) {
-	e := &Executor{defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30, maxCheckpointGraceSeconds: 600}
 	labels := map[string]string{LabelGraceSeconds: "5", LabelCheckpointGrace: "300"}
-	if got := e.stopGrace(labels, false); got != 5 {
-		t.Fatalf("stop grace = %d, want 5: only a policy termination may spend the checkpoint window", got)
+	if got, err := stopGrace(labels, false); err != nil || got != 5 {
+		t.Fatalf("stop grace = (%d, %v), want 5: only a policy termination may spend the checkpoint window", got, err)
+	}
+}
+
+// A container with no readable grace is an error, never a default the runtime picks itself.
+func TestAContainerWithoutARecordedGraceIsNotStoppedOnAGuess(t *testing.T) {
+	if _, err := stopGrace(map[string]string{}, false); err == nil {
+		t.Fatal("stopGrace guessed a grace for a container that records none")
+	}
+}
+
+// Grace is resolved by the control plane at admission; a job without it is refused.
+func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
+	exp := checkpointWindowExperiment(nil)
+	exp.Job.TerminationGracePeriodSeconds = nil
+	if _, err := (&Executor{apiURL: "http://example.invalid:8083"}).BuildContainerSpec(exp, Placement{DevicePaths: []string{"/dev/tenstorrent/0"}}); err == nil {
+		t.Fatal("built a container for a job whose grace admission never resolved")
 	}
 }
 
@@ -357,7 +342,7 @@ func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
-			MaxRetries: maxRetriesPtr(0), AcceleratorCount: 1,
+			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
 			CheckpointGraceSeconds: checkpointGrace,
 		},

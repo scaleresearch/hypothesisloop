@@ -249,7 +249,6 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
     env = {
         "CLUSTER_NAME": bare_cluster,
         "API_URL": API_URL,
-        "HYPOTHESISLOOP_CONFIG": str(REPO_ROOT / "controlplane" / "settings" / "hypothesisloop.yaml"),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"tt-bare-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),

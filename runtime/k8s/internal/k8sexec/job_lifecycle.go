@@ -555,14 +555,7 @@ func (c *JobWorkloadClient) GetNodeTotalCapacity(ctx context.Context) (map[strin
 // from one Kubernetes node/pod listing (DRA inventory listed once per configured driver), so
 // the reconcile exchange reports one internally consistent snapshot without duplicate reads.
 func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error) {
-	// Hardware publishes many true facts about itself — a Tenstorrent card reports its arch, its
-	// board type, its tray, its serial. Each is a legitimate accelerator type, but reporting all
-	// of them would bury the two an operator actually cares about under twenty per-serial
-	// entries. The priced catalog is the filter: it is precisely the set of types that can be
-	// billed, and admission already refuses anything unpriced, so an unpriced type could never
-	// have been submitted anyway. The operator prices the granularity they want; that is exactly
-	// what capacity reports.
-	priced := c.pricedAcceleratorTypes
+	// Every type the hardware publishes is reported; the control plane keeps the priced ones.
 	nodes, pods, err := c.listSchedulableNodesAndPods(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -596,9 +589,6 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 	}
 	for acceleratorName, snapshot := range draSnapshots {
 		key := acceleratorName
-		if !priced[strings.ToLower(key)] {
-			continue
-		}
 		available[key], total[key] = snapshot.available, snapshot.total
 		for node, free := range snapshot.freeByNode {
 			if byNode[node] == nil {
@@ -632,9 +622,6 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 					continue
 				}
 				key := labelKey + "=" + labelValue
-				if !priced[strings.ToLower(key)] {
-					continue
-				}
 				if byNode[node.Name] == nil {
 					byNode[node.Name] = make(map[string]int64)
 				}

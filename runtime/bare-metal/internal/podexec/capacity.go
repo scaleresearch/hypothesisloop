@@ -140,7 +140,7 @@ func (e *Executor) GetLiveStorageCapacity(ctx context.Context) (available, total
 // GetLiveAcceleratorCapacitySnapshot returns aggregate and per-node actual accelerator state.
 // There is exactly one node (this one), so byNode/nodeLabels each carry a single entry keyed by
 // e.nodeName — the bare-node shape of the same cluster->node->flavor->count contract k8sexec
-// reports, restricted (like k8sexec) to the priced catalog.
+// reports. Every type the hardware publishes is reported; the control plane keeps the priced ones.
 func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error) {
 	devices, err := probeAccelerators(ctx)
 	if err != nil {
@@ -154,9 +154,6 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	inUse := map[string]int64{}
 	for _, d := range devices {
 		for _, label := range d.Labels {
-			if !e.pricedAcceleratorTypes[strings.ToLower(label)] {
-				continue
-			}
 			total[label]++
 		}
 	}

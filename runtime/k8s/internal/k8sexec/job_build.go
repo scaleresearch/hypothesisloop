@@ -173,34 +173,20 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 
 	backoff := int32(*spec.MaxRetries)
 
-	terminationGrace := c.defaultTerminationGracePeriodSeconds
-	if spec.TerminationGracePeriodSeconds != nil {
-		terminationGrace = *spec.TerminationGracePeriodSeconds
-	}
-	if terminationGrace > c.maxTerminationGracePeriodSeconds {
-		terminationGrace = c.maxTerminationGracePeriodSeconds
+	terminationGrace, checkpointGrace, err := spec.ResolvedGrace()
+	if err != nil {
+		return nil, fmt.Errorf("workload: experiment %s: %w", exp.ID, err)
 	}
 
 	// The pod's grace is the longer of its ordinary shutdown grace and the checkpoint window it
 	// declared, because the window has to be a property of the pod for the kubelet to honour it:
 	// when the Job is deleted it is Kubernetes' garbage collector that deletes these pods, and
-	// it uses whatever the pod itself declares. Capped separately from the shutdown grace —
-	// 30 seconds does not checkpoint a serious model, and minutes is not a sane default for
-	// every other kill.
+	// it uses whatever the pod itself declares.
 	//
 	// Which terminations actually get to spend that window is not decided here and is not a rule
 	// the runtime is handed: DeleteWorkload shortens the pod back to graceSeconds below whenever
 	// the control plane did not grant this termination its window.
-	podGrace := terminationGrace
-	if spec.CheckpointGraceSeconds != nil {
-		checkpointGrace := *spec.CheckpointGraceSeconds
-		if checkpointGrace > c.maxCheckpointGraceSeconds {
-			checkpointGrace = c.maxCheckpointGraceSeconds
-		}
-		if checkpointGrace > podGrace {
-			podGrace = checkpointGrace
-		}
-	}
+	podGrace := max(terminationGrace, checkpointGrace)
 
 	priorityClass := PriorityClassGuaranteed
 	if exp.CapacityTier == domain.CapacityBurst {

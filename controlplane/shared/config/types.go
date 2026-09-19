@@ -126,9 +126,9 @@ type SchedulerConfig struct {
 	// keeps landing on broken hardware must eventually stop and say so with the reason that
 	// keeps ending it, rather than loop silently forever.
 	MaxInfrastructureRequeues int `yaml:"max_infrastructure_requeues"`
-	// MaxLogTailLineChars bounds one line of a job's reported log tail (see
-	// runtime/shared/agentloop.splitLongLines): large enough to keep a real compiler error or
-	// stack frame intact, small enough that one pathological line can't blow up a status push.
+	// MaxLogTailLineChars bounds one stored line of a job's reported log tail, applied on ingest
+	// (see clusteragentapi.splitLongLines): large enough to keep a real compiler error or stack
+	// frame intact, small enough that one pathological line can't blow up a stored tail.
 	// Lines over this are split, never truncated/dropped.
 	MaxLogTailLineChars int `yaml:"max_log_tail_line_chars"`
 	// ScaleUpTimeoutSeconds is the global default deadline a SUBMITTED/RUNNING job with an

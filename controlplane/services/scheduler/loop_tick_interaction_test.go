@@ -96,7 +96,7 @@ func TestSubmitJobRejectsClaimWhenNodeVanishesBeforeClaim(t *testing.T) {
 		nodeAccel: map[string]map[string]map[string]int64{"cluster-a": {}},
 		nodeRes:   map[string]map[string]map[string]int64{"cluster-a": {}},
 	}
-	l := NewLoop(store, submitQuota{}, workload, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, workload, testGraceLimits, zap.NewNop())
 
 	err := l.submitJob(context.Background(), exp, "cluster-a", exp.AcceleratorType)
 	if !errors.Is(err, errAdmissionCapacityChanged) {
@@ -128,7 +128,7 @@ func TestSubmitJobSucceedsWhenNodeStillPresentAtClaim(t *testing.T) {
 		nodeAccel:  map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 1}}},
 		nodeRes:    map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}},
 	}
-	l := NewLoop(store, submitQuota{}, workload, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, workload, testGraceLimits, zap.NewNop())
 
 	if err := l.submitJob(context.Background(), exp, "cluster-a", exp.AcceleratorType); err != nil {
 		t.Fatalf("submitJob = %v, want nil: the node the placement relied on is still there", err)
@@ -293,7 +293,7 @@ func TestTickSkipsPreemptionWhenClusterIsAlreadyWaitingForScaleUp(t *testing.T) 
 	exp.ClusterName = "cluster-a"
 
 	store := &scaleUpWaitingStore{noRunningListStore{t: t, queued: []*domain.Experiment{exp}}}
-	l := NewLoop(store, tickQuota{}, scaleUpWaitingWorkload{}, zap.NewNop())
+	l := NewLoop(store, tickQuota{}, scaleUpWaitingWorkload{}, testGraceLimits, zap.NewNop())
 	l.evictor = noopEvictor{}
 	l.disbalanceTolerance = DefaultDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}
@@ -319,7 +319,7 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 	exp.ClusterName = "cluster-a"
 
 	store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
-	l := NewLoop(store, tickQuota{}, layoutShortWorkload{}, zap.NewNop())
+	l := NewLoop(store, tickQuota{}, layoutShortWorkload{}, testGraceLimits, zap.NewNop())
 	l.evictor = noopEvictor{}
 	l.disbalanceTolerance = DefaultDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}
@@ -383,7 +383,7 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 				Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
 			}
 			store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
-			l := NewLoop(store, tickQuota{}, shareWorkload{}, zap.NewNop())
+			l := NewLoop(store, tickQuota{}, shareWorkload{}, testGraceLimits, zap.NewNop())
 			l.evictor = noopEvictor{}
 			l.disbalanceTolerance = DefaultDisbalanceTolerance
 			l.reprioritizer = noopReprioritizer{}

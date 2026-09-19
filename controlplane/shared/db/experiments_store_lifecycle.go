@@ -70,11 +70,14 @@ func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) er
 }
 
 // ClaimSubmitted serializes admission decisions for one cluster, checks fresh capacity while
-// holding that lock, and conditionally persists the desired-state claim. resolvedJob is the
-// literal resolution of any "max" sentinel in the job (nil if there was nothing to resolve),
-// written into resolved_job_spec in the SAME transaction as the SUBMITTED status transition —
-// see domain.Experiment.ResolvedJob's doc comment.
+// holding that lock, and conditionally persists the desired-state claim. resolvedJob is the job
+// as the runtime must run it (any "max" sentinel and the grace periods resolved), written into
+// resolved_job_spec in the SAME transaction as the SUBMITTED status transition — see
+// domain.Experiment.ResolvedJob's doc comment.
 func (s *ExperimentsStore) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+	if resolvedJob == nil {
+		return false, fmt.Errorf("experiments_store.ClaimSubmitted: resolved job spec is required")
+	}
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: begin: %w", err)
@@ -109,13 +112,9 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	if !available {
 		return false, nil
 	}
-	var resolvedJobSpec []byte
-	if resolvedJob != nil {
-		var err error
-		resolvedJobSpec, err = json.Marshal(resolvedJob)
-		if err != nil {
-			return false, fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
-		}
+	resolvedJobSpec, err := json.Marshal(resolvedJob)
+	if err != nil {
+		return false, fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
 	}
 	const q = `UPDATE experiments
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, not_admitted_reason = NULL, resolved_job_spec = $3, updated_at = NOW()

@@ -11,7 +11,6 @@
 //	CLUSTER_NAME          — this node's stable identity, registered as its own cluster
 //	API_URL               — base URL of the control-plane API
 //	                        (must also be reachable from *inside* a workload container)
-//	HYPOTHESISLOOP_CONFIG — path to hypothesisloop.yaml
 //	SCRATCH_DIR           — filesystem Storage quotas are measured/enforced against (default /var/lib/hypothesisloop/scratch)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
 package main
@@ -24,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/runtime/bare-metal/internal/podexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
@@ -41,7 +39,6 @@ func main() {
 	// this agent starts as HYPOTHESISLOOP_API_URL, so it must be reachable from inside a
 	// workload container as well as from the agent process.
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
-	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
@@ -56,14 +53,10 @@ func main() {
 	}
 
 	exec, err := podexec.New(podexec.Config{
-		APIURL:                               apiURL,
-		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
-		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
-		MaxCheckpointGraceSeconds:            pcfg.Scheduler.MaxCheckpointGraceSeconds,
-		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
-		ScratchDir:                           scratchDir,
-		NodeLabels:                           parseNodeLabels(os.Getenv("NODE_LABELS")),
-		NodeName:                             os.Getenv("NODE_NAME"),
+		APIURL:     apiURL,
+		ScratchDir: scratchDir,
+		NodeLabels: parseNodeLabels(os.Getenv("NODE_LABELS")),
+		NodeName:   os.Getenv("NODE_NAME"),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
@@ -93,7 +86,6 @@ func main() {
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
 		LogTailLines:      logTailLines,
-		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
 		Log:               log,
 	}
 	a.Run(ctx)

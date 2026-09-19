@@ -1,0 +1,33 @@
+{
+  "experiment": {
+    "id": "grace-golden",
+    "agent_id": "agent",
+    "project_id": "project",
+    "capacity_tier": "guaranteed",
+    "estimated_duration_hours": 1,
+    "job": {
+      "image": "example.invalid/workload",
+      "cpu": "1", "memory": "1Gi", "storage": "1Gi",
+      "max_retries": 0,
+      "termination_grace_period_seconds": 90,
+      "checkpoint_grace_seconds": 86400
+    },
+    "resolved_job": {
+      "image": "example.invalid/workload",
+      "cpu": "1", "memory": "1Gi", "storage": "1Gi",
+      "max_retries": 0,
+      "termination_grace_period_seconds": 30,
+      "checkpoint_grace_seconds": 600
+    },
+    "data": {
+      "uri": "s3://hl-data/pe-1/agent/grace-golden/",
+      "shared": "s3://hl-data/pe-1/",
+      "endpoint": "http://store.invalid:9000",
+      "region": "us-east-1",
+      "access_key_id": "key",
+      "secret_access_key": "secret"
+    }
+  },
+  "ordinary_stop_grace_seconds": 30,
+  "checkpoint_stop_grace_seconds": 600
+}

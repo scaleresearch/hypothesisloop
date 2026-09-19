@@ -6,7 +6,6 @@
 //
 //	CLUSTER_NAME        — this cluster's stable identity
 //	API_URL             — base URL of the control-plane API
-//	HYPOTHESISLOOP_CONFIG — path to hypothesisloop.yaml
 package main
 
 import (
@@ -16,7 +15,6 @@ import (
 	"os"
 	"time"
 
-	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/runtime/k8s/internal/k8sexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
@@ -35,7 +33,6 @@ func main() {
 	// clusters where the control plane lives outside the cluster
 	// (e.g. http://host.docker.internal:8081).
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
-	pcfg := hypothesisloopcfg.MustLoad(agentloop.RequiredEnv(binaryName, "HYPOTHESISLOOP_CONFIG"))
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
@@ -43,13 +40,7 @@ func main() {
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
 
-	jwc, err := k8sexec.New(k8sexec.Config{
-		APIURL:                               apiURL,
-		DefaultTerminationGracePeriodSeconds: pcfg.Scheduler.DefaultTerminationGracePeriodSeconds,
-		MaxTerminationGracePeriodSeconds:     pcfg.Scheduler.MaxTerminationGracePeriodSeconds,
-		MaxCheckpointGraceSeconds:            pcfg.Scheduler.MaxCheckpointGraceSeconds,
-		PricedAcceleratorTypes:               pcfg.AcceleratorTypeNames(),
-	})
+	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
 		os.Exit(1)
@@ -78,7 +69,6 @@ func main() {
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
 		LogTailLines:      logTailLines,
-		MaxLogLineChars:   pcfg.Scheduler.MaxLogTailLineChars,
 		AutoscalerEnabled: autoscalerEnabled,
 		Log:               log,
 	}

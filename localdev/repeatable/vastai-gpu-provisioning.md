@@ -107,10 +107,9 @@ bash localdev/local-tunnels/tunnels.sh status  # re-check anytime; URLs re-rando
 
 ```bash
 GOOS=linux GOARCH=amd64 go build -o /tmp/bare-agent ./runtime/bare-metal/cmd/bare-agent
-scp -i ~/.ssh/vastai_hypothesisloop -P <port> /tmp/bare-agent controlplane/settings/hypothesisloop.yaml root@<ip>:/root/
+scp -i ~/.ssh/vastai_hypothesisloop -P <port> /tmp/bare-agent root@<ip>:/root/
 ssh ... 'CLUSTER_NAME=my-gpu-node \
   API_URL=<control-plane API tunnel URL> \
-  HYPOTHESISLOOP_CONFIG=/root/hypothesisloop.yaml \
   NODE_NAME=my-gpu-node \
   nohup /root/bare-agent > /root/bare-agent.log 2>&1 &'
 ```

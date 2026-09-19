@@ -17,14 +17,13 @@ func attemptTestExperiment(attempt int) *domain.Experiment {
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed, AttemptCount: attempt,
 		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi",
-			MaxRetries: intPtr(1), AcceleratorCount: 1,
+			MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
 	}
 }
 
 func attemptTestClient() *JobWorkloadClient {
-	return &JobWorkloadClient{apiURL: "http://registry",
-		defaultTerminationGracePeriodSeconds: 5, maxTerminationGracePeriodSeconds: 30}
+	return &JobWorkloadClient{apiURL: "http://registry"}
 }
 
 // The attempt travels from desired state onto the workload and back out with its phase, and the

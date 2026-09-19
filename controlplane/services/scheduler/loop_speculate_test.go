@@ -86,7 +86,7 @@ func (s *speculationStore) ListCapacityClaimedExperiments(_ context.Context) ([]
 }
 
 func speculationLoop(store LoopStore) *Loop {
-	l := NewLoop(store, tickQuota{}, nil, zap.NewNop())
+	l := NewLoop(store, tickQuota{}, nil, testGraceLimits, zap.NewNop())
 	return l.WithSpeculation(15 * time.Minute)
 }
 
@@ -265,9 +265,11 @@ type nilCallbackClaimStore struct {
 	claimed        bool
 	capacityCheck  func(context.Context, []*domain.Experiment) (bool, error)
 	settings       map[string]*domain.ClusterSettings
+	resolvedJob    *domain.JobSpec
 }
 
-func (s *nilCallbackClaimStore) ClaimSubmitted(_ context.Context, _, _ string, _ *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *nilCallbackClaimStore) ClaimSubmitted(_ context.Context, _, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+	s.resolvedJob = resolvedJob
 	s.sawNilCallback = capacityAvailable == nil
 	s.capacityCheck = capacityAvailable
 	s.claimed = true
@@ -285,7 +287,7 @@ func TestSubmitJobSpeculativeWithNoClusterIDSkipsCapRecheck(t *testing.T) {
 	exp := distributedExperiment(1, 1)
 	exp.ID = "exp-1"
 	store := &nilCallbackClaimStore{}
-	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true) = %v, want nil", err)
@@ -312,7 +314,7 @@ func TestSubmitJobSpeculativeReChecksClusterCapAgainstFreshDesired(t *testing.T)
 	store := &nilCallbackClaimStore{settings: map[string]*domain.ClusterSettings{
 		"cid-a": {MaxSpeculativeAccelerators: &cap},
 	}}
-	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true) = %v, want nil", err)
@@ -347,7 +349,7 @@ func TestSubmitJobSpeculativeWithNoProvenFitAndNoCapDefaultsToOneJob(t *testing.
 	exp.ID = "exp-1"
 	exp.AcceleratorCount = 2
 	store := &nilCallbackClaimStore{} // no ClusterSettings entry for cid-a: no operator cap
-	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true, false); err != nil {
 		t.Fatalf("submitJobTo(speculative=true, provenFit=false) = %v, want nil", err)
@@ -380,7 +382,7 @@ func TestSubmitJobSpeculativeWithProvenFitAndNoCapIsUnbounded(t *testing.T) {
 	exp.ID = "exp-1"
 	exp.AcceleratorCount = 2
 	store := &nilCallbackClaimStore{}
-	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true, provenFit=true) = %v, want nil", err)
@@ -396,7 +398,7 @@ func TestSubmitJobLiveFitPassesNonNilCapacityCallback(t *testing.T) {
 	exp := distributedExperiment(1, 1)
 	exp.ID = "exp-1"
 	store := &nilCallbackClaimStore{}
-	l := NewLoop(store, submitQuota{}, &liveWorkload{}, zap.NewNop())
+	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, false, false); err != nil {
 		t.Fatalf("submitJobTo(speculative=false) = %v, want nil", err)
@@ -594,7 +596,7 @@ func TestSpeculativeCandidatesIncludesMismatchedFlavorClusterButRanksItLast(t *t
 func TestSpeculativeCandidatesDisabledWithoutWithSpeculation(t *testing.T) {
 	exp := distributedExperiment(1, 2)
 	accel, resources := nodeFixture()
-	l := NewLoop(&speculationStore{}, tickQuota{}, nil, zap.NewNop()) // no WithSpeculation call
+	l := NewLoop(&speculationStore{}, tickQuota{}, nil, testGraceLimits, zap.NewNop()) // no WithSpeculation call
 
 	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp,
 		map[string]bool{"cluster-a": true}, map[string]bool{"cluster-a": true},

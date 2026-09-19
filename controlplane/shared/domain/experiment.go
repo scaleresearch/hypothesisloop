@@ -32,10 +32,10 @@ type Experiment struct {
 	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the
 	// billing/admission-facing canonical values derived from it once at submission time.
 	Job JobSpec `json:"job"`
-	// ResolvedJob is the durably-persisted literal resolution of any MaxResourceSentinel ("max")
-	// value in Job's cpu/memory/storage, written once at admission onto the specific cluster the
-	// job landed on. Nil until admitted (or for a job with no "max" fields to resolve — see
-	// admission's write path). Job itself is NEVER rewritten, so a GET always shows exactly what
+	// ResolvedJob is Job as the runtime must run it, written once at admission onto the specific
+	// cluster the job landed on: any MaxResourceSentinel ("max") cpu/memory/storage resolved to a
+	// literal, and the shutdown and checkpoint grace resolved against the operator's limits (see
+	// GraceLimits.Resolve). Nil until admitted. Job itself is NEVER rewritten, so a GET always shows exactly what
 	// was submitted; every downstream consumer that needs the runnable/executable values (cost
 	// estimation, BuildJobs, Footprint, NodeShapes) must call EffectiveJob() instead of reading
 	// Job directly.

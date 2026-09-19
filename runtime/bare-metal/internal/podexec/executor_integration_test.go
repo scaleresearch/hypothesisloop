@@ -21,12 +21,9 @@ func newTestExecutor(t *testing.T) *Executor {
 	t.Helper()
 	dir := t.TempDir()
 	e, err := New(Config{
-		APIURL:                               "http://example.invalid:8083",
-		DefaultTerminationGracePeriodSeconds: 5,
-		MaxTerminationGracePeriodSeconds:     30,
-		MaxCheckpointGraceSeconds:            600,
-		ScratchDir:                           dir,
-		NodeName:                             "integration-test-node",
+		APIURL:     "http://example.invalid:8083",
+		ScratchDir: dir,
+		NodeName:   "integration-test-node",
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -53,7 +50,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 			CPU:        "0.5",
 			Memory:     "64Mi",
 			Storage:    "128Mi",
-			MaxRetries: maxRetries(0),
+			MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		},
 	}
 
@@ -157,7 +154,7 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 	e := newTestExecutor(t)
 	spec := domain.JobSpec{
 		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
-		MaxRetries: maxRetries(0), NumNodes: 2,
+		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5), NumNodes: 2,
 	}
 	exp := &domain.Experiment{ID: "reject-num-nodes", Job: spec}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err == nil {
@@ -177,7 +174,7 @@ func TestIntegrationIgnoresK8sOnlyFields(t *testing.T) {
 		CPU:        "0.5",
 		Memory:     "64Mi",
 		Storage:    "128Mi",
-		MaxRetries: maxRetries(0),
+		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5),
 	}
 
 	cases := []struct {

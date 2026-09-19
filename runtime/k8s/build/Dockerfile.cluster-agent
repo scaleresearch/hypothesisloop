@@ -9,6 +9,4 @@ RUN CGO_ENABLED=0 go build -mod=vendor -o /cluster-agent ./runtime/k8s/cmd/clust
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /cluster-agent /cluster-agent
-COPY --from=builder /app/controlplane/settings /settings
-ENV HYPOTHESISLOOP_CONFIG=/settings/hypothesisloop.yaml
 CMD ["/cluster-agent"]

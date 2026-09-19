@@ -31,9 +31,8 @@ type LoopStore interface {
 	ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	MarkQueued(ctx context.Context, id, reason string) error
-	// ClaimSubmitted persists resolvedJob (exp.ResolvedJob — nil if the job had nothing to
-	// resolve) alongside the SUBMITTED status transition, in the same transaction — see
-	// domain.Experiment.ResolvedJob's doc comment.
+	// ClaimSubmitted persists resolvedJob (exp.ResolvedJob, required) alongside the SUBMITTED
+	// status transition, in the same transaction — see domain.Experiment.ResolvedJob's doc comment.
 	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
 	// RequeuePreempted returns id to QUEUED and overwrites its duration plus the accelerator-hours
 	// estimate with the caller's proportionally rescaled remaining amounts — see the store
@@ -161,6 +160,7 @@ type Loop struct {
 	store         LoopStore
 	quota         LoopQuotaStore
 	workload      LoopWorkloadClient
+	grace         domain.GraceLimits
 	reprioritizer Reprioritizer // called after each admission pass
 	trigger       chan struct{}
 	logger        *zap.Logger
@@ -222,11 +222,12 @@ type Loop struct {
 const DefaultEvictionTTL = 60 * time.Second
 
 // NewLoop constructs a Loop.
-func NewLoop(store LoopStore, quota LoopQuotaStore, workloadClient LoopWorkloadClient, logger *zap.Logger) *Loop {
+func NewLoop(store LoopStore, quota LoopQuotaStore, workloadClient LoopWorkloadClient, grace domain.GraceLimits, logger *zap.Logger) *Loop {
 	return &Loop{
 		store:                    store,
 		quota:                    quota,
 		workload:                 workloadClient,
+		grace:                    grace,
 		trigger:                  make(chan struct{}, 1),
 		logger:                   logger,
 		heartbeat:                10 * time.Second,

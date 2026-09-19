@@ -40,16 +40,6 @@ const (
 // implicit defaults.
 type Config struct {
 	APIURL string
-	// DefaultTerminationGracePeriodSeconds/MaxTerminationGracePeriodSeconds mirror
-	// k8sexec.Config exactly — see there for meaning.
-	DefaultTerminationGracePeriodSeconds int
-	MaxTerminationGracePeriodSeconds     int
-	// MaxCheckpointGraceSeconds caps job.checkpoint_grace_seconds — mirrors
-	// k8sexec.Config.MaxCheckpointGraceSeconds exactly.
-	MaxCheckpointGraceSeconds int
-	// PricedAcceleratorTypes bounds which accelerator types capacity reporting names (see
-	// hypothesisloop.yaml accelerator_types) — identical role to k8sexec.Config.
-	PricedAcceleratorTypes []string
 	// ScratchDir is the filesystem this node's Storage quota is measured/enforced against
 	// (podman --storage-opt size=, statfs'd for total/available). Required.
 	ScratchDir string
@@ -62,13 +52,9 @@ type Config struct {
 }
 
 type Executor struct {
-	apiURL                               string
-	defaultTerminationGracePeriodSeconds int64
-	maxTerminationGracePeriodSeconds     int64
-	maxCheckpointGraceSeconds            int64
-	pricedAcceleratorTypes               map[string]bool
-	scratchDir                           string
-	nodeLabels                           map[string]string
+	apiURL     string
+	scratchDir string
+	nodeLabels map[string]string
 	// nodeName is this node's own identity, reported as the sole entry in every
 	// cluster->node->... map the Backend contract expects (a bare-node "cluster" is one node).
 	nodeName string
@@ -90,22 +76,12 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("podexec: APIURL is required")
 	}
-	if cfg.DefaultTerminationGracePeriodSeconds <= 0 || cfg.MaxTerminationGracePeriodSeconds <= 0 ||
-		cfg.MaxCheckpointGraceSeconds <= 0 {
-		return nil, fmt.Errorf("podexec: termination settings must be positive")
-	}
 	if cfg.ScratchDir == "" {
 		return nil, fmt.Errorf("podexec: ScratchDir is required")
 	}
 	docker, engineName, err := resolveEngineClient(context.Background())
 	if err != nil {
 		return nil, err
-	}
-	// Lowercased (see domain.AcceleratorType.MatchesLabels) so a device isn't silently dropped
-	// from capacity over a casing mismatch with the pricing catalog.
-	priced := make(map[string]bool, len(cfg.PricedAcceleratorTypes))
-	for _, name := range cfg.PricedAcceleratorTypes {
-		priced[strings.ToLower(name)] = true
 	}
 	nodeName, err := localNodeName()
 	if err != nil {
@@ -123,17 +99,13 @@ func New(cfg Config) (*Executor, error) {
 		return nil, err
 	}
 	return &Executor{
-		apiURL:                               cfg.APIURL,
-		defaultTerminationGracePeriodSeconds: int64(cfg.DefaultTerminationGracePeriodSeconds),
-		maxTerminationGracePeriodSeconds:     int64(cfg.MaxTerminationGracePeriodSeconds),
-		maxCheckpointGraceSeconds:            int64(cfg.MaxCheckpointGraceSeconds),
-		pricedAcceleratorTypes:               priced,
-		scratchDir:                           cfg.ScratchDir,
-		nodeLabels:                           labels,
-		nodeName:                             nodeName,
-		docker:                               docker,
-		engineName:                           engineName,
-		storageQuotaEnforced:                 quotaSupported,
+		apiURL:               cfg.APIURL,
+		scratchDir:           cfg.ScratchDir,
+		nodeLabels:           labels,
+		nodeName:             nodeName,
+		docker:               docker,
+		engineName:           engineName,
+		storageQuotaEnforced: quotaSupported,
 	}, nil
 }
 
