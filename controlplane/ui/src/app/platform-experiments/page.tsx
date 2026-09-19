@@ -172,7 +172,7 @@ function ExperimentCard({
               Hypotheses
               {progressPartial && (
                 <span className="text-dim" style={{ marginLeft: 6, textTransform: 'none' }}>
-                  (first {MAX_LIST_PAGE_SIZE})
+                  (partial)
                 </span>
               )}
             </div>

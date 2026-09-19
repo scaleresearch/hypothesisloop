@@ -38,7 +38,8 @@ export interface Page<T> {
   total: number
 }
 
-// The largest page every list endpoint will serve; asking for more is clamped server-side.
+// The largest page any list endpoint will serve; asking for more is clamped server-side, and
+// the job list clamps to 50.
 export const MAX_LIST_PAGE_SIZE = 200
 
 async function apiFetchPage<T>(url: string): Promise<Page<T>> {
