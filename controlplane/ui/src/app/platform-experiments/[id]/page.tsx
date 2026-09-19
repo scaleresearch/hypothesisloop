@@ -64,32 +64,28 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
   const filtered = points.filter((p) => trackedSet.has(p.metric_name))
   const metricNames = Array.from(new Set(filtered.map((p) => p.metric_name))).sort()
   // One row per point; a point only sets its own metric's key, so unrelated metrics are left
-  // undefined for that row (a gap in their line, not a fake zero) rather than merged by time.
-  const chartData = filtered
+  // undefined for that row (a gap in their line, not a fake zero). Plotted over training progress:
+  // a job of a few seconds has no readable time axis.
+  const chartData = [...filtered]
+    .sort((a, b) => new Date(a.recorded_at as string).getTime() - new Date(b.recorded_at as string).getTime())
     .map((p) => ({
-      t: new Date(p.recorded_at as string).getTime(),
+      frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
       [p.metric_name]: p.metric_value,
     }))
-    .sort((a, b) => a.t - b.t)
   if (chartData.length === 0) {
     return <EmptyState>No data yet</EmptyState>
   }
   const hasBounded = metricNames.some(isBoundedMetric)
   const hasUnbounded = metricNames.some((n) => !isBoundedMetric(n))
-  // A job of a few seconds needs fractions of a second to tell its ticks apart.
-  const short = chartData[chartData.length - 1].t - chartData[0].t < 10_000
-  const formatTime = (t: number) => new Date(t).toLocaleTimeString(undefined, {
-    hour: 'numeric', minute: '2-digit', second: '2-digit', fractionalSecondDigits: short ? 1 : undefined,
-  })
   const axisOf = (name: string) => (isBoundedMetric(name) ? 'left' : 'right')
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={formatTime} tick={CHART_TICK} />
+        <XAxis dataKey="frac" type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={CHART_TICK} />
         {hasBounded && <YAxis yAxisId="left" domain={['auto', 'auto']} tick={CHART_TICK} width={40} />}
         {hasUnbounded && <YAxis yAxisId="right" orientation="right" domain={['auto', 'auto']} tick={CHART_TICK} width={40} />}
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={formatTime} contentStyle={CHART_TOOLTIP_STYLE} />
+        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => `${l}% of training`} contentStyle={CHART_TOOLTIP_STYLE} />
         <Legend wrapperStyle={{ fontSize: 10 }} />
         {metricNames.map((name, i) => (
           <Line
@@ -1197,8 +1193,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {(experiments ?? []).length > 0 && (
         <Pod>
           <PodHeader>
-            Live Metrics
-            <span className="text-dim" style={{ marginLeft: 8 }}>auto-refreshes every 30 s</span>
+            Job Metrics
+            <span className="text-dim" style={{ marginLeft: 8 }}>over training progress, refreshed every 30 s</span>
           </PodHeader>
           <PodContent>
             <LiveMetricsPicker jobs={experiments ?? []} />
