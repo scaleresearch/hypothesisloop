@@ -151,6 +151,9 @@ export interface Experiment {
   // The runtime's latest explanation for why this job's container hasn't started or keeps
   // restarting, merged in live from the metrics store on every read.
   phase_detail?: PhaseDetail
+  // The job's best value on its platform experiment's first ranking metric, read live from the
+  // metrics store. Absent until the job reports that metric.
+  metric?: { name: string; best: number; basis: string }
   // Lineage
   code_ref?: string
   config_hash?: string

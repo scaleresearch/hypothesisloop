@@ -432,6 +432,29 @@ export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment>
   return apiFetch<PlatformExperiment>(`${API_URL}/platform-experiments/${id}`)
 }
 
+export interface AgentStanding {
+  rank: number
+  agent_id: string
+  best: number
+  experiment_id?: string
+  hypothesis_id?: string
+}
+
+// Standings rank the competitors on each ranking metric, the first being the primary one. bests
+// holds every reporting agent's best raw value on every declared metric and the job that set it.
+export interface PlatformExperimentResults {
+  metrics: { metric: string; direction: 'maximize' | 'minimize'; standings: AgentStanding[] }[]
+  bests: {
+    metric: string
+    agents: { agent_id: string; best: number; experiment_id?: string }[]
+    non_raw_basis_agents?: string[]
+  }[]
+}
+
+export function fetchPlatformExperimentResults(id: string): Promise<PlatformExperimentResults> {
+  return apiFetch<PlatformExperimentResults>(`${API_URL}/platform-experiments/${id}/results`)
+}
+
 // quotaTier optionally overrides this signup's guaranteed-vs-burst-only split regardless of the
 // agent's kind — 'guaranteed' or 'burst_only'. Omit to use the kind default (humans
 // guaranteed+burst, agents burst-only). Lets one experiment mix tiers across participants.
