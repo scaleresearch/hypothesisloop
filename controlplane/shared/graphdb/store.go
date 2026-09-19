@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	// Memgraph returns stored timestamps with their zone name (Etc/UTC) and the driver resolves it
+	// with time.LoadLocation, which fails in an image without a zone database.
+	_ "time/tzdata"
+
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
