@@ -41,15 +41,15 @@ func (e *Refused) Error() string { return e.msg }
 
 // Options mirrors hl-watch's flags.
 type Options struct {
-	URL                 string
-	Experiment          string
-	PlatformExperiment  string
-	Agent               string
-	Kinds               string
-	ShowSubscription    bool
-	Until               string
-	Timeout             time.Duration
-	Since               int64
+	URL                string
+	Experiment         string
+	PlatformExperiment string
+	Agent              string
+	Kinds              string
+	ShowSubscription   bool
+	Until              string
+	Timeout            time.Duration
+	Since              int64
 
 	// Stdout/Stderr let callers (and tests) capture output instead of the process streams.
 	Stdout io.Writer

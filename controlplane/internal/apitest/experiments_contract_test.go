@@ -150,8 +150,8 @@ func TestListExperimentsClampsOversizedLimit(t *testing.T) {
 	if code, _ := get(t, r, "/experiments?limit=100000"); code != 200 {
 		t.Fatalf("status = %d, want 200", code)
 	}
-	if spy.gotList.Limit != 200 {
-		t.Errorf("limit = %d, want it clamped to 200", spy.gotList.Limit)
+	if spy.gotList.Limit != 50 {
+		t.Errorf("limit = %d, want it clamped to 50", spy.gotList.Limit)
 	}
 }
 
