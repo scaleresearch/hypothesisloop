@@ -1,7 +1,7 @@
 import { ExperimentStatus } from '@/types'
 import type { ExperimentStats } from '@/lib/api'
 
-const TERMINAL: string[] = [
+export const TERMINAL: string[] = [
   ExperimentStatus.COMPLETED,
   ExperimentStatus.FAILED,
   ExperimentStatus.EVICTED,

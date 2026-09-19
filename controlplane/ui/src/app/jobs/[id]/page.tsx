@@ -5,16 +5,17 @@ import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
+import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs, fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
-import { formatAccH } from '@/lib/format'
+import { formatAccH, formatDuration } from '@/lib/format'
 import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
 import { graphHref } from '@/lib/hypothesis-graph'
+import { TERMINAL } from '@/lib/hypothesis-progress'
 
 function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
   return (
@@ -39,6 +40,16 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     () => fetchExperimentMetrics(id),
     { refreshInterval: 10_000 },
   )
+  const { data: pe } = useSWR(
+    job ? ['pe', job.platform_experiment_id] : null,
+    () => fetchPlatformExperiment(job!.platform_experiment_id),
+  )
+  // A job's summary is filed as a finding on its hypothesis; there is no read of it by job.
+  const { data: hypothesis } = useSWR(
+    job?.hypothesis_id ? job.hypothesis_id : null,
+    fetchHypothesis,
+    { refreshInterval: 10_000 },
+  )
 
   if (error) return (
     <div>
@@ -55,10 +66,11 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   // attached — see lib/eviction.
   const evictionText = j.eviction_reason ? evictionLabel(j.eviction_reason) : null
 
-  // Jobs report one or more metrics (the objective plus any secondary ones the workload
+  // Jobs report one or more metrics (the ranking metric plus any secondary ones the workload
   // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
   // own chart instead of interleaving unrelated scales on a single line.
-  const primaryMetricName = j.objective ? String(j.objective).split(/\s+/).pop() : undefined
+  const rankingMetric = pe?.metrics?.find(m => m.role === 'ranking') ?? pe?.metrics?.[0]
+  const primaryMetricName = rankingMetric?.key
   // The API appends one contiguous block per underlying series (metric_name, or per retry
   // attempt if a retry changed agent_id) rather than a single time-ordered stream, so a job
   // with a retry has two blocks for the same metric_name back to back. Sort each metric's
@@ -89,12 +101,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   })
 
   const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
-  // The job's final metric comes from the metrics store, never from the job record — the record
+  // The job's metric comes from the metrics store, never from the job record — the record
   // has no such field, and metric values live in one place (important.md #3). The series is
-  // already sorted by recorded_at above, so the last point of the primary metric is the answer.
-  const primarySeries = primaryMetricName ? seriesByMetric.get(primaryMetricName) : undefined
-  const finalPrimaryMetric = primarySeries?.length ? primarySeries[primarySeries.length - 1].value : null
-
+  // already sorted by recorded_at above.
+  const primaryValues = (primaryMetricName ? seriesByMetric.get(primaryMetricName) ?? [] : []).map(p => p.value)
+  const bestPrimaryMetric = primaryValues.length === 0 ? null
+    : rankingMetric!.direction === 'maximize' ? Math.max(...primaryValues) : Math.min(...primaryValues)
+  const findings = (hypothesis?.findings ?? []).filter(f => f.experiment_id === j.id)
+  const finished = TERMINAL.includes(j.status)
 
   const axisColor = 'rgba(255,255,255,.45)'
   const gridColor = 'rgba(255,255,255,.08)'
@@ -192,6 +206,25 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
+      {(bestPrimaryMetric != null || findings.length > 0) && (
+        <Pod style={{ marginBottom: 12 }}>
+          <PodHeader>Result</PodHeader>
+          <PodContent>
+            {bestPrimaryMetric != null && (
+              <div className="mono" style={{ marginBottom: findings.length > 0 ? 10 : 0 }}>
+                <span style={{ fontSize: 22, fontWeight: 700, color: semantic.success }}>{bestPrimaryMetric.toFixed(4)}</span>
+                <span className="text-muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                  best {primaryMetricName} · final {primaryValues[primaryValues.length - 1].toFixed(4)}
+                </span>
+              </div>
+            )}
+            {findings.map(f => (
+              <p key={f.id} style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxWidth: 900 }}>{f.summary}</p>
+            ))}
+          </PodContent>
+        </Pod>
+      )}
+
       {/* Job metadata */}
       <Pod style={{ marginBottom: 12 }}>
         <PodHeader>Job Details</PodHeader>
@@ -206,8 +239,16 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
               <Row label="Est. duration" value={j.estimated_duration_hours != null ? `${j.estimated_duration_hours.toFixed(2)} h` : '—'} />
               <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} AccH` : '—'} />
-              <Row label="Submitted" value={j.created_at ? new Date(j.created_at).toLocaleString() : '—'} />
-              {finalPrimaryMetric != null && <Row label="Final metric" value={finalPrimaryMetric.toFixed(4)} highlight={semantic.success} />}
+              <Row label="Submitted" value={new Date(j.created_at).toLocaleString()} />
+              {j.submitted_at && <Row label="Sent to cluster" value={new Date(j.submitted_at).toLocaleString()} />}
+              {finished && (
+                <Row label="Finished" value={
+                  <>
+                    {new Date(j.updated_at).toLocaleString()}
+                    {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.updated_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
+                  </>
+                } />
+              )}
               {j.objective && <Row label="Objective" value={j.objective} />}
               {j.theory && <Row label="Rationale" value={j.theory} />}
               {j.job?.env && Object.keys(j.job.env).length > 0 && (
@@ -222,9 +263,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         </PodContent>
       </Pod>
 
-      {/* Metric trajectories — one chart per reported metric, primary (the objective) first */}
+      {/* Metric trajectories — one chart per reported metric, the ranking metric first */}
       <Pod style={{ marginBottom: 12 }}>
-        <PodHeader>Metric Trajectories{j.objective ? ` — ${j.objective}` : ''}</PodHeader>
+        <PodHeader>Metric Trajectories</PodHeader>
         <PodContent>
           {metricsError ? (
             <ErrorMessage>Could not read this job&apos;s metrics.</ErrorMessage>
@@ -242,7 +283,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 return (
                 <div key={name}>
                   <div className="mono text-muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                    {name}{name === primaryMetricName ? ' (objective)' : ''}
+                    {name}{name === primaryMetricName ? ' (ranking metric)' : ''}
                     {nonRaw.length > 0 && (
                       <span
                         className="mono"
