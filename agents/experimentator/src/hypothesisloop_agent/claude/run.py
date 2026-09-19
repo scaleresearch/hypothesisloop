@@ -156,8 +156,8 @@ _IDLE_NUDGE_BACKOFF_MAX_S = 240
 # not fire reliably for this SDK's long-lived sequence of query()/receive_response() calls (the
 # production transcript reached 650K cache-read tokens with zero compact boundaries). The SDK has
 # no public compact method or context-limit option, so checkpoint into a fresh, non-resumed
-# session at a fixed ceiling. ResultMessage usage is the only free per-turn measurement available;
-# summing input/cache/output fields approximates the context carried into the next query.
+# session at a fixed ceiling. The last assistant message's usage measures the context of the latest
+# model call; ResultMessage usage sums every call in the turn and overstates it many times over.
 _CONTEXT_COMPACTION_THRESHOLD_TOKENS = 400_000
 _COMPACTION_PROMPT = (
     "We must rotate to a fresh session because this session has reached its context budget. "
@@ -169,7 +169,7 @@ _COMPACTION_PROMPT = (
 
 
 def _context_tokens(usage: dict | None) -> int:
-    """Best available approximation of context represented by one ResultMessage usage block."""
+    """Context carried by one model call, from its usage block."""
     if not usage:
         return 0
     return sum(int(usage.get(key, 0) or 0) for key in (
@@ -222,6 +222,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             async for message in client.receive_response():
                 if _log_message(message):
                     turn_used_tool = True
+                if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
+                    context_tokens = _context_tokens(message.usage)
                 if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
                     rate_limited_resets_at = message.rate_limit_info.resets_at
                 if isinstance(message, ResultMessage):
@@ -230,7 +232,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     session_id = getattr(message, "session_id", None) or resume_id
                     _save_resume_id(setup, session_id)
                     resume_id = session_id or resume_id
-                    context_tokens = _context_tokens(message.usage)
                     if initial_prompt and not message.is_error:
                         _remove_file(_handoff_file(setup))
 
