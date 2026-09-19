@@ -2,9 +2,10 @@
 
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
-import { fetchExperiments, fetchExperimentStats, fetchPlatformExperiments, fetchClusters } from '@/lib/api'
-import type { Experiment, PlatformExperiment, ClustersResponse } from '@/types'
+import { fetchExperiments, fetchExperimentStats, fetchClusters } from '@/lib/api'
+import type { Experiment, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
+import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +14,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 import { statusColor, semantic } from '@/lib/colors'
-import { evictionCodeLabel, evictionLabel, faultBreakdown } from '@/lib/eviction'
+import { evictionCode, evictionCodeLabel, evictionDetail, faultBreakdown } from '@/lib/eviction'
 
 type Job = Record<string, any>
 
@@ -54,11 +55,6 @@ export default function DashboardPage() {
     { refreshInterval: 15_000 },
   )
 
-  const { data: platformExps } = useSWR<PlatformExperiment[]>(
-    'pe-all',
-    () => fetchPlatformExperiments(),
-    { refreshInterval: 30_000 },
-  )
 
   const { data: clusters } = useSWR<ClustersResponse>(
     'clusters',
@@ -107,9 +103,6 @@ export default function DashboardPage() {
 
   const recentEvictions: Job[] = (evictedJobs ?? []) as Job[]
 
-  // Per-platform-experiment summary
-  const peMap = Object.fromEntries((platformExps ?? []).map(pe => [pe.id, pe.name]))
-
   const statusBreakdown = Object.entries(byStatus).sort((a, b) => b[1] - a[1])
 
   const evictionChartData = Object.entries(evictionByReason)
@@ -124,15 +117,13 @@ export default function DashboardPage() {
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
 
       {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
         <StatTile label="Total Jobs" value={total} />
         <StatTile label="Running" value={running} color={semantic.success} />
         <StatTile label="Pending" value={pending} color={semantic.warning} sub="submitted + queued + admitted" />
         <StatTile label="Completion Rate" value={completionRate != null ? `${completionRate}%` : '—'} sub="completed of all terminal jobs" />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
         <StatTile label="Completed" value={completed} color={semantic.accent} />
-        <StatTile label="Evicted" value={evicted} color={semantic.pink} sub="contract / plateau / guard" />
+        <StatTile label="Evicted" value={evicted} color={semantic.pink} />
         <StatTile label="Failed" value={failed} color={semantic.danger} />
         <StatTile
           label="Clusters"
@@ -140,8 +131,6 @@ export default function DashboardPage() {
           color={connectedCount === clusterList.length && clusterList.length > 0 ? semantic.success : semantic.danger}
           sub="connected / registered"
         />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
         <StatTile
           label="Accelerator Occupancy"
           value={occupancyPct != null ? `${occupancyPct}%` : '—'}
@@ -238,7 +227,7 @@ export default function DashboardPage() {
             {evictionChartData.length === 0 ? (
               <EmptyState>No evictions recorded.</EmptyState>
             ) : (
-              <div style={{ width: '100%', height: 150 }}>
+              <div style={{ width: '100%', height: evictionChartData.length * 30 + 30 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={evictionChartData} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 4 }}>
                     <CartesianGrid stroke="var(--border)" horizontal={false} />
@@ -246,7 +235,8 @@ export default function DashboardPage() {
                     <YAxis
                       type="category"
                       dataKey="reason"
-                      width={110}
+                      width={170}
+                      interval={0}
                       tick={{ fill: 'var(--muted-fg)', fontSize: 10 }}
                       axisLine={false}
                       tickLine={false}
@@ -287,13 +277,14 @@ export default function DashboardPage() {
                     onClick={() => router.push(`/jobs/${e.id}`)}
                     onKeyDown={ev => { if (ev.key === 'Enter') router.push(`/jobs/${e.id}`) }}
                   >
-                    <td className="mono text-dim" style={{ fontSize: 11 }}>{e.id.slice(0, 8)}…</td>
-                    <td className="mono">{e.agent_id}</td>
+                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.id.slice(0, 8)}…</td>
+                    <td className="mono" style={{ whiteSpace: 'nowrap' }}>{e.agent_id}</td>
                     <td className="text-link" style={{ fontSize: 12 }}>
-                      {e.platform_experiment_id ? (peMap[e.platform_experiment_id] ?? e.platform_experiment_id.slice(0, 8) + '…') : '—'}
+                      <PlatformExperimentName id={e.platform_experiment_id} />
                     </td>
                     <td style={{ fontSize: 12 }}>
-                      <Badge status="evicted">{e.eviction_reason ? evictionLabel(e.eviction_reason) : '—'}</Badge>
+                      <Badge status="evicted">{evictionCodeLabel(evictionCode(e.eviction_reason))}</Badge>
+                      <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>{evictionDetail(e.eviction_reason)}</div>
                     </td>
                     <td className="mono" style={{ fontSize: 11 }}>{e.accelerator_count}× {e.accelerator_type}</td>
                     <td><Badge status={e.capacity_tier ?? 'unknown'}>{e.capacity_tier ?? '—'}</Badge></td>
