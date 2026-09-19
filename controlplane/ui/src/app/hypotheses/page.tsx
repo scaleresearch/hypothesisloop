@@ -12,6 +12,7 @@ import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { AddIdeaForm } from '@/components/human-idea'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
@@ -46,7 +47,6 @@ function HypothesesPageContent() {
     () => fetchPlatformExperiments(),
     { refreshInterval: 30_000 },
   )
-  // The selector lists one page of experiments; the selected one may lie beyond it.
   const { data: pe, error: selectedError } = useSWR(
     peID ? ['pe', peID] : null,
     () => fetchPlatformExperiment(peID),
@@ -76,11 +76,6 @@ function HypothesesPageContent() {
     return options
   }, [graph])
 
-  const peOptions = useMemo(() => {
-    const listed = platformExperiments ?? []
-    return (pe && !listed.some(p => p.id === pe.id) ? [pe, ...listed] : listed).map(p => ({ value: p.id, label: p.name }))
-  }, [platformExperiments, pe])
-
   const selected = focus || graph?.root || ''
   const filtering = statusFilter !== '' || ownerFilter !== ''
   const showSide = graph !== undefined && (q !== '' || selected !== graph.root)
@@ -106,13 +101,12 @@ function HypothesesPageContent() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="uppercase-label">Platform Experiment</span>
-        <SearchableSelect
+        <PlatformExperimentSelect
           value={peID}
           onChange={selectExperiment}
           hideAllOption
           placeholder="Select an experiment"
           style={{ minWidth: 260 }}
-          options={peOptions}
         />
         <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }} role="group" aria-label="View">
           <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>

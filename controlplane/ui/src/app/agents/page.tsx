@@ -12,7 +12,7 @@ import { Badge, AgentKindBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
-import { SearchableSelect } from '@/components/ui/searchable-select'
+import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pagination } from '@/components/ui/pagination'
 import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
@@ -165,11 +165,10 @@ export default function AgentsPage() {
           <PodHeader>Filter</PodHeader>
           <PodContent style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span className="text-muted">By experiment:</span>
-            <SearchableSelect
+            <PlatformExperimentSelect
               value={experimentFilter}
               onChange={v => { setExperimentFilter(v); setPage(0) }}
               allLabel="All experiments"
-              options={(experiments ?? []).map(pe => ({ value: pe.id, label: `${pe.name} (${pe.status})` }))}
             />
             {experimentFilter && (
               <Button size="sm" onClick={() => { setExperimentFilter(''); setPage(0) }}>Clear</Button>

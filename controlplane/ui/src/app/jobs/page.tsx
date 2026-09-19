@@ -4,10 +4,11 @@ import { Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchExperimentsPage, fetchExperimentStats, fetchAgents, cancelExperiment, fetchClusters, fetchPlatformExperiments } from '@/lib/api'
-import type { Experiment, Agent, ClustersResponse, PlatformExperiment } from '@/types'
+import { fetchExperimentsPage, fetchExperimentStats, fetchAgents, cancelExperiment, fetchClusters } from '@/lib/api'
+import type { Experiment, Agent, ClustersResponse } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
+import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge } from '@/components/ui/badge'
@@ -64,7 +65,6 @@ function JobsPageContent() {
     () => [...(agents ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [agents],
   )
-  const { data: platformExperiments } = useSWR<PlatformExperiment[]>('platform-experiments-all', () => fetchPlatformExperiments())
   const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
 
@@ -169,11 +169,10 @@ function JobsPageContent() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="uppercase-label">Platform Experiment</span>
-          <SearchableSelect
+          <PlatformExperimentSelect
             value={peFilter}
             onChange={v => { setPEFilter(v); setPage(0) }}
             allLabel="All experiments"
-            options={(platformExperiments ?? []).map(pe => ({ value: pe.id, label: pe.name }))}
           />
         </div>
       </div>

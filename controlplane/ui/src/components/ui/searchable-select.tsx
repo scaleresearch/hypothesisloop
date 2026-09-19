@@ -18,6 +18,10 @@ interface SearchableSelectProps {
   style?: React.CSSProperties
   /** Omit the leading "All" row — for pickers where one option must always be selected. */
   hideAllOption?: boolean
+  /** Told every query, for a caller that loads its options from a server-side search. */
+  onSearch?: (query: string) => void
+  /** A dim last row, e.g. how many options the list leaves out. */
+  hint?: string
 }
 
 const FIELD_STYLE: React.CSSProperties = {
@@ -44,8 +48,9 @@ function optionRowStyle(focus: boolean, selected: boolean): React.CSSProperties 
  * raw <select> when the option list can grow long enough that scanning it beats scrolling it.
  * Options are shown in the order passed in, so callers control sort (e.g. newest first).
  */
-export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, style, hideAllOption }: SearchableSelectProps) {
+export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, style, hideAllOption, onSearch, hint }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
+  const search = (q: string) => { setQuery(q); onSearch?.(q) }
 
   // A value outside the options (a filter set from a link) shows as itself, never as "All".
   const selected = options.find(o => o.value === value)
@@ -57,7 +62,8 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
     <Combobox
       immediate
       value={value}
-      onChange={(v: string | null) => { onChange(v ?? ''); setQuery('') }}
+      onChange={(v: string | null) => onChange(v ?? '')}
+      onClose={() => search('')}
       as="div"
       className={className}
       style={{ position: 'relative', minWidth: 180, ...style }}
@@ -67,7 +73,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
         style={FIELD_STYLE}
         placeholder={placeholder ?? allLabel}
         displayValue={() => selected?.label ?? value}
-        onChange={e => setQuery(e.target.value)}
+        onChange={e => search(e.target.value)}
       />
       <ComboboxOptions
         style={{
@@ -88,6 +94,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
             {({ focus }: { focus: boolean }) => <div style={optionRowStyle(focus, o.value === value)}>{o.label}</div>}
           </ComboboxOption>
         ))}
+        {hint && <div className="text-dim" style={{ fontSize: 11, padding: '6px 8px' }}>{hint}</div>}
       </ComboboxOptions>
     </Combobox>
   )
