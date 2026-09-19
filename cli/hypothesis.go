@@ -536,20 +536,26 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 }
 
 func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID
+	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID [--limit N]
 
-One hypothesis with its links (in and out), findings, comments and jobs. A job is as brief as in
-hl job list; hl job status ID prints its whole record.`, stderr)
+One hypothesis with its links (in and out), findings, comments and jobs, oldest first. A job is
+as brief as in hl job list, metric included; hl job status ID prints its whole record.`, stderr)
+	limit := fs.Int("limit", 0, "how many of its jobs, findings and comments each (server default 20, max 200)")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
 		return parseExit(err)
 	}
+	path := "/hypotheses/" + url.PathEscape(id)
+	if *limit != 0 {
+		path += "?limit=" + strconv.Itoa(*limit)
+	}
 	var out json.RawMessage
-	if err := c.Do("GET", "/hypotheses/"+url.PathEscape(id), nil, &out); err != nil {
+	if err := c.Do("GET", path, nil, &out); err != nil {
 		return fail(stderr, err)
 	}
 	var h struct {
-		Jobs []json.RawMessage `json:"jobs"`
+		Jobs     []json.RawMessage `json:"jobs"`
+		JobCount int               `json:"job_count"`
 	}
 	if err := json.Unmarshal(out, &h); err != nil {
 		return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
@@ -563,6 +569,9 @@ hl job list; hl job status ID prints its whole record.`, stderr)
 		return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 	}
 	fmt.Fprintf(stdout, "%s,\"jobs\":[%s]}\n", line[:len(line)-1], bytes.Join(jobs, []byte(",")))
+	if h.JobCount > len(jobs) {
+		fmt.Fprintf(stderr, "hl: hypothesis get: %d more jobs; --limit N (max 200) shows them\n", h.JobCount-len(jobs))
+	}
 	return 0
 }
 

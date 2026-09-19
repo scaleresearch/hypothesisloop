@@ -110,8 +110,8 @@ it outranks this briefing. Roughly, not a rigid script:
   6. Updates about your own jobs and hypotheses arrive as messages on their own: a job ending or
      still queued and why, your quota, a stage advance or your cut, the run closing or its brief
      changing, and others' comments, findings and links on your hypotheses. Each is a pointer:
-     follow it with `hl job status`, `hl job metrics` or `hl hypothesis get` for the detail. Never
-     poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A changed
+     `hl job list` has every job's status and best ranking metric, `hl hypothesis get` the rest.
+     Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A changed
      brief outranks anything you inferred earlier, so re-read it before your next trial. If you are
      cut, wind up and stop.
      While a job is QUEUED, cancel and resubmit it smaller if its `not_admitted_reason` stays

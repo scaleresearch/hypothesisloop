@@ -42,38 +42,44 @@ func (e *HTTPError) Error() string {
 // Do issues one request. body, when non-nil, is marshaled as the JSON request body. The response
 // body is decoded into out (which may be nil to discard it).
 func (c *Client) Do(method, path string, body any, out any) error {
+	_, err := c.DoHeader(method, path, body, out)
+	return err
+}
+
+// DoHeader is Do, also returning the response headers: a list's X-Total-Count.
+func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, error) {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encoding request body: %w", err)
+			return nil, fmt.Errorf("encoding request body: %w", err)
 		}
 		reader = bytes.NewReader(data)
 	}
 	req, err := http.NewRequest(method, strings.TrimRight(c.BaseURL, "/")+path, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if reader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("%s %s: reading response: %w", method, path, err)
+		return nil, fmt.Errorf("%s %s: reading response: %w", method, path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
 	if out == nil || len(data) == 0 {
-		return nil
+		return resp.Header, nil
 	}
 	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("%s %s: decoding response: %w", method, path, err)
+		return nil, fmt.Errorf("%s %s: decoding response: %w", method, path, err)
 	}
-	return nil
+	return resp.Header, nil
 }

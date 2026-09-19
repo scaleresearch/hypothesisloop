@@ -19,7 +19,7 @@ import (
 const jobUsage = `usage: hl job <command> ...
 
   submit   [FILE|-]            submit a job spec, prints its id; --hypothesis and --env override it
-  list                         jobs of your platform experiment, one brief line each
+  list                         jobs of your platform experiment, one brief line each with its metric
   status   ID [ID ...]         a job's whole record: status, queue or eviction reason, spec
   metrics  ID [--points]       per metric: last value, min, max and points reported
   summary  ID --text T         file the write-up of a finished job
@@ -231,16 +231,17 @@ type jobBrief struct {
 	AgentID           string          `json:"agent_id"`
 	HypothesisID      string          `json:"hypothesis_id"`
 	Status            string          `json:"status"`
+	Metric            json.RawMessage `json:"metric"`
 	NotAdmittedReason string          `json:"not_admitted_reason"`
 	EvictionReason    string          `json:"eviction_reason"`
 	PhaseDetail       json.RawMessage `json:"phase_detail"`
 	Theory            string          `json:"theory"`
-	Env               map[string]any  `json:"env"`
 	EstimatedCost     float64         `json:"estimated_cost_acch"`
 	CreatedAt         string          `json:"created_at"`
 }
 
-// briefJobs is one compact line per job, with the env settings that differ between these jobs.
+// briefJobs is one compact line per job, ending in env: the settings that differ between these
+// jobs, always present so that a reader can index it.
 func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 	briefs := make([]jobBrief, len(jobs))
 	envs := make([]map[string]any, len(jobs))
@@ -258,34 +259,38 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 	}
 	lines := make([][]byte, len(jobs))
 	for i := range briefs {
+		varied := map[string]any{}
 		for key, value := range envs[i] {
 			if slices.ContainsFunc(envs, func(other map[string]any) bool { return other[key] != value }) {
-				if briefs[i].Env == nil {
-					briefs[i].Env = map[string]any{}
-				}
-				briefs[i].Env[key] = value
+				varied[key] = value
 			}
 		}
 		line, _ := json.Marshal(briefs[i])
-		var err error
-		if lines[i], err = compactJSON(line); err != nil {
+		line, err := compactJSON(line)
+		if err != nil {
 			return nil, err
 		}
+		env, _ := json.Marshal(varied)
+		if env, err = compactJSON(env); err != nil {
+			return nil, err
+		}
+		lines[i] = slices.Concat(line[:len(line)-1], []byte(`,"env":`), env, []byte("}"))
 	}
 	return lines, nil
 }
 
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job list", `usage: hl job list [--platform-experiment PE] [--agent A] [--status S] [--needs-summary] [--limit N]
+	fs := newFlags("job list", `usage: hl job list [--platform-experiment PE] [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
-One job per line, in the scheduler's order: ids, status, reasons, theory, cost and the env
-settings that differ between the listed jobs. hl job status ID prints a job's whole record.
-Without --agent, every agent's jobs.`, stderr)
+One job per line, newest first: ids, status, metric (its best value on the ranking metric),
+reasons, theory, cost and env, the settings that differ between the listed jobs. hl job status ID
+prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, ADMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED")
 	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds your queued jobs back")
-	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
+	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
+	offset := fs.Int("offset", 0, "jobs to skip")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -308,8 +313,12 @@ Without --agent, every agent's jobs.`, stderr)
 	if *limit != 0 {
 		q.Set("limit", strconv.Itoa(*limit))
 	}
+	if *offset != 0 {
+		q.Set("offset", strconv.Itoa(*offset))
+	}
 	var jobs []json.RawMessage
-	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &jobs); err != nil {
+	header, err := c.DoHeader("GET", "/experiments?"+q.Encode(), nil, &jobs)
+	if err != nil {
 		return fail(stderr, err)
 	}
 	lines, err := briefJobs(jobs)
@@ -322,6 +331,9 @@ Without --agent, every agent's jobs.`, stderr)
 	if len(lines) == 0 {
 		fmt.Fprintln(stderr, "hl: job list: no job matches")
 	}
+	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > *offset+len(lines) {
+		fmt.Fprintf(stderr, "hl: job list: %d more; --limit N (max 50) and --offset N show them\n", total-*offset-len(lines))
+	}
 	return 0
 }
 
@@ -329,7 +341,7 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
 One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED or
-REJECTED), eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
+REJECTED), metric, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
 what the job waits for: awaiting_admission for the scheduler's first look at it, summary_gate
 for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")

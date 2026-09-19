@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -144,31 +145,50 @@ func TestHypothesisQueryTakesCypherFlag(t *testing.T) {
 	}
 }
 
-func TestJobListAndHypothesisGetPrintBriefJobsWithTheEnvTheyVaried(t *testing.T) {
-	job := func(id, lr string) map[string]any {
-		return map[string]any{"id": id, "agent_id": "a", "hypothesis_id": "hyp-1", "status": "QUEUED", "hypothesis": "long text",
-			"not_admitted_reason": "awaiting_admission", "phase_detail": map[string]any{}, "theory": "why", "estimated_cost_acch": 0.5,
-			"created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"image": "i"},
-			"job": map[string]any{"image": "i", "env": map[string]any{"LR": lr, "GIT_TOKEN": "secret"}}}
+func TestJobListAndHypothesisGetPrintBriefJobsWithMetricAndTheEnvTheyVaried(t *testing.T) {
+	job := func(id string, env map[string]any) map[string]any {
+		return map[string]any{"id": id, "agent_id": "a", "hypothesis_id": "hyp-1", "status": "COMPLETED", "hypothesis": "long text",
+			"metric": map[string]any{"name": "acc", "best": 0.9, "basis": "raw"}, "phase_detail": map[string]any{}, "theory": "a > b",
+			"estimated_cost_acch": 0.5, "created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"image": "i"},
+			"job": map[string]any{"image": "i", "env": env}}
 	}
-	jobs := []any{job("job-1", "0.1"), job("job-2", "0.3")}
+	jobs := []any{job("job-1", map[string]any{"GIT_TOKEN": "secret"}), job("job-2", map[string]any{"LR": "0.3", "GIT_TOKEN": "secret"})}
 	recordingServer(t, func(_ int, r recorded) any {
 		if r.Path == "/experiments" {
 			return jobs
 		}
-		return map[string]any{"id": "hyp-1", "jobs": jobs, "job_count": 2}
+		return map[string]any{"id": "hyp-1", "jobs": jobs, "job_count": 5}
 	})
-	brief := func(id, lr string) string {
-		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"QUEUED","not_admitted_reason":"awaiting_admission",` +
-			`"theory":"why","env":{"LR":"` + lr + `"},"estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z"}`
+	brief := func(id, env string) string {
+		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"COMPLETED","metric":{"basis":"raw","best":0.9,"name":"acc"},` +
+			`"theory":"a > b","estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z","env":` + env + `}`
 	}
+	both := []string{brief("job-1", `{}`), brief("job-2", `{"LR":"0.3"}`)}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "list"}, &stdout, &stderr); code != 0 || stdout.String() != brief("job-1", "0.1")+"\n"+brief("job-2", "0.3")+"\n" {
+	if code := run([]string{"job", "list"}, &stdout, &stderr); code != 0 || !reflect.DeepEqual(lines(stdout.String()), both) || stderr.Len() != 0 {
 		t.Fatalf("job list: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
-	want := `{"id":"hyp-1","job_count":2,"jobs":[` + brief("job-1", "0.1") + "," + brief("job-2", "0.3") + "]}\n"
+	want := `{"id":"hyp-1","job_count":5,"jobs":[` + strings.Join(both, ",") + "]}\n"
 	if code := run([]string{"hypothesis", "get", "hyp-1"}, &stdout, &stderr); code != 0 || stdout.String() != want {
 		t.Fatalf("hypothesis get: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "hl: hypothesis get: 3 more jobs; --limit N (max 200) shows them\n" {
+		t.Fatalf("hypothesis get stderr = %q", got)
+	}
+}
+
+func TestJobListSaysHowManyJobsThePageLeftOut(t *testing.T) {
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "39")
+		_, _ = w.Write([]byte(`[{"id":"job-1"},{"id":"job-2"}]`))
+	})
+	setAPIURL(t, url)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "list", "--offset", "30"}, &stdout, &stderr); code != 0 || len(lines(stdout.String())) != 2 {
+		t.Fatalf("exit %d, stdout %q", code, stdout.String())
+	}
+	if got := stderr.String(); got != "hl: job list: 7 more; --limit N (max 50) and --offset N show them\n" {
+		t.Fatalf("stderr = %q", got)
 	}
 }
