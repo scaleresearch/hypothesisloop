@@ -66,6 +66,11 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(updates.message(events, "agent-a"),
                          "Platform updates:\nexperiment.status exp-1 COMPLETED\nhypothesis.link hyp-2 builds_on hyp-1 by agent-b")
 
+    def test_a_repeated_event_is_delivered_once(self):
+        event = {"kind": "job.underperforming", "subject": "job-1", "value": "val_accuracy", "agent_id": "agent-a"}
+        self.assertEqual(updates.message([event, dict(event, position=2), dict(event, position=3)], "agent-a"),
+                         "Platform updates:\njob.underperforming job-1 val_accuracy")
+
     def test_activity_logs_each_delivered_event(self):
         now = datetime(2026, 10, 2, 6, 21, 30, tzinfo=timezone.utc)
         events = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]

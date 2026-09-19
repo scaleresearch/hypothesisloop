@@ -82,4 +82,4 @@ def event_line(event: dict, agent_id: str) -> str:
 
 
 def message(events: list[dict], agent_id: str) -> str:
-    return "Platform updates:\n" + "\n".join(event_line(e, agent_id) for e in events)
+    return "Platform updates:\n" + "\n".join(dict.fromkeys(event_line(e, agent_id) for e in events))
