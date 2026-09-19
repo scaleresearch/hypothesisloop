@@ -73,7 +73,7 @@ silently improvise.
    is not in the data path), so it must be the host LAN address too — the shipped value is the
    placeholder `http://REPLACE-WITH-HOST-LAN-IP:9000`, and loading a config whose endpoint is
    loopback is refused outright rather than failing later inside a job. `make controlplane-up`
-   publishes MinIO on `:9000` and creates the bucket; the LAN address is reachable from the
+   publishes the S3 store (Silo) on `:9000` and creates the bucket; the LAN address is reachable from the
    control-plane containers as well, so one value serves both.
 4. **Job image** built before agents start (e.g. `make sparse-sdpa-workload-image`), smoke-tested
    on real hardware (`podman run --device /dev/tenstorrent/0 -v

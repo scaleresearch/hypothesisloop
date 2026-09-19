@@ -1,4 +1,4 @@
-# Local control-plane stack: Postgres, GreptimeDB, Memgraph, MinIO, control-service, metrics-service.
+# Local control-plane stack: Postgres, GreptimeDB, Memgraph, an S3 store (Silo), control-service, metrics-service.
 # Brought up via `make controlplane-up` (podman compose) — nothing here is
 # podman-specific; `docker compose -f this-file up` works identically).
 #
@@ -85,8 +85,10 @@ services:
       timeout: 3s
       retries: 30
 
+  # Silo, the maintained MinIO fork: the S3 server plus the MinIO-style STS AssumeRole with an inline
+  # session policy that shared/objectstore mints per-job credentials with. MinIO's own images are gone.
   minio:
-    image: docker.io/minio/minio:latest
+    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     restart: unless-stopped
     command: ["server", "/data", "--address", "0.0.0.0:9000"]
     environment:
@@ -103,10 +105,10 @@ services:
       retries: 30
 
   minio-init:
-    image: docker.io/minio/minio:latest
+    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     entrypoint: ["sh", "-c"]
     command:
-      - "mc alias set hl http://minio:9000 hypothesisloop hypothesisloop && mc mb --ignore-existing hl/hypothesisloop-data"
+      - "mcli alias set hl http://minio:9000 hypothesisloop hypothesisloop && mcli mb --ignore-existing hl/hypothesisloop-data"
     depends_on:
       minio:
         condition: service_healthy
