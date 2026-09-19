@@ -242,7 +242,8 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- list itself is the cap on attempts, one entry per cluster per TTL window.
     tried_clusters           JSONB             NOT NULL DEFAULT '[]'::jsonb,
     -- The job's permanent object-store key, created in the store in the same transaction that
-    -- inserts the row and never rotated or deleted. '' only on rows that predate per-job keys.
+    -- inserts the row and never rotated or deleted. '' only on terminal rows that predate
+    -- per-job keys (experiments_active_has_data_key).
     data_access_key_id       TEXT              NOT NULL DEFAULT '',
     data_secret_access_key   TEXT              NOT NULL DEFAULT '',
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
@@ -278,6 +279,20 @@ END;
 DO $$ BEGIN
     ALTER TABLE experiments ADD CONSTRAINT experiments_queue_reason_consistent
         CHECK ((status = 'QUEUED') = (not_admitted_reason IS NOT NULL));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+-- A row from before per-job keys has no store key and would run with empty AWS_* credentials, so
+-- an active one is cancelled the way CancelExperiment would, and no active row may lack a key.
+UPDATE experiments
+SET status = CASE WHEN status IN ('QUEUED', 'SUBMITTED') THEN 'REJECTED' ELSE 'EVICTED' END::experiment_status,
+    eviction_reason = 'cancelled: submitted before per-job storage keys, resubmit it',
+    not_admitted_reason = NULL
+WHERE data_access_key_id = '' AND status IN ('QUEUED', 'SUBMITTED', 'ADMITTED', 'RUNNING');
+DO $$ BEGIN
+    ALTER TABLE experiments ADD CONSTRAINT experiments_active_has_data_key
+        CHECK (data_access_key_id <> '' OR status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED'));
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;

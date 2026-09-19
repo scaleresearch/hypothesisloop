@@ -260,9 +260,9 @@ func insertJob(t *testing.T, pool *Pool, agentID, peID, hypothesisID, jobID stri
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO experiments
 (id, agent_id, project_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
- estimated_duration_hours, queued_at)
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
 VALUES ($1, $2, 'p', $3, 'r@0', 'h', 'd', $4, 'claim', 'objective', 'test-accelerator',
-        'QUEUED', 'capacity_unavailable', 1, now())`,
+        'QUEUED', 'capacity_unavailable', 1, now(), 'AK', 'SK')`,
 		jobID, agentID, peID, hypothesisID); err != nil {
 		t.Fatalf("insert experiment: got = %v, want = nil", err)
 	}

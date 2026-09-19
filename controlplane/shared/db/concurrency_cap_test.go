@@ -22,7 +22,8 @@ func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount,
 		EstimatedDurationHours: 1, EstimatedCostAccH: 1,
 		CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,
-		Job: domain.JobSpec{AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount},
+		Job:     domain.JobSpec{AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount},
+		DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 	}
 	if err := exps.CreateExperiment(context.Background(), exp); err != nil {
 		t.Fatalf("seed experiment %s: got = %v, want = nil", id, err)
