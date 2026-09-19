@@ -169,7 +169,8 @@ func (f *standingsStore) ListSignupsByRole(ctx context.Context, platformExpID st
 }
 
 func (f *standingsStore) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
-	return &domain.Experiment{ID: id, CodeRef: "repo@" + id}, nil
+	return &domain.Experiment{ID: id, CodeRef: "repo@" + id, HypothesisID: "hyp-" + id,
+		Job: domain.JobSpec{Env: map[string]string{"LR": "0.1"}}}, nil
 }
 
 // The metrics store answers for every agent that reported, which is the point — a baseline's
@@ -193,6 +194,9 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 	}
 	if got, want := standings[0].AgentID, "c1"; got != want {
 		t.Errorf("rank 1 = %v, want %v", got, want)
+	}
+	if st := standings[0]; st.CodeRef != "repo@job-c1" || st.HypothesisID != "hyp-job-c1" || st.Env["LR"] != "0.1" {
+		t.Errorf("rank 1 = %+v, want the code ref, hypothesis and env of job-c1", st)
 	}
 	for _, st := range standings {
 		if st.AgentID == "baseline" {

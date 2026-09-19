@@ -22,6 +22,9 @@ type AgentStanding struct {
 	Basis        string `json:"basis"`
 	ExperimentID string `json:"experiment_id,omitempty"`
 	CodeRef      string `json:"code_ref,omitempty"`
+	// HypothesisID and Env say what that experiment tested and with which settings.
+	HypothesisID string            `json:"hypothesis_id,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
 }
 
 // MetricStandings is the full ranking on a single declared metric, best-first.
@@ -146,17 +149,11 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if pe == nil {
 		return nil, nil
 	}
-	var primary *domain.MetricDefinition
-	for i := range pe.Metrics {
-		if pe.Metrics[i].EffectiveRole() == domain.MetricRoleRanking {
-			primary = &pe.Metrics[i]
-			break
-		}
-	}
-	if primary == nil {
+	primary, ok := domain.PrimaryRankingMetric(pe.Metrics)
+	if !ok {
 		return nil, nil
 	}
-	standings, _, err := s.standingsOnMetric(ctx, pe, *primary)
+	standings, _, err := s.standingsOnMetric(ctx, pe, primary)
 	if err != nil {
 		return nil, err
 	}
@@ -199,10 +196,10 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *
 		if b.ExperimentID != "" {
 			exp, err := s.store.GetExperiment(ctx, b.ExperimentID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("results: %s: code ref for %s: %w", metric.Key, b.ExperimentID, err)
+				return nil, nil, fmt.Errorf("results: %s: job %s: %w", metric.Key, b.ExperimentID, err)
 			}
 			if exp != nil {
-				st.CodeRef = exp.CodeRef
+				st.CodeRef, st.HypothesisID, st.Env = exp.CodeRef, exp.HypothesisID, exp.Job.Env
 			}
 		}
 		standings = append(standings, st)

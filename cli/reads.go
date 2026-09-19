@@ -48,8 +48,8 @@ running jobs.`, stderr)
 func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("results", `usage: hl results [PE]
 
-The standings on each declared metric, one line per agent and metric in rank order: its best
-value and the job (experiment_id, code_ref) that set it.`, stderr)
+The standings on each ranking metric, one line per agent and metric in rank order: its best
+value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, stderr)
 	pe, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id", "platform-experiment")
 	if err != nil {
 		return parseExit(err)
