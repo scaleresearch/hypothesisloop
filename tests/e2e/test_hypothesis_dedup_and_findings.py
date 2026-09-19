@@ -71,7 +71,11 @@ def test_finding_is_visible_to_a_different_agent(api, experiment, run_id, deadli
     _completed(api, job, deadline)
 
     summary_text = "Achieved 0.81 val_accuracy -- e2e cross-agent findings-visibility coverage"
-    api.file_finding(job, summary_text)
+    filed = api.hl_expect("job", "summary", job, "--text", summary_text)
+    assert filed.returncode == 0 and filed.stdout == '{"status":"ok"}\n', filed
+    assert f"hl hypothesis status {hyp['id']} confirmed|refuted|inconclusive" in filed.stderr, (
+        f"the summary of a job on the agent's own open hypothesis did not point at the verdict: {filed.stderr}"
+    )
 
     hyp_view = api.hypothesis(hyp["id"])
     findings = hyp_view.get("findings") or []
