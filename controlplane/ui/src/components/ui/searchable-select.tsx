@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Combobox, ComboboxInput, ComboboxOptions, ComboboxOption } from '@headlessui/react'
 
 export interface SearchableSelectOption {
@@ -18,7 +18,7 @@ interface SearchableSelectProps {
   style?: React.CSSProperties
   /** Omit the leading "All" row — for pickers where one option must always be selected. */
   hideAllOption?: boolean
-  /** Told every query, for a caller that loads its options from a server-side search. */
+  /** Told the query once typing pauses, for a caller that loads its options from a server-side search. Must be stable across renders. */
   onSearch?: (query: string) => void
   /** A dim last row, e.g. how many options the list leaves out. */
   hint?: string
@@ -50,11 +50,15 @@ function optionRowStyle(focus: boolean, selected: boolean): React.CSSProperties 
  */
 export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, style, hideAllOption, onSearch, hint }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
-  const search = (q: string) => { setQuery(q); onSearch?.(q) }
+  useEffect(() => {
+    if (!onSearch) return
+    const timer = setTimeout(() => onSearch(query), 200)
+    return () => clearTimeout(timer)
+  }, [query, onSearch])
 
   // A value outside the options (a filter set from a link) shows as itself, never as "All".
   const selected = options.find(o => o.value === value)
-  const filtered = query === ''
+  const filtered = query === '' || onSearch
     ? options
     : options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
 
@@ -63,7 +67,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
       immediate
       value={value}
       onChange={(v: string | null) => onChange(v ?? '')}
-      onClose={() => search('')}
+      onClose={() => setQuery('')}
       as="div"
       className={className}
       style={{ position: 'relative', minWidth: 180, ...style }}
@@ -73,7 +77,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
         style={FIELD_STYLE}
         placeholder={placeholder ?? allLabel}
         displayValue={() => selected?.label ?? value}
-        onChange={e => search(e.target.value)}
+        onChange={e => setQuery(e.target.value)}
       />
       <ComboboxOptions
         style={{
