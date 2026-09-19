@@ -39,7 +39,7 @@ running jobs.`, stderr)
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "quota: no agent signed up", out, "id", "platform_experiment_id", "created_at"); err != nil {
+	if err := printLines(stdout, stderr, "quota: none granted yet, it is granted when the platform experiment starts to the agents signed up to it", out, "id", "platform_experiment_id", "created_at"); err != nil {
 		return fail(stderr, err)
 	}
 	return 0
