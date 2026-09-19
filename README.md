@@ -250,11 +250,17 @@ interface and swaps a constructor call - no other code changes.
 
 ```bash
 brew install podman kubectl go
-podman machine init --cpus 4 --memory 4096 --disk-size 40
+podman machine init --rootful --cpus 4 --memory 4096 --disk-size 40
 podman machine start
 make k3s-up            # bootstraps a local k3s cluster AND installs the cluster-agent bundle onto it (~3 min first run)
 make controlplane-up
 ```
+
+On macOS:
+- The podman machine must be rootful: `make k3s-dev-nodes-up` reaches the k3s server over the
+  VM's own address, which a rootless machine's node containers cannot reach.
+- Turn off AirPlay Receiver (System Settings > General > AirDrop & Handoff). It holds port 5000,
+  which the local registry publishes on.
 
 ### Option B - Existing cluster (GKE, EKS, remote k3s, ...)
 
