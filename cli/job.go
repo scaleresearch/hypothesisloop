@@ -16,59 +16,25 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
 
-const jobUsage = `usage: hl job <command> ...
-
-  submit   [FILE|-]            submit a job spec, prints its id; --hypothesis and --env override it
-  list                         jobs of your platform experiment, one brief line each with its metric
-  status   ID [ID ...]         a job's whole record: status, queue or eviction reason, spec
-  metrics  ID [--points]       per metric: last value, min, max and points reported
-  summary  ID --text T         file the write-up of a finished job
-  logs     ID [--lines N]      the last log lines its cluster reported
-  data     ID                  what the job wrote to the object store
-  cost     ID                  what it cost so far, against the estimate
-  cancel   ID                  cancel a queued or running job, refunding its credits
-  stats                        job counts by status, capacity tier and eviction reason
-
-Run hl job <command> --help for its flags.`
-
-func cmdJob(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, jobUsage)
-		return 2
-	}
-	sub, rest := args[0], args[1:]
-	switch sub {
-	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, jobUsage)
-		return 0
-	case "submit":
-		return jobSubmit(c, rest, stdout, stderr)
-	case "list":
-		return jobList(c, rest, stdout, stderr)
-	case "status":
-		return jobStatus(c, rest, stdout, stderr)
-	case "metrics":
-		return jobMetrics(c, rest, stdout, stderr)
-	case "summary":
-		return jobSummary(c, rest, stdout, stderr)
-	case "logs":
-		return jobLogs(c, rest, stdout, stderr)
-	case "data":
-		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", rest, stdout, stderr)
-	case "cost":
-		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", rest, stdout, stderr)
-	case "cancel":
-		return jobCancel(c, rest, stdout, stderr)
-	case "stats":
-		return jobStats(c, rest, stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "hl: job: unknown subcommand %q\n\n%s\n", sub, jobUsage)
-		return 2
-	}
+var jobCommands = []subcommand{
+	{"submit", "submit a job spec, prints its id", jobSubmit},
+	{"list", "jobs, newest first, one brief line each with its metric", jobList},
+	{"status", "a job's whole record", jobStatus},
+	{"metrics", "per metric: last value, min, max and points reported", jobMetrics},
+	{"summary", "file the write-up of a finished job", jobSummary},
+	{"logs", "the last log lines its cluster reported", jobLogs},
+	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", args, stdout, stderr)
+	}},
+	{"cost", "what it cost so far, against the estimate", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", args, stdout, stderr)
+	}},
+	{"cancel", "cancel a queued or running job, refunding its credits", jobCancel},
+	{"stats", "job counts by status, capacity tier and eviction reason", jobStats},
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--objective T] [--theory T] [--agent AGENT]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--objective T] [--theory T]
 
 FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis and env, with
@@ -285,7 +251,7 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 }
 
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job list", `usage: hl job list [--platform-experiment PE] [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
+	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
 One job per line, newest first: ids, status, metric (its best value on the ranking metric),
 reasons, theory, cost and env, the settings that differ between the listed jobs. hl job status ID
@@ -526,7 +492,7 @@ func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 }
 
 func jobStats(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job stats", `usage: hl job stats [--platform-experiment PE] [--agent A] [--hypothesis ID]
+	fs := newFlags("job stats", `usage: hl job stats [--agent A] [--hypothesis ID]
 
 Counts over every matching job: by status, capacity tier, eviction reason and eviction class
 (workload is yours, infrastructure the environment's, policy the platform's own decision).`, stderr)

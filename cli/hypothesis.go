@@ -47,8 +47,8 @@ type link struct {
 	To   string `json:"to"`
 }
 
-const submitUsage = `usage: hl hypothesis submit [--agent A] [--platform-experiment PE] --text T --builds-on ID|root
-         [--builds-on ID ...] [--contradicts ID ...] [--related ID ...] [--distinct-from ID ...]
+const submitUsage = `usage: hl hypothesis submit --text T --builds-on ID|root [--builds-on ID ...]
+         [--contradicts ID ...] [--related ID ...] [--distinct-from ID ...]
    or: hl hypothesis submit --file hypothesis.yaml [flags above override every item]
 
 Every hypothesis builds on the objective (root) or on existing hypotheses; several --builds-on
@@ -69,49 +69,22 @@ resubmit naming each with --contradicts or --distinct-from. FILE shape:
 Items are submitted in order; top-level fields default onto every item. Prints one JSON object
 per item. Full reference: controlplane/settings/examples/hypothesis.yaml`
 
-const hypothesisUsage = `usage: hl hypothesis <command> ...
-
-  submit   register an idea under the objective or the hypotheses it builds on
-  link     add a builds_on, contradicts or related link from your own hypothesis
-  comment  add a note to a hypothesis
-  status   set your hypothesis's verdict
-  list     one platform experiment's hypotheses, most recent first
-  get      one hypothesis with its links, jobs, findings and comments
-  query    read-only Cypher over the graph, including its text search
-
-Run hl hypothesis <command> --help for its flags.`
+var hypothesisCommands = []subcommand{
+	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit},
+	{"link", "add a link from your own hypothesis", hypothesisLink},
+	{"comment", "add a note to a hypothesis", hypothesisComment},
+	{"status", "set your hypothesis's verdict", hypothesisStatus},
+	{"list", "hypotheses, most recent first", hypothesisList},
+	{"get", "one hypothesis with its links, jobs, findings and comments", hypothesisGet},
+	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery},
+}
 
 func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, hypothesisUsage)
+	if len(args) > 0 && (args[0] == "comments" || args[0] == "links") {
+		fmt.Fprintf(stderr, "hl: hypothesis %s: read them with hl hypothesis get ID, add one with hl hypothesis %s\n", args[0], strings.TrimSuffix(args[0], "s"))
 		return 2
 	}
-	sub, rest := args[0], args[1:]
-	switch sub {
-	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, hypothesisUsage)
-		return 0
-	case "submit":
-		return hypothesisSubmit(c, rest, stdout, stderr)
-	case "link":
-		return hypothesisLink(c, rest, stdout, stderr)
-	case "comment":
-		return hypothesisComment(c, rest, stdout, stderr)
-	case "status":
-		return hypothesisStatus(c, rest, stdout, stderr)
-	case "list":
-		return hypothesisList(c, rest, stdout, stderr)
-	case "get":
-		return hypothesisGet(c, rest, stdout, stderr)
-	case "query":
-		return hypothesisQuery(c, rest, stdout, stderr)
-	case "comments", "links":
-		fmt.Fprintf(stderr, "hl: hypothesis %s: read them with hl hypothesis get ID, add one with hl hypothesis %s\n", sub, strings.TrimSuffix(sub, "s"))
-		return 2
-	default:
-		fmt.Fprintf(stderr, "hl: hypothesis: unknown subcommand %q\n\n%s\n", sub, hypothesisUsage)
-		return 2
-	}
+	return runGroup("hypothesis", hypothesisCommands, c, args, stdout, stderr)
 }
 
 func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -411,7 +384,7 @@ func validLinkType(t string) bool {
 }
 
 func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis link", `usage: hl hypothesis link ID --type builds_on|contradicts|related --to ID [--agent A]
+	fs := newFlags("hypothesis link", `usage: hl hypothesis link ID --type builds_on|contradicts|related --to ID
 
 Adds one link from your own hypothesis ID (--from ID works too). Links are append-only. Prints
 the updated outgoing links.`, stderr)
@@ -441,7 +414,7 @@ the updated outgoing links.`, stderr)
 }
 
 func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID --text T [--agent A]
+	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID --text T
 
 A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision.`, stderr)
 	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
@@ -465,7 +438,7 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 }
 
 func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|confirmed|refuted|inconclusive [--agent A]
+	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|confirmed|refuted|inconclusive
 
 Sets the verdict on your own hypothesis, or on a human-submitted one. --status VERDICT works too.`, stderr)
 	agent := fs.String("agent", "", "agent id, the one that registered ID (default $AGENT_ID)")
@@ -493,7 +466,7 @@ Sets the verdict on your own hypothesis, or on a human-submitted one. --status V
 }
 
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--platform-experiment PE] [--agent A] [--status S] [--limit N] [--offset N]
+	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--limit N] [--offset N]
 
 Most recent first, one JSON object per line with builds_on, child_count, finding_count and
 comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
@@ -576,7 +549,7 @@ as brief as in hl job list, metric included; hl job status ID prints its whole r
 }
 
 func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis query", `usage: hl hypothesis query 'CYPHER' [--param k=v ...] [--platform-experiment PE]
+	fs := newFlags("hypothesis query", `usage: hl hypothesis query 'CYPHER' [--param k=v ...]
    or: hl hypothesis query - [--param k=v ...]   (query read from stdin)
 
 Read-only Cypher over one platform experiment's hypothesis graph (default

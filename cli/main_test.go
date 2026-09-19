@@ -374,7 +374,7 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 		{[]string{"hypothesis", "status", "h-1", "h-2", "--status", "open"}, "usage: hl hypothesis status ID"},
 		{[]string{"job", "summary", "job-1"}, "usage: hl job summary ID --text T"},
 		{[]string{"quota", "--bogus"}, "usage: hl quota"},
-		{[]string{"job", "list", "--platform-experiment-id", "pe-1"}, "[--platform-experiment PE]"},
+		{[]string{"job", "list", "--platform-experiment-id", "pe-1"}, "usage: hl job list [--agent A]"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(tc.args, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), tc.usage) {
@@ -390,6 +390,35 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 	}
 	if len(*got) != 0 {
 		t.Fatalf("misuse sent requests: %+v", *got)
+	}
+}
+
+// The briefing of an agent carries the group listings, so each names the flags of its commands,
+// taken from the command's own --help.
+func TestAGroupListsEachCommandWithTheSynopsisOfItsOwnHelp(t *testing.T) {
+	for group, subs := range map[string][]subcommand{"job": jobCommands, "hypothesis": hypothesisCommands} {
+		var listing, none bytes.Buffer
+		if code := run([]string{group, "--help"}, &listing, &none); code != 0 || none.Len() != 0 {
+			t.Fatalf("hl %s --help: exit %d, stderr %q", group, code, none.String())
+		}
+		for _, sub := range subs {
+			var help bytes.Buffer
+			if code := run([]string{group, sub.name, "--help"}, &none, &help); code != 0 {
+				t.Fatalf("hl %s %s --help: exit %d", group, sub.name, code)
+			}
+			usage, _, _ := strings.Cut(help.String(), "\n")
+			synopsis, ok := strings.CutPrefix(usage, "usage: hl "+group+" ")
+			if !ok || !strings.Contains(listing.String(), "\n  "+synopsis) {
+				t.Errorf("hl %s --help does not list %q:\n%s", group, usage, listing.String())
+			}
+		}
+	}
+	var listing, none bytes.Buffer
+	run([]string{"job", "--help"}, &listing, &none)
+	for _, flag := range []string{"--hypothesis ID", "--env K=V", "--objective T", "--theory T", "--needs-summary"} {
+		if !strings.Contains(listing.String(), flag) {
+			t.Errorf("hl job --help does not name %s", flag)
+		}
 	}
 }
 

@@ -97,7 +97,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "hypothesis":
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
-		return cmdJob(client, rest, stdout, stderr)
+		return runGroup("job", jobCommands, client, rest, stdout, stderr)
 	case "watch":
 		return cmdWatch(apiURL, rest, stdout, stderr)
 	case "experiments", "experiment":
@@ -122,12 +122,52 @@ const usage = `usage: hl <command> ...
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
 
-An ID is a positional argument (hl job status ID); --id ID works too. --agent and
---platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, except where --agent
-filters a list. Run hl <command> --help for its flags.`
+An ID is positional; --id ID works too. --agent and --platform-experiment default to $AGENT_ID
+and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. hl <command> --help has its
+flags.`
 
 // notStarted is what an agent can do about an open platform experiment: nothing but wait.
 const notStarted = "not started: every job submit is refused until it runs; prepare, then end your turn and the start arrives as an update"
+
+// subcommand is one command of a group. The group's listing takes its synopsis from the command's
+// own --help, so the two cannot drift.
+type subcommand struct {
+	name, about string
+	run         func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
+}
+
+// groupUsage lists each subcommand as the first usage form of its --help and what it is for.
+func groupUsage(group string, subs []subcommand) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "usage: hl %s <command> ...\n", group)
+	for _, sub := range subs {
+		var help bytes.Buffer
+		sub.run(nil, []string{"-h"}, io.Discard, &help)
+		usage, _, _ := strings.Cut(help.String(), "\n\n")
+		usage, _, _ = strings.Cut(usage, "\n   or:")
+		synopsis := strings.Join(strings.Fields(strings.TrimPrefix(usage, "usage: hl "+group+" ")), " ")
+		fmt.Fprintf(&b, "\n  %s\n    %s", synopsis, sub.about)
+	}
+	return b.String()
+}
+
+func runGroup(group string, subs []subcommand, c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, groupUsage(group, subs))
+		return 2
+	}
+	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		fmt.Fprintln(stdout, groupUsage(group, subs))
+		return 0
+	}
+	for _, sub := range subs {
+		if sub.name == args[0] {
+			return sub.run(c, args[1:], stdout, stderr)
+		}
+	}
+	fmt.Fprintf(stderr, "hl: %s: unknown subcommand %q\n\n%s\n", group, args[0], groupUsage(group, subs))
+	return 2
+}
 
 const (
 	agentEnv              = "AGENT_ID"
