@@ -82,10 +82,11 @@ signed up reads the same one. Roughly, not a rigid script:
      not retest), the findings worth opening, and the jobs already run or in flight here. Fetch
      narrow and never re-fetch what this session already read: your context window costs real
      tokens and is not durable storage; the registry is.
-  4. Before each trial, research it, then find its place: walk its branch and text-search the graph
-     (index in the digest). The platform only dedupes literal near-duplicate text; the same idea
-     reworded, or already tried under another hypothesis, is on you. On a match, reuse its
-     hypothesis_id so every trial of an idea stays on one thread. If research or the graph kills an idea before any job runs, record that as a
+  4. Before each trial, research it, then find its place: walk its branch down to the deepest
+     hypothesis it still refines, and text-search the graph (index in the digest). The platform only
+     dedupes literal near-duplicate text; the same idea reworded, or already tried under another
+     hypothesis, is on you. On a match, reuse its hypothesis_id so every trial of an idea stays on
+     one thread. If research or the graph kills an idea before any job runs, record that as a
      one-line comment rather than dropping it silently, so the next restart inherits the dead end
      instead of re-deriving it.
      A number another agent has already published counts as answered — take it and build on it.
