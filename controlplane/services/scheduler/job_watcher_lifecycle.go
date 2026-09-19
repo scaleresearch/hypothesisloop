@@ -13,6 +13,18 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
+// startOverdue is how long exp has been admitted beyond its own checkpoint window. A requeued job
+// can be re-admitted while its previous generation is still inside that window, and the runtime
+// creates the new workload only once the old one is gone, so the window does not count against
+// the time a job has to start.
+func startOverdue(exp *domain.Experiment) time.Duration {
+	window := int64(0)
+	if grace := exp.EffectiveJob().CheckpointGraceSeconds; grace != nil {
+		window = *grace
+	}
+	return time.Since(*exp.SubmittedAt) - time.Duration(window)*time.Second
+}
+
 // evictIfPastAdmissionDeadline evicts a job that has stayed pre-RUNNING for longer than
 // stuckPendingTimeout, with the reason naming what actually failed to resolve. Called only for
 // experiments still in SUBMITTED/ADMITTED, from the one place that has just observed why the
@@ -28,7 +40,7 @@ func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *doma
 		// skipping is what makes a job immortal — surface it instead.
 		return fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
 	}
-	if time.Since(*exp.SubmittedAt) <= w.stuckPendingTimeout {
+	if startOverdue(exp) <= w.stuckPendingTimeout {
 		return nil
 	}
 	w.logger.Warn("job_watcher: admission deadline passed, evicting",
@@ -94,7 +106,7 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	if timeout <= 0 {
 		return false, nil
 	}
-	if time.Since(*exp.SubmittedAt) <= timeout {
+	if startOverdue(exp) <= timeout {
 		return false, nil
 	}
 	w.logger.Warn("job_watcher: placement deadline passed, evicting",

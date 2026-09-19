@@ -161,7 +161,8 @@ scheduler:
 
   # How long a job may stay SUBMITTED/ADMITTED without reporting RUNNING before job_watcher
   # evicts it (reason stuck_pending) and fully refunds its reservation. Bounds capacity held by
-  # jobs that never actually start (e.g. unschedulable).
+  # jobs that never actually start (e.g. unschedulable). A job's own checkpoint window is added,
+  # since a requeued job cannot start before its previous pod has finished checkpointing.
   stuck_pending_timeout_seconds: 300
 
   # How stale a cluster-agent's heartbeat may be before the cluster is treated as Unreachable:

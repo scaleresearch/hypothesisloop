@@ -267,3 +267,33 @@ func TestIsTerminalSchedulingRefusal(t *testing.T) {
 		}
 	}
 }
+
+// A requeued job re-admitted while its previous generation checkpoints has no workload until that
+// pod is gone, which may take the whole window.
+func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testing.T) {
+	window := int64(600)
+	for _, tc := range []struct {
+		submittedAgo time.Duration
+		wantEvicted  bool
+	}{
+		{submittedAgo: 12 * time.Minute, wantEvicted: false},
+		{submittedAgo: 16 * time.Minute, wantEvicted: true},
+	} {
+		for _, phase := range []workload.JobPhase{workload.JobPhaseGone, workload.JobPhasePending} {
+			store := &lifecycleStore{}
+			found := phase == workload.JobPhasePending
+			backend := &scaleUpBackend{phase: phase, phaseDetailFound: &found}
+			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+			exp := scaleUpExperiment(1, tc.submittedAgo)
+			exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: &window}
+
+			if err := w.reconcileOne(context.Background(), exp, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			if evicted := len(store.requeuedReasons)+len(store.terminalReasons) > 0; evicted != tc.wantEvicted {
+				t.Errorf("phase %s, admitted %s ago with a %ds window: evicted = %v, want %v",
+					phase, tc.submittedAgo, window, evicted, tc.wantEvicted)
+			}
+		}
+	}
+}
