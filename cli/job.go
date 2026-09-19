@@ -43,7 +43,7 @@ capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
-$PLATFORM_EXPERIMENT_ID. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
+--platform-experiment. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
 files and HEAD pushed to origin. Commit and git push only after changing a tracked file.
 Minimal shape:
@@ -61,9 +61,10 @@ Minimal shape:
 See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`, stderr)
 	agent := fs.String("agent", "", "stamped onto metadata.agent_id (default $AGENT_ID)")
 	overrides := map[string]*string{
-		"hypothesis_id": fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
-		"objective":     fs.String("objective", "", "sets metadata.objective"),
-		"theory":        fs.String("theory", "", "sets metadata.theory"),
+		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
+		"objective":              fs.String("objective", "", "sets metadata.objective"),
+		"theory":                 fs.String("theory", "", "sets metadata.theory"),
+		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then $PLATFORM_EXPERIMENT_ID)"),
 	}
 	var env stringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")

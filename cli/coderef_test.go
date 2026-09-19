@@ -123,12 +123,12 @@ func TestJobSubmitFlagsOverrideTheCommittedSpecWithoutACommit(t *testing.T) {
 	}))
 	var stdout, stderr bytes.Buffer
 	args := []string{"job", "submit", "job.yaml", "--agent", "jane", "--hypothesis", "hyp-9", "--theory", "wider wins",
-		"--env", "LR=0.1", "--env", "NOTE=a=b"}
+		"--env", "LR=0.1", "--env", "NOTE=a=b", "--platform-experiment", "pe-flag"}
 	if code := run(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	metadata := sent["metadata"].(map[string]any)
-	if metadata["hypothesis_id"] != "hyp-9" || metadata["theory"] != "wider wins" {
+	if metadata["hypothesis_id"] != "hyp-9" || metadata["theory"] != "wider wins" || metadata["platform_experiment_id"] != "pe-flag" {
 		t.Fatalf("metadata = %+v", metadata)
 	}
 	if want := origin + "@" + mustGit(t, clone, "rev-parse", "HEAD"); metadata["code_ref"] != want {
