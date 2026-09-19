@@ -11,6 +11,7 @@ import json
 import subprocess
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -185,8 +186,10 @@ class API:
             "max_agents": max_agents,
             "report_interval_seconds": report_interval_seconds,
             "metrics": metrics or [{"key": "val_accuracy", "direction": "maximize"}],
+            # Zero starts_at means "start now"; creation requires a real ends_at, far enough out
+            # that no test outlives it.
             "starts_at": "0001-01-01T00:00:00Z",
-            "ends_at": "0001-01-01T00:00:00Z",
+            "ends_at": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         if stages is not None:
             body["stages"] = stages

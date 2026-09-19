@@ -285,7 +285,7 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
 
     bad = api.query("MATC (h:Hypothesis) RETURN h")
     assert bad.status_code == 400, f"malformed Cypher answered {bad.status_code}"
-    assert bad.json().get("detail"), f"400 without Memgraph's message: {bad.text}"
+    assert "mismatched input" in bad.json().get("error", ""), f"400 without Memgraph's message: {bad.text}"
 
     capped = api.query("UNWIND range(1, 1000) AS i RETURN i")
     assert capped.status_code == 200, capped.text
