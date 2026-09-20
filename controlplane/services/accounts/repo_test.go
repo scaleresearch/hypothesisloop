@@ -2,9 +2,11 @@ package accounts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -60,7 +62,6 @@ type minted struct {
 }
 
 type lookup struct {
-	installation         int64
 	repo, code, redirect string
 }
 
@@ -87,8 +88,9 @@ type fakeApp struct {
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{known: map[string]github.Repository{
-		"acme/model": {ID: 1, FullName: "Acme/Model"},
-		"acme/other": {ID: 2, FullName: "acme/other"},
+		"acme/model": {ID: 1, FullName: "Acme/Model", InstallationID: 100},
+		"acme/other": {ID: 2, FullName: "acme/other", InstallationID: 100},
+		"solo/tool":  {ID: 9, FullName: "solo/tool", InstallationID: 300},
 	}, names: map[int64]string{1: "Acme/Model", 2: "acme/other"}}
 }
 
@@ -96,13 +98,13 @@ func (a *fakeApp) App() github.App {
 	return github.App{Slug: "hypothesisloop", ClientID: "Iv23test", InstallURL: "https://github.test/install", AuthorizeURL: "https://github.test/authorize"}
 }
 
-func (a *fakeApp) Repository(_ context.Context, installationID int64, fullName, userCode, redirectURI string) (*github.Repository, error) {
-	a.lookups = append(a.lookups, lookup{installationID, fullName, userCode, redirectURI})
+func (a *fakeApp) Repository(_ context.Context, fullName, userCode, redirectURI string) (*github.Repository, error) {
+	a.lookups = append(a.lookups, lookup{fullName, userCode, redirectURI})
 	if a.repositoryErr != nil {
 		return nil, a.repositoryErr
 	}
 	repo, ok := a.known[strings.ToLower(fullName)]
-	if !ok || installationID != 100 {
+	if !ok {
 		return nil, github.ErrRepositoryNotInstalled
 	}
 	return &repo, nil
@@ -169,8 +171,8 @@ func (w *repoWorld) seed(projectID string, repositoryID int64, repo string) {
 	}
 }
 
-func attachBody(installation int64, repo, code string) map[string]any {
-	return map[string]any{"installation_id": installation, "repo": repo, "code": code, "redirect_uri": testRedirect}
+func attachBody(repo, code string) map[string]any {
+	return map[string]any{"repo": repo, "code": code, "redirect_uri": testRedirect}
 }
 
 func TestWhoMayReachAProjectsRepository(t *testing.T) {
@@ -191,7 +193,7 @@ func TestWhoMayReachAProjectsRepository(t *testing.T) {
 		{"read the app", func(w *repoWorld) request { return request{"GET", "/github/app", nil} },
 			map[string]int{"owner": ok, "member": ok, "outsider": ok, "org-key": ok, "project-key": ok, "foreign-key": ok, "staff": ok, "staff-user": ok}},
 		{"attach", func(w *repoWorld) request {
-			return request{"POST", "/projects/" + w.projectA + "/repo", attachBody(100, "acme/model", "code")}
+			return request{"POST", "/projects/" + w.projectA + "/repo", attachBody("acme/model", "code")}
 		}, map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"read", func(w *repoWorld) request { return request{"GET", "/projects/" + w.projectA + "/repo", nil} },
 			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
@@ -238,7 +240,7 @@ func TestAnotherOrgsProjectReadsAsAbsent(t *testing.T) {
 	w := newRepoWorld(t, true)
 	w.seed(w.projectB, 1, "Acme/Model")
 	for _, req := range []request{
-		{"GET", "/projects/%s/repo", nil}, {"DELETE", "/projects/%s/repo", nil}, {"POST", "/projects/%s/repo", attachBody(100, "acme/model", "code")},
+		{"GET", "/projects/%s/repo", nil}, {"DELETE", "/projects/%s/repo", nil}, {"POST", "/projects/%s/repo", attachBody("acme/model", "code")},
 	} {
 		foreign := w.call("owner", req.method, fmt.Sprintf(req.path, w.projectB), req.body)
 		absent := w.call("owner", req.method, fmt.Sprintf(req.path, "prj_missing"), req.body)
@@ -254,8 +256,8 @@ func TestAnotherOrgsProjectReadsAsAbsent(t *testing.T) {
 func TestAttachRecordsWhatGitHubStates(t *testing.T) {
 	w := newRepoWorld(t, true)
 	var view RepoView
-	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(100, "acme/model", "the-code"), http.StatusOK, &view)
-	want := lookup{100, "acme/model", "the-code", testRedirect}
+	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody("acme/model", "the-code"), http.StatusOK, &view)
+	want := lookup{"acme/model", "the-code", testRedirect}
 	if len(w.app.lookups) != 1 || w.app.lookups[0] != want {
 		t.Fatalf("GitHub was asked %+v, want %+v", w.app.lookups, want)
 	}
@@ -269,20 +271,33 @@ func TestAttachRecordsWhatGitHubStates(t *testing.T) {
 		t.Fatalf("read back = %+v, want = %+v", read, view)
 	}
 
+	// The installation is the one GitHub names for the repository, whichever that is.
+	var solo RepoView
+	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody("solo/tool", "solo-code"), http.StatusOK, &solo)
+	if solo.InstallationID != 300 || solo.RepositoryID != 9 {
+		t.Fatalf("view = %+v, want the installation GitHub stated for that repository", solo)
+	}
+
 	// A second attach replaces the first, and a second project may sit on the same installation.
-	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(100, "acme/other", "next-code"), http.StatusOK, &view)
-	w.ok("owner", "POST", "/projects/"+w.projectA2+"/repo", attachBody(100, "acme/model", "third-code"), http.StatusOK, nil)
+	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody("acme/other", "next-code"), http.StatusOK, &view)
+	w.ok("owner", "POST", "/projects/"+w.projectA2+"/repo", attachBody("acme/model", "third-code"), http.StatusOK, nil)
 	if view.RepositoryID != 2 || w.repos.repos[w.projectA].RepositoryID != 2 || w.repos.repos[w.projectA2].RepositoryID != 1 {
 		t.Fatalf("after re-attaching: %+v and %+v", w.repos.repos[w.projectA], w.repos.repos[w.projectA2])
 	}
 
 	w.ok("owner", "DELETE", "/projects/"+w.projectA+"/repo", nil, http.StatusNoContent, nil)
-	gone := w.call("owner", "GET", "/projects/"+w.projectA+"/repo", nil)
-	if gone.Code != http.StatusNotFound || !strings.Contains(gone.Body.String(), "no repository is attached") {
-		t.Fatalf("read after detach: got = %d %s", gone.Code, gone.Body)
+	for _, method := range []string{"GET", "DELETE"} {
+		gone := w.call("owner", method, "/projects/"+w.projectA+"/repo", nil)
+		if gone.Code != http.StatusNotFound || reasonOf(t, gone) != ReasonNoRepository || !strings.Contains(gone.Body.String(), "no repository is attached") {
+			t.Fatalf("%s after detach: got = %d %s, want 404 with reason no_repository", method, gone.Code, gone.Body)
+		}
 	}
-	if again := w.call("owner", "DELETE", "/projects/"+w.projectA+"/repo", nil); again.Code != http.StatusNotFound {
-		t.Fatalf("second detach: got = %d %s, want 404", again.Code, again.Body)
+	// A project that is not there carries no reason, so a client tells the two 404s apart.
+	for _, project := range []string{w.projectB, "prj_missing"} {
+		absent := w.call("owner", "GET", "/projects/"+project+"/repo", nil)
+		if absent.Code != http.StatusNotFound || reasonOf(t, absent) != "" {
+			t.Fatalf("project %s: got = %d %s, want 404 with no reason", project, absent.Code, absent.Body)
+		}
 	}
 	if _, kept := w.repos.repos[w.projectA2]; !kept {
 		t.Fatal("detaching one project's repository took the other's")
@@ -291,50 +306,68 @@ func TestAttachRecordsWhatGitHubStates(t *testing.T) {
 
 func TestAttachRefusesARequestItCannotCheck(t *testing.T) {
 	for name, body := range map[string]map[string]any{
-		"no installation":       attachBody(0, "acme/model", "code"),
-		"a negative one":        attachBody(-1, "acme/model", "code"),
-		"no repository":         attachBody(100, "", "code"),
-		"a url for a name":      attachBody(100, "https://github.com/acme/model", "code"),
-		"a path out of the api": attachBody(100, "acme/../../app/installations", "code"),
-		"no code":               attachBody(100, "acme/model", ""),
-		"no redirect":           map[string]any{"installation_id": 100, "repo": "acme/model", "code": "code", "redirect_uri": ""},
+		"no repository":         attachBody("", "code"),
+		"a url for a name":      attachBody("https://github.com/acme/model", "code"),
+		"a path out of the api": attachBody("acme/../../app/installations", "code"),
+		"no code":               attachBody("acme/model", ""),
+		"no redirect":           map[string]any{"repo": "acme/model", "code": "code", "redirect_uri": ""},
 	} {
 		w := newRepoWorld(t, true)
 		rec := w.call("owner", "POST", "/projects/"+w.projectA+"/repo", body)
 		if rec.Code != http.StatusBadRequest || len(w.app.lookups) != 0 || len(w.repos.repos) != 0 {
-			t.Errorf("%s: got = %d %s with lookups %+v, want 400 before GitHub is asked", name, rec.Code, rec.Body, w.app.lookups)
+			t.Errorf("%s: got = %d %s with lookups %+v, want 400 before GitHub is asked, so the code is not spent", name, rec.Code, rec.Body, w.app.lookups)
 		}
 	}
+	// The installation is not the client's to name: a body that still does is refused whole.
+	w := newRepoWorld(t, true)
+	named := attachBody("acme/model", "code")
+	named["installation_id"] = 100
+	if rec := w.call("owner", "POST", "/projects/"+w.projectA+"/repo", named); rec.Code != http.StatusUnprocessableEntity || len(w.app.lookups) != 0 {
+		t.Errorf("a body naming an installation: got = %d %s, want 422 before GitHub is asked", rec.Code, rec.Body)
+	}
+}
+
+// reasonOf is the machine-readable reason of a refusal, empty when it carries none.
+func reasonOf(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("the refusal is not JSON: %s", rec.Body)
+	}
+	return body.Reason
 }
 
 const leak = "ghs_a_token_in_an_error"
 
 func TestWhatGitHubRefusesOnAttach(t *testing.T) {
 	for name, tc := range map[string]struct {
-		err  error
-		want int
+		err    error
+		repo   string
+		want   int
+		reason string
 	}{
-		"the person cannot push":                   {github.ErrUserCannotPush, http.StatusForbidden},
-		"single sign-on blocks the person's token": {github.ErrUserBlocked, http.StatusForbidden},
-		"the installation withholds the access":    {github.ErrPermissionNotGranted, http.StatusConflict},
-		"the app is not on that repository":        {github.ErrRepositoryNotInstalled, http.StatusUnprocessableEntity},
-		"a guessed installation":                   {nil, http.StatusUnprocessableEntity},
-		"the code was used":                        {github.ErrCodeRejected, http.StatusBadRequest},
-		"the installation was suspended":           {github.ErrInstallationGone, http.StatusConflict},
-		"github rate limits":                       {fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), http.StatusServiceUnavailable},
-		"the app key expired":                      {fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), http.StatusBadGateway},
-		"something else":                           {errors.New("dial tcp: " + leak), http.StatusInternalServerError},
+		"the person cannot push":                   {github.ErrUserCannotPush, "acme/model", http.StatusForbidden, ""},
+		"single sign-on blocks the person's token": {github.ErrUserBlocked, "acme/model", http.StatusForbidden, ""},
+		"the installation withholds the access":    {github.ErrPermissionNotGranted, "acme/model", http.StatusConflict, ""},
+		"the app is not on that repository":        {github.ErrRepositoryNotInstalled, "acme/model", http.StatusUnprocessableEntity, ReasonAppNotInstalled},
+		"a repository github does not know":        {nil, "acme/nowhere", http.StatusUnprocessableEntity, ReasonAppNotInstalled},
+		"the code was used":                        {github.ErrCodeRejected, "acme/model", http.StatusBadRequest, ""},
+		"the installation was suspended":           {github.ErrInstallationGone, "acme/model", http.StatusConflict, ""},
+		"github rate limits":                       {fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), "acme/model", http.StatusServiceUnavailable, ""},
+		"the app key expired":                      {fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), "acme/model", http.StatusBadGateway, ""},
+		"something else":                           {errors.New("dial tcp: " + leak), "acme/model", http.StatusInternalServerError, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newRepoWorld(t, true)
 			w.app.repositoryErr = tc.err
-			installation := int64(100)
-			if tc.err == nil {
-				installation = 101
+			rec := w.call("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(tc.repo, "code"))
+			if rec.Code != tc.want || reasonOf(t, rec) != tc.reason {
+				t.Fatalf("got = %d %s, want = %d with reason %q", rec.Code, rec.Body, tc.want, tc.reason)
 			}
-			rec := w.call("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(installation, "acme/model", "code"))
-			if rec.Code != tc.want {
-				t.Fatalf("got = %d %s, want = %d", rec.Code, rec.Body, tc.want)
+			if tc.reason == ReasonAppNotInstalled && !strings.Contains(rec.Body.String(), "install") {
+				t.Fatalf("the answer does not say to install the App: %s", rec.Body)
 			}
 			if len(w.repos.repos) != 0 {
 				t.Fatalf("a refused attach was stored: %+v", w.repos.repos)
@@ -356,17 +389,21 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		want                       int
 	}{
 		{"the app", "owner", "GET", "/github/app", nil, unavailable},
-		{"attach", "owner", "POST", "/projects/" + w.projectA + "/repo", attachBody(100, "acme/model", "code"), unavailable},
-		{"attach to another org's project", "owner", "POST", "/projects/" + w.projectB + "/repo", attachBody(100, "acme/model", "code"), http.StatusNotFound},
-		{"attach as a member", "member", "POST", "/projects/" + w.projectA + "/repo", attachBody(100, "acme/model", "code"), http.StatusForbidden},
+		{"attach", "owner", "POST", "/projects/" + w.projectA + "/repo", attachBody("acme/model", "code"), unavailable},
+		{"attach to another org's project", "owner", "POST", "/projects/" + w.projectB + "/repo", attachBody("acme/model", "code"), http.StatusNotFound},
+		{"attach as a member", "member", "POST", "/projects/" + w.projectA + "/repo", attachBody("acme/model", "code"), http.StatusForbidden},
 		{"a credential", "agent", "GET", modelCredential, nil, unavailable},
 		{"a credential for a person", "owner", "GET", modelCredential, nil, http.StatusForbidden},
 		{"a credential with nothing to it", "agent-second-project", "GET", otherCredential, nil, http.StatusNotFound},
 		{"reading what is attached", "owner", "GET", "/projects/" + w.projectA + "/repo", nil, http.StatusOK},
 		{"detaching it", "owner", "DELETE", "/projects/" + w.projectA + "/repo", nil, http.StatusNoContent},
 	} {
-		if rec := w.call(tc.caller, tc.method, tc.path, tc.body); rec.Code != tc.want {
+		rec := w.call(tc.caller, tc.method, tc.path, tc.body)
+		if rec.Code != tc.want {
 			t.Errorf("%s: got = %d %s, want = %d", tc.name, rec.Code, rec.Body, tc.want)
+		}
+		if tc.want == unavailable && (reasonOf(t, rec) != ReasonGitHubNotConfigured || !strings.Contains(rec.Body.String(), "no GitHub App configured")) {
+			t.Errorf("%s: got = %s, want its own sentence with reason github_not_configured", tc.name, rec.Body)
 		}
 	}
 }
@@ -505,7 +542,7 @@ func TestARepositoryDetachedMidRunStopsCredentialsAtOnce(t *testing.T) {
 		t.Fatalf("tokens minted = %d, want only the one from before the detach", len(w.app.mints))
 	}
 	// Attached again, to another repository, the same agent gets that one and no longer the first.
-	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(100, "acme/other", "code"), http.StatusOK, nil)
+	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody("acme/other", "code"), http.StatusOK, nil)
 	attachMints := len(w.app.mints)
 	var credential GitCredential
 	w.ok("agent", "GET", otherCredential, nil, http.StatusOK, &credential)

@@ -88,6 +88,8 @@ const (
 type Repository struct {
 	ID       int64
 	FullName string
+	// InstallationID is the installation of the App that covers it.
+	InstallationID int64
 }
 
 // Token is an installation token. It works for about an hour and on one repository, which
@@ -102,7 +104,7 @@ type Token struct {
 type App struct {
 	Slug         string `json:"slug"`
 	ClientID     string `json:"client_id"`
-	InstallURL   string `json:"install_url" doc:"Where a person installs the App on repositories they choose. GitHub sends them back with installation_id."`
+	InstallURL   string `json:"install_url" doc:"Where a person installs the App on repositories they choose. Nothing GitHub sends them back with is needed: the platform finds the installation itself."`
 	AuthorizeURL string `json:"authorize_url" doc:"Where a person proves who they are on GitHub. Add redirect_uri and state. GitHub sends them back with code."`
 }
 
@@ -165,15 +167,17 @@ func CloneURL(fullName string) string {
 }
 
 // Repository checks everything an attach rests on and returns the repository as GitHub states
-// it. Each of these must hold, and each is GitHub's own answer:
+// it, with the installation that covers it. Nothing the caller says is taken on trust but the
+// name, and each of these is GitHub's own answer:
 //
 //   - the person behind userCode can push to the repository. Agents will push to it, and nobody
 //     may hand out access they do not hold. redirectURI is the one the code was issued to. The
 //     person's token answers this one question and is revoked before anything is returned.
-//   - the App is installed on the repository, through the installation named. An installation
-//     id is a small number anyone can guess, so the id alone proves nothing.
+//   - the App is installed on the repository. GitHub names the installation, to the App itself.
 //   - an installation token limited to the repository can be minted.
-func (c *Client) Repository(ctx context.Context, installationID int64, fullName, userCode, redirectURI string) (*Repository, error) {
+//
+// A name that cannot be a repository is refused before the code is spent.
+func (c *Client) Repository(ctx context.Context, fullName, userCode, redirectURI string) (*Repository, error) {
 	if err := ValidRepository(fullName); err != nil {
 		return nil, err
 	}
@@ -205,17 +209,17 @@ func (c *Client) Repository(ctx context.Context, installationID int64, fullName,
 	case err != nil:
 		return nil, err
 	}
-	if installation.ID != installationID {
-		return nil, ErrRepositoryNotInstalled
+	if installation.ID <= 0 {
+		return nil, errors.New("github: the installation of the repository was answered without an id")
 	}
 	if installation.SuspendedAt != nil {
 		return nil, ErrInstallationGone
 	}
-	token, err := c.Token(ctx, installationID, repositoryID, Read)
+	token, err := c.Token(ctx, installation.ID, repositoryID, Read)
 	if err != nil {
 		return nil, err
 	}
-	return &Repository{ID: repositoryID, FullName: token.Repository}, nil
+	return &Repository{ID: repositoryID, FullName: token.Repository, InstallationID: installation.ID}, nil
 }
 
 // pushableBy returns the id of a repository the holder of userToken can push to.

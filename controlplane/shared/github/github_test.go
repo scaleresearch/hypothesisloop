@@ -373,12 +373,12 @@ var ctx = context.Background()
 
 func TestRepositoryIsVerifiedThreeWaysAndReturnedAsGitHubStatesIt(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	repo, err := client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect)
+	repo, err := client.Repository(ctx, "acme/model", "code-alice", testRedirect)
 	if err != nil {
 		t.Fatalf("Repository: %v", err)
 	}
-	if repo.ID != 1 || repo.FullName != "Acme/Model" {
-		t.Fatalf("repository = %+v, want id 1 in GitHub's own casing", repo)
+	if repo.ID != 1 || repo.FullName != "Acme/Model" || repo.InstallationID != 100 {
+		t.Fatalf("repository = %+v, want id 1 in GitHub's own casing under the installation GitHub names", repo)
 	}
 	if len(f.revoked) != 1 || len(f.userTokens) != 0 || len(f.redirects) != 1 || f.redirects[0] != testRedirect {
 		t.Fatalf("revoked %v with %d user tokens left, redirects %v: want the person's token revoked and the redirect sent", f.revoked, len(f.userTokens), f.redirects)
@@ -392,28 +392,28 @@ func TestRepositoryIsVerifiedThreeWaysAndReturnedAsGitHubStatesIt(t *testing.T) 
 	}
 }
 
-// An installation id is a small number. Naming someone else's must not attach their repository.
+// The caller names a repository and nothing else: the installation is GitHub's to state.
 func TestRepositoryRefusesWhatTheCallerCannotProve(t *testing.T) {
 	cases := map[string]struct {
-		installation int64
-		repo, code   string
-		want         error
+		repo, code string
+		want       error
+		codeKept   bool
 	}{
-		"a repository of another account's installation, guessed": {200, "rival/secret", "code-alice", ErrRepositoryNotInstalled},
-		"the right repository under a guessed installation":       {200, "acme/model", "code-alice", ErrRepositoryNotInstalled},
-		"an installation that does not exist":                     {999, "acme/model", "code-alice", ErrRepositoryNotInstalled},
-		"a repository the App was not installed on":               {100, "acme/unlisted", "code-alice", ErrRepositoryNotInstalled},
-		"a repository that does not exist":                        {100, "acme/nothing", "code-alice", ErrRepositoryNotInstalled},
-		"a person who can only read it":                           {100, "acme/model", "code-reader", ErrUserCannotPush},
-		"a person who cannot see it":                              {100, "acme/model", "code-mallory", ErrRepositoryNotInstalled},
-		"a code github never issued":                              {100, "acme/model", "code-made-up", ErrCodeRejected},
-		"no code":                                                 {100, "acme/model", "", ErrCodeRejected},
-		"a name that is no repository":                            {100, "acme/model/../../app", "code-alice", ErrInvalidRepository},
+		"a repository of another account's installation": {"rival/secret", "code-alice", ErrRepositoryNotInstalled, false},
+		"a repository the App was not installed on":      {"acme/unlisted", "code-alice", ErrRepositoryNotInstalled, false},
+		"a repository that does not exist":               {"acme/nothing", "code-alice", ErrRepositoryNotInstalled, false},
+		"a person who can only read it":                  {"acme/model", "code-reader", ErrUserCannotPush, false},
+		"a person who cannot see it":                     {"acme/model", "code-mallory", ErrRepositoryNotInstalled, false},
+		"a code github never issued":                     {"acme/model", "code-made-up", ErrCodeRejected, false},
+		"no code":                                        {"acme/model", "", ErrCodeRejected, false},
+		// A malformed name is refused before the code is spent, so the person need not authorise again.
+		"a name that is no repository": {"acme/model/../../app", "code-alice", ErrInvalidRepository, true},
+		"an address for a name":        {"https://github.com/acme/model", "code-alice", ErrInvalidRepository, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f, client := newFakeGitHub(t)
-			repo, err := client.Repository(ctx, tc.installation, tc.repo, tc.code, testRedirect)
+			repo, err := client.Repository(ctx, tc.repo, tc.code, testRedirect)
 			if !errors.Is(err, tc.want) || repo != nil {
 				t.Fatalf("Repository = %+v, %v, want %v", repo, err, tc.want)
 			}
@@ -423,16 +423,32 @@ func TestRepositoryRefusesWhatTheCallerCannotProve(t *testing.T) {
 			if len(f.userTokens) != 0 {
 				t.Fatalf("a refused attach left the person's token alive: %v", f.userTokens)
 			}
+			if _, kept := f.codes["code-alice"]; tc.codeKept && !kept {
+				t.Fatal("the code was spent on a name that cannot be a repository")
+			}
 		})
+	}
+}
+
+// Two installations of the App: each repository is attached under the one GitHub names for it.
+func TestRepositoryIsFoundUnderWhicheverInstallationCoversIt(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	f.pushers["alice"][3] = true
+	repo, err := client.Repository(ctx, "rival/secret", "code-alice", testRedirect)
+	if err != nil || repo.ID != 3 || repo.InstallationID != 200 {
+		t.Fatalf("Repository = %+v, %v, want repository 3 under installation 200", repo, err)
+	}
+	if minted := f.lastToken(); len(minted.repos) != 1 || minted.repos[0] != 3 {
+		t.Fatalf("the token minted = %+v, want repository 3 alone", minted)
 	}
 }
 
 func TestACodeWorksOnce(t *testing.T) {
 	_, client := newFakeGitHub(t)
-	if _, err := client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect); err != nil {
+	if _, err := client.Repository(ctx, "acme/model", "code-alice", testRedirect); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Repository(ctx, 100, "acme/other", "code-alice", testRedirect); !errors.Is(err, ErrCodeRejected) {
+	if _, err := client.Repository(ctx, "acme/other", "code-alice", testRedirect); !errors.Is(err, ErrCodeRejected) {
 		t.Fatalf("a second attach on one code: got = %v, want %v", err, ErrCodeRejected)
 	}
 }
@@ -608,7 +624,7 @@ func TestNoErrorHoldsASecret(t *testing.T) {
 			}
 			arrange(f, client)
 			var failures []error
-			_, err = client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect)
+			_, err = client.Repository(ctx, "acme/model", "code-alice", testRedirect)
 			failures = append(failures, err)
 			_, err = client.Token(ctx, 100, 1, Write)
 			failures = append(failures, err)
@@ -684,7 +700,7 @@ func TestAttachProofRefusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f, client := newFakeGitHub(t)
 			tc.arrange(f)
-			if repo, err := client.Repository(ctx, 100, "acme/model", "code-alice", tc.redirect); !errors.Is(err, tc.want) || repo != nil {
+			if repo, err := client.Repository(ctx, "acme/model", "code-alice", tc.redirect); !errors.Is(err, tc.want) || repo != nil {
 				t.Fatalf("Repository = %+v, %v, want %v", repo, err, tc.want)
 			}
 			if len(f.userTokens) != 0 {
@@ -699,7 +715,7 @@ func TestAnAttachFailsWhenThePersonsTokenCannotBeRevoked(t *testing.T) {
 	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusUnprocessableEntity} {
 		f, client := newFakeGitHub(t)
 		f.revokeStatus = status
-		repo, err := client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect)
+		repo, err := client.Repository(ctx, "acme/model", "code-alice", testRedirect)
 		if err == nil || repo != nil || len(f.tokens) != 0 {
 			t.Errorf("revocation answered %d: Repository = %+v, %v with %d installation tokens, want a failure and none", status, repo, err, len(f.tokens))
 		}
@@ -707,7 +723,7 @@ func TestAnAttachFailsWhenThePersonsTokenCannotBeRevoked(t *testing.T) {
 	// The refusal of the check itself is what the caller hears when both fail.
 	f, client := newFakeGitHub(t)
 	f.revokeStatus = http.StatusInternalServerError
-	if _, err := client.Repository(ctx, 100, "acme/model", "code-reader", testRedirect); !errors.Is(err, ErrUserCannotPush) {
+	if _, err := client.Repository(ctx, "acme/model", "code-reader", testRedirect); !errors.Is(err, ErrUserCannotPush) {
 		t.Errorf("a reader whose token could not be revoked: got = %v, want %v", err, ErrUserCannotPush)
 	}
 }

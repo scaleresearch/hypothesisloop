@@ -63,7 +63,7 @@ def _call(api: API, method: str, path: str, body: dict | None = None) -> request
 
 
 ATTACH = {
-    "installation_id": 1, "repo": "acme/model", "code": "a-code-github-never-issued",
+    "repo": "acme/model", "code": "a-code-github-never-issued",
     "redirect_uri": "http://localhost:3000/settings/repository",
 }
 
@@ -80,8 +80,10 @@ ANY_REPO = _credential("acme/model.git")
 def test_a_project_starts_with_no_repository(orgs):
     a, _ = orgs
     read = _call(a.api, "GET", f"/projects/{a.project_id}/repo")
-    assert read.status_code == 404 and "no repository is attached" in read.json()["error"], read.text
-    assert _call(a.api, "DELETE", f"/projects/{a.project_id}/repo").status_code == 404
+    detach = _call(a.api, "DELETE", f"/projects/{a.project_id}/repo")
+    for refused in (read, detach):
+        assert refused.status_code == 404 and refused.json()["reason"] == "no_repository", refused.text
+        assert "no repository is attached" in refused.json()["message"], refused.text
 
 
 @pytest.mark.parallel
@@ -102,13 +104,16 @@ def test_attach_is_refused_without_proof_from_github(orgs):
     app = _call(a.api, "GET", "/github/app")
     attach = _call(a.api, "POST", f"/projects/{a.project_id}/repo", ATTACH)
     if app.status_code == 503:
-        assert attach.status_code == 503 and "GitHub App" in attach.json()["error"], attach.text
+        for refused in (app, attach):
+            assert refused.status_code == 503 and refused.json()["reason"] == "github_not_configured", refused.text
+            assert "GitHub App" in refused.json()["message"], refused.text
     else:
         assert app.status_code == 200 and set(app.json()) >= {"slug", "client_id", "install_url", "authorize_url"}, app.text
         assert attach.status_code == 400 and "code" in attach.json()["error"], attach.text
-        for bad in ({**ATTACH, "repo": "https://github.com/acme/model"}, {**ATTACH, "installation_id": 0}, {**ATTACH, "code": ""},
-                    {**ATTACH, "redirect_uri": ""}):
+        for bad in ({**ATTACH, "repo": "https://github.com/acme/model"}, {**ATTACH, "code": ""}, {**ATTACH, "redirect_uri": ""}):
             assert _call(a.api, "POST", f"/projects/{a.project_id}/repo", bad).status_code == 400, bad
+    # The installation is GitHub's to name: a body that names one is refused whole.
+    assert _call(a.api, "POST", f"/projects/{a.project_id}/repo", {**ATTACH, "installation_id": 1}).status_code == 422
     assert _call(a.api, "GET", f"/projects/{a.project_id}/repo").status_code == 404
 
 
@@ -132,7 +137,7 @@ def test_a_git_credential_goes_only_to_what_the_platform_launched(api: API, orgs
         assert refused.status_code == 403 and "password" not in refused.text, refused.text
     assert requests.get(a.api._url(ANY_REPO), timeout=30).status_code == 401
     nothing = _call(agent, "GET", ANY_REPO)
-    assert nothing.status_code == 404 and "no repository is attached" in nothing.json()["error"], nothing.text
+    assert nothing.status_code == 404 and nothing.json()["reason"] == "no_repository", nothing.text
     # The address git asks about is part of the question.
     assert _call(agent, "GET", "/git-credential").status_code == 422
 
