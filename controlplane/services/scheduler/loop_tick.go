@@ -170,10 +170,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	completion, err := l.completionFractions(ctx, queued)
-	if err != nil {
-		return err
-	}
+	completion := l.completionFractions(ctx, queued)
 
 	// 3a. Enforce the summary gate: skip agents with COMPLETED experiments missing a summary.
 	// 3b. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
@@ -498,7 +495,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
-				reason = notAdmittedReasonFor(fitAtTickStart, fp, shortage)
+				reason = notAdmittedReasonFor(fitAtTickStart, shortage)
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -625,7 +622,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = exceedsClusterCapacityReason(exp)
 			}
 			if reason == "" {
-				reason = notAdmittedReasonFor(fitAtTickStart, fp, shortage)
+				reason = notAdmittedReasonFor(fitAtTickStart, shortage)
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -668,7 +665,7 @@ func (l *Loop) skipExperiment(errs *[]error, exp *domain.Experiment, err error) 
 // It used to be inferred from "some dimension of the footprint shrank this tick", which is true
 // of every skipped job on any busy cluster — a request oversized for the hardware was told it
 // had been outranked, and waiting for the queue to drain would never admit it.
-func notAdmittedReasonFor(fitAtTickStart bool, footprint domain.Footprint, shortage domain.Footprint) string {
+func notAdmittedReasonFor(fitAtTickStart bool, shortage domain.Footprint) string {
 	if fitAtTickStart {
 		return domain.NotAdmittedOutranked
 	}

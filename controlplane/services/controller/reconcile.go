@@ -112,7 +112,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			continue
 		}
 		checked[key] = true
-		if err := c.checkQuotaExhaustion(ctx, exp.AgentID, exp.PlatformExperimentID, now); err != nil {
+		if err := c.checkQuotaExhaustion(ctx, exp.AgentID, exp.PlatformExperimentID); err != nil {
 			c.logger.Error("quota exhaustion check", zap.String("agent", exp.AgentID), zap.Error(err))
 			errs = append(errs, fmt.Errorf("quota exhaustion check for %s: %w", exp.AgentID, err))
 		}
@@ -129,7 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 // checkQuotaExhaustion evicts all running jobs for an agent when actual AccH consumed
 // reaches their tier quota. No refund — budget genuinely exhausted.
-func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platformExpID string, now time.Time) error {
+func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platformExpID string) error {
 	// Observed consumption only. A reservation-inclusive figure would trip this check on work
 	// that has merely been queued, and evict — irreversibly, unrefunded — running jobs for budget
 	// nobody has spent. RAM/storage are not enforced here because nothing observes them.
@@ -231,7 +231,7 @@ func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, n
 				zap.Float64("observed_hours", hours),
 				zap.Float64("max_job_hours", maxHours),
 			)
-			return c.evict(ctx, exp, domain.EvictionJobTooLong, now)
+			return c.evict(ctx, exp, domain.EvictionJobTooLong)
 		}
 	}
 
@@ -240,7 +240,7 @@ func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, n
 		return err
 	}
 	if evict {
-		return c.evict(ctx, exp, reason, now)
+		return c.evict(ctx, exp, reason)
 	}
 	return nil
 }

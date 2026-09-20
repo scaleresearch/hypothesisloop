@@ -48,7 +48,7 @@ type StagesStore interface {
 func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment, obs *tickObservations, now time.Time) error {
 	// Boundaries already crossed may have left job-stopping incomplete (a crash between the
 	// AdvanceStage commit and the eviction sweep). Retrying it is free — it is idempotent.
-	if err := c.reconcileCuts(ctx, pe, runningExps); err != nil {
+	if err := c.reconcileCuts(ctx, pe); err != nil {
 		return err
 	}
 
@@ -95,7 +95,7 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 		return fmt.Errorf("stages: computeCut: %w", err)
 	}
 
-	if err := c.applyCut(ctx, pe, pe.CurrentStage, survivors, cut, runningExps); err != nil {
+	if err := c.applyCut(ctx, pe, pe.CurrentStage, survivors, cut); err != nil {
 		return fmt.Errorf("stages: applyCut: %w", err)
 	}
 	return nil
@@ -135,13 +135,13 @@ func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExper
 // reconcileCuts retries job-stopping for every agent already cut in this platform experiment.
 // The cut set is read back from the durable platform_experiment_cuts table, so it survives a
 // crash; stopping is idempotent, so this runs every tick.
-func (c *Controller) reconcileCuts(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment) error {
+func (c *Controller) reconcileCuts(ctx context.Context, pe *domain.PlatformExperiment) error {
 	cuts, err := c.stagesStore.ListCutAgents(ctx, pe.ID)
 	if err != nil {
 		return fmt.Errorf("stages: list cut agents: %w", err)
 	}
 	for _, cut := range cuts {
-		if err := c.stopCutAgentJobs(ctx, cut.AgentID, pe.ID, runningExps); err != nil {
+		if err := c.stopCutAgentJobs(ctx, cut.AgentID, pe.ID); err != nil {
 			c.logger.Error("stages: stop cut agent jobs",
 				zap.String("agent", cut.AgentID), zap.String("pe", pe.ID), zap.Error(err))
 		}

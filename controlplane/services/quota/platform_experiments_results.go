@@ -128,7 +128,7 @@ func (s *PlatformExperimentsService) constraintIneligibleAgents(ctx context.Cont
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
 		}
-		standings, _, err := s.standingsOnMetric(ctx, pe, metric)
+		standings, err := s.standingsOnMetric(ctx, pe, metric)
 		if err != nil {
 			return nil, err
 		}
@@ -210,13 +210,12 @@ func (s *PlatformExperimentsService) eligibleStandings(ctx context.Context, pe *
 // standingsOnMetric ranks every agent by its best "raw"-basis value on one metric, best-first.
 // The ranking itself is metricsdb.BestPerAgentOnMetric — the same call the stage ladder cuts with,
 // so a run's final standings and its mid-run cuts can never disagree about who is ahead.
-func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) ([]AgentStanding, []string, error) {
-	best, nonRawAgents, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
+func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) ([]AgentStanding, error) {
+	best, _, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
 	if err != nil {
-		return nil, nil, fmt.Errorf("results: %w", err)
+		return nil, fmt.Errorf("results: %w", err)
 	}
-	standings, err := s.rank(ctx, pe, metric, best)
-	return standings, nonRawAgents, err
+	return s.rank(ctx, pe, metric, best)
 }
 
 // rank presents the competitors' bests on one metric as standings: attaches each one's job, sorts

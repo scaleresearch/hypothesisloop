@@ -129,7 +129,7 @@ func PopulateUsage(ctx context.Context, dbURL string, platformExpStart time.Time
 		if !ok {
 			continue
 		}
-		applyUsedSample(q, domain.ResourceType(s.Labels["resource_type"]), domain.CapacityTier(s.Labels["tier"]), s.Value)
+		applyUsedSample(q, domain.CapacityTier(s.Labels["tier"]), s.Value)
 	}
 	return nil
 }
@@ -147,7 +147,7 @@ func PopulateUsageOne(ctx context.Context, dbURL string, platformExpStart time.T
 		return fmt.Errorf("metricsdb.PopulateUsageOne: %w", err)
 	}
 	for _, s := range samples {
-		applyUsedSample(q, domain.ResourceType(s.Labels["resource_type"]), domain.CapacityTier(s.Labels["tier"]), s.Value)
+		applyUsedSample(q, domain.CapacityTier(s.Labels["tier"]), s.Value)
 	}
 	return nil
 }
@@ -173,9 +173,7 @@ func SettledCostForJob(ctx context.Context, dbURL string, platformExpStart time.
 	return out, true, nil
 }
 
-func applyUsedSample(q *domain.AgentQuota, resourceType domain.ResourceType, tier domain.CapacityTier, value float64) {
-	// resourceType is always domain.ResourceAcceleratorHours now — it's the only ResourceType left.
-	_ = resourceType
+func applyUsedSample(q *domain.AgentQuota, tier domain.CapacityTier, value float64) {
 	if tier == domain.CapacityGuaranteed {
 		q.UsedGuaranteedAccH = value
 	} else {

@@ -87,11 +87,8 @@ func TestTerminatedExitCodeReportsWorstContainer(t *testing.T) {
 // Kubernetes' termination Reason were discarded, and Terminated.Message is empty unless the
 // workload writes to terminationMessagePath, which a crashing Python process does not.
 func TestTerminatedPhaseDetailReportsExitCode(t *testing.T) {
-	reason, message, restarts, err := terminatedPhaseDetail(
+	reason, message, restarts := terminatedPhaseDetail(
 		&corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}, 2)
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
 	if reason != domain.PhaseReasonContainerFailed {
 		t.Errorf("reason = %q, want %q", reason, domain.PhaseReasonContainerFailed)
 	}
@@ -105,7 +102,7 @@ func TestTerminatedPhaseDetailReportsExitCode(t *testing.T) {
 
 // OOM is called out separately because the fix differs — raise the request, not the code.
 func TestTerminatedPhaseDetailDistinguishesOOM(t *testing.T) {
-	reason, message, _, _ := terminatedPhaseDetail(
+	reason, message, _ := terminatedPhaseDetail(
 		&corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}, 0)
 	if reason != domain.PhaseReasonOOMKilled {
 		t.Errorf("reason = %q, want %q", reason, domain.PhaseReasonOOMKilled)

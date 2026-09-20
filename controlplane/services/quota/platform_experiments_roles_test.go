@@ -185,7 +185,7 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking}
-	standings, _, err := svc.standingsOnMetric(context.Background(), pe, metric)
+	standings, err := svc.standingsOnMetric(context.Background(), pe, metric)
 	if err != nil {
 		t.Fatalf("standingsOnMetric err = %v, want nil", err)
 	}

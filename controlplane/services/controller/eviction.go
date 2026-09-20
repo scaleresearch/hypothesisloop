@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -16,7 +15,7 @@ import (
 // QUEUED for a free attempt instead of terminating, and one that exhausts that budget ends
 // EVICTED and settles to a full refund — see db.Store.ResolveTermination and settlement.Settle.
 // Nothing here decides that; this function only reports the outcome and settles either way.
-func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, now time.Time) error {
+func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) error {
 	outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), "")
 	if err != nil {
 		return fmt.Errorf("evict: %w", err)
@@ -67,7 +66,6 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 		return nil
 	}
 
-	now := time.Now().UTC()
 	for _, pe := range closedPEs {
 		active, err := c.store.ListActiveByPlatformExperiment(ctx, pe.ID)
 		if err != nil {
@@ -77,7 +75,7 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 		}
 		for _, exp := range active {
 			if exp.Status == domain.StatusRunning {
-				if err := c.evict(ctx, exp, domain.EvictionExperimentClosed, now); err != nil {
+				if err := c.evict(ctx, exp, domain.EvictionExperimentClosed); err != nil {
 					c.logger.Error("reconcileClosedExperiments: evict running job",
 						zap.String("exp", exp.ID), zap.Error(err))
 				}

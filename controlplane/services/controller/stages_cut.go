@@ -14,7 +14,7 @@ import (
 // applyCut commits one boundary: release the incoming stage's share of the budget across
 // survivors, zero the cut agents' unspent quota into that release, stop their jobs. stageIndex
 // is the 1-based index of the stage that is ending.
-func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment, stageIndex int, survivors, cut []string, runningExps []*domain.Experiment) error {
+func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment, stageIndex int, survivors, cut []string) error {
 	quotas, err := c.stagesStore.ListAgentQuotas(ctx, pe.ID)
 	if err != nil {
 		return fmt.Errorf("stages: list agent quotas: %w", err)
@@ -76,7 +76,7 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	)
 
 	for _, agentID := range cut {
-		if err := c.stopCutAgentJobs(ctx, agentID, pe.ID, runningExps); err != nil {
+		if err := c.stopCutAgentJobs(ctx, agentID, pe.ID); err != nil {
 			c.logger.Error("stages: stop cut agent jobs", zap.String("agent", agentID), zap.Error(err))
 		}
 	}
@@ -85,7 +85,7 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 
 // stopCutAgentJobs terminates all non-terminal jobs for a cut agent. Idempotent — every
 // transition is guarded by its from-status, so a retry after a crash is a no-op.
-func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpID string, runningExps []*domain.Experiment) error {
+func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpID string) error {
 	running, err := c.stagesStore.GetAgentRunningExperiments(ctx, agentID, platformExpID)
 	if err != nil {
 		return fmt.Errorf("get running: %w", err)

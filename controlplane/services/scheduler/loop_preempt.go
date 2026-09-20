@@ -257,7 +257,7 @@ func preemptionContribution(victim, preemptor *domain.Experiment) domain.Footpri
 
 // completionFractions derives queue ordering progress from metrics on each tick. The returned
 // map is ephemeral scratch data, never retained or persisted.
-func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experiment) (map[string]float64, error) {
+func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experiment) map[string]float64 {
 	out := make(map[string]float64, len(exps))
 	now := time.Now().UTC()
 	for _, exp := range exps {
@@ -283,7 +283,7 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 		}
 		out[exp.ID] = fraction
 	}
-	return out, nil
+	return out
 }
 
 // submitJob marks the experiment SUBMITTED and assigns it to clusterName in the DB first
