@@ -128,7 +128,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// A bound job is past the placement deadline above, and a cluster that stops reporting
 		// never yields a phase to act on, so the admission deadline is its only bound.
 		if exp.Status != domain.StatusRunning && bound {
-			if deadlineErr := w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending); deadlineErr != nil {
+			if deadlineErr := w.evictIfPastDeadline(ctx, exp, w.stuckPendingTimeout, domain.EvictionStuckPending); deadlineErr != nil {
 				return deadlineErr
 			}
 		}
@@ -165,7 +165,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, triedClusterID)
 			return nil
 		case runningTypeUnobservable:
-			return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionAcceleratorTypeUnobservable)
+			return w.evictIfPastDeadline(ctx, exp, w.stuckPendingTimeout, domain.EvictionAcceleratorTypeUnobservable)
 		default:
 			return fmt.Errorf("unknown running outcome %d", outcome)
 		}
@@ -180,12 +180,12 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// Gone keeps its own existing handling, unchanged: the placement-deadline check above
 		// only fires while scheduledNodes < Nodes(), so a fully-bound job that then vanishes
 		// (scheduledNodes already caught up before Gone was observed) still needs this bound.
-		return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending)
+		return w.evictIfPastDeadline(ctx, exp, w.stuckPendingTimeout, domain.EvictionStuckPending)
 	case workload.JobPhasePending:
-		// An unbound job is under the placement deadline above. A bound one whose container
-		// never starts has only this bound.
+		// An unbound job is under the placement deadline above. A bound one the runtime reports
+		// as pending is starting, which includes pulling its image, and gets the start timeout.
 		if exp.Status != domain.StatusRunning && bound {
-			return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending)
+			return w.evictIfPastDeadline(ctx, exp, w.startTimeout, domain.EvictionStuckPending)
 		}
 		return nil
 	default:

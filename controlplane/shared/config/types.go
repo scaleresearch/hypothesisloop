@@ -78,6 +78,9 @@ type SchedulerConfig struct {
 	// reporting RUNNING before job_watcher evicts it (reason stuck_pending) and fully refunds
 	// its reservation.
 	StuckPendingTimeoutSeconds int `yaml:"stuck_pending_timeout_seconds"`
+	// StartTimeoutSeconds bounds how long a placed job the runtime reports as pending may take to
+	// start, image pull included, before job_watcher evicts it (reason stuck_pending).
+	StartTimeoutSeconds int `yaml:"start_timeout_seconds"`
 	// ClusterUnreachableAfterSeconds bounds how stale a cluster-agent's heartbeat may be before
 	// the cluster is treated as Unreachable: its live-reported capacity (see GetLiveCPUCapacity)
 	// ages out of admission (freezing new jobs to it) and it shows Disconnected in the UI.

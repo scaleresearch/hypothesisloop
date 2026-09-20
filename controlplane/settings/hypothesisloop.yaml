@@ -165,6 +165,9 @@ scheduler:
   # since a requeued job cannot start before its previous pod has finished checkpointing.
   stuck_pending_timeout_seconds: 300
 
+  # How long a placed job may stay pending (image pull, container creation) before the same eviction.
+  start_timeout_seconds: 1800
+
   # How stale a cluster-agent's heartbeat may be before the cluster is treated as Unreachable:
   # its live-reported capacity ages out of admission (freezing new jobs to it) and it shows
   # Disconnected in the UI. Jobs already RUNNING there are left alone until it reconnects.

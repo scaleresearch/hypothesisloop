@@ -90,6 +90,8 @@ type JobWatcher struct {
 	// stuckPendingTimeout bounds how long a job may stay SUBMITTED without reporting
 	// RUNNING before it is evicted with reason stuck_pending and fully refunded.
 	stuckPendingTimeout time.Duration
+	// startTimeout bounds how long a placed job the runtime reports as pending may take to start.
+	startTimeout time.Duration
 
 	// metricsDBURL and observedGapCap configure onFinished's observed-elapsed query
 	// (metricsdb.ObservedElapsedHours) — the same source of truth every other termination path
@@ -129,6 +131,13 @@ func (w *JobWatcher) WithPollInterval(d time.Duration) *JobWatcher {
 // RUNNING before job_watcher evicts it as stuck_pending.
 func (w *JobWatcher) WithStuckPendingTimeout(d time.Duration) *JobWatcher {
 	w.stuckPendingTimeout = d
+	return w
+}
+
+// WithStartTimeout sets how long a placed job may stay pending, pulling its image or creating
+// its container, before job_watcher evicts it as stuck_pending.
+func (w *JobWatcher) WithStartTimeout(d time.Duration) *JobWatcher {
+	w.startTimeout = d
 	return w
 }
 

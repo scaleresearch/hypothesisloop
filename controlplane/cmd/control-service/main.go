@@ -250,6 +250,7 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 	watcher := scheduler.NewJobWatcher(store, jwc, settler, logger).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
+		WithStartTimeout(time.Duration(pcfg.Scheduler.StartTimeoutSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap).
 		WithScaleUpTimeout(time.Duration(pcfg.Scheduler.ScaleUpTimeoutSeconds) * time.Second)
 

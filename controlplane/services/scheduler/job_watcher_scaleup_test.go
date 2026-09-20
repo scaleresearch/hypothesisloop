@@ -341,10 +341,12 @@ func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testi
 	}
 }
 
-// A job whose every rank bound is past the placement deadline. If its container never starts, or
-// its cluster stops reporting a phase, the admission deadline is what releases its reservation.
-func TestABoundJobThatNeverStartsIsEvictedAtTheAdmissionDeadline(t *testing.T) {
+// A job whose every rank bound is past the placement deadline. A cluster that stops reporting its
+// phase releases the reservation at the admission deadline. A job the runtime reports as pending
+// and placed is starting and has the longer start timeout.
+func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 	window := int64(600)
+	noPhase := errors.New("no snapshot")
 	for _, tc := range []struct {
 		name         string
 		phaseErr     error
@@ -353,17 +355,19 @@ func TestABoundJobThatNeverStartsIsEvictedAtTheAdmissionDeadline(t *testing.T) {
 		status       domain.ExperimentStatus
 		wantEvicted  bool
 	}{
-		{name: "pending inside the deadline", submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
-		{name: "pending past the deadline", submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
-		{name: "no phase inside the deadline", phaseErr: errors.New("no snapshot"), submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
-		{name: "no phase past the deadline", phaseErr: errors.New("no snapshot"), submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
-		{name: "pending inside the checkpoint window", submittedAgo: 12 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
-		{name: "running job with no phase", phaseErr: errors.New("no snapshot"), submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
+		{name: "no phase inside the admission deadline", phaseErr: noPhase, submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "no phase past the admission deadline", phaseErr: noPhase, submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
+		{name: "no phase inside the checkpoint window", phaseErr: noPhase, submittedAgo: 12 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "pulling its image past the admission deadline", submittedAgo: 20 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "pending past the start timeout", submittedAgo: 31 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
+		{name: "pending past the start timeout inside the checkpoint window", submittedAgo: 35 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "running job with no phase", phaseErr: noPhase, submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
 		{name: "running job reading pending", submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
 	} {
 		store := &lifecycleStore{}
 		backend := &scaleUpBackend{phase: workload.JobPhasePending, phaseErr: tc.phaseErr, scheduledNodes: 1}
-		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
+			WithStuckPendingTimeout(5 * time.Minute).WithStartTimeout(30 * time.Minute)
 		exp := scaleUpExperiment(1, tc.submittedAgo)
 		exp.Status = tc.status
 		exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: tc.checkpoint}

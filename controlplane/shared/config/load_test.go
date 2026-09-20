@@ -68,3 +68,10 @@ func TestLoadRejectsZeroDefaultMaxConcurrentAccelerators(t *testing.T) {
 		t.Fatal("Load accepted default_max_concurrent_accelerators: 0")
 	}
 }
+
+func TestLoadRequiresStartTimeout(t *testing.T) {
+	text := strings.Replace(productionConfig(t), "  start_timeout_seconds: 1800\n", "", 1)
+	if err := loadText(t, text); err == nil {
+		t.Fatal("Load accepted a config with no start_timeout_seconds")
+	}
+}

@@ -25,13 +25,12 @@ func startOverdue(exp *domain.Experiment) time.Duration {
 	return time.Since(*exp.SubmittedAt) - time.Duration(window)*time.Second
 }
 
-// evictIfPastAdmissionDeadline evicts a job that has stayed pre-RUNNING for longer than
-// stuckPendingTimeout, with the reason naming what actually failed to resolve. Called only for
-// experiments still in SUBMITTED, from the one place that has just observed why the
-// lifecycle could not advance — the deadline is the bound on every such "still can't tell" state,
-// so none of them can hold a reservation indefinitely.
-func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) error {
-	if w.stuckPendingTimeout <= 0 {
+// evictIfPastDeadline evicts a job that has stayed pre-RUNNING for longer than timeout, with the
+// reason naming what actually failed to resolve. Called only for experiments still in SUBMITTED,
+// from the one place that has just observed why the lifecycle could not advance, so none of those
+// states can hold a reservation indefinitely.
+func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experiment, timeout time.Duration, reason domain.EvictionReason) error {
+	if timeout <= 0 {
 		return nil
 	}
 	if exp.SubmittedAt == nil {
@@ -40,13 +39,13 @@ func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *doma
 		// skipping is what makes a job immortal — surface it instead.
 		return fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
 	}
-	if startOverdue(exp) <= w.stuckPendingTimeout {
+	if startOverdue(exp) <= timeout {
 		return nil
 	}
 	w.logger.Warn("job_watcher: admission deadline passed, evicting",
 		zap.String("id", exp.ID),
 		zap.String("reason", string(reason)),
-		zap.Duration("timeout", w.stuckPendingTimeout),
+		zap.Duration("timeout", timeout),
 	)
 	w.evictNotYetRunning(ctx, exp, reason)
 	return nil
