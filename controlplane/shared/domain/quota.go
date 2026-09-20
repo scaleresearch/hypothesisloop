@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"math"
 	"time"
 )
 
@@ -18,16 +17,6 @@ type AgentQuota struct {
 	UsedBurstAccH              float64 `json:"used_burst_acch"`
 
 	CreatedAt time.Time `json:"created_at"`
-}
-
-// AvailableGuaranteed returns AccH available for new guaranteed jobs.
-func (q *AgentQuota) AvailableGuaranteed() float64 {
-	return math.Max(0, q.GuaranteedAcceleratorHours-q.UsedGuaranteedAccH)
-}
-
-// AvailableBurst returns AccH available for new burst jobs.
-func (q *AgentQuota) AvailableBurst() float64 {
-	return math.Max(0, q.BurstAcceleratorHours-q.UsedBurstAccH)
 }
 
 // DominantUtilization is used/guaranteed AccH — the fairness signal scheduler.sortBurst orders

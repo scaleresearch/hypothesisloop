@@ -67,7 +67,6 @@ value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, s
 		return parseExit(err)
 	}
 	var out struct {
-		Status  string `json:"status"`
 		Metrics []struct {
 			Metric    string            `json:"metric"`
 			Direction string            `json:"direction"`

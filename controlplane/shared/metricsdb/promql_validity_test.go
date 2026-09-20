@@ -78,16 +78,6 @@ func firstOversizedRange(expr parser.Expr) string {
 	return bad
 }
 
-// mustParsePromQL is the direct, HTTP-free half of this guarantee: every query string this
-// package builds must be valid PromQL per the real parser, checked in isolation from any network
-// round trip.
-func mustParsePromQL(t *testing.T, query string) {
-	t.Helper()
-	if _, err := parser.NewParser(parser.Options{}).ParseExpr(query); err != nil {
-		t.Fatalf("not valid PromQL: %q: %v", query, err)
-	}
-}
-
 // TestObservedLookbackProducesValidPromQLAtAnyStartTime is the direct regression test for the bug
 // that started this file: whatever ObservedLookback returns must parse, and must stay under
 // GreptimeDB's real ceiling, for every start time a stored row could ever hold — including the
@@ -194,7 +184,7 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 	}
 }
 
-// TestMustParsePromQLCatchesAMalformedQuery is a meta-test: proves mustParsePromQL and the mock
+// TestMustParsePromQLCatchesAMalformedQuery is a meta-test: proves the parser and the mock
 // server actually reject something, so a query-building bug that produces broken syntax (an
 // unescaped label value, an unbalanced brace — exactly the kind of slip an AI-generated query
 // string is prone to) cannot silently pass this suite.

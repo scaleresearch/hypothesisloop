@@ -38,11 +38,9 @@ type PlatformExperimentsStore interface {
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	GetSignupRole(ctx context.Context, platformExpID, agentID string) (domain.SignupRole, bool, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
-	CountSignups(ctx context.Context, platformExpID string) (int, error)
-	// UpsertAgentQuota/GetAgentQuota/ListAgentQuotas cover allocation only (guaranteed/burst
+	// GetAgentQuota/ListAgentQuotas cover allocation only (guaranteed/burst
 	// capacity settings) — consumption (used_*) is never stored here; PlatformExperimentsService
 	// merges it in from the metrics DB on every read via metricsdb.PopulateUsage(One).
-	UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
 	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
@@ -57,12 +55,8 @@ type PlatformExperimentsStore interface {
 	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error), rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (decision db.AdmitDecision, rejectionReason string, err error)
 	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observed func(context.Context, string, string) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
-	HasTop3History(ctx context.Context, agentID string) (bool, error)
-	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
 	ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error)
-	GetAgent(ctx context.Context, agentID string) (*domain.Agent, error)
-	UpdateAgent(ctx context.Context, agent *domain.Agent) error
 	// FulfillDonationTx performs a donation transfer atomically and idempotently — locking the
 	// donation + both quota rows, verifying the donation is still open and the donor has headroom,
 	// moving the amount and marking the donation fulfilled in one transaction. observe is called

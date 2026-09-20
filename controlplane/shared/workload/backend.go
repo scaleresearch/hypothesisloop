@@ -10,11 +10,6 @@ import (
 // capacity. The production implementation persists desired state in PostgreSQL and reads
 // actual capacity from the metrics store; it never connects to an execution cluster.
 type Backend interface {
-	// SetupCluster idempotently prepares a target cluster to receive workloads (namespace,
-	// priority classes, or whatever the backend's admission mechanism requires). Called once
-	// per cluster at control-plane startup.
-	SetupCluster(ctx context.Context) error
-
 	// There is deliberately no DeleteWorkload: the source of truth for "should exp's job exist"
 	// is exp's own status. A caller that needs a job gone (preemption, eviction) moves it out of
 	// SUBMITTED/RUNNING and the cluster agent reconciles it away.

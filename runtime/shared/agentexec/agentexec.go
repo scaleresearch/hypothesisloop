@@ -19,8 +19,6 @@ import (
 // agent-facing contract each cluster-agent/bare-agent binary drives its local reconcile/status
 // loop with.
 type Executor interface {
-	SetupCluster(ctx context.Context) error
-
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
 	// DeleteWorkload removes the experiment's workload. grantCheckpointWindow says whether the
 	// control plane granted this termination the checkpoint window the job declared: true for a

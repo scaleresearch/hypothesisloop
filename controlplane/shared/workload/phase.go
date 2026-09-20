@@ -27,23 +27,6 @@ func (p JobPhase) String() string {
 	}
 }
 
-// ParseJobPhase is the inverse of JobPhase.String, used to decode wire values. Unrecognized
-// values decode to JobPhasePending (fail safe: never treat an unrecognized phase as terminal).
-func ParseJobPhase(s string) JobPhase {
-	switch s {
-	case "running":
-		return JobPhaseRunning
-	case "succeeded":
-		return JobPhaseSucceeded
-	case "failed":
-		return JobPhaseFailed
-	case "gone":
-		return JobPhaseGone
-	default:
-		return JobPhasePending
-	}
-}
-
 // AttemptUnknown is the attempt of a workload whose generation cannot be established: a
 // cluster-agent that predates the attempt field reports none, and its silence must survive
 // decoding as silence. Read as 0 instead it would be indistinguishable from a genuine first

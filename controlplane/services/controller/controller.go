@@ -17,15 +17,10 @@ import (
 // Cluster and job observations are queried from metrics storage and never cached here.
 type Store interface {
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error)
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	// GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent.
 	// Both are pre-run: their reservations must be returned when the budget is exhausted.
 	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
-	// TransitionStatus atomically updates status only when current status matches from.
-	// Returns false (no error) if the row was already in a different state — used to
-	// prevent double-refunds when eviction and natural completion race.
-	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
 	// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED,
 	// RUNNING) for a platform experiment. Used by close-eviction reconciliation.
 	ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)

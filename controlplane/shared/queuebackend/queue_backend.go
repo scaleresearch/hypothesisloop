@@ -51,10 +51,6 @@ func New(store Store, metricsDBURL string, connectedWithin time.Duration) (*Back
 
 var _ workload.Backend = (*Backend)(nil)
 
-// SetupCluster is a no-op here: namespace and PriorityClass creation happens on the
-// cluster-agent side (it has in-cluster credentials; the control plane does not).
-func (b *Backend) SetupCluster(_ context.Context) error { return nil }
-
 // CreateWorkload is a no-op: the caller already updated exp's status to SUBMITTED (or
 // similar), and that status change is exactly what a cluster-agent's desired-state
 // reconciliation reads. Deliberately not even a database write, to avoid a second place

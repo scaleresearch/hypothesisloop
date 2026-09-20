@@ -17,7 +17,6 @@ type Store interface {
 	ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error)
 	CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error)
 	ListExperimentsTesting(ctx context.Context, hypothesisIDs []string) ([]*domain.Experiment, error)
-	MarkStarted(ctx context.Context, id string) (bool, error)
 	MarkUnderperforming(ctx context.Context, id, metricName string) error
 	GetLineage(ctx context.Context, experimentID string) ([]*domain.Experiment, error)
 	// GetAgent resolves an agent id, nil when no such agent ever signed up.

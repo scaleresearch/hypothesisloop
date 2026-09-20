@@ -26,7 +26,6 @@ const (
 	wsOpText   = 0x1
 	wsOpClose  = 0x8
 	wsOpPing   = 0x9
-	wsOpPong   = 0xA
 	wsFinalBit = 0x80
 	wsMaskBit  = 0x80
 	// A control frame's payload is capped at 125 bytes by the protocol, and this server has no

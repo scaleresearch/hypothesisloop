@@ -29,7 +29,6 @@ type StagesStore interface {
 	// reviewer holds quota and runs jobs like anyone else; it is simply not one of the things
 	// the ladder is comparing.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
-	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 
 	// Quota. Accelerator-hours drives progress itself (GetTotalConsumedAccH); CPU/RAM/storage
 	// are released alongside it (see applyCut).
@@ -42,8 +41,6 @@ type StagesStore interface {
 	// ResolveTermination atomically transitions status and records the reason. Does not write
 	// usage; the caller settles separately (see Controller.settleAndMark).
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)
-	// MarkQuotaSettled records that a terminal experiment's final usage was durably written.
-	MarkQuotaSettled(ctx context.Context, id string) error
 }
 
 // advanceStages advances a running platform experiment's ladder by at most one stage per tick,

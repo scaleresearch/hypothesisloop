@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -51,23 +52,6 @@ WHERE id = $1`
 		return nil, fmt.Errorf("agents_store.GetAgent: %w", err)
 	}
 	return agent, nil
-}
-
-// UpdateAgent updates the mutable fields of an agent.
-func (s *AgentsStore) UpdateAgent(ctx context.Context, agent *domain.Agent) error {
-	const q = `
-UPDATE agents SET
-	name              = $2,
-	performance_score = $3
-WHERE id = $1`
-
-	_, err := s.pool.pool.Exec(ctx, q,
-		agent.ID, agent.Name, agent.PerformanceScore,
-	)
-	if err != nil {
-		return fmt.Errorf("agents_store.UpdateAgent: %w", err)
-	}
-	return nil
 }
 
 // defaultAgentListLimit and maxAgentListLimit bound every ListAgents read the same way

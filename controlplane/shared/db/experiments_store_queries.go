@@ -111,20 +111,6 @@ ORDER BY created_at ASC`
 	return collectExperiments(rows)
 }
 
-// ListExperimentsByPlatformExperiment returns all jobs for a given platform experiment.
-func (s *ExperimentsStore) ListExperimentsByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
-	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE platform_experiment_id = $1
-ORDER BY created_at DESC`
-
-	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.ListExperimentsByPlatformExperiment: %w", err)
-	}
-	defer rows.Close()
-	return collectExperiments(rows)
-}
-
 // ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for
 // a platform experiment. Used to evict jobs when an experiment is closed.
 func (s *ExperimentsStore) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {

@@ -236,14 +236,6 @@ type PhaseDetail struct {
 	Reason       string `json:"reason,omitempty"`
 	Message      string `json:"message,omitempty"`
 	RestartCount int32  `json:"restart_count,omitempty"`
-	// ScheduledNodes is the count of this experiment's pods with condition PodScheduled=True, as
-	// last reported by the runtime — see autoscaler.md's gang-readiness design. 0 on a runtime
-	// that doesn't yet report it, or genuinely zero pods placed.
-	ScheduledNodes int32 `json:"scheduled_nodes,omitempty"`
-	// SchedulingReason is a best-effort, runtime-supplied explanation for a still-Pending pod
-	// (an autoscaler event message like "TriggeredScaleUp" or "NotTriggerScaleUp: max node group
-	// size reached").
-	SchedulingReason string `json:"scheduling_reason,omitempty"`
 }
 
 const (

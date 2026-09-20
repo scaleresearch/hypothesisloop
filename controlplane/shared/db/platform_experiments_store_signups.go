@@ -196,13 +196,3 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`
 	}
 	return true, nil
 }
-
-// CountSignups returns how many agents have signed up for a platform experiment.
-func (s *PlatformExperimentsStore) CountSignups(ctx context.Context, platformExpID string) (int, error) {
-	const q = `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1`
-	var n int
-	if err := s.pool.pool.QueryRow(ctx, q, platformExpID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("platform_experiments_store.CountSignups: %w", err)
-	}
-	return n, nil
-}

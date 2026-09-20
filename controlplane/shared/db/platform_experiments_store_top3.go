@@ -3,8 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // ---- top-3 history (Domain 6) ----
@@ -21,18 +19,4 @@ ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET final_metric = EXCL
 		return fmt.Errorf("platform_experiments_store.RecordTop3: %w", err)
 	}
 	return nil
-}
-
-// HasTop3History returns true if the agent has ever placed in the top 3.
-func (s *PlatformExperimentsStore) HasTop3History(ctx context.Context, agentID string) (bool, error) {
-	const q = `SELECT 1 FROM experiment_top3 WHERE agent_id = $1 LIMIT 1`
-	var dummy int
-	err := s.pool.pool.QueryRow(ctx, q, agentID).Scan(&dummy)
-	if err == pgx.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.HasTop3History: %w", err)
-	}
-	return true, nil
 }
