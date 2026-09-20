@@ -70,13 +70,12 @@ const (
 	// arrived — a subscriber that wants the number reads it from there. It is the one kind
 	// Replay cannot return, because Postgres never saw it (see Replay).
 	EventMetricPoint = "metric.point"
-	// EventJobUnderperforming says only that, right now, this job trails its cohort on the
-	// platform experiment's ranking metric by enough margin to be worth a look — an opinion, not
-	// an instruction. Like metric.point it has no backing row: nothing about "trailing" is
-	// desired state anyone stores, it is recomputed from the metrics store at the moment a
-	// sample makes it true, and it is never stored itself; the job's row only records that its
-	// owner was told, so it is sent once per job. The agent decides; the existing
-	// cancel-experiment call is the only path that ever ends the job.
+	// EventJobUnderperforming says only that this job trailed its cohort on the platform
+	// experiment's ranking metric by enough margin to be worth a look: an opinion, never an
+	// instruction. Trailing is recomputed from the metrics store when a sample makes it true; the
+	// job's row records the metric its owner was told about, once, and that write is the event,
+	// live and replayed. The agent decides; the existing cancel-experiment call is the only path
+	// that ever ends the job.
 	EventJobUnderperforming = "job.underperforming"
 )
 
@@ -128,7 +127,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
-		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job and never replayed."},
+		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
 }
 
 func init() {
@@ -361,7 +360,7 @@ func (s *EventsStore) Concerns(ctx context.Context, filter EventFilter, events [
 
 const notifySQL = "SELECT hypothesisloop_notify_event($1, $2, $3, $4, $5, $6)"
 
-// NotifyEvent emits one event that no row produced: a metric pointer, which the metrics store
+// NotifyEvent emits the one event that no row produced: a metric pointer, which the metrics store
 // holds and Replay cannot reconstruct. Position and cursor are set by Postgres; e's are ignored.
 func (s *EventsStore) NotifyEvent(ctx context.Context, e Event) error {
 	if _, err := s.pool.pool.Exec(ctx, notifySQL, e.Kind, e.Subject, e.Value, e.Detail, e.PlatformExperimentID, e.AgentID); err != nil {
@@ -502,10 +501,10 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 
 func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
 	const q = `SELECT id, agent_id, status::text, COALESCE(eviction_reason, ''), COALESCE(not_admitted_reason, ''),
-	queued_xid, submitted_xid, status_xid, not_admitted_xid
+	queued_xid, submitted_xid, status_xid, not_admitted_xid, COALESCE(underperforming_metric, ''), underperforming_xid
 FROM experiments
 WHERE platform_experiment_id = $1
-  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2)`
+  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayExperiments: %w", err)
@@ -514,10 +513,10 @@ WHERE platform_experiment_id = $1
 
 	var events []Event
 	for rows.Next() {
-		var id, agentID, status, evictionReason, notAdmitted string
-		var queuedXid, submittedXid *int64
+		var id, agentID, status, evictionReason, notAdmitted, underperformingMetric string
+		var queuedXid, submittedXid, underperformingXid *int64
 		var statusXid, notAdmittedXid int64
-		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid); err != nil {
+		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid, &underperformingMetric, &underperformingXid); err != nil {
 			return nil, fmt.Errorf("events_store.replayExperiments: scan: %w", err)
 		}
 		if queuedXid != nil {
@@ -534,6 +533,11 @@ WHERE platform_experiment_id = $1
 		if notAdmitted != "" && notAdmitted != domain.NotAdmittedAwaitingAdmission && notAdmitted != domain.NotAdmittedSummaryGate {
 			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: notAdmitted,
 				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
+		}
+		// An advisory to cancel a job that has ended has nothing left to advise.
+		if underperformingXid != nil && !domain.ExperimentStatus(status).IsTerminal() {
+			events = append(events, Event{Kind: EventJobUnderperforming, Subject: id, Value: underperformingMetric,
+				PlatformExperimentID: peID, AgentID: agentID, Position: *underperformingXid})
 		}
 	}
 	if err := rows.Err(); err != nil {

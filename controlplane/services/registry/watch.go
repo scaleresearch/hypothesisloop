@@ -435,8 +435,8 @@ type watchFrame struct {
 // overlap between that replay and what the widened filter has been buffering is removed the same
 // way as at handshake time (see served).
 //
-// The honest limit here is metric.point and job.underperforming: neither has a row behind it, so
-// widening onto either can only ever start live. Every other kind widens the same way a fresh
+// The honest limit here is metric.point: it has no row behind it, so widening onto it can only
+// ever start live. Every other kind widens the same way a fresh
 // connection opens -- a connection that carried no floor for it yet is treated as `since=0`,
 // which Replay answers with that kind's current snapshot, not silence.
 func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subscriber, payload []byte, delivered *served) error {

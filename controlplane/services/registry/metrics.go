@@ -133,8 +133,9 @@ const (
 // checkUnderperformance compares this job's just-recorded ranking-metric sample to its cohort
 // (every other job in the same platform experiment reporting the same metric, each taken at the
 // progress this job has reached) and, if it is the
-// clear straggler with underperformMinRemaining of its run still ahead, tells only the owning
-// agent so: once per job, never a command. See db.EventJobUnderperforming.
+// clear straggler with underperformMinRemaining of its run still ahead, marks the job's row. The
+// first mark emits job.underperforming to the owning agent: once per job, never a command. See
+// db.EventJobUnderperforming.
 //
 // Trailing is recomputed from the metrics store every time; the only thing kept is the marker on
 // the job's row saying its owner was told. A job launched against siblings that already finished
@@ -145,7 +146,7 @@ const (
 // not synchronous, so a sibling's newest point can be missing. That under-fires for one
 // checkpoint, the safe direction: the next checkpoint sees it.
 func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experiment, metricName string, fractionComplete, value float64, at time.Time) {
-	if s.events == nil || exp.PlatformExperimentID == "" {
+	if exp.PlatformExperimentID == "" {
 		return
 	}
 	if fractionComplete < underperformMinFraction {
@@ -258,25 +259,8 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	if worst-score(value) < margin {
 		return
 	}
-	first, err := s.store.MarkUnderperforming(ctx, exp.ID)
-	if err != nil {
+	if err := s.store.MarkUnderperforming(ctx, exp.ID, metricName); err != nil {
 		s.logger.Warn("registry: mark underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
-		return
-	}
-	if !first {
-		return
-	}
-
-	err = s.events.NotifyEvent(ctx, db.Event{
-		Kind:                 db.EventJobUnderperforming,
-		Subject:              exp.ID,
-		Value:                metricName,
-		Detail:               "trailing its cohort on this ranking metric",
-		PlatformExperimentID: exp.PlatformExperimentID,
-		AgentID:              exp.AgentID,
-	})
-	if err != nil {
-		s.logger.Warn("registry: notify underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
 	}
 }
 

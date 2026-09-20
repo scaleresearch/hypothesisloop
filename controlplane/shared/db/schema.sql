@@ -278,7 +278,9 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
-ALTER TABLE experiments ADD COLUMN IF NOT EXISTS underperforming_notified_at TIMESTAMPTZ;
+-- The ranking metric the job's owner was told it trails its cohort on, written once.
+ALTER TABLE experiments DROP COLUMN IF EXISTS underperforming_notified_at;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS underperforming_metric TEXT;
 
 -- A row from before per-job keys has no store key and would run with empty AWS_* credentials, so
 -- an active one is cancelled the way CancelExperiment would, and no active row may lack a key.
@@ -580,6 +582,7 @@ ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS queued_xid    BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS submitted_xid BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS status_xid       BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS not_admitted_xid BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS underperforming_xid BIGINT;
 ALTER TABLE agent_quotas          ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_findings   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_comments   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
@@ -631,6 +634,9 @@ BEGIN
     IF TG_OP = 'INSERT' OR NEW.submitted_at IS DISTINCT FROM OLD.submitted_at THEN
         NEW.submitted_xid := CASE WHEN NEW.submitted_at IS NULL THEN NULL ELSE NEW.updated_xid END;
     END IF;
+    IF TG_OP = 'INSERT' OR NEW.underperforming_metric IS DISTINCT FROM OLD.underperforming_metric THEN
+        NEW.underperforming_xid := CASE WHEN NEW.underperforming_metric IS NULL THEN NULL ELSE NEW.updated_xid END;
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -652,6 +658,11 @@ BEGIN
     IF NEW.not_admitted_reason NOT IN ('awaiting_admission', 'summary_gate')
        AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
         PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id, NEW.not_admitted_reason, '',
+            NEW.platform_experiment_id, NEW.agent_id);
+    END IF;
+    IF NEW.underperforming_metric IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.underperforming_metric IS DISTINCT FROM OLD.underperforming_metric) THEN
+        PERFORM hypothesisloop_notify_event('job.underperforming', NEW.id, NEW.underperforming_metric, '',
             NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     RETURN NULL;

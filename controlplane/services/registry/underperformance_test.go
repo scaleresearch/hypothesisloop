@@ -18,22 +18,26 @@ import (
 )
 
 // underperformStore answers GetPlatformExperimentMetrics with one fixed ranking metric and
-// GetExperiment with the given experiment. Everything else panics if called — this check touches
-// nothing more of Store.
+// GetExperiment with the given experiment, and records marks the way the experiments row does:
+// the first mark of a job is the job.underperforming event, a later one writes nothing.
+// Everything else panics if called.
 type underperformStore struct {
 	Store
 	exp     *domain.Experiment
 	metrics []domain.MetricDefinition
-	told    map[string]bool
+	marks   *marks
 }
 
-func (s underperformStore) MarkUnderperforming(_ context.Context, id string) (bool, error) {
-	if s.told == nil {
-		return true, nil
+type marks struct{ events []db.Event }
+
+func (s underperformStore) MarkUnderperforming(_ context.Context, id, metricName string) error {
+	for _, e := range s.marks.events {
+		if e.Subject == id {
+			return nil
+		}
 	}
-	first := !s.told[id]
-	s.told[id] = true
-	return first, nil
+	s.marks.events = append(s.marks.events, db.Event{Kind: db.EventJobUnderperforming, Subject: id, Value: metricName})
+	return nil
 }
 
 func (s underperformStore) GetExperiment(_ context.Context, _ string) (*domain.Experiment, error) {
@@ -42,21 +46,6 @@ func (s underperformStore) GetExperiment(_ context.Context, _ string) (*domain.E
 
 func (s underperformStore) GetPlatformExperimentMetrics(_ context.Context, _ string) ([]domain.MetricDefinition, bool, error) {
 	return s.metrics, true, nil
-}
-
-// capturingNotifier records every event handed to it, standing in for the Postgres NOTIFY path
-// this check ultimately drives in production.
-type capturingNotifier struct {
-	events []db.Event
-}
-
-func (n *capturingNotifier) NotifyEvent(_ context.Context, e db.Event) error {
-	n.events = append(n.events, e)
-	return nil
-}
-
-func (n *capturingNotifier) Emit(context.Context, func(db.Stamp) ([]db.Event, error)) error {
-	panic("the underperformance check writes nothing to the graph")
 }
 
 // cohortServer answers the two range queries of the check, value and fraction_complete, with one
@@ -118,12 +107,11 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 	server := cohortSeriesServer([]float64{0.9, 0.9, 0.9125, 0.9375, 0.94375, 0.875})
 	defer server.Close()
 
-	notifier := &capturingNotifier{}
+	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), told: map[string]bool{}},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
-		events:       notifier,
 	}
 
 	// A run of 3 minutes: 36 s in at 20%, 54 s at 30%, 72 s at 40%, where under 2 minutes are left.
@@ -146,12 +134,11 @@ func TestUnderperformanceNeedsAMinimumCohort(t *testing.T) {
 	server := cohortSeriesServer([]float64{0.9}) // only one sibling
 	defer server.Close()
 
-	notifier := &capturingNotifier{}
+	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
-		events:       notifier,
 	}
 
 	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
@@ -167,12 +154,11 @@ func TestUnderperformanceIgnoresStaleSiblings(t *testing.T) {
 	server := staleCohortServer([]float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
-	notifier := &capturingNotifier{}
+	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
-		events:       notifier,
 	}
 
 	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
@@ -188,12 +174,11 @@ func TestUnderperformanceSkipsEarlyProgress(t *testing.T) {
 	server := cohortSeriesServer([]float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
-	notifier := &capturingNotifier{}
+	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
-		events:       notifier,
 	}
 
 	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.05, 0.01, time.Now().UTC())
@@ -211,12 +196,11 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 	server := cohortSeriesServer([]float64{0.9, 0.9, 0.9})
 	defer server.Close()
 
-	notifier := &capturingNotifier{}
+	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
-		events:       notifier,
 	}
 
 	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.88, time.Now().UTC())
@@ -238,12 +222,11 @@ func TestUnderperformanceStaysSilentWhenTheJobIsAboutToEnd(t *testing.T) {
 		fraction float64
 		want     int
 	}{{20 * time.Second, 0.5, 0}, {time.Hour, 0.5, 1}, {10 * time.Minute, 0.9, 0}, {10 * time.Hour, 0.9, 1}} {
-		notifier := &capturingNotifier{}
+		notifier := &marks{}
 		svc := &Service{
-			store:        underperformStore{exp: admittedAgo(tc.admitted), metrics: rankingMetric("acc", "maximize")},
+			store:        underperformStore{exp: admittedAgo(tc.admitted), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 			metricsDBURL: server.URL,
 			logger:       zap.NewNop(),
-			events:       notifier,
 		}
 		svc.checkUnderperformance(context.Background(), admittedAgo(tc.admitted), "acc", tc.fraction, 0.5, time.Now().UTC())
 		if len(notifier.events) != tc.want {
@@ -264,12 +247,11 @@ func TestUnderperformanceComparesSiblingsAtTheJobsOwnProgress(t *testing.T) {
 		value float64
 		want  int
 	}{{0.3, 0}, {0.1, 1}} {
-		notifier := &capturingNotifier{}
+		notifier := &marks{}
 		svc := &Service{
-			store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+			store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 			metricsDBURL: server.URL,
 			logger:       zap.NewNop(),
-			events:       notifier,
 		}
 		svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.3, tc.value, time.Now().UTC())
 		if len(notifier.events) != tc.want {
@@ -300,12 +282,11 @@ func TestUnderperformanceLeavesOutSiblingsBehindTheJob(t *testing.T) {
 	}))
 	defer server.Close()
 
-	notifier := &capturingNotifier{}
+	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
-		events:       notifier,
 	}
 	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.6, 0.1, time.Now().UTC())
 	if len(notifier.events) != 0 {

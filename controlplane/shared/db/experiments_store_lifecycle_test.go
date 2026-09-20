@@ -37,17 +37,69 @@ func TestAJobTheAdmissionLoopHasNotSeenIsAwaitingAdmission(t *testing.T) {
 	}
 }
 
-func TestMarkUnderperformingIsTrueOncePerJob(t *testing.T) {
+// The advisory is written once per job, and that one write is the event: live in the marking
+// transaction, and replayed at the same position to a watcher that was away, until the job ends.
+func TestUnderperformingIsSentOnceAndReplayed(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
 	exps := NewExperimentsStore(pool)
+	events := NewEventsStore(pool, noHypothesisEvents{})
+	ctx := context.Background()
 	id := "underperforming-" + peID
 	seedExperimentForCapTest(t, pool, id, agentID, peID, 1, domain.StatusRunning)
-
-	for i, want := range []bool{true, false} {
-		got, err := exps.MarkUnderperforming(context.Background(), id)
-		if err != nil || got != want {
-			t.Errorf("call %d: MarkUnderperforming = %v, %v, want %v", i+1, got, err, want)
+	filter := EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{EventJobUnderperforming: true}}
+	replay := func(since int64) []Event {
+		t.Helper()
+		got, err := events.Replay(ctx, filter, since)
+		if err != nil {
+			t.Fatalf("Replay(%d): %v", since, err)
 		}
+		return got
+	}
+	if got := replay(0); len(got) != 0 {
+		t.Fatalf("before the mark: replay = %+v, want nothing", got)
+	}
+
+	live, stop := listenForEvents(t, pool)
+	defer stop()
+	for _, metric := range []string{"val_accuracy", "other"} {
+		if err := exps.MarkUnderperforming(ctx, id, metric); err != nil {
+			t.Fatalf("MarkUnderperforming(%s): %v", metric, err)
+		}
+	}
+	// A later write to the row is what the live stream is drained up to.
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'FAILED' WHERE id = $1`, id); err != nil {
+		t.Fatalf("to FAILED: %v", err)
+	}
+	var sent []Event
+	for e := range live {
+		if e.Subject != id {
+			continue
+		}
+		if e.Kind == EventJobUnderperforming {
+			sent = append(sent, e)
+		}
+		if e.Kind == EventExperimentStatus && e.Value == string(domain.StatusFailed) {
+			break
+		}
+	}
+	if len(sent) != 1 || sent[0].Value != "val_accuracy" || sent[0].AgentID != agentID {
+		t.Fatalf("live events = %+v, want one job.underperforming on val_accuracy for %s", sent, agentID)
+	}
+	if got := replay(0); len(got) != 0 {
+		t.Fatalf("after the job ended: replay = %+v, want nothing", got)
+	}
+
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'RUNNING' WHERE id = $1`, id); err != nil {
+		t.Fatalf("back to RUNNING: %v", err)
+	}
+	for _, since := range []int64{0, sent[0].Position} {
+		got := replay(since)
+		if len(got) != 1 || got[0].Identity() != sent[0].Identity() {
+			t.Fatalf("replay since %d = %+v, want the live event %+v", since, got, sent[0])
+		}
+	}
+	if got := replay(sent[0].Position + 1); len(got) != 0 {
+		t.Fatalf("replay past the mark = %+v, want nothing", got)
 	}
 }
 
