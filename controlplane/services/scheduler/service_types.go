@@ -76,6 +76,8 @@ type WorkloadClient interface {
 	// job fits one node in every dimension, not just in accelerators.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
+	// GetClusterIDs maps each connected cluster's name to the id it reports.
+	GetClusterIDs(ctx context.Context) (map[string]string, error)
 }
 
 // NoveltyDetector computes the novelty of a hypothesis relative to existing experiments.

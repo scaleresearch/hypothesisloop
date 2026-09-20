@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -83,7 +84,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			ParentID:               meta.ParentID,
 			AgentID:                meta.AgentID,
 			PlatformExperimentID:   meta.PlatformExperimentID,
-			ProjectID:              meta.ProjectID,
 			CodeRef:                meta.CodeRef,
 			ConfigHash:             meta.ConfigHash,
 			DataRef:                meta.DataRef,
@@ -407,7 +407,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct {
 		Body domain.ClusterSettings
 	}, error) {
-		if err := access.Cluster(ctx, in.ClusterID); err != nil {
+		if err := h.clusterAccess(ctx, access, in.ClusterID); err != nil {
 			return nil, err
 		}
 		cs, err := h.svc.GetClusterSettings(ctx, in.ClusterID)
@@ -442,7 +442,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct {
 		Body domain.ClusterSettings
 	}, error) {
-		if err := access.Cluster(ctx, in.ClusterID); err != nil {
+		if err := h.clusterAccess(ctx, access, in.ClusterID); err != nil {
 			return nil, err
 		}
 		cs := &domain.ClusterSettings{
@@ -460,6 +460,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		out.Body = *cs
 		return out, nil
 	})
+}
+
+// clusterAccess admits the caller to the settings of the cluster reporting clusterID. An id no
+// connected cluster reports resolves to no name, which only staff reach.
+func (h *Handler) clusterAccess(ctx context.Context, access *auth.Access, clusterID string) error {
+	name, err := h.svc.ClusterName(ctx, clusterID)
+	if err != nil {
+		return huma.Error500InternalServerError(err.Error())
+	}
+	return access.Cluster(ctx, name)
 }
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
