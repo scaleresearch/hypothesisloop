@@ -1,48 +1,61 @@
 # Default values for the hypothesisloop chart.
 #
-# Platform policy (accelerator prices, quota, stage ladder, scheduler timing) is NOT
-# duplicated here — it lives in one place, controlplane/settings/hypothesisloop.yaml,
-# staged into files/hypothesisloop.yaml by `make helm-prepare` and rendered verbatim into
-# the ConfigMap. This file only overrides the handful of fields that are genuinely
-# environment-specific (the object store endpoint) and the deployment knobs Helm exists
-# to manage (images, replicas, resources, secrets).
+# Platform policy (accelerator prices, quota, stage ladder, scheduler timing) is not repeated
+# here. It lives in controlplane/settings/hypothesisloop.yaml, which `make helm-prepare` stages
+# into files/hypothesisloop.yaml and templates/config.yaml renders into the ConfigMap. This file
+# holds what differs per deployment: images, addresses, sizes, and which stores run in-cluster.
 
 namespace:
   create: true
   name: hypothesisloop
 
 images:
-  # Built and pushed with `make images` (from the repo root) to a real registry every node in
-  # the target cluster can already reach -- provisioning that reachability is the cluster
-  # provisioner's job, same division of responsibility as runtime/k8s/infra/install.sh's
-  # REGISTRY_URL. No default: a prod registry host is never a safe guess, so rendering fails
-  # fast without one instead of silently defaulting to a dev-only address.
+  # The registry `make images REGISTRY=...` pushed to. Required: every node must be able to pull
+  # from it, and no address is a safe guess.
   registry: ""
   pullPolicy: IfNotPresent
-  # No default either: `make images` computes this from the tree it built and pushed
-  # (content-addressed, so IfNotPresent never risks running stale bytes under a reused tag) --
-  # supply the same value here that it printed.
+  # The TAG `make images` printed. Required. It names the tree content that was built, so
+  # IfNotPresent never runs stale bytes under a reused tag.
   tag: ""
 
+# Every secret comes from this one Secret, which must exist in the namespace before the chart is
+# installed. The chart reads it and never creates it. Keys:
+#
+#   DATABASE_URL                     Postgres connection string. With postgres.enabled it is
+#                                    postgres://<postgres.user>:<POSTGRES_PASSWORD>@hypothesisloop-postgres:5432/<postgres.database>?sslmode=disable
+#   POSTGRES_PASSWORD                only with postgres.enabled
+#   OBJECT_STORE_ACCESS_KEY_ID       object store key that may create service accounts; with
+#   OBJECT_STORE_SECRET_ACCESS_KEY   objectStore.enabled these become the store's root user
+#
+# plus whatever config.secretEnv, cloudAgent.secretEnv and agentLauncher.secretEnv name.
+secretName: hypothesisloop
+
+# Set to any string that changes when the Secret's content does (a hash of it). It is stamped on
+# every pod that reads the Secret, so a changed secret restarts them.
+secretChecksum: ""
+
+config:
+  # Appended verbatim to hypothesisloop.yaml: the sections a deployment adds to the staged file.
+  # Write ${NAME} for a secret and list NAME in secretEnv; the services expand it at start.
+  extra: ""
+  # Secret keys handed as environment variables to control-service and metrics-service, the two
+  # processes that load hypothesisloop.yaml. Every ${NAME} in the rendered file must be here.
+  secretEnv:
+    - DATABASE_URL
+    - OBJECT_STORE_ACCESS_KEY_ID
+    - OBJECT_STORE_SECRET_ACCESS_KEY
+
 postgres:
+  # false when DATABASE_URL in the Secret points at a database run elsewhere.
+  enabled: true
   image: postgres:16-alpine
   user: hypothesisloop
-  password: hypothesisloop
   database: hypothesisloop
   storage: 5Gi
   storageClassName: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 1Gi }
-  # A managed Postgres instance (RDS, Cloud SQL, etc.) instead of the StatefulSet this chart
-  # would otherwise deploy. Only one of url/existingSecret is needed; existingSecret takes an
-  # already-existing Secret name + key so the connection string (which usually carries a
-  # password) never has to sit in plain values.yaml.
-  external:
-    enabled: false
-    url: ""
-    existingSecret: ""
-    existingSecretKey: "url"
 
 greptimedb:
   image: greptime/greptimedb:latest
@@ -51,16 +64,14 @@ greptimedb:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 1Gi }
-  # A managed metrics store (e.g. GreptimeDB Cloud) instead of the StatefulSet this chart would
-  # otherwise deploy. Same url/existingSecret choice as postgres.external above.
+  # A metrics store run elsewhere instead of the StatefulSet: its http URL.
   external:
     enabled: false
     url: ""
-    existingSecret: ""
-    existingSecretKey: "url"
 
-# The hypothesis graph, read and written only by control-service. Pinned: the schema bootstrap and
-# the read-only query guard (controlplane/shared/graphdb) were verified against exactly this version.
+# The hypothesis graph, read and written only by control-service. One shared instance. Pinned: the
+# schema bootstrap and the read-only query guard (controlplane/shared/graphdb) were verified
+# against exactly this version.
 memgraph:
   image: memgraph/memgraph:3.13.1
   storage: 5Gi
@@ -68,11 +79,29 @@ memgraph:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 2Gi }
-  # An existing Memgraph instead of the StatefulSet this chart would otherwise deploy: its bolt
-  # URL, e.g. bolt://memgraph.example:7687.
+  # An existing Memgraph instead of the StatefulSet: its bolt URL, e.g. bolt://memgraph.example:7687.
   external:
     enabled: false
     url: ""
+
+# Durable-data object store (S3 plus the MinIO admin API, which creates each job's key).
+objectStore:
+  # Deploys Silo and creates the bucket named in hypothesisloop.yaml. false when endpoint names
+  # a store run elsewhere.
+  enabled: true
+  image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+  # data_store.endpoint: the one address both the control plane and every job reach the store at.
+  # Required. Jobs in this cluster only: http://object-store.<namespace>.svc:9000. Jobs on other
+  # clusters or rented hosts: an address they can reach, such as a tunnel URL to the NodePort.
+  endpoint: ""
+  storage: 20Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  service:
+    type: NodePort
+    nodePort: 30900
 
 controlService:
   replicas: 1
@@ -81,7 +110,8 @@ controlService:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
   service:
-    type: ClusterIP
+    type: NodePort
+    nodePort: 30081
 
 metricsService:
   replicas: 1
@@ -89,10 +119,41 @@ metricsService:
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
+  service:
+    type: NodePort
+    nodePort: 30084
 
-# Durable-data object store (S3-compatible). Not deployed by this chart — addressed like
-# any other external dependency, same as the platform's own design (see
-# controlplane/settings/hypothesisloop.yaml's data_store comment: the platform is not in
-# the data path). Point this at a real bucket before installing.
-objectStore:
-  endpoint: "http://REPLACE-WITH-HOST-ADDRESS:9000"
+# The API address the browser calls is compiled into the UI image (NEXT_PUBLIC_API_URL, see
+# controlplane/build/Dockerfile.ui), so it is set when the image is built.
+ui:
+  enabled: true
+  replicas: 1
+  port: 3000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  service:
+    type: NodePort
+    nodePort: 30300
+
+# One process per compute provider account; it registers as a cluster and holds that provider's
+# key. Image hypothesisloop-cloud-agent, its one config file from `config` (verbatim, mounted at
+# /settings/cloud-agent.yaml, path in CLOUD_AGENT_CONFIG), secrets from secretEnv.
+cloudAgent:
+  enabled: false
+  config: ""
+  secretEnv: []
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# One process per sandbox provider account; it creates and destroys agent VMs. Image
+# hypothesisloop-agent-launcher, config at /settings/agent-launcher.yaml (path in
+# AGENT_LAUNCHER_CONFIG), secrets from secretEnv.
+agentLauncher:
+  enabled: false
+  config: ""
+  secretEnv: []
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }

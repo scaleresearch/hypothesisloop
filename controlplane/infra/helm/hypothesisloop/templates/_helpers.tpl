@@ -4,73 +4,67 @@
 
 {{/* call as: include "hypothesisloop.image" (dict "name" "control-service" "root" $) */}}
 {{- define "hypothesisloop.image" -}}
-{{ required "images.registry is required -- run `make images` and pass its REGISTRY, or point at your own registry" .root.Values.images.registry }}/hypothesisloop-{{ .name }}:{{ required "images.tag is required -- run `make images` and pass the TAG it built" .root.Values.images.tag }}
+{{ required "images.registry is required: pass the REGISTRY `make images` pushed to" .root.Values.images.registry }}/hypothesisloop-{{ .name }}:{{ required "images.tag is required: pass the TAG `make images` built" .root.Values.images.tag }}
+{{- end -}}
+
+{{/* env entries reading keys of the shared Secret. call as: include "hypothesisloop.secretEnv" (dict "keys" (list "A" "B") "root" $) */}}
+{{- define "hypothesisloop.secretEnv" -}}
+{{- range .keys }}
+- name: {{ . }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $.root.Values.secretName }}
+      key: {{ . }}
+{{- end }}
+{{- end -}}
+
+{{/* Pod annotations that restart a pod when the Secret it reads changes. */}}
+{{- define "hypothesisloop.secretAnnotations" -}}
+checksum/secret: {{ .Values.secretChecksum | quote }}
+{{- end -}}
+
+{{/* The staged hypothesisloop.yaml. */}}
+{{- define "hypothesisloop.stagedConfig" -}}
+{{- $raw := .Files.Get "files/hypothesisloop.yaml" -}}
+{{- if not $raw -}}
+{{- fail "files/hypothesisloop.yaml is missing: run `make helm-prepare` first" -}}
+{{- end -}}
+{{ $raw }}
 {{- end -}}
 
 {{/*
-Postgres connection string, used only to fill the hypothesisloop-db Secret this chart creates
-itself -- skipped entirely when postgres.external.existingSecret names a Secret the operator
-already created (see control-service.yaml/metrics-service.yaml's DATABASE_URL env, which then
-reads that Secret directly instead of this one). In-cluster DNS by default; a managed instance
-(postgres.external.enabled + url) supplies its own connection string instead.
+Replaces the value of one key of the staged config, found by its exact indentation and name.
+Fails when the key is absent, so a renamed setting cannot leave the old value in place.
+call as: include "hypothesisloop.setConfig" (dict "text" $raw "key" "  endpoint" "value" "http://x")
 */}}
-{{- define "hypothesisloop.databaseURL" -}}
-{{- if .Values.postgres.external.enabled -}}
-{{- if not .Values.postgres.external.url -}}
-{{- fail "postgres.external.enabled is true but neither postgres.external.url nor postgres.external.existingSecret is set" -}}
+{{- define "hypothesisloop.setConfig" -}}
+{{- $pattern := printf "(?m)^%s:.*$" .key -}}
+{{- if not (regexMatch $pattern .text) -}}
+{{- fail (printf "files/hypothesisloop.yaml has no %q key" .key) -}}
 {{- end -}}
-{{ .Values.postgres.external.url }}
-{{- else -}}
-postgres://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@hypothesisloop-postgres:5432/{{ .Values.postgres.database }}?sslmode=disable
-{{- end -}}
+{{ regexReplaceAllLiteral $pattern .text (printf "%s: %s" .key .value) }}
 {{- end -}}
 
-{{/* Name of the Secret holding DATABASE_URL: the operator's own when set, else ours. */}}
-{{- define "hypothesisloop.databaseSecretName" -}}
-{{- if .Values.postgres.external.existingSecret -}}
-{{ .Values.postgres.external.existingSecret }}
-{{- else -}}
-hypothesisloop-db
+{{/* The bucket named by data_store.bucket in the staged config. */}}
+{{- define "hypothesisloop.bucket" -}}
+{{- $line := regexFind "(?m)^  bucket: \\S+" (include "hypothesisloop.stagedConfig" .) -}}
+{{- if not $line -}}
+{{- fail "files/hypothesisloop.yaml has no data_store.bucket" -}}
 {{- end -}}
-{{- end -}}
-
-{{/* Key within that Secret holding DATABASE_URL. */}}
-{{- define "hypothesisloop.databaseSecretKey" -}}
-{{- if .Values.postgres.external.existingSecret -}}
-{{ .Values.postgres.external.existingSecretKey }}
-{{- else -}}
-DATABASE_URL
-{{- end -}}
+{{ trimPrefix "  bucket: " $line }}
 {{- end -}}
 
-{{/*
-GreptimeDB metrics_db_url, rendered into the staged hypothesisloop.yaml ConfigMap
-(templates/config.yaml). Cannot share hypothesisloop.databaseURL above -- GreptimeDB's URL is
-a bare http:// host:port, not a postgres:// connection string -- so it gets its own helper.
-existingSecret is deliberately not read here: a ConfigMap is plaintext, so pulling a Secret's
-value into it at template time would defeat the point of a Secret. Use greptimedb.external.url
-for a managed instance (its address is not normally sensitive the way a DB password is); route
-real credentials to GreptimeDB itself via whatever auth its own client config supports, not
-through this file.
-*/}}
 {{- define "hypothesisloop.metricsDBURL" -}}
 {{- if .Values.greptimedb.external.enabled -}}
-{{- if not .Values.greptimedb.external.url -}}
-{{- fail "greptimedb.external.enabled is true but greptimedb.external.url is not set (existingSecret is not supported here -- see this helper's comment)" -}}
-{{- end -}}
-{{ .Values.greptimedb.external.url }}
+{{ required "greptimedb.external.enabled is true but greptimedb.external.url is not set" .Values.greptimedb.external.url }}
 {{- else -}}
 http://greptimedb:4000
 {{- end -}}
 {{- end -}}
 
-{{/* Memgraph graph_db_url, rendered into the staged hypothesisloop.yaml ConfigMap like metrics_db_url. */}}
 {{- define "hypothesisloop.graphDBURL" -}}
 {{- if .Values.memgraph.external.enabled -}}
-{{- if not .Values.memgraph.external.url -}}
-{{- fail "memgraph.external.enabled is true but memgraph.external.url is not set" -}}
-{{- end -}}
-{{ .Values.memgraph.external.url }}
+{{ required "memgraph.external.enabled is true but memgraph.external.url is not set" .Values.memgraph.external.url }}
 {{- else -}}
 bolt://memgraph:7687
 {{- end -}}

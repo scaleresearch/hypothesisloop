@@ -10,6 +10,9 @@ spec:
   ports:
     - port: {{ .Values.controlService.port }}
       targetPort: {{ .Values.controlService.port }}
+      {{- if eq .Values.controlService.service.type "NodePort" }}
+      nodePort: {{ .Values.controlService.service.nodePort }}
+      {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -25,10 +28,13 @@ spec:
     metadata:
       labels:
         app: hypothesisloop-control-service
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+        {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
     spec:
-      {{- if not (and .Values.postgres.external.enabled .Values.memgraph.external.enabled) }}
+      {{- if or .Values.postgres.enabled (not .Values.memgraph.external.enabled) }}
       initContainers:
-        {{- if not .Values.postgres.external.enabled }}
+        {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
           image: {{ .Values.postgres.image }}
           command: ["sh", "-c", "until pg_isready -h hypothesisloop-postgres -U {{ .Values.postgres.user }}; do sleep 2; done"]
@@ -48,11 +54,7 @@ spec:
               value: {{ .Values.controlService.port | quote }}
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hypothesisloop.databaseSecretName" . }}
-                  key: {{ include "hypothesisloop.databaseSecretKey" . }}
+            {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.config.secretEnv "root" $) | nindent 12 }}
           ports:
             - containerPort: {{ .Values.controlService.port }}
           volumeMounts:

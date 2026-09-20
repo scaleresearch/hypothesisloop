@@ -1,0 +1,50 @@
+{{- if .Values.agentLauncher.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hypothesisloop-agent-launcher-config
+  namespace: {{ include "hypothesisloop.namespace" . }}
+data:
+  agent-launcher.yaml: |
+{{ required "agentLauncher.config is required when agentLauncher.enabled is true" .Values.agentLauncher.config | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hypothesisloop-agent-launcher
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  replicas: 1
+  # One process per provider account: the old pod is gone before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hypothesisloop-agent-launcher
+  template:
+    metadata:
+      labels:
+        app: hypothesisloop-agent-launcher
+      annotations:
+        checksum/config: {{ .Values.agentLauncher.config | sha256sum }}
+        {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
+    spec:
+      containers:
+        - name: agent-launcher
+          image: {{ include "hypothesisloop.image" (dict "name" "agent-launcher" "root" $) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: AGENT_LAUNCHER_CONFIG
+              value: /settings/agent-launcher.yaml
+            {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.agentLauncher.secretEnv "root" $) | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /settings
+              readOnly: true
+          resources:
+            {{- toYaml .Values.agentLauncher.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: hypothesisloop-agent-launcher-config
+{{- end }}

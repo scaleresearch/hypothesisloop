@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hypothesisloop
-description: HypothesisLoop control plane — control-service, metrics-service, Postgres, GreptimeDB and Memgraph.
+description: HypothesisLoop control plane in one namespace (control-service, metrics-service, the UI, Postgres, GreptimeDB, Memgraph and the object store).
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"

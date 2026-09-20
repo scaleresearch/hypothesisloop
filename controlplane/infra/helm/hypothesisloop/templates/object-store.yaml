@@ -1,0 +1,98 @@
+{{- if .Values.objectStore.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: object-store
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  type: {{ .Values.objectStore.service.type }}
+  selector:
+    app: hypothesisloop-object-store
+  ports:
+    - port: 9000
+      targetPort: 9000
+      {{- if eq .Values.objectStore.service.type "NodePort" }}
+      nodePort: {{ .Values.objectStore.service.nodePort }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hypothesisloop-object-store
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  serviceName: object-store
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hypothesisloop-object-store
+  template:
+    metadata:
+      labels:
+        app: hypothesisloop-object-store
+      annotations:
+        {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
+    spec:
+      containers:
+        - name: silo
+          image: {{ .Values.objectStore.image }}
+          args: ["server", "/data", "--address", "0.0.0.0:9000"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: OBJECT_STORE_ACCESS_KEY_ID
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: OBJECT_STORE_SECRET_ACCESS_KEY
+          ports:
+            - containerPort: 9000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.objectStore.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.objectStore.storageClassName }}
+        storageClassName: {{ .Values.objectStore.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.objectStore.storage }}
+---
+{{- $bucket := include "hypothesisloop.bucket" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # A Job's pod template cannot be edited, so the name carries what the template depends on: a
+  # new image or bucket makes a new Job and Helm removes the old one.
+  name: hypothesisloop-object-store-bucket-{{ print .Values.objectStore.image $bucket | sha256sum | trunc 8 }}
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bucket
+          image: {{ .Values.objectStore.image }}
+          command:
+            - sh
+            - -c
+            - mcli alias set hl http://object-store:9000 "$OBJECT_STORE_ACCESS_KEY_ID" "$OBJECT_STORE_SECRET_ACCESS_KEY" && mcli mb --ignore-existing hl/{{ $bucket }}
+          env:
+            {{- include "hypothesisloop.secretEnv" (dict "keys" (list "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY") "root" $) | nindent 12 }}
+{{- end }}

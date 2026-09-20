@@ -1,0 +1,49 @@
+{{- if .Values.ui.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  type: {{ .Values.ui.service.type }}
+  selector:
+    app: hypothesisloop-ui
+  ports:
+    - port: {{ .Values.ui.port }}
+      targetPort: {{ .Values.ui.port }}
+      {{- if eq .Values.ui.service.type "NodePort" }}
+      nodePort: {{ .Values.ui.service.nodePort }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hypothesisloop-ui
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      app: hypothesisloop-ui
+  template:
+    metadata:
+      labels:
+        app: hypothesisloop-ui
+    spec:
+      containers:
+        - name: ui
+          image: {{ include "hypothesisloop.image" (dict "name" "ui" "root" $) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: PORT
+              value: {{ .Values.ui.port | quote }}
+          ports:
+            - containerPort: {{ .Values.ui.port }}
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.ui.port }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+{{- end }}

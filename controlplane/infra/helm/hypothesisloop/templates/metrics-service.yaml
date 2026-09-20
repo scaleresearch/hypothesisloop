@@ -4,11 +4,15 @@ metadata:
   name: metrics-service
   namespace: {{ include "hypothesisloop.namespace" . }}
 spec:
+  type: {{ .Values.metricsService.service.type }}
   selector:
     app: hypothesisloop-metrics-service
   ports:
     - port: {{ .Values.metricsService.port }}
       targetPort: {{ .Values.metricsService.port }}
+      {{- if eq .Values.metricsService.service.type "NodePort" }}
+      nodePort: {{ .Values.metricsService.service.nodePort }}
+      {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -24,8 +28,11 @@ spec:
     metadata:
       labels:
         app: hypothesisloop-metrics-service
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+        {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
     spec:
-      {{- if not .Values.postgres.external.enabled }}
+      {{- if .Values.postgres.enabled }}
       initContainers:
         - name: wait-for-postgres
           image: {{ .Values.postgres.image }}
@@ -40,11 +47,7 @@ spec:
               value: {{ .Values.metricsService.port | quote }}
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hypothesisloop.databaseSecretName" . }}
-                  key: {{ include "hypothesisloop.databaseSecretKey" . }}
+            {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.config.secretEnv "root" $) | nindent 12 }}
           ports:
             - containerPort: {{ .Values.metricsService.port }}
           volumeMounts:

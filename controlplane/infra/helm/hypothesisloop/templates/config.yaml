@@ -1,10 +1,10 @@
-{{- $raw := .Files.Get "files/hypothesisloop.yaml" }}
-{{- if not $raw }}
-{{- fail "files/hypothesisloop.yaml is missing — run `make helm-prepare` before installing this chart" }}
-{{- end }}
-{{- $raw = regexReplaceAll "endpoint: http://REPLACE-WITH-HOST-ADDRESS:9000" $raw (printf "endpoint: %s" .Values.objectStore.endpoint) }}
-{{- $raw = regexReplaceAll "metrics_db_url: http://greptimedb:4000" $raw (printf "metrics_db_url: %s" (include "hypothesisloop.metricsDBURL" .)) }}
-{{- $raw = regexReplaceAll "graph_db_url: bolt://memgraph:7687" $raw (printf "graph_db_url: %s" (include "hypothesisloop.graphDBURL" .)) }}
+{{- $raw := include "hypothesisloop.stagedConfig" . }}
+{{- $endpoint := required "objectStore.endpoint is required: the address the control plane and every job reach the object store at" .Values.objectStore.endpoint }}
+{{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "key" "  endpoint" "value" $endpoint) }}
+{{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "key" "  access_key_id" "value" "${OBJECT_STORE_ACCESS_KEY_ID}") }}
+{{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "key" "  secret_access_key" "value" "${OBJECT_STORE_SECRET_ACCESS_KEY}") }}
+{{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "key" "  metrics_db_url" "value" (include "hypothesisloop.metricsDBURL" .)) }}
+{{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "key" "  graph_db_url" "value" (include "hypothesisloop.graphDBURL" .)) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,14 +13,6 @@ metadata:
 data:
   hypothesisloop.yaml: |
 {{ $raw | indent 4 }}
-{{- if not .Values.postgres.external.existingSecret }}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: hypothesisloop-db
-  namespace: {{ include "hypothesisloop.namespace" . }}
-type: Opaque
-stringData:
-  DATABASE_URL: {{ include "hypothesisloop.databaseURL" . | quote }}
+{{- with .Values.config.extra }}
+{{ . | indent 4 }}
 {{- end }}
