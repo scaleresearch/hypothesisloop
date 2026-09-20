@@ -74,7 +74,28 @@ lib_render_settings() {
 export HYPOTHESISLOOP_CONFIG="${HYPOTHESISLOOP_CONFIG:-${LIB_AUTH_REPO}/controlplane/settings/.hypothesisloop.rendered.yaml}"
 export DATABASE_URL="${DATABASE_URL:-postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable}"
 
+# lib_fresh_settings: renders the local settings again when the committed file is newer than
+# them. A caller outside make (a test runner, a script) otherwise loads settings rendered before
+# a required key was added, and hl-admin stops on the key it misses. Settings named by the
+# caller are the caller's to keep.
+lib_fresh_settings() {
+  local rendered="${LIB_AUTH_REPO}/controlplane/settings/.hypothesisloop.rendered.yaml"
+  local address_file="${LIB_AUTH_REPO}/localdev/.host-address"
+  if [[ "${HYPOTHESISLOOP_CONFIG}" != "${rendered}" ]]; then
+    return 0
+  fi
+  if [[ -f "${rendered}" && ! "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" -nt "${rendered}" ]]; then
+    return 0
+  fi
+  if [[ ! -s "${address_file}" ]]; then
+    echo "auth: the local settings are not rendered from the current controlplane/settings/hypothesisloop.yaml: run make render-settings" >&2
+    return 1
+  fi
+  lib_render_settings "$(cat "${address_file}")" "${rendered}"
+}
+
 lib_hl_admin() {
+  lib_fresh_settings || return 1
   (cd "${LIB_AUTH_REPO}" && go run ./controlplane/cmd/hl-admin "$@")
 }
 
