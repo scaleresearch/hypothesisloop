@@ -42,9 +42,6 @@ type Config struct {
 	Provider      provider.Provider
 	HTTPClient    *http.Client
 	Interval      time.Duration
-	// BootLimit is how long an instance may stay in StateStarting, counted from the StartedAt its
-	// provider reports, before it is destroyed and rented again.
-	BootLimit time.Duration
 	// CreatePause is waited between two creates of one pass, for a provider that limits how fast
 	// instances may be rented. Zero is no pause.
 	CreatePause time.Duration
@@ -112,9 +109,6 @@ func (cfg Config) Validate() error {
 	if cfg.Interval <= 0 {
 		return errors.New("agentlaunch: Interval must be positive")
 	}
-	if cfg.BootLimit <= 0 {
-		return errors.New("agentlaunch: BootLimit must be positive")
-	}
 	if cfg.CreatePause < 0 {
 		return errors.New("agentlaunch: CreatePause must not be negative")
 	}
@@ -165,7 +159,6 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		return fmt.Errorf("fetch desired state: %w", err)
 	}
 
-	now := time.Now()
 	var failures []error
 	destroy := func(i provider.Instance, why string) bool {
 		if err := l.provider.Destroy(ctx, i.ID); err != nil {
@@ -207,13 +200,13 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	var lastCreateError error
 	for _, name := range sortedKeys(want.instances) {
 		// One instance runs the agent: the live one with the lowest id. A provider that lists
-		// with a lag or a create that failed after it succeeded leaves a second, and one
-		// starting for longer than the boot limit will never run its command. Both go.
+		// with a lag or a create that failed after it succeeded leaves a second, which goes.
 		//
-		// An exited one is never rented again from here. It was reported with this pass's
-		// question, and the control plane answers an exit it accepts with another name or with
-		// none. One still asked for under its own name is left as it is for the next answer, and
-		// goes only as the leftover beside a live one.
+		// An exited one is never rented again from here, and one that stays starting is never
+		// replaced from here. Both were reported with this pass's question, and the control
+		// plane answers one it gives up on with another name or with none. An exited one still
+		// asked for under its own name is left as it is for the next answer, and goes only as
+		// the leftover beside a live one.
 		var live, exited []provider.Instance
 		cleared := true
 		instances := byName[name]
@@ -222,8 +215,6 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			switch {
 			case i.State == provider.StateExited:
 				exited = append(exited, i)
-			case l.stuckStarting(i, now):
-				cleared = destroy(i, fmt.Sprintf("still starting after %s, the boot limit is %s", now.Sub(i.StartedAt).Round(time.Second), l.cfg.BootLimit)) && cleared
 			case len(live) > 0:
 				cleared = destroy(i, "duplicate") && cleared
 			default:
@@ -306,16 +297,6 @@ func tail(text string, limit int) string {
 		return text
 	}
 	return strings.ToValidUTF8(text[len(text)-limit:], "")
-}
-
-// stuckStarting reports an instance that has been starting for longer than the boot limit. An
-// instance whose provider reports no start time, or one in the future, has no age to judge and
-// is left to start.
-func (l *Launcher) stuckStarting(i provider.Instance, now time.Time) bool {
-	if i.State != provider.StateStarting || i.StartedAt.Unix() <= 0 {
-		return false
-	}
-	return now.Sub(i.StartedAt) > l.cfg.BootLimit
 }
 
 // pause waits CreatePause and reports false when ctx ended first.

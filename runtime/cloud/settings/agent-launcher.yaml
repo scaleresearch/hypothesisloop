@@ -19,13 +19,6 @@ namespace: main
 # has to change. Set this against the provider's rate limit.
 reconcile_interval_seconds: 15
 
-# How long an instance may stay starting, counted from when its provider says it was created,
-# before the launcher destroys it and rents it again: a machine whose command never came up is
-# billed with no agent in it. A first boot pulls the agent image, which took about 11 seconds on
-# the slowest provider measured, so 120 leaves a pull ten times slower alone. Too low and a slow
-# pull is destroyed mid-way on every pass and no agent ever starts.
-boot_limit_seconds: 120
-
 # Waited between two creates of one pass, for a provider that limits how fast instances may be
 # rented: the strictest one shipped documents one create a second. A provider that ends every
 # instance at a fixed age makes all agents of an experiment due at once, and this is what spreads

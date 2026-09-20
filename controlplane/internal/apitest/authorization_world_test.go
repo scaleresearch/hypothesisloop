@@ -200,6 +200,10 @@ func (noLauncherAgents) RecordAgentInstanceExit(context.Context, string, string,
 	panic("the launcher handler reached its store")
 }
 
+func (noLauncherAgents) RecordAgentInstanceStuck(context.Context, string, string, string, time.Duration, int) (bool, error) {
+	panic("the launcher handler reached its store")
+}
+
 // reached is what a request answers once every check let it through and the handler asked a
 // service for something: the services here hold no store, so that first ask panics.
 const reached = 599
@@ -251,7 +255,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	launchers := chi.NewRouter()
 	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, access, logger)
-	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, "image", "http://api", worldSecret, logger))
+	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, "image", "http://api", worldSecret, time.Minute, logger))
 	api.router.Mount("/internal/launchers", launchers)
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)

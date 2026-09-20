@@ -42,6 +42,20 @@ type launcherStore struct {
 	asked      []string
 	windDown   time.Duration
 	exitLogs   map[string]string
+	// askedAgo is how long ago each agent's current instance name was first asked for.
+	askedAgo map[string]time.Duration
+}
+
+const testBootLimit = 5 * time.Minute
+
+func (s *launcherStore) RecordAgentInstanceStuck(ctx context.Context, pe, agent, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+	if err := s.writeErr[agent]; err != nil {
+		return false, err
+	}
+	if s.askedAgo[agent] <= bootLimit {
+		return false, nil
+	}
+	return s.RecordAgentInstanceExit(ctx, pe, agent, name, "still starting past the boot limit", maxRestarts)
 }
 
 func (s *launcherStore) ListLauncherAgents(_ context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error) {
@@ -77,6 +91,7 @@ func (s *launcherStore) SetAgentInstanceName(_ context.Context, pe, agent, name 
 		return err
 	}
 	s.find(pe, agent).Name = name
+	delete(s.askedAgo, agent)
 	return nil
 }
 
@@ -133,7 +148,7 @@ func reconcileWith(t *testing.T, store Store, caller auth.Principal, launcher st
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(store, testImage, testAPIURL, testSecret, logger))
+	RegisterHuma(doc, NewHandler(store, testImage, testAPIURL, testSecret, testBootLimit, logger))
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -381,7 +396,7 @@ func TestAChangeOfConfigOrOfTheLaunchersInputsRenamesRunningInstancesAndLeavesEn
 	// The same agents under another image: the handler is built anew, as after a config change.
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(store, "registry.example.invalid/agent:2", "https://moved.example.invalid", testSecret, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(store, "registry.example.invalid/agent:2", "https://moved.example.invalid", testSecret, testBootLimit, zap.NewNop()))
 	raw, _ := json.Marshal(rotated)
 	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
@@ -468,7 +483,7 @@ func TestARequestWithNoTokenIsRefused(t *testing.T) {
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	store := &launcherStore{}
-	RegisterHuma(doc, NewHandler(store, testImage, testAPIURL, testSecret, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(store, testImage, testAPIURL, testSecret, testBootLimit, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	raw, _ := json.Marshal(observed())
 	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
@@ -617,11 +632,12 @@ func TestANameChangesWithWhatTheInstanceRunsAndNotWithTheSecret(t *testing.T) {
 
 func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
 	for name, build := range map[string]func(){
-		"no store":  func() { NewHandler(nil, testImage, testAPIURL, testSecret, zap.NewNop()) },
-		"no image":  func() { NewHandler(&launcherStore{}, "", testAPIURL, testSecret, zap.NewNop()) },
-		"no url":    func() { NewHandler(&launcherStore{}, testImage, "", testSecret, zap.NewNop()) },
-		"no secret": func() { NewHandler(&launcherStore{}, testImage, testAPIURL, "", zap.NewNop()) },
-		"no logger": func() { NewHandler(&launcherStore{}, testImage, testAPIURL, testSecret, nil) },
+		"no store":  func() { NewHandler(nil, testImage, testAPIURL, testSecret, testBootLimit, zap.NewNop()) },
+		"no image":  func() { NewHandler(&launcherStore{}, "", testAPIURL, testSecret, testBootLimit, zap.NewNop()) },
+		"no url":    func() { NewHandler(&launcherStore{}, testImage, "", testSecret, testBootLimit, zap.NewNop()) },
+		"no secret": func() { NewHandler(&launcherStore{}, testImage, testAPIURL, "", testBootLimit, zap.NewNop()) },
+		"no logger": func() { NewHandler(&launcherStore{}, testImage, testAPIURL, testSecret, testBootLimit, nil) },
+		"no limit":  func() { NewHandler(&launcherStore{}, testImage, testAPIURL, testSecret, 0, zap.NewNop()) },
 	} {
 		func() {
 			defer func() {
@@ -631,5 +647,44 @@ func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
 			}()
 			build()
 		}()
+	}
+}
+
+func TestAMachineReportedAsStartingPastTheBootLimitIsGivenUpOnLikeAnExit(t *testing.T) {
+	store := &launcherStore{
+		byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-slow")}, {AgentSignup: hosted("pe-1", "ag-absent")}}},
+		askedAgo:   map[string]time.Duration{},
+	}
+	first := mustReconcile(t, store, observed())
+	slow, absent := first.Instances[0].Name, first.Instances[1].Name
+
+	// Inside the limit, and for a machine the provider does not list at all, nothing is decided:
+	// a create that keeps failing is no boot.
+	store.askedAgo = map[string]time.Duration{"ag-slow": testBootLimit - time.Second, "ag-absent": 24 * time.Hour}
+	answer := mustReconcile(t, store, observed(ObservedInstance{Name: slow, State: "starting"}))
+	if answer.Instances[0].Name != slow || answer.Instances[1].Name != absent {
+		t.Fatalf("answer = %+v, want both names unchanged", answer.Instances)
+	}
+
+	store.askedAgo["ag-slow"] = testBootLimit + time.Second
+	answer = mustReconcile(t, store, observed(ObservedInstance{Name: slow, State: "starting"}))
+	if answer.Instances[0].Name == slow || answer.Instances[1].Name != absent {
+		t.Fatalf("answer = %+v, want the slow agent under a new name", answer.Instances)
+	}
+	recorded := store.find("pe-1", "ag-slow")
+	if recorded.Restarts != 1 || recorded.Stopped || recorded.ExitedAt == nil || recorded.Name != answer.Instances[0].Name {
+		t.Fatalf("recorded %+v", recorded)
+	}
+	// The replacement's time starts when it is asked for.
+	again := mustReconcile(t, store, observed(ObservedInstance{Name: answer.Instances[0].Name, State: "starting"}))
+	if again.Instances[0].Name != answer.Instances[0].Name {
+		t.Fatal("the replacement was given up on at once")
+	}
+
+	// Running, however long ago it was asked for, is no boot.
+	store.askedAgo["ag-slow"] = 24 * time.Hour
+	up := mustReconcile(t, store, observed(ObservedInstance{Name: again.Instances[0].Name, State: "running"}))
+	if up.Instances[0].Name != again.Instances[0].Name || store.find("pe-1", "ag-slow").Restarts != 1 {
+		t.Fatal("a running machine was held to the boot limit")
 	}
 }

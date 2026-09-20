@@ -120,7 +120,6 @@ func (h *harness) config() Config {
 		Provider:      h.rented,
 		HTTPClient:    h.cp.server.Client(),
 		Interval:      time.Second,
-		BootLimit:     2 * time.Minute,
 		Log: func(format string, args ...any) {
 			h.logMu.Lock()
 			defer h.logMu.Unlock()
@@ -753,7 +752,6 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 		"no interval":         func(c *Config) { c.Interval = 0 },
 		"no model provider":   func(c *Config) { c.ModelProvider = "" },
 		"no provider env":     func(c *Config) { c.Env = nil },
-		"no boot limit":       func(c *Config) { c.BootLimit = 0 },
 		"negative pause":      func(c *Config) { c.CreatePause = -time.Second },
 		"empty env value":     func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
 		"no provider":         func(c *Config) { c.Provider = nil },
@@ -766,23 +764,6 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-}
-
-// since lists what the wrapped provider rents with the start times a test gives by name, as an
-// adapter that reports when an instance was created does.
-type since struct {
-	provider.Provider
-	started map[string]time.Time
-}
-
-func (p *since) List(ctx context.Context, prefix string) ([]provider.Instance, error) {
-	listed, err := p.Provider.List(ctx, prefix)
-	for i := range listed {
-		if at, set := p.started[listed[i].Name]; set {
-			listed[i].StartedAt = at
-		}
-	}
-	return listed, err
 }
 
 func (h *harness) launcherWith(edit func(*Config)) *Launcher {
@@ -808,102 +789,25 @@ func (h *harness) logged(text string) int {
 	return count
 }
 
-func TestAnInstanceStartingPastTheBootLimitIsDestroyedAndRentedAgain(t *testing.T) {
+func TestAnInstanceThatStaysStartingIsReportedAndNeverReplacedFromHere(t *testing.T) {
 	h := newHarness(t)
-	clock := &since{Provider: h.rented, started: map[string]time.Time{}}
-	launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
-	h.cp.want([]entry{agent("a"), agent("b")}, nil)
-	if err := launcher.Pass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	stuck := h.rented.IDs(full("a"))
-	slow := h.rented.IDs(full("b"))
-	clock.started[full("a")] = time.Now().Add(-2*time.Minute - time.Second)
-	clock.started[full("b")] = time.Now().Add(-2*time.Minute + 10*time.Second)
-
-	if err := launcher.Pass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	h.names(full("a"), full("b"))
-	if got := h.rented.IDs(full("a")); len(got) != 1 || got[0] == stuck[0] {
-		t.Fatalf("the stuck instance was not replaced: %v, was %v", got, stuck)
-	}
-	if got := h.rented.IDs(full("b")); !reflect.DeepEqual(got, slow) {
-		t.Fatalf("an instance inside the boot limit was replaced: %v, was %v", got, slow)
-	}
-	if h.logged("still starting after") != 1 || h.logged("the boot limit is 2m0s") != 1 {
-		t.Fatalf("log = %q", h.log)
-	}
-}
-
-func TestOnlyAStartingInstanceWithAKnownAgeIsHeldToTheBootLimit(t *testing.T) {
-	long := time.Now().Add(-24 * time.Hour)
-	for name, tc := range map[string]struct {
-		started time.Time
-		running bool
-	}{
-		"no start time reported":      {started: time.Time{}},
-		"the epoch for no start time": {started: time.Unix(0, 0)},
-		"a start time in the future":  {started: time.Now().Add(time.Hour)},
-		"running for a day":           {started: long, running: true},
-	} {
-		h := newHarness(t)
-		clock := &since{Provider: h.rented, started: map[string]time.Time{}}
-		launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
-		h.cp.want([]entry{agent("a")}, nil)
-		if err := launcher.Pass(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if tc.running {
-			h.rented.Start(full("a"))
-		}
-		clock.started[full("a")] = tc.started
-		for range 3 {
-			if err := launcher.Pass(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
-			t.Errorf("%s: creates %d destroys %d, want the instance left alone", name, h.rented.Calls("Create"), h.rented.Calls("Destroy"))
-		}
-	}
-}
-
-func TestAStuckInstanceThatCannotBeDestroyedIsNotRentedBeside(t *testing.T) {
-	h := newHarness(t)
-	clock := &since{Provider: h.rented, started: map[string]time.Time{}}
-	launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
 	h.cp.want([]entry{agent("a")}, nil)
-	if err := launcher.Pass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	clock.started[full("a")] = time.Now().Add(-time.Hour)
-	h.rented.Fail = func(method, _ string) error {
-		if method == "Destroy" {
-			return errors.New("vendor refused")
+	h.mustPass()
+	ids := h.rented.IDs(full("a"))
+	for range 5 {
+		h.mustPass()
+		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "starting"}}) {
+			t.Fatalf("told the control plane %+v", got)
 		}
-		return nil
 	}
-	if err := launcher.Pass(context.Background()); err == nil || !strings.Contains(err.Error(), "destroy "+full("a")) {
-		t.Fatalf("err = %v", err)
+	if !reflect.DeepEqual(h.rented.IDs(full("a")), ids) || h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
+		t.Fatalf("a starting instance was replaced by the launcher: creates %d destroys %d", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
 	}
-	if got := h.rented.IDs(full("a")); len(got) != 1 || h.rented.Calls("Create") != 1 {
-		t.Fatalf("instances %v, creates %d", got, h.rented.Calls("Create"))
-	}
-}
 
-func TestAnEndingInstanceIsNotHeldToTheBootLimit(t *testing.T) {
-	h := newHarness(t)
-	clock := &since{Provider: h.rented, started: map[string]time.Time{full("a"): time.Now().Add(-time.Hour)}}
-	launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
-	rent(t, h.rented, full("a"))
-	h.cp.want(nil, []string{"a"})
-	if err := launcher.Pass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if h.rented.Calls("Destroy") != 0 || h.rented.Calls("Create") != 1 {
-		t.Fatalf("destroys %d creates %d", h.rented.Calls("Destroy"), h.rented.Calls("Create"))
-	}
+	// The control plane gives up on it: another name, and the machine is replaced.
+	h.cp.want([]entry{agent("a-again")}, nil)
+	h.mustPass()
+	h.names(full("a-again"))
 }
 
 // timed records when each create reached the provider.

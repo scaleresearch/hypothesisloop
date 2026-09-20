@@ -31,6 +31,17 @@ const contractSecret = "a-signing-secret-only-this-test-knows"
 // writes the handler makes.
 type signups struct {
 	agents []db.LauncherAgent
+	// askedAgo is how long ago each agent's current instance name was first asked for.
+	askedAgo map[string]time.Duration
+}
+
+const contractBootLimit = 5 * time.Minute
+
+func (s *signups) RecordAgentInstanceStuck(ctx context.Context, pe, agentID, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+	if s.askedAgo[agentID] <= bootLimit {
+		return false, nil
+	}
+	return s.RecordAgentInstanceExit(ctx, pe, agentID, name, "still starting past the boot limit", maxRestarts)
 }
 
 func (s *signups) ListLauncherAgents(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherAgent, error) {
@@ -57,6 +68,7 @@ func (s *signups) instance(agentID string) *domain.AgentInstance {
 
 func (s *signups) SetAgentInstanceName(_ context.Context, _, agentID, name string) error {
 	s.instance(agentID).Name = name
+	delete(s.askedAgo, agentID)
 	return nil
 }
 
@@ -103,10 +115,10 @@ type contract struct {
 
 func newContract(t *testing.T, agents ...db.LauncherAgent) *contract {
 	t.Helper()
-	c := &contract{t: t, store: &signups{agents: agents}, rented: fake.New()}
+	c := &contract{t: t, store: &signups{agents: agents, askedAgo: map[string]time.Duration{}}, rented: fake.New()}
 	launchers := chi.NewRouter()
 	doc := apidocs.New(launchers, "launcher", "1.0.0", "", onlyTheLauncher{}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, "registry.example.invalid/agent:1", "https://api.example.invalid", contractSecret, zap.NewNop()))
+	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, "registry.example.invalid/agent:1", "https://api.example.invalid", contractSecret, contractBootLimit, zap.NewNop()))
 	root := chi.NewRouter()
 	root.Mount("/internal/launchers", launchers)
 	server := httptest.NewServer(root)
@@ -116,7 +128,7 @@ func newContract(t *testing.T, agents ...db.LauncherAgent) *contract {
 		Name: "main", APIURL: server.URL, Token: launcherToken, Namespace: "ns",
 		Command: []string{"run-agent"}, Size: Size{CPUMillis: 1000, MemoryBytes: 1 << 30, DiskBytes: 1 << 30},
 		ModelProvider: "example", Env: map[string]string{"MODEL_CREDENTIAL": oauthToken},
-		Provider: c.rented, HTTPClient: server.Client(), Interval: time.Second, BootLimit: time.Minute,
+		Provider: c.rented, HTTPClient: server.Client(), Interval: time.Second,
 		Log: func(format string, args ...any) {},
 	})
 	if err != nil {
@@ -263,5 +275,50 @@ func TestARotatedCredentialReplacesEveryRunningInstance(t *testing.T) {
 	}
 	if strings.Contains(names[0], "rotated") {
 		t.Fatal("the credential is in the instance name")
+	}
+}
+
+func TestAMachineThatNeverStartsIsReplacedByTheControlPlanesDecisionAndCountedAsARestart(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-slow"))
+	c.pass()
+	first := c.rented.Names()[0]
+	firstIDs := c.rented.IDs(first)
+
+	c.store.askedAgo["ag-slow"] = contractBootLimit - time.Second
+	c.pass()
+	if !reflect.DeepEqual(c.rented.IDs(first), firstIDs) {
+		t.Fatal("a machine inside the boot limit was replaced")
+	}
+
+	for restart := 1; restart <= domain.MaxAgentInstanceRestarts; restart++ {
+		before := c.rented.Names()[0]
+		c.store.askedAgo["ag-slow"] = contractBootLimit + time.Second
+		c.pass()
+		names := c.rented.Names()
+		if len(names) != 1 || names[0] == before {
+			t.Fatalf("restart %d: rented %v, want one machine under a new name (was %q)", restart, names, before)
+		}
+		if recorded := c.store.instance("ag-slow"); recorded.Restarts != restart || recorded.Stopped {
+			t.Fatalf("restart %d: recorded %+v", restart, recorded)
+		}
+	}
+	c.store.askedAgo["ag-slow"] = contractBootLimit + time.Second
+	c.pass()
+	if recorded := c.store.instance("ag-slow"); !recorded.Stopped || len(c.rented.Names()) != 0 {
+		t.Fatalf("after the last restart: recorded %+v, rented %v, want the agent stopped and nothing rented", recorded, c.rented.Names())
+	}
+	if creates := c.rented.Calls("Create"); creates != 1+domain.MaxAgentInstanceRestarts {
+		t.Fatalf("creates = %d, want %d ever", creates, 1+domain.MaxAgentInstanceRestarts)
+	}
+
+	// A machine that came up is never held to the limit.
+	running := newContract(t, hostedAgent("pe-1", "ag-up"))
+	running.pass()
+	name := running.rented.Names()[0]
+	running.rented.Start(name)
+	running.store.askedAgo["ag-up"] = 24 * time.Hour
+	running.pass()
+	if running.store.instance("ag-up").Restarts != 0 || running.rented.Calls("Create") != 1 {
+		t.Fatal("a running machine was held to the boot limit")
 	}
 }

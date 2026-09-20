@@ -42,11 +42,17 @@ auth:
 #   api_url    the address a hosted agent reaches this API at, from wherever its launcher rents.
 #   default_model  the model an agent runs on when it joins without naming one. Written onto the
 #              agent when it joins, so a change moves new agents only.
+#   boot_limit_seconds  how long a hosted agent's machine may be reported as starting, counted
+#              from when the launcher was first asked for it, before it is replaced and one of
+#              the agent's three restarts is spent. A first boot pulls the agent image (about 11
+#              seconds on the slowest provider measured) and the count starts up to one launcher
+#              pass before the machine exists. Too low spends every restart on slow pulls.
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
   api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   default_model: claude-sonnet-5
+  boot_limit_seconds: 300
 
 # Where a cluster's runtime reaches the platform. Registering a cluster returns both beside its
 # runtime token, so the command that starts the cluster's agents has one source. Both must be

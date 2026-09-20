@@ -234,6 +234,9 @@ type AgentsConfig struct {
 	// DefaultModel is the model an agent runs on when it joins without naming one. It is
 	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
 	DefaultModel string `yaml:"default_model"`
+	// BootLimitSeconds is how long a hosted agent's machine may be reported as starting,
+	// counted from when it was first asked for, before it is replaced as an exited one is.
+	BootLimitSeconds int `yaml:"boot_limit_seconds"`
 }
 
 // RuntimesConfig is where a cluster's runtime reaches the platform. Both are handed out when a

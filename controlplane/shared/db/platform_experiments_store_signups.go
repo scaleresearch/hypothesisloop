@@ -294,7 +294,7 @@ func (s *PlatformExperimentsStore) LauncherHasAgents(ctx context.Context, launch
 // SetAgentInstanceName records the name a hosted agent's machine is asked for under.
 func (s *PlatformExperimentsStore) SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
-UPDATE experiment_signups SET instance_name = $3
+UPDATE experiment_signups SET instance_name = $3, instance_asked_at = now()
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted`, platformExpID, agentID, name); err != nil {
 		return fmt.Errorf("platform_experiments_store.SetAgentInstanceName: %w", err)
 	}
@@ -306,15 +306,28 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted`, platformExpID, 
 // counted, and stops the agent otherwise. The name is cleared, so the same exit reported again
 // records nothing: recorded=false, as for a name the agent is not asked for under.
 func (s *PlatformExperimentsStore) RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (recorded bool, err error) {
+	return s.endAgentInstance(ctx, platformExpID, agentID, name, exitLog, maxRestarts, 0)
+}
+
+// RecordAgentInstanceStuck records, as an exit, that the machine a hosted agent was asked for
+// under name is still starting more than bootLimit after it was asked for, on the database's
+// clock. recorded=false while it is inside the limit.
+func (s *PlatformExperimentsStore) RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name string, bootLimit time.Duration, maxRestarts int) (recorded bool, err error) {
+	why := fmt.Sprintf("the machine was still starting %s after it was asked for, which is the boot limit", bootLimit)
+	return s.endAgentInstance(ctx, platformExpID, agentID, name, why, maxRestarts, bootLimit)
+}
+
+func (s *PlatformExperimentsStore) endAgentInstance(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int, askedBefore time.Duration) (bool, error) {
 	tag, err := s.pool.pool.Exec(ctx, `
 UPDATE experiment_signups
 SET instance_name = '', instance_exited_at = now(), instance_exit_log = $4,
     instance_stopped = instance_restarts >= $5,
     instance_restarts = CASE WHEN instance_restarts >= $5 THEN instance_restarts ELSE instance_restarts + 1 END
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted AND NOT instance_stopped
-  AND instance_name = $3 AND instance_name <> ''`, platformExpID, agentID, name, exitLog, maxRestarts)
+  AND instance_name = $3 AND instance_name <> ''
+  AND instance_asked_at <= now() - make_interval(secs => $6)`, platformExpID, agentID, name, exitLog, maxRestarts, askedBefore.Seconds())
 	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RecordAgentInstanceExit: %w", err)
+		return false, fmt.Errorf("platform_experiments_store: end instance of %s: %w", agentID, err)
 	}
 	return tag.RowsAffected() == 1, nil
 }

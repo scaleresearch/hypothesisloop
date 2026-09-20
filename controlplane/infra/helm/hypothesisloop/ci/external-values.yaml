@@ -85,7 +85,6 @@ agentLauncher:
     api_url: http://control-service:8081
     namespace: main
     reconcile_interval_seconds: 15
-    boot_limit_seconds: 120
     create_pause_milliseconds: 1000
     provider:
       name: fly

@@ -233,6 +233,9 @@ func (c *Config) build() error {
 	if _, _, err := domain.ResolveAgentLaunch("", "", c.Agents.DefaultModel, nil); err != nil {
 		return fmt.Errorf("agents default_model is required, the model an agent runs on when it names none: %w", err)
 	}
+	if c.Agents.BootLimitSeconds <= 0 {
+		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a hosted agent's machine may stay starting")
+	}
 	for key, address := range map[string]string{"api_url": c.Runtimes.APIURL, "metrics_url": c.Runtimes.MetricsURL} {
 		parsed, err := url.Parse(address)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {

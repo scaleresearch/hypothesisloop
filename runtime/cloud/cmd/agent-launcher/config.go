@@ -24,9 +24,6 @@ type config struct {
 	Namespace string `yaml:"namespace"`
 	// Each pass costs the provider one list call and the control plane one request.
 	ReconcileIntervalSeconds int `yaml:"reconcile_interval_seconds"`
-	// BootLimitSeconds is how long an instance may stay starting before it is destroyed and
-	// rented again.
-	BootLimitSeconds int `yaml:"boot_limit_seconds"`
 	// CreatePauseMilliseconds is waited between two creates of one pass. 0 is no pause, and the
 	// key must be present either way.
 	CreatePauseMilliseconds *int                `yaml:"create_pause_milliseconds"`
@@ -121,7 +118,6 @@ func (cfg *config) launch() agentlaunch.Config {
 		ModelProvider: cfg.ModelProvider.Name,
 		Env:           cfg.modelProviderEnv,
 		Interval:      time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
-		BootLimit:     time.Duration(cfg.BootLimitSeconds) * time.Second,
 		CreatePause:   time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
 	}
 }

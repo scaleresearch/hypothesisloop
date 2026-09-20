@@ -453,6 +453,8 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_restarts  INTEG
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_stopped   BOOLEAN     NOT NULL DEFAULT false;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exited_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exit_log  TEXT        NOT NULL DEFAULT '';
+-- When instance_name was set: the moment a machine still starting is timed from.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_asked_at  TIMESTAMPTZ;
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN

@@ -239,6 +239,8 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"api url not http":      {"  api_url: http://host.example.invalid:8081", "  api_url: ftp://example.invalid"},
 		"misspelled agents key": {"  launcher: main", "  launcher: main\n  launchers: [main]"},
 		"no default model":      {"  default_model: claude-sonnet-5\n", ""},
+		"no boot limit":         {"  boot_limit_seconds: 300\n", ""},
+		"negative boot limit":   {"  boot_limit_seconds: 300", "  boot_limit_seconds: -1"},
 		"default model unsafe":  {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
 	} {
 		text := productionConfig(t)

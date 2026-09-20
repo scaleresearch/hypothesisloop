@@ -20,6 +20,7 @@ type Store interface {
 	ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error)
 	SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error
 	RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (bool, error)
+	RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name string, bootLimit time.Duration, maxRestarts int) (bool, error)
 }
 
 type Handler struct {
@@ -29,14 +30,17 @@ type Handler struct {
 	apiURL string
 	// signingSecret derives each agent's own token, handed out inside its environment.
 	signingSecret string
-	logger        *zap.Logger
+	// bootLimit is how long a machine may be reported as starting, counted from when it was
+	// first asked for, before that is recorded as an exit.
+	bootLimit time.Duration
+	logger    *zap.Logger
 }
 
-func NewHandler(store Store, image, apiURL, signingSecret string, logger *zap.Logger) *Handler {
-	if store == nil || image == "" || apiURL == "" || signingSecret == "" || logger == nil {
-		panic("launcherapi.NewHandler: store, image, apiURL, signingSecret and logger are required")
+func NewHandler(store Store, image, apiURL, signingSecret string, bootLimit time.Duration, logger *zap.Logger) *Handler {
+	if store == nil || image == "" || apiURL == "" || signingSecret == "" || bootLimit <= 0 || logger == nil {
+		panic("launcherapi.NewHandler: store, image, apiURL, signingSecret, bootLimit and logger are required")
 	}
-	return &Handler{store: store, image: image, apiURL: apiURL, signingSecret: signingSecret, logger: logger}
+	return &Handler{store: store, image: image, apiURL: apiURL, signingSecret: signingSecret, bootLimit: bootLimit, logger: logger}
 }
 
 // Observed is what a launcher found on its provider account before it asked: every instance of
@@ -52,7 +56,10 @@ type ObservedInstance struct {
 	Log   string `json:"log,omitempty" doc:"For an exited instance, the end of what its command wrote."`
 }
 
-const stateExited = "exited"
+const (
+	stateStarting = "starting"
+	stateExited   = "exited"
+)
 
 var launchDigestPattern = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
 
@@ -77,11 +84,9 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	if err != nil {
 		return nil, err
 	}
-	exitLog := map[string]string{}
+	seen := map[string]ObservedInstance{}
 	for _, instance := range observed.Instances {
-		if instance.State == stateExited {
-			exitLog[instance.Name] = instance.Log
-		}
+		seen[instance.Name] = instance
 	}
 
 	out := &Desired{Instances: []Instance{}, Ending: []string{}}
@@ -99,15 +104,24 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			}
 			continue
 		}
-		if tail, exited := exitLog[agent.Instance.Name]; exited && agent.Instance.Name != "" {
-			recorded, err := h.store.RecordAgentInstanceExit(ctx, agent.PlatformExperimentID, agent.AgentID, agent.Instance.Name, lastBytes(tail, domain.MaxAgentInstanceLogBytes), domain.MaxAgentInstanceRestarts)
+		if reported, listed := seen[agent.Instance.Name]; listed && agent.Instance.Name != "" {
+			// A machine that exited and one that never got past starting end the same way: the
+			// outcome is recorded, and the agent gets another machine while it has a restart left.
+			var recorded bool
+			var err error
+			switch reported.State {
+			case stateExited:
+				recorded, err = h.store.RecordAgentInstanceExit(ctx, agent.PlatformExperimentID, agent.AgentID, agent.Instance.Name, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes), domain.MaxAgentInstanceRestarts)
+			case stateStarting:
+				recorded, err = h.store.RecordAgentInstanceStuck(ctx, agent.PlatformExperimentID, agent.AgentID, agent.Instance.Name, h.bootLimit, domain.MaxAgentInstanceRestarts)
+			}
 			if err != nil {
-				log.Error("record instance exit failed", zap.Error(err))
+				log.Error("record instance outcome failed", zap.Error(err))
 				continue
 			}
 			if recorded {
 				stopped := agent.Instance.Restarts >= domain.MaxAgentInstanceRestarts
-				log.Warn("hosted agent's instance exited", zap.String("instance", agent.Instance.Name), zap.Int("restartsBefore", agent.Instance.Restarts), zap.Bool("stopped", stopped))
+				log.Warn("hosted agent's instance ended", zap.String("instance", agent.Instance.Name), zap.String("reported", reported.State), zap.Int("restartsBefore", agent.Instance.Restarts), zap.Bool("stopped", stopped))
 				if stopped {
 					continue
 				}
@@ -168,7 +182,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "The launcher sends what its provider lists, and for an exited instance the end of its output. The answer is its complete desired state. " +
 			"instances: each {name, image, env} should exist and be running. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
-			"Any other instance of the launcher should not exist. An exited instance is recorded on its agent and is never started again by the launcher: " +
+			"Any other instance of the launcher should not exist. An exited instance, and one reported as starting for longer than the platform's boot limit, " +
+			"is recorded on its agent and is never replaced by the launcher on its own: " +
 			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
