@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -24,10 +25,11 @@ type scaleUpBackend struct {
 	// test; set to false to simulate no phase-detail row ever having been written for this
 	// experiment's current cluster/attempt (see TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound).
 	phaseDetailFound *bool
+	phaseErr         error
 }
 
 func (b *scaleUpBackend) PollJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, error) {
-	return b.phase, nil
+	return b.phase, b.phaseErr
 }
 func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, error) {
 	return b.admittedType, nil
@@ -335,6 +337,47 @@ func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testi
 				t.Errorf("phase %s, admitted %s ago with a %ds window: evicted = %v, want %v",
 					phase, tc.submittedAgo, window, evicted, tc.wantEvicted)
 			}
+		}
+	}
+}
+
+// A job whose every rank bound is past the placement deadline. If its container never starts, or
+// its cluster stops reporting a phase, the admission deadline is what releases its reservation.
+func TestABoundJobThatNeverStartsIsEvictedAtTheAdmissionDeadline(t *testing.T) {
+	window := int64(600)
+	for _, tc := range []struct {
+		name         string
+		phaseErr     error
+		submittedAgo time.Duration
+		checkpoint   *int64
+		status       domain.ExperimentStatus
+		wantEvicted  bool
+	}{
+		{name: "pending inside the deadline", submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "pending past the deadline", submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
+		{name: "no phase inside the deadline", phaseErr: errors.New("no snapshot"), submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "no phase past the deadline", phaseErr: errors.New("no snapshot"), submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
+		{name: "pending inside the checkpoint window", submittedAgo: 12 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "running job with no phase", phaseErr: errors.New("no snapshot"), submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
+		{name: "running job reading pending", submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
+	} {
+		store := &lifecycleStore{}
+		backend := &scaleUpBackend{phase: workload.JobPhasePending, phaseErr: tc.phaseErr, scheduledNodes: 1}
+		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+		exp := scaleUpExperiment(1, tc.submittedAgo)
+		exp.Status = tc.status
+		exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: tc.checkpoint}
+
+		err := w.reconcileOne(context.Background(), exp, nil, nil)
+		if (err != nil) != (tc.phaseErr != nil) {
+			t.Errorf("%s: reconcile error = %v", tc.name, err)
+		}
+		reasons := append(append([]string{}, store.requeuedReasons...), store.terminalReasons...)
+		if evicted := len(reasons) > 0; evicted != tc.wantEvicted {
+			t.Fatalf("%s: evicted = %v, want %v", tc.name, evicted, tc.wantEvicted)
+		}
+		if tc.wantEvicted && reasons[0] != string(domain.EvictionStuckPending) {
+			t.Errorf("%s: reason = %q, want %q", tc.name, reasons[0], domain.EvictionStuckPending)
 		}
 	}
 }

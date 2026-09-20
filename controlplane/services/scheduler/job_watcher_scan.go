@@ -106,7 +106,8 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	//
 	// Not for a RUNNING job: its placement is over, and the deadline counts from submitted_at, so
 	// a pod being recreated hours in would evict it at once.
-	if exp.Status != domain.StatusRunning && (!found || scheduledNodes < int32(exp.Job.Nodes())) {
+	bound := found && scheduledNodes >= int32(exp.Job.Nodes())
+	if exp.Status != domain.StatusRunning && !bound {
 		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)
@@ -124,6 +125,13 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// hardware.
 	phase, err := w.backend.PollJobPhase(ctx, exp)
 	if err != nil {
+		// A bound job is past the placement deadline above, and a cluster that stops reporting
+		// never yields a phase to act on, so the admission deadline is its only bound.
+		if exp.Status != domain.StatusRunning && bound {
+			if deadlineErr := w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending); deadlineErr != nil {
+				return deadlineErr
+			}
+		}
 		return fmt.Errorf("poll actual phase: %w", err)
 	}
 
@@ -174,9 +182,11 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// (scheduledNodes already caught up before Gone was observed) still needs this bound.
 		return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending)
 	case workload.JobPhasePending:
-		// Superseded by the placement-deadline check above, which now runs unconditionally
-		// before this switch and covers exactly this case (plus the ones that check used to
-		// miss — Running with a partial gang, and Gone before scheduledNodes catches up).
+		// An unbound job is under the placement deadline above. A bound one whose container
+		// never starts has only this bound.
+		if exp.Status != domain.StatusRunning && bound {
+			return w.evictIfPastAdmissionDeadline(ctx, exp, domain.EvictionStuckPending)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown actual phase %q", phase)
