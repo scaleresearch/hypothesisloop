@@ -33,9 +33,6 @@ type lifecycleStore struct {
 func (*lifecycleStore) ListExperimentsWithStatus(context.Context, domain.ExperimentStatus) ([]*domain.Experiment, error) {
 	return nil, nil
 }
-func (*lifecycleStore) UpdateExperimentStatus(context.Context, string, domain.ExperimentStatus) error {
-	return nil
-}
 func (s *lifecycleStore) MarkStarted(context.Context, string) (bool, error) {
 	s.started++
 	return true, nil
