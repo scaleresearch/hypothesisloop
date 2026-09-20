@@ -57,7 +57,8 @@ func main() {
 
 	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := jwc.SetupCluster(setupCtx); err != nil {
-		log("SetupCluster: %v", err)
+		fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
+		os.Exit(1)
 	}
 	setupCancel()
 
