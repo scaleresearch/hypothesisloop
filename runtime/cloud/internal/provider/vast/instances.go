@@ -20,8 +20,18 @@ type instance struct {
 	ID           int64   `json:"id"`
 	Label        *string `json:"label"`
 	ActualStatus *string `json:"actual_status"`
+	StatusMsg    *string `json:"status_msg"`
+	MachineID    int64   `json:"machine_id"`
 	StartDate    float64 `json:"start_date"`
 }
+
+const (
+	// slowStart is how long an instance may be starting before List logs what its host says.
+	// Image pulls on a cold host took up to six and a half minutes.
+	slowStart = 8 * time.Minute
+	// maxStatusMsg bounds the host's message in a log line.
+	maxStatusMsg = 300
+)
 
 func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Instance, error) {
 	listed := []provider.Instance{}
@@ -50,11 +60,15 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			if !known {
 				log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as starting", found.ID, name, *found.ActualStatus)
 			}
+			startedAt := time.Unix(0, int64(found.StartDate*float64(time.Second)))
+			if state == provider.StateStarting && time.Since(startedAt) > slowStart {
+				logSlowStart(found, name, startedAt)
+			}
 			listed = append(listed, provider.Instance{
 				ID:        strconv.FormatInt(found.ID, 10),
 				Name:      name,
 				State:     state,
-				StartedAt: time.Unix(0, int64(found.StartDate*float64(time.Second))),
+				StartedAt: startedAt,
 			})
 		}
 		if page.NextToken == nil || *page.NextToken == "" {
@@ -62,6 +76,21 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 		}
 		token = *page.NextToken
 	}
+}
+
+// logSlowStart puts the host's own account of an instance that is not coming up where an
+// operator reads it: provider.Instance has no place for it, and it is the only word on why (an
+// image that cannot be pulled, a host that cannot hand over its GPU). It is logged on every List
+// until the caller's boot timeout destroys the instance.
+func logSlowStart(found instance, name string, startedAt time.Time) {
+	message := "no status message"
+	if found.StatusMsg != nil && strings.TrimSpace(*found.StatusMsg) != "" {
+		message = strings.Join(strings.Fields(*found.StatusMsg), " ")
+		if len(message) > maxStatusMsg {
+			message = message[:maxStatusMsg]
+		}
+	}
+	log.Printf("vast: instance %d (%s) on machine %d has been starting for %s: %s", found.ID, name, found.MachineID, time.Since(startedAt).Round(time.Second), message)
 }
 
 // stateOf maps the status the host last reported. It is null until the host has answered, and

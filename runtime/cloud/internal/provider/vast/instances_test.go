@@ -3,6 +3,8 @@ package vast
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -39,7 +41,7 @@ func TestListReturnsOnlyThePrefixAcrossPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	started := time.Unix(1791145633, 500_000_000)
+	started := time.Unix(4102444800, 0)
 	want := []provider.Instance{
 		{ID: "11", Name: "hl-exp1-a1", State: provider.StateRunning, StartedAt: started},
 		{ID: "14", Name: "hl-exp2-a1", State: provider.StateStarting, StartedAt: started},
@@ -225,5 +227,50 @@ func TestDestroyReportsEveryOtherFailure(t *testing.T) {
 				t.Errorf("requests = %d, want 1", api.total())
 			}
 		})
+	}
+}
+
+func stuckInstance(id int, label, status, message string, age time.Duration) string {
+	encoded, _ := json.Marshal(message)
+	return fmt.Sprintf(`{"id":%d,"label":%q,"actual_status":%q,"status_msg":%s,"machine_id":124592,"start_date":%d}`,
+		id, label, status, encoded, time.Now().Add(-age).Unix())
+}
+
+// An instance that never comes up is ended by the caller's boot timeout, and the host's message
+// is the only account of why. The contract has no field for it, so List writes it to the log.
+func TestListLogsWhatTheHostSaysAboutAnInstanceThatIsSlowToStart(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	const cdi = "Error response from daemon: failed to inject CDI devices:\n unresolvable CDI devices nvidia.com/gpu=3\n"
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, listPath, answer(200, instancesPage("",
+		stuckInstance(1, "hl-stuck", "created", cdi, 20*time.Minute),
+		stuckInstance(2, "hl-pulling", "loading", "e36530ed2a4d: Downloading", 2*time.Minute),
+		stuckInstance(3, "hl-running", "running", "success, running img", 20*time.Minute),
+		stuckInstance(4, "other-stuck", "created", cdi, 20*time.Minute),
+		stuckInstance(5, "hl-silent", "created", "", 20*time.Minute),
+		stuckInstance(6, "hl-loud", "created", strings.Repeat("x", 5000), 20*time.Minute),
+	)))
+	p := newTestProvider(t, api, Settings{})
+
+	got, err := p.List(context.Background(), "hl-")
+	if err != nil || len(got) != 5 || got[0].State != provider.StateStarting {
+		t.Fatalf("List = %v, %v", got, err)
+	}
+	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("log has %d lines, want one for each of the three slow instances of the prefix:\n%s", len(lines), logged.String())
+	}
+	for _, want := range []string{"hl-stuck", "machine 124592", "failed to inject CDI devices: unresolvable CDI devices nvidia.com/gpu=3"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("log line %q lacks %q", lines[0], want)
+		}
+	}
+	if !strings.Contains(lines[1], "hl-silent") || !strings.Contains(lines[1], "no status message") {
+		t.Errorf("log line %q, want the silent instance named", lines[1])
+	}
+	if len(lines[2]) > 600 {
+		t.Errorf("a log line of %d bytes carries the host's whole message", len(lines[2]))
 	}
 }
