@@ -68,3 +68,8 @@ agents/coordinator/experiments/**/__pycache__/
 # Per-run validation/reproduction output, gitignored the same way (see each experiment's own
 # .gitignore: scratch_*/).
 agents/coordinator/experiments/*/scratch_*/
+
+# Agent worktrees and Python virtualenvs: copies of the repo and installed packages, over a
+# gigabyte that every image's COPY wrote into the build VM and no image runs from.
+.claude/
+**/.venv/
