@@ -105,7 +105,7 @@ function ConnectedClusters() {
           {error && <ErrorMessage>Cannot reach scheduler service — is the stack running?</ErrorMessage>}
           {data && data.clusters.length === 0 && (
             <EmptyState>
-              No cluster has ever connected. Install a cluster-agent (<code>make cluster-agent-up CLUSTER=&lt;name&gt;</code>)
+              No cluster has ever connected. Install a cluster-agent (<code>make cluster-agent-up CLUSTER=&lt;name&gt; API_URL=&lt;control-service-url&gt; METRICS_URL=&lt;metrics-service-url&gt;</code>)
               pointed at this control plane.
             </EmptyState>
           )}

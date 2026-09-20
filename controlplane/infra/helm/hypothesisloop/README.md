@@ -27,9 +27,9 @@ unreachable from inside the cluster.
 ## What this chart does not do
 
 - **Does not install the cluster agent.** Training clusters get the runtime's own chart through
-  `make cluster-agent-up CLUSTER=<name>` (`runtime/k8s/infra/install.sh`), including this one if
-  it also runs jobs. Both use the `hypothesisloop` namespace: install this chart first, or pass
-  `--set namespace.create=false` when the cluster agent already created it.
+  `make cluster-agent-up CLUSTER=<name> API_URL=<control-service-url> METRICS_URL=<metrics-service-url>`
+  (`runtime/k8s/infra/install.sh`), including this one if it also runs jobs. Both use the
+  `hypothesisloop` namespace: install this chart first, or pass `--set namespace.create=false` when the cluster agent already created it.
 - **Does not manage the durable-data object store.** Point `objectStore.endpoint` at an
   existing S3-compatible bucket; the platform is deliberately not in the data path (see
   the `data_store` comment in `controlplane/settings/hypothesisloop.yaml`).
