@@ -36,6 +36,7 @@ spec:
           env:
             - name: CLOUD_AGENT_CONFIG
               value: /settings/cloud-agent.yaml
+            {{- include "hypothesisloop.secretKey" (dict "env" "RUNTIME_TOKEN" "key" "CLOUD_AGENT_RUNTIME_TOKEN" "root" $) | nindent 12 }}
             {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.cloudAgent.secretEnv "root" $) | nindent 12 }}
           volumeMounts:
             - name: config

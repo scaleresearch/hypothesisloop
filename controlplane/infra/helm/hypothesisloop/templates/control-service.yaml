@@ -54,7 +54,7 @@ spec:
               value: {{ .Values.controlService.port | quote }}
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
-            {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.config.secretEnv "root" $) | nindent 12 }}
+            {{- include "hypothesisloop.configSecretEnv" . | nindent 12 }}
           ports:
             - containerPort: {{ .Values.controlService.port }}
           volumeMounts:

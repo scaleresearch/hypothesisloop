@@ -19,31 +19,51 @@ images:
   tag: ""
 
 # Every secret comes from this one Secret, which must exist in the namespace before the chart is
-# installed. The chart reads it and never creates it. Keys:
+# installed. The chart reads it and never creates it. Required. Its keys:
 #
 #   DATABASE_URL                     Postgres connection string. With postgres.enabled it is
 #                                    postgres://<postgres.user>:<POSTGRES_PASSWORD>@hypothesisloop-postgres:5432/<postgres.database>?sslmode=disable
 #   POSTGRES_PASSWORD                only with postgres.enabled
+#   HYPOTHESISLOOP_SIGNING_SECRET    derives every token the platform hands out, 32 characters or
+#                                    more. Whoever holds it can mint a staff token.
 #   OBJECT_STORE_ACCESS_KEY_ID       object store key that may create service accounts; with
 #   OBJECT_STORE_SECRET_ACCESS_KEY   objectStore.enabled these become the store's root user
+#   CLOUD_AGENT_RUNTIME_TOKEN        only with cloudAgent.enabled: `hl-admin cluster add <cluster_name> <org>`
+#   AGENT_LAUNCHER_TOKEN             only with agentLauncher.enabled: `hl-admin token launcher:<launcher_name>`
 #
-# plus whatever config.secretEnv, cloudAgent.secretEnv and agentLauncher.secretEnv name.
-secretName: hypothesisloop
+# plus whatever cloudAgent.secretEnv and agentLauncher.secretEnv name.
+secretName: ""
 
 # Set to any string that changes when the Secret's content does (a hash of it). It is stamped on
 # every pod that reads the Secret, so a changed secret restarts them.
 secretChecksum: ""
 
-config:
-  # Appended verbatim to hypothesisloop.yaml: the sections a deployment adds to the staged file.
-  # Write ${NAME} for a secret and list NAME in secretEnv; the services expand it at start.
-  extra: ""
-  # Secret keys handed as environment variables to control-service and metrics-service, the two
-  # processes that load hypothesisloop.yaml. Every ${NAME} in the rendered file must be here.
-  secretEnv:
-    - DATABASE_URL
-    - OBJECT_STORE_ACCESS_KEY_ID
-    - OBJECT_STORE_SECRET_ACCESS_KEY
+# Read by no template. An installer that hands helm this chart as a local path sets it to a hash
+# of the chart's files, so that an edited template makes a changed release.
+chartChecksum: ""
+
+# Who may call the API: the auth section of hypothesisloop.yaml, which explains each value. The
+# signing secret is not here. It comes from the Secret.
+auth:
+  # The identity provider people sign in with. With no keys listed no person's token is accepted
+  # and the API takes API keys and derived tokens only.
+  issuer: ""
+  audience: ""
+  # The provider's public keys as its JWKS document lists them, with these fields only:
+  # kid, kty, alg and crv, x, y (ES256) or n, e (RS256). In a values file write "y" and "n" in
+  # quotes: helm reads a bare y or n as a boolean.
+  jwtKeys: []
+  # Required: the address people open the UI at.
+  uiOrigin: ""
+
+# Hosted agents: the agents section of hypothesisloop.yaml.
+agents:
+  # The launcher_name of the agent-launcher that starts them.
+  launcher: main
+  # Required: the image a hosted agent's machine boots, pullable from wherever the launcher rents.
+  image: ""
+  # Required: the address a hosted agent reaches the API at.
+  apiURL: ""
 
 postgres:
   # false when DATABASE_URL in the Secret points at a database run elsewhere.
@@ -123,10 +143,16 @@ metricsService:
     type: NodePort
     nodePort: 30084
 
-# The API address the browser calls is compiled into the UI image (NEXT_PUBLIC_API_URL, see
-# controlplane/build/Dockerfile.ui), so it is set when the image is built.
+# Image hypothesisloop-ui. Next.js compiles NEXT_PUBLIC_* values into the image when it is built
+# (controlplane/build/Dockerfile.ui): the API address and the two Supabase values. The Deployment
+# sets the two Supabase values as environment too, and they must be the ones the image was built
+# with.
 ui:
   enabled: true
+  # Required with enabled: https://<project>.supabase.co and the project's publishable key. Both
+  # are public values.
+  supabaseURL: ""
+  supabasePublishableKey: ""
   replicas: 1
   port: 3000
   resources:
@@ -137,22 +163,31 @@ ui:
     nodePort: 30300
 
 # One process per compute provider account; it registers as a cluster and holds that provider's
-# key. Image hypothesisloop-cloud-agent, its one config file from `config` (verbatim, mounted at
-# /settings/cloud-agent.yaml, path in CLOUD_AGENT_CONFIG), secrets from secretEnv.
+# key. Image hypothesisloop-cloud-agent.
 cloudAgent:
   enabled: false
+  # Required with enabled: the whole config file, as runtime/cloud/settings/cloud-agent.yaml
+  # describes it. It is mounted as it is, so it holds the names of environment variables and
+  # never a secret.
   config: ""
+  # Secret keys handed to the process as environment variables of the same name: every variable
+  # the config names, such as the provider's api_key_env. RUNTIME_TOKEN is always set, from the
+  # key CLOUD_AGENT_RUNTIME_TOKEN.
   secretEnv: []
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
 
-# One process per sandbox provider account; it creates and destroys agent VMs. Image
-# hypothesisloop-agent-launcher, config at /settings/agent-launcher.yaml (path in
-# AGENT_LAUNCHER_CONFIG), secrets from secretEnv.
+# One process per sandbox provider account; it creates and destroys the machines hosted agents
+# run in. Image hypothesisloop-agent-launcher.
 agentLauncher:
   enabled: false
+  # Required with enabled: the whole config file, as runtime/cloud/settings/agent-launcher.yaml
+  # describes it. Its launcher_name must be agents.launcher above.
   config: ""
+  # Secret keys handed to the process as environment variables of the same name: the variable
+  # claude_code_oauth_token_env names and the provider's. LAUNCHER_TOKEN is always set, from the
+  # key AGENT_LAUNCHER_TOKEN.
   secretEnv: []
   resources:
     requests: { cpu: 50m, memory: 64Mi }

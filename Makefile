@@ -305,11 +305,15 @@ sparse-sdpa-workload-image: check-tag registry-up
 # controlplane/build/Dockerfile.control-service.
 HELM_CHART := controlplane/infra/helm/hypothesisloop
 helm-prepare:
+	mkdir -p $(HELM_CHART)/files
 	cp controlplane/settings/hypothesisloop.yaml $(HELM_CHART)/files/hypothesisloop.yaml
 
+# The two ci values files are the two ways the chart is installed: every store in the cluster, and
+# a database run elsewhere with the runtime processes on. `make test` renders the same two and
+# loads what they render (controlplane/infra/helm/chart_test.go).
 helm-lint: helm-prepare
-	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG) \
-		--set objectStore.endpoint=http://object-store.hypothesisloop.svc:9000
+	helm lint $(HELM_CHART) --values $(HELM_CHART)/ci/in-cluster-values.yaml
+	helm lint $(HELM_CHART) --values $(HELM_CHART)/ci/external-values.yaml
 	helm lint runtime/k8s/infra/chart --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint,runtimeToken=lint \
 		--set-string images.registry=$(REGISTRY),images.tag=$(TAG)
 

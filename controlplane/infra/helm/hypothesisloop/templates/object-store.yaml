@@ -41,12 +41,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
+                  name: {{ include "hypothesisloop.secretName" . }}
                   key: OBJECT_STORE_ACCESS_KEY_ID
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
+                  name: {{ include "hypothesisloop.secretName" . }}
                   key: OBJECT_STORE_SECRET_ACCESS_KEY
           ports:
             - containerPort: 9000

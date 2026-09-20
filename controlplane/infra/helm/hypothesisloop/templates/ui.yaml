@@ -37,6 +37,10 @@ spec:
           env:
             - name: PORT
               value: {{ .Values.ui.port | quote }}
+            - name: NEXT_PUBLIC_SUPABASE_URL
+              value: {{ required "ui.supabaseURL is required when ui.enabled is true: the address of the Supabase project that signs people in" .Values.ui.supabaseURL | quote }}
+            - name: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+              value: {{ required "ui.supabasePublishableKey is required when ui.enabled is true: the project's publishable key, a public value" .Values.ui.supabasePublishableKey | quote }}
           ports:
             - containerPort: {{ .Values.ui.port }}
           resources:

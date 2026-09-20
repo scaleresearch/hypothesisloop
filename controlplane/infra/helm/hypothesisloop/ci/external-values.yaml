@@ -1,0 +1,91 @@
+# A hosted install: the database runs elsewhere, people sign in through an identity provider, and
+# a cloud-agent and an agent-launcher rent from two providers. Every value is made up. The chart's
+# tests render it (controlplane/infra/helm/chart_test.go).
+namespace:
+  create: false
+images:
+  registry: registry.example.invalid
+  tag: test
+secretName: deployment-secrets
+secretChecksum: 0f0f0f
+auth:
+  issuer: https://project.supabase.example.invalid/auth/v1
+  audience: authenticated
+  jwtKeys:
+    - kid: made-up-key
+      kty: EC
+      alg: ES256
+      crv: P-256
+      x: f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU
+      "y": x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0
+  uiOrigin: https://ui.example.invalid
+agents:
+  launcher: main
+  image: registry.example.invalid/hypothesisloop-experimentator-base:test
+  apiURL: https://api.example.invalid
+postgres:
+  enabled: false
+objectStore:
+  endpoint: https://object-store.example.invalid
+ui:
+  supabaseURL: https://project.supabase.example.invalid
+  supabasePublishableKey: sb_publishable_made-up
+cloudAgent:
+  enabled: true
+  secretEnv: [VAST_API_KEY]
+  config: |
+    cluster_name: vast
+    api_url: https://api.example.invalid
+    job_image: registry.example.invalid/hypothesisloop-job:test
+    namespace: main
+    reconcile_interval_seconds: 10
+    status_interval_seconds: 30
+    log_tail_lines: 100
+    provider:
+      name: vast
+      account_id: "000000"
+      settings:
+        api_key_env: VAST_API_KEY
+        max_price_per_hour: 0.60
+        min_reliability: 0.98
+        regions: [SE, NL, DE]
+        verified_only: true
+        accelerators:
+          - product: NVIDIA GeForce RTX 4090
+            gpu_name: RTX 4090
+    shapes:
+      - name: rtx4090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 2
+      - name: cpu
+        cpu: "4"
+        memory: 16Gi
+        storage: 50Gi
+        max_instances: 2
+agentLauncher:
+  enabled: true
+  secretEnv: [CLAUDE_CODE_OAUTH_TOKEN, FLY_API_TOKEN]
+  config: |
+    launcher_name: main
+    api_url: http://control-service:8081
+    namespace: main
+    reconcile_interval_seconds: 15
+    boot_limit_seconds: 120
+    create_pause_milliseconds: 1000
+    provider:
+      name: fly
+      settings:
+        api_token_env: FLY_API_TOKEN
+        app: agents-example
+        region: ams
+        cpu_kind: shared
+    instance:
+      command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
+      cpu: "2"
+      memory: 4Gi
+      storage: 10Gi
+    claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN

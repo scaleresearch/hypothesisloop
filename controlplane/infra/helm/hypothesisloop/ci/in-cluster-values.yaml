@@ -1,0 +1,18 @@
+# A self-hosted install with every store in the cluster and no identity provider. Every value is
+# made up. The chart's tests render it (controlplane/infra/helm/chart_test.go).
+namespace:
+  create: false
+images:
+  registry: registry.example.invalid
+  tag: test
+secretName: hypothesisloop
+auth:
+  uiOrigin: http://ui.example.invalid:30300
+agents:
+  image: registry.example.invalid/hypothesisloop-experimentator-base:test
+  apiURL: http://api.example.invalid:30081
+objectStore:
+  endpoint: http://object-store.hypothesisloop.svc:9000
+ui:
+  supabaseURL: https://project.supabase.example.invalid
+  supabasePublishableKey: sb_publishable_made-up

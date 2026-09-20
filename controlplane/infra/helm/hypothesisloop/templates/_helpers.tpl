@@ -7,15 +7,32 @@
 {{ required "images.registry is required: pass the REGISTRY `make images` pushed to" .root.Values.images.registry }}/hypothesisloop-{{ .name }}:{{ required "images.tag is required: pass the TAG `make images` built" .root.Values.images.tag }}
 {{- end -}}
 
-{{/* env entries reading keys of the shared Secret. call as: include "hypothesisloop.secretEnv" (dict "keys" (list "A" "B") "root" $) */}}
-{{- define "hypothesisloop.secretEnv" -}}
-{{- range .keys }}
-- name: {{ . }}
+{{- define "hypothesisloop.secretName" -}}
+{{ required "secretName is required: the Secret that holds every secret of the deployment. The chart reads it and never creates it" .Values.secretName }}
+{{- end -}}
+
+{{/* One env entry reading a key of the Secret. call as: include "hypothesisloop.secretKey" (dict "env" "RUNTIME_TOKEN" "key" "CLOUD_AGENT_RUNTIME_TOKEN" "root" $) */}}
+{{- define "hypothesisloop.secretKey" -}}
+- name: {{ .env }}
   valueFrom:
     secretKeyRef:
-      name: {{ $.root.Values.secretName }}
-      key: {{ . }}
+      name: {{ include "hypothesisloop.secretName" .root }}
+      key: {{ .key }}
+{{- end -}}
+
+{{/* Env entries named after the Secret keys they read. call as: include "hypothesisloop.secretEnv" (dict "keys" (list "A" "B") "root" $) */}}
+{{- define "hypothesisloop.secretEnv" -}}
+{{- range .keys }}
+{{ include "hypothesisloop.secretKey" (dict "env" . "key" . "root" $.root) }}
 {{- end }}
+{{- end -}}
+
+{{/*
+Every ${NAME} of the rendered hypothesisloop.yaml, for the two processes that load it. DATABASE_URL
+is in no file: both read it from the environment.
+*/}}
+{{- define "hypothesisloop.configSecretEnv" -}}
+{{ include "hypothesisloop.secretEnv" (dict "keys" (list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY") "root" .) }}
 {{- end -}}
 
 {{/* Pod annotations that restart a pod when the Secret it reads changes. */}}
@@ -33,25 +50,37 @@ checksum/secret: {{ .Values.secretChecksum | quote }}
 {{- end -}}
 
 {{/*
-Replaces the value of one key of the staged config, found by its exact indentation and name.
-Fails when the key is absent, so a renamed setting cannot leave the old value in place.
-call as: include "hypothesisloop.setConfig" (dict "text" $raw "key" "  endpoint" "value" "http://x")
+A top-level section of the staged config from its name down to the line of one of its own keys.
+Fails when the section has no such key, so a renamed setting cannot go unnoticed.
+call as: include "hypothesisloop.configKey" (dict "text" $raw "section" "auth" "key" "issuer")
+*/}}
+{{- define "hypothesisloop.configKey" -}}
+{{- $found := regexFind (printf "(?m)^%s:[ \\t]*\\n(?:[ #].*\\n|\\n)*?  %s:.*$" .section .key) .text -}}
+{{- if not $found -}}
+{{- fail (printf "files/hypothesisloop.yaml has no %s.%s" .section .key) -}}
+{{- end -}}
+{{ $found }}
+{{- end -}}
+
+{{/*
+Replaces the value of one key of one section of the staged config. The value is written as JSON,
+which YAML reads as it is, so no value can change the shape of the file.
+call as: include "hypothesisloop.setConfig" (dict "text" $raw "section" "auth" "key" "issuer" "value" "https://issuer")
 */}}
 {{- define "hypothesisloop.setConfig" -}}
-{{- $pattern := printf "(?m)^%s:.*$" .key -}}
-{{- if not (regexMatch $pattern .text) -}}
-{{- fail (printf "files/hypothesisloop.yaml has no %q key" .key) -}}
-{{- end -}}
-{{ regexReplaceAllLiteral $pattern .text (printf "%s: %s" .key .value) }}
+{{- $found := include "hypothesisloop.configKey" . -}}
+{{- $line := printf "  %s: %s" .key (toJson .value) -}}
+{{ replace $found (print (regexReplaceAllLiteral "(?m)^.*\\z" $found "") $line) .text }}
 {{- end -}}
 
 {{/* The bucket named by data_store.bucket in the staged config. */}}
 {{- define "hypothesisloop.bucket" -}}
-{{- $line := regexFind "(?m)^  bucket: \\S+" (include "hypothesisloop.stagedConfig" .) -}}
-{{- if not $line -}}
-{{- fail "files/hypothesisloop.yaml has no data_store.bucket" -}}
+{{- $found := include "hypothesisloop.configKey" (dict "text" (include "hypothesisloop.stagedConfig" .) "section" "data_store" "key" "bucket") -}}
+{{- $bucket := regexReplaceAll "^  bucket:[ \\t]*(\\S*).*$" (regexFind "[^\\n]*\\z" $found) "${1}" | trimAll "\"'" -}}
+{{- if not $bucket -}}
+{{- fail "files/hypothesisloop.yaml has an empty data_store.bucket" -}}
 {{- end -}}
-{{ trimPrefix "  bucket: " $line }}
+{{ $bucket }}
 {{- end -}}
 
 {{- define "hypothesisloop.metricsDBURL" -}}
