@@ -9,7 +9,8 @@
 #   CLUSTER_NAME       -> clusterName (required)
 #   API_URL            -> apiURL (required)
 #   METRICS_URL        -> metricsURL (required)
-#   RUNTIME_TOKEN      -> runtimeToken (required)
+#   RUNTIME_TOKEN      -> runtimeToken (required). Handed to helm on stdin, so it is never in a
+#                         process's arguments.
 #   AUTOSCALER_ENABLED -> autoscalerEnabled (default: false)
 #   REGISTRY_URL       -> images.registry. Must already be reachable from every node; providing
 #                         that reachability is the cluster provisioner's job (default: localhost:5000)
@@ -42,7 +43,9 @@ helm upgrade --install hypothesisloop-cluster-agent "${SCRIPT_DIR}/chart" \
   --set-string clusterName="${CLUSTER_NAME}" \
   --set-string apiURL="${API_URL}" \
   --set-string metricsURL="${METRICS_URL}" \
-  --set-string runtimeToken="${RUNTIME_TOKEN}" \
   --set-string autoscalerEnabled="${AUTOSCALER_ENABLED}" \
   --set-string images.registry="${REGISTRY_URL}" \
-  --set-string images.tag="${TAG}"
+  --set-string images.tag="${TAG}" \
+  --values - <<VALUES
+runtimeToken: "${RUNTIME_TOKEN}"
+VALUES

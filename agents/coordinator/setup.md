@@ -226,14 +226,16 @@ turn the harness registers `AGENT_ID` and signs it up to `PLATFORM_EXPERIMENT_ID
 skips what is already done), and `hl` in the container reads both as its `--agent` and
 `--platform-experiment` defaults. Each agent gets its own token, which lets it act as that agent
 in that platform experiment and nowhere else:
-`make -s token SCOPE=agent:$PLATFORM_EXPERIMENT_ID/agent-<id>`.
+`make -s token SCOPE=agent:$PLATFORM_EXPERIMENT_ID/agent-<id>`. A secret is named with a bare
+`-e NAME`, which hands the container the value from this shell's environment: written as
+`-e NAME=value` it would sit in the process list and in the shell's history.
 
+    HL_TOKEN="$(make -s token SCOPE=agent:$PLATFORM_EXPERIMENT_ID/agent-<id>)" \
     podman run -d --name agent-<id> --network host \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
       -e AGENT_FLAVOR=hyperparameter-search -e AGENT_HYPERPARAMETERS='{"batch_size":64}' \
-      -e API_URL=$API_URL -e HL_TOKEN=<the agent's token> \
-      -e CODE_REPO_URL=$CODE_REPO_URL -e GIT_TOKEN=$GIT_TOKEN \
-      -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN \
+      -e API_URL=$API_URL -e CODE_REPO_URL=$CODE_REPO_URL \
+      -e HL_TOKEN -e GIT_TOKEN -e CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT
 
 Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files
