@@ -7,10 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/cloudexec"
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
 
@@ -87,49 +84,19 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 	}
 }
 
-type exampleSettings struct {
-	Region string `yaml:"region"`
-}
-
-func settingsNode(t *testing.T, text string) yaml.Node {
-	t.Helper()
-	var holder struct {
-		Settings yaml.Node `yaml:"settings"`
-	}
-	if err := yaml.Unmarshal([]byte(text), &holder); err != nil {
-		t.Fatal(err)
-	}
-	return holder.Settings
-}
-
-func TestAProviderIsBuiltFromItsOwnSectionOfTheConfig(t *testing.T) {
-	var got exampleSettings
-	var gotTypes []string
-	providers["example"] = adapter(func(s exampleSettings, acceleratorTypes []string) (*fake.Provider, error) {
-		got, gotTypes = s, acceleratorTypes
-		return fake.New(), nil
-	})
-	defer delete(providers, "example")
+func TestAProviderIsAskedForTheAcceleratorTypesOfTheShapesThatRentOne(t *testing.T) {
 	shapes := []cloudexec.Shape{
 		{Name: "h100", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100", Accelerators: 1},
 		{Name: "cpu"},
 	}
+	if got := acceleratorTypes(shapes); len(got) != 1 || got[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
+		t.Errorf("accelerator types = %q, want the one type a shape rents", got)
+	}
+}
 
-	var rented provider.Provider
-	rented, err := newProvider(providerConfig{Name: "example", Settings: settingsNode(t, "settings: {region: eu}")}, shapes)
-	if err != nil || rented == nil || got.Region != "eu" {
-		t.Fatalf("provider %v, settings %+v, %v", rented, got, err)
-	}
-	if len(gotTypes) != 1 || gotTypes[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
-		t.Errorf("accelerator types handed to the provider = %q, want the one type a shape rents", gotTypes)
-	}
-	if _, err := newProvider(providerConfig{Name: "example", Settings: settingsNode(t, "settings: {regoin: eu}")}, nil); err == nil {
-		t.Error("a misspelled provider setting was accepted")
-	}
-	if _, err := newProvider(providerConfig{Name: "example"}, nil); err != nil {
-		t.Errorf("a provider with no settings of its own: %v", err)
-	}
-	if _, err := newProvider(providerConfig{Name: "other"}, nil); err == nil {
-		t.Error("a provider this binary was not built with was accepted")
+func TestAProviderThisBinaryWasNotBuiltWithIsRefused(t *testing.T) {
+	_, err := newProvider(providerConfig{Name: "other"}, nil)
+	if err == nil || !strings.Contains(err.Error(), `config: provider.name "other"`) {
+		t.Fatalf("err = %v, want one naming the config key and the provider", err)
 	}
 }

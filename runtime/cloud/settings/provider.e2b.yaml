@@ -1,0 +1,20 @@
+# The provider section of a config file for one E2B team. A process that rents instances embeds
+# it as it is; cloud-agent.yaml explains name and settings.
+#
+# E2B boots a sandbox from a template. Before an image can be rented at a size, build its
+# template: `infra/images/e2b-template.sh <image> <cores> <memory-mib>`. A Create whose template
+# is missing fails with that command.
+
+provider:
+  name: e2b
+  settings:
+    # The environment variable that holds the team's API key. The key itself is never in a file.
+    api_key_env: E2B_API_KEY
+    # How long a sandbox lives. E2B kills it then, with its output, and whoever rented it rents
+    # it again on its next pass. The plan caps it: 3600 on the free plan, 86400 on Pro. A value
+    # above the cap fails every Create with the vendor's own message.
+    lifetime_seconds: 3600
+
+# What to set the intervals of the embedding config against: a list of the instances is one
+# request for each hundred sandboxes of the team and two more for each instance listed, one after
+# another, about a fifth of a second each. Reading an instance's output is two requests.

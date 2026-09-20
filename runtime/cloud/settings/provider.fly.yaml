@@ -1,0 +1,27 @@
+# The provider section of a config file for one Fly.io organization. A process that rents
+# instances embeds it as it is; cloud-agent.yaml explains name and settings.
+
+provider:
+  name: fly
+  settings:
+    # The environment variable that holds a token for the app's organization, as
+    # `fly tokens create org` prints it: "FlyV1 " and the token. The token is never in a file.
+    # An org token can create and destroy machines in every app of the organization.
+    api_token_env: FLY_API_TOKEN
+    # The one Fly app that holds every machine. It must exist: `fly apps create <name> -o <org>`.
+    # Give it a network of its own (`--network <name>`): machines on one network reach each
+    # other's ports, and an app created without one shares the organization's default network.
+    app: hypothesisloop-agents
+    # Three-letter code of the region machines are placed in (`fly platform regions`).
+    region: ams
+    # shared or performance. A spec gets the smallest machine of this kind that holds its cpu
+    # and memory: shared has 1, 2, 4, 6 or 8 cores with 256 MB to 2 GB each, performance 1 to 16
+    # cores with 2 to 8 GB each. A spec that fits none of them, asks for more than 50 GB of
+    # disk, or asks for an accelerator is refused.
+    cpu_kind: shared
+
+# What to set the intervals of the embedding config against: the Machines API allows one request
+# a second per action and app, with bursts of three. A list of the instances is one request; a
+# machine that stopped in the last two minutes adds one log read to it. Reading an instance's
+# output is one request to the log API, which gives the last 500 entries: a log_tail_lines above
+# about 400 fails once an instance has written that much.
