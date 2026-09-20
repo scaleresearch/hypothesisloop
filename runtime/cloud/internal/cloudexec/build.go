@@ -50,25 +50,15 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s requests host_mounts, which a rented instance cannot provide", exp.ID)
 	}
 
-	command, args := group.Command, group.Args
-	if len(command) == 0 {
-		command, args = spec.Command, spec.Args
-	}
+	command, args := workloadenv.Command(spec, group)
 	// The instance runs the command under hl exec, so there has to be one: the image's own
 	// entrypoint cannot be wrapped from outside.
 	if len(command) == 0 {
 		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s has no command, and a job on a rented instance needs one", exp.ID)
 	}
-
-	platform, err := workloadenv.Platform(exp, group, e.apiURL, func(url string) string { return url })
+	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, func(url string) string { return url })
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudexec: %w", err)
-	}
-	env := workloadenv.Job(spec, group)
-	for _, v := range platform {
-		if _, set := env[v.Name]; !set {
-			env[v.Name] = v.Value
-		}
 	}
 
 	// The wrapper is only sent SIGTERM for a termination the control plane granted the checkpoint

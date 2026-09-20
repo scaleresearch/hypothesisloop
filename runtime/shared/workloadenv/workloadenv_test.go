@@ -62,3 +62,39 @@ func TestJobLayersTheGroupEnvironmentOverTheJobs(t *testing.T) {
 		t.Errorf("Job = %v, want A from the job and B from the group", got)
 	}
 }
+
+func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
+	exp := &domain.Experiment{ID: "exp-1", Data: &domain.DataAccess{Region: "eu"}, Token: "job-token"}
+	spec := domain.JobSpec{Env: map[string]string{"LR": "0.1", "AWS_REGION": "us"}}
+	group := domain.JobGroup{Env: map[string]string{"LR": "0.3", "ROLE": "learner"}}
+
+	env, err := Merged(exp, spec, group, "http://api", func(url string) string { return url })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"LR": "0.3", "ROLE": "learner", "AWS_REGION": "us",
+		"HYPOTHESISLOOP_EXPERIMENT_ID": "exp-1", "HYPOTHESISLOOP_API_URL": "http://api", "HYPOTHESISLOOP_TOKEN": "job-token",
+	} {
+		if env[name] != want {
+			t.Errorf("%s = %q, want %q", name, env[name], want)
+		}
+	}
+	exp.Data = nil
+	if _, err := Merged(exp, spec, group, "http://api", func(url string) string { return url }); err == nil {
+		t.Error("Merged for an experiment without durable-data access: got nil, want an error")
+	}
+}
+
+func TestCommandIsTheGroupsOwnWhenItNamesOne(t *testing.T) {
+	spec := domain.JobSpec{Command: []string{"python", "train.py"}, Args: []string{"--all"}}
+	command, args := Command(spec, domain.JobGroup{})
+	if command[1] != "train.py" || args[0] != "--all" {
+		t.Errorf("no group command: %q %q", command, args)
+	}
+	// The group's command comes with the group's args, never the job's.
+	command, args = Command(spec, domain.JobGroup{Command: []string{"python", "actor.py"}})
+	if command[1] != "actor.py" || len(args) != 0 {
+		t.Errorf("group command: %q %q", command, args)
+	}
+}

@@ -334,13 +334,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		}
 	}
 
-	// The group's own process when it names one, the job's shared entrypoint otherwise. An
-	// ungrouped job's synthetic group carries the job-level values, so this is spec.Command/Args
-	// exactly as before.
-	command, args := group.Command, group.Args
-	if len(command) == 0 {
-		command, args = spec.Command, spec.Args
-	}
+	command, args := workloadenv.Command(spec, group)
 	container := corev1.Container{
 		Name:  "experiment",
 		Image: spec.Image,

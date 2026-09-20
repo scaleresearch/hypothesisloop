@@ -1,5 +1,5 @@
-// Package workloadenv is the environment both runtimes hand a workload, so a job reads the same
-// variables wherever it was placed.
+// Package workloadenv is the environment and the command every runtime hands a workload, so a job
+// reads the same variables and runs the same process wherever it was placed.
 package workloadenv
 
 import (
@@ -69,4 +69,29 @@ func Job(spec domain.JobSpec, group domain.JobGroup) map[string]string {
 		env[k] = v
 	}
 	return env
+}
+
+// Merged is the whole environment of one node of group as one map: the job's own entries, and the
+// platform's for every name the job did not set itself.
+func Merged(exp *domain.Experiment, spec domain.JobSpec, group domain.JobGroup, apiURL string, reach func(url string) string) (map[string]string, error) {
+	platform, err := Platform(exp, group, apiURL, reach)
+	if err != nil {
+		return nil, err
+	}
+	env := Job(spec, group)
+	for _, v := range platform {
+		if _, set := env[v.Name]; !set {
+			env[v.Name] = v.Value
+		}
+	}
+	return env, nil
+}
+
+// Command is the process one node of group runs: the group's own when it names one, the job's
+// shared entrypoint otherwise. An ungrouped job's one group carries the job-level values.
+func Command(spec domain.JobSpec, group domain.JobGroup) (command, args []string) {
+	if len(group.Command) > 0 {
+		return group.Command, group.Args
+	}
+	return spec.Command, spec.Args
 }

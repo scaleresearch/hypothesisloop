@@ -198,23 +198,11 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		shmSizeBytes = shmQty.Value()
 	}
 
-	platform, err := workloadenv.Platform(exp, group, e.apiURL, containerReachable)
+	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, containerReachable)
 	if err != nil {
 		return containerSpec{}, fmt.Errorf("podexec: %w", err)
 	}
-	env := workloadenv.Job(spec, group)
-	for _, v := range platform {
-		if _, set := env[v.Name]; !set {
-			env[v.Name] = v.Value
-		}
-	}
-
-	// The group's own process when it names one, the job's shared entrypoint otherwise — same
-	// rule as the k8s runtime.
-	command, args := group.Command, group.Args
-	if len(command) == 0 {
-		command, args = spec.Command, spec.Args
-	}
+	command, args := workloadenv.Command(spec, group)
 	cs := containerSpec{
 		Name:           containerName(exp.ID),
 		Image:          spec.Image,
