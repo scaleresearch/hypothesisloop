@@ -23,34 +23,6 @@ type Policy struct {
 	Statement []PolicyStatement `json:"Statement"`
 }
 
-// Allows reports whether the policy grants action on resource. IAM's rule is that anything not
-// explicitly allowed is denied, so this is the whole evaluation: the write-scoping guarantee is
-// "no statement allows a write outside the job's own prefix", not "a Deny statement forbids it".
-func (p Policy) Allows(action, resource string) bool {
-	for _, st := range p.Statement {
-		if st.Effect != "Allow" {
-			continue
-		}
-		if matchesAny(st.Action, action) && matchesAny(st.Resource, resource) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchesAny applies IAM's only wildcard, a trailing "*", to each pattern.
-func matchesAny(patterns []string, value string) bool {
-	for _, pattern := range patterns {
-		if pattern == value {
-			return true
-		}
-		if n := len(pattern); n > 0 && pattern[n-1] == '*' && len(value) >= n-1 && value[:n-1] == pattern[:n-1] {
-			return true
-		}
-	}
-	return false
-}
-
 // JobPolicy is the grant one job runs under: write confined to its own prefix, read spanning
 // the platform experiment it belongs to. This is what makes "any agent can load the checkpoint
 // behind any claim, and no agent can overwrite another's evidence" a property of the store rather

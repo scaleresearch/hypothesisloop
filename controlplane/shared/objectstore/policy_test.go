@@ -20,7 +20,7 @@ func TestJobPolicyGrantsWriteOnlyWithinTheJobsOwnPrefix(t *testing.T) {
 	policy := mustJobPolicy(t)
 
 	own := "arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/checkpoint.pt"
-	if !policy.Allows("s3:PutObject", own) {
+	if !allows(policy, "s3:PutObject", own) {
 		t.Fatalf("policy denies s3:PutObject on %s — a job that cannot write its own prefix has nowhere to leave a checkpoint", own)
 	}
 }
@@ -37,10 +37,10 @@ func TestJobPolicyRefusesWriteOutsideTheJobsOwnPrefix(t *testing.T) {
 		"arn:aws:s3:::hl-data/pe-1/rogue.pt",
 		"arn:aws:s3:::hl-data/pe-2/agent-a/exp-7/checkpoint.pt",
 	} {
-		if policy.Allows("s3:PutObject", resource) {
+		if allows(policy, "s3:PutObject", resource) {
 			t.Fatalf("policy allows s3:PutObject on %s — one agent can overwrite another's evidence", resource)
 		}
-		if policy.Allows("s3:DeleteObject", resource) {
+		if allows(policy, "s3:DeleteObject", resource) {
 			t.Fatalf("policy allows s3:DeleteObject on %s — erasing a rival's evidence is the same failure as rewriting it", resource)
 		}
 	}
@@ -53,10 +53,10 @@ func TestJobPolicyGrantsReadAcrossThePlatformExperiment(t *testing.T) {
 	policy := mustJobPolicy(t)
 
 	other := "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt"
-	if !policy.Allows("s3:GetObject", other) {
+	if !allows(policy, "s3:GetObject", other) {
 		t.Fatalf("policy denies s3:GetObject on %s — no agent could load the checkpoint behind another's claim", other)
 	}
-	if policy.Allows("s3:GetObject", "arn:aws:s3:::hl-data/pe-2/agent-a/exp-7/checkpoint.pt") {
+	if allows(policy, "s3:GetObject", "arn:aws:s3:::hl-data/pe-2/agent-a/exp-7/checkpoint.pt") {
 		t.Fatal("policy allows reading another platform experiment — the shared prefix is one program's, not the whole bucket's")
 	}
 }
@@ -123,7 +123,7 @@ func TestAgentPolicyWritesTheAgentsPrefixAndReadsThePlatformExperiment(t *testin
 		"arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/checkpoint.pt",
 	} {
 		for _, action := range []string{"s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"} {
-			if !policy.Allows(action, own) {
+			if !allows(policy, action, own) {
 				t.Errorf("policy denies %s on %s, inside the agent's own prefix", action, own)
 			}
 		}
@@ -135,15 +135,15 @@ func TestAgentPolicyWritesTheAgentsPrefixAndReadsThePlatformExperiment(t *testin
 		"arn:aws:s3:::hl-data/pe-2/agent-a/x",
 	} {
 		for _, action := range []string{"s3:PutObject", "s3:DeleteObject"} {
-			if policy.Allows(action, other) {
+			if allows(policy, action, other) {
 				t.Errorf("policy allows %s on %s, outside the agent's own prefix", action, other)
 			}
 		}
 	}
-	if !policy.Allows("s3:GetObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt") {
+	if !allows(policy, "s3:GetObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt") {
 		t.Error("policy denies reading another agent's object in the same platform experiment")
 	}
-	if policy.Allows("s3:GetObject", "arn:aws:s3:::hl-data/pe-2/agent-a/x") {
+	if allows(policy, "s3:GetObject", "arn:aws:s3:::hl-data/pe-2/agent-a/x") {
 		t.Error("policy allows reading another platform experiment")
 	}
 	document, err := policy.JSON()
@@ -161,4 +161,32 @@ func TestAgentPolicyRefusesAWildcardOrEmptyIdentifier(t *testing.T) {
 			t.Errorf("AgentPolicy accepted platform experiment %q, agent %q", bad.pe, bad.agent)
 		}
 	}
+}
+
+// allows reports whether the policy grants action on resource. IAM's rule is that anything not
+// explicitly allowed is denied, so this is the whole evaluation: the write-scoping guarantee is
+// "no statement allows a write outside the job's own prefix", not "a Deny statement forbids it".
+func allows(p Policy, action, resource string) bool {
+	for _, st := range p.Statement {
+		if st.Effect != "Allow" {
+			continue
+		}
+		if matchesAny(st.Action, action) && matchesAny(st.Resource, resource) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAny applies IAM's only wildcard, a trailing "*", to each pattern.
+func matchesAny(patterns []string, value string) bool {
+	for _, pattern := range patterns {
+		if pattern == value {
+			return true
+		}
+		if n := len(pattern); n > 0 && pattern[n-1] == '*' && len(value) >= n-1 && value[:n-1] == pattern[:n-1] {
+			return true
+		}
+	}
+	return false
 }

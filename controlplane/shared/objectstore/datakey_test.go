@@ -94,8 +94,8 @@ func TestCreateDataKeySendsTheKeyAndItsPolicyEncryptedToTheAdminAPI(t *testing.T
 	if err := json.Unmarshal(got.Policy, &policy); err != nil {
 		t.Fatalf("policy is not a JSON document: %v", err)
 	}
-	if !policy.Allows("s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/x") ||
-		policy.Allows("s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/x") {
+	if !allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/x") ||
+		allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/x") {
 		t.Fatalf("key policy is not the job's write scope: %s", got.Policy)
 	}
 }
@@ -123,8 +123,8 @@ func TestCreateAgentDataKeyAsksForTheAgentsWriteScope(t *testing.T) {
 	if err := json.Unmarshal(got.Policy, &policy); err != nil {
 		t.Fatalf("policy is not a JSON document: %v", err)
 	}
-	if !policy.Allows("s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/x") ||
-		policy.Allows("s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/x") {
+	if !allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/x") ||
+		allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/x") {
 		t.Fatalf("key policy is not the agent's write scope: %s", got.Policy)
 	}
 }
