@@ -162,6 +162,10 @@ func (l *Loop) tick(ctx context.Context) error {
 	// is what separates "you lost this to jobs ahead of you, wait" from "this cluster cannot
 	// host your request, shrink it" — a distinction a submitter cannot make from the outside
 	// and cannot act on if it is wrong. Both passes classify against the same snapshot.
+	//
+	// It is also what installed accelerators per node are rebuilt from (free plus claimed): a job
+	// admitted this tick is in neither the live free count nor the claimed list, so a "max" share
+	// measured against live capacity grows with every admission.
 	nodeAvailAtTickStart := cloneNodeAvailByCluster(nodeAvail)
 	nodeResourcesAtTickStart := cloneNodeAvailByCluster(nodeResources)
 
@@ -310,7 +314,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// request is oversized for every node, so there is nothing else to try here.
 		misfit := ""
 		if cluster != "" {
-			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
+			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeLabels[cluster])
 			if rerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
 				continue
@@ -332,7 +336,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			// SUBMITTED row itself is the scale-up request the native autoscaler reacts to.
 			// Live-fit always wins over speculating (this branch only runs on live no-fit), and
 			// speculating anywhere always wins over preempting a burst job (this runs first).
-			candidates, provenFitByCluster, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvail, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
+			candidates, provenFitByCluster, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvailAtTickStart, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
 			if cerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
 				continue
@@ -353,7 +357,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				// the wrong cluster's nodes, or (if never resolved at all) leave the literal
 				// "max" sentinel in the submitted spec.
 				if specCluster != cluster {
-					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvail[specCluster], nodeLabels[specCluster])
+					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvailAtTickStart[specCluster], nodeLabels[specCluster])
 					if rerr != nil {
 						l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources for speculative target: %w", rerr))
 						continue
@@ -571,7 +575,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// before the fit check.
 		misfit := ""
 		if cluster != "" {
-			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvail[cluster], nodeLabels[cluster])
+			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeLabels[cluster])
 			if rerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
 				continue

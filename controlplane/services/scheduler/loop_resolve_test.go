@@ -351,3 +351,34 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) 
 }
 
 func pastTime() time.Time { return time.Now().Add(-time.Hour) }
+
+type resolvedCPUStore struct {
+	holdStore
+	cpu map[string]string
+}
+
+func (s *resolvedCPUStore) ClaimSubmitted(_ context.Context, id, _ string, resolved *domain.JobSpec, _ func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+	if s.cpu == nil {
+		s.cpu = map[string]string{}
+	}
+	s.cpu[id] = resolved.CPU
+	return true, nil
+}
+
+// Free accelerators shrink as a tick admits, and jobs admitted this tick are in no claimed list
+// yet, so a share measured against live free capacity grows with every admission.
+func TestMaxSharesDoNotGrowAsATickAdmits(t *testing.T) {
+	first := holdJob("first", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
+	second := holdJob("second", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
+	second.AgentID = "agent-2"
+	first.ClusterName, second.ClusterName = "cluster-a", "cluster-a"
+	store := &resolvedCPUStore{holdStore: holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{first, second}}}}
+	l := holdLoop(store, holdWorkload{cpuCores: 16}, noopEvictor{})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatalf("tick() = %v, want nil", err)
+	}
+	if store.cpu["first"] == "" || store.cpu["first"] != store.cpu["second"] {
+		t.Fatalf("resolved cpu = %q and %q, want the same share of the node for both", store.cpu["first"], store.cpu["second"])
+	}
+}
