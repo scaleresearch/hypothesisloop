@@ -886,6 +886,25 @@ CREATE TABLE IF NOT EXISTS org_members (
 );
 CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
 
+-- An invite is a link: the platform stores no email and sends none. token_hash is the sha256 of
+-- the whole token, which is shown once and stored nowhere. It is accepted once, before
+-- expires_at and while not revoked. created_by is the person answerable for it.
+CREATE TABLE IF NOT EXISTS org_invites (
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL REFERENCES orgs(id),
+    role        TEXT        NOT NULL,
+    token_hash  TEXT        NOT NULL UNIQUE,
+    created_by  TEXT        NOT NULL REFERENCES users(id),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL,
+    accepted_by TEXT        REFERENCES users(id),
+    accepted_at TIMESTAMPTZ,
+    revoked_at  TIMESTAMPTZ,
+    CONSTRAINT org_invites_role CHECK (role IN ('owner', 'member')),
+    CONSTRAINT org_invites_accepted CHECK ((accepted_by IS NULL) = (accepted_at IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id);
+
 CREATE TABLE IF NOT EXISTS projects (
     id         TEXT        PRIMARY KEY,
     org_id     TEXT        NOT NULL REFERENCES orgs(id),

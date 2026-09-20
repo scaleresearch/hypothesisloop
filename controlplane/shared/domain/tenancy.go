@@ -30,6 +30,33 @@ type Org struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// OrgMember is one person of an org. The platform holds no name and no email for them: the
+// identity provider does.
+type OrgMember struct {
+	OrgID    string    `json:"org_id"`
+	UserID   string    `json:"user_id"`
+	Role     OrgRole   `json:"role"`
+	JoinedAt time.Time `json:"joined_at"`
+}
+
+// InviteLifetime is how long an invite to an org can be accepted.
+const InviteLifetime = 7 * 24 * time.Hour
+
+// OrgInvite is a link that lets one signed-in person join an org with Role. Its token is returned
+// once at creation and only its hash is stored. It works once, until ExpiresAt, and while not
+// revoked. CreatedBy is the person answerable for it.
+type OrgInvite struct {
+	ID         string     `json:"id"`
+	OrgID      string     `json:"org_id"`
+	Role       OrgRole    `json:"role"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	AcceptedBy string     `json:"accepted_by,omitempty"`
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+}
+
 // Project groups an org's platform experiments.
 type Project struct {
 	ID        string    `json:"id"`
@@ -64,8 +91,9 @@ type APIKey struct {
 	CreatedAt time.Time `json:"created_at"`
 	// RevokedAt is the earliest revocation of this key or of a key it descends from.
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
-	// Orphaned reports that the person who created the key no longer owns its org and is not
-	// staff. A key carries its creator's authority, so it ends with it.
+	// Orphaned reports that the person who created the key could no longer create it: they left
+	// the org, or the key reaches the whole org and they no longer own it, and they are not staff.
+	// A key carries its creator's authority, so it ends with it.
 	Orphaned bool `json:"orphaned,omitempty"`
 }
 
