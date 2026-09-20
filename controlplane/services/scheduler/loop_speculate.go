@@ -43,7 +43,7 @@ func (l *Loop) speculativeCandidates(
 	// failed over from within the TTL is excluded here too, not just this job's own tried-list —
 	// otherwise every queued job lines up behind the same dead node group in turn instead of
 	// skipping it together.
-	recentlyTried, err := l.store.RecentlyTriedClusters(ctx, l.triedClusterTTL)
+	recentlyTried, err := resolveCache.recentlyTriedClusters(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,7 +100,7 @@ func (l *Loop) speculativeCandidates(
 		// one level up (per-node instead of per-cluster). Every autoscaler-enabled, non-backed-off
 		// cluster stays a candidate; provenFit only affects ordering below.
 		provenFit := fitsLargestNode(exp, accelCeiling, nodeResourcesTotal[cluster], nodeLabels[cluster])
-		cap, err := l.clusterSpeculativeCap(ctx, clusterID)
+		cap, err := resolveCache.speculativeCap(ctx, clusterID)
 		if err != nil {
 			return nil, nil, err
 		}

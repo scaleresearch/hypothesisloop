@@ -15,16 +15,41 @@ import (
 // resolution needs (see resolveClusterLocalResources) across every queued job considered in one
 // tick: the running set and each running job's node are the same answer for every queued job
 // asking about a given accelerator flavor, so this is built lazily and reused rather than
-// re-queried once per queued job.
+// re-queried once per queued job. The speculative-candidate reads are held the same way.
 type resolutionCache struct {
-	l             *Loop
-	claimed       []*domain.Experiment // RUNNING and SUBMITTED — see loadClaimed
-	claimedLoaded bool
-	nodeOf        map[string]string // experiment ID -> node, filled lazily
+	l               *Loop
+	claimed         []*domain.Experiment // RUNNING and SUBMITTED — see loadClaimed
+	claimedLoaded   bool
+	nodeOf          map[string]string // experiment ID -> node, filled lazily
+	recentlyTried   map[string]bool   // cluster IDs any job failed over from within the TTL
+	speculativeCaps map[string]*int   // cluster ID -> max_speculative_accelerators, nil for no cap
 }
 
 func newResolutionCache(l *Loop) *resolutionCache {
-	return &resolutionCache{l: l, nodeOf: map[string]string{}}
+	return &resolutionCache{l: l, nodeOf: map[string]string{}, speculativeCaps: map[string]*int{}}
+}
+
+func (c *resolutionCache) recentlyTriedClusters(ctx context.Context) (map[string]bool, error) {
+	if c.recentlyTried == nil {
+		tried, err := c.l.store.RecentlyTriedClusters(ctx, c.l.triedClusterTTL)
+		if err != nil {
+			return nil, err
+		}
+		c.recentlyTried = tried
+	}
+	return c.recentlyTried, nil
+}
+
+func (c *resolutionCache) speculativeCap(ctx context.Context, clusterID string) (*int, error) {
+	if cap, ok := c.speculativeCaps[clusterID]; ok {
+		return cap, nil
+	}
+	cap, err := c.l.clusterSpeculativeCap(ctx, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	c.speculativeCaps[clusterID] = cap
+	return cap, nil
 }
 
 // loadClaimed returns every experiment that has already claimed accelerator capacity toward the
