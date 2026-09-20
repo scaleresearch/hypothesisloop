@@ -381,29 +381,20 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 		return Placement{}, err
 	}
 
-	candidateTypes := append([]domain.AcceleratorType{exp.AcceleratorType}, exp.Job.AcceptableAcceleratorTypes...)
-	for _, candidate := range candidateTypes {
-		if candidate == "" {
+	var freeDevices []string
+	for _, d := range devices {
+		if !hasLabel(d.Labels, string(exp.AcceleratorType)) {
 			continue
 		}
-		var freeDevices []string
-		for _, d := range devices {
-			if !hasLabel(d.Labels, string(candidate)) {
-				continue
-			}
-			if inUseDevices[strings.ToLower(d.DevicePath)] {
-				continue // already claimed by a running container
-			}
-			freeDevices = append(freeDevices, d.DevicePath)
-			if int64(len(freeDevices)) == int64(count) {
-				break
-			}
+		if inUseDevices[strings.ToLower(d.DevicePath)] {
+			continue // already claimed by a running container
 		}
+		freeDevices = append(freeDevices, d.DevicePath)
 		if int64(len(freeDevices)) == int64(count) {
 			return Placement{DevicePaths: freeDevices}, nil
 		}
 	}
-	return Placement{}, fmt.Errorf("podexec: no free devices match accelerator type %q (or acceptable alternatives) for %d requested", exp.AcceleratorType, count)
+	return Placement{}, fmt.Errorf("podexec: no free devices match accelerator type %q for %d requested", exp.AcceleratorType, count)
 }
 
 func hasLabel(labels []string, want string) bool {
