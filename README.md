@@ -127,12 +127,16 @@ hl job summary job-1 --text "..."
 hl job logs job-1 | data job-1 | cost job-1 | cancel job-1
 hl job stats                                               # counts by status and eviction reason
 hl donation list | request --credits 0.5 --reason "..." | fulfill d-1 | cancel d-1
+hl org list | rename "New name"                            # the orgs this token reaches
+hl project list | create vision | rename --project prj-1 language
+hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
+hl cluster add my-cluster --metrics-url URL | list         # register a cluster, print the command that starts its agent
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
-An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
+An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
 ## Coordinator and researcher experiments
 
@@ -288,11 +292,13 @@ On macOS:
 ### Option B - Existing cluster (GKE, EKS, remote k3s, ...)
 
 ```bash
-# Point kubectl at your cluster, then:
 make controlplane-up
-API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084 \
-  RUNTIME_TOKEN="$(make -s runtime-token CLUSTER=my-cluster)" \
-  make cluster-agent-up CLUSTER=my-cluster
+# Register the cluster for your org. This prints the command that installs its agent,
+# with the cluster's runtime token filled in:
+hl cluster add my-cluster --api-url https://your-control-plane:8081 --metrics-url https://your-control-plane:8084
+# Point kubectl at the cluster and run what it printed:
+make cluster-agent-up CLUSTER=my-cluster API_URL=https://your-control-plane:8081 \
+  METRICS_URL=https://your-control-plane:8084 RUNTIME_TOKEN=hls_...
 ```
 
 `make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
@@ -300,10 +306,32 @@ and `REGISTRY` must name a registry every node can pull from (`make images` push
 `API_URL` (control-service) and `METRICS_URL` (metrics-service) are both required and just need
 to be reachable *outbound* from inside the target cluster - the control
 plane never needs to reach the cluster at all, so there's no kubeconfig or credential to hand
-it. Repeat both for every additional target cluster. `make runtime-token` registers the cluster
-name for an org (`ORG=`, default `default`) and prints the token its agents start with; the
-control plane refuses a token for a name nobody registered, so a typo'd `CLUSTER=` is an error.
-Capacity is read from the agent's heartbeats.
+it. Repeat both for every additional target cluster. Capacity is read from the agent's heartbeats.
+
+#### Clusters belong to an org
+
+A cluster exists for the platform once an org registers its name: `hl cluster add` or
+`POST /orgs/{id}/clusters`. Registering returns the cluster's
+runtime token. The token is derived from the name, so registering the same name again returns
+the same token, and a name another org holds is refused. The control plane refuses a token for
+a name nobody registered, so a typo'd `CLUSTER=` is an error and never a second cluster.
+An operator who holds the signing secret and the database can do the same without an API key:
+`make -s runtime-token CLUSTER=my-cluster ORG=<org id>`.
+
+A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
+the job's org or on a shared cluster, and a job whose org has neither waits with
+`not_admitted_reason: no_cluster_for_org`. Sharing is the platform's decision, set by staff:
+`hl-admin cluster share my-cluster on` or `PATCH /orgs/{id}/clusters/{name}` with
+`{"shared": true}`. Jobs already placed on a cluster stay there when it stops being shared.
+
+`hl capacity` and `GET /resource-catalog/capacity` show the clusters your jobs can land on:
+your org's own and the shared ones. `hl cluster list` shows your org's clusters and whether each
+is connected. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
+registered the cluster and stay reachable while its agent is away; `cluster_id` is the identity
+the cluster's runtime reported, shown by `hl cluster list` once it has connected.
+
+The clusters of the local stack (`local`, `box-a`, `k3s-nvidia`) are registered for the
+org `default` by `make controlplane-up`.
 
 ### Option C - Windows (untested)
 
