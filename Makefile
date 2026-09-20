@@ -66,8 +66,10 @@ registry-up:
 registry-prune:
 	bash localdev/controlplane/registry-prune.sh
 
+# compose is started under auth.sh, which exports the GitHub App's secrets when .env has an App:
+# a PEM does not survive being a make variable.
 controlplane-up: registry-up render-settings images
-	podman compose -f $(COMPOSE_FILE) up -d
+	bash -c '. localdev/lib/auth.sh && podman compose -f $(COMPOSE_FILE) up -d'
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 	bash -c '. localdev/lib/auth.sh && lib_register_local_clusters'

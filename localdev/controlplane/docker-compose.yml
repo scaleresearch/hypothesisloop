@@ -120,6 +120,10 @@ services:
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
+      # The GitHub App's two secrets, which the rendered settings name when .env has an App
+      # (localdev/lib/auth.sh). Empty and unread otherwise.
+      HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET:-}
+      HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
     ports:
       - "${API_HOST_PORT:-8081}:8081"
     volumes:
@@ -140,6 +144,10 @@ services:
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
+      # The GitHub App's two secrets, which the rendered settings name when .env has an App
+      # (localdev/lib/auth.sh). Empty and unread otherwise.
+      HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET:-}
+      HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
     ports:
       - "8084:8084"
     volumes:

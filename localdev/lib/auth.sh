@@ -13,8 +13,35 @@ export HL_DEV_JWT_KID="local-dev"
 export HL_DEV_JWT_ISSUER="http://localhost/hypothesisloop-dev"
 export HL_DEV_JWT_AUDIENCE="hypothesisloop-dev"
 
+# The GitHub App local development reaches repositories through, when the repository's .env
+# names one by GITHUB_APP_ID (.env.example). The rendered settings then get a github section, and
+# its two secrets reach every process that loads them (the compose services, hl-admin) through
+# the two variables exported here. With no .env or no id there is no App and no section.
+lib_env_value() {
+  (set +u; . "${LIB_AUTH_REPO}/.env"; printf '%s' "${!1:-}")
+}
+HL_GITHUB_APP_ID=""
+if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
+  HL_GITHUB_APP_ID="$(lib_env_value GITHUB_APP_ID)"
+fi
+if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
+  for lib_auth_key in GITHUB_APP_SLUG GITHUB_APP_CLIENT_ID GITHUB_APP_CLIENT_SECRET GITHUB_APP_PRIVATE_KEY; do
+    if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
+      echo "auth: .env sets GITHUB_APP_ID and not ${lib_auth_key} (.env.example says what it is)" >&2
+      return 1 2>/dev/null || exit 1
+    fi
+  done
+  unset lib_auth_key
+  HL_GITHUB_APP_SLUG="$(lib_env_value GITHUB_APP_SLUG)"
+  HL_GITHUB_APP_CLIENT_ID="$(lib_env_value GITHUB_APP_CLIENT_ID)"
+  HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET="$(lib_env_value GITHUB_APP_CLIENT_SECRET)"
+  HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY="$(lib_env_value GITHUB_APP_PRIVATE_KEY)"
+  export HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY
+fi
+
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
-# which are the committed ones with this host's address and the local JWT key filled in.
+# which are the committed ones with this host's address and the local JWT key filled in, and the
+# GitHub App's section when there is one.
 lib_render_settings() {
   local host_address="$1" output="$2" coordinate jwk
   if [[ ! -f "${HL_DEV_JWT_KEY}" ]]; then
@@ -32,6 +59,15 @@ lib_render_settings() {
   for rendered in "issuer: ${HL_DEV_JWT_ISSUER}" "audience: ${HL_DEV_JWT_AUDIENCE}" "kid: ${HL_DEV_JWT_KID}"; do
     grep -q "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
+  if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
+    if grep -q '^github:' "${output}"; then
+      echo "render-settings: the settings file has a github section, and .env would add a second one" >&2
+      return 1
+    fi
+    # The values are JSON strings, which YAML reads as they are.
+    printf '\ngithub:\n  app_id: %d\n  app_slug: "%s"\n  client_id: "%s"\n  client_secret: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}\n  private_key: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}\n' \
+      "${HL_GITHUB_APP_ID}" "${HL_GITHUB_APP_SLUG}" "${HL_GITHUB_APP_CLIENT_ID}" >> "${output}"
+  fi
 }
 # hl-admin reads the settings the local control plane runs with. The committed file holds
 # placeholders and is refused at load, so `make render-settings` comes first.
