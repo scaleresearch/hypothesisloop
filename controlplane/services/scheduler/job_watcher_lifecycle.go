@@ -51,21 +51,45 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 	return nil
 }
 
-// stuckPendingTimeoutOn is the stuck-pending deadline for a job admitted to the cluster with
-// this id: the value its operator set in cluster_settings, and the global one where none is set.
-// A cluster that has reported no id has no settings row to read.
-func (w *JobWatcher) stuckPendingTimeoutOn(ctx context.Context, clusterID string) (time.Duration, error) {
+// stuckPendingTimeoutFor is the stuck-pending deadline of the cluster exp was admitted to: the
+// value its operator set in cluster_settings, and the global one where none is set. It is read
+// at the moment a stuck-pending decision is made and nowhere else, so a job with no such decision
+// pending is never held up by a read that fails.
+//
+// clusterIDs is the pass's own read when the scale-up deadline is enabled. A deployment without
+// it reads none for the pass, so they are read here.
+func (w *JobWatcher) stuckPendingTimeoutFor(ctx context.Context, exp *domain.Experiment, clusterIDs map[string]string) (time.Duration, error) {
+	if w.scaleUpTimeout <= 0 {
+		var err error
+		clusterIDs, err = w.backend.GetClusterIDs(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("cluster ids: %w", err)
+		}
+	}
+	// Settings are keyed by cluster id, so a cluster that has reported none has no row to read.
+	clusterID := clusterIDs[exp.ClusterName]
 	if clusterID == "" {
 		return w.stuckPendingTimeout, nil
 	}
 	cs, err := w.store.GetClusterSettings(ctx, clusterID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("cluster settings: %w", err)
 	}
 	if cs != nil && cs.StuckPendingTimeoutSeconds != nil {
 		return time.Duration(*cs.StuckPendingTimeoutSeconds) * time.Second, nil
 	}
 	return w.stuckPendingTimeout, nil
+}
+
+// evictIfStuckPending evicts exp once it has stayed pre-RUNNING past its cluster's stuck-pending
+// timeout. A timeout that cannot be read is an error and no eviction: the global value might
+// evict a job its cluster gives longer to.
+func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experiment, clusterIDs map[string]string, reason domain.EvictionReason) error {
+	timeout, err := w.stuckPendingTimeoutFor(ctx, exp, clusterIDs)
+	if err != nil {
+		return fmt.Errorf("stuck-pending timeout: %w", err)
+	}
+	return w.evictIfPastDeadline(ctx, exp, timeout, reason)
 }
 
 // checkScaleUpDeadline evicts exp if its gang has not fully bound (called only while
@@ -77,15 +101,16 @@ func (w *JobWatcher) stuckPendingTimeoutOn(ctx context.Context, clusterID string
 // scale_up_timeout — an infrastructure fault recorded as a tried_clusters failover rather than
 // spending infra_requeue_count, so a run of slow clusters cannot exhaust a job's environment-fault
 // budget. On every other cluster (or when this deployment never called WithScaleUpTimeout), the
-// deadline and reason are the cluster's stuckPendingTimeout and EvictionStuckPending.
-func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, stuckPendingTimeout time.Duration, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
+// deadline is that cluster's stuck-pending timeout (stuckPendingTimeoutFor) and the reason is
+// EvictionStuckPending.
+func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
 	if exp.SubmittedAt == nil {
 		// Every SUBMITTED row is written with submitted_at (ClaimSubmitted sets it in
 		// the same UPDATE); a RUNNING row keeps whatever the current attempt's submitted_at was.
 		return false, fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
 	}
 
-	timeout := stuckPendingTimeout
+	var timeout time.Duration
 	evictionReason := domain.EvictionStuckPending
 	triedClusterID := ""
 	// clusterIDs[exp.ClusterName] can be legitimately empty either because this cluster isn't
@@ -117,6 +142,16 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 				zap.String("scheduling_reason", schedulingReason))
 			w.evictNotYetRunningWithFailover(ctx, exp, evictionReason, triedClusterID)
 			return true, nil
+		}
+	} else {
+		var err error
+		timeout, err = w.stuckPendingTimeoutFor(ctx, exp, clusterIDs)
+		if err != nil {
+			// This decision is skipped and the rest of the job's reconcile goes on: a job that
+			// has in fact finished must still be read as finished.
+			w.logger.Warn("job_watcher: stuck-pending timeout unreadable, placement deadline not judged this pass",
+				zap.String("id", exp.ID), zap.Error(err))
+			return false, nil
 		}
 	}
 	if timeout <= 0 {

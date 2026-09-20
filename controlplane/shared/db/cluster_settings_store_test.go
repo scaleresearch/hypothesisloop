@@ -60,4 +60,17 @@ func TestClusterSettingsGetAndPutRoundTrip(t *testing.T) {
 	if got == nil || got.ScaleUpTimeoutSeconds == nil || *got.ScaleUpTimeoutSeconds != 120 || got.MaxSpeculativeAccelerators != nil || got.StuckPendingTimeoutSeconds != nil {
 		t.Fatalf("get after re-put: got = %+v, want ScaleUpTimeoutSeconds=120 and the other two nil", got)
 	}
+
+	// The stuck-pending timeout alone, which is the row a cluster of rented instances has.
+	if err := store.PutClusterSettings(ctx, &domain.ClusterSettings{ClusterID: id, StuckPendingTimeoutSeconds: intPtr(900)}); err != nil {
+		t.Fatalf("put stuck-pending only: %v", err)
+	}
+	got, err = store.GetClusterSettings(ctx, id)
+	if err != nil || got == nil || got.StuckPendingTimeoutSeconds == nil || *got.StuckPendingTimeoutSeconds != 900 ||
+		got.ScaleUpTimeoutSeconds != nil || got.MaxSpeculativeAccelerators != nil {
+		t.Fatalf("get after stuck-pending only: got = %+v, %v", got, err)
+	}
+	if err := store.PutClusterSettings(ctx, &domain.ClusterSettings{ClusterID: id, StuckPendingTimeoutSeconds: intPtr(0)}); err == nil {
+		t.Fatal("a zero stuck-pending timeout was stored")
+	}
 }

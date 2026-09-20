@@ -89,7 +89,7 @@ type JobWatcher struct {
 	pollInterval time.Duration
 	// stuckPendingTimeout bounds how long a job may stay SUBMITTED without reporting
 	// RUNNING before it is evicted with reason stuck_pending and fully refunded. It is the global
-	// value; a cluster with its own in cluster_settings is judged by that, see stuckPendingTimeoutOn.
+	// value; a cluster with its own in cluster_settings is judged by that, see stuckPendingTimeoutFor.
 	stuckPendingTimeout time.Duration
 	// startTimeout bounds how long a placed job the runtime reports as pending may take to start.
 	startTimeout time.Duration

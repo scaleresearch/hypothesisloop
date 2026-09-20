@@ -39,20 +39,21 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 		domain.StatusSubmitted,
 		domain.StatusRunning,
 	}
-	// Cluster ids key the per-cluster deadlines in cluster_settings. A fetch failure ends the
-	// pass: judging a deadline without them would apply the wrong timeout.
-	clusterIDs, err := w.backend.GetClusterIDs(ctx)
-	if err != nil {
-		return fmt.Errorf("cluster ids: %w", err)
-	}
-	// The autoscaler capability is read only when a deployment has opted in via
+	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
 	// WithScaleUpTimeout — mirrors Loop.tick's own opt-in gate for the same reason: a backend
-	// that has not implemented it must not be asked to.
+	// that has not implemented these two methods must not be asked to. A fetch failure ends the
+	// pass: judging a placement deadline without them would apply the wrong timeout.
 	var autoscalerEnabled map[string]bool
+	var clusterIDs map[string]string
 	if w.scaleUpTimeout > 0 {
+		var err error
 		autoscalerEnabled, err = w.backend.GetAutoscalerCapability(ctx)
 		if err != nil {
 			return fmt.Errorf("autoscaler capability: %w", err)
+		}
+		clusterIDs, err = w.backend.GetClusterIDs(ctx)
+		if err != nil {
+			return fmt.Errorf("cluster ids: %w", err)
 		}
 	}
 	for _, status := range statuses {
@@ -106,17 +107,8 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// Not for a RUNNING job: its placement is over, and the deadline counts from submitted_at, so
 	// a pod being recreated hours in would evict it at once.
 	bound := found && scheduledNodes >= int32(exp.Job.Nodes())
-	// Only a job not yet RUNNING is ever judged against the stuck-pending deadline, so only then
-	// is its cluster's own value read.
-	var stuckPendingTimeout time.Duration
-	if exp.Status != domain.StatusRunning {
-		stuckPendingTimeout, err = w.stuckPendingTimeoutOn(ctx, clusterIDs[exp.ClusterName])
-		if err != nil {
-			return fmt.Errorf("stuck-pending timeout: %w", err)
-		}
-	}
 	if exp.Status != domain.StatusRunning && !bound {
-		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, stuckPendingTimeout, autoscalerEnabled, clusterIDs)
+		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)
 		}
@@ -136,7 +128,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// A bound job is past the placement deadline above, and a cluster that stops reporting
 		// never yields a phase to act on, so the admission deadline is its only bound.
 		if exp.Status != domain.StatusRunning && bound {
-			if deadlineErr := w.evictIfPastDeadline(ctx, exp, stuckPendingTimeout, domain.EvictionStuckPending); deadlineErr != nil {
+			if deadlineErr := w.evictIfStuckPending(ctx, exp, clusterIDs, domain.EvictionStuckPending); deadlineErr != nil {
 				return deadlineErr
 			}
 		}
@@ -173,7 +165,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, triedClusterID)
 			return nil
 		case runningTypeUnobservable:
-			return w.evictIfPastDeadline(ctx, exp, stuckPendingTimeout, domain.EvictionAcceleratorTypeUnobservable)
+			return w.evictIfStuckPending(ctx, exp, clusterIDs, domain.EvictionAcceleratorTypeUnobservable)
 		default:
 			return fmt.Errorf("unknown running outcome %d", outcome)
 		}
@@ -188,7 +180,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// Gone keeps its own existing handling, unchanged: the placement-deadline check above
 		// only fires while scheduledNodes < Nodes(), so a fully-bound job that then vanishes
 		// (scheduledNodes already caught up before Gone was observed) still needs this bound.
-		return w.evictIfPastDeadline(ctx, exp, stuckPendingTimeout, domain.EvictionStuckPending)
+		return w.evictIfStuckPending(ctx, exp, clusterIDs, domain.EvictionStuckPending)
 	case workload.JobPhasePending:
 		// An unbound job is under the placement deadline above. A bound one the runtime reports
 		// as pending is starting, which includes pulling its image, and gets the start timeout.
