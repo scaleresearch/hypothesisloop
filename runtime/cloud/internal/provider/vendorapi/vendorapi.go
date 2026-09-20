@@ -1,6 +1,3 @@
-// Package vendorapi is what adapters share in talking to a vendor over HTTP: a bounded read of
-// the answer, the error a refusal becomes, and the giving back of an instance a Create could not
-// finish. It knows no vendor.
 package vendorapi
 
 import (

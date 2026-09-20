@@ -1,6 +1,3 @@
-// Package provider is the one contract every instance vendor is reached through. An adapter is
-// a sub-package implementing Provider; nothing outside this tree names a vendor, and a vendor's
-// own instance id never leaves its adapter except as the opaque Instance.ID handed back to it.
 package provider
 
 import (

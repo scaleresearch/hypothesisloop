@@ -1,6 +1,3 @@
-// Package providers is the one place a vendor is named outside its own package. Every process
-// that rents instances builds its provider here, from the name and the settings section of its
-// config file, so adding a vendor is its package and a line in this file.
 package providers
 
 import (

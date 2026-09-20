@@ -1,7 +1,3 @@
-// Package supervise is the shell core every adapter's supervisor is built around. An instance
-// runs the supervisor in place of the bare command, and the adapter adds its vendor's own ends:
-// how the command's output is kept, how its end is marked, what happens after it. The core knows
-// no vendor.
 package supervise
 
 // Parts are an adapter's own ends of a supervisor, as shell text. Each may be empty.
