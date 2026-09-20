@@ -149,7 +149,6 @@ func main() {
 	logger.Info("control-service: stopped")
 }
 
-// apiGate is what every API surface is built with: who is calling, and what they may reach.
 type apiGate struct {
 	authenticator *auth.Authenticator
 	access        *auth.Access

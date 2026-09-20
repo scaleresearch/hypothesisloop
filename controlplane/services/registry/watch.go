@@ -249,9 +249,8 @@ func (h *WatchHandler) Start(ctx context.Context) {
 	}()
 }
 
-// authenticate resolves the caller from the token offered as a WebSocket subprotocol and admits
-// the callers the agent audience does. A browser cannot set a header on a WebSocket, so the
-// subprotocol is the one place every client, hl included, puts its token.
+// The token is offered as a WebSocket subprotocol: a browser cannot set a header on a WebSocket,
+// so that is the one place every client, hl included, can put it.
 func (h *WatchHandler) authenticate(ctx context.Context, token string) (context.Context, auth.Principal, error) {
 	principal, err := h.authenticator.Authenticate(ctx, token)
 	if err != nil {
