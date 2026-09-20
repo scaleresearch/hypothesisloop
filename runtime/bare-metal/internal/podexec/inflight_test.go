@@ -717,8 +717,8 @@ func TestQuickEngineCallsCarryADeadlineAndSlowOnesDoNot(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for kind, want := range map[string]bool{
-		"list": true, "inspect": true, "image inspect": true, "start": true, "remove": true, "logs": true,
-		"create": false, "pull": false, "stop": false,
+		"list": true, "inspect": true, "image inspect": true, "create": true, "start": true, "remove": true, "logs": true,
+		"pull": false, "stop": false,
 	} {
 		got, called := f.deadlines[kind]
 		if !called {

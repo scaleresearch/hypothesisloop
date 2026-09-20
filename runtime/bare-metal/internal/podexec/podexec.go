@@ -98,9 +98,9 @@ type engine interface {
 // engineCallTimeout bounds every engine call that should answer at once.
 const engineCallTimeout = 30 * time.Second
 
-// bounded puts engineCallTimeout on list, inspect, start and remove, so a hung engine socket
-// fails the pass instead of stalling both loops. Create, pull and stop keep the caller's
-// context: they legitimately run long, and a deadline on a stop would cut a job's grace short.
+// bounded puts engineCallTimeout on list, inspect, create, start and remove, so a hung engine
+// socket fails the pass instead of stalling both loops. Pull and stop keep the caller's context:
+// they legitimately run long, and a deadline on a stop would cut a job's grace short.
 // FetchLogTail bounds its own call, since the deadline has to cover reading the stream.
 type bounded struct{ engine }
 
@@ -114,6 +114,12 @@ func (b bounded) ContainerInspect(ctx context.Context, containerID string, optio
 	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
 	defer cancel()
 	return b.engine.ContainerInspect(ctx, containerID, options)
+}
+
+func (b bounded) ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
+	return b.engine.ContainerCreate(ctx, options)
 }
 
 func (b bounded) ContainerStart(ctx context.Context, containerID string, options client.ContainerStartOptions) (client.ContainerStartResult, error) {
