@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
-  ApiError, addHumanHypothesisComment, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
+  ApiError, addHumanHypothesisComment, registerCluster, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
   fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings,
   registerHumanHypothesis, revokeAPIKey,
 } from '@/lib/api'
@@ -58,7 +58,7 @@ describe('every request carries the session token', () => {
   it('on a write with a body', async () => {
     fetchMock().mockResolvedValue(answer(201, { id: 'pe-1' }))
     await createPlatformExperiment('prj_1', {
-      name: 'n', budget_accelerator_hours: 1, max_agents: 1, starts_at: 'a', ends_at: 'b',
+      name: 'n', description: '', metrics: [], report_interval_seconds: 60, budget_accelerator_hours: 1, max_agents: 1, starts_at: 'a', ends_at: 'b',
     })
     const { headers, init, body, url } = sent()
     expect(init.method).toBe('POST')
@@ -202,6 +202,14 @@ describe('what a person writes is filed under their session, with no author in t
   })
 })
 
+describe('registering a cluster', () => {
+  it('answers with the cluster and its addresses, and leaves the runtime token behind', async () => {
+    fetchMock().mockResolvedValue(answer(200, { name: 'edge', runtime_token: 'hls_runtime', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test' }))
+    await expect(registerCluster('org_a', 'edge')).resolves.toEqual({ name: 'edge', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test' })
+    expect(sent().body).toEqual({ name: 'edge' })
+  })
+})
+
 describe('a project\'s repository', () => {
   it('is null for a project that has none, which the API answers 404', async () => {
     fetchMock().mockResolvedValue(answer(404, { message: 'no repository is attached to this project' }))
@@ -216,10 +224,10 @@ describe('a project\'s repository', () => {
 
   it('is attached with the installation, the name and the code GitHub returned', async () => {
     fetchMock().mockResolvedValue(answer(200, { project_id: 'prj_1', repo: 'acme/widgets' }))
-    await attachProjectRepo('prj_1', 4242, 'acme/widgets', 'code-1')
+    await attachProjectRepo('prj_1', { installationID: 4242, repo: 'acme/widgets', code: 'code-1', redirectURI: 'http://ui.test/settings/repository' })
     expect(sent().init.method).toBe('POST')
     expect(sent().url.pathname).toBe('/projects/prj_1/repo')
-    expect(sent().body).toEqual({ installation_id: 4242, repo: 'acme/widgets', code: 'code-1' })
+    expect(sent().body).toEqual({ installation_id: 4242, repo: 'acme/widgets', code: 'code-1', redirect_uri: 'http://ui.test/settings/repository' })
   })
 
   it('is detached by a call that answers with no body', async () => {

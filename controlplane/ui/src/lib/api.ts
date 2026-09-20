@@ -135,9 +135,11 @@ export function fetchOrgClusters(orgID: string): Promise<OrgCluster[]> {
   return apiFetch<{ clusters: OrgCluster[] }>(`/orgs/${orgID}/clusters`).then(r => r.clusters)
 }
 
-// Registering a name the org already owns changes nothing and answers with the same token.
-export function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
-  return apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
+// Registering a name the org already owns changes nothing and answers the same. The answer's
+// runtime token is left behind here, so no page holds it.
+export async function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
+  const registered = await apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
+  return { name: registered.name, api_url: registered.api_url, metrics_url: registered.metrics_url }
 }
 
 // Per-cluster autoscaler-speculation overrides — null fields mean "use the global scheduler
@@ -411,14 +413,14 @@ export async function cancelExperiment(id: string): Promise<void> {
 
 export interface CreatePlatformExperimentRequest {
   name: string
-  description?: string
+  description: string
   budget_accelerator_hours: number
   max_agents: number
   /** Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Omitted uses
    *  the platform default (quota.default_max_concurrent_accelerators). */
   max_concurrent_accelerators?: number
-  metrics?: MetricDefinition[]
-  report_interval_seconds?: number
+  metrics: MetricDefinition[]
+  report_interval_seconds: number
   /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
   stages?: Stage[]
   starts_at: string
@@ -643,10 +645,14 @@ export async function fetchProjectRepo(projectID: string): Promise<ProjectRepo |
   return res.json()
 }
 
-// `code` is what GitHub returned from authorising the App: it proves the person can push to the
-// repository, and works once.
-export function attachProjectRepo(projectID: string, installationID: number, repo: string, code: string): Promise<ProjectRepo> {
-  return apiSend<ProjectRepo>('POST', `/projects/${projectID}/repo`, { installation_id: installationID, repo, code })
+// `code` is what GitHub returned from authorising the App, to `redirectURI`: it proves the person
+// can push to the repository, and works once.
+export function attachProjectRepo(
+  projectID: string, attach: { installationID: number; repo: string; code: string; redirectURI: string },
+): Promise<ProjectRepo> {
+  return apiSend<ProjectRepo>('POST', `/projects/${projectID}/repo`, {
+    installation_id: attach.installationID, repo: attach.repo, code: attach.code, redirect_uri: attach.redirectURI,
+  })
 }
 
 export async function detachProjectRepo(projectID: string): Promise<void> {

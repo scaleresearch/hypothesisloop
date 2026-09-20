@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { ApiError, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo } from '@/lib/api'
 import { useProjectRouter, useRecordProject } from '@/lib/query-state'
-import { REPOSITORY_PATH, attachStep, authorizeAddress, endAttach, installAddress, leaveFor } from '@/lib/repo-attach'
+import { REPOSITORY_PATH, attachStep, authorizeAddress, endAttach, installAddress, leaveFor, redirectURI } from '@/lib/repo-attach'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, ProjectRepo } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -48,7 +48,6 @@ function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => P
       <table className="wa-table">
         <tbody>
           <tr><th>Repository</th><td className="mono" style={{ fontWeight: 600 }}>{repo.repo}</td></tr>
-          <tr><th>Default branch</th><td className="mono">{repo.default_branch}</td></tr>
           <tr><th>Cloned from</th><td className="mono">{repo.clone_url}</td></tr>
           <tr><th>Attached</th><td className="mono text-muted">{new Date(repo.attached_at).toLocaleString()}</td></tr>
         </tbody>
@@ -84,7 +83,11 @@ function Install({ app }: { app: GitHubApp }) {
 }
 
 function Authorize({ app, installationID }: { app: GitHubApp; installationID: number }) {
+  // Leaving is done once: an effect that runs again would ask GitHub for a second code.
+  const left = useRef(false)
   useEffect(() => {
+    if (left.current) return
+    left.current = true
     leaveFor(authorizeAddress(app.authorize_url, installationID))
   }, [app, installationID])
   return <Loading text="Going to GitHub to confirm who you are…" />
@@ -106,7 +109,7 @@ function Attach({ app, installationID, code, onAttached }: {
     setBusy(true)
     setError('')
     try {
-      await attachProjectRepo(project.id, installationID, repo.trim(), code)
+      await attachProjectRepo(project.id, { installationID, repo: repo.trim(), code, redirectURI: redirectURI() })
       endAttach()
       await onAttached()
     } catch (e) {

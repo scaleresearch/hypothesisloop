@@ -46,7 +46,7 @@ beforeEach(() => {
     if (!clusters.some(c => c.name === name)) {
       clusters = [...clusters, { name, org_id: orgID, shared: false, created_at: at, owned: true, connected: false }]
     }
-    return { name, runtime_token: 'hls_runtime-token', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test' }
+    return { name, api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test' }
   })
 })
 
@@ -155,13 +155,13 @@ describe('a cluster the platform shares with the org', () => {
 })
 
 describe('a cluster\'s start command', () => {
-  it('is shown again on request: registering an owned name answers with the same token', async () => {
+  it('is shown again on request: registering an owned name answers the same', async () => {
     show()
     const lab = (await screen.findByRole('cell', { name: /^lab/ })).closest('tr')!
     await userEvent.click(within(lab).getByRole('button', { name: 'Show start command' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'lab')
-    expect((await screen.findByTestId('secret')).textContent).toContain('CLUSTER=lab')
-    expect(screen.getByText(/brings the\s+same one back/)).toBeTruthy()
+    expect((await screen.findByTestId('secret')).textContent).toContain(`hl cluster token 'lab' --org 'org_a')" make cluster-agent-up CLUSTER='lab'`)
+    expect(screen.getByText(/brings the\s+same command back/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/never again|only time/)
   })
 
@@ -180,17 +180,18 @@ describe('a cluster\'s start command', () => {
 })
 
 describe('adding a cluster', () => {
-  it('shows the start command with the runtime token, and lists the cluster', async () => {
+  it('shows the command hl cluster add prints, which carries no token, and lists the cluster', async () => {
     show()
     await userEvent.type(screen.getByLabelText('Cluster name'), 'edge')
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'edge')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      'RUNTIME_TOKEN=hls_runtime-token make cluster-agent-up CLUSTER=edge API_URL=http://api.cluster.test METRICS_URL=http://metrics.cluster.test',
+      `RUNTIME_TOKEN="$(hl cluster token 'edge' --org 'org_a')" make cluster-agent-up CLUSTER='edge' API_URL='http://api.cluster.test' METRICS_URL='http://metrics.cluster.test'`,
     )
+    expect(document.body.textContent).not.toContain('hls_')
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Hide' }))
-    expect(document.body.textContent).not.toContain('hls_runtime-token')
+    expect(screen.queryByTestId('secret')).toBeNull()
   })
 
   it('shows the API\'s refusal, as for a name another org owns', async () => {

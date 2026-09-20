@@ -508,10 +508,11 @@ export interface OrgCluster {
   connected: boolean
 }
 
-// A cluster in the answer to registering it, with everything its agent is started with.
+// A registered cluster and the addresses its agent is started with. The API also answers with
+// the cluster's runtime token, which the UI drops on arrival: `hl cluster token` reads it where
+// the agent is installed.
 export interface RegisteredCluster {
   name: string
-  runtime_token: string
   // Where the cluster's agent reaches the API and sends metrics.
   api_url: string
   metrics_url: string
@@ -550,7 +551,6 @@ export interface ProjectRepo {
   repository_id: number
   /** owner/name. */
   repo: string
-  default_branch: string
   attached_at: string
   clone_url: string
 }

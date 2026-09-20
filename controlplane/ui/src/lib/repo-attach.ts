@@ -33,6 +33,11 @@ function withParams(address: string, params: Record<string, string>): string {
   return url.toString()
 }
 
+/** Where GitHub returns the person after they authorise, which the attach names again. */
+export function redirectURI(): string {
+  return new URL(REPOSITORY_PATH, window.location.origin).toString()
+}
+
 /** Starts an attempt for the project and returns where to install the App. */
 export function installAddress(installURL: string, projectID: string): string {
   const nonce = crypto.randomUUID()
@@ -45,7 +50,7 @@ export function authorizeAddress(authorizeURL: string, installationID: number): 
   const current = attempt()
   if (!current) throw new Error('no attach is in progress in this tab')
   return withParams(authorizeURL, {
-    redirect_uri: new URL(REPOSITORY_PATH, window.location.origin).toString(),
+    redirect_uri: redirectURI(),
     state: `${current.nonce}.${installationID}`,
   })
 }

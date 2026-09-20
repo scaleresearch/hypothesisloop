@@ -11,9 +11,15 @@ import { Button } from '@/components/ui/button'
 import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
-// The command `hl cluster add` prints, with the addresses the platform says its agents use.
-function startCommand(cluster: RegisteredCluster): string {
-  return `RUNTIME_TOKEN=${cluster.runtime_token} make cluster-agent-up CLUSTER=${cluster.name} API_URL=${cluster.api_url} METRICS_URL=${cluster.metrics_url}`
+function shellQuote(text: string): string {
+  return `'${text.replaceAll("'", `'\\''`)}'`
+}
+
+// The command `hl cluster add` prints, word for word. It reads the runtime token with
+// `hl cluster token` when it runs, so the token is on no page and in no shell history.
+function startCommand(orgID: string, cluster: RegisteredCluster): string {
+  const name = shellQuote(cluster.name)
+  return `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})" make cluster-agent-up CLUSTER=${name} API_URL=${shellQuote(cluster.api_url)} METRICS_URL=${shellQuote(cluster.metrics_url)}`
 }
 
 function Status({ connected }: { connected: boolean }) {
@@ -40,8 +46,8 @@ export function OrgClusters({ manage }: { manage: boolean }) {
   const [registered, setRegistered] = useState<RegisteredCluster | null>(null)
   const manages = manage && administers
 
-  // Registering a name the org already owns changes nothing and answers with the same token,
-  // so adding a cluster and reading an existing one's command again are the same call.
+  // Registering a name the org already owns changes nothing and answers the same addresses, so
+  // adding a cluster and reading an existing one's command again are the same call.
   async function register(clusterName: string): Promise<boolean> {
     setBusy(true)
     setActionError('')
@@ -83,12 +89,14 @@ export function OrgClusters({ manage }: { manage: boolean }) {
       {registered && (
         <Secret
           label={`Start the agent of ${registered.name}`}
-          value={startCommand(registered)}
+          value={startCommand(org.id, registered)}
           note={<>
-            Run it from a checkout of the repository on a machine that reaches the cluster. The
-            command carries the cluster&apos;s runtime token, which is derived from its name:{' '}
+            Run it from a checkout of the repository, with <span className="mono">kubectl</span> pointed
+            at the cluster and <span className="mono">hl</span> signed in as an owner of {org.name}.
+            It reads the cluster&apos;s runtime token with <span className="mono">hl cluster token</span>{' '}
+            when it runs, so the token is not on this page.{' '}
             <span className="mono">Show start command</span> in the cluster&apos;s row brings the
-            same one back, as does <span className="mono">hl cluster add {registered.name}</span>.
+            same command back, as does <span className="mono">hl cluster add {registered.name}</span>.
           </>}
           dismiss="Hide"
           onDismiss={() => setRegistered(null)}

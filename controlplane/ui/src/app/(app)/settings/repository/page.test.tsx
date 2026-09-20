@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo } from '@/lib/api'
@@ -42,7 +43,7 @@ const app = {
   authorize_url: 'https://github.test/login/oauth/authorize?client_id=Iv1.abc',
 }
 const attached: ProjectRepo = {
-  project_id: 'prj_2', installation_id: 4242, repository_id: 9, repo: 'acme/widgets', default_branch: 'main',
+  project_id: 'prj_2', installation_id: 4242, repository_id: 9, repo: 'acme/widgets',
   attached_at: at, clone_url: 'https://github.com/acme/widgets.git',
 }
 
@@ -128,6 +129,22 @@ describe('returning from installing the App', () => {
     expect(address.searchParams.get('client_id')).toBe('Iv1.abc')
   })
 
+  it('leaves once when React runs the effect twice, so GitHub is asked for one code', async () => {
+    const state = begun()
+    navigation.search = `project=prj_2&installation_id=4242&setup_action=install&state=${state}`
+    const resolved = resolveTenant(owner, 'prj_2')
+    if (resolved.state !== 'selected') throw new Error('no tenant')
+    render(
+      <StrictMode>
+        <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false }}>
+          <TenantContext.Provider value={resolved.tenant}><RepositoryPage /></TenantContext.Provider>
+        </SWRConfig>
+      </StrictMode>,
+    )
+    await screen.findByRole('status', { name: 'Going to GitHub to confirm who you are…' })
+    expect(leaveFor).toHaveBeenCalledTimes(1)
+  })
+
   it('first points the URL at the project the attempt began in, which GitHub\'s return does not name', async () => {
     const state = begun('prj_2')
     show(`installation_id=4242&setup_action=install&state=${state}`)
@@ -151,7 +168,9 @@ describe('returning from authorising', () => {
     show(`project=prj_2&code=code-1&state=${state}.4242`)
     await userEvent.type(await screen.findByLabelText('Repository'), ' acme/widgets ')
     await userEvent.click(screen.getByRole('button', { name: 'Attach repository' }))
-    expect(attachProjectRepo).toHaveBeenCalledExactlyOnceWith('prj_2', 4242, 'acme/widgets', 'code-1')
+    expect(attachProjectRepo).toHaveBeenCalledExactlyOnceWith('prj_2', {
+      installationID: 4242, repo: 'acme/widgets', code: 'code-1', redirectURI: `${window.location.origin}/settings/repository`,
+    })
     expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/settings/repository?project=prj_2')
     expect(window.sessionStorage.getItem('hl-repository-attach')).toBeNull()
   })
@@ -187,10 +206,9 @@ describe('returning from authorising', () => {
 describe('a project with a repository', () => {
   beforeEach(() => { repo = attached })
 
-  it('shows the repository, its default branch and when it was attached', async () => {
+  it('shows the repository, where it is cloned from and when it was attached', async () => {
     show()
     expect(await screen.findByText('acme/widgets')).toBeTruthy()
-    expect(screen.getByText('main')).toBeTruthy()
     expect(screen.getByText('https://github.com/acme/widgets.git')).toBeTruthy()
     expect(screen.getByText(new Date(at).toLocaleString())).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Install the GitHub App' })).toBeNull()
