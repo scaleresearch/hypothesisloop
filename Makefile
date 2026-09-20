@@ -41,6 +41,9 @@ export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh 
 REGISTRY_TLS_VERIFY ?= false
 # Empty builds for this host. Set it (linux/amd64) to build for nodes of another architecture.
 IMAGE_PLATFORM ?=
+# Passed to every image build. The UI image takes what the browser needs this way
+# (--build-arg NEXT_PUBLIC_..., see controlplane/build/Dockerfile.ui).
+IMAGE_BUILD_ARGS ?=
 
 check-tag:
 	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
@@ -262,7 +265,7 @@ images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
-		podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
+		podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) $(IMAGE_BUILD_ARGS) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
