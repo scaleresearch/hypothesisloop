@@ -4,7 +4,7 @@ import { Fragment, useMemo, useState } from 'react'
 import { useProjectRouter, useRecordProject } from '@/lib/query-state'
 import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
-import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
+import { clsx } from 'clsx'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
@@ -28,29 +28,24 @@ import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import { Badge, NoSummary } from '@/components/ui/badge'
+import { Card, CardHeader, CardContent, InsetCard } from '@/components/ui/card'
+import { Badge, Dot, NoSummary } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog } from '@/components/ui/dialog'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { StatTile } from '@/components/ui/stat-tile'
+import { PageHeader } from '@/components/ui/page-header'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
-import { semantic, agentPalette } from '@/lib/colors'
+import { Table } from '@/components/ui/table'
+import { Eyebrow, Pill } from '@/components/ui/text'
+import { semantic, agentPalette, chart } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys, verdictSetBy } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
-
-const TWO_LINES: React.CSSProperties = {
-  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-}
-
-const CHART_GRID = 'rgba(255,255,255,0.08)'
-const CHART_TICK = { fontSize: 10, fill: 'var(--muted-fg)' }
-const CHART_TOOLTIP_STYLE: React.CSSProperties = {
-  fontSize: 11, background: 'var(--surface-raised)', border: '1px solid var(--border)',
-  borderRadius: 6, color: 'var(--foreground)',
-}
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
@@ -88,12 +83,12 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-        <XAxis dataKey="frac" type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={CHART_TICK} />
-        {hasBounded && <YAxis yAxisId="left" domain={['auto', 'auto']} tick={CHART_TICK} width={40} />}
-        {hasUnbounded && <YAxis yAxisId="right" orientation="right" domain={['auto', 'auto']} tick={CHART_TICK} width={40} />}
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => `${l}% of training`} contentStyle={CHART_TOOLTIP_STYLE} />
-        <Legend wrapperStyle={{ fontSize: 10 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+        <XAxis dataKey="frac" type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={chart.tick} />
+        {hasBounded && <YAxis yAxisId="left" domain={['auto', 'auto']} tick={chart.tick} width={40} />}
+        {hasUnbounded && <YAxis yAxisId="right" orientation="right" domain={['auto', 'auto']} tick={chart.tick} width={40} />}
+        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => `${l}% of training`} contentStyle={chart.tooltip.contentStyle} labelStyle={chart.tooltip.labelStyle} />
+        <Legend wrapperStyle={chart.legend} />
         {metricNames.map((name, i) => (
           <Line
             key={name}
@@ -125,30 +120,20 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
   const [expanded, setExpanded] = useState(false)
   const points = (metrics ?? []).filter((p) => p.recorded_at)
   return (
-    <div style={{ position: 'relative' }}>
-      <button
+    <div className="relative">
+      <Button
         type="button"
+        size="icon"
         onClick={() => setExpanded(true)}
         title="Expand chart"
         aria-label="Expand chart"
-        className="wa-chart-expand-btn"
-        style={{
-          position: 'absolute', top: 0, right: 0, zIndex: 1, border: '1px solid var(--border)',
-          background: 'var(--surface)', borderRadius: 4, width: 20, height: 20, lineHeight: '18px',
-          fontSize: 12, cursor: 'pointer', color: 'var(--muted-fg)',
-        }}
+        className="absolute right-0 top-0 z-[1] text-muted"
       >
         ⤢
-      </button>
+      </Button>
       <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={400} />
-      <Dialog open={expanded} onClose={() => setExpanded(false)} className="wa-dialog">
-        <div className="wa-dialog-backdrop" aria-hidden="true" />
-        <div className="wa-dialog-container">
-          <DialogPanel className="wa-dialog-panel" style={{ maxWidth: '90vw', width: '90vw' }}>
-            <DialogTitle style={{ fontWeight: 600, marginBottom: 10 }} className="mono">{jobId}</DialogTitle>
-            <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={640} />
-          </DialogPanel>
-        </div>
+      <Dialog open={expanded} onClose={() => setExpanded(false)} size="wide" title={<span className="font-mono">{jobId}</span>}>
+        <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={640} />
       </Dialog>
     </div>
   )
@@ -195,49 +180,38 @@ function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 12 }}>
+      <div className="mb-3 flex flex-wrap items-start gap-3">
         <div>
-          <div className="uppercase-label" style={{ marginBottom: 6 }}>Job</div>
+          <Eyebrow className="mb-1.5 block">Job</Eyebrow>
           <SearchableSelect
             options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${j.status} · ${j.agent_id}` }))}
             value={selectedJob.id}
             onChange={v => { if (v) setJobId(v) }}
             placeholder="Search jobs…"
-            className="mono"
-            style={{ minWidth: 320 }}
+            className="min-w-[320px]"
             hideAllOption
           />
         </div>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div className="uppercase-label" style={{ marginBottom: 6 }}>Metrics</div>
+        <div className="min-w-[200px] flex-1">
+          <Eyebrow className="mb-1.5 block">Metrics</Eyebrow>
           {availableMetrics.length === 0 ? (
-            <span className="text-dim" style={{ fontSize: 12 }}>No metrics reported yet</span>
+            <span className="text-xs text-subtle">No metrics reported yet</span>
           ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <div className="flex flex-wrap gap-1.5">
               {availableMetrics.map(name => {
                 const isOn = selected.has(name)
                 return (
-                  <label
+                  <Checkbox
                     key={name}
-                    className="mono"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, cursor: 'pointer',
-                      padding: '3px 8px', borderRadius: 999, border: `1px solid ${isOn ? 'var(--accent)' : 'var(--border)'}`,
-                      background: isOn ? 'rgba(124,108,240,0.14)' : 'var(--surface-2)', color: isOn ? 'var(--foreground)' : 'var(--muted-fg)',
+                    pill
+                    checked={isOn}
+                    onChange={() => {
+                      const next = new Set(selected)
+                      isOn ? next.delete(name) : next.add(name)
+                      setSelected(next)
                     }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isOn}
-                      onChange={() => {
-                        const next = new Set(selected)
-                        isOn ? next.delete(name) : next.add(name)
-                        setSelected(next)
-                      }}
-                      style={{ margin: 0 }}
-                    />
-                    {name}
-                  </label>
+                    label={name}
+                  />
                 )
               })}
             </div>
@@ -273,38 +247,28 @@ function AgentSelector({
   const allSelected = agentIds.length > 0 && agentIds.every(id => selected.has(id))
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div className="uppercase-label">Agents</div>
-        <button type="button" onClick={() => onChange(allSelected ? new Set() : new Set(agentIds))} className="wa-btn-link" style={{ fontSize: 11 }}>
+      <div className="mb-2 flex items-center justify-between">
+        <Eyebrow>Agents</Eyebrow>
+        <Button type="button" variant="link" size="sm" onClick={() => onChange(allSelected ? new Set() : new Set(agentIds))}>
           {allSelected ? 'Clear' : 'Select all'}
-        </button>
+        </Button>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <div className="flex flex-wrap gap-1.5">
         {agentIds.map((id) => {
           const isOn = selected.has(id)
           return (
-            <label
+            <Checkbox
               key={id}
-              className="mono"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, cursor: 'pointer',
-                padding: '3px 8px', borderRadius: 999, border: `1px solid ${isOn ? colorFor(id) : 'var(--border)'}`,
-                background: isOn ? `${colorFor(id)}1a` : 'var(--surface-2)', color: isOn ? 'var(--foreground)' : 'var(--muted-fg)',
+              pill
+              color={colorFor(id)}
+              checked={isOn}
+              onChange={() => {
+                const next = new Set(selected)
+                isOn ? next.delete(id) : next.add(id)
+                onChange(next)
               }}
-            >
-              <input
-                type="checkbox"
-                checked={isOn}
-                onChange={() => {
-                  const next = new Set(selected)
-                  isOn ? next.delete(id) : next.add(id)
-                  onChange(next)
-                }}
-                style={{ margin: 0 }}
-              />
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorFor(id), flexShrink: 0 }} />
-              {id}
-            </label>
+              label={<><Dot color={colorFor(id)} />{id}</>}
+            />
           )
         })}
       </div>
@@ -322,39 +286,31 @@ function MetricSelector({
   const allSelected = metrics.length > 0 && metrics.every(m => selected.has(m.key))
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div className="uppercase-label">Metrics</div>
-        <button type="button" onClick={() => onChange(allSelected ? new Set() : new Set(metrics.map(m => m.key)))} className="wa-btn-link" style={{ fontSize: 11 }}>
+      <div className="mb-2 flex items-center justify-between">
+        <Eyebrow>Metrics</Eyebrow>
+        <Button type="button" variant="link" size="sm" onClick={() => onChange(allSelected ? new Set() : new Set(metrics.map(m => m.key)))}>
           {allSelected ? 'Clear' : 'Select all'}
-        </button>
+        </Button>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <div className="flex flex-wrap gap-1.5">
         {metrics.map((m, i) => {
           const isOn = selected.has(m.key)
           return (
-            <label
+            <Checkbox
               key={m.key}
-              className="mono"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, cursor: 'pointer',
-                padding: '3px 8px', borderRadius: 999, border: `1px solid ${isOn ? 'var(--accent)' : 'var(--border)'}`,
-                background: isOn ? 'rgba(124,108,240,0.14)' : 'var(--surface-2)', color: isOn ? 'var(--foreground)' : 'var(--muted-fg)',
+              pill
+              checked={isOn}
+              onChange={() => {
+                const next = new Set(selected)
+                isOn ? next.delete(m.key) : next.add(m.key)
+                onChange(next)
               }}
-            >
-              <input
-                type="checkbox"
-                checked={isOn}
-                onChange={() => {
-                  const next = new Set(selected)
-                  isOn ? next.delete(m.key) : next.add(m.key)
-                  onChange(next)
-                }}
-                style={{ margin: 0 }}
-              />
-              {i === 0 && <span style={{ fontWeight: 700 }}>★</span>}
-              {m.key}
-              <span style={{ opacity: 0.7 }}>{m.direction === 'maximize' ? '↑' : '↓'}</span>
-            </label>
+              label={<>
+                {i === 0 && <span className="font-bold">★</span>}
+                {m.key}
+                <span className="opacity-70">{m.direction === 'maximize' ? '↑' : '↓'}</span>
+              </>}
+            />
           )
         })}
       </div>
@@ -445,22 +401,18 @@ function CompetingAgentsChart({
     <>
       {nonRawAgentIds.size > 0 && (
         <div
-          className="mono"
+          className="mb-2 inline-block px-2 py-0.5 rounded-sm border border-danger bg-danger/10 font-mono text-2xs text-danger"
           title="These agents also reported this metric on a non-&quot;raw&quot; basis (a rescaled/transformed value); that data is excluded from this chart and never compared to raw-basis agents."
-          style={{
-            marginBottom: 8, fontSize: 11, padding: '3px 8px', borderRadius: 4, display: 'inline-block',
-            background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
-          }}
         >
           Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().join(', ')}
         </div>
       )}
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={rows} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={CHART_TICK} />
-        <YAxis domain={['auto', 'auto']} tick={CHART_TICK} />
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={CHART_TOOLTIP_STYLE} />
+        <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+        <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={chart.tick} />
+        <YAxis domain={['auto', 'auto']} tick={chart.tick} />
+        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={chart.tooltip.contentStyle} labelStyle={chart.tooltip.labelStyle} />
         {(boundaries ?? []).map(b => (
           <ReferenceLine
             key={b.stage_index}
@@ -505,15 +457,15 @@ function AgentJobsPanel({ projectId, platformExperimentId, agentId, trackedMetri
     return <EmptyState>No jobs from {agentId} yet.</EmptyState>
   }
   return (
-    <div style={{ padding: '10px 0 4px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 10 }}>
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(480px,1fr))] gap-2.5 pb-1 pt-2.5">
       {jobs.map(job => (
-        <div key={job.id} className="wa-mini-card">
-          <div style={{ fontSize: 11, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Link href={`/jobs/${job.id}`} className="mono text-link" style={{ fontWeight: 600 }}>{job.id.slice(0, 8)}…</Link>
+        <InsetCard key={job.id}>
+          <div className="mb-1 flex items-center justify-between text-2xs">
+            <Link href={`/jobs/${job.id}`} className="font-mono font-semibold text-accent hover:underline">{job.id.slice(0, 8)}…</Link>
             <StatusBadge status={job.status} />
           </div>
           <JobMetricMini jobId={job.id} trackedMetrics={trackedMetrics} />
-        </div>
+        </InsetCard>
       ))}
     </div>
   )
@@ -526,15 +478,7 @@ function StatusBadge({ status }: { status: string }) {
 // Only shown when a policy narrows past the 'mixed' default, so the common case (anyone may
 // submit either) stays uncluttered — a restriction is the exceptional, worth-flagging state.
 function SubmitPolicyChips({ pe }: { pe: PlatformExperiment }) {
-  const chip = (label: string) => (
-    <span
-      key={label}
-      className="mono"
-      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted-fg)' }}
-    >
-      {label}
-    </span>
-  )
+  const chip = (label: string) => <Pill key={label}>{label}</Pill>
   const chips: React.ReactNode[] = []
   if (pe.hypothesis_submit_policy && pe.hypothesis_submit_policy !== 'mixed') {
     chips.push(chip(`Hypotheses: ${pe.hypothesis_submit_policy === 'human_only' ? 'humans only' : 'agents only'}`))
@@ -733,30 +677,24 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   return (
     <div>
       {/* Header */}
-      <div className="wa-title" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-        <div>
-          <div
-            className="text-dim"
-            style={{ marginBottom: 6, cursor: 'pointer' }}
-            onClick={() => router.push('/platform-experiments')}
-          >
-            ← Platform Experiments
-          </div>
-          <h1 style={{ marginBottom: 6 }}>{pe.name}</h1>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <PageHeader
+        back={{ label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
+        title={pe.name}
+        description={
+          <div className="flex flex-wrap items-center gap-2.5">
             <StatusBadge status={pe.status} />
             {!isZeroDate(pe.starts_at) && (
-              <span className="text-dim">
+              <span className="text-xs text-subtle">
                 {formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}
               </span>
             )}
-            <Link href={graphHref(pe.id)} className="text-link" style={{ fontSize: 12 }}>
+            <Link href={graphHref(pe.id)} className="text-xs text-accent hover:underline">
               {hypothesisCount} Hypotheses →
             </Link>
             <SubmitPolicyChips pe={pe} />
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Description + metrics */}
       {(pe.description || (pe.metrics && pe.metrics.length > 0)) && (
@@ -764,22 +702,17 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           <CardHeader>About this Experiment</CardHeader>
           <CardContent>
             {pe.description && (
-              <CollapsibleDescription text={pe.description} style={{ marginBottom: pe.metrics?.length ? 12 : 0 }} />
+              <CollapsibleDescription text={pe.description} className={pe.metrics?.length ? 'mb-3' : undefined} />
             )}
             {pe.metrics && pe.metrics.length > 0 && (
               <div>
-                <div className="uppercase-label" style={{ marginBottom: 6 }}>Optimization Metrics</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Eyebrow className="mb-1.5 block">Optimization Metrics</Eyebrow>
+                <div className="flex flex-wrap gap-2">
                   {pe.metrics.map((m, i) => (
-                    <div key={m.key} className="mono" style={{
-                      padding: '4px 12px', borderRadius: 999, fontSize: 12,
-                      background: m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(251, 191, 36, 0.12)',
-                      border: `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
-                      color: m.direction === 'maximize' ? semantic.success : semantic.warning,
-                    }}>
-                      {i === 0 && <span style={{ fontWeight: 700, marginRight: 4 }}>PRIMARY</span>}
+                    <Pill key={m.key} tone={m.direction === 'maximize' ? 'success' : 'warning'} active={i === 0}>
+                      {i === 0 && <span className="font-bold">PRIMARY</span>}
                       {m.key} {m.direction === 'maximize' ? '↑ maximize' : '↓ minimize'}
-                    </div>
+                    </Pill>
                   ))}
                 </div>
               </div>
@@ -793,57 +726,57 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Card>
           <CardHeader>
             Findings
-            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+            <span className="ml-2 text-xs font-normal text-muted">
               ({found.length} hypotheses with a verdict or a result)
             </span>
           </CardHeader>
           <CardContent scrollX>
-            <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 760 }}>
+            <Table className="min-w-[760px] table-fixed">
               <thead>
                 <tr>
-                  <th style={{ width: 110 }}>Verdict</th>
+                  <th className="w-[110px]">Verdict</th>
                   <th>Hypothesis</th>
-                  <th style={{ width: 170, textAlign: 'right' }}>Best job</th>
+                  <th className="w-[170px] text-right">Best job</th>
                   <th title="The best job's own summary. Without one, the newest finding of the hypothesis, named with the job it is about.">Finding</th>
                 </tr>
               </thead>
               <tbody>
                 {found.map(h => (
-                  <tr key={h.id} style={{ verticalAlign: 'top' }}>
+                  <tr key={h.id} className="[&>td]:align-top">
                     <td>
                       <Badge status={h.status}>{h.status}</Badge>
-                      <div className="text-muted" style={{ fontSize: 10, marginTop: 3 }}>{verdictSetBy(h)}</div>
+                      <div className="mt-0.5 text-2xs text-muted">{verdictSetBy(h)}</div>
                       {h.finding && filedAfterVerdict(h, h.finding.created_at) && (
-                        <div style={{ fontSize: 10, marginTop: 3, color: semantic.warning }} title="The newest finding was filed after this verdict was set">
+                        <div className="mt-0.5 text-2xs text-warning" title="The newest finding was filed after this verdict was set">
                           newer finding
                         </div>
                       )}
                     </td>
-                    <td style={{ fontSize: 12 }}>
-                      <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
+                    <td className="text-xs">
+                      <Link href={`/hypotheses/${h.id}`} className="line-clamp-2 text-accent hover:underline" title={h.text}>{h.text}</Link>
                     </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
+                    <td className="text-right font-mono text-xs">
                       {h.best_job ? (
-                        <Link href={`/jobs/${h.best_job.id}`} className="text-link" title={h.best_job.id}>
+                        <Link href={`/jobs/${h.best_job.id}`} className="text-accent hover:underline" title={h.best_job.id}>
                           {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
                         </Link>
-                      ) : <span className="text-muted">—</span>}
+                      ) : <span className="text-xs text-muted">—</span>}
                       {h.best_job && unsummarized?.has(h.best_job.id) && <div><NoSummary /></div>}
                     </td>
-                    <td style={{ fontSize: 12 }}>
+                    <td className="text-xs">
                       {h.best_job?.summary ? (
-                        <span style={TWO_LINES} title={h.best_job.summary}>{h.best_job.summary}</span>
+                        <span className="line-clamp-2" title={h.best_job.summary}>{h.best_job.summary}</span>
                       ) : h.finding ? (
-                        <span style={TWO_LINES} title={h.finding.summary}>
-                          <Link href={`/jobs/${h.finding.experiment_id}`} className="text-link mono">{h.finding.experiment_id}</Link>
+                        <span className="line-clamp-2" title={h.finding.summary}>
+                          <Link href={`/jobs/${h.finding.experiment_id}`} className="font-mono text-accent hover:underline">{h.finding.experiment_id}</Link>
                           {': '}{h.finding.summary}
                         </span>
-                      ) : <span className="text-muted">no finding filed</span>}
+                      ) : <span className="text-xs text-muted">no finding filed</span>}
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </CardContent>
         </Card>
       )}
@@ -853,7 +786,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Card>
           <CardHeader>Competing Agents over time</CardHeader>
           <CardContent>
-            <div style={{ display: 'grid', gridTemplateColumns: knownAgentIds.length > 0 ? '1fr 1fr' : '1fr', gap: 24, marginBottom: 16 }}>
+            <div className={clsx('mb-4 grid gap-6', knownAgentIds.length > 0 ? 'grid-cols-2' : 'grid-cols-1')}>
               <MetricSelector metrics={metrics} selected={activeMetricKeys} onChange={setSelectedMetricKeys} />
               {knownAgentIds.length > 0 && (
                 <AgentSelector agentIds={knownAgentIds} selected={activeAgentIds} onChange={setSelectedAgentIds} colorFor={colorFor} />
@@ -862,11 +795,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             {activeMetricKeys.size === 0 ? (
               <EmptyState>Select at least one metric to plot.</EmptyState>
             ) : (
-              <div style={{ display: 'grid', gap: 16 }}>
+              <div className="grid gap-4">
                 {metrics.filter(m => activeMetricKeys.has(m.key)).map(m => (
                   <div key={m.key}>
-                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                      {m.key} <span className="text-dim" style={{ fontWeight: 400 }}>({m.direction})</span>
+                    <div className="mb-1 text-xs font-semibold">
+                      {m.key} <span className="font-normal text-subtle">({m.direction})</span>
                     </div>
                     <CompetingAgentsChart
                       series={(allMetricSeries ?? []).find(e => e.key === m.key)?.series}
@@ -887,16 +820,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stage ladder — boundaries are published, per-agent rank deliberately is not
           (see docs/stages.md). */}
       {stagesStatus && stagesStatus.stages.length > 0 && (
-        <Card style={{ borderLeft: `3px solid ${stagesStatus.cut_agents.length > 0 ? semantic.warning : 'var(--accent)'}` }}>
+        <Card className={clsx('border-l-[3px]', stagesStatus.cut_agents.length > 0 ? 'border-l-warning hover:border-l-warning' : 'border-l-accent hover:border-l-accent')}>
           <CardContent>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <div className="mono" style={{
-                fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
-                background: 'rgba(124, 108, 240, 0.16)', color: semantic.accent,
-              }}>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-full bg-accent/15 px-2.5 py-1 font-mono text-xs font-bold text-accent">
                 STAGE {stagesStatus.current_stage} OF {stagesStatus.stages.length}
               </div>
-              <span className="text-dim">
+              <span className="text-xs text-subtle">
                 {Math.round(stagesStatus.progress * 100)}% through the experiment
                 {stagesStatus.current_stage < stagesStatus.stages.length && (
                   <> — next boundary at {Math.round(stagesStatus.next_boundary_progress * 100)}%,
@@ -907,24 +837,18 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             </div>
 
             {/* The ladder itself: one segment per stage, sized by its share of the experiment. */}
-            <div style={{ display: 'flex', gap: 3, marginTop: 12 }}>
+            <div className="mt-3 flex gap-[3px]">
               {stagesStatus.stages.reduce<{ start: number; nodes: JSX.Element[] }>((acc, stage, i) => {
                 const stageNo = i + 1
                 const end = acc.start + stage.length_pct / 100
                 const current = stageNo === stagesStatus.current_stage
                 const filled = Math.max(0, Math.min(1, (stagesStatus.progress - acc.start) / (end - acc.start)))
                 acc.nodes.push(
-                  <div key={stageNo} style={{ flex: stage.length_pct, minWidth: 0 }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
-                    <div style={{
-                      height: 8, borderRadius: 2, background: 'var(--border)', overflow: 'hidden',
-                      boxShadow: current ? '0 0 8px rgba(124,108,240,0.6)' : undefined,
-                    }}>
-                      <div style={{
-                        height: '100%', width: `${filled * 100}%`,
-                        background: current ? semantic.accent : 'rgba(124,108,240,0.55)',
-                      }} />
+                  <div key={stageNo} className="min-w-0" style={{ flex: stage.length_pct }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
+                    <div className={clsx('h-2 overflow-hidden rounded-sm bg-border', current && 'shadow-glow')}>
+                      <div className={clsx('h-full', current ? 'bg-accent' : 'bg-accent/55')} style={{ width: `${filled * 100}%` }} />
                     </div>
-                    <div className="mono text-dim" style={{ fontSize: 10, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div className="mt-1 truncate font-mono text-2xs text-subtle">
                       {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}{stage.max_job_hours ? ` · ≤${stage.max_job_hours}h/job` : ''}
                     </div>
                   </div>
@@ -933,27 +857,27 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               }, { start: 0, nodes: [] }).nodes}
             </div>
 
-            <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="mt-3 grid grid-cols-2 gap-4">
               <div>
-                <div className="uppercase-label" style={{ color: semantic.success, marginBottom: 6 }}>
+                <Eyebrow tone="success" className="mb-1.5 block">
                   Active Agents ({stagesStatus.active_agents.length})
-                </div>
+                </Eyebrow>
                 {stagesStatus.active_agents.length === 0
-                  ? <span className="text-dim">none</span>
+                  ? <span className="text-xs text-subtle">none</span>
                   : stagesStatus.active_agents.map(a => (
-                    <div key={a} className="mono" style={{ fontSize: 12, padding: '2px 8px', margin: '2px 4px 2px 0', background: 'rgba(74,222,128,0.12)', color: semantic.success, borderRadius: 999, display: 'inline-block' }}>{a}</div>
+                    <Pill key={a} tone="success" className="my-0.5 mr-1">{a}</Pill>
                   ))}
               </div>
               <div>
-                <div className="uppercase-label" style={{ color: semantic.danger, marginBottom: 6 }}>
+                <Eyebrow tone="danger" className="mb-1.5 block">
                   Cut Agents ({stagesStatus.cut_agents.length})
-                </div>
+                </Eyebrow>
                 {stagesStatus.cut_agents.length === 0
-                  ? <span className="text-dim">none</span>
+                  ? <span className="text-xs text-subtle">none</span>
                   : stagesStatus.cut_agents.map(c => (
-                    <div key={c.agent_id} className="mono" style={{ fontSize: 12, padding: '2px 8px', margin: '2px 4px 2px 0', background: 'rgba(242,89,107,0.12)', color: semantic.danger, borderRadius: 999, display: 'inline-block' }}>
-                      {c.agent_id} <span style={{ opacity: 0.7 }}>· stage {c.stage_index}</span>
-                    </div>
+                    <Pill key={c.agent_id} tone="danger" className="my-0.5 mr-1">
+                      {c.agent_id} <span className="opacity-70">· stage {c.stage_index}</span>
+                    </Pill>
                   ))}
               </div>
             </div>
@@ -964,12 +888,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
       {/* Stats row */}
       <Card>
         <CardContent>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile
               label="Accelerators In Flight"
               value={pe.max_concurrent_accelerators == null ? `${inFlightAccelerators}` : `${inFlightAccelerators} / ${pe.max_concurrent_accelerators}`}
-              color={pe.max_concurrent_accelerators != null && inFlightAccelerators >= pe.max_concurrent_accelerators ? semantic.accent : undefined}
+              tone={pe.max_concurrent_accelerators != null && inFlightAccelerators >= pe.max_concurrent_accelerators ? 'accent' : undefined}
               sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
@@ -978,20 +902,20 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             <StatTile
               label="Running"
               value={(jobsByStatus.RUNNING ?? 0).toString()}
-              color={(jobsByStatus.RUNNING ?? 0) > 0 ? semantic.success : undefined}
+              tone={(jobsByStatus.RUNNING ?? 0) > 0 ? 'success' : undefined}
               href={`/jobs?platform_experiment_id=${pe.id}&status=RUNNING`}
             />
             <StatTile
               label="Evicted"
               value={(jobsByStatus.EVICTED ?? 0).toString()}
-              color={(jobsByStatus.EVICTED ?? 0) > 0 ? semantic.danger : undefined}
+              tone={(jobsByStatus.EVICTED ?? 0) > 0 ? 'danger' : undefined}
               sub={[evictionFaultBreakdown, evictionBreakdown].filter(Boolean).join(' — ') || undefined}
               href={`/jobs?platform_experiment_id=${pe.id}&status=EVICTED`}
             />
             <StatTile
               label="Hypotheses"
               value={hypothesisCount.toString()}
-              color={semantic.accent}
+              tone="accent"
               sub={hypothesisSub}
               href={graphHref(pe.id)}
             />
@@ -1011,24 +935,24 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           {scoreboard.length === 0 ? (
             <EmptyState>No agents signed up yet.</EmptyState>
           ) : (
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
-                  <th style={{ width: 36 }}>Rank</th>
+                  <th className="w-9">Rank</th>
                   <th>Agent</th>
                   {metrics.length > 0 ? metrics.map((m, i) => (
-                    <th key={m.key} style={{ textAlign: 'right' }}>
+                    <th key={m.key} className="text-right">
                       {i === 0 && metrics.length > 1 && (
-                        <span title="Primary metric — used for ranking" style={{ fontWeight: 700, marginRight: 4 }}>★</span>
+                        <span title="Primary metric — used for ranking" className="mr-1 font-bold">★</span>
                       )}
-                      Best {m.key} <span className="text-dim" style={{ fontWeight: 400 }}>({m.direction === 'maximize' ? '↑' : '↓'})</span>
+                      Best {m.key} <span className="font-normal text-subtle">({m.direction === 'maximize' ? '↑' : '↓'})</span>
                     </th>
-                  )) : <th style={{ textAlign: 'right' }}>Best Metric</th>}
+                  )) : <th className="text-right">Best Metric</th>}
                   <th title={`The hypothesis each agent's best ${primaryStandings?.metric ?? 'ranked'} job tested, and the settings that differ between those jobs`}>
                     Best job: hypothesis · settings
                   </th>
-                  <th style={{ textAlign: 'right' }}>Jobs</th>
-                  <th style={{ textAlign: 'right' }}>Completed</th>
+                  <th className="text-right">Jobs</th>
+                  <th className="text-right">Completed</th>
                   <th>Quota Used</th>
                 </tr>
               </thead>
@@ -1051,25 +975,18 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                     <Fragment key={agentId}>
                       <tr
                         onClick={() => setExpandedAgentId(isExpanded ? null : agentId)}
-                        style={{
-                          background: isCut ? 'rgba(251,191,36,0.06)' : isWinner ? 'rgba(124,108,240,0.05)' : undefined,
-                          opacity: isCut ? 0.65 : 1, cursor: 'pointer',
-                        }}
+                        className={clsx('cursor-pointer', isCut ? 'bg-warning/5 opacity-60' : isWinner && 'bg-primary/5')}
                       >
-                        <td className="mono" style={{ fontWeight: 600 }}>{rank != null ? `#${rank}` : '—'}</td>
-                        <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                          <span className="text-muted" style={{ display: 'inline-block', width: 12 }}>{isExpanded ? '▾' : '▸'}</span>
+                        <td className="font-mono text-xs font-semibold">{rank != null ? `#${rank}` : '—'}</td>
+                        <td className="whitespace-nowrap font-mono text-xs font-semibold">
+                          <span className="inline-block w-3 text-muted">{isExpanded ? '▾' : '▸'}</span>
                           {agentId}
-                          {isCut && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.danger, fontWeight: 400 }}>CUT</span>}
-                          {isActive && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.success, fontWeight: 400 }}>ACTIVE</span>}
+                          {isCut && <span className="ml-2 text-2xs font-normal text-danger">CUT</span>}
+                          {isActive && <span className="ml-2 text-2xs font-normal text-success">ACTIVE</span>}
                           {nonRawMetrics.length > 0 && (
                             <span
-                              className="mono"
+                              className="ml-2 px-1.5 py-px font-normal rounded-sm border border-danger bg-danger/10 font-mono text-2xs text-danger"
                               title={`Also reported ${nonRawMetrics.join(', ')} on a non-"raw" basis (a rescaled/transformed value). That value is never blended into ${nonRawMetrics.length > 1 ? 'those rankings' : 'that ranking'} — only a raw-basis value (if any) counts here.`}
-                              style={{
-                                marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 400,
-                                background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
-                              }}
                             >
                               NON-RAW BASIS
                             </span>
@@ -1078,11 +995,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         {metrics.length > 0 ? metrics.map(m => {
                           const best = bestOf(m.key, agentId)
                           return (
-                            <td key={m.key} className="mono" style={{ textAlign: 'right', fontWeight: isWinner ? 700 : 400 }}>
+                            <td key={m.key} className={clsx('text-right font-mono text-xs', isWinner && 'font-bold')}>
                               {best?.experiment_id ? (
                                 <Link
                                   href={`/jobs/${best.experiment_id}`}
-                                  className="text-link"
+                                  className="text-accent hover:underline"
                                   title={`The job that set it: ${best.experiment_id}`}
                                   onClick={e => e.stopPropagation()}
                                 >
@@ -1092,36 +1009,35 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                               {best?.experiment_id && unsummarized?.has(best.experiment_id) && <div><NoSummary /></div>}
                             </td>
                           )
-                        }) : <td className="mono" style={{ textAlign: 'right' }}>—</td>}
-                        <td style={{ fontSize: 12, maxWidth: 360 }}>
+                        }) : <td className="text-right font-mono text-xs">—</td>}
+                        <td className="max-w-[360px] text-xs">
                           {standing?.hypothesis_id ? (
                             <>
                               <Link
                                 href={`/hypotheses/${standing.hypothesis_id}`}
-                                className="text-link"
-                                style={TWO_LINES}
+                                className="line-clamp-2 text-accent hover:underline"
                                 title={hypothesisText.get(standing.hypothesis_id)}
                                 onClick={e => e.stopPropagation()}
                               >
                                 {hypothesisText.get(standing.hypothesis_id) ?? standing.hypothesis_id}
                               </Link>
-                              <div className="mono text-muted" style={{ fontSize: 11 }} title={settings(standing.env, Object.keys(standing.env ?? {}).sort())}>
+                              <div className="font-mono text-2xs text-muted" title={settings(standing.env, Object.keys(standing.env ?? {}).sort())}>
                                 {settings(standing.env, standingKeys)}
                               </div>
                             </>
-                          ) : <span className="text-muted">—</span>}
+                          ) : <span className="text-xs text-muted">—</span>}
                         </td>
-                        <td className="mono" style={{ textAlign: 'right' }}>{jobs?.total ?? 0}</td>
-                        <td className="mono" style={{ textAlign: 'right' }}>{jobs?.by_status.COMPLETED ?? 0}</td>
-                        <td style={{ width: 160 }}>
+                        <td className="text-right font-mono text-xs">{jobs?.total ?? 0}</td>
+                        <td className="text-right font-mono text-xs">{jobs?.by_status.COMPLETED ?? 0}</td>
+                        <td className="w-40">
                           {totalAccH > 0 ? (
                             <MetricBar value={usedAccH} max={totalAccH} />
-                          ) : <span className="text-muted">no quota</span>}
+                          ) : <span className="text-xs text-muted">no quota</span>}
                         </td>
                       </tr>
                       {isExpanded && (
                         <tr>
-                          <td colSpan={colCount} style={{ background: 'var(--surface-2)' }}>
+                          <td colSpan={colCount} className="bg-surface-inset">
                             <AgentJobsPanel
                               projectId={pe.project_id}
                               platformExperimentId={pe.id}
@@ -1135,7 +1051,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   )
                 })}
               </tbody>
-            </table>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -1145,30 +1061,30 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Card>
           <CardHeader>Currently Running Jobs ({runningPage?.total ?? running.length})</CardHeader>
           <CardContent scrollX>
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
                   <th>Experiment ID</th>
                   <th>Agent</th>
                   <th>Accelerator</th>
-                  <th style={{ textAlign: 'right' }}>Est. Cost</th>
+                  <th className="text-right">Est. Cost</th>
                   <th>Hypothesis</th>
                 </tr>
               </thead>
               <tbody>
                 {running.map(exp => (
                   <tr key={exp.id}>
-                    <td className="mono" style={{ fontSize: 11 }}>
-                      <Link href={`/jobs/${exp.id}`} className="text-link">{exp.id.slice(0, 8)}…</Link>
+                    <td className="font-mono text-2xs">
+                      <Link href={`/jobs/${exp.id}`} className="text-accent hover:underline">{exp.id.slice(0, 8)}…</Link>
                     </td>
-                    <td className="mono">{exp.agent_id}</td>
-                    <td className="mono">{exp.accelerator_count}× {acceleratorLabel(exp.accelerator_type)}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} AccH` : '—'}</td>
-                    <td style={{ fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.hypothesis}</td>
+                    <td className="font-mono text-xs">{exp.agent_id}</td>
+                    <td className="font-mono text-xs">{exp.accelerator_count}× {acceleratorLabel(exp.accelerator_type)}</td>
+                    <td className="text-right font-mono text-xs">{exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} AccH` : '—'}</td>
+                    <td className="max-w-[280px] truncate text-xs">{exp.hypothesis}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </CardContent>
         </Card>
       )}
@@ -1178,7 +1094,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Card>
           <CardHeader>
             Job Metrics
-            <span className="text-dim" style={{ marginLeft: 8 }}>over training progress, refreshed every 30 s</span>
+            <span className="ml-2 text-xs font-normal text-subtle">over training progress, refreshed every 30 s</span>
           </CardHeader>
           <CardContent>
             <LiveMetricsPicker jobs={experiments ?? []} />
@@ -1195,15 +1111,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           {!experiments || experiments.length === 0 ? (
             <EmptyState>No jobs submitted yet.</EmptyState>
           ) : (
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
                   <th>ID</th>
                   <th>Agent</th>
                   <th>Status</th>
                   <th title="Under each hypothesis: the settings that differ between these jobs of it">Hypothesis · varied settings</th>
-                  <th style={{ textAlign: 'right' }}>Best {primaryStandings?.metric ?? 'Metric'}</th>
-                  <th style={{ textAlign: 'right' }}>Est. Cost</th>
+                  <th className="text-right">Best {primaryStandings?.metric ?? 'Metric'}</th>
+                  <th className="text-right">Est. Cost</th>
                   <th>Submitted</th>
                 </tr>
               </thead>
@@ -1215,35 +1131,35 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                     : undefined
                   return (
                     <tr key={exp.id}>
-                      <td className="mono" style={{ fontSize: 11 }}>
-                        <Link href={`/jobs/${exp.id}`} className="text-link">{exp.id.slice(0, 8)}…</Link>
+                      <td className="font-mono text-2xs">
+                        <Link href={`/jobs/${exp.id}`} className="text-accent hover:underline">{exp.id.slice(0, 8)}…</Link>
                       </td>
-                      <td className="mono">{exp.agent_id}</td>
+                      <td className="font-mono text-xs">{exp.agent_id}</td>
                       <td>
                         <StatusBadge status={exp.status} />
-                        {unsummarized?.has(exp.id) && <NoSummary style={{ marginLeft: 6 }} />}
+                        {unsummarized?.has(exp.id) && <NoSummary className="ml-1.5" />}
                         {evictionText && (
-                          <div className="text-dim" style={{ fontSize: 10, marginTop: 2 }} title="eviction_reason">
+                          <div className="mt-0.5 text-2xs text-subtle" title="eviction_reason">
                             {evictionText}
                           </div>
                         )}
                       </td>
-                      <td style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }} title={exp.hypothesis}>
+                      <td className="max-w-xs truncate text-xs" title={exp.hypothesis}>
                         {exp.hypothesis_id
-                          ? <Link href={`/hypotheses/${exp.hypothesis_id}`} className="text-link">{exp.hypothesis}</Link>
+                          ? <Link href={`/hypotheses/${exp.hypothesis_id}`} className="text-accent hover:underline">{exp.hypothesis}</Link>
                           : exp.hypothesis}
-                        <div className="mono text-muted" style={{ fontSize: 10, marginTop: 3, whiteSpace: 'normal' }}>
+                        <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
                           {envSettings(exp, variedByHypothesis.get(exp.hypothesis_id) ?? [])}
                         </div>
                       </td>
-                      <td className="mono" style={{ textAlign: 'right' }}>{exp.metric?.best.toFixed(4) ?? '—'}</td>
-                      <td className="mono" style={{ textAlign: 'right' }}>{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
-                      <td className="text-dim">{new Date(exp.created_at).toLocaleString()}</td>
+                      <td className="text-right font-mono text-xs">{exp.metric?.best.toFixed(4) ?? '—'}</td>
+                      <td className="text-right font-mono text-xs">{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
+                      <td className="text-xs text-subtle">{new Date(exp.created_at).toLocaleString()}</td>
                     </tr>
                   )
                 })}
               </tbody>
-            </table>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -1253,7 +1169,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Card>
           <CardHeader>Agent Quotas</CardHeader>
           <CardContent scrollX>
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
                   <th>Agent</th>
@@ -1267,17 +1183,17 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   const remaining = quotaRemainingAccH(q)
                   return (
                     <tr key={q.id}>
-                      <td className="mono" style={{ fontWeight: 600 }}>{q.agent_id}</td>
-                      <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
-                      <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
-                      <td className="mono" style={{ fontSize: 11, color: remaining > 0 ? semantic.success : semantic.danger }}>
+                      <td className="font-mono text-xs font-semibold">{q.agent_id}</td>
+                      <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
+                      <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
+                      <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>
                         {formatAccH(remaining)} AccH
                       </td>
                     </tr>
                   )
                 })}
               </tbody>
-            </table>
+            </Table>
             {/* RAM/storage quota columns intentionally omitted: those dimensions are hard
                 physical-fit-checked at admission, not hours-tracked, so AgentQuota carries no
                 RAM/storage fields at all. */}
@@ -1290,11 +1206,11 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         <Card>
           <CardHeader>Compute Donation Requests ({relevantDonations.length})</CardHeader>
           <CardContent scrollX>
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
                   <th>Agent</th>
-                  <th style={{ textAlign: 'right' }}>Wants</th>
+                  <th className="text-right">Wants</th>
                   <th>Reason</th>
                   <th>Requested</th>
                 </tr>
@@ -1302,14 +1218,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               <tbody>
                 {relevantDonations.map(d => (
                   <tr key={d.id}>
-                    <td className="mono" style={{ fontWeight: 600 }}>{d.agent_name || d.agent_id}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{d.credits_want} AccH</td>
-                    <td style={{ fontSize: 12 }}>{d.reason}</td>
-                    <td className="text-dim">{new Date(d.created_at).toLocaleString()}</td>
+                    <td className="font-mono text-xs font-semibold">{d.agent_name || d.agent_id}</td>
+                    <td className="text-right font-mono text-xs">{d.credits_want} AccH</td>
+                    <td className="text-xs">{d.reason}</td>
+                    <td className="text-xs text-subtle">{new Date(d.created_at).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </CardContent>
         </Card>
       )}

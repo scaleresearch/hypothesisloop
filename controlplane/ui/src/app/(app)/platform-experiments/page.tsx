@@ -4,7 +4,7 @@ import React, { Suspense, useState } from 'react'
 import useSWR from 'swr'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
-import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react'
+import { clsx } from 'clsx'
 import {
   fetchPlatformExperimentsPage,
   fetchPlatformExperimentQuotas,
@@ -25,35 +25,30 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
+import { Dialog } from '@/components/ui/dialog'
+import { FieldGroup, FormField } from '@/components/ui/form-field'
+import { Input, Textarea } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Table } from '@/components/ui/table'
+import { Segmented, Tabs } from '@/components/ui/tabs'
+import { Eyebrow, Pill } from '@/components/ui/text'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
-import { semantic, hypothesisStatusColors } from '@/lib/colors'
+import { statusColor } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
 }
 
+// The primary metric ranks the leaderboard, so its pill carries the accent ring.
 function MetricChip({ m, primary }: { m: MetricDefinition; primary?: boolean }) {
   return (
-    <span
-      className="mono"
-      style={{
-        fontSize: 11, padding: '3px 9px', borderRadius: 999,
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        background: m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(251, 191, 36, 0.12)',
-        border: primary
-          ? `1px solid ${semantic.accent}`
-          : `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
-        color: m.direction === 'maximize' ? semantic.success : semantic.warning,
-        boxShadow: primary ? `0 0 0 1px ${semantic.accent} inset` : undefined,
-      }}
-      title={primary ? 'Primary metric — used for ranking' : undefined}
-    >
-      {primary && <span style={{ opacity: 0.85, fontSize: 9 }}>★</span>}
+    <Pill tone={m.direction === 'maximize' ? 'success' : 'warning'} active={primary} title={primary ? 'Primary metric — used for ranking' : undefined}>
+      {primary && <span className="opacity-80">★</span>}
       {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
-    </span>
+    </Pill>
   )
 }
 
@@ -94,98 +89,98 @@ function ExperimentCard({
     : null
 
   return (
-    <Card style={{ cursor: 'pointer' }}>
+    <Card className="cursor-pointer">
       <CardHeader
-        style={{ justifyContent: 'space-between' }}
+        className="justify-between"
         onClick={() => router.push(`/platform-experiments/${pe.id}`)}
         tabIndex={0}
         role="link"
         onKeyDown={e => { if (e.key === 'Enter') router.push(`/platform-experiments/${pe.id}`) }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="flex items-center gap-2.5">
           <StatusBadge status={pe.status} />
-          <span style={{ fontSize: 14, fontWeight: 700 }}>{pe.name}</span>
+          <span className="text-base font-bold">{pe.name}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 400 }}>
+        <div className="flex items-center gap-3 font-normal">
           {!isZeroDate(pe.starts_at) && (
-            <span className="text-dim">{formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}</span>
+            <span className="text-xs text-subtle">{formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}</span>
           )}
           {daysLeft != null && daysLeft > 0 && (
-            <span style={{ fontSize: 11, color: daysLeft < 2 ? semantic.danger : 'var(--muted-fg)' }}>{daysLeft}d remaining</span>
+            <span className={clsx('text-2xs', daysLeft < 2 ? 'text-danger' : 'text-muted')}>{daysLeft}d remaining</span>
           )}
           <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
-          <span className="text-muted" style={{ fontSize: 12 }} onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}>{expanded ? '▲' : '▼'}</span>
+          <span className="text-xs text-muted" onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}>{expanded ? '▲' : '▼'}</span>
         </div>
       </CardHeader>
 
       <CardContent onClick={() => router.push(`/platform-experiments/${pe.id}`)}>
-        {pe.description && <CollapsibleDescription text={pe.description} style={{ marginBottom: 12 }} />}
+        {pe.description && <CollapsibleDescription text={pe.description} className="mb-3" />}
 
         {pe.metrics && pe.metrics.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+          <div className="mb-3.5 flex flex-wrap gap-1.5">
             {pe.metrics.map((m, i) => <MetricChip key={m.key} m={m} primary={i === 0} />)}
           </div>
         )}
 
         {pe.stages && pe.stages.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-            <span className="uppercase-label" style={{ marginRight: 2 }}>Ladder</span>
+          <div className="mb-3.5 flex flex-wrap items-center gap-1.5">
+            <Eyebrow className="mr-0.5">Ladder</Eyebrow>
             {pe.stages.map((s, i) => {
               const active = i + 1 === pe.current_stage
               return (
-                <span key={i} className="mono" title={`Stage ${i + 1}: spans ${s.length_pct}% of the run${s.evict_pct > 0 ? `, then cuts ${s.evict_pct}% of survivors` : ', no cut'}${s.max_job_hours ? `; no job may run longer than ${s.max_job_hours}h` : '; no job length limit'}`} style={{
-                  fontSize: 11, padding: '3px 9px', borderRadius: 999,
-                  background: active ? 'rgba(96,165,250,0.12)' : 'var(--surface-2)',
-                  border: `1px solid ${active ? semantic.accent : 'var(--border)'}`,
-                  color: active ? 'var(--foreground)' : 'var(--muted-fg)',
-                }}>
+                <Pill
+                  key={i}
+                  tone={active ? 'accent' : undefined}
+                  active={active}
+                  title={`Stage ${i + 1}: spans ${s.length_pct}% of the run${s.evict_pct > 0 ? `, then cuts ${s.evict_pct}% of survivors` : ', no cut'}${s.max_job_hours ? `; no job may run longer than ${s.max_job_hours}h` : '; no job length limit'}`}
+                >
                   {s.length_pct}% {s.evict_pct > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}{s.max_job_hours ? ` · ≤${s.max_job_hours}h/job` : ''}
-                </span>
+                </Pill>
               )
             })}
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 14 }}>
+        <div className="mb-3.5 grid grid-cols-4 gap-4">
           <div>
-            <div className="uppercase-label">Budget</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700 }}>{pe.budget_accelerator_hours} <span className="text-muted">AccH</span></div>
+            <Eyebrow className="block">Budget</Eyebrow>
+            <div className="font-mono text-xl font-bold">{pe.budget_accelerator_hours} <span className="text-xs text-muted">AccH</span></div>
           </div>
           <div>
-            <div className="uppercase-label">Agents</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700 }}>{pe.signup_count} <span className="text-muted">/ {pe.max_agents}</span></div>
+            <Eyebrow className="block">Agents</Eyebrow>
+            <div className="font-mono text-xl font-bold">{pe.signup_count} <span className="text-xs text-muted">/ {pe.max_agents}</span></div>
           </div>
           <div>
-            <div className="uppercase-label">Budget Used</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: totalUsed > 0 ? 'var(--accent-light)' : undefined }}>
-              {formatAccH(totalUsed)} <span className="text-muted">AccH</span>
+            <Eyebrow className="block">Budget Used</Eyebrow>
+            <div className={clsx('font-mono text-xl font-bold', totalUsed > 0 && 'text-accent')}>
+              {formatAccH(totalUsed)} <span className="text-xs text-muted">AccH</span>
             </div>
           </div>
           <div>
-            <div className="uppercase-label">Hypotheses</div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <Eyebrow className="block">Hypotheses</Eyebrow>
+            <div className="flex flex-wrap items-baseline gap-2.5">
               {HYPOTHESIS_STATUSES.map(v => (
-                <span key={v} className="mono" style={{ fontSize: 13, color: hypothesisStatusColors[v] }}>
-                  {verdicts?.by_status[v] ?? 0} <span className="text-muted" style={{ fontSize: 10 }}>{v}</span>
+                <span key={v} className="font-mono text-sm" style={{ color: statusColor(v) }}>
+                  {verdicts?.by_status[v] ?? 0} <span className="text-2xs text-muted">{v}</span>
                 </span>
               ))}
             </div>
-            {activity && <div className="text-muted" style={{ fontSize: 10 }}>{activity}</div>}
+            {activity && <div className="text-2xs text-muted">{activity}</div>}
           </div>
         </div>
 
         {expanded && (
           <div onClick={e => e.stopPropagation()}>
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-              <div className="uppercase-label" style={{ marginBottom: 10 }}>
+            <div className="border-t pt-3.5">
+              <Eyebrow className="mb-2.5 block">
                 Agent Quotas — Guaranteed &amp; Burst (AccH)
-              </div>
+              </Eyebrow>
               {!quotas ? (
-                <p className="text-dim">Loading quotas…</p>
+                <p className="text-xs text-subtle">Loading quotas…</p>
               ) : quotas.length === 0 ? (
-                <p className="text-dim">No quotas allocated yet.</p>
+                <p className="text-xs text-subtle">No quotas allocated yet.</p>
               ) : (
-                <table className="wa-table">
+                <Table>
                   <thead>
                     <tr>
                       <th>Agent</th>
@@ -199,15 +194,15 @@ function ExperimentCard({
                       const remaining = quotaRemainingAccH(q)
                       return (
                         <tr key={q.id}>
-                          <td className="mono" style={{ fontWeight: 600 }}>{q.agent_id}</td>
-                          <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
-                          <td className="mono" style={{ fontSize: 11 }}>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
-                          <td className="mono" style={{ fontSize: 11, color: remaining > 0 ? semantic.success : semantic.danger }}>{formatAccH(remaining)} AccH</td>
+                          <td className="font-mono text-xs font-semibold">{q.agent_id}</td>
+                          <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
+                          <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
+                          <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>{formatAccH(remaining)} AccH</td>
                         </tr>
                       )
                     })}
                   </tbody>
-                </table>
+                </Table>
               )}
             </div>
           </div>
@@ -218,16 +213,6 @@ function ExperimentCard({
 }
 
 // ---- Experiment Modal (create / edit) ----
-
-const INPUT_STYLE: React.CSSProperties = {
-  width: '100%', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 6,
-  fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box',
-  background: 'var(--surface-2)', color: 'var(--foreground)',
-}
-const LABEL_STYLE: React.CSSProperties = {
-  fontSize: 11, color: 'var(--muted-fg)', textTransform: 'uppercase' as const, letterSpacing: 0.8,
-  display: 'block', marginBottom: 4,
-}
 
 function localDatetime(offsetDays: number): string {
   const d = new Date()
@@ -273,47 +258,6 @@ const POLICY_HINTS: Record<'hypothesis' | 'job', Record<SubmitterPolicy, string>
     human_only: 'Only human participants may submit jobs. An agent that fires one off — even accidentally, e.g. a leftover automation — is rejected with an error naming this policy, before anything runs or is billed.',
     agent_only: 'Only agents may submit jobs — a human cannot run one directly.',
   },
-}
-
-// SubmitterPolicySelect is a 3-way segmented control: only 3 mutually-exclusive options, so a
-// dropdown would just cost an extra click. Mirrors the visual language of the stage-ladder
-// preset buttons above (active = filled, accent border) rather than introducing a new pattern.
-function SubmitterPolicySelect({ value, onChange, disabled }: { value: SubmitterPolicy; onChange: (v: SubmitterPolicy) => void; disabled?: boolean }) {
-  return (
-    <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      {POLICY_OPTIONS.map(opt => {
-        const active = value === opt.value
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(opt.value)}
-            style={{
-              padding: '6px 14px', fontSize: 12, fontWeight: active ? 700 : 400,
-              border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
-              background: active ? semantic.accent : 'transparent',
-              color: active ? 'var(--background)' : disabled ? 'var(--muted-fg)' : 'var(--foreground)',
-              opacity: disabled ? 0.6 : 1,
-            }}
-          >
-            {opt.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-// Field wraps one input with its label and the one-line explanation of what it actually does.
-function Field({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div>
-      <label style={LABEL_STYLE}>{label}</label>
-      {children}
-      {hint && <p className="text-dim" style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.5 }}>{hint}</p>}
-    </div>
-  )
 }
 
 // StageDraft holds what's typed, not what's parsed. A number-typed field cannot represent a
@@ -376,52 +320,53 @@ function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+      <div className="mb-2 flex flex-wrap gap-1.5">
         <Button type="button" size="sm" onClick={() => onChange(DEFAULT_STAGES)}>Platform default (40/75, 60/0)</Button>
         <Button type="button" size="sm" onClick={() => onChange([{ length_pct: '100', evict_pct: '0', max_job_hours: '' }])}>Single stage, no cuts</Button>
         <Button type="button" size="sm" onClick={() => onChange([{ length_pct: '20', evict_pct: '50', max_job_hours: '' }, { length_pct: '30', evict_pct: '25', max_job_hours: '' }, { length_pct: '50', evict_pct: '0', max_job_hours: '' }])}>Three stages</Button>
         <Button type="button" size="sm" onClick={() => onChange([{ length_pct: '30', evict_pct: '25', max_job_hours: '1' }, { length_pct: '70', evict_pct: '0', max_job_hours: '' }])}>Explore then commit (1h cap, then none)</Button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
-        <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>#</span>
-        <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Length %</span>
-        <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Evict %</span>
-        <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Max job h</span>
+      <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center gap-2">
+        <Eyebrow>#</Eyebrow>
+        <Eyebrow>Length %</Eyebrow>
+        <Eyebrow>Evict %</Eyebrow>
+        <Eyebrow>Max job h</Eyebrow>
         <span />
         {stages.map((s, i) => (
           <React.Fragment key={i}>
-            <span className="mono text-dim" style={{ fontSize: 12 }}>{i + 1}</span>
-            <input
-              style={INPUT_STYLE} type="number" min={0.1} max={100} step="any" value={s.length_pct}
+            <span className="font-mono text-xs text-subtle">{i + 1}</span>
+            <Input
+              className="w-full min-w-0" type="number" min={0.1} max={100} step="any" value={s.length_pct}
               onChange={e => setStage(i, { length_pct: e.target.value })}
             />
-            <input
-              style={{ ...INPUT_STYLE, opacity: i === stages.length - 1 ? 0.5 : 1 }}
+            <Input
+              className="w-full min-w-0"
               type="number" min={0} max={99} step={5}
               value={s.evict_pct}
               disabled={i === stages.length - 1}
               title={i === stages.length - 1 ? 'The final stage cannot evict — nothing follows it' : undefined}
               onChange={e => setStage(i, { evict_pct: e.target.value })}
             />
-            <input
-              style={INPUT_STYLE} type="number" min={0} step={0.5} value={s.max_job_hours}
+            <Input
+              className="w-full min-w-0" type="number" min={0} step={0.5} value={s.max_job_hours}
               placeholder="no limit"
               title="Longest a single job may run while this stage is current. Leave empty for no limit."
               onChange={e => setStage(i, { max_job_hours: e.target.value })}
             />
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               onClick={() => onChange(stages.filter((_, idx) => idx !== i).map((st, idx, arr) => idx === arr.length - 1 ? { ...st, evict_pct: '0' } : st))}
               disabled={stages.length <= 1}
-              style={{ background: 'none', border: 'none', cursor: stages.length <= 1 ? 'default' : 'pointer', color: 'var(--muted-fg)', opacity: stages.length <= 1 ? 0.3 : 0.7, fontSize: 14 }}
               title="Remove this stage"
-            >×</button>
+            >×</Button>
           </React.Fragment>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+      <div className="mt-2 flex items-center gap-2">
         <Button
           type="button" size="sm"
           disabled={stages.length >= 8}
@@ -431,12 +376,12 @@ function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s
             { length_pct: '', evict_pct: '0', max_job_hours: '' },
           ])}
         >+ Add stage</Button>
-        <span className="mono text-dim" style={{ fontSize: 11, color: Math.abs(total - 100) < 0.001 ? semantic.success : semantic.warning }}>
+        <span className={clsx('font-mono text-2xs', Math.abs(total - 100) < 0.001 ? 'text-success' : 'text-warning')}>
           total {total}%
         </span>
       </div>
 
-      {err && <p style={{ margin: '6px 0 0', fontSize: 11, color: semantic.warning }}>{err}</p>}
+      {err && <p className="mt-1.5 text-2xs text-warning">{err}</p>}
     </div>
   )
 }
@@ -481,65 +426,47 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <select
-          value={selectedPreset}
-          onChange={e => setSelectedPreset(e.target.value)}
-          style={{ ...INPUT_STYLE, flex: 1 }}
-        >
+      <div className="mb-2 flex gap-1.5">
+        <Select className="min-w-0 flex-1" value={selectedPreset} onChange={e => setSelectedPreset(e.target.value)}>
           <option value="">— pick a common metric —</option>
           {COMMON_ML_METRICS.filter(m => m.key !== 'custom').map(m => (
             <option key={m.key} value={m.key}>{m.label} ({m.direction === 'maximize' ? '↑ max' : '↓ min'})</option>
           ))}
-        </select>
+        </Select>
         <Button type="button" variant="primary" size="sm" onClick={addPreset}>Add</Button>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-        <input
-          style={{ ...INPUT_STYLE, flex: 1 }}
+      <div className="mb-1.5 flex gap-1.5">
+        <Input
+          className="min-w-0 flex-1"
           placeholder="custom_metric_key"
           value={customKey}
           onChange={e => setCustomKey(e.target.value)}
         />
-        <select value={customDir} onChange={e => setCustomDir(e.target.value as 'maximize' | 'minimize')} style={{ ...INPUT_STYLE, width: 'auto' }}>
+        <Select value={customDir} onChange={e => setCustomDir(e.target.value as 'maximize' | 'minimize')}>
           <option value="maximize">↑ max</option>
           <option value="minimize">↓ min</option>
-        </select>
+        </Select>
         <Button type="button" size="sm" onClick={addCustom}>Add Custom</Button>
       </div>
 
       {metrics.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {metrics.map((m, i) => {
             const primary = i === 0
             return (
-              <span key={m.key} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '3px 8px', borderRadius: 999, fontSize: 12,
-                background: m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.12)' : 'rgba(251, 191, 36, 0.12)',
-                border: primary ? `1px solid ${semantic.accent}` : `1px solid ${m.direction === 'maximize' ? 'rgba(74, 222, 128, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
-                boxShadow: primary ? `0 0 0 1px ${semantic.accent} inset` : undefined,
-                color: m.direction === 'maximize' ? semantic.success : semantic.warning,
-              }}>
+              <Pill key={m.key} tone={m.direction === 'maximize' ? 'success' : 'warning'} active={primary}>
                 {primary ? (
-                  <span title="Primary metric — used for ranking" style={{ fontSize: 9, opacity: 0.85 }}>★</span>
+                  <span title="Primary metric — used for ranking" className="opacity-80">★</span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => makePrimary(m.key)}
-                    title="Make primary"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'inherit', opacity: 0.5 }}
-                  >
-                    ☆
-                  </button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => makePrimary(m.key)} title="Make primary">☆</Button>
                 )}
-                <button type="button" onClick={() => toggleDir(m.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, color: 'inherit' }}>
+                <Button type="button" variant="ghost" size="icon" onClick={() => toggleDir(m.key)} title="Flip between maximize and minimize">
                   {m.direction === 'maximize' ? '↑' : '↓'}
-                </button>
+                </Button>
                 {m.key}
-                <button type="button" onClick={() => remove(m.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 2px', fontSize: 11, color: 'inherit', opacity: 0.6 }}>×</button>
-              </span>
+                <Button type="button" variant="ghost" size="icon" onClick={() => remove(m.key)} title="Remove this metric">×</Button>
+              </Pill>
             )
           })}
         </div>
@@ -640,165 +567,138 @@ function ExperimentModal({
     }
   }
 
-  const stepTab = (n: 1 | 2, label: string) => (
-    <button
-      type="button"
-      onClick={() => { setError(null); setStep(n) }}
-      style={{
-        background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 8px', fontSize: 12,
-        fontWeight: step === n ? 700 : 400,
-        color: step === n ? 'var(--foreground)' : 'var(--muted-fg)',
-        borderBottom: step === n ? `2px solid ${semantic.accent}` : '2px solid transparent',
-      }}
-    >
-      {n}. {label}
-    </button>
-  )
-
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(2,3,6,0.6)', backdropFilter: 'blur(2px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 10,
-          padding: 28, width: 680, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto',
-          boxShadow: 'var(--shadow-lg)',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 14 }}>
-          {isEdit ? 'Edit Platform Experiment' : 'New Platform Experiment'}
-        </div>
-
-        <div style={{ display: 'flex', gap: 20, borderBottom: '1px solid var(--border)', marginBottom: 18 }}>
-          {stepTab(1, 'Essentials')}
-          {stepTab(2, 'Competition settings')}
+    <Dialog open onClose={onClose} title={isEdit ? 'Edit Platform Experiment' : 'New Platform Experiment'}>
+        <div className="mb-4">
+          <Tabs
+            label="Steps"
+            tabs={[{ id: '1', label: '1. Essentials' }, { id: '2', label: '2. Competition settings' }]}
+            value={String(step) as '1' | '2'}
+            onChange={id => { setError(null); setStep(id === '1' ? 1 : 2) }}
+          />
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="flex flex-col gap-4">
             {step === 1 ? (
               <>
-                <Field label="Name *" hint="Shown to every agent in the listing. Make it specific enough to tell two runs apart.">
-                  <input style={INPUT_STYLE} value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
-                </Field>
+                <FormField label="Name *" hint="Shown to every agent in the listing. Make it specific enough to tell two runs apart.">
+                  <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
+                </FormField>
 
-                <Field
+                <FormField
                   label="Description"
                   hint="The brief agents actually read before choosing an approach: the goal, the dataset, the evaluation protocol, and any constraint on how they may reach it."
                 >
-                  <textarea
-                    style={{ ...INPUT_STYLE, minHeight: 80, resize: 'vertical' }}
+                  <Textarea
+                    className="min-h-20"
                     value={form.description}
                     onChange={e => set('description', e.target.value)}
                     placeholder="Goals, evaluation protocol, dataset details, winner criteria…"
                   />
-                </Field>
+                </FormField>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field label="Starts at" hint={lockedWhileRunning ? 'Locked once running.' : 'Signups close and quota is allocated at this moment.'}>
-                    <input style={INPUT_STYLE} type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
-                  </Field>
-                  <Field label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
-                    <input style={INPUT_STYLE} type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
-                  </Field>
+                <div className="grid grid-cols-2 gap-3.5">
+                  <FormField label="Starts at" hint={lockedWhileRunning ? 'Locked once running.' : 'Signups close and quota is allocated at this moment.'}>
+                    <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
+                  </FormField>
+                  <FormField label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
+                    <Input type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
+                  </FormField>
                 </div>
 
-                <Field
+                <FieldGroup
                   label="Optimization metrics"
                   hint={lockedWhileRunning
                     ? 'Locked once running — stage cuts have already ranked agents against these metrics.'
                     : <>The metric keys agents must emit. The <strong>★ primary metric</strong> ranks the leaderboard — click ☆ on another to promote it. The ↑/↓ on each chip sets its direction; click it to flip between maximize and minimize. At a stage cut an agent survives if it survives on <em>at least one</em> metric, so specialists are not eliminated by a metric they never targeted.</>}
                 >
                   {lockedWhileRunning ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <div className="flex flex-wrap gap-1.5">
                       {form.metrics.map(m => (
-                        <span key={m.key} className="mono" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted-fg)' }}>
-                          {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
-                        </span>
+                        <Pill key={m.key}>{m.key} {m.direction === 'maximize' ? '↑' : '↓'}</Pill>
                       ))}
                     </div>
                   ) : (
                     <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
                   )}
-                </Field>
+                </FieldGroup>
               </>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field
+                <div className="grid grid-cols-2 gap-3.5">
+                  <FormField
                     label="Accelerator budget — AccH (GPU-hours) *"
                     hint={lockedWhileRunning
                       ? 'Locked once running — admission has already committed usage against this budget.'
                       : <>Normalized H100-equivalent hours — the <strong>only</strong> budget (H100 1.0, A100 0.375, L40 0.25/hr). CPU, RAM and storage are capped per job instead, not budgeted.</>}
                   >
-                    <input style={INPUT_STYLE} type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
-                  </Field>
-                  <Field label="Max participants" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
-                    <input style={INPUT_STYLE} type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
-                  </Field>
+                    <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
+                  </FormField>
+                  <FormField label="Max participants" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
+                    <Input type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
+                  </FormField>
                 </div>
 
-                <Field
+                <FormField
                   label="Max concurrent accelerators"
                   hint={lockedWhileRunning
                     ? 'Locked once running.'
-                    : 'Accelerators this experiment may hold in flight (submitted + running) at once, across all agents\' jobs. Empty = platform default. Bounds spend rate now that a job can trigger a cluster scale-up on demand.'}
+                    : "Accelerators this experiment may hold in flight (submitted + running) at once, across all agents' jobs. Empty = platform default. Bounds spend rate now that a job can trigger a cluster scale-up on demand."}
                 >
-                  <input style={INPUT_STYLE} type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={lockedWhileRunning} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
-                </Field>
+                  <Input type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={lockedWhileRunning} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
+                </FormField>
 
-                <Field
+                <FieldGroup
                   label={isEdit ? 'Stage ladder (fixed at creation)' : 'Stage ladder'}
                   hint={isEdit
                     ? <>The ladder is fixed when the experiment is created and cannot be changed afterwards — agents plan around published boundaries, so moving them mid-run would invalidate the competition. Create a new platform experiment to use a different ladder.</>
                     : <>Each stage ends by cutting the worst-performing share of agents (their jobs stop, unspent budget redistributes) — lengths must total 100%, the final stage evicts 0%, and cuts skip entirely at ≤4 agents. <strong>Max job h</strong> caps run length per stage (empty = no limit) and is enforced.</>}
                 >
                   {isEdit ? (
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <div className="flex flex-wrap gap-1.5">
                       {form.stages.map((s, i) => (
-                        <span key={i} className="mono" style={{
-                          fontSize: 11, padding: '3px 9px', borderRadius: 999,
-                          background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted-fg)',
-                        }}>
+                        <Pill key={i}>
                           {i + 1}: {s.length_pct}% {Number(s.evict_pct) > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}{s.max_job_hours ? ` · ≤${s.max_job_hours}h/job` : ''}
-                        </span>
+                        </Pill>
                       ))}
                     </div>
                   ) : (
                     <StagesEditor stages={form.stages} onChange={s => set('stages', s)} />
                   )}
-                </Field>
+                </FieldGroup>
 
-                <Field
+                <FormField
                   label="Report interval (seconds)"
                   hint={lockedWhileRunning
                     ? 'Locked once running.'
                     : "How often agents are expected to push metrics. A job that reports nothing for 3× this interval is treated as dead and evicted, so set it to match your real training loop's logging cadence — too low and healthy jobs get killed during a reschedule."}
                 >
-                  <input style={INPUT_STYLE} type="number" min={1} step={1} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
-                </Field>
+                  <Input type="number" min={1} step={1} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
+                </FormField>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field label="Who can submit hypotheses?" hint={POLICY_HINTS.hypothesis[form.hypothesis_submit_policy]}>
-                    <SubmitterPolicySelect
+                <div className="grid grid-cols-2 gap-3.5">
+                  <FieldGroup label="Who can submit hypotheses?" hint={POLICY_HINTS.hypothesis[form.hypothesis_submit_policy]}>
+                    <Segmented
+                      label="Who can submit hypotheses?"
+                      options={POLICY_OPTIONS}
                       value={form.hypothesis_submit_policy}
                       disabled={lockedWhileRunning}
                       onChange={v => set('hypothesis_submit_policy', v)}
                     />
-                  </Field>
-                  <Field label="Who can submit jobs?" hint={POLICY_HINTS.job[form.job_submit_policy]}>
-                    <SubmitterPolicySelect
+                  </FieldGroup>
+                  <FieldGroup label="Who can submit jobs?" hint={POLICY_HINTS.job[form.job_submit_policy]}>
+                    <Segmented
+                      label="Who can submit jobs?"
+                      options={POLICY_OPTIONS}
                       value={form.job_submit_policy}
                       disabled={lockedWhileRunning}
                       onChange={v => set('job_submit_policy', v)}
                     />
-                  </Field>
+                  </FieldGroup>
                 </div>
                 {lockedWhileRunning && (
-                  <p className="text-dim" style={{ margin: '-8px 0 0', fontSize: 11, lineHeight: 1.5 }}>
+                  <p className="-mt-2 text-2xs leading-normal text-subtle">
                     Locked once running — who may submit has already shaped who signed up.
                   </p>
                 )}
@@ -807,7 +707,7 @@ function ExperimentModal({
 
             {error && <ErrorMessage>{error}</ErrorMessage>}
 
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+            <div className="mt-1 flex justify-end gap-2">
               <Button type="button" onClick={onClose}>Cancel</Button>
               {step === 1 ? (
                 <Button type="button" variant="primary" onClick={() => { setError(null); setStep(2) }}>Next: competition settings</Button>
@@ -822,8 +722,7 @@ function ExperimentModal({
             </div>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -837,44 +736,6 @@ const SORT_OPTIONS = [
   { value: 'name', label: 'Name (A–Z)' },
   { value: '-name', label: 'Name (Z–A)' },
 ]
-
-function SortListbox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const current = SORT_OPTIONS.find(o => o.value === value) ?? SORT_OPTIONS[0]
-  return (
-    <Listbox value={value} onChange={onChange} as="div" style={{ position: 'relative' }}>
-      <ListboxButton
-        className="mono"
-        style={{
-          fontSize: 12, padding: '5px 10px', border: '1px solid rgba(255,255,255,.16)', borderRadius: 6,
-          background: 'var(--surface-2)', color: 'var(--foreground)', cursor: 'pointer', minWidth: 140, textAlign: 'left',
-        }}
-      >
-        Sort: {current.label}
-      </ListboxButton>
-      <ListboxOptions
-        style={{
-          position: 'absolute', zIndex: 20, top: '100%', left: 0, marginTop: 4, minWidth: 160,
-          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-raised)',
-          boxShadow: 'var(--shadow-lg)', padding: 4,
-        }}
-      >
-        {SORT_OPTIONS.map(o => (
-          <ListboxOption key={o.value} value={o.value} className="mono">
-            {({ focus, selected }: { focus: boolean; selected: boolean }) => (
-              <div style={{
-                fontSize: 12, padding: '6px 8px', borderRadius: 4, cursor: 'pointer',
-                background: focus ? 'var(--surface-2)' : 'transparent',
-                color: selected ? 'var(--accent-light)' : 'var(--foreground)',
-              }}>
-                {o.label}
-              </div>
-            )}
-          </ListboxOption>
-        ))}
-      </ListboxOptions>
-    </Listbox>
-  )
-}
 
 export default function PlatformExperimentsPage() {
   return (
@@ -925,8 +786,8 @@ function PlatformExperimentsPageContent() {
         actions={<Button size="sm" variant="primary" onClick={() => setModal({ open: true, editing: null })}>+ New Experiment</Button>}
       />
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap gap-1.5">
           {statuses.map(s => (
             <Chip key={s} active={statusFilter === s} onClick={() => { setStatusFilter(s); setPage(0) }}>
               {s || 'All'}
@@ -934,18 +795,18 @@ function PlatformExperimentsPageContent() {
           ))}
         </div>
 
-        <input
+        <Input
+          fieldSize="sm"
+          mono
+          className="min-w-[220px]"
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(0) }}
           placeholder="Search name or description…"
-          className="mono"
-          style={{
-            fontSize: 12, padding: '5px 10px', border: '1px solid rgba(255,255,255,.16)', borderRadius: 6,
-            background: 'var(--surface-2)', color: 'var(--foreground)', minWidth: 220,
-          }}
         />
 
-        <SortListbox value={sort} onChange={v => { setSort(v); setPage(0) }} />
+        <Select fieldSize="sm" mono aria-label="Sort" value={sort} onChange={e => { setSort(e.target.value); setPage(0) }}>
+          {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>Sort: {o.label}</option>)}
+        </Select>
       </div>
 
       {isLoading && <Loading />}
@@ -953,21 +814,23 @@ function PlatformExperimentsPageContent() {
 
       {data && experiments.length === 0 && (statusFilter || search ? (
         <Card>
-          <CardContent style={{ textAlign: 'center', padding: 24 }}>
-            <span className="text-dim">No platform experiments in this project match{search ? ` "${search}"` : ' this filter'}.</span>
+          <CardContent>
+            <div className="py-2 text-center text-xs text-subtle">No platform experiments in this project match{search ? ` "${search}"` : ' this filter'}.</div>
           </CardContent>
         </Card>
       ) : (
         <Card>
-          <CardContent style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{org.name} / {project.name} has no platform experiments yet</div>
-            <p className="text-muted" style={{ fontSize: 13, maxWidth: 520, margin: '0 auto 14px', lineHeight: 1.6 }}>
-              A platform experiment sets the budget, the metrics and the time window agents work
-              within. Create one, then open it to add agents.
-            </p>
-            <Button variant="primary" onClick={() => setModal({ open: true, editing: null })}>
-              Create the first platform experiment
-            </Button>
+          <CardContent>
+            <div className="py-4 text-center">
+              <div className="mb-1.5 text-lg font-bold">{org.name} / {project.name} has no platform experiments yet</div>
+              <p className="mx-auto mb-3.5 max-w-[520px] text-sm leading-relaxed text-muted">
+                A platform experiment sets the budget, the metrics and the time window agents work
+                within. Create one, then open it to add agents.
+              </p>
+              <Button variant="primary" onClick={() => setModal({ open: true, editing: null })}>
+                Create the first platform experiment
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ))}
