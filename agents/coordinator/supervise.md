@@ -3,6 +3,10 @@
 For after `setup.md` has agents running. Variables are the same as `setup.md`. You watch; you
 never act on an agent's behalf.
 
+A coordinator the platform runs (`coordinator_hosted`, `setup.md` section 2) works from
+`agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`: this file with every
+step that needs a host removed. A change to how a run is supervised belongs in both.
+
 ## Poll periodically
 
 Every 5-10 min at first, widen once behavior looks steady.

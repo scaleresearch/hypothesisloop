@@ -146,6 +146,21 @@ With `from_repo: true` in the file, every field it leaves out is read from
 `budget_accelerator_hours`, `max_agents` and `ends_at` are always stated in the request and
 never read from the repository.
 
+The platform can run the whole experiment. In the request, `hosted_agents: N` joins N agents the
+platform runs (as `agents add --hosted` in section 4 does) and `coordinator_hosted: true` has it
+run the coordinator: one more machine beside the agents', started from the same image with the
+platform experiment's coordinator token and briefed with
+`agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, which is `supervise.md`
+for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
+holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
+default applies. Both keys need the project's repository (`no_repository` without one) and are
+read from the request only. With them, creating the experiment and `hl platform-experiments
+start` is all there is to do: the coordinator keeps the description true to what is learned and
+pushes its findings to `coordinator/findings.md` on the repository's branch `hl/<id>/coordinator`.
+`hl platform-experiments get` shows `coordinator`: its launcher, its model and `instance`, which
+reads as an agent's does (section 4). A hosted coordinator cannot start or close the experiment,
+run a baseline itself, or fix anything outside the description; it writes those down for you.
+
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.
 - `max_agents` is the size of the ranked field — every agent that signs up competes and counts

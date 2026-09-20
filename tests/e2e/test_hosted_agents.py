@@ -25,6 +25,7 @@ import os
 import uuid
 
 import pytest
+import requests
 
 from support import admin
 from support.api import API
@@ -85,8 +86,27 @@ def desired_for(api: API, pe_id: str, observed: list[dict] | None = None) -> tup
     agent id, and the names of the ending ones."""
     desired = api.launcher_desired(LAUNCHER, observed)
     assert isinstance(desired["instances"], list) and isinstance(desired["ending"], list), desired.keys()
-    own = {i["env"]["AGENT_ID"]: i for i in desired["instances"] if i["env"]["PLATFORM_EXPERIMENT_ID"] == pe_id}
+    own = {i["env"]["AGENT_ID"]: i for i in desired["instances"]
+           if i["env"]["PLATFORM_EXPERIMENT_ID"] == pe_id and "AGENT_ID" in i["env"]}
     return own, set(desired["ending"])
+
+
+def coordinator_for(api: API, pe_id: str, observed: list[dict] | None = None) -> tuple[dict | None, set[str]]:
+    """The instance the launcher is asked to keep for this platform experiment's coordinator, and
+    the names of the ending ones."""
+    desired = api.launcher_desired(LAUNCHER, observed)
+    own = [i for i in desired["instances"] if i["env"]["PLATFORM_EXPERIMENT_ID"] == pe_id and "AGENT_ID" not in i["env"]]
+    assert len(own) <= 1, f"more than one coordinator instance for {pe_id}: {[i['name'] for i in own]}"
+    return (own[0] if own else None), set(desired["ending"])
+
+
+def _hosted_run(project: API, name: str, **more) -> requests.Response:
+    body = {
+        "project_id": project.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0, "max_agents": 5,
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
+        "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z", **more,
+    }
+    return project.post("/platform-experiments", body)
 
 
 def roster(api: API, pe_id: str) -> dict[str, dict]:
@@ -311,3 +331,84 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     assert not instances
     for agent in survivors:
         assert before[agent]["name"] in ending, f"{agent} is not left to end after the close"
+
+
+def test_a_coordinator_is_hosted_only_in_a_project_with_a_repository(api: API, run_id: str):
+    project = _new_project(api, "bare-coordinator")
+    for more in ({"coordinator_hosted": True}, {"hosted_agents": 1}):
+        r = _hosted_run(project, f"coordinated-no-repo-{run_id}", **more)
+        assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"{more}: {r.status_code} {r.text}"
+    r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_model="some-model")
+    assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
+
+
+def test_one_create_hosts_a_coordinator_and_agents_and_the_launcher_keeps_a_machine_for_each(with_repo: API, run_id: str):
+    r = _hosted_run(with_repo, f"coordinated-{run_id}", coordinator_hosted=True, hosted_agents=2)
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    try:
+        assert r.json()["coordinator_hosted"] is True and r.json()["signup_count"] == 2, r.json()
+        pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
+        assert pe["coordinator"]["launcher"] == LAUNCHER and pe["coordinator"]["model"], pe.get("coordinator")
+        assert pe["coordinator"]["instance"]["restarts"] == 0 and not pe["coordinator"]["instance"]["stopped"], pe["coordinator"]
+
+        # The coordinator is no agent: the roster and the quotas hold the two agents and nothing else.
+        agents = roster(with_repo, pe_id)
+        assert len(agents) == 2 and all(a["hosted"] and a["launcher"] == LAUNCHER for a in agents.values()), agents
+        assert {q["agent_id"] for q in with_repo.platform_experiment_quotas(pe_id)} <= set(agents), "the coordinator holds a quota"
+
+        own, _ = desired_for(with_repo, pe_id)
+        assert set(own) == set(agents), f"agents asked for: {set(own)}, joined: {set(agents)}"
+        coordinator, _ = coordinator_for(with_repo, pe_id)
+        assert coordinator is not None, "the launcher is not asked for the coordinator of an open platform experiment"
+        env = coordinator["env"]
+        assert env["AGENT_FLAVOR"] == "coordinator" and env["AGENT_MODEL"] == pe["coordinator"]["model"], env
+        assert set(env) == {"API_URL", "PLATFORM_EXPERIMENT_ID", "AGENT_FLAVOR", "AGENT_MODEL", "HL_TOKEN"}, set(env)
+        assert env["HL_TOKEN"] not in coordinator["name"] and coordinator["name"].count("-") == 2, coordinator["name"]
+        assert with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]["name"] == coordinator["name"]
+
+        # Its token coordinates this platform experiment: it reads the roster and changes the brief.
+        as_coordinator = with_repo.as_caller(env["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        assert len(as_coordinator.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]) == 2
+        changed = {key: pe[key] for key in ("name", "budget_accelerator_hours", "max_agents", "metrics",
+                                            "report_interval_seconds", "starts_at", "ends_at")}
+        changed["description"] = "the coordinator's brief"
+        put = as_coordinator.put(f"/platform-experiments/{pe_id}", changed)
+        assert put.status_code == 200, f"the coordinator updating the description: {put.status_code} {put.text}"
+        assert with_repo.get_json(f"/platform-experiments/{pe_id}")["description"] == "the coordinator's brief"
+
+        # Its machine exits: recorded on the platform experiment, asked for again under a new name.
+        first = coordinator["name"]
+        again, _ = coordinator_for(with_repo, pe_id, [{"name": first, "state": "exited", "log": "boom\nSystemExit: the reason"}])
+        assert again is not None and again["name"] != first, f"after an exit the coordinator is asked for as {again}"
+        instance = with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]
+        assert instance["restarts"] == 1 and "SystemExit: the reason" in instance["exit_log"] and not instance["stopped"], instance
+        assert set(desired_for(with_repo, pe_id)[0]) == set(agents), "the agents' machines changed with the coordinator's exit"
+
+        # Started, it is kept. Closed, it is told to end and is asked for no more.
+        with_repo.start_platform_experiment(pe_id)
+        kept, _ = coordinator_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
+        assert kept is not None and kept["name"] == again["name"], f"after the start: {kept}"
+        with_repo.close_platform_experiment(pe_id)
+        gone, ending = coordinator_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
+        assert gone is None and again["name"] in ending, f"after the close: instance {gone}, ending {ending}"
+    finally:
+        with_repo.close_platform_experiment(pe_id)
+
+
+def test_a_coordinators_machine_that_keeps_exiting_is_stopped_and_shown(with_repo: API, run_id: str):
+    r = _hosted_run(with_repo, f"coordinator-crashing-{run_id}", coordinator_hosted=True)
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    try:
+        seen: set[str] = set()
+        coordinator, _ = coordinator_for(with_repo, pe_id)
+        for exit_number in range(1, MAX_RESTARTS + 2):
+            assert coordinator is not None and coordinator["name"] not in seen, f"exit {exit_number}: {coordinator}"
+            seen.add(coordinator["name"])
+            coordinator, _ = coordinator_for(with_repo, pe_id, [{"name": coordinator["name"], "state": "exited", "log": f"exit {exit_number}"}])
+        assert coordinator is None, f"after {MAX_RESTARTS} restarts the coordinator is still asked for: {coordinator}"
+        instance = with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]
+        assert instance["stopped"] and instance["restarts"] == MAX_RESTARTS and instance["exit_log"] == f"exit {MAX_RESTARTS + 1}", instance
+    finally:
+        with_repo.close_platform_experiment(pe_id)
