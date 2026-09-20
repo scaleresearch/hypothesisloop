@@ -123,8 +123,8 @@ const usage = `usage: hl <command> ...
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
 
 An ID is positional; --id ID works too. --agent and --platform-experiment default to $AGENT_ID
-and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. hl <command> --help has its
-flags.`
+and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. hl job --help and
+hl hypothesis --help list their commands with every flag.`
 
 // notStarted is what an agent can do about an open platform experiment: nothing but wait. It
 // says how long when startsAt is the experiment's start time.
