@@ -46,3 +46,18 @@ func TestQueryRangeRejectsMalformedPointInsteadOfShorteningActualHistory(t *test
 		t.Fatalf("QueryRange error = %v, want malformed second point error", err)
 	}
 }
+
+func TestAHungMetricsStoreFailsTheQueryInsteadOfBlockingForever(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer server.Close()
+	defer close(release)
+
+	previous := httpClient.Timeout
+	httpClient.Timeout = 50 * time.Millisecond
+	defer func() { httpClient.Timeout = previous }()
+
+	if _, err := QueryVector(context.Background(), server.URL, "up"); err == nil {
+		t.Fatal("QueryVector against a hung store: got nil error, want a timeout")
+	}
+}

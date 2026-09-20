@@ -237,7 +237,7 @@ func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*
 	if err != nil {
 		return nil, false, fmt.Errorf("%s: build query: %w", op, err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("%s: query: %w", op, err)
 	}

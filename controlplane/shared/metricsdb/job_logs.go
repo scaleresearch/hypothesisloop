@@ -156,7 +156,7 @@ func doSQL(ctx context.Context, dbURL, sql string) (*greptimeSQLResponse, error)
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}

@@ -532,7 +532,7 @@ func runClusterSnapshotQuery(ctx context.Context, dbURL, query string) ([]Vector
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}

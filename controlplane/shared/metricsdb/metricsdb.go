@@ -21,6 +21,10 @@ import (
 	"github.com/golang/snappy"
 )
 
+// Callers are control loops whose contexts carry no deadline, so the bound lives here: a hung
+// GreptimeDB response fails the one read instead of stalling the loop for good.
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
 // rwLabel/rwSample/rwTimeSeries/rwWriteRequest mirror prometheus/prompb's wire types — just
 // enough of the remote-write protocol to push individual samples to GreptimeDB without pulling
 // in the full prometheus/prometheus dependency tree.
@@ -104,7 +108,7 @@ func WriteGaugesAt(ctx context.Context, dbURL string, samples []GaugeSample) err
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("metricsdb.WriteGaugesAt: post: %w", err)
 	}
@@ -138,7 +142,7 @@ func QueryVector(ctx context.Context, dbURL, promQL string) ([]VectorSample, err
 		return nil, fmt.Errorf("metricsdb.QueryVector: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.QueryVector: %w", err)
 	}
@@ -241,7 +245,7 @@ func QueryRange(ctx context.Context, dbURL, promQL string, start, end time.Time,
 		return nil, fmt.Errorf("metricsdb.QueryRange: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.QueryRange: %w", err)
 	}
