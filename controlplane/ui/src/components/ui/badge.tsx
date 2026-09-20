@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { statusTone } from '@/lib/colors'
 import type { Tone } from '@/lib/colors'
+import { toneText } from '@/components/ui/tone'
 
 const toneClass: Record<Tone, string> = {
   success: 'bg-success/15 text-success',
@@ -43,6 +44,16 @@ export function Badge({ children, status, tone, className, title }: BadgeProps) 
 /** A dot in a colour of lib/colors, for a legend entry or a status beside its name. */
 export function Dot({ color, className }: { color: string; className?: string }) {
   return <span aria-hidden="true" className={clsx('inline-block h-2 w-2 flex-none rounded-full', className)} style={{ background: color }} />
+}
+
+/** A state in words with its dot, where a pill would be too heavy: connected, enabled. */
+export function StatusLabel({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return (
+    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-semibold', toneText[tone])}>
+      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-current" />
+      {children}
+    </span>
+  )
 }
 
 export function TierBadge({ tier }: { tier?: string }) {

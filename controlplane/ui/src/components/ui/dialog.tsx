@@ -9,7 +9,7 @@ interface DialogProps {
   open: boolean
   onClose: () => void
   title: ReactNode
-  size?: 'default' | 'sm'
+  size?: 'default' | 'sm' | 'wide'
   children: ReactNode
 }
 
@@ -22,7 +22,7 @@ export function Dialog({ open, onClose, title, size = 'default', children }: Dia
         <DialogPanel
           className={clsx(
             'max-h-[calc(100vh-2rem)] w-full overflow-y-auto rounded-lg border border-border-strong bg-surface-raised p-5 shadow-lg',
-            size === 'sm' ? 'max-w-md' : 'max-w-2xl',
+            size === 'sm' ? 'max-w-md' : size === 'wide' ? 'max-w-[90vw]' : 'max-w-2xl',
           )}
         >
           <DialogTitle className="mb-3 text-lg font-semibold">{title}</DialogTitle>

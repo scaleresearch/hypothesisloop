@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Description, Field, Label } from '@headlessui/react'
 import { clsx } from 'clsx'
 import { InlineError } from '@/components/ui/status-message'
+import { Eyebrow } from '@/components/ui/text'
 
 interface FormFieldProps {
   label: ReactNode
@@ -22,5 +23,16 @@ export function FormField({ label, hint, error, inline, className, children }: F
       {hint && <Description className="text-xs text-subtle">{hint}</Description>}
       {error && <InlineError>{error}</InlineError>}
     </Field>
+  )
+}
+
+/** The caption and hint of FormField over several controls, which one label cannot name. */
+export function FieldGroup({ label, hint, className, children }: { label: ReactNode; hint?: ReactNode; className?: string; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={typeof label === 'string' ? label : undefined} className={clsx('grid content-start gap-1', className)}>
+      <Eyebrow>{label}</Eyebrow>
+      <div>{children}</div>
+      {hint && <p className="text-xs text-subtle">{hint}</p>}
+    </div>
   )
 }

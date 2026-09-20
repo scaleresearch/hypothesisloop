@@ -74,16 +74,19 @@ export function Chip({ active, className, ...props }: ChipProps) {
 
 interface RowButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   selected?: boolean
+  /** Marks a row a search matched. */
+  hit?: boolean
 }
 
 /** A full-width row of a list that is picked by clicking it: a search hit, an outline entry. */
-export const RowButton = forwardRef<HTMLButtonElement, RowButtonProps>(function RowButton({ selected, className, ...props }, ref) {
+export const RowButton = forwardRef<HTMLButtonElement, RowButtonProps>(function RowButton({ selected, hit, className, ...props }, ref) {
   return (
     <button
       ref={ref}
       className={clsx(
         'flex w-full min-w-0 items-center gap-2 rounded border px-2 py-1.5 text-left text-sm text-foreground transition-colors',
-        selected ? 'border-primary/40 bg-primary/15' : 'border-transparent hover:bg-foreground/5',
+        selected ? 'bg-primary/15' : 'hover:bg-foreground/5',
+        hit ? 'border-warning/60' : selected ? 'border-primary/40' : 'border-transparent',
         className,
       )}
       {...props}

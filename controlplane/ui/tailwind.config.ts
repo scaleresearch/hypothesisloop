@@ -52,6 +52,7 @@ const config: Config = {
       lg: ['15px', '1.45'],
       xl: ['18px', '1.35'],
       '2xl': ['23px', '1.25'],
+      '3xl': ['40px', '1.1'],
     },
     borderRadius: {
       none: '0',

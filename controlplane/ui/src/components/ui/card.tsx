@@ -1,5 +1,6 @@
-import type { HTMLAttributes } from 'react'
+import type { ComponentProps, HTMLAttributes } from 'react'
 import { clsx } from 'clsx'
+import { Link } from '@/components/ui/link'
 
 type DivProps = HTMLAttributes<HTMLDivElement>
 
@@ -32,4 +33,24 @@ export function CardContent({ className, scrollX, ...props }: DivProps & { scrol
 /** A tile inside a card: a per-job chart, an agent's job list. */
 export function InsetCard({ className, ...props }: DivProps) {
   return <div className={clsx('rounded border bg-surface-inset p-2.5 transition-colors hover:border-border-strong', className)} {...props} />
+}
+
+/** A card that is one link to another page. */
+export function CardLink({ className, ...props }: ComponentProps<typeof Link>) {
+  return (
+    <Link
+      className={clsx('block animate-rise rounded-lg border bg-surface p-5 shadow-sm transition-shadow hover:border-border-strong hover:shadow-md', className)}
+      {...props}
+    />
+  )
+}
+
+/** A row of a list inside a card that leads to the record it names. */
+export function RowLink({ className, ...props }: ComponentProps<typeof Link>) {
+  return (
+    <Link
+      className={clsx('flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-foreground/5', className)}
+      {...props}
+    />
+  )
 }
