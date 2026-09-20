@@ -90,15 +90,20 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 		if c.Labels[LabelExperimentID] != experimentID {
 			continue
 		}
-		grace, err := stopGrace(c.Labels, grantCheckpointWindow)
-		if err != nil {
-			return fmt.Errorf("podexec: container %s: %w", c.name(), err)
+		name := c.name()
+		// A nil grace is the engine's own default. A container that cannot say its grace must
+		// still be stoppable, or it holds its device for good.
+		var grace *int
+		if seconds, err := stopGrace(c.Labels, grantCheckpointWindow); err != nil {
+			log.Printf("podexec: container %s: %v; stopping it on the engine's default grace", name, err)
+		} else {
+			timeout := int(seconds)
+			grace = &timeout
 		}
 		devices, err := e.currentDevicesFor(ctx, experimentID)
 		if err != nil {
 			return err
 		}
-		name := c.name()
 		e.begin(ctx, experimentID, "delete workload", operation{labels: c.Labels, devices: devices}, func(ctx context.Context) error {
 			return e.stopContainer(ctx, name, grace)
 		})
@@ -115,7 +120,8 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 // workload failure, a drift replacement -- stops on the ordinary grace whatever the job
 // declared, because there is nothing to save or nothing left to save it with.
 //
-// A container with no readable grace is an error rather than a guess, as in the k8s runtime.
+// A container with no readable grace is an error rather than a guess; DeleteWorkload then leaves
+// the grace to the engine.
 func stopGrace(labels map[string]string, grantCheckpointWindow bool) (int64, error) {
 	grace, err := strconv.ParseInt(labels[LabelGraceSeconds], 10, 64)
 	if err != nil {

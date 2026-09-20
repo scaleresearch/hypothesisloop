@@ -31,6 +31,7 @@ type fakeEngine struct {
 	containers   map[string]*fakeContainer
 	images       map[string]bool
 	pulls, stops map[string]int
+	stopGraces   map[string]*int
 	gates        map[string]chan struct{}
 	waiting      map[string]bool
 	pullFailures map[string]int
@@ -43,7 +44,7 @@ type fakeEngine struct {
 func newFakeEngine() *fakeEngine {
 	return &fakeEngine{
 		containers: map[string]*fakeContainer{}, images: map[string]bool{},
-		pulls: map[string]int{}, stops: map[string]int{},
+		pulls: map[string]int{}, stops: map[string]int{}, stopGraces: map[string]*int{},
 		gates: map[string]chan struct{}{}, waiting: map[string]bool{}, pullFailures: map[string]int{},
 		stoppingState: "stopping",
 	}
@@ -161,7 +162,7 @@ func (f *fakeEngine) ContainerStart(_ context.Context, id string, _ client.Conta
 	return client.ContainerStartResult{}, nil
 }
 
-func (f *fakeEngine) ContainerStop(ctx context.Context, id string, _ client.ContainerStopOptions) (client.ContainerStopResult, error) {
+func (f *fakeEngine) ContainerStop(ctx context.Context, id string, options client.ContainerStopOptions) (client.ContainerStopResult, error) {
 	f.mu.Lock()
 	c := f.containers[id]
 	if c == nil {
@@ -169,6 +170,7 @@ func (f *fakeEngine) ContainerStop(ctx context.Context, id string, _ client.Cont
 		return client.ContainerStopResult{}, fmt.Errorf("container %s: %w", id, errdefs.ErrNotFound)
 	}
 	f.stops[id]++
+	f.stopGraces[id] = options.Timeout
 	before := c.state
 	c.state = f.stoppingState
 	f.mu.Unlock()
@@ -635,5 +637,40 @@ func TestAJobPullingItsImageIsReportedPendingAndPlaced(t *testing.T) {
 	eventually(t, "the cancelled pull has returned", idle(e, "dropped"))
 	if status, err := e.PollJobStatus(ctx, "dropped"); err != nil || status.Phase != workload.JobPhaseGone {
 		t.Fatalf("status of a job with no container and no operation = %s, %v, want gone", status.Phase, err)
+	}
+}
+
+func TestAContainerWithNoReadableGraceIsStoppedOnTheEngineDefault(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f, "/dev/fake/0")
+	ctx := t.Context()
+	labelled, unlabelled := fakeJob("labelled", "fast", 0), fakeJob("unlabelled", "fast", 1)
+
+	pass(t, ctx, e, labelled, unlabelled)
+	eventually(t, "both jobs run", func() bool {
+		return f.state("labelled") == "running" && f.state("unlabelled") == "running"
+	})
+	eventually(t, "both starts have returned", func() bool { return len(e.operations()) == 0 })
+	f.mu.Lock()
+	delete(f.containers[containerName("unlabelled")].labels, LabelGraceSeconds)
+	f.mu.Unlock()
+
+	pass(t, ctx, e)
+	eventually(t, "both jobs are stopped", func() bool {
+		return f.state("labelled") != "running" && f.state("unlabelled") != "running"
+	})
+	eventually(t, "both stops have returned", func() bool { return len(e.operations()) == 0 })
+
+	f.mu.Lock()
+	withLabel, withoutLabel := f.stopGraces[containerName("labelled")], f.stopGraces[containerName("unlabelled")]
+	f.mu.Unlock()
+	if withLabel == nil || *withLabel != 5 {
+		t.Fatalf("labelled container stopped with grace %v, want its own 5 seconds", withLabel)
+	}
+	if withoutLabel != nil {
+		t.Fatalf("container with no grace label stopped with grace %d, want the engine default", *withoutLabel)
+	}
+	if free := freeAccelerators(t, ctx, e); free != 1 {
+		t.Fatalf("%d accelerators free after the stop, want the device back", free)
 	}
 }

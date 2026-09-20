@@ -201,11 +201,11 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 }
 
 // stopContainer sends SIGTERM then SIGKILL after graceSeconds — the engine's own stop-timeout
-// semantics, the direct analogue of TerminationGracePeriodSeconds. The container is left in
-// place (not removed): a stopped container is the "gone" record (§4.6), pruned separately.
-func (e *Executor) stopContainer(ctx context.Context, name string, graceSeconds int64) error {
-	timeout := int(graceSeconds)
-	_, err := e.docker.ContainerStop(ctx, name, client.ContainerStopOptions{Timeout: &timeout})
+// semantics, the direct analogue of TerminationGracePeriodSeconds. A nil graceSeconds is the
+// engine's default. The container is left in place (not removed): a stopped container is the
+// "gone" record (§4.6), pruned separately.
+func (e *Executor) stopContainer(ctx context.Context, name string, graceSeconds *int) error {
+	_, err := e.docker.ContainerStop(ctx, name, client.ContainerStopOptions{Timeout: graceSeconds})
 	if err != nil && errdefs.IsNotFound(err) {
 		return nil
 	}
