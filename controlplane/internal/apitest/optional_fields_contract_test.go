@@ -33,7 +33,14 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 	for _, tc := range []struct {
 		path, field, why string
 	}{
-		{"/platform-experiments/{id}/signup", "role", "every signup written before roles existed omits it, and competitor is the documented default"},
+		{"/platform-experiments/{id}/agents", "role", "competitor is the documented default, and a caller adding competitors omits it"},
+		{"/platform-experiments/{id}/agents", "agent_id", "a caller creating agents names none"},
+		{"/platform-experiments/{id}/agents", "count", "one agent is the documented default"},
+		{"/platform-experiments/{id}/agents", "hosted", "an agent the caller runs itself is the default"},
+		{"/platform-experiments/{id}/agents", "flavor", "an agent with no flavor runs the harness's default"},
+		{"/platform-experiments/{id}/agents", "hyperparameters", "an agent with none gets an empty object"},
+		{"/platform-experiments/{id}/agents", "model", "an agent with no model runs the harness's default"},
+		{"/platform-experiments/{id}/agents", "quota_tier", "omitted, the platform experiment's default applies"},
 		{"/hypotheses", "author", "an agent-submitted hypothesis sets agent_id and no author"},
 		{"/hypotheses", "agent_id", "a human-submitted hypothesis sets author and no agent_id"},
 		{"/hypotheses/{id}/comments", "author", "an agent-submitted comment sets agent_id and no author"},
@@ -54,7 +61,9 @@ func openAPISpec(t *testing.T) map[string]any {
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, nil))
+	platformExperiments := quota.NewPlatformExperimentsHandler(nil, nil).WithAgentLaunch("main", "contract-test-signing-secret")
+	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), platformExperiments)
+	quota.RegisterAgentsHuma(doc, platformExperiments)
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
