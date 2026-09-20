@@ -58,13 +58,14 @@ type StoreDirectory struct {
 }
 
 // LauncherKnown reports whether a launcher of this name has anything to ask for: it is the one
-// config gives new hosted agents to, or an agent is still assigned to it. The second half keeps
-// a launcher that config no longer names working until its last agent is gone.
+// config gives new hosted agents to, or its list still names an agent, running or in its
+// wind-down. The second half keeps a launcher that config no longer names working until its last
+// machine is gone, and no longer.
 func (d StoreDirectory) LauncherKnown(ctx context.Context, name string) (bool, error) {
 	if name == d.ConfiguredLauncher {
 		return true, nil
 	}
-	return d.LauncherHasAgents(ctx, name)
+	return d.LauncherHasAgents(ctx, name, domain.AgentWindDown)
 }
 
 func NewStoreDirectory(pool *db.Pool) StoreDirectory {
@@ -152,7 +153,16 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		if tenancy == nil || ended {
 			return Principal{}, unauthenticated("job %s is not running", p.ExperimentID)
 		}
+		_, closedAt, err := a.directory.PlatformExperimentTenancy(ctx, tenancy.PlatformExperimentID)
+		if err != nil {
+			return Principal{}, err
+		}
+		cutAt, err := a.directory.AgentCutAt(ctx, tenancy.PlatformExperimentID, tenancy.AgentID)
+		if err != nil {
+			return Principal{}, err
+		}
 		p = p.within(tenancy)
+		p.RunOver = closedAt != nil || cutAt != nil
 	case KindCoordinator:
 		tenancy, closedAt, err := a.directory.PlatformExperimentTenancy(ctx, p.PlatformExperimentID)
 		if err != nil {
@@ -163,6 +173,7 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		}
 		p = p.within(tenancy)
 		p.PlatformExperimentClosed = closedAt != nil
+		p.RunOver = closedAt != nil
 	case KindAgent:
 		tenancy, closedAt, err := a.directory.PlatformExperimentTenancy(ctx, p.PlatformExperimentID)
 		if err != nil {
@@ -189,6 +200,7 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, unauthenticated("agent %s was cut from platform experiment %s", p.AgentID, p.PlatformExperimentID)
 		}
 		p = p.within(tenancy)
+		p.RunOver = closedAt != nil || cutAt != nil
 	}
 	return p, nil
 }
