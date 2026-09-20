@@ -399,7 +399,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// job with no fresh output this tick doesn't wipe out its last-known tail.
 			if rep.LogTail != nil {
 				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, h.maxLogLineChars), now); err != nil {
-					return nil, huma.Error500InternalServerError(err.Error())
+					h.logger.Error("record log tail", zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName), zap.Error(err))
 				}
 			}
 			// Reason/Message/RestartCount are optional the same way: only write when the
@@ -408,7 +408,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// prior explanation with silence.
 			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
 				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
-					return nil, huma.Error500InternalServerError(err.Error())
+					h.logger.Error("record phase detail", zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName), zap.Error(err))
 				}
 			}
 		}
