@@ -5,14 +5,16 @@ import { Link } from '@/components/ui/link'
 import { useProjectRouter, useRecordProject } from '@/lib/query-state'
 import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, InsetCard, RowLink } from '@/components/ui/card'
+import { PageHeader } from '@/components/ui/page-header'
+import { Table } from '@/components/ui/table'
+import { Eyebrow } from '@/components/ui/text'
 import { Badge, NoSummary } from '@/components/ui/badge'
-import { Loading, EmptyState } from '@/components/ui/status-message'
+import { Loading, EmptyState, InlineError } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 import { envSettings, filedAfterVerdict, variedEnvKeys, verdictSetBy } from '@/lib/hypothesis-progress'
-import { semantic } from '@/lib/colors'
 
 function LinkRow({ link, platformExperimentID, pe }: {
   link: HypothesisLink
@@ -21,20 +23,20 @@ function LinkRow({ link, platformExperimentID, pe }: {
 }) {
   if (link.hypothesis_id === platformExperimentID) {
     return (
-      <Link href={`/platform-experiments/${platformExperimentID}`} className="hg-hit text-link">
-        <span className="uppercase-label">Objective</span>
-        <span className="hg-outline-text">{pe?.name ?? platformExperimentID}</span>
-      </Link>
+      <RowLink href={`/platform-experiments/${platformExperimentID}`}>
+        <Eyebrow>Objective</Eyebrow>
+        <span className="min-w-0 flex-1 truncate text-accent">{pe?.name ?? platformExperimentID}</span>
+      </RowLink>
     )
   }
   return (
-    <Link href={`/hypotheses/${link.hypothesis_id}`} className="hg-hit" title={link.text}>
+    <RowLink href={`/hypotheses/${link.hypothesis_id}`} title={link.text}>
       <Badge status={link.status}>{link.status}</Badge>
-      <span className="hg-outline-text">{link.text}</span>
-      <span className="text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+      <span className="min-w-0 flex-1 truncate">{link.text}</span>
+      <span className="whitespace-nowrap text-2xs text-subtle">
         linked by <PoolAuthor source={link.author ? 'human' : 'agent'} agentID={link.agent_id} author={link.author} />
       </span>
-    </Link>
+    </RowLink>
   )
 }
 
@@ -52,9 +54,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   if (error) return (
     <div>
-      <div className="wa-title"><h1>Hypothesis Not Found</h1></div>
-      <p className="text-error">Could not load hypothesis {id}</p>
-      <Link href="/hypotheses" className="text-link" style={{ fontSize: 13 }}>← Hypothesis graph</Link>
+      <PageHeader title="Hypothesis Not Found" />
+      <p><InlineError>Could not load hypothesis {id}</InlineError></p>
+      <Link href="/hypotheses" className="text-sm text-accent hover:underline">← Hypothesis graph</Link>
     </div>
   )
 
@@ -73,45 +75,37 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   return (
     <div>
-      <div className="wa-title" style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
-        <div style={{ flex: 1 }}>
-          <div
-            className="text-dim"
-            style={{ marginBottom: 6, cursor: 'pointer', fontSize: 12 }}
-            onClick={() => router.push(`/platform-experiments/${data.platform_experiment_id}`)}
-          >
-            ← {pe?.name ?? data.platform_experiment_id.slice(0, 12) + '…'}
-          </div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', wordBreak: 'break-word' }}>
-            <span className="mono text-dim" style={{ fontSize: 14 }}>{data.id}</span>
+      <PageHeader
+        back={{
+          label: pe?.name ?? data.platform_experiment_id.slice(0, 12) + '…',
+          onClick: () => router.push(`/platform-experiments/${data.platform_experiment_id}`),
+        }}
+        title={
+          <>
+            <span className="font-mono text-base font-normal text-subtle">{data.id}</span>
             <Badge status={data.status ?? 'open'}>{data.status ?? 'open'}</Badge>
-          </h1>
-          <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
+          </>
+        }
+        description={
+          <span className="font-mono text-2xs">
             Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
             {data.status_changed_at && <> · {data.status} {verdictSetBy(data)}</>}
             {sinceVerdict > 0 && (
-              <span style={{ color: semantic.warning }}> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
+              <span className="text-warning"> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
             )}
-          </p>
-        </div>
-        <Link href={graphHref(data.platform_experiment_id, data.id)} className="text-link" style={{ fontSize: 12, marginBottom: 4 }}>
-          View in graph →
-        </Link>
-      </div>
+          </span>
+        }
+        actions={
+          <Link href={graphHref(data.platform_experiment_id, data.id)} className="text-xs text-accent hover:underline">
+            View in graph →
+          </Link>
+        }
+      />
 
-      <Card style={{ marginBottom: 12 }}>
+      <Card>
         <CardHeader>Hypothesis</CardHeader>
         <CardContent>
-          <p
-            style={{
-              maxWidth: 760,
-              fontSize: 14,
-              lineHeight: 1.65,
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'break-word',
-              wordBreak: 'break-word',
-            }}
-          >
+          <p className="max-w-[760px] whitespace-pre-wrap break-words text-base leading-relaxed">
             {data.text}
           </p>
         </CardContent>
@@ -120,10 +114,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
       <Card>
         <CardHeader>Links</CardHeader>
         <CardContent>
-          <div className="hg-stack" style={{ gap: 12, maxWidth: 760 }}>
+          <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-3">
             {linkGroups(data.links.out, data.links.in).map(group => (
-              <div key={group.label} className="hg-stack" style={{ gap: 2 }}>
-                <span className="uppercase-label">{group.label}</span>
+              <div key={group.label} className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
+                <Eyebrow>{group.label}</Eyebrow>
                 {group.items.map(l => (
                   <LinkRow
                     key={`${l.type}:${l.hypothesis_id}`}
@@ -143,7 +137,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         <CardHeader>
           Findings
           {data.finding_count > 0 && (
-            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+            <span className="ml-2 text-xs font-normal text-muted">
               ({data.finding_count}{data.finding_count > findings.length ? `, showing ${findings.length}` : ''})
             </span>
           )}
@@ -155,25 +149,25 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               this hypothesis reaches a terminal state.
             </EmptyState>
           ) : (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="grid gap-2.5">
               {findings.map(f => {
                 const job = jobByID.get(f.experiment_id)
                 return (
-                  <div key={f.id} className="wa-mini-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>{f.agent_id}</span>
-                        <Link href={`/jobs/${f.experiment_id}`} className="mono text-link">{f.experiment_id.slice(0, 8)}…</Link>
+                  <InsetCard key={f.id}>
+                    <div className="mb-1.5 flex items-center justify-between text-2xs">
+                      <span className="flex items-center gap-2 font-mono">
+                        <span className="font-semibold">{f.agent_id}</span>
+                        <Link href={`/jobs/${f.experiment_id}`} className="text-accent hover:underline">{f.experiment_id.slice(0, 8)}…</Link>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
-                        {job?.metric && <span className="mono accent" title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
+                        {job?.metric && <span className="text-accent" title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
                       </span>
-                      <span className="text-dim mono">
-                        {filedAfterVerdict(data, f.created_at) && <span style={{ color: semantic.warning }}>after the verdict · </span>}
+                      <span className="font-mono text-subtle">
+                        {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
                         {relTime(f.created_at)}
                       </span>
                     </div>
-                    <p style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{f.summary}</p>
-                  </div>
+                    <p className="whitespace-pre-wrap text-sm">{f.summary}</p>
+                  </InsetCard>
                 )
               })}
             </div>
@@ -185,7 +179,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         <CardHeader>
           Comments
           {data.comment_count > 0 && (
-            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+            <span className="ml-2 text-xs font-normal text-muted">
               ({data.comment_count}{data.comment_count > comments.length ? `, showing ${comments.length}` : ''})
             </span>
           )}
@@ -194,15 +188,15 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           {comments.length === 0 ? (
             <EmptyState>No comments yet. A note here needs no job behind it.</EmptyState>
           ) : (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="grid gap-2.5">
               {comments.map(c => (
-                <div key={c.id} className="wa-mini-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11 }}>
+                <InsetCard key={c.id}>
+                  <div className="mb-1.5 flex items-center justify-between text-2xs">
                     <PoolAuthor source={c.source} agentID={c.agent_id} author={c.author} />
-                    <span className="text-dim mono">{relTime(c.created_at)}</span>
+                    <span className="font-mono text-subtle">{relTime(c.created_at)}</span>
                   </div>
-                  <p style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{c.text}</p>
-                </div>
+                  <p className="whitespace-pre-wrap text-sm">{c.text}</p>
+                </InsetCard>
               ))}
             </div>
           )}
@@ -214,13 +208,13 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         <CardHeader>
           Jobs testing this hypothesis
           {data.job_count > 0 && (
-            <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+            <span className="ml-2 text-xs font-normal text-muted">
               ({data.job_count}{data.job_count > jobs.length ? `, showing ${jobs.length}` : ''})
             </span>
           )}
         </CardHeader>
         <CardContent scrollX>
-          <table className="wa-table">
+          <Table>
             <thead>
               <tr>
                 <th>Job ID</th>
@@ -228,8 +222,8 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>Status</th>
                 <th>{variedEnv.length > 0 ? 'Varied settings' : 'Settings'}</th>
                 <th>Accelerator</th>
-                <th style={{ textAlign: 'right' }}>Est. Cost</th>
-                <th style={{ textAlign: 'right' }}>Best {metricName ?? 'metric'}</th>
+                <th className="text-right">Est. Cost</th>
+                <th className="text-right">Best {metricName ?? 'metric'}</th>
                 <th>Submitted</th>
               </tr>
             </thead>
@@ -237,7 +231,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               {jobs.length === 0 ? (
                 <tr>
                   <td colSpan={8}>
-                    <div className="empty-state">No jobs have tested this hypothesis yet.</div>
+                    <EmptyState>No jobs have tested this hypothesis yet.</EmptyState>
                   </td>
                 </tr>
               ) : jobs.map(job => {
@@ -249,34 +243,34 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     key={job.id}
                     tabIndex={0}
                     role="link"
-                    style={{ cursor: 'pointer' }}
+                    className="cursor-pointer"
                     onClick={() => router.push(`/jobs/${job.id}`)}
                     onKeyDown={e => { if (e.key === 'Enter') router.push(`/jobs/${job.id}`) }}
                   >
-                    <td className="mono text-dim" style={{ fontSize: 11 }}>{job.id.slice(0, 8)}…</td>
-                    <td className="mono">{job.agent_id}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
+                    <td className="font-mono text-2xs text-subtle">{job.id.slice(0, 8)}…</td>
+                    <td className="font-mono text-xs">{job.agent_id}</td>
+                    <td className="whitespace-nowrap">
                       <Badge status={status}>{status}</Badge>
-                      {status === 'COMPLETED' && data.finding_count === findings.length && !summarized.has(job.id) && <NoSummary style={{ marginLeft: 6 }} />}
+                      {status === 'COMPLETED' && data.finding_count === findings.length && !summarized.has(job.id) && <NoSummary className="ml-1.5" />}
                     </td>
-                    <td className="mono" style={{ fontSize: 11 }}>
+                    <td className="font-mono text-2xs">
                       {envSettings(j, shownEnv) || '—'}
                     </td>
-                    <td className="mono" style={{ fontSize: 11 }}>{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
-                    <td className="mono" style={{ textAlign: 'right', fontSize: 11 }}>
+                    <td className="font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
+                    <td className="text-right font-mono text-2xs">
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      {j.metric ? <span className="accent">{j.metric.best.toFixed(4)}</span> : <span className="text-muted">—</span>}
+                    <td className="text-right font-mono text-xs">
+                      {j.metric ? <span className="text-accent">{j.metric.best.toFixed(4)}</span> : <span className="text-muted">—</span>}
                     </td>
-                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                    <td className="whitespace-nowrap font-mono text-2xs text-subtle">
                       {relTime(j.submitted_at ?? j.created_at)}
                     </td>
                   </tr>
                 )
               })}
             </tbody>
-          </table>
+          </Table>
         </CardContent>
       </Card>
     </div>

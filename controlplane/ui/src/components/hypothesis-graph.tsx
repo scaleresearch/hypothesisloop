@@ -11,29 +11,32 @@ import { clsx } from 'clsx'
 import { FileText, MessageSquare } from 'lucide-react'
 import type { HypothesisGraph, HypothesisListItem } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
-import { hypothesisLinkStyles, hypothesisStatusColors, semantic } from '@/lib/colors'
+import { hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
+import { Dot } from '@/components/ui/badge'
+import { Eyebrow } from '@/components/ui/text'
 import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
 import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
+
+const COUNT = 'inline-flex items-center gap-0.5'
 
 /** Owner, evidence counts and best result, shared by graph nodes and outline rows. */
 export function NodeMeta({ item, evidence }: { item: HypothesisListItem; evidence?: HypothesisEvidence }) {
   const newer = evidence?.finding !== undefined && filedAfterVerdict(item, evidence.finding.created_at)
   return (
-    <span className="hg-meta">
+    <span className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap font-mono text-2xs text-muted">
       {item.source === 'human'
-        ? <span className="hg-meta-human hg-meta-owner" title={`human: ${item.author}`}>{item.author}</span>
-        : <span className="hg-meta-owner" title={item.agent_id}>{item.agent_id}</span>}
+        ? <span className="max-w-[110px] truncate text-warning" title={`human: ${item.author}`}>{item.author}</span>
+        : <span className="max-w-[110px] truncate" title={item.agent_id}>{item.agent_id}</span>}
       <span
-        className="hg-count"
-        style={newer ? { color: semantic.warning } : undefined}
+        className={clsx(COUNT, newer && 'text-warning')}
         title={`${item.finding_count} findings${newer ? ', the newest filed after the verdict' : ''}`}
       >
         <FileText size={11} /> {item.finding_count}
       </span>
-      <span className="hg-count" title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
+      <span className={COUNT} title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
       {evidence?.best_job && (
-        <span className="hg-count accent" title={`Best ${evidence.best_job.metric.name} of its jobs`}>
+        <span className={clsx(COUNT, 'text-accent')} title={`Best ${evidence.best_job.metric.name} of its jobs`}>
           {evidence.best_job.metric.best.toFixed(4)}
         </span>
       )}
@@ -48,13 +51,19 @@ type ObjectiveNodeData = { label: string }
 // rebuilding every React Flow node.
 const Highlight = createContext({ selected: '', hits: new Set<string>(), dimmed: new Set<string>() })
 
+const HANDLE = 'pointer-events-none opacity-0'
+
+// The box is NODE_WIDTH by NODE_HEIGHT: the layout places nodes by those.
+const NODE = 'flex h-[92px] w-[240px] cursor-pointer flex-col gap-1.5 rounded border border-l-[3px] py-2 pl-3 pr-2.5 text-foreground transition-[opacity,box-shadow,background-color] hover:bg-surface-raised'
+const NODE_TEXT = 'line-clamp-3 text-xs leading-snug [overflow-wrap:anywhere]'
+
 function HiddenHandles() {
   return (
     <>
-      <Handle id="top" type="target" position={Side.Top} isConnectable={false} className="hg-handle" />
-      <Handle id="bottom" type="source" position={Side.Bottom} isConnectable={false} className="hg-handle" />
-      <Handle id="left" type="source" position={Side.Left} isConnectable={false} className="hg-handle" />
-      <Handle id="right" type="source" position={Side.Right} isConnectable={false} className="hg-handle" />
+      <Handle id="top" type="target" position={Side.Top} isConnectable={false} className={HANDLE} />
+      <Handle id="bottom" type="source" position={Side.Bottom} isConnectable={false} className={HANDLE} />
+      <Handle id="left" type="source" position={Side.Left} isConnectable={false} className={HANDLE} />
+      <Handle id="right" type="source" position={Side.Right} isConnectable={false} className={HANDLE} />
     </>
   )
 }
@@ -62,17 +71,23 @@ function HiddenHandles() {
 const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<HypothesisNodeData>>) {
   const { item, evidence } = data
   const { selected, hits, dimmed } = useContext(Highlight)
-  const color = hypothesisStatusColors[item.status]
+  const color = statusColor(item.status)
   return (
     <div
-      className={clsx('hg-node', selected === item.id && 'selected', hits.has(item.id) && 'hit', dimmed.has(item.id) && 'dimmed')}
+      className={clsx(
+        NODE,
+        'justify-between border-border-strong',
+        selected === item.id ? 'bg-surface-raised shadow-glow' : 'bg-surface-inset',
+        hits.has(item.id) && 'ring-2 ring-warning',
+        dimmed.has(item.id) && 'opacity-20',
+      )}
       style={{ borderLeftColor: color }}
       title={item.text}
     >
       <HiddenHandles />
-      <div className="hg-node-text">{item.text}</div>
-      <div className="hg-node-foot">
-        <span className="hg-node-status" style={{ color }} title={verdictSetBy(item) && `${item.status} ${verdictSetBy(item)}`}>{item.status}</span>
+      <div className={NODE_TEXT}>{item.text}</div>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="font-mono text-2xs font-bold uppercase tracking-wide" style={{ color }} title={verdictSetBy(item) && `${item.status} ${verdictSetBy(item)}`}>{item.status}</span>
         <NodeMeta item={item} evidence={evidence} />
       </div>
     </div>
@@ -82,10 +97,10 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
 const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
   const { selected } = useContext(Highlight)
   return (
-    <div className={clsx('hg-node hg-objective', selected === id && 'selected')}>
+    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-glow' : 'bg-primary/10')}>
       <HiddenHandles />
-      <span className="uppercase-label">Objective</span>
-      <div className="hg-node-text">{data.label}</div>
+      <Eyebrow>Objective</Eyebrow>
+      <div className={NODE_TEXT}>{data.label}</div>
     </div>
   )
 })
@@ -94,11 +109,11 @@ const nodeTypes: NodeTypes = { hypothesis: HypothesisNode, objective: ObjectiveN
 
 function Legend() {
   return (
-    <div className="hg-legend">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 border-b px-3 py-1.5 text-2xs text-muted">
       {(Object.keys(hypothesisLinkStyles) as Array<keyof typeof hypothesisLinkStyles>).map(type => {
         const s = hypothesisLinkStyles[type]
         return (
-          <span key={type}>
+          <span key={type} className="inline-flex items-center gap-1.5">
             <svg width="26" height="8" aria-hidden="true">
               <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" />
             </svg>
@@ -106,9 +121,9 @@ function Legend() {
           </span>
         )
       })}
-      {Object.entries(hypothesisStatusColors).map(([status, color]) => (
-        <span key={status}>
-          <span className="hg-legend-dot" style={{ background: color }} />
+      {hypothesisStatuses.map(status => (
+        <span key={status} className="inline-flex items-center gap-1.5">
+          <Dot color={statusColor(status)} />
           {status}
         </span>
       ))}
@@ -206,7 +221,7 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
       label: hierarchy && !further ? undefined : s.label,
       zIndex: hierarchy && !further ? 0 : 1,
       labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600, opacity },
-      labelBgStyle: { fill: 'var(--surface)' },
+      labelBgStyle: { fill: semantic.surface },
       labelBgPadding: [4, 2] as [number, number],
       style: {
         stroke: s.color,
@@ -244,7 +259,7 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
         edges={edges}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
-        colorMode="dark"
+        colorMode="system"
         onInit={() => setReady(true)}
         minZoom={0.05}
         maxZoom={2}
@@ -254,18 +269,18 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
         elementsSelectable={false}
         onNodeClick={(_, node) => onSelect(node.id)}
         proOptions={{ hideAttribution: true }}
-        style={{ background: 'var(--surface)', flex: 1, height: 'auto', minHeight: 0 }}
+        style={{ background: semantic.surface, flex: 1, height: 'auto', minHeight: 0 }}
       >
-        <Background gap={24} color="rgba(255, 255, 255, 0.05)" />
+        <Background gap={24} color={tint(semantic.text, 0.06)} />
         <Controls showInteractive={false} position="top-left" />
         {minimap && (
           <MiniMap
             position="top-right"
             pannable
             zoomable
-            nodeColor={n => n.type === 'objective' ? '#7c6cf0' : hypothesisStatusColors[(n.data as HypothesisNodeData).item.status]}
-            maskColor="rgba(8, 9, 12, 0.7)"
-            style={{ background: 'var(--surface-2)', width: 150, height: 100 }}
+            nodeColor={n => n.type === 'objective' ? semantic.primary : statusColor((n.data as HypothesisNodeData).item.status)}
+            maskColor={tint(semantic.surface, 0.7)}
+            style={{ background: semantic.surfaceInset, width: 150, height: 100 }}
           />
         )}
       </ReactFlow>

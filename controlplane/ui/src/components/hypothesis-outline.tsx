@@ -5,6 +5,8 @@ import { clsx } from 'clsx'
 import type { HypothesisGraph } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
+import { RowButton } from '@/components/ui/button'
+import { Eyebrow } from '@/components/ui/text'
 import { NodeMeta } from '@/components/hypothesis-graph'
 import { matchesFilters, outlineRows } from '@/lib/hypothesis-graph'
 import { verdictSetBy } from '@/lib/hypothesis-progress'
@@ -30,41 +32,39 @@ export function HypothesisOutline({ graph, rootLabel, evidence, selected, hits, 
   }, [selected])
 
   return (
-    <ul className="hg-outline" aria-label="Hypotheses by what they build on">
+    <ul className="h-full list-none overflow-y-auto p-1.5" aria-label="Hypotheses by what they build on">
       <li>
-        <button
+        <RowButton
           ref={selected === graph.root ? selectedRef : undefined}
-          className={clsx('hg-outline-row', selected === graph.root && 'selected')}
+          selected={selected === graph.root}
+          className="pl-3"
           aria-current={selected === graph.root}
           onClick={() => onSelect(graph.root)}
         >
-          <span className="uppercase-label">Objective</span>
-          <span className="hg-outline-text">{rootLabel}</span>
-        </button>
+          <Eyebrow>Objective</Eyebrow>
+          <span className="min-w-0 flex-1 truncate">{rootLabel}</span>
+        </RowButton>
       </li>
       {rows.map(({ node, depth, alsoBuildsOn }) => (
         <li key={node.id}>
-          <button
+          <RowButton
             ref={selected === node.id ? selectedRef : undefined}
-            className={clsx(
-              'hg-outline-row',
-              selected === node.id && 'selected',
-              hits.has(node.id) && 'hit',
-              !matchesFilters(node, filters) && 'dimmed',
-            )}
+            selected={selected === node.id}
+            hit={hits.has(node.id)}
+            className={clsx(!matchesFilters(node, filters) && 'opacity-40')}
             style={{ paddingLeft: 12 + (depth + 1) * 18 }}
             aria-current={selected === node.id}
             onClick={() => onSelect(node.id)}
           >
             <span title={verdictSetBy(node) && `${node.status} ${verdictSetBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
-            <span className="hg-outline-text" title={node.text}>{node.text}</span>
+            <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
             {alsoBuildsOn.length > 0 && (
-              <span className="text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+              <span className="whitespace-nowrap text-2xs text-subtle">
                 also builds on {alsoBuildsOn.length}
               </span>
             )}
             <NodeMeta item={node} evidence={evidence.get(node.id)} />
-          </button>
+          </RowButton>
         </li>
       ))}
     </ul>

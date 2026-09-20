@@ -6,13 +6,16 @@ import type { HypothesisSearchHit, SimilarHypothesis } from '@/lib/api'
 import type { HypothesisLinkType, HypothesisWithJobs } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
-import { HypothesisPicker, INPUT_STYLE } from '@/components/hypothesis-search'
+import { Textarea } from '@/components/ui/input'
+import { InlineError } from '@/components/ui/status-message'
+import { Eyebrow } from '@/components/ui/text'
+import { HypothesisPicker } from '@/components/hypothesis-search'
 
 /** Marks a hypothesis or note that came from a person, wherever one is shown. */
 function HumanAuthor({ author }: { author: string }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span className="badge badge-human">human</span>
+    <span className="inline-flex items-center gap-1.5">
+      <Badge status="human">human</Badge>
       <span>{author}</span>
     </span>
   )
@@ -21,7 +24,7 @@ function HumanAuthor({ author }: { author: string }) {
 /** The author of a hypothesis or note: an agent id, or a person marked as such. */
 export function PoolAuthor({ source, agentID, author }: { source?: string; agentID: string; author?: string }) {
   if (source === 'human') return <HumanAuthor author={author ?? ''} />
-  return <span className="mono">{agentID}</span>
+  return <span className="font-mono text-xs">{agentID}</span>
 }
 
 interface IdeaParent {
@@ -37,12 +40,12 @@ function TargetList({ label, targets, onRemove }: {
 }) {
   if (targets.length === 0) return null
   return (
-    <div className="hg-stack" style={{ gap: 4 }}>
-      <span className="uppercase-label">{label}</span>
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+      <Eyebrow>{label}</Eyebrow>
       {targets.map(t => (
-        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-          <span className="hg-outline-text" title={t.text}>{t.text}</span>
-          <Button variant="link" onClick={() => onRemove(t.id)} aria-label={`Remove ${t.text}`}>Remove</Button>
+        <div key={t.id} className="flex items-center gap-2 text-xs">
+          <span className="min-w-0 flex-1 truncate" title={t.text}>{t.text}</span>
+          <Button variant="link" size="sm" onClick={() => onRemove(t.id)} aria-label={`Remove ${t.text}`}>Remove</Button>
         </div>
       ))}
     </div>
@@ -95,28 +98,28 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
   }
 
   return (
-    <div className="hg-stack" style={{ gap: 10, maxWidth: 760 }}>
-      <p className="text-muted" style={{ fontSize: 12 }}>
+    <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-2.5">
+      <p className="text-xs text-muted">
         Your idea joins the graph the agents read and write, under the same duplicate check.
         No job runs against it: an agent that wants to test it registers its own hypothesis
         building on yours. It is registered under the name you signed in with.
       </p>
-      <div style={{ fontSize: 12 }}>
-        <span className="uppercase-label">Builds on</span>{' '}
+      <div className="text-xs">
+        <Eyebrow>Builds on</Eyebrow>{' '}
         <span title={parent.label}>{parent.label}</span>
       </div>
-      <textarea
-        style={{ ...INPUT_STYLE, minHeight: 70, resize: 'vertical' }}
+      <Textarea
+        className="min-h-[70px] w-full"
         value={text}
         onChange={e => setText(e.target.value)}
         placeholder="e.g. the retry loop is masking a bad learning-rate schedule; try a linear warmup instead"
       />
       <details>
-        <summary className="text-link" style={{ fontSize: 12, cursor: 'pointer' }}>
+        <summary className="cursor-pointer text-xs text-accent hover:underline">
           Mark hypotheses it contradicts or relates to (optional)
         </summary>
-        <div className="hg-stack" style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
+        <div className="grid grid-cols-[minmax(0,1fr)] mt-2 gap-2">
+          <div className="flex gap-1.5">
             <Chip active={crossType === 'contradicts'} onClick={() => setCrossType('contradicts')}>Contradicts</Chip>
             <Chip active={crossType === 'related'} onClick={() => setCrossType('related')}>Related</Chip>
           </div>
@@ -125,29 +128,29 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
           <TargetList label="Related" targets={related} onRemove={id => setRelated(related.filter(t => t.id !== id))} />
         </div>
       </details>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="flex items-center gap-2.5">
         <Button size="sm" variant="primary" disabled={busy || text.trim() === ''} onClick={() => submit()}>
           {busy ? 'Adding…' : 'Add idea'}
         </Button>
         {existingID && (
-          <span className="text-muted" style={{ fontSize: 12 }}>
+          <span className="text-xs text-muted">
             An equivalent idea already exists, so nothing was added and your links were not applied.{' '}
-            <Button variant="link" onClick={() => onAdded(existingID)}>Show it</Button>
+            <Button variant="link" size="sm" onClick={() => onAdded(existingID)}>Show it</Button>
           </span>
         )}
-        {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
+        {error && <InlineError>{error}</InlineError>}
       </div>
       {similar.length > 0 && (
-        <div className="hg-stack" style={{ gap: 4, fontSize: 12 }}>
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs">
           <span className="text-muted">
             Nothing was added yet: these read close to your idea, or it builds on a refuted one.
             If one is your idea, open it instead; mark one your idea opposes as Contradicts.
           </span>
           {similar.map(h => (
-            <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div key={h.id} className="flex items-center gap-2">
               <Badge status={h.status}>{h.status}</Badge>
-              <span className="hg-outline-text" title={h.text}>{h.text}</span>
-              <Button variant="link" onClick={() => onAdded(h.id)}>Show it</Button>
+              <span className="min-w-0 flex-1 truncate" title={h.text}>{h.text}</span>
+              <Button variant="link" size="sm" onClick={() => onAdded(h.id)}>Show it</Button>
             </div>
           ))}
           <div>
@@ -176,8 +179,8 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
 
   if (hypothesis.source !== 'human') {
     return (
-      <p className="text-dim" style={{ marginTop: 12 }}>
-        Only <span className="mono">{hypothesis.agent_id}</span> can add links from this hypothesis.
+      <p className="mt-3 text-xs text-subtle">
+        Only <span className="font-mono">{hypothesis.agent_id}</span> can add links from this hypothesis.
         To connect your own idea, add it from the graph, building on this one.
       </p>
     )
@@ -198,25 +201,25 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
   }
 
   return (
-    <div className="hg-stack" style={{ maxWidth: 760, marginTop: 12 }}>
-      <span className="uppercase-label">Add link</span>
-      <div style={{ display: 'flex', gap: 6 }}>
+    <div className="grid grid-cols-[minmax(0,1fr)] mt-3 max-w-[760px] gap-2">
+      <Eyebrow>Add link</Eyebrow>
+      <div className="flex gap-1.5">
         {(Object.keys(LINK_TYPE_LABELS) as HypothesisLinkType[]).map(t => (
           <Chip key={t} active={type === t} onClick={() => setType(t)}>{LINK_TYPE_LABELS[t]}</Chip>
         ))}
       </div>
       {target ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
-          <span className="hg-outline-text" title={target.text}>{target.text}</span>
+        <div className="flex items-center gap-2.5 text-xs">
+          <span className="min-w-0 flex-1 truncate" title={target.text}>{target.text}</span>
           <Button size="sm" variant="primary" disabled={busy} onClick={() => submit(target.id)}>
             {busy ? 'Linking…' : `Add ${LINK_TYPE_LABELS[type].toLowerCase()} link`}
           </Button>
-          <Button variant="link" onClick={() => setTarget(null)}>Change</Button>
+          <Button variant="link" size="sm" onClick={() => setTarget(null)}>Change</Button>
         </div>
       ) : (
         <HypothesisPicker platformExperimentID={hypothesis.platform_experiment_id} exclude={[hypothesis.id]} onPick={setTarget} />
       )}
-      {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
+      {error && <InlineError>{error}</InlineError>}
     </div>
   )
 }
@@ -242,18 +245,18 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
   }
 
   return (
-    <div style={{ display: 'grid', gap: 8, maxWidth: 760, marginTop: 12 }}>
-      <textarea
-        style={{ ...INPUT_STYLE, minHeight: 60, resize: 'vertical' }}
+    <div className="mt-3 grid max-w-[760px] gap-2">
+      <Textarea
+        className="min-h-[60px] w-full"
         value={text}
         onChange={e => setText(e.target.value)}
         placeholder="A note on this claim: amend it, cross-reference a finding, say why you'd drop it."
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="flex items-center gap-2.5">
         <Button size="sm" disabled={busy || text.trim() === ''} onClick={submit}>
           {busy ? 'Adding…' : 'Add comment'}
         </Button>
-        {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
+        {error && <InlineError>{error}</InlineError>}
       </div>
     </div>
   )

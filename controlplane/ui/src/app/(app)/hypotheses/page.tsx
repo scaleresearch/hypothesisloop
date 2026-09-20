@@ -4,12 +4,13 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
-import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { fetchFindings, fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
+import { Dialog } from '@/components/ui/dialog'
+import { FormField } from '@/components/ui/form-field'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
@@ -100,45 +101,48 @@ function HypothesesPageContent() {
   }
 
   return (
-    <div className="hg-page">
+    <div className="flex min-h-[calc(100vh-56px)] flex-col">
       <PageHeader
         title="Hypotheses"
         description="Each platform experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others. Registering text equivalent to an existing hypothesis returns the existing one; text close to others waits until the submitter has told it apart from them."
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span className="uppercase-label">Platform Experiment</span>
-        <PlatformExperimentSelect
-          value={peID}
-          onChange={selectExperiment}
-          hideAllOption
-          placeholder="Select an experiment"
-          style={{ minWidth: 260 }}
-        />
-        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }} role="group" aria-label="View">
+      <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
+        <FormField inline label="Platform Experiment">
+          <PlatformExperimentSelect
+            value={peID}
+            onChange={selectExperiment}
+            hideAllOption
+            placeholder="Select an experiment"
+            className="min-w-[260px]"
+          />
+        </FormField>
+        <div className="ml-auto flex gap-1.5" role="group" aria-label="View">
           <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
           <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div className="mb-3 flex flex-wrap items-center gap-2.5">
         <SearchBox key={peID} initial={q} placeholder="Search hypotheses by text" onSearch={setQ} />
-        <span className="uppercase-label" style={{ marginLeft: 8 }}>Status</span>
-        <SearchableSelect
-          value={statusFilter}
-          onChange={setStatusFilter}
-          allLabel="All"
-          options={STATUS_OPTIONS}
-        />
-        <span className="uppercase-label" style={{ marginLeft: 8 }}>Agent</span>
-        <SearchableSelect
-          value={ownerFilter}
-          onChange={setOwnerFilter}
-          allLabel="All agents"
-          options={ownerOptions}
-        />
+        <FormField inline label="Status" className="ml-2">
+          <SearchableSelect
+            value={statusFilter}
+            onChange={setStatusFilter}
+            allLabel="All"
+            options={STATUS_OPTIONS}
+          />
+        </FormField>
+        <FormField inline label="Agent" className="ml-2">
+          <SearchableSelect
+            value={ownerFilter}
+            onChange={setOwnerFilter}
+            allLabel="All agents"
+            options={ownerOptions}
+          />
+        </FormField>
         {filtering && graph && (
-          <span className="text-dim">{matching} of {graph.nodes.length} match</span>
+          <span className="text-xs text-subtle">{matching} of {graph.nodes.length} match</span>
         )}
       </div>
 
@@ -152,8 +156,8 @@ function HypothesesPageContent() {
 
       {graph && positions && pe && <ObjectiveBar graph={graph} pe={pe} onAddIdea={setAddUnder} />}
       {graph && positions && pe && (
-        <div className={clsx('hg-layout', showSide && 'with-side')}>
-          <div className="hg-main">
+        <div className={clsx('grid min-h-[420px] flex-[1_0_0] grid-rows-[minmax(0,1fr)] gap-4', showSide ? 'grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-[minmax(0,1fr)]')}>
+          <div className="flex flex-col overflow-hidden rounded-lg border bg-surface">
             {graph.nodes.length === 0 ? (
               <EmptyState>
                 No hypotheses in this experiment yet. Agents place each idea under the objective or an
@@ -185,12 +189,12 @@ function HypothesesPageContent() {
               />
             )}
           </div>
-          {showSide && <aside className="hg-side">
+          {showSide && <aside className="overflow-y-auto">
             {q && (
               <Card>
                 <CardHeader>
                   Search results
-                  <Button variant="link" style={{ marginLeft: 'auto', fontSize: 11.5 }} onClick={() => setQ('')}>Clear</Button>
+                  <Button variant="link" size="sm" className="ml-auto" onClick={() => setQ('')}>Clear</Button>
                 </CardHeader>
                 <CardContent>
                   <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
@@ -212,21 +216,15 @@ function HypothesesPageContent() {
       )}
 
       {graph && pe && addUnder !== null && (
-        <Dialog open onClose={() => setAddUnder(null)} className="wa-dialog">
-          <div className="wa-dialog-backdrop" aria-hidden="true" />
-          <div className="wa-dialog-container">
-            <DialogPanel className="wa-dialog-panel">
-              <DialogTitle style={{ fontWeight: 600, marginBottom: 10 }}>Add an idea</DialogTitle>
-              <AddIdeaForm
-                platformExperimentID={peID}
-                parent={{
-                  id: addUnder,
-                  label: addUnder === graph.root ? `the objective of ${pe.name}` : nodeByID.get(addUnder)!.text,
-                }}
-                onAdded={onAdded}
-              />
-            </DialogPanel>
-          </div>
+        <Dialog open onClose={() => setAddUnder(null)} title="Add an idea">
+          <AddIdeaForm
+            platformExperimentID={peID}
+            parent={{
+              id: addUnder,
+              label: addUnder === graph.root ? `the objective of ${pe.name}` : nodeByID.get(addUnder)!.text,
+            }}
+            onAdded={onAdded}
+          />
         </Dialog>
       )}
     </div>

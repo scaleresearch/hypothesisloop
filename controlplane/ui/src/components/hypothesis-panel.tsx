@@ -4,13 +4,14 @@ import { Link } from '@/components/ui/link'
 import type { HypothesisGraph, HypothesisLinkType, HypothesisListItem, PlatformExperiment } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Badge, Dot } from '@/components/ui/badge'
+import { Button, RowButton } from '@/components/ui/button'
+import { Eyebrow } from '@/components/ui/text'
 import { EmptyState } from '@/components/ui/status-message'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { PoolAuthor } from '@/components/human-idea'
 import { linkGroups } from '@/lib/hypothesis-graph'
-import { hypothesisStatusColors, semantic } from '@/lib/colors'
+import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
 
@@ -30,16 +31,16 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
 }) {
   return (
     <Card>
-      <CardContent className="hg-stack">
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-          <span className="uppercase-label">Objective</span>
-          <span style={{ fontWeight: 650 }}>{pe.name}</span>
-          <span className="text-muted" style={{ fontSize: 12 }}>
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-2">
+        <div className="flex flex-wrap items-baseline gap-3">
+          <Eyebrow>Objective</Eyebrow>
+          <span className="font-semibold">{pe.name}</span>
+          <span className="text-xs text-muted">
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto' }}>
+          <span className="ml-auto flex items-center gap-3">
             <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button>
-            <Link href={`/platform-experiments/${graph.root}`} className="text-link" style={{ fontSize: 12 }}>Experiment →</Link>
+            <Link href={`/platform-experiments/${graph.root}`} className="text-xs text-accent hover:underline">Experiment →</Link>
           </span>
         </div>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
@@ -56,7 +57,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
         <CardHeader>Hypothesis</CardHeader>
         <CardContent>
           <EmptyState>
-            <span className="mono">{selected}</span> is not in this experiment&apos;s graph.{' '}
+            <span className="font-mono text-xs">{selected}</span> is not in this experiment&apos;s graph.{' '}
             <Button variant="link" onClick={() => onSelect('')}>Show the objective</Button>
           </EmptyState>
         </CardContent>
@@ -74,45 +75,45 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
         Hypothesis
         <Badge status={node.status}>{node.status}</Badge>
       </CardHeader>
-      <CardContent className="hg-stack" style={{ gap: 12 }}>
-        <p style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: 240, overflowY: 'auto' }}>
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
+        <p className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">
           {node.text}
         </p>
-        <div className="text-muted" style={{ fontSize: 11 }}>
+        <div className="text-2xs text-muted">
           <PoolAuthor source={node.source} agentID={node.agent_id} author={node.author} /> · {relTime(node.created_at)}
           {node.status_changed_at && <> · {node.status} {verdictSetBy(node)}</>}
         </div>
-        <div className="text-muted mono" style={{ fontSize: 11 }}>
+        <div className="font-mono text-2xs text-muted">
           {node.finding_count} findings · {node.comment_count} comments · built on by {node.child_count}
         </div>
         {bestJob && (
-          <div className="mono" style={{ fontSize: 12 }}>
+          <div className="font-mono text-xs">
             <span className="text-muted">Best job </span>
-            <Link href={`/jobs/${bestJob.id}`} className="text-link">{bestJob.metric.name} {bestJob.metric.best.toFixed(4)}</Link>
+            <Link href={`/jobs/${bestJob.id}`} className="text-accent hover:underline">{bestJob.metric.name} {bestJob.metric.best.toFixed(4)}</Link>
           </div>
         )}
         {finding && (
-          <div className="hg-stack" style={{ gap: 4 }}>
-            <span className="uppercase-label">
-              Newest finding · <Link href={`/jobs/${finding.experiment_id}`} className="text-link mono" style={{ textTransform: 'none' }}>{finding.experiment_id}</Link>
-              {filedAfterVerdict(node, finding.created_at) && <span style={{ color: semantic.warning }}> · filed after the verdict</span>}
-            </span>
-            <p style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: 160, overflowY: 'auto' }}>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <Eyebrow>
+              Newest finding · <Link href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case text-accent hover:underline">{finding.experiment_id}</Link>
+              {filedAfterVerdict(node, finding.created_at) && <span className="text-warning"> · filed after the verdict</span>}
+            </Eyebrow>
+            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-xs">
               {finding.summary}
             </p>
           </div>
         )}
         {linkGroups(out, incoming).map(group => (
-          <div key={group.label} className="hg-stack" style={{ gap: 4 }}>
-            <span className="uppercase-label">{group.label}</span>
+          <div key={group.label} className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <Eyebrow>{group.label}</Eyebrow>
             {group.items.map(l => (
               <PanelLink key={`${l.type}:${l.id}`} id={l.id} type={l.type} graph={graph} nodeByID={nodeByID} onSelect={onSelect} />
             ))}
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div className="flex flex-wrap items-center gap-3">
           <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button>
-          <Link href={`/hypotheses/${node.id}`} className="text-link" style={{ fontSize: 12 }}>Open detail →</Link>
+          <Link href={`/hypotheses/${node.id}`} className="text-xs text-accent hover:underline">Open detail →</Link>
         </div>
       </CardContent>
     </Card>
@@ -129,9 +130,9 @@ function PanelLink({ id, type, graph, nodeByID, onSelect }: {
   const target = nodeByID.get(id)
   const label = id === graph.root ? 'Objective' : target?.text ?? id
   return (
-    <button className="hg-hit" onClick={() => onSelect(id)} title={label} aria-label={`${type}: ${label}`}>
-      <span className="hg-legend-dot" style={{ background: target ? hypothesisStatusColors[target.status] : 'var(--accent)' }} />
-      <span className="hg-outline-text">{label}</span>
-    </button>
+    <RowButton className="text-xs" onClick={() => onSelect(id)} title={label} aria-label={`${type}: ${label}`}>
+      <Dot color={target ? statusColor(target.status) : semantic.accent} />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </RowButton>
   )
 }
