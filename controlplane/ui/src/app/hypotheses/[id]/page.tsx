@@ -11,7 +11,7 @@ import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
-import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, variedEnvKeys, verdictSetBy } from '@/lib/hypothesis-progress'
 import { semantic } from '@/lib/colors'
 
 function LinkRow({ link, platformExperimentID, pe }: {
@@ -87,7 +87,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           </h1>
           <p className="text-muted mono" style={{ fontSize: 11, marginTop: 4 }}>
             Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
-            {data.status_changed_at && <> · {data.status} {relTime(data.status_changed_at)}</>}
+            {data.status_changed_at && <> · {data.status} {verdictSetBy(data)}</>}
             {sinceVerdict > 0 && (
               <span style={{ color: semantic.warning }}> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
             )}

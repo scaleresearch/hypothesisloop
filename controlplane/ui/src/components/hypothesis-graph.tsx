@@ -12,7 +12,7 @@ import { FileText, MessageSquare } from 'lucide-react'
 import type { HypothesisGraph, HypothesisListItem } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
 import { hypothesisLinkStyles, hypothesisStatusColors, semantic } from '@/lib/colors'
-import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
 import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
@@ -72,7 +72,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       <HiddenHandles />
       <div className="hg-node-text">{item.text}</div>
       <div className="hg-node-foot">
-        <span className="hg-node-status" style={{ color }}>{item.status}</span>
+        <span className="hg-node-status" style={{ color }} title={verdictSetBy(item) && `${item.status} ${verdictSetBy(item)}`}>{item.status}</span>
         <NodeMeta item={item} evidence={evidence} />
       </div>
     </div>

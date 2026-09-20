@@ -1,6 +1,7 @@
 import { ExperimentStatus } from '@/types'
 import type { Experiment } from '@/types'
 import type { ExperimentStats } from '@/lib/api'
+import { relTime } from '@/lib/format'
 
 export const TERMINAL: string[] = [
   ExperimentStatus.COMPLETED,
@@ -28,6 +29,13 @@ export function hypothesisActivity(
 // A finding filed after the verdict is evidence the verdict did not weigh.
 export function filedAfterVerdict(h: { status_changed_at: string | null }, findingAt: string): boolean {
   return h.status_changed_at != null && new Date(findingAt).getTime() > new Date(h.status_changed_at).getTime()
+}
+
+// Who set the verdict and when, empty while none was set. Only its owner rules on an agent's
+// hypothesis; who ruled on a human's idea is not recorded.
+export function verdictSetBy(h: { agent_id: string; status_changed_at: string | null }): string {
+  if (h.status_changed_at == null) return ''
+  return `${h.agent_id ? `by ${h.agent_id} · ` : ''}${relTime(h.status_changed_at)}`
 }
 
 // The env settings that are not the same in every one of the jobs: what a hypothesis's runs varied.

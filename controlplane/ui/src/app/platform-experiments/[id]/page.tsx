@@ -38,7 +38,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { semantic, agentPalette } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys, verdictSetBy } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 
 const TWO_LINES: React.CSSProperties = {
@@ -810,6 +810,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   <tr key={h.id} style={{ verticalAlign: 'top' }}>
                     <td>
                       <Badge status={h.status}>{h.status}</Badge>
+                      <div className="text-muted" style={{ fontSize: 10, marginTop: 3 }}>{verdictSetBy(h)}</div>
                       {h.finding && filedAfterVerdict(h, h.finding.created_at) && (
                         <div style={{ fontSize: 10, marginTop: 3, color: semantic.warning }} title="The newest finding was filed after this verdict was set">
                           newer finding

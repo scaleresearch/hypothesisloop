@@ -11,7 +11,7 @@ import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { PoolAuthor } from '@/components/human-idea'
 import { linkGroups } from '@/lib/hypothesis-graph'
 import { hypothesisStatusColors, semantic } from '@/lib/colors'
-import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
 
 interface HypothesisPanelProps {
@@ -80,6 +80,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
         </p>
         <div className="text-muted" style={{ fontSize: 11 }}>
           <PoolAuthor source={node.source} agentID={node.agent_id} author={node.author} /> · {relTime(node.created_at)}
+          {node.status_changed_at && <> · {node.status} {verdictSetBy(node)}</>}
         </div>
         <div className="text-muted mono" style={{ fontSize: 11 }}>
           {node.finding_count} findings · {node.comment_count} comments · built on by {node.child_count}
