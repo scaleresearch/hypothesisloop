@@ -66,18 +66,20 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
     <Combobox
       immediate
       value={value}
-      onChange={(v: string | null) => {
-        onChange(v ?? '')
-        // The list opens on focus, so the field gives focus up once a choice is made: the next
-        // click on it opens the list again.
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
-      }}
+      onChange={(v: string | null) => onChange(v ?? '')}
       onClose={() => setQuery('')}
       as="div"
       className={className}
       style={{ position: 'relative', minWidth: 180, ...style }}
     >
+      {({ open }) => (
+        <>
       <ComboboxInput
+        // The list opens when the field takes focus, and the field keeps focus after a choice,
+        // so a click on it while the list is closed opens the list the way ArrowDown does.
+        onClick={e => {
+          if (!open) e.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+        }}
         className="mono"
         style={FIELD_STYLE}
         placeholder={placeholder ?? allLabel}
@@ -105,6 +107,8 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
         ))}
         {hint && <div className="text-dim" style={{ fontSize: 11, padding: '6px 8px' }}>{hint}</div>}
       </ComboboxOptions>
+        </>
+      )}
     </Combobox>
   )
 }
