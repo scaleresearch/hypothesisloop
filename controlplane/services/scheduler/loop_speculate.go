@@ -180,13 +180,9 @@ func negativeInDimension(avail domain.Footprint, flavor domain.AcceleratorType) 
 		// zero-value default doing the talking, not an observed desired-free of zero.
 		return false
 	}
-	// <= 0, not < 0: a job needs at least one accelerator, so desired-free landing at exactly
-	// zero (a speculative claim that exactly exhausted this flavor, not overdrew it) already
-	// means "nothing here for the next guaranteed job either" -- codex review caught the
-	// strictly-negative version as a boundary a speculative submit can legitimately land on
-	// without ever going negative, which would have let preemption through right when the
-	// skip-preemption rule exists to stop it.
-	return v <= 0
+	// Zero is a saturated cluster with no bet outstanding: free capacity is zero whenever running
+	// jobs hold every accelerator. Only a SUBMITTED claim above the installed total goes negative.
+	return v < 0
 }
 
 // allSpeculativeCandidatesTried reports whether at least one autoscaler-enabled, connected

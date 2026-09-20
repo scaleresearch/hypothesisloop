@@ -416,6 +416,10 @@ func TestNegativeInDimension(t *testing.T) {
 	if negativeInDimension(avail, "a100") {
 		t.Fatal("a different flavor's negative entry must not match")
 	}
+	saturated := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: 0}
+	if negativeInDimension(saturated, domain.AcceleratorType(h100)) {
+		t.Fatal("a saturated cluster with no claim above its total is not waiting for a scale-up")
+	}
 	if negativeInDimension(nil, domain.AcceleratorType(h100)) {
 		t.Fatal("a nil footprint (e.g. cluster absent from gAvail) must not be treated as negative")
 	}
