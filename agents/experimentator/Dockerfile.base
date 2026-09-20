@@ -36,7 +36,7 @@ FROM python:3.13-slim
 # that is the trace from a submitted job back to its source.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Non-interactive git auth, baked so the agent never handles credentials: a helper emits $GIT_TOKEN
 # (injected at runtime as a secret, never baked) for HTTPS clone/push to CODE_REPO_URL, plus a
