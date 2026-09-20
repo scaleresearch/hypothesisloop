@@ -1,14 +1,3 @@
-"""A real agent-launcher process against the control plane, renting nothing: the binary is built
-with -tags e2efake, which adds the in-memory provider to its registry (no image is built that
-way), and what it does is read from its own log.
-
-Exclusive: the local control plane gives every hosted agent to the one launcher its config names,
-and a launcher's question carries a digest of its own launch inputs that is part of every instance
-name. A second asker of that launcher with another digest, which is what this process is beside
-the tests that ask by hand, renames the instances of every hosted agent on each call.
-
-Needs a repository to attach, as every test that hosts an agent does (see test_hosted_agents.py).
-"""
 from __future__ import annotations
 
 import os
@@ -23,6 +12,9 @@ from support import admin
 from support.api import API
 from support.wait import eventually
 
+# Exclusive: this process asks as the one launcher the local control plane gives hosted agents to
+# and reports what it holds. A machine another asker reported and this one does not is an exit,
+# and a question with another launch digest renames every instance.
 pytestmark = [pytest.mark.exclusive, pytest.mark.slow, pytest.mark.timeout(420)]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +24,8 @@ WIND_DOWN_SECONDS = 120  # domain.AgentWindDown
 
 @pytest.fixture(scope="module")
 def launcher_binary(tmp_path_factory) -> Path:
+    """Built with -tags e2efake, which adds the in-memory provider to its registry: nothing is
+    rented and no image is built."""
     binary = tmp_path_factory.mktemp("agent-launcher") / "agent-launcher"
     subprocess.run(["go", "build", "-tags", "e2efake", "-o", str(binary), "./runtime/cloud/cmd/agent-launcher"],
                    cwd=REPO_ROOT, check=True)

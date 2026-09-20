@@ -1,5 +1,3 @@
-"""The harness started as a platform experiment's coordinator: what it is launched with, what it
-checks before its first turn, what it is briefed with and what it watches."""
 import os
 import re
 import shutil

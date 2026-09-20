@@ -1,6 +1,3 @@
-"""What the harness is started with and how it ends when that cannot work: the values a hosted
-agent's launcher hands it, the signal the launcher sends when the agent's run is over, and a
-credential the model provider refuses."""
 import asyncio
 import contextlib
 import io
