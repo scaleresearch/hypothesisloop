@@ -18,9 +18,11 @@ TAG="$(bash "${REPO_DIR}/localdev/lib/image-tag.sh")"
 gcloud auth print-access-token --account "${GCP_ACCOUNT}" \
   | podman login --username oauth2accesstoken --password-stdin "${REGISTRY%%/*}"
 
+make -C "${REPO_DIR}" images REGISTRY="${REGISTRY}" TAG="${TAG}" REGISTRY_TLS_VERIFY=true IMAGE_PLATFORM="${PLATFORM}"
+
 # What the UI image compiles into the browser bundle, all public: the API as a browser reaches
 # it and the Supabase project that signs people in.
-make -C "${REPO_DIR}" images REGISTRY="${REGISTRY}" TAG="${TAG}" REGISTRY_TLS_VERIFY=true IMAGE_PLATFORM="${PLATFORM}" \
+make -C "${REPO_DIR}" ui-image REGISTRY="${REGISTRY}" TAG="${TAG}" REGISTRY_TLS_VERIFY=true IMAGE_PLATFORM="${PLATFORM}" \
   NEXT_PUBLIC_API_URL="$("${INFRA_DIR}/pulumi.sh" "${STACK}" stack output browserAPIURL)" \
   NEXT_PUBLIC_SUPABASE_URL="$("${INFRA_DIR}/pulumi.sh" "${STACK}" stack output supabaseURL)" \
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="$("${INFRA_DIR}/pulumi.sh" "${STACK}" config get supabasePublishableKey)"

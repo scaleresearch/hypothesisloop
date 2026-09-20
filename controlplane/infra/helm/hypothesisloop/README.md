@@ -8,6 +8,8 @@ the object store.
 
 ```sh
 make images REGISTRY=<registry>   # builds every image and pushes it under the TAG make prints
+make ui-image REGISTRY=<registry> NEXT_PUBLIC_API_URL=<the API as a browser reaches it> \
+  NEXT_PUBLIC_SUPABASE_URL=<project address> NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<its publishable key>
 make helm-prepare                 # stages controlplane/settings/hypothesisloop.yaml into the chart
 
 kubectl create namespace hypothesisloop
