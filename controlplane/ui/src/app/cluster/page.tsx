@@ -197,6 +197,7 @@ function LiveCapacity() {
                 <th>Accelerator Type</th>
                 <th>Available</th>
                 <th>Total</th>
+                <th title="What one accelerator of this type costs for an hour, in accelerator hours">AccH per hour</th>
               </tr>
             </thead>
             <tbody>
@@ -208,6 +209,7 @@ function LiveCapacity() {
                     {r.available}
                   </td>
                   <td className="mono text-muted">{r.total}</td>
+                  <td className="mono">{r.acch_per_hour}</td>
                 </tr>
               ))}
             </tbody>

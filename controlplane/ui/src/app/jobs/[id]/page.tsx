@@ -186,18 +186,20 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {(j.metric || j.summary || j.status === 'COMPLETED') && (
+      {(j.metrics || j.summary || j.status === 'COMPLETED') && (
         <Pod style={{ marginBottom: 12 }}>
           <PodHeader>Result</PodHeader>
           <PodContent>
-            {j.metric && (
-              <div className="mono" style={{ marginBottom: 10 }}>
-                <span style={{ fontSize: 22, fontWeight: 700, color: semantic.success }}>{j.metric.best.toFixed(4)}</span>
+            {(j.metrics ?? []).map(m => (
+              <div key={m.name} className="mono" style={{ marginBottom: 10 }}>
+                <span style={m.name === primaryMetricName ? { fontSize: 22, fontWeight: 700, color: semantic.success } : { fontSize: 15, fontWeight: 600 }}>
+                  {m.best.toFixed(4)}
+                </span>
                 <span className="text-muted" style={{ marginLeft: 8, fontSize: 12 }}>
-                  best {j.metric.name}{j.metric.basis !== 'raw' && ` · basis ${j.metric.basis}`}
+                  best {m.name} · last {m.last.toFixed(4)}{m.basis !== 'raw' && ` · basis ${m.basis}`}
                 </span>
               </div>
-            )}
+            ))}
             {j.summary && <p style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxWidth: 900 }}>{j.summary}</p>}
             {!j.summary && j.status === 'COMPLETED' && (
               <p style={{ fontSize: 13, color: semantic.warning }}>No summary: the agent did not write up what this job found.</p>

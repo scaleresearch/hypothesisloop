@@ -17,8 +17,8 @@ export enum ExperimentStatus {
 }
 
 // AcceleratorType is an open, operator-defined identifier (see hypothesisloop.yaml's accelerator_types) — any
-// vendor's model name is valid (NVIDIA, AMD, ...), not a fixed set. Fetch the live catalog
-// (name + rate) via fetchResourceCatalog() instead of hardcoding known values here.
+// vendor's model name is valid (NVIDIA, AMD, ...), not a fixed set. fetchResourceCapacity() has
+// the types a cluster reports and their rates.
 export type AcceleratorType = string
 
 export enum CapacityTier {
@@ -110,6 +110,14 @@ export interface PhaseDetail {
   restart_count?: number
 }
 
+// Mirrors domain.JobMetric (shared/domain/metrics.go). best follows the metric's direction.
+export interface JobMetric {
+  name: string
+  best: number
+  last: number
+  basis: string
+}
+
 // Mirrors domain.Experiment (shared/domain/experiment.go). Fields the Go struct does not have
 // do not belong here: an optional phantom field type-checks fine and renders as an em dash
 // forever, which reads as "not reported yet" rather than "this was never real".
@@ -151,9 +159,11 @@ export interface Experiment {
   // The runtime's latest explanation for why this job's container hasn't started or keeps
   // restarting, merged in live from the metrics store on every read.
   phase_detail?: PhaseDetail
-  // The job's best value on its platform experiment's first ranking metric, read live from the
-  // metrics store. Absent until the job reports that metric.
-  metric?: { name: string; best: number; basis: string }
+  // The job's best and last value on its platform experiment's first ranking metric, read live
+  // from the metrics store. Absent until the job reports that metric.
+  metric?: JobMetric
+  // The same for every declared metric the job reported, in declared order.
+  metrics?: JobMetric[]
   // The write-up its agent filed, on a read of one job only.
   summary?: string
   // When the job reached its terminal status; absent while it can still run.

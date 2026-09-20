@@ -503,20 +503,12 @@ export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<Ag
   return apiFetch<AgentQuota[]>(`${API_URL}/platform-experiments/${platformExpID}/quotas`)
 }
 
-// Resource pricing reference data (Accelerator type rates) — fetched from the backend instead of
-// hardcoded, so the UI never drifts from the operator's config.
-export interface ResourceCatalog {
-  accelerator_types: Array<{ name: string; acch_rate: number }>
-}
-
-
-// Live, per-cluster accelerator capacity — what's actually schedulable right now, as opposed to
-// fetchResourceCatalog's static type/rate list. Read from the metrics store
-// (metricsdb.LiveClusterAcceleratorAvailableAndTotal).
+// Live, per-cluster accelerator capacity: what is schedulable right now, read from the metrics
+// store, and what an hour on one accelerator of each type costs in accelerator hours.
 export interface ResourceCapacity {
   clusters: Array<{
     cluster_name: string
-    accelerators: Array<{ accelerator_type: string; available: number; total: number }>
+    accelerators: Array<{ accelerator_type: string; available: number; total: number; acch_per_hour: number }>
   }>
 }
 
