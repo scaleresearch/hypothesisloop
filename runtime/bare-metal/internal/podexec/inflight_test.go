@@ -728,3 +728,41 @@ func TestQuickEngineCallsCarryADeadlineAndSlowOnesDoNot(t *testing.T) {
 		}
 	}
 }
+
+func TestAContainerWithNoReadableRequestsIsSkippedAndKeepsItsDevice(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f, "/dev/fake/0", "/dev/fake/1")
+	ctx := t.Context()
+	broken, second := fakeJob("broken", "fast", 1), fakeJob("second", "fast", 1)
+
+	pass(t, ctx, e, broken)
+	eventually(t, "the job runs", func() bool { return f.state("broken") == "running" })
+	eventually(t, "its start has returned", idle(e, "broken"))
+	f.mu.Lock()
+	delete(f.containers[containerName("broken")].labels, LabelCPUCores)
+	f.mu.Unlock()
+
+	available, total, err := e.GetLiveCPUCapacity(ctx)
+	if err != nil {
+		t.Fatalf("GetLiveCPUCapacity: got = %v, want = nil", err)
+	}
+	if available != total {
+		t.Fatalf("CPU available = %v of %v, want the unreadable container left out", available, total)
+	}
+	if free := freeAccelerators(t, ctx, e); free != 1 {
+		t.Fatalf("%d accelerators free, want the unreadable container's device still taken", free)
+	}
+
+	f.mu.Lock()
+	delete(f.containers[containerName("broken")].labels, LabelAcceleratorType)
+	f.mu.Unlock()
+	pass(t, ctx, e, broken, second)
+	eventually(t, "the second job runs", func() bool { return f.state("second") == "running" })
+	a, b := f.devices("broken"), f.devices("second")
+	if len(a) != 1 || len(b) != 1 || a[0] == b[0] {
+		t.Fatalf("unreadable job holds %v and second job holds %v, want one distinct device each", a, b)
+	}
+	if len(f.doubleBooked) > 0 {
+		t.Fatalf("device handed out twice: %v", f.doubleBooked)
+	}
+}

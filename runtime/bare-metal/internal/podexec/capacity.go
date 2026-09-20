@@ -2,6 +2,7 @@ package podexec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -48,34 +49,25 @@ func (e *Executor) sumRunningRequests(ctx context.Context) (runningRequests, err
 	}
 	out := runningRequests{accelerators: map[string]int64{}}
 	for _, c := range claims {
-		cpuMilli, err := requestLabel(c, LabelCPUCores)
-		if err != nil {
-			return runningRequests{}, err
+		count, countErr := requestLabel(c, LabelAcceleratorCnt)
+		if acceleratorType := c.Labels[LabelAcceleratorType]; acceleratorType != "" && countErr == nil && count > 0 {
+			out.accelerators[acceleratorType] += count
 		}
-		memoryBytes, err := requestLabel(c, LabelMemoryBytes)
-		if err != nil {
-			return runningRequests{}, err
-		}
-		storageBytes, err := requestLabel(c, LabelStorageBytes)
-		if err != nil {
-			return runningRequests{}, err
-		}
-		count, err := requestLabel(c, LabelAcceleratorCnt)
-		if err != nil {
-			return runningRequests{}, err
+		cpuMilli, cpuErr := requestLabel(c, LabelCPUCores)
+		memoryBytes, memoryErr := requestLabel(c, LabelMemoryBytes)
+		storageBytes, storageErr := requestLabel(c, LabelStorageBytes)
+		if err := errors.Join(countErr, cpuErr, memoryErr, storageErr); err != nil {
+			log.Printf("podexec: skipping a container in the capacity read, its requests are not counted as taken: %v", err)
+			continue
 		}
 		out.cpuMilli += cpuMilli
 		out.memoryBytes += memoryBytes
 		out.storageBytes += storageBytes
-		if acceleratorType := c.Labels[LabelAcceleratorType]; acceleratorType != "" && count > 0 {
-			out.accelerators[acceleratorType] += count
-		}
 	}
 	return out, nil
 }
 
-// requestLabel parses a resource request recorded on a managed container. A missing or
-// malformed value fails the whole read: counting it as zero would over-report free capacity.
+// requestLabel parses a resource request recorded on a managed container.
 func requestLabel(c containerInfo, key string) (int64, error) {
 	v, err := strconv.ParseInt(c.Labels[key], 10, 64)
 	if err != nil {
@@ -283,9 +275,6 @@ func (e *Executor) devicesInUseExcluding(ctx context.Context, excludeExperimentI
 			continue
 		}
 		if c.State != "running" && c.State != "created" {
-			continue
-		}
-		if c.Labels[LabelAcceleratorType] == "" {
 			continue
 		}
 		resp, err := e.docker.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
