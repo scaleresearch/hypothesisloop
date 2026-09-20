@@ -3,7 +3,7 @@ import type { Experiment } from '@/types'
 import type { ExperimentStats } from '@/lib/api'
 import { relTime } from '@/lib/format'
 
-export const TERMINAL: string[] = [
+const TERMINAL: string[] = [
   ExperimentStatus.COMPLETED,
   ExperimentStatus.FAILED,
   ExperimentStatus.EVICTED,

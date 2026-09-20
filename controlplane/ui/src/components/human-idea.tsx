@@ -9,7 +9,7 @@ import { Button, Chip } from '@/components/ui/button'
 import { HypothesisPicker, INPUT_STYLE } from '@/components/hypothesis-search'
 
 /** Marks a hypothesis or note that came from a person, wherever one is shown. */
-export function HumanAuthor({ author }: { author: string }) {
+function HumanAuthor({ author }: { author: string }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span className="badge badge-human">human</span>

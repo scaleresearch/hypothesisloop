@@ -96,7 +96,7 @@ const FAULT_CLASS_LABELS: Record<string, string> = {
 // can act on, then the environment's, then the platform's own decisions — which are not failures.
 const FAULT_CLASS_ORDER = ['workload', 'infrastructure', 'policy', 'unclassified']
 
-export function faultClassLabel(faultClass: string): string {
+function faultClassLabel(faultClass: string): string {
   return FAULT_CLASS_LABELS[faultClass] ?? faultClass
 }
 

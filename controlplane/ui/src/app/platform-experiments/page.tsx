@@ -443,7 +443,6 @@ function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s
 
 function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onChange: (m: MetricDefinition[]) => void }) {
   const [customKey, setCustomKey] = useState('')
-  const [customDesc, setCustomDesc] = useState('')
   const [customDir, setCustomDir] = useState<'maximize' | 'minimize'>('maximize')
   const [selectedPreset, setSelectedPreset] = useState('')
 
@@ -461,7 +460,6 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
     if (!key || metrics.some(m => m.key === key)) return
     onChange([...metrics, { key, direction: customDir }])
     setCustomKey('')
-    setCustomDesc('')
   }
 
   function remove(key: string) {
@@ -613,7 +611,7 @@ function ExperimentModal({
     try {
       const payload = {
         name: form.name.trim(),
-        description: form.description.trim() || '',
+        description: form.description.trim(),
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
         max_agents: Number(form.max_agents),
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),

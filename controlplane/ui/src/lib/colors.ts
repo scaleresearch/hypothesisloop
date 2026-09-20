@@ -17,7 +17,7 @@ export const semantic = {
   neutral: '#b7bcc9',
 } as const
 
-export const statusColors: Record<string, string> = {
+const statusColors: Record<string, string> = {
   RUNNING: semantic.success,
   COMPLETED: semantic.accent,
   QUEUED: semantic.warning,

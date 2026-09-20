@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Combobox, ComboboxInput, ComboboxOptions, ComboboxOption } from '@headlessui/react'
 
-export interface SearchableSelectOption {
+interface SearchableSelectOption {
   value: string
   label: string
 }

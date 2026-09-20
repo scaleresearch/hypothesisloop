@@ -6,7 +6,7 @@ export const NODE_HEIGHT = 92
 export const HUMAN_OWNER = 'human'
 
 /** The value the agent filter matches: the registering agent, or HUMAN_OWNER for any person. */
-export function ownerKey(h: Hypothesis): string {
+function ownerKey(h: Hypothesis): string {
   return h.source === 'human' ? HUMAN_OWNER : h.agent_id
 }
 

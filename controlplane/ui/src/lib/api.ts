@@ -4,7 +4,6 @@ import type {
   Agent,
   Experiment,
   MetricDataPoint,
-  LineageNode,
   PlatformExperiment,
   AgentQuota,
   MetricDefinition,
@@ -15,7 +14,6 @@ import type {
   HypothesisGraph,
   HypothesisLinkInput,
   HypothesisLinkType,
-  HypothesisListItem,
   HypothesisStatus,
   HypothesisWithJobs,
   JobMetric,
@@ -24,7 +22,7 @@ import type {
 import { isZeroDate } from '@/lib/format'
 
 // One API, one base URL — quota, scheduler and registry operations are all served together.
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081'
+const API_URL = process.env.NEXT_PUBLIC_API_URL as string
 
 async function apiFetch<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: 'no-store' })
@@ -229,25 +227,6 @@ export function fetchPlatformExperimentTimeseries(
 // Hypotheses
 // ---------------------------------------------------------------------------
 
-export interface HypothesesParams {
-  /** Omit for the global, cross-platform-experiment view. */
-  platform_experiment_id?: string
-  agent?: string
-  status?: string
-  limit?: number
-  offset?: number
-}
-
-export function fetchHypothesesPage(params?: HypothesesParams): Promise<Page<HypothesisListItem>> {
-  const url = new URL(`${API_URL}/hypotheses`)
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
-    }
-  }
-  return apiFetchPage<HypothesisListItem>(url.toString())
-}
-
 export const HYPOTHESIS_STATUSES: HypothesisStatus[] = ['open', 'confirmed', 'refuted', 'inconclusive']
 
 export interface HypothesisStats {
@@ -285,7 +264,7 @@ export function fetchHypothesisGraph(platformExperimentID: string): Promise<Hypo
   )
 }
 
-export interface HypothesisQueryResult {
+interface HypothesisQueryResult {
   columns: string[]
   rows: unknown[][]
   truncated: boolean
@@ -293,7 +272,7 @@ export interface HypothesisQueryResult {
 
 // Read-only Cypher against one platform experiment's hypothesis graph, which the backend binds as
 // $pe. A Cypher error comes back as a 400 whose body is the database's own message.
-export async function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
+async function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
   const res = await fetch(`${API_URL}/hypotheses/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -454,7 +433,7 @@ export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment>
   return apiFetch<PlatformExperiment>(`${API_URL}/platform-experiments/${id}`)
 }
 
-export interface AgentStanding {
+interface AgentStanding {
   rank: number
   agent_id: string
   best: number
@@ -477,30 +456,6 @@ export interface PlatformExperimentResults {
 
 export function fetchPlatformExperimentResults(id: string): Promise<PlatformExperimentResults> {
   return apiFetch<PlatformExperimentResults>(`${API_URL}/platform-experiments/${id}/results`)
-}
-
-// quotaTier optionally overrides this signup's guaranteed-vs-burst-only split regardless of the
-// agent's kind — 'guaranteed' or 'burst_only'. Omit to use the kind default (humans
-// guaranteed+burst, agents burst-only). Lets one experiment mix tiers across participants.
-export type QuotaTierOverride = 'guaranteed' | 'burst_only' | undefined
-
-export async function signupPlatformExperiment(
-  id: string,
-  agentID: string,
-  quotaTier?: QuotaTierOverride,
-): Promise<{ status: string }> {
-  const res = await fetch(`${API_URL}/platform-experiments/${id}/signup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent_id: agentID, ...(quotaTier ? { quota_tier: quotaTier } : {}) }),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(`signup failed: ${res.status}`)
-  return res.json()
-}
-
-export function fetchAgentQuota(agentID: string, platformExpID: string): Promise<AgentQuota> {
-  return apiFetch<AgentQuota>(`${API_URL}/platform-experiments/${platformExpID}/quotas/${agentID}`)
 }
 
 export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<AgentQuota[]> {
@@ -566,12 +521,12 @@ export interface Stage {
   max_job_hours?: number
 }
 
-export interface AgentCut {
+interface AgentCut {
   agent_id: string
   stage_index: number
 }
 
-export interface StageAdvance {
+interface StageAdvance {
   stage_index: number
   advanced_at: string
 }

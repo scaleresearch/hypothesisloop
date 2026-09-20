@@ -27,7 +27,6 @@ import {
 import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
-import type { DonationRequest } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
@@ -158,12 +157,11 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
 // running ones) and pick which of that job's actually-reported metrics to chart, rather than
 // being limited to the experiment's tracked/ranking subset like the per-agent panel above.
 function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
-  // Most-recently-active first, keyed by whichever timestamp is freshest for that job — updated_at
-  // moves as a running job reports progress, submitted_at/created_at anchor jobs that haven't.
+  // Most-recently-active first: updated_at moves as a running job reports progress.
   const sorted = useMemo(
     () => [...jobs].sort((a, b) => {
-      const tA = new Date(a.updated_at ?? a.submitted_at ?? a.created_at ?? 0).getTime()
-      const tB = new Date(b.updated_at ?? b.submitted_at ?? b.created_at ?? 0).getTime()
+      const tA = new Date(a.updated_at).getTime()
+      const tB = new Date(b.updated_at).getTime()
       return tB - tA
     }),
     [jobs],

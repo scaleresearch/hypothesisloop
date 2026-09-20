@@ -16,9 +16,9 @@ export enum ExperimentStatus {
 // AcceleratorType is an open, operator-defined identifier (see hypothesisloop.yaml's accelerator_types) — any
 // vendor's model name is valid (NVIDIA, AMD, ...), not a fixed set. fetchResourceCapacity() has
 // the types a cluster reports and their rates.
-export type AcceleratorType = string
+type AcceleratorType = string
 
-export enum CapacityTier {
+enum CapacityTier {
   GUARANTEED = 'guaranteed',
   BURST = 'burst',
 }
@@ -56,7 +56,7 @@ export interface MetricDataPoint {
 
 // One competing job's full metric history within a platform experiment — a leaderboard/
 // competition dashboard plots one line per series.
-export interface MetricSeriesPoint {
+interface MetricSeriesPoint {
   timestamp: string
   value: number
 }
@@ -78,7 +78,7 @@ export interface AgentMetricSeries {
 
 // JobSpec mirrors the backend's domain.JobSpec — the platform's own execution DSL (never a
 // raw k8s manifest). See controlplane/settings/examples/experiment-submission.yaml for the full reference.
-export interface JobSpec {
+interface JobSpec {
   image: string
   command?: string[]
   args?: string[]
@@ -101,7 +101,7 @@ export interface JobSpec {
 
 // Mirrors domain.PhaseDetail (shared/domain/constants.go) — the runtime's explanation for a
 // container that hasn't started or keeps restarting.
-export interface PhaseDetail {
+interface PhaseDetail {
   reason?: string
   message?: string
   restart_count?: number
@@ -331,18 +331,6 @@ export interface ClusterSettings {
 }
 
 // ---------------------------------------------------------------------------
-// Lineage
-// ---------------------------------------------------------------------------
-
-export interface LineageNode {
-  id: string
-  hypothesis: string
-  status: ExperimentStatus
-  final_metric_value?: number
-  created_at: string
-}
-
-// ---------------------------------------------------------------------------
 // Hypotheses
 // ---------------------------------------------------------------------------
 
@@ -353,7 +341,7 @@ export type HypothesisStatus = 'open' | 'confirmed' | 'refuted' | 'inconclusive'
 // Who put a row in the pool. Human rows come from the UI form and carry `author` instead of
 // `agent_id`; exactly one of the two is ever set. Both sit in the same pool under the same dedup,
 // but a human row owns no job, holds no quota, and appears in no standings.
-export type HypothesisSource = 'agent' | 'human'
+type HypothesisSource = 'agent' | 'human'
 
 export interface Hypothesis {
   id: string
@@ -382,7 +370,7 @@ export interface HypothesisListItem extends Hypothesis {
 }
 
 // agent_id or author (exactly one) and created_at say who made the link and when.
-export interface HypothesisGraphEdge {
+interface HypothesisGraphEdge {
   from: string
   to: string
   type: HypothesisLinkType
