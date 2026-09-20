@@ -26,7 +26,6 @@ from support.wait import eventually
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("nvidia")]
 
-JOB_FILE = REPO_ROOT / "tests" / "workloads" / "nvidia" / "job.yaml"
 
 
 def _skip_reason() -> str | None:
@@ -125,7 +124,7 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
         )
         api.signup_and_start(pe_id, [agent])
 
-        _run(api, pe_id, agent, cluster_name, engine, acc_type, run_id, deadline, submitted)
+        _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted)
     finally:
         for j in submitted:
             try:
@@ -142,7 +141,7 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
         log_file.close()
 
 
-def _run(api, pe_id, agent, cluster_name, engine, acc_type, run_id, deadline, submitted: list[str]) -> None:
+def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted: list[str]) -> None:
     def force_admit(job_id: str, cluster: str) -> bool:
         for _ in range(5):
             r = api.admit(job_id, cluster)

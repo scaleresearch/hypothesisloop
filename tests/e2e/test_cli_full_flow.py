@@ -74,7 +74,7 @@ def test_hl_register_returns_the_registered_agent_id(api, run_id):
     assert register_id == agent, f"hl register: expected id {agent}, got {register_id}"
 
 
-def test_cli_full_flow_happy_path(api, run_id, deadline):
+def test_cli_full_flow_happy_path(api, run_id):
     """register -> platform-experiments create/start -> signup -> hypothesis submit --file/list ->
     job submit -> job list/status -> watch --until a terminal status -> hypothesis dedup. Ported as
     one sequential test since each step consumes state (pe_id, hyp_id, job_id) produced by the one
@@ -193,7 +193,7 @@ def cli_watch_pe(api, experiment, run_id):
     return pe_id, agent
 
 
-def test_watch_comment_new_delivered_live(api, cli_watch_pe, deadline):
+def test_watch_comment_new_delivered_live(api, cli_watch_pe):
     # -- hl watch: comment.new delivered live --
     pe_id, agent = cli_watch_pe
     hyp_id = api.register_hypothesis(pe_id, agent, f"cli watch comment.new hypothesis {uuid.uuid4().hex[:8]}")["id"]

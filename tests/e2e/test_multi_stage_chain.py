@@ -94,7 +94,7 @@ def test_completed_job_that_wrote_nothing_lists_as_empty_data(api, experiment, r
         job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}, "accelerator_type": ACCELERATOR_TYPE},
     )
 
-    exp = _wait_completed(api, deadline, job_id, "the no-data job to complete")
+    _wait_completed(api, deadline, job_id, "the no-data job to complete")
     api.file_finding(job_id, "multi-stage chain: a completed job that kept nothing.")
 
     resp = api.experiment_data(job_id)

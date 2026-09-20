@@ -32,8 +32,8 @@ import sys
 import time
 import urllib.request
 
-EXP_ID = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-API_URL = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
+EXP_ID = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
+API_URL = os.environ["HYPOTHESISLOOP_API_URL"]
 METRIC = os.environ.get("HYPOTHESISLOOP_PRIMARY_METRIC", "val_accuracy")
 
 def resolve_rank() -> int:

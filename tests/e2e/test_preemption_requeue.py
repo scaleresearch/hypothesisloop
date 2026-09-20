@@ -51,7 +51,6 @@ def _deployed_setting(key: str) -> int:
 pytestmark = pytest.mark.exclusive("a100")
 
 ACCELERATOR_TYPE = A100
-A100_ACCH_RATE = 0.375
 
 STARTED = ("RUNNING",)
 TERMINAL = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
@@ -267,10 +266,6 @@ CKPT_FULL_RUN_SECONDS = CKPT_STEPS_TOTAL * CKPT_STEP_SECONDS  # 70
 CKPT_PREEMPT_AT_STEP = 9
 CKPT_WRITE_DELAY = 8
 CKPT_GRACE = 60
-
-
-def _no_rank_survives(job_id: str) -> bool:
-    return job_pod_count(job_id) == 0
 
 
 @pytest.fixture(scope="module")

@@ -41,10 +41,10 @@ import json
 import time
 import urllib.request
 
-EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
-PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
-API_URL    = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
+EXP_ID     = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
+AGENT_ID   = os.environ["HYPOTHESISLOOP_AGENT_ID"]
+PROJECT_ID = os.environ["HYPOTHESISLOOP_PROJECT_ID"]
+API_URL    = os.environ["HYPOTHESISLOOP_API_URL"]
 
 # DRA gives this pod exactly one Tenstorrent device (accelerator_count: 1 in
 # tests/workloads/tenstorrent/job.yaml) and only that device's /dev/tenstorrent/N node is

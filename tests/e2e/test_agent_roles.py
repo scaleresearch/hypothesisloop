@@ -148,7 +148,6 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     api.file_finding(baseline_job)
 
     baseline_best = api.metric_max(baseline_job, "val_accuracy")
-    reviewer_best = api.metric_max(reviewer_job, "val_accuracy")
     assert baseline_best is not None, "the baseline's val_accuracy must be recorded and readable"
 
     best_comp, best_comp_value = None, None
@@ -226,17 +225,15 @@ def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, ex
     # lower rate the same run time settles proportionally less and the boundary is never reached.
     # Matches tests/scenarios/agent-roles.sh's own ACCELERATOR_TYPE choice for this exact reason.
     CUT_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
-    baseline_job = api.submit_job(
+    api.submit_job(
         pe_id, baseline, hours=CUT_JOB_HOURS,
         job_overrides={"env": _env(CUT_RUN_SECONDS, LOW_ANCHOR), "accelerator_type": CUT_ACCELERATOR_TYPE},
     )
-    comp_jobs = [
+    for a, anchor in zip(competitors, CUT_ANCHORS):
         api.submit_job(
             pe_id, a, hours=CUT_JOB_HOURS,
             job_overrides={"env": _env(CUT_RUN_SECONDS, str(anchor)), "accelerator_type": CUT_ACCELERATOR_TYPE},
         )
-        for a, anchor in zip(competitors, CUT_ANCHORS)
-    ]
 
     stages = eventually(
         "the first stage boundary",

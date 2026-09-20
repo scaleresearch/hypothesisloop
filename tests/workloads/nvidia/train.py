@@ -19,10 +19,10 @@ import json
 import time
 import urllib.request
 
-EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
-PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
-API_URL    = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
+EXP_ID     = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
+AGENT_ID   = os.environ["HYPOTHESISLOOP_AGENT_ID"]
+PROJECT_ID = os.environ["HYPOTHESISLOOP_PROJECT_ID"]
+API_URL    = os.environ["HYPOTHESISLOOP_API_URL"]
 
 # Repeats the sweep in a loop, sleeping REPEAT_SLEEP_SECONDS between passes, until killed —
 # lets a scenario request a job that stays RUNNING long enough to observe live metrics and/or

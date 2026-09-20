@@ -27,7 +27,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -39,7 +38,6 @@ pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("tenstorrent")]
 
 TT_CONTEXT = os.environ.get("TT_CONTEXT", "k3s-tt")
 JOB_NS = "hypothesisloop-jobs"
-JOB_FILE = REPO_ROOT / "tests" / "workloads" / "tenstorrent" / "job.yaml"
 ACCEL_TYPE = "tenstorrent.com/chipArch=blackhole"
 
 # Overrides tests/workloads/tenstorrent/job.yaml's own fields on top of the generic base spec

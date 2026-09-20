@@ -67,10 +67,6 @@ def gang_cmd(max_retries: int, colocated: bool = False) -> dict:
     return cmd
 
 
-def gang_pods_gone(job_id: str) -> bool:
-    return job_pod_count(job_id) == 0
-
-
 def test_distributed_job_gang_admission_pod_spec_and_billing(api, experiment, run_id, deadline):
     """Part 1: a single num_nodes=2 job's gang scheduling creates all replicas, generated pod
     specs carry equal/non-empty requests==limits, a corrupted companion Service is fully
@@ -287,7 +283,7 @@ def test_gang_per_node_accelerator_count(api, experiment, run_id, deadline):
     api.file_finding(job_id, "distributed e2e: per-node accelerator count is true of the pod.")
 
 
-def test_gang_admission_is_all_or_nothing(api, experiment, run_id, deadline):
+def test_gang_admission_is_all_or_nothing(api, experiment, run_id):
     """Part 3, #3 (G1): all N nodes are admitted together or none is. More ranks than there are
     hosts advertising this type, with the default hard host spread -- there is no partial
     admission to fall back to, so it must sit in the queue saying why."""

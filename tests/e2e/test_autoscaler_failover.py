@@ -368,7 +368,7 @@ def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadlin
         api.close_platform_experiment(pe_id)
 
 
-def test_cluster_identity_survives_agent_restart(api, run_id):
+def test_cluster_identity_survives_agent_restart(api):
     """Scenario 5 (restart form): cluster_id is derived live from the kube-system namespace UID,
     not generated/persisted by the runtime -- restarting the cluster-agent process must not change
     it, so cluster_settings and tried-history keep applying across a restart. Renaming CLUSTER_NAME

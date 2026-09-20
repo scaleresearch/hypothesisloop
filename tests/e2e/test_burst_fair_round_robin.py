@@ -27,7 +27,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
-from support.wait import Deadline, eventually
+from support.wait import eventually
 
 pytestmark = pytest.mark.exclusive("a100")
 

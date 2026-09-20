@@ -30,14 +30,14 @@ import urllib.request
 
 # Config from environment
 
-EXP_ID     = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-AGENT_ID   = os.environ.get("HYPOTHESISLOOP_AGENT_ID", "agent-dev")
-PROJECT_ID = os.environ.get("HYPOTHESISLOOP_PROJECT_ID", "dev")
+EXP_ID     = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
+AGENT_ID   = os.environ["HYPOTHESISLOOP_AGENT_ID"]
+PROJECT_ID = os.environ["HYPOTHESISLOOP_PROJECT_ID"]
 METRIC     = os.environ.get("HYPOTHESISLOOP_PRIMARY_METRIC", "val_accuracy")
 DIRECTION  = os.environ.get("HYPOTHESISLOOP_METRIC_DIRECTION", "maximize")
 INTERVAL   = int(os.environ.get("HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS", "5"))
 DURATION   = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "60"))
-API_URL    = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
+API_URL    = os.environ["HYPOTHESISLOOP_API_URL"]
 BASELINE   = float(os.environ.get("HYPOTHESISLOOP_BASELINE", "0.5"))
 ACCELERATOR_TYPE   = os.environ.get("HYPOTHESISLOOP_ACCELERATOR_TYPE", "T4")
 ACCELERATOR_COUNT  = int(os.environ.get("HYPOTHESISLOOP_ACCELERATOR_COUNT", "1"))
@@ -130,21 +130,13 @@ def post_metric(fraction: float, value: float, metric_name: str = METRIC) -> Non
         print(f"  [warn] metric POST failed: {e}", file=sys.stderr)
 
 
-def patch_status(status: str, final_metric=None) -> None:
-    # Execution status (RUNNING/COMPLETED/FAILED) is owned by the control plane, derived from the
-    # cluster agent's pod-phase reports — a workload cannot self-declare its lifecycle state. This
-    # is intentionally a no-op; kept so the call sites read as documentation of the real transition.
-    return
-
-
-
 # Main: emit metrics on a real timer, sleeping between each step
 
 
 def main() -> None:
     steps = max(4, DURATION // max(1, INTERVAL))
 
-    print(f"HypothesisLoop workload starting")
+    print("HypothesisLoop workload starting")
     print(f"  experiment: {EXP_ID}  agent: {AGENT_ID}  project: {PROJECT_ID}")
     print(f"  metric: {METRIC} ({DIRECTION})  steps: {steps}  interval: {INTERVAL}s  total: ~{steps * INTERVAL}s")
     print(f"  pretend accelerator: {ACCELERATOR_COUNT}x {ACCELERATOR_TYPE}")
@@ -152,7 +144,6 @@ def main() -> None:
     print(f"  lr={LEARNING_RATE}  batch={BATCH_SIZE}  hidden={HIDDEN_DIM}  "
           f"dropout={DROPOUT}  optim={OPTIMIZER}  wd={WEIGHT_DECAY}")
 
-    patch_status("RUNNING")
 
     best = None
     final_value = None
@@ -197,7 +188,6 @@ def main() -> None:
     if final_value is None:
         final_value = val_accuracy_at(1.0)
 
-    patch_status("COMPLETED", final_value)
     print(f"\nDone. final={final_value:.4f}  best={best:.4f}")
 
 

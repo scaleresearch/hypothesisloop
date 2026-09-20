@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
-from support.cluster import pod_cpu_resources
+from support.cluster import pod_resource
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -90,7 +90,7 @@ def test_fractional_cpu_retains_millicore_precision_in_pod_spec(api, mixed_pe, d
         deadline=deadline,
     )
     assert admitted["status"] in ("RUNNING", "COMPLETED")
-    req, lim = pod_cpu_resources(job_id)
+    req, lim = pod_resource(job_id, "cpu")
     assert req == "333m" and lim == "333m", (
         f"fractional CPU precision lost: got request={req} limit={lim}, expected 333m/333m"
     )

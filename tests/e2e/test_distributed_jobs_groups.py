@@ -67,10 +67,6 @@ def groups_cmd(max_retries: int) -> dict:
     }
 
 
-def gang_pods_gone(job_id: str) -> bool:
-    return job_pod_count(job_id) == 0
-
-
 def test_heterogeneous_group_gang_forms_one_process_group_and_bills_by_shape(api, experiment, run_id, deadline):
     """One process group across both groups, plus cost summed over the shapes (not replicated
     over the largest one)."""

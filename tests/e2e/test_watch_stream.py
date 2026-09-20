@@ -31,7 +31,6 @@ import json
 import subprocess
 import time
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -365,7 +364,7 @@ def test_watch_mid_run_disconnect_and_cursor_replay(api, watch_pe, watch, deadli
     assert not changed, f"a repeated status carried a different position than before the disconnect: {changed}"
 
 
-def test_watch_unknown_kind_refused_at_handshake(api, pe, run_id, watch, deadline):
+def test_watch_unknown_kind_refused_at_handshake(pe, run_id, watch):
     """No job needed at all: kind parsing happens before scope validation, so this needs only a
     platform experiment to name -- the API-only, no-accelerator split of this module."""
     pe_id = pe(f"watch-stream-bogus-{run_id}", PE_BUDGET, 1)
