@@ -10,7 +10,12 @@
 //     content is not logged.
 //   - The vendor's list shows a sandbox as running and nothing of what runs in it, and envd
 //     answers only to the sandbox's own token, so List makes two calls for each sandbox of the
-//     prefix: one for the token and one for the state file.
+//     prefix: one for the token and one for the state file. They are made side by side, and one
+//     sandbox that cannot be read does not fail the list.
+//   - Whatever a sandbox listens on answers at a public address unless public traffic is turned
+//     off when the sandbox is made, which Create does. envd is not behind that switch.
+//   - Everything read from inside a sandbox is written by what runs there, so every such read
+//     has a bound.
 //   - A sandbox is killed when its lifetime ends, with everything in it. The plan caps the
 //     lifetime, at one hour on the free plan.
 //   - Nothing of the account is inside a sandbox.
@@ -20,12 +25,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vendorapi"
 )
 
 var _ provider.Provider = (*Provider)(nil)
@@ -33,8 +40,15 @@ var _ provider.Provider = (*Provider)(nil)
 const (
 	defaultBaseURL = "https://api.e2b.app"
 	requestTimeout = 30 * time.Second
-	maxErrorBody   = 512
 	pollInterval   = time.Second
+
+	// launchWindow bounds what Create does with a sandbox it has made: the wait to see it in
+	// the list, and then the start of the command inside it.
+	launchWindow = 30 * time.Second
+
+	// maxAnswer bounds one answer of the API. The largest is a page of the list, a hundred
+	// sandboxes of a few hundred bytes each.
+	maxAnswer = 4 << 20
 )
 
 type Provider struct {
@@ -45,6 +59,9 @@ type Provider struct {
 	envdURL func(sandboxID string) string
 	http    *http.Client
 	poll    time.Duration
+	window  time.Duration
+	// stateRead bounds the reading of one sandbox's state in List.
+	stateRead time.Duration
 }
 
 // New refuses any accelerator type: the vendor rents CPU-only sandboxes, so a shape that asks
@@ -61,25 +78,24 @@ func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 		return nil, err
 	}
 	return &Provider{
-		cfg:     cfg,
-		apiKey:  key,
-		baseURL: defaultBaseURL,
-		envdURL: func(sandboxID string) string { return "https://49983-" + sandboxID + ".e2b.app" },
-		http:    &http.Client{Timeout: requestTimeout},
-		poll:    pollInterval,
+		cfg:       cfg,
+		apiKey:    key,
+		baseURL:   defaultBaseURL,
+		envdURL:   func(sandboxID string) string { return "https://49983-" + sandboxID + ".e2b.app" },
+		http:      &http.Client{Timeout: requestTimeout},
+		poll:      pollInterval,
+		window:    launchWindow,
+		stateRead: stateReadWindow,
 	}, nil
 }
 
-// statusError is a non-2xx answer from the API or from a sandbox's envd.
-type statusError struct {
-	Method string
-	Path   string
-	Status int
-	Body   string
-}
+const vendor = "e2b"
 
-func (e *statusError) Error() string {
-	return fmt.Sprintf("e2b: %s %s: HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
+// hasStatus tells whether err is an answer with the given HTTP status, from the API or from a
+// sandbox's envd.
+func hasStatus(err error, status int) bool {
+	var failure *vendorapi.StatusError
+	return errors.As(err, &failure) && failure.Status == status
 }
 
 // call sends one JSON request to the API and decodes a 2xx answer into out. A nil out is for an
@@ -101,7 +117,7 @@ func (p *Provider) call(ctx context.Context, method, path string, body, out any)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	raw, header, err := p.send(req)
+	raw, header, err := vendorapi.Do(p.http, req, vendor, maxAnswer)
 	if err != nil {
 		return nil, err
 	}
@@ -112,28 +128,4 @@ func (p *Provider) call(ctx context.Context, method, path string, body, out any)
 		return nil, fmt.Errorf("e2b: decode %s %s: %w", method, path, err)
 	}
 	return header, nil
-}
-
-// send returns the body of a 2xx answer.
-func (p *Provider) send(req *http.Request) ([]byte, http.Header, error) {
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("e2b: %s %s: %w", req.Method, req.URL.Path, err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, nil, fmt.Errorf("e2b: read %s %s: %w", req.Method, req.URL.Path, err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, nil, &statusError{Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode, Body: truncate(raw)}
-	}
-	return raw, resp.Header, nil
-}
-
-func truncate(raw []byte) string {
-	if len(raw) > maxErrorBody {
-		return string(raw[:maxErrorBody])
-	}
-	return string(raw)
 }

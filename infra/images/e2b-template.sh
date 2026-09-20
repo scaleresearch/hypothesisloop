@@ -92,6 +92,10 @@ CONFIG="$(registry "blobs/$(jq -r '.config.digest' <<<"${MANIFEST}")")"
 # the adapter's supervisor reads before it sets the command's own (supervise.go). Every value is
 # in single quotes, inside which a shell reads each byte as itself. USER comes last: the file and
 # the working directory are made by root.
+# The names are checked first: a name is written into that file unquoted, and one that is not a
+# variable name would be read by the shell of every sandbox as a command.
+BAD_NAME="$(jq -r '[(.config.Env // [])[] | split("=")[0] | select(test("\\A[A-Za-z_][A-Za-z0-9_]*\\z") | not)][0] // empty | @json' <<<"${CONFIG}")"
+[[ -z "${BAD_NAME}" ]] || { echo "e2b-template: ${IMAGE} sets ${BAD_NAME} in its ENV, which is not an environment variable name" >&2; exit 1; }
 IMAGE_ENV="$(jq -r '(.config.Env // [])[] | capture("^(?<k>[^=]*)=(?<v>.*)$"; "s")
   | "export \(.k)=\u0027\(.v | gsub("\u0027"; "\u0027\\\u0027\u0027"))\u0027"' <<<"${CONFIG}")"
 STEPS="$(jq -c --arg env "$(printf '%s\n' "${IMAGE_ENV}" | base64 | tr -d '\n')" '

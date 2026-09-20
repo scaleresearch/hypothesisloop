@@ -3,10 +3,15 @@ package e2b
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vendorapi"
 )
 
 func stdoutEvent(output string) string {
@@ -16,8 +21,6 @@ func stdoutEvent(output string) string {
 func stderrEvent(output string) string {
 	return `{"event":{"data":{"stderr":"` + base64.StdEncoding.EncodeToString([]byte(output)) + `"}}}`
 }
-
-const endedEvent = `{"event":{"end":{"exited":true,"status":"exit status 0"}}}`
 
 // tailing wires a Logs call whose tail writes the given chunks.
 func tailing(api *fakeAPI, chunks ...string) {
@@ -148,4 +151,64 @@ func TestLogsReportsEveryFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// What a sandbox sends is written by what runs in it. A frame is as long as its header says and
+// a log as long as its lines are, so both have a ceiling, and neither is read past it.
+func TestLogsRefusesAStreamMessageLargerThanAnyEnvdSends(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, sandboxPath, answer(200, detailJSON))
+	api.on(http.MethodPost, envdStart, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte{0, 0xff, 0xff, 0xff, 0xff})
+	})
+	p := newTestProvider(t, api)
+
+	before := allocated()
+	_, err := p.Logs(context.Background(), "sb1", 10)
+	if err == nil || !strings.Contains(err.Error(), "announces a message of 4294967295 bytes") {
+		t.Fatalf("err = %v, want a refusal of the announced length", err)
+	}
+	if grew := allocated() - before; grew > 64<<20 {
+		t.Errorf("%d MiB were allocated for a length a sandbox announced", grew>>20)
+	}
+}
+
+func TestLogsRefusesOutputLongerThanItsBound(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, sandboxPath, answer(200, detailJSON))
+	var sent atomic.Int64
+	api.on(http.MethodPost, envdStart, func(w http.ResponseWriter, _ *http.Request) {
+		piece := framed(0, stdoutEvent(strings.Repeat("x", 256<<10)))
+		for sent.Load() < 64<<20 {
+			if _, err := w.Write(piece); err != nil {
+				return
+			}
+			sent.Add(int64(len(piece)))
+		}
+	})
+	p := newTestProvider(t, api)
+
+	_, err := p.Logs(context.Background(), "sb1", 1)
+	if err == nil || !strings.Contains(err.Error(), "wrote more than 4194304 bytes") {
+		t.Fatalf("err = %v, want a refusal naming the bound", err)
+	}
+	if sent.Load() >= 64<<20 {
+		t.Errorf("all %d MiB were read before the output was refused", sent.Load()>>20)
+	}
+}
+
+func TestAnAnswerOfTheAPILargerThanItsBoundIsRefused(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, sandboxPath, answer(200, `{"envdAccessToken":"`+strings.Repeat("t", maxAnswer)+`"}`))
+	p := newTestProvider(t, api)
+
+	if _, err := p.Logs(context.Background(), "sb1", 10); !errors.Is(err, vendorapi.ErrTooLarge) {
+		t.Fatalf("err = %v, want the answer refused as too large", err)
+	}
+}
+
+func allocated() uint64 {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.TotalAlloc
 }

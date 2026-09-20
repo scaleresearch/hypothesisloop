@@ -2,9 +2,11 @@ package e2b
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +34,7 @@ func TestListReturnsTheSandboxesOfThePrefixUnderTheirNames(t *testing.T) {
 		api.on(http.MethodGet, "/sandboxes/"+id, answer(200, detailJSON))
 	}
 	api.on(http.MethodGet, "/envd/sb1/files", answer(200, "running\n"))
-	api.on(http.MethodGet, "/envd/sb2/files", answer(200, "running\nexited 3\n"))
+	api.on(http.MethodGet, "/envd/sb2/files", answer(200, "running\nexited\n"))
 	api.on(http.MethodGet, "/envd/sb3/files", answer(404, noFileJSON))
 	p := newTestProvider(t, api)
 
@@ -107,8 +109,7 @@ func TestListMapsWhatTheSupervisorWrote(t *testing.T) {
 		"no state file yet":     {answer(404, noFileJSON), provider.StateStarting},
 		"a file made and empty": {answer(200, ""), provider.StateStarting},
 		"running":               {answer(200, "running\n"), provider.StateRunning},
-		"exited with success":   {answer(200, "running\nexited 0\n"), provider.StateExited},
-		"exited with a signal":  {answer(200, "running\nexited 143\n"), provider.StateExited},
+		"exited":                {answer(200, "running\nexited\n"), provider.StateExited},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -139,56 +140,129 @@ func TestAPausedSandboxIsStartingAndNothingInsideItIsRead(t *testing.T) {
 	}
 }
 
-func TestASandboxThatEndedBetweenTheListAndTheReadIsGone(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodGet, sandboxesPath, answer(200, sandboxes(sandboxJSON("sb1", "hl-a", "running"), sandboxJSON("sb2", "hl-b", "running"))))
-	api.on(http.MethodGet, sandboxPath, answer(404, goneJSON))
-	api.on(http.MethodGet, "/sandboxes/sb2", answer(200, detailJSON))
-	api.on(http.MethodGet, "/envd/sb2/files", answer(200, "running\n"))
-	p := newTestProvider(t, api)
-
-	got, err := p.List(context.Background(), "hl-")
-	if err != nil || len(got) != 1 || got[0].ID != "sb2" {
-		t.Fatalf("List = %+v, %v, want only the sandbox that is still there", got, err)
-	}
-}
-
-func TestListReportsEveryFailure(t *testing.T) {
-	listed := answer(200, sandboxes(sandboxJSON("sb1", "hl-a", "running")))
-	cases := map[string]struct {
-		list, detail, state http.HandlerFunc
-		requests            int
-	}{
-		"list rate limited":      {list: answer(429, `{"code":429,"message":"rate limit exceeded"}`), requests: 1},
-		"list server error":      {list: answer(500, `oops`), requests: 1},
-		"list is not a list":     {list: answer(200, `{"sandboxes":[]}`), requests: 1},
-		"token rate limited":     {list: listed, detail: answer(429, `{"code":429}`), requests: 2},
-		"token server error":     {list: listed, detail: answer(500, `oops`), requests: 2},
-		"shown without a token":  {list: listed, detail: answer(200, `{"sandboxID":"sb1"}`), requests: 2},
-		"envd unreachable":       {list: listed, detail: answer(200, detailJSON), state: answer(502, deadEnvd), requests: 3},
-		"envd refuses the token": {list: listed, detail: answer(200, detailJSON), state: answer(401, `{"code":401}`), requests: 3},
-		"a state nobody wrote":   {list: listed, detail: answer(200, detailJSON), state: answer(200, "exited 0\n"), requests: 3},
-		"a third state line":     {list: listed, detail: answer(200, detailJSON), state: answer(200, "running\nexited 0\nrunning\n"), requests: 3},
-	}
-	for name, tc := range cases {
+func TestListFailsOnlyWhenTheVendorsOwnListDoes(t *testing.T) {
+	for name, list := range map[string]http.HandlerFunc{
+		"rate limited": answer(429, `{"code":429,"message":"rate limit exceeded"}`),
+		"server error": answer(500, `oops`),
+		"not a list":   answer(200, `{"sandboxes":[]}`),
+		"too large":    answer(200, "["+strings.Repeat(" ", maxAnswer)+"]"),
+	} {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
-			api.on(http.MethodGet, sandboxesPath, tc.list)
-			if tc.detail != nil {
-				api.on(http.MethodGet, sandboxPath, tc.detail)
-			}
-			if tc.state != nil {
-				api.on(http.MethodGet, envdFiles, tc.state)
-			}
+			api.on(http.MethodGet, sandboxesPath, list)
 			p := newTestProvider(t, api)
 
 			if got, err := p.List(context.Background(), "hl-"); err == nil {
 				t.Fatalf("List = %+v with no error", got)
 			}
-			if api.total() != tc.requests {
-				t.Errorf("requests = %d, want %d and no retry", api.total(), tc.requests)
+			if api.total() != 1 {
+				t.Errorf("requests = %d, want 1 and no retry", api.total())
 			}
 		})
+	}
+}
+
+// A caller creates what it does not find and destroys nothing it cannot see, so one sandbox
+// that cannot be read must neither fail the list of all the others nor drop out of it.
+func TestListKeepsEverySandboxWhateverReadingItCameTo(t *testing.T) {
+	hung := func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
+	cases := map[string]struct {
+		detail, state http.HandlerFunc
+		want          provider.State
+	}{
+		"token rate limited":         {answer(429, `{"code":429}`), nil, provider.StateRunning},
+		"token server error":         {answer(500, `oops`), nil, provider.StateRunning},
+		"token refused":              {answer(401, `{"code":401}`), nil, provider.StateRunning},
+		"token read hangs":           {hung, nil, provider.StateRunning},
+		"shown without a token":      {answer(200, `{"sandboxID":"sb1"}`), nil, provider.StateRunning},
+		"gone when read":             {answer(404, goneJSON), nil, provider.StateRunning},
+		"envd unreachable":           {answer(200, detailJSON), answer(502, deadEnvd), provider.StateRunning},
+		"envd refuses the token":     {answer(200, detailJSON), answer(401, `{"code":401}`), provider.StateRunning},
+		"envd hangs":                 {answer(200, detailJSON), hung, provider.StateRunning},
+		"a state nobody wrote":       {answer(200, detailJSON), answer(200, "exited\n"), provider.StateExited},
+		"a third state line":         {answer(200, detailJSON), answer(200, "running\nexited\nrunning\n"), provider.StateExited},
+		"a state file without end":   {answer(200, detailJSON), answer(200, strings.Repeat("running\n", 1<<20)), provider.StateExited},
+		"a state file one byte over": {answer(200, detailJSON), answer(200, strings.Repeat("x", maxStateBytes+1)), provider.StateExited},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.on(http.MethodGet, sandboxesPath, answer(200, sandboxes(sandboxJSON("sb1", "hl-a", "running"), sandboxJSON("sb2", "hl-b", "running"))))
+			api.on(http.MethodGet, sandboxPath, tc.detail)
+			if tc.state != nil {
+				api.on(http.MethodGet, envdFiles, tc.state)
+			}
+			api.on(http.MethodGet, "/sandboxes/sb2", answer(200, detailJSON))
+			api.on(http.MethodGet, "/envd/sb2/files", answer(200, "running\nexited\n"))
+			p := newTestProvider(t, api)
+			p.stateRead = 100 * time.Millisecond
+
+			got, err := p.List(context.Background(), "hl-")
+			if err != nil || len(got) != 2 {
+				t.Fatalf("List = %+v, %v, want both sandboxes and no error", got, err)
+			}
+			if got[0].ID != "sb1" || got[0].Name != "hl-a" || got[0].State != tc.want {
+				t.Errorf("the sandbox that could not be read = %+v, want it listed as %s", got[0], tc.want)
+			}
+			if got[1].ID != "sb2" || got[1].State != provider.StateExited {
+				t.Errorf("the sandbox beside it = %+v, want it read as exited", got[1])
+			}
+		})
+	}
+}
+
+func TestListReadsSandboxesSideBySideAndNoMoreThanItsBoundAtOnce(t *testing.T) {
+	const count = 40
+	api := newFakeAPI(t)
+	var listed []string
+	for i := range count {
+		listed = append(listed, sandboxJSON(fmt.Sprintf("s%d", i), fmt.Sprintf("hl-%d", i), "running"))
+	}
+	api.on(http.MethodGet, sandboxesPath, answer(200, sandboxes(listed...)))
+	var mu sync.Mutex
+	reading, most := 0, 0
+	for i := range count {
+		api.on(http.MethodGet, fmt.Sprintf("/sandboxes/s%d", i), func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			reading++
+			most = max(most, reading)
+			mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			answer(200, detailJSON)(w, r)
+		})
+		api.on(http.MethodGet, fmt.Sprintf("/envd/s%d/files", i), func(w http.ResponseWriter, r *http.Request) {
+			answer(200, "running\n")(w, r)
+			mu.Lock()
+			reading--
+			mu.Unlock()
+		})
+	}
+	p := newTestProvider(t, api)
+
+	got, err := p.List(context.Background(), "hl-")
+	if err != nil || len(got) != count {
+		t.Fatalf("List = %d instances, %v, want %d", len(got), err, count)
+	}
+	for i, instance := range got {
+		if want := fmt.Sprintf("s%d", i); instance.ID != want || instance.State != provider.StateRunning {
+			t.Fatalf("instance %d = %+v, want %s running, in the order of the vendor's list", i, instance, want)
+		}
+	}
+	if most < 2 || most > stateReaders {
+		t.Errorf("%d sandboxes were read at once, want more than one and at most %d", most, stateReaders)
+	}
+}
+
+func TestListFailsWhenTheCallersTimeEndsBeforeEverySandboxIsRead(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, sandboxesPath, answer(200, sandboxes(sandboxJSON("sb1", "hl-a", "running"))))
+	api.on(http.MethodGet, sandboxPath, func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+	p := newTestProvider(t, api)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	if got, err := p.List(ctx, "hl-"); err == nil {
+		t.Fatalf("List = %+v with no error, though the caller gave up before the states were read", got)
 	}
 }
 

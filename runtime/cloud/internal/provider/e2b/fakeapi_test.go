@@ -99,6 +99,17 @@ func (a *fakeAPI) sent(method, path string) []recorded {
 	return out
 }
 
+// order is every request so far, as "METHOD path", in the order it arrived.
+func (a *fakeAPI) order() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	for _, r := range a.requests {
+		out = append(out, r.Method+" "+r.Path)
+	}
+	return out
+}
+
 func (a *fakeAPI) total() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -183,7 +194,10 @@ func sentProcess(t *testing.T, r recorded) map[string]any {
 	return body
 }
 
-const startedEvent = `{"event":{"start":{"pid":971}}}`
+const (
+	startedEvent = `{"event":{"start":{"pid":971}}}`
+	endedEvent   = `{"event":{"end":{"exited":true,"status":"exit status 0"}}}`
+)
 
 func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	t.Helper()
@@ -195,5 +209,6 @@ func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	p.baseURL = api.server.URL
 	p.envdURL = func(sandboxID string) string { return api.server.URL + "/envd/" + sandboxID }
 	p.poll = 5 * time.Millisecond
+	p.window = 300 * time.Millisecond
 	return p
 }

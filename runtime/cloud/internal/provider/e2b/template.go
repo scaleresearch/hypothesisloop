@@ -20,7 +20,7 @@ type size struct {
 }
 
 func sizeOf(spec provider.Spec) size {
-	return size{CPUs: ceilDiv(spec.CPUMillis, 1000), MemoryMB: ceilDiv(spec.MemoryBytes, bytesPerMB)}
+	return size{CPUs: provider.CeilDiv(spec.CPUMillis, 1000), MemoryMB: provider.CeilDiv(spec.MemoryBytes, bytesPerMB)}
 }
 
 // templateName is the name of the template for an image at a size. It is a function of the two
@@ -31,8 +31,4 @@ func sizeOf(spec provider.Spec) size {
 func templateName(image string, s size) string {
 	digest := sha256.Sum256([]byte(image))
 	return fmt.Sprintf("hl-%s-%dc-%dm", hex.EncodeToString(digest[:10]), s.CPUs, s.MemoryMB)
-}
-
-func ceilDiv(value, unit int64) int64 {
-	return (value + unit - 1) / unit
 }

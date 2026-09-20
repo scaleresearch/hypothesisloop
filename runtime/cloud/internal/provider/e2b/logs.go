@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// maxLogBytes bounds what one Logs call reads. The command writes the lines, and tail counts
+// lines whatever their length.
+const maxLogBytes = 4 << 20
+
 // Logs runs tail on the output file inside the sandbox, which needs tail in the template. A
 // sandbox that is gone has no output left to read: the vendor keeps nothing of a killed sandbox.
 func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, error) {
@@ -20,27 +24,12 @@ func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, err
 	if !exists {
 		return nil, fmt.Errorf("e2b: logs of sandbox %s: the sandbox is gone, and its output with it", id)
 	}
-	var stdout, stderr strings.Builder
-	status := ""
-	read := startRequest{Process: processConfig{Cmd: "/bin/sh", Args: []string{"-c", tailScript, "hl-logs", outputPath, strconv.Itoa(tail)}}}
-	err = inside.start(ctx, read, func(event processEvent) bool {
-		if data := event.Event.Data; data != nil {
-			stdout.Write(data.Stdout)
-			stderr.Write(data.Stderr)
-		}
-		if end := event.Event.End; end != nil {
-			status = end.Status
-		}
-		return true
-	})
+	output, err := inside.run(ctx, maxLogBytes, "/bin/sh", "-c", tailScript, "hl-logs", outputPath, strconv.Itoa(tail))
 	if err != nil {
-		return nil, fmt.Errorf("e2b: logs of sandbox %s: %w", id, err)
+		return nil, fmt.Errorf("e2b: logs of sandbox %s, its last %d lines: %w", id, tail, err)
 	}
-	if status != "exit status 0" {
-		return nil, fmt.Errorf("e2b: logs of sandbox %s: reading the output file ended with %q: %s", id, status, truncate([]byte(stderr.String())))
-	}
-	if stdout.Len() == 0 {
+	if output == "" {
 		return []string{}, nil
 	}
-	return strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n"), nil
+	return strings.Split(strings.TrimSuffix(output, "\n"), "\n"), nil
 }
