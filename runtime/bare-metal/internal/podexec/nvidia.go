@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
 )
 
 // probeNVIDIA discovers local NVIDIA accelerator hardware via NVML (libnvidia-ml.so), the same
@@ -56,16 +57,8 @@ func probeNVIDIA(_ context.Context) ([]acceleratorDevice, error) {
 		}
 		devices = append(devices, acceleratorDevice{
 			DevicePath: fmt.Sprintf("/dev/nvidia%d", minor),
-			Labels:     []string{"nvidia.com/gpu.product=" + normalizeGFDProductName(name)},
+			Labels:     []string{acceleratorname.NVIDIAProductLabel(name)},
 		})
 	}
 	return devices, nil
-}
-
-// normalizeGFDProductName reproduces NVIDIA GPU Feature Discovery's node-label normalization
-// exactly (different-backend.md §4.2): uppercase, spaces to dashes. "NVIDIA H100 80GB HBM3" ->
-// "NVIDIA-H100-80GB-HBM3".
-func normalizeGFDProductName(name string) string {
-	upper := strings.ToUpper(strings.TrimSpace(name))
-	return strings.Join(strings.Fields(upper), "-")
 }
