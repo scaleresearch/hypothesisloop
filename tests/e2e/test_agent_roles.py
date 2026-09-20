@@ -269,8 +269,8 @@ def test_repeat_signup_of_a_member_succeeds_once_running_and_full(api, experimen
 
     for _ in range(2):
         r = api.signup(pe_id, member)
-        assert r.status_code == 200, f"repeat signup of a member: HTTP {r.status_code} {r.text}"
-    api.hl("signup", "--platform-experiment", pe_id, "--agent", member)
+        assert r.status_code == 201, f"repeat signup of a member: HTTP {r.status_code} {r.text}"
+    api.hl("platform-experiments", "agents", "add", pe_id, "--agent", member)
 
     r = api.signup(pe_id, make_agent(api, run_id, "repeat-newcomer"))
     assert r.status_code == 400 and "signup_closed" in r.text, f"newcomer after start: HTTP {r.status_code} {r.text}"

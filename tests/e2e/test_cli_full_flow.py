@@ -96,9 +96,9 @@ def test_cli_full_flow_happy_path(api, run_id):
     pe_id = json.loads(pe_create_out)["id"]
     assert pe_id, f"hl platform-experiments create: no id in response: {pe_create_out}"
 
-    # -- hl signup --
-    signup_out = api.hl("signup", "--platform-experiment", pe_id, "--agent", agent)
-    json.loads(signup_out)  # hl signup: returned valid JSON
+    # -- hl platform-experiments agents add --
+    signup_out = api.hl("platform-experiments", "agents", "add", pe_id, "--agent", agent)
+    assert json.loads(signup_out)["agent_id"] == agent  # one joined agent per line, as valid JSON
 
     api.hl("platform-experiments", "start", "--id", pe_id)  # hl platform-experiments start: succeeded
 

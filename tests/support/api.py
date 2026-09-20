@@ -264,11 +264,26 @@ class API:
             payload["role"] = role
         if quota_tier:
             payload["quota_tier"] = quota_tier
-        return self.post(f"/platform-experiments/{pe_id}/signup", payload)
+        return self.post(f"/platform-experiments/{pe_id}/agents", payload)
 
     def signup_ok(self, pe_id: str, agent_id: str, role: str | None = None, quota_tier: str | None = "guaranteed") -> None:
         r = self.signup(pe_id, agent_id, role, quota_tier)
         r.raise_for_status()
+
+    def add_agents(self, pe_id: str, **body: Any) -> list[dict]:
+        """POST /platform-experiments/{id}/agents with no agent_id: the platform creates the
+        agents. Returns each one as answered, with its token when it is not hosted."""
+        return self.post_json(f"/platform-experiments/{pe_id}/agents", body)["agents"]
+
+    def agents(self, pe_id: str) -> list[dict]:
+        return self.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]
+
+    def remove_agent(self, pe_id: str, agent_id: str) -> requests.Response:
+        return self.session.delete(self._url(f"/platform-experiments/{pe_id}/agents/{agent_id}"), timeout=30)
+
+    def launcher_desired(self, launcher: str) -> dict:
+        """What the agent-launcher of that name is told should exist right now."""
+        return self.post_json(f"/internal/launchers/{launcher}/reconcile")
 
     def signup_role(self, pe_id: str, agent_id: str) -> tuple[int, str | None]:
         r = self.get(f"/platform-experiments/{pe_id}/signups/{agent_id}")

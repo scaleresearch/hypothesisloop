@@ -82,6 +82,7 @@ def _reads_of_one_resource(t: Tenant) -> list[str]:
     return [
         f"/platform-experiments/{t.pe_id}",
         f"/platform-experiments/{t.pe_id}/signups/{t.agent}",
+        f"/platform-experiments/{t.pe_id}/agents",
         f"/platform-experiments/{t.pe_id}/results",
         f"/platform-experiments/{t.pe_id}/quotas",
         f"/platform-experiments/{t.pe_id}/quotas/{t.agent}",
@@ -196,7 +197,9 @@ def test_another_org_writes_nothing(tenants):
     body_as_b["metadata"]["agent_id"] = b.agent
     pe_update = _platform_experiment_body("taken over")
     writes = [
-        ("POST", f"/platform-experiments/{b.pe_id}/signup", {"agent_id": a.agent}),
+        ("POST", f"/platform-experiments/{b.pe_id}/agents", {"agent_id": a.agent}),
+        ("POST", f"/platform-experiments/{b.pe_id}/agents", {"count": 1, "hosted": True}),
+        ("DELETE", f"/platform-experiments/{b.pe_id}/agents/{b.agent}", None),
         ("PUT", f"/platform-experiments/{b.pe_id}", pe_update),
         ("POST", f"/platform-experiments/{b.pe_id}/start", None),
         ("POST", f"/platform-experiments/{b.pe_id}/close", {"top_results": []}),
