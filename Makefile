@@ -29,12 +29,15 @@ REGISTRY_PUBLISH_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry_p
 # imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
 # image reads it from make. REGISTRY_TLS_VERIFY=false only because the dev registry
 # in docker-compose.yml serves plain HTTP; a prod REGISTRY with real TLS overrides it to true.
-REGISTRY ?= $(HOST_ADDRESS):5000
+LOCAL_REGISTRY := $(HOST_ADDRESS):5000
+REGISTRY ?= $(LOCAL_REGISTRY)
 ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
 export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
 REGISTRY_TLS_VERIFY ?= false
+# Empty builds for this host. Set it (linux/amd64) to build for nodes of another architecture.
+IMAGE_PLATFORM ?=
 
 check-tag:
 	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
@@ -221,15 +224,17 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
 	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
-	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
+	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic \
+	ui:controlplane/build/Dockerfile.ui:controlplane/ui
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here.
-images: check-tag registry-up
+# The dev registry is started only when it is the one pushed to.
+images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	go mod vendor
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
-		podman build -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
+		podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
@@ -275,7 +280,8 @@ helm-prepare:
 	cp controlplane/settings/hypothesisloop.yaml $(HELM_CHART)/files/hypothesisloop.yaml
 
 helm-lint: helm-prepare
-	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
+	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG) \
+		--set objectStore.endpoint=http://object-store.hypothesisloop.svc:9000
 	helm lint runtime/k8s/infra/chart --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint \
 		--set-string images.registry=$(REGISTRY),images.tag=$(TAG)
 

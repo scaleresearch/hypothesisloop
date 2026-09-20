@@ -1,0 +1,20 @@
+FROM node:20-alpine AS builder
+WORKDIR /ui
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+# Next.js compiles NEXT_PUBLIC_* into the browser bundle, so the API address the browser calls
+# is fixed here and cannot be changed when the container starts.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8081
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN npm run build && npm prune --omit=dev
+
+FROM node:20-alpine
+WORKDIR /ui
+ENV NODE_ENV=production
+COPY --from=builder /ui/package.json /ui/next.config.mjs ./
+COPY --from=builder /ui/node_modules ./node_modules
+COPY --from=builder /ui/.next ./.next
+USER node
+EXPOSE 3000
+CMD ["node_modules/.bin/next", "start"]

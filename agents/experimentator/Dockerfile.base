@@ -16,15 +16,16 @@
 # raw curl) for everything a human would do through it too: hl register/signup, hl hypothesis
 # query/submit/link, hl job submit job.yaml, hl watch. Built from the repo root
 # (build context — see Makefile `experimentator-base-image`), same module as the controlplane.
-FROM golang:1.25-bookworm AS hl-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS hl-builder
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cli/ cli/
-RUN CGO_ENABLED=0 go build -o /out/hl ./cli
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
 # Only each experiment's seed/ and hl-clone reach the agent: experiment.md carries coordinator
 # notes agents must not read.
-FROM golang:1.25-bookworm AS samples
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS samples
 COPY agents/coordinator/experiments /samples
 RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed -exec rm -rf {} + \
 	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete
