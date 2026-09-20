@@ -131,7 +131,8 @@ const (
 )
 
 // checkUnderperformance compares this job's just-recorded ranking-metric sample to its cohort
-// (every other job in the same platform experiment reporting the same metric) and, if it is the
+// (every other job in the same platform experiment reporting the same metric, each taken at the
+// progress this job has reached) and, if it is the
 // clear straggler with underperformMinRemaining of its run still ahead, tells only the owning
 // agent so: once per job, never a command. See db.EventJobUnderperforming.
 //
@@ -178,10 +179,26 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		return
 	}
 
-	series, err := s.GetPlatformExperimentTimeseries(ctx, exp.PlatformExperimentID, metricName, underperformSiblingStaleness+5*time.Minute, time.Time{})
+	// Both reads end at the sample's own instant, so they share one grid and join on timestamp.
+	lookback := underperformSiblingStaleness + 5*time.Minute
+	series, err := s.platformExperimentSeries(ctx, metricsdb.ExperimentMetricValue, exp.PlatformExperimentID, metricName, lookback, at)
 	if err != nil {
 		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
 		return
+	}
+	fractions, err := s.platformExperimentSeries(ctx, metricsdb.ExperimentMetricFraction, exp.PlatformExperimentID, metricName, lookback, at)
+	if err != nil {
+		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
+		return
+	}
+	type attempt struct{ job, agent string }
+	progress := make(map[attempt]map[int64]float64, len(fractions))
+	for _, f := range fractions {
+		byTime := make(map[int64]float64, len(f.Points))
+		for _, p := range f.Points {
+			byTime[p.Timestamp.UnixMilli()] = p.Value
+		}
+		progress[attempt{f.ExperimentID, f.AgentID}] = byTime
 	}
 
 	score := func(v float64) float64 {
@@ -207,7 +224,21 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		if time.Since(last.Timestamp) > underperformSiblingStaleness {
 			continue
 		}
-		siblingScores = append(siblingScores, score(last.Value))
+		// The sibling is measured where this job is now: a metric that climbs all run long would
+		// otherwise call every late starter a straggler. One that never came within a checkpoint
+		// of this progress inside the window is left out.
+		reached, gap := false, underperformCheckpointWidth
+		var atSameProgress float64
+		for _, p := range s.Points {
+			f, ok := progress[attempt{s.ExperimentID, s.AgentID}][p.Timestamp.UnixMilli()]
+			if d := math.Abs(f - fractionComplete); ok && d <= gap {
+				reached, gap, atSameProgress = true, d, p.Value
+			}
+		}
+		if !reached {
+			continue
+		}
+		siblingScores = append(siblingScores, score(atSameProgress))
 	}
 	if len(siblingScores) < underperformCohortMinSize {
 		return
@@ -302,6 +333,12 @@ func validMetricLabel(field, value string) error {
 // query (GetTimeseries) only ever returns the latest sample per series. The window is the lookback
 // before end; an end that is zero or still ahead means now.
 func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformExpID, metricName string, lookback time.Duration, end time.Time) ([]*domain.AgentMetricSeries, error) {
+	return s.platformExperimentSeries(ctx, metricsdb.ExperimentMetricValue, platformExpID, metricName, lookback, end)
+}
+
+// platformExperimentSeries reads one of the two gauges a metric sample is written as: its value
+// or the fraction_complete it was reported at.
+func (s *Service) platformExperimentSeries(ctx context.Context, gauge, platformExpID, metricName string, lookback time.Duration, end time.Time) ([]*domain.AgentMetricSeries, error) {
 	if lookback <= 0 {
 		lookback = 24 * time.Hour
 	}
@@ -314,7 +351,7 @@ func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformE
 		step = time.Second
 	}
 
-	query := fmt.Sprintf(`%s{platform_experiment_id=%q, metric_name=%q}`, metricsdb.ExperimentMetricValue, platformExpID, metricName)
+	query := fmt.Sprintf(`%s{platform_experiment_id=%q, metric_name=%q}`, gauge, platformExpID, metricName)
 	result, err := metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, step)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: %w", err)

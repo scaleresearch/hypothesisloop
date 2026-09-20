@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // underperformStore answers GetPlatformExperimentMetrics with one fixed ranking metric and
@@ -57,27 +59,31 @@ func (n *capturingNotifier) Emit(context.Context, func(db.Stamp) ([]db.Event, er
 	panic("the underperformance check writes nothing to the graph")
 }
 
-// cohortSeriesServer answers a PromQL range query with one series for "exp-1" (the job under
-// test, one point older than the 2s "just written" cutoff) and three sibling series, regardless
-// of the actual query string — the same shortcut recordedSamplesServer uses in metrics_test.go.
-func cohortSeriesServer(selfPrevValue float64, siblingValues []float64) *httptest.Server {
+// cohortServer answers the two range queries of the check, value and fraction_complete, with one
+// series per sibling. Each sibling reported at every tenth of its run, the last sample `age` ago,
+// and valueAt gives its value at a fraction.
+func cohortServer(age time.Duration, siblings int, valueAt func(sibling int, fraction float64) float64) *httptest.Server {
+	end := time.Now().UTC().Add(-age).Unix()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		selfTS := time.Now().UTC().Add(-time.Hour).Unix()  // old: must predate the 2s "just written" cutoff
-		sibTS := time.Now().UTC().Add(-time.Minute).Unix() // recent: must survive the sibling staleness bound
+		_ = r.ParseForm()
+		fractionQuery := strings.Contains(r.Form.Get("query"), metricsdb.ExperimentMetricFraction)
 		type series struct {
 			Metric map[string]string `json:"metric"`
 			Values [][2]interface{}  `json:"values"`
 		}
-		result := []series{
-			{Metric: map[string]string{"job_id": "exp-1", "agent_id": "agent-1", "metric_name": "acc"},
-				Values: [][2]interface{}{{selfTS, strconv.FormatFloat(selfPrevValue, 'f', -1, 64)}}},
-		}
-		for i, v := range siblingValues {
-			result = append(result, series{
-				Metric: map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"},
-				Values: [][2]interface{}{{sibTS, strconv.FormatFloat(v, 'f', -1, 64)}},
-			})
+		var result []series
+		for i := 0; i < siblings; i++ {
+			s := series{Metric: map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"}}
+			for tenth := 1; tenth <= 10; tenth++ {
+				fraction := float64(tenth) / 10
+				v := fraction
+				if !fractionQuery {
+					v = valueAt(i, fraction)
+				}
+				s.Values = append(s.Values, [2]interface{}{end - int64(10-tenth), strconv.FormatFloat(v, 'f', -1, 64)})
+			}
+			result = append(result, s)
 		}
 		body := map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}}
 		enc, _ := json.Marshal(body)
@@ -85,31 +91,15 @@ func cohortSeriesServer(selfPrevValue float64, siblingValues []float64) *httptes
 	}))
 }
 
-// staleCohortServer is like cohortSeriesServer but every sibling's last point is well past
-// underperformSiblingStaleness — a cohort that stopped reporting a while ago, not a live one.
-func staleCohortServer(selfPrevValue float64, siblingValues []float64) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		selfTS := time.Now().UTC().Add(-time.Hour).Unix()
-		staleTS := time.Now().UTC().Add(-2 * time.Hour).Unix()
-		type series struct {
-			Metric map[string]string `json:"metric"`
-			Values [][2]interface{}  `json:"values"`
-		}
-		result := []series{
-			{Metric: map[string]string{"job_id": "exp-1", "agent_id": "agent-1", "metric_name": "acc"},
-				Values: [][2]interface{}{{selfTS, strconv.FormatFloat(selfPrevValue, 'f', -1, 64)}}},
-		}
-		for i, v := range siblingValues {
-			result = append(result, series{
-				Metric: map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"},
-				Values: [][2]interface{}{{staleTS, strconv.FormatFloat(v, 'f', -1, 64)}},
-			})
-		}
-		body := map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}}
-		enc, _ := json.Marshal(body)
-		_, _ = w.Write(enc)
-	}))
+// cohortSeriesServer is a live cohort whose siblings each held one value all run long.
+func cohortSeriesServer(siblingValues []float64) *httptest.Server {
+	return cohortServer(time.Minute, len(siblingValues), func(i int, _ float64) float64 { return siblingValues[i] })
+}
+
+// staleCohortServer is the same cohort with every sibling's last sample well past
+// underperformSiblingStaleness.
+func staleCohortServer(siblingValues []float64) *httptest.Server {
+	return cohortServer(2*time.Hour, len(siblingValues), func(i int, _ float64) float64 { return siblingValues[i] })
 }
 
 // admittedAgo is the job under test, admitted that long before now.
@@ -125,7 +115,7 @@ func rankingMetric(key, direction string) []domain.MetricDefinition {
 // A job launched after its siblings finished trails them from its first sample: its previous
 // sample trailed as well. It is told at its first checkpoint, and once, however many follow.
 func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.T) {
-	server := cohortSeriesServer(0.84375, []float64{0.9, 0.9, 0.9125, 0.9375, 0.94375, 0.875})
+	server := cohortSeriesServer([]float64{0.9, 0.9, 0.9125, 0.9375, 0.94375, 0.875})
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
@@ -153,7 +143,7 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 // A cohort smaller than underperformCohortMinSize gives no signal to compare against, so nothing
 // fires no matter how bad the value looks.
 func TestUnderperformanceNeedsAMinimumCohort(t *testing.T) {
-	server := cohortSeriesServer(0.87, []float64{0.9}) // only one sibling
+	server := cohortSeriesServer([]float64{0.9}) // only one sibling
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
@@ -174,7 +164,7 @@ func TestUnderperformanceNeedsAMinimumCohort(t *testing.T) {
 // A sibling that stopped reporting a while ago is a different phase of the run, not a fair
 // live comparison — it must not count toward the cohort, even if its last value looked great.
 func TestUnderperformanceIgnoresStaleSiblings(t *testing.T) {
-	server := staleCohortServer(0.87, []float64{0.9, 0.85, 0.88})
+	server := staleCohortServer([]float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
@@ -195,7 +185,7 @@ func TestUnderperformanceIgnoresStaleSiblings(t *testing.T) {
 // Below underperformMinFraction, one or two early samples can rank last by chance alone, so the
 // check does not even query the cohort.
 func TestUnderperformanceSkipsEarlyProgress(t *testing.T) {
-	server := cohortSeriesServer(0.87, []float64{0.9, 0.85, 0.88})
+	server := cohortSeriesServer([]float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
@@ -218,7 +208,7 @@ func TestUnderperformanceSkipsEarlyProgress(t *testing.T) {
 // nonzero gap at all, however negligible. This was caught live: three siblings all reporting 0.9
 // flagged a self value of 0.88 as "trailing" even though it was 2% off a tied field.
 func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
-	server := cohortSeriesServer(0.95, []float64{0.9, 0.9, 0.9})
+	server := cohortSeriesServer([]float64{0.9, 0.9, 0.9})
 	defer server.Close()
 
 	notifier := &capturingNotifier{}
@@ -240,7 +230,7 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 // leaves 20 seconds, less than the agent needs to read the advisory. The same half after an hour
 // leaves an hour, and fires.
 func TestUnderperformanceStaysSilentWhenTheJobIsAboutToEnd(t *testing.T) {
-	server := cohortSeriesServer(0.87, []float64{0.9, 0.85, 0.88})
+	server := cohortSeriesServer([]float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
 	for _, tc := range []struct {
@@ -259,5 +249,66 @@ func TestUnderperformanceStaysSilentWhenTheJobIsAboutToEnd(t *testing.T) {
 		if len(notifier.events) != tc.want {
 			t.Fatalf("admitted %s ago at fraction %v: events = %d, want %d", tc.admitted, tc.fraction, len(notifier.events), tc.want)
 		}
+	}
+}
+
+// On a metric that climbs all run long a job at 30% is below every finished sibling's final
+// value. It is measured against where they stood at 30%, so keeping pace is not trailing and
+// falling behind that point is.
+func TestUnderperformanceComparesSiblingsAtTheJobsOwnProgress(t *testing.T) {
+	climbing := func(i int, fraction float64) float64 { return fraction + 0.01*float64(i) }
+	server := cohortServer(time.Minute, 4, climbing)
+	defer server.Close()
+
+	for _, tc := range []struct {
+		value float64
+		want  int
+	}{{0.3, 0}, {0.1, 1}} {
+		notifier := &capturingNotifier{}
+		svc := &Service{
+			store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+			metricsDBURL: server.URL,
+			logger:       zap.NewNop(),
+			events:       notifier,
+		}
+		svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.3, tc.value, time.Now().UTC())
+		if len(notifier.events) != tc.want {
+			t.Fatalf("value %v at 30%%: events = %d, want %d", tc.value, len(notifier.events), tc.want)
+		}
+	}
+}
+
+// A sibling that has not come as far as the job has nothing to be compared at, so a cohort of
+// such siblings is no cohort.
+func TestUnderperformanceLeavesOutSiblingsBehindTheJob(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		v := "0.9"
+		if strings.Contains(r.Form.Get("query"), metricsdb.ExperimentMetricFraction) {
+			v = "0.2"
+		}
+		ts := time.Now().UTC().Add(-time.Minute).Unix()
+		var result []map[string]any
+		for i := 0; i < 4; i++ {
+			result = append(result, map[string]any{
+				"metric": map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"},
+				"values": [][2]interface{}{{ts, v}},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}})
+	}))
+	defer server.Close()
+
+	notifier := &capturingNotifier{}
+	svc := &Service{
+		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize")},
+		metricsDBURL: server.URL,
+		logger:       zap.NewNop(),
+		events:       notifier,
+	}
+	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.6, 0.1, time.Now().UTC())
+	if len(notifier.events) != 0 {
+		t.Fatalf("events = %d, want 0 (no sibling has reached 60%%)", len(notifier.events))
 	}
 }
