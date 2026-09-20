@@ -22,7 +22,7 @@ func main() {
 		os.Exit(1)
 	}
 	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
-	rented, err := newProvider(cfg.Provider)
+	rented, err := newProvider(cfg.Provider, cfg.shapes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
 		os.Exit(1)

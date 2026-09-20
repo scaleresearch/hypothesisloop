@@ -39,11 +39,19 @@ type Provider struct {
 	baseURL string
 	http    *http.Client
 	poll    time.Duration
+	logWait time.Duration
 }
 
-func New(cfg Settings) (*Provider, error) {
+// New refuses settings that cannot rent one of acceleratorTypes, the catalog strings the caller
+// will ask for, so that a missing entry stops the process at startup instead of a job at Create.
+func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
+	}
+	for _, catalogType := range acceleratorTypes {
+		if _, err := cfg.accelerator(catalogType); err != nil {
+			return nil, err
+		}
 	}
 	key, err := cfg.apiKey()
 	if err != nil {
@@ -55,6 +63,7 @@ func New(cfg Settings) (*Provider, error) {
 		baseURL: defaultBaseURL,
 		http:    &http.Client{Timeout: requestTimeout},
 		poll:    pollInterval,
+		logWait: logDeliveryTimeout,
 	}, nil
 }
 

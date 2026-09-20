@@ -145,7 +145,7 @@ func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 	if cfg.MaxPricePerHour == 0 {
 		cfg.MaxPricePerHour = 0.5
 	}
-	p, err := New(cfg)
+	p, err := New(cfg, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

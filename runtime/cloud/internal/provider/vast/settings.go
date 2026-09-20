@@ -62,12 +62,6 @@ func (c Settings) accelerator(catalogType string) (Accelerator, error) {
 	return Accelerator{}, fmt.Errorf("vast: accelerator type %q has no entry in accelerators", catalogType)
 }
 
-// Covers says whether a job asking for catalogType can be rented with these settings.
-func (c Settings) Covers(catalogType string) error {
-	_, err := c.accelerator(catalogType)
-	return err
-}
-
 func (c Settings) apiKey() (string, error) {
 	key := os.Getenv(c.APIKeyEnv)
 	if key == "" {

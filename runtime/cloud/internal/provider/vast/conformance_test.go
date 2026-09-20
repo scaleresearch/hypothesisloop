@@ -18,7 +18,8 @@ import (
 //
 // VAST_CONFORMANCE_GPU="<driver product name>=<vendor gpu name>", for example
 // "NVIDIA GeForce RTX 3060=RTX 3060", adds the run on that GPU, and VAST_CONFORMANCE_HOLD=1 the
-// thirty minute hold.
+// thirty minute hold. One run per account at a time: a run starts by destroying what an aborted
+// earlier run left under the suite's prefix.
 func conformanceOptions() providertest.Options {
 	return providertest.Options{
 		Template: provider.Spec{
@@ -44,7 +45,7 @@ func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 		MinReliability:  0.99,
 		VerifiedOnly:    true,
 		Accelerators:    accelerators,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

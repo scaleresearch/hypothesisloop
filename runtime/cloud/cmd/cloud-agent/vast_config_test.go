@@ -1,33 +1,42 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
-
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vast"
 )
 
 const shippedVastConfig = "../../settings/cloud-agent.vast.yaml"
 
-func TestTheShippedVastConfigBuildsTheAdapterAndCoversItsShapes(t *testing.T) {
+func TestTheShippedVastConfigBuildsTheAdapter(t *testing.T) {
 	t.Setenv("VAST_API_KEY", "not-a-real-key")
 	cfg, err := loadConfig(shippedVastConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newProvider(cfg.Provider); err != nil {
+	if _, err := newProvider(cfg.Provider, cfg.shapes); err != nil {
 		t.Fatalf("provider: %v", err)
 	}
-	var settings vast.Settings
-	if err := cfg.Provider.Settings.Decode(&settings); err != nil {
+}
+
+func TestAShapeTheVastSettingsCannotRentStopsStartup(t *testing.T) {
+	t.Setenv("VAST_API_KEY", "not-a-real-key")
+	raw, err := os.ReadFile(shippedVastConfig)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, shape := range cfg.shapes {
-		if shape.Accelerators == 0 {
-			continue
-		}
-		if err := settings.Covers(shape.AcceleratorType); err != nil {
-			t.Errorf("shape %s: %v", shape.Name, err)
-		}
+	const rented, unrentable = "accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIE", "accelerator_type: nvidia.com/gpu.product=NVIDIA-H200"
+	if !strings.Contains(string(raw), rented) {
+		t.Fatalf("the shipped config has no %q", rented)
+	}
+	cfg, err := loadText(t, strings.Replace(string(raw), rented, unrentable, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = newProvider(cfg.Provider, cfg.shapes)
+	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {
+		t.Fatalf("err = %v, want one naming the accelerator type the settings have no entry for", err)
 	}
 }
 
@@ -37,7 +46,7 @@ func TestAVastConfigWithoutItsKeyIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newProvider(cfg.Provider); err == nil {
+	if _, err := newProvider(cfg.Provider, cfg.shapes); err == nil {
 		t.Fatal("a provider was built with no API key in the environment")
 	}
 }

@@ -104,24 +104,32 @@ func settingsNode(t *testing.T, text string) yaml.Node {
 
 func TestAProviderIsBuiltFromItsOwnSectionOfTheConfig(t *testing.T) {
 	var got exampleSettings
-	providers["example"] = adapter(func(s exampleSettings) (*fake.Provider, error) {
-		got = s
+	var gotTypes []string
+	providers["example"] = adapter(func(s exampleSettings, acceleratorTypes []string) (*fake.Provider, error) {
+		got, gotTypes = s, acceleratorTypes
 		return fake.New(), nil
 	})
 	defer delete(providers, "example")
+	shapes := []cloudexec.Shape{
+		{Name: "h100", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100", Accelerators: 1},
+		{Name: "cpu"},
+	}
 
 	var rented provider.Provider
-	rented, err := newProvider(providerConfig{Name: "example", Settings: settingsNode(t, "settings: {region: eu}")})
+	rented, err := newProvider(providerConfig{Name: "example", Settings: settingsNode(t, "settings: {region: eu}")}, shapes)
 	if err != nil || rented == nil || got.Region != "eu" {
 		t.Fatalf("provider %v, settings %+v, %v", rented, got, err)
 	}
-	if _, err := newProvider(providerConfig{Name: "example", Settings: settingsNode(t, "settings: {regoin: eu}")}); err == nil {
+	if len(gotTypes) != 1 || gotTypes[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
+		t.Errorf("accelerator types handed to the provider = %q, want the one type a shape rents", gotTypes)
+	}
+	if _, err := newProvider(providerConfig{Name: "example", Settings: settingsNode(t, "settings: {regoin: eu}")}, nil); err == nil {
 		t.Error("a misspelled provider setting was accepted")
 	}
-	if _, err := newProvider(providerConfig{Name: "example"}); err != nil {
+	if _, err := newProvider(providerConfig{Name: "example"}, nil); err != nil {
 		t.Errorf("a provider with no settings of its own: %v", err)
 	}
-	if _, err := newProvider(providerConfig{Name: "other"}); err == nil {
+	if _, err := newProvider(providerConfig{Name: "other"}, nil); err == nil {
 		t.Error("a provider this binary was not built with was accepted")
 	}
 }
