@@ -27,6 +27,7 @@ type lifecycleStore struct {
 	requeuedReasons []string
 	triedClusters   []string
 	markedSettled   int
+	started         int
 }
 
 func (*lifecycleStore) ListExperimentsWithStatus(context.Context, domain.ExperimentStatus) ([]*domain.Experiment, error) {
@@ -35,7 +36,10 @@ func (*lifecycleStore) ListExperimentsWithStatus(context.Context, domain.Experim
 func (*lifecycleStore) UpdateExperimentStatus(context.Context, string, domain.ExperimentStatus) error {
 	return nil
 }
-func (*lifecycleStore) MarkStarted(context.Context, string) (bool, error) { return true, nil }
+func (s *lifecycleStore) MarkStarted(context.Context, string) (bool, error) {
+	s.started++
+	return true, nil
+}
 func (s *lifecycleStore) TransitionStatus(context.Context, string, domain.ExperimentStatus, domain.ExperimentStatus) (bool, error) {
 	s.transitioned = true
 	return true, nil

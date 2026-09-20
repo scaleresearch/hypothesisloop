@@ -106,7 +106,10 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// closes at the source, so treating not-found as unplaced no longer risks evicting a healthy
 	// job on a one-off metrics-store hiccup: it still only evicts once the deadline, measured from
 	// submitted_at, has actually passed.
-	if !found || scheduledNodes < int32(exp.Job.Nodes()) {
+	//
+	// Not for a RUNNING job: its placement is over, and the deadline counts from submitted_at, so
+	// a pod being recreated hours in would evict it at once.
+	if exp.Status != domain.StatusRunning && (!found || scheduledNodes < int32(exp.Job.Nodes())) {
 		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)
@@ -135,6 +138,11 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	case workload.JobPhaseRunning:
 		if exp.Status == domain.StatusRunning {
 			// The cluster agent continuously writes actual accelerator type into the metrics store.
+			return nil
+		}
+		if found && scheduledNodes < int32(exp.Job.Nodes()) {
+			// One landed rank reads as Running. The gang stays SUBMITTED, under the placement
+			// deadline above, until every rank has bound.
 			return nil
 		}
 		switch _, outcome := w.onRunning(ctx, exp); outcome {

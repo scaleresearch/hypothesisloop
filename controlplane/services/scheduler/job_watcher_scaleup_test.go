@@ -133,13 +133,54 @@ func TestScaleUpDeadlinePhaseIndependentPartialGangWhileRunning(t *testing.T) {
 		WithStuckPendingTimeout(10 * time.Minute).
 		WithScaleUpTimeout(1 * time.Minute)
 	exp := scaleUpExperiment(3, 2*time.Minute)
-	exp.Status = domain.StatusRunning
 
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
 		t.Fatalf("requeuedReasons = %v, want a partial-gang eviction even though phase is Running", store.requeuedReasons)
+	}
+}
+
+// One landed rank reads as Running. Marking the job RUNNING there would take it out from under
+// the placement deadline with part of the gang never placed.
+func TestAPartialGangStaysSubmittedWhileItsPhaseReadsRunning(t *testing.T) {
+	store := &lifecycleStore{}
+	backend := &scaleUpBackend{phase: workload.JobPhaseRunning, scheduledNodes: 2}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(10 * time.Minute)
+
+	if err := w.reconcileOne(context.Background(), scaleUpExperiment(3, time.Minute), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if store.started != 0 || store.transitioned {
+		t.Fatalf("started = %d, transitioned = %v, want the gang left SUBMITTED", store.started, store.transitioned)
+	}
+}
+
+// The placement deadline counts from submitted_at. A job that has run for hours and shows one
+// pod unscheduled, because it is being recreated, is past placement.
+func TestARunningJobIsNotHeldToThePlacementDeadline(t *testing.T) {
+	for name, found := range map[string]bool{"one rank unscheduled": true, "no phase detail": false} {
+		t.Run(name, func(t *testing.T) {
+			store := &lifecycleStore{}
+			backend := &scaleUpBackend{
+				phase: workload.JobPhaseRunning, scheduledNodes: 2, phaseDetailFound: &found,
+				autoscalerEnabled: map[string]bool{"cluster-a": true},
+				clusterIDs:        map[string]string{"cluster-a": "cid-a"},
+			}
+			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
+				WithStuckPendingTimeout(10 * time.Minute).
+				WithScaleUpTimeout(1 * time.Minute)
+			exp := scaleUpExperiment(3, 5*time.Hour)
+			exp.Status = domain.StatusRunning
+
+			if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
+				t.Fatal(err)
+			}
+			if store.transitioned {
+				t.Fatalf("a RUNNING job was evicted: requeued %v, terminal %v", store.requeuedReasons, store.terminalReasons)
+			}
+		})
 	}
 }
 
