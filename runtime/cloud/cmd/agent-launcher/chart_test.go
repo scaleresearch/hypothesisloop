@@ -18,9 +18,8 @@ func TestTheChartStartsTheLauncherWithAConfigAndEnvironmentItAccepts(t *testing.
 	if env["AGENT_LAUNCHER_CONFIG"] != "/settings/agent-launcher.yaml" {
 		t.Errorf("AGENT_LAUNCHER_CONFIG = %q, want the mounted file", env["AGENT_LAUNCHER_CONFIG"])
 	}
-	if env["LAUNCHER_TOKEN"] != charttest.Secret["AGENT_LAUNCHER_TOKEN"] {
-		t.Errorf("LAUNCHER_TOKEN = %q, want the Secret's AGENT_LAUNCHER_TOKEN", env["LAUNCHER_TOKEN"])
-	}
+	// The launcher's own token is in no Secret: the pod's init container derives it, and the
+	// chart's tests hold that (controlplane/infra/helm/chart_test.go).
 	cfg, err := loadConfig(release.ConfigFile(t, "hypothesisloop-agent-launcher-config", "agent-launcher.yaml"))
 	if err != nil {
 		t.Fatal(err)

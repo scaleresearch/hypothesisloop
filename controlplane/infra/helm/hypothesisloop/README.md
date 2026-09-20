@@ -38,25 +38,20 @@ install. No value of the chart is a secret, and nothing secret is rendered into 
 | `HYPOTHESISLOOP_SIGNING_SECRET` | control-service, metrics-service | always. 32 characters or more, for example `openssl rand -hex 32` |
 | `OBJECT_STORE_ACCESS_KEY_ID`, `OBJECT_STORE_SECRET_ACCESS_KEY` | control-service, metrics-service, and the store as its root user | always |
 | `POSTGRES_PASSWORD` | Postgres | `postgres.enabled` |
-| `CLOUD_AGENT_RUNTIME_TOKEN` | cloud-agent, as `RUNTIME_TOKEN` | `cloudAgent.enabled` |
-| `AGENT_LAUNCHER_TOKEN` | agent-launcher, as `LAUNCHER_TOKEN` | `agentLauncher.enabled` |
+| `HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET`, `HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY` | control-service, metrics-service | `github.appId` |
 | any key in `cloudAgent.secretEnv`, `agentLauncher.secretEnv` | that process only, under the same name | when it is enabled |
 
 The rendered `hypothesisloop.yaml` holds `${NAME}` where a secret belongs, and the services
 replace it from their environment at start (`config.Load`). Pods do not notice a changed Secret
 by themselves: pass a new `secretChecksum` and they restart.
 
-The two tokens are derived from the signing secret, so they exist once control-service runs. Its
-image carries `hl-admin`, which reads the config and the Secret the pod was started with:
-
-```sh
-kubectl -n hypothesisloop exec deploy/hypothesisloop-control-service -- /hl-admin cluster add <cluster_name> <org>
-kubectl -n hypothesisloop exec deploy/hypothesisloop-control-service -- /hl-admin token launcher:<launcher_name>
-```
-
-The first registers the cluster the cloud-agent's config names and prints its runtime token; the
-second prints the launcher's. Add them to the Secret, then enable the two processes. Asking
-again prints the same tokens.
+The tokens cloud-agent and agent-launcher present are derived from the signing secret and are in
+no Secret. Each of the two pods first runs `hl-admin` from the control-service image, with the
+config and the Secret keys control-service is started with: the cloud-agent's registers
+`cloudAgent.clusterName` for `cloudAgent.org`, shares it or not as `cloudAgent.shared` says, and
+leaves the cluster's runtime token for the process; the launcher's leaves the token of
+`agents.launcher`. Registering again changes nothing, so every start of the pod does it. Until
+control-service has made the tables the init container fails and the pod waits.
 
 ## Choices
 

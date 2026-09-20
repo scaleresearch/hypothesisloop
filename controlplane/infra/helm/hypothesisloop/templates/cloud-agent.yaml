@@ -29,18 +29,28 @@ spec:
         checksum/config: {{ .Values.cloudAgent.config | sha256sum }}
         {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
     spec:
+      {{- $cluster := required "cloudAgent.clusterName is required when cloudAgent.enabled is true: the cluster_name of its config" .Values.cloudAgent.clusterName }}
+      {{- $org := required "cloudAgent.org is required when cloudAgent.enabled is true: the org the cluster is registered for" .Values.cloudAgent.org }}
+      # Registering a cluster its org already owns changes nothing and prints the same token, so
+      # every start of the pod does it again. It fails, and the pod waits, until control-service
+      # has made the tables.
+      initContainers:
+        {{- include "hypothesisloop.tokenInit" (dict "script" (printf "/hl-admin cluster add %s %s > /token/token && /hl-admin cluster share %s %s" $cluster $org $cluster (ternary "on" "off" .Values.cloudAgent.shared)) "root" $) | nindent 8 }}
       containers:
         - name: cloud-agent
           image: {{ include "hypothesisloop.image" (dict "name" "cloud-agent" "root" $) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: ["/bin/sh", "-ec", "RUNTIME_TOKEN=\"$(cat /token/token)\" exec /cloud-agent"]
           env:
             - name: CLOUD_AGENT_CONFIG
               value: /settings/cloud-agent.yaml
-            {{- include "hypothesisloop.secretKey" (dict "env" "RUNTIME_TOKEN" "key" "CLOUD_AGENT_RUNTIME_TOKEN" "root" $) | nindent 12 }}
             {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.cloudAgent.secretEnv "root" $) | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /settings
+              readOnly: true
+            - name: token
+              mountPath: /token
               readOnly: true
           resources:
             {{- toYaml .Values.cloudAgent.resources | nindent 12 }}
@@ -48,4 +58,5 @@ spec:
         - name: config
           configMap:
             name: hypothesisloop-cloud-agent-config
+        {{- include "hypothesisloop.tokenVolumes" . | nindent 8 }}
 {{- end }}

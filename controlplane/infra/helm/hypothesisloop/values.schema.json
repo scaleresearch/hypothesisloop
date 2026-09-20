@@ -101,7 +101,8 @@
       "additionalProperties": false,
       "properties": {
         "launcher": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$|^$"
         },
         "image": {
           "type": "string"
@@ -388,6 +389,17 @@
         },
         "resources": {
           "type": "object"
+        },
+        "clusterName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$|^$"
+        },
+        "org": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$|^$"
+        },
+        "shared": {
+          "type": "boolean"
         }
       }
     },
@@ -410,6 +422,22 @@
         },
         "resources": {
           "type": "object"
+        }
+      }
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "appId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "appSlug": {
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string"
         }
       }
     }

@@ -160,6 +160,59 @@ func TestTheRuntimeProcessesAreOffUntilEnabled(t *testing.T) {
 	}
 }
 
+// The github section is in no staged file: the chart adds it for a deployment with an App, the
+// ids as values and the two secrets as references both services resolve from the Secret.
+func TestTheGitHubAppReachesTheConfigOnlyWhenTheDeploymentHasOne(t *testing.T) {
+	if cfg := loadRendered(t, charttest.Render(t, charttest.InCluster), charttest.InCluster, configLoaders[0]); cfg.GitHub.Configured() {
+		t.Errorf("in-cluster github = %+v, want no App", cfg.GitHub.AppID)
+	}
+	release := charttest.Render(t, charttest.External)
+	for _, deployment := range configLoaders {
+		got := loadRendered(t, release, charttest.External, deployment).GitHub
+		want := config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", ClientID: "Iv23made-up",
+			ClientSecret: charttest.Secret["HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET"], PrivateKey: charttest.Secret["HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY"]}
+		if got != want {
+			t.Errorf("%s: github app %d (%s, %s), or its secrets, are not the values' and the Secret's", deployment, got.AppID, got.AppSlug, got.ClientID)
+		}
+	}
+}
+
+// A runtime's token is derived from the signing secret, which only the control plane's tool
+// reads. The pod runs that tool first, with what control-service is started with, and the
+// process is started with what it printed.
+func TestEachRuntimeProcessTakesItsTokenFromTheControlPlanesTool(t *testing.T) {
+	release := charttest.Render(t, charttest.External)
+	for deployment, want := range map[string]struct{ script, start string }{
+		"hypothesisloop-cloud-agent": {
+			"/hl-admin cluster add vast default > /token/token && /hl-admin cluster share vast on",
+			`RUNTIME_TOKEN="$(cat /token/token)" exec /cloud-agent`},
+		"hypothesisloop-agent-launcher": {
+			"/hl-admin token launcher:main > /token/token",
+			`LAUNCHER_TOKEN="$(cat /token/token)" exec /agent-launcher`},
+	} {
+		script, env := release.TokenInit(t, deployment, secretNames[charttest.External])
+		if script != want.script {
+			t.Errorf("%s: the init container runs %q, want %q", deployment, script, want.script)
+		}
+		charttest.Setenv(t, env)
+		if _, err := config.Load(release.ConfigFile(t, "hypothesisloop-config", "hypothesisloop.yaml")); err != nil {
+			t.Errorf("%s: hl-admin could not load the config with the init container's environment: %v", deployment, err)
+		}
+		if env["DATABASE_URL"] != charttest.Secret["DATABASE_URL"] {
+			t.Errorf("%s: the init container has no DATABASE_URL, which registering a cluster needs", deployment)
+		}
+		pod := release.Deployments[deployment].Spec.Template.Spec
+		if command := pod.Containers[0].Command; len(command) != 3 || command[2] != want.start {
+			t.Errorf("%s: started with %q, want %q", deployment, command, want.start)
+		}
+		for _, entry := range pod.Containers[0].Env {
+			if entry.ValueFrom != nil && (entry.ValueFrom.SecretKeyRef.Key == "HYPOTHESISLOOP_SIGNING_SECRET" || entry.ValueFrom.SecretKeyRef.Key == "DATABASE_URL") {
+				t.Errorf("%s: the process itself is handed %s", deployment, entry.ValueFrom.SecretKeyRef.Key)
+			}
+		}
+	}
+}
+
 func TestTheTunnelledPortsAreNodePorts(t *testing.T) {
 	release := charttest.Render(t, charttest.External)
 	for name, want := range map[string][2]int32{
@@ -183,27 +236,31 @@ func TestTheUIIsGivenItsPublicValues(t *testing.T) {
 
 func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 	for name, refused := range map[string]struct{ values, set, complaint string }{
-		"no secret name":             {charttest.InCluster, `secretName=""`, "secretName is required"},
-		"no image registry":          {charttest.InCluster, `images.registry=""`, "images.registry is required"},
-		"no image tag":               {charttest.InCluster, `images.tag=""`, "images.tag is required"},
-		"no UI origin":               {charttest.InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
-		"no launcher":                {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
-		"no agent image":             {charttest.InCluster, `agents.image=""`, "agents.image is required"},
-		"no agent API address":       {charttest.InCluster, `agents.apiURL=""`, "agents.apiURL is required"},
-		"no runtime API address":     {charttest.InCluster, `runtimes.apiURL=""`, "runtimes.apiURL is required"},
-		"no runtime metrics address": {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
-		"no object store address":    {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
-		"no Supabase address":        {charttest.InCluster, `ui.supabaseURL=""`, "ui.supabaseURL is required"},
-		"no publishable key":         {charttest.InCluster, `ui.supabasePublishableKey=""`, "ui.supabasePublishableKey is required"},
-		"cloud-agent without config": {charttest.InCluster, `cloudAgent.enabled=true`, "cloudAgent.config is required"},
-		"launcher without config":    {charttest.InCluster, `agentLauncher.enabled=true`, "agentLauncher.config is required"},
-		"keys as text":               {charttest.External, `auth.jwtKeys="kid"`, "/auth/jwtKeys"},
-		"a key field nobody reads":   {charttest.External, `auth.jwtKeys=[{"kid":"a","kty":"EC","alg":"ES256","use":"sig"}]`, "/auth/jwtKeys/0"},
-		"an origin that is a number": {charttest.External, `auth.uiOrigin=3000`, "/auth/uiOrigin"},
-		"a flag that is text":        {charttest.External, `postgres.enabled="no"`, "/postgres/enabled"},
-		"a secret passed as a value": {charttest.External, `auth.signingSecret="made-up"`, "signingSecret"},
-		"the removed extra section":  {charttest.External, `config={"extra":"auth: {}"}`, "config"},
-		"env names as one string":    {charttest.External, `cloudAgent.secretEnv="VAST_API_KEY"`, "/cloudAgent/secretEnv"},
+		"no secret name":              {charttest.InCluster, `secretName=""`, "secretName is required"},
+		"no image registry":           {charttest.InCluster, `images.registry=""`, "images.registry is required"},
+		"no image tag":                {charttest.InCluster, `images.tag=""`, "images.tag is required"},
+		"no UI origin":                {charttest.InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
+		"no launcher":                 {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
+		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
+		"no agent API address":        {charttest.InCluster, `agents.apiURL=""`, "agents.apiURL is required"},
+		"no runtime API address":      {charttest.InCluster, `runtimes.apiURL=""`, "runtimes.apiURL is required"},
+		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
+		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
+		"no Supabase address":         {charttest.InCluster, `ui.supabaseURL=""`, "ui.supabaseURL is required"},
+		"no publishable key":          {charttest.InCluster, `ui.supabasePublishableKey=""`, "ui.supabasePublishableKey is required"},
+		"cloud-agent without config":  {charttest.InCluster, `cloudAgent.enabled=true`, "cloudAgent.config is required"},
+		"launcher without config":     {charttest.InCluster, `agentLauncher.enabled=true`, "agentLauncher.config is required"},
+		"cloud-agent with no cluster": {charttest.External, `cloudAgent.clusterName=""`, "cloudAgent.clusterName is required"},
+		"cloud-agent with no org":     {charttest.External, `cloudAgent.org=""`, "cloudAgent.org is required"},
+		"a cluster name with a shell": {charttest.External, `cloudAgent.clusterName="a; rm"`, "/cloudAgent/clusterName"},
+		"an App with no client id":    {charttest.External, `github.clientId=""`, "github.clientId is required"},
+		"keys as text":                {charttest.External, `auth.jwtKeys="kid"`, "/auth/jwtKeys"},
+		"a key field nobody reads":    {charttest.External, `auth.jwtKeys=[{"kid":"a","kty":"EC","alg":"ES256","use":"sig"}]`, "/auth/jwtKeys/0"},
+		"an origin that is a number":  {charttest.External, `auth.uiOrigin=3000`, "/auth/uiOrigin"},
+		"a flag that is text":         {charttest.External, `postgres.enabled="no"`, "/postgres/enabled"},
+		"a secret passed as a value":  {charttest.External, `auth.signingSecret="made-up"`, "signingSecret"},
+		"the removed extra section":   {charttest.External, `config={"extra":"auth: {}"}`, "config"},
+		"env names as one string":     {charttest.External, `cloudAgent.secretEnv="VAST_API_KEY"`, "/cloudAgent/secretEnv"},
 	} {
 		if complaint := charttest.RenderError(t, refused.values, refused.set); !strings.Contains(complaint, refused.complaint) {
 			t.Errorf("%s: helm said %q, want it to name %q", name, complaint, refused.complaint)

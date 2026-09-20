@@ -1,5 +1,6 @@
-# A hosted install: the database runs elsewhere, people sign in through an identity provider, and
-# a cloud-agent and an agent-launcher rent from two providers. Every value is made up. The chart's
+# A hosted install: the database runs elsewhere, people sign in through an identity provider,
+# repositories are reached through a GitHub App, and a cloud-agent and an agent-launcher rent
+# from two providers. Every value is made up. The chart's
 # tests render it (controlplane/infra/helm/chart_test.go).
 namespace:
   create: false
@@ -33,8 +34,15 @@ objectStore:
 ui:
   supabaseURL: https://project.supabase.example.invalid
   supabasePublishableKey: sb_publishable_made-up
+github:
+  appId: 4242
+  appSlug: made-up-app
+  clientId: Iv23made-up
 cloudAgent:
   enabled: true
+  clusterName: vast
+  org: default
+  shared: true
   secretEnv: [VAST_API_KEY]
   config: |
     cluster_name: vast

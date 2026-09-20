@@ -32,7 +32,44 @@ Every ${NAME} of the rendered hypothesisloop.yaml, for the two processes that lo
 is in no file: both read it from the environment.
 */}}
 {{- define "hypothesisloop.configSecretEnv" -}}
-{{ include "hypothesisloop.secretEnv" (dict "keys" (list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY") "root" .) }}
+{{- $keys := list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY" -}}
+{{- if .Values.github.appId -}}
+{{- $keys = concat $keys (list "HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET" "HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY") -}}
+{{- end -}}
+{{ include "hypothesisloop.secretEnv" (dict "keys" $keys "root" .) }}
+{{- end -}}
+
+{{/*
+The init container of a runtime process: the control plane's own tool, started with what
+control-service is started with, leaves the process's token in /token/token. The token is derived
+from the signing secret, so no one has to carry it into the Secret.
+call as: include "hypothesisloop.tokenInit" (dict "script" "/hl-admin token launcher:main > /token/token" "root" $)
+*/}}
+{{- define "hypothesisloop.tokenInit" -}}
+- name: token
+  image: {{ include "hypothesisloop.image" (dict "name" "control-service" "root" .root) }}
+  imagePullPolicy: {{ .root.Values.images.pullPolicy }}
+  command: ["/bin/sh", "-ec", {{ .script | quote }}]
+  env:
+    - name: HYPOTHESISLOOP_CONFIG
+      value: /platform/hypothesisloop.yaml
+    {{- include "hypothesisloop.configSecretEnv" .root | nindent 4 }}
+  volumeMounts:
+    - name: token
+      mountPath: /token
+    - name: platform-config
+      mountPath: /platform
+      readOnly: true
+{{- end -}}
+
+{{/* The two volumes hypothesisloop.tokenInit mounts. */}}
+{{- define "hypothesisloop.tokenVolumes" -}}
+- name: token
+  emptyDir:
+    medium: Memory
+- name: platform-config
+  configMap:
+    name: hypothesisloop-config
 {{- end -}}
 
 {{/* Pod annotations that restart a pod when the Secret it reads changes. */}}

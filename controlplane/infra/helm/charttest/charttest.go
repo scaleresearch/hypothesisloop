@@ -30,17 +30,17 @@ const (
 // Secret is every key the chart can read from the deployment's Secret, with made-up values. A
 // test's processes get these through the environment and through nothing else.
 var Secret = map[string]string{
-	"DATABASE_URL":                   "postgres://made-up-user:made-up-database-password@db.example.invalid:5432/postgres?sslmode=require",
-	"POSTGRES_PASSWORD":              "made-up-database-password",
-	"HYPOTHESISLOOP_SIGNING_SECRET":  "made-up-signing-secret-of-forty-characters",
-	"OBJECT_STORE_ACCESS_KEY_ID":     "made-up-object-store-key-id",
-	"OBJECT_STORE_SECRET_ACCESS_KEY": "made-up-object-store-secret-key",
-	"CLOUD_AGENT_RUNTIME_TOKEN":      "hls_bWFkZS11cC1ydW50aW1l.c2lnbmF0dXJl",
-	"AGENT_LAUNCHER_TOKEN":           "hls_bWFkZS11cC1sYXVuY2hlcg.c2lnbmF0dXJl",
-	"VAST_API_KEY":                   "made-up-vast-api-key",
-	"FLY_API_TOKEN":                  "FlyV1 made-up-fly-token",
-	"E2B_API_KEY":                    "made-up-e2b-api-key",
-	"CLAUDE_CODE_OAUTH_TOKEN":        "made-up-claude-subscription-token",
+	"DATABASE_URL":                            "postgres://made-up-user:made-up-database-password@db.example.invalid:5432/postgres?sslmode=require",
+	"POSTGRES_PASSWORD":                       "made-up-database-password",
+	"HYPOTHESISLOOP_SIGNING_SECRET":           "made-up-signing-secret-of-forty-characters",
+	"OBJECT_STORE_ACCESS_KEY_ID":              "made-up-object-store-key-id",
+	"OBJECT_STORE_SECRET_ACCESS_KEY":          "made-up-object-store-secret-key",
+	"HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET": "made-up-app-client-secret",
+	"HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY":   "-----BEGIN RSA PRIVATE KEY-----\nmade-up: key # one string\n-----END RSA PRIVATE KEY-----\n",
+	"VAST_API_KEY":                            "made-up-vast-api-key",
+	"FLY_API_TOKEN":                           "FlyV1 made-up-fly-token",
+	"E2B_API_KEY":                             "made-up-e2b-api-key",
+	"CLAUDE_CODE_OAUTH_TOKEN":                 "made-up-claude-subscription-token",
 }
 
 // Release is one rendering of the chart.
@@ -182,8 +182,24 @@ func (r *Release) Env(t testing.TB, deployment, secretName string) map[string]st
 	if len(containers) != 1 {
 		t.Fatalf("Deployment %s has %d containers, want one", deployment, len(containers))
 	}
+	return env(t, deployment, containers[0], secretName)
+}
+
+// TokenInit is the init container that leaves a runtime process its token: the script it runs
+// and the environment it runs it with.
+func (r *Release) TokenInit(t testing.TB, deployment, secretName string) (script string, environment map[string]string) {
+	t.Helper()
+	pod := r.Deployments[deployment].Spec.Template.Spec
+	if len(pod.InitContainers) != 1 || len(pod.InitContainers[0].Command) != 3 {
+		t.Fatalf("Deployment %s: init containers = %+v, want the one that runs hl-admin through a shell", deployment, pod.InitContainers)
+	}
+	return pod.InitContainers[0].Command[2], env(t, deployment, pod.InitContainers[0], secretName)
+}
+
+func env(t testing.TB, deployment string, container corev1.Container, secretName string) map[string]string {
+	t.Helper()
 	env := map[string]string{}
-	for _, entry := range containers[0].Env {
+	for _, entry := range container.Env {
 		if entry.ValueFrom == nil {
 			env[entry.Name] = entry.Value
 			continue

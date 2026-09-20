@@ -17,9 +17,8 @@ func TestTheChartStartsTheCloudAgentWithAConfigAndEnvironmentItAccepts(t *testin
 	if env["CLOUD_AGENT_CONFIG"] != "/settings/cloud-agent.yaml" {
 		t.Errorf("CLOUD_AGENT_CONFIG = %q, want the mounted file", env["CLOUD_AGENT_CONFIG"])
 	}
-	if env["RUNTIME_TOKEN"] != charttest.Secret["CLOUD_AGENT_RUNTIME_TOKEN"] {
-		t.Errorf("RUNTIME_TOKEN = %q, want the Secret's CLOUD_AGENT_RUNTIME_TOKEN", env["RUNTIME_TOKEN"])
-	}
+	// The runtime token is in no Secret: the pod's init container registers the cluster and
+	// leaves its token, and the chart's tests hold that (controlplane/infra/helm/chart_test.go).
 	cfg, err := loadConfig(release.ConfigFile(t, "hypothesisloop-cloud-agent-config", "cloud-agent.yaml"))
 	if err != nil {
 		t.Fatal(err)
