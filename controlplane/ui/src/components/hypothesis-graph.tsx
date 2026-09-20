@@ -171,7 +171,9 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
   ], [graph, positions, rootLabel, evidence])
   const highlight = useMemo(() => ({ selected, hits, dimmed }), [selected, hits, dimmed])
 
-  const edges = useMemo<Edge[]>(() => graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
+  const edges = useMemo<Edge[]>(() => {
+    const builtOn = new Set(graph.edges.filter(e => e.type === 'builds_on').flatMap(e => [`${e.from}>${e.to}`, `${e.to}>${e.from}`]))
+    return graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
     const s = hypothesisLinkStyles[e.type]
     const hierarchy = e.type === 'builds_on'
     const opacity = dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1
@@ -187,7 +189,9 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
     // A node hangs one row under its deepest parent, so a builds_on that skips a row is a further
     // parent: it curves into the child's side, dashed and labelled, clear of the tree's own lines.
     const further = hierarchy && rows > 1
+    // A cross link to the node's own parent would lie on the tree's line, so it loops round the side.
     const [sourceHandle, targetHandle] = further ? ['bottom', a.x < b.x ? 'left' : 'right']
+      : !hierarchy && builtOn.has(`${e.from}>${e.to}`) ? ['left', 'left']
       : hierarchy || rows === 1 ? ['bottom', 'top']
       : rows === 0 ? ['bottom', 'bottom']
       : a.x < b.x ? ['right', 'left'] : ['left', 'right']
@@ -198,7 +202,7 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
       sourceHandle,
       targetHandle,
       type: further || rows > 1 ? 'default' : 'smoothstep',
-      pathOptions: hierarchy ? undefined : { stepPosition: 1 },
+      pathOptions: hierarchy ? undefined : { stepPosition: 1, offset: e.type === 'related' ? 12 : 20 },
       label: hierarchy && !further ? undefined : s.label,
       zIndex: hierarchy && !further ? 0 : 1,
       labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600, opacity },
@@ -211,7 +215,7 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
         opacity,
       },
     }
-  }), [graph, positions, dimmed])
+  })}, [graph, positions, dimmed])
 
   // Without a focus the view opens on the whole graph under the objective, or on its top when
   // the whole would be too small to read.
