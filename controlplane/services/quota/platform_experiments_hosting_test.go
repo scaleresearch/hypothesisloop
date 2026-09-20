@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -26,12 +25,15 @@ type hostingStore struct {
 	spawnErr error
 }
 
-func (s *hostingStore) SpawnAgents(_ context.Context, _ string, _ []*domain.Agent, signups []domain.AgentSignup) error {
+func (s *hostingStore) CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error {
 	if s.spawnErr != nil {
 		return s.spawnErr
 	}
+	if len(agents) != len(signups) {
+		return errors.New("agents and signups differ in number")
+	}
 	s.spawned = append(s.spawned, signups...)
-	return nil
+	return s.CreatePlatformExperiment(ctx, pe)
 }
 
 func (s *hostingStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
@@ -78,8 +80,8 @@ func TestCreateWithAHostedCoordinatorAndAgentsAsksTheConfiguredLauncherForThem(t
 	if out["coordinator_hosted"] != true || out["signup_count"] != float64(2) {
 		t.Errorf("answer = %v, want coordinator_hosted and two agents", out)
 	}
-	if len(store.spawned) != 2 {
-		t.Fatalf("spawned = %+v, want two", store.spawned)
+	if len(store.spawned) != 2 || store.spawned[0].AgentID == "" || store.spawned[0].AgentID == store.spawned[1].AgentID {
+		t.Fatalf("spawned = %+v, want two agents of their own ids", store.spawned)
 	}
 	for _, signup := range store.spawned {
 		if !signup.Hosted || signup.Launcher != "main" || signup.Model != "model-default" || signup.Flavor != domain.DefaultAgentFlavor {
@@ -131,12 +133,13 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		"agents without a repository":        {map[string]any{"hosted_agents": 1}, &fakeProjectRepos{}, 409, "no_repository"},
 		"a model without a coordinator":      {map[string]any{"coordinator_model": "m"}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 		"a model no name can be":             {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b"}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"more agents than the field holds":   {map[string]any{"hosted_agents": 4}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"a negative count":                   {map[string]any{"hosted_agents": -1}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"more agents than the field holds":   {map[string]any{"hosted_agents": 4}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, ""},
+		"a negative count":                   {map[string]any{"hosted_agents": -1}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, ""},
 	} {
 		store, create := hostingAPI(t, tc.repos)
 		code, out := create(with(tc.more))
-		if code != tc.status || out["reason"] != tc.reason || len(store.created) != 0 || len(store.spawned) != 0 {
+		reason, _ := out["reason"].(string)
+		if code != tc.status || reason != tc.reason || len(store.created) != 0 || len(store.spawned) != 0 {
 			t.Errorf("%s: got = %d %v with %d created, want %d %s and nothing created", name, code, out, len(store.created), tc.status, tc.reason)
 		}
 	}
@@ -147,12 +150,11 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		t.Fatalf("nothing hosted and no repository: got = %d %v, want 201", code, out)
 	}
 
-	// Agents that could not be joined leave the platform experiment, and the answer says so.
+	// The experiment and its agents are one write: when it fails neither exists, and the answer
+	// is the platform's own failure.
 	store, create = hostingAPI(t, &fakeProjectRepos{files: map[string]string{"prj-a": ""}})
 	store.spawnErr = errors.New("the database is away")
-	code, out := create(with(map[string]any{"hosted_agents": 2}))
-	detail, _ := out["error"].(string)
-	if code != http.StatusInternalServerError || len(store.created) != 1 || !strings.Contains(detail, store.created[0].ID) || strings.Contains(detail, "database") {
-		t.Fatalf("agents that could not be joined: got = %d %v, want 500 naming the platform experiment", code, out)
+	if code, out := create(with(map[string]any{"hosted_agents": 2})); code != http.StatusInternalServerError || len(store.created) != 0 || len(store.spawned) != 0 {
+		t.Fatalf("a write that failed: got = %d %v with %d created and %d agents, want 500 and nothing", code, out, len(store.created), len(store.spawned))
 	}
 }

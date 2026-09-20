@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -461,7 +460,7 @@ func TestAMachineStillStartingPastTheBootLimitIsRecordedAsAnExit(t *testing.T) {
 	if err := pes.SetAgentInstanceName(ctx, pe, agent, "name-1"); err != nil {
 		t.Fatal(err)
 	}
-	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-1", bootLimit, 3); err != nil || recorded {
+	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-1", "never started", bootLimit, 3); err != nil || recorded {
 		t.Fatalf("just asked for: got = %v, %v, want = false", recorded, err)
 	}
 	age := func(by time.Duration) {
@@ -471,25 +470,25 @@ func TestAMachineStillStartingPastTheBootLimitIsRecordedAsAnExit(t *testing.T) {
 		}
 	}
 	age(bootLimit - 10*time.Second)
-	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-1", bootLimit, 3); err != nil || recorded {
+	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-1", "never started", bootLimit, 3); err != nil || recorded {
 		t.Fatalf("inside the limit: got = %v, %v, want = false", recorded, err)
 	}
 	age(bootLimit + time.Second)
-	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "another-name", bootLimit, 3); err != nil || recorded {
+	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "another-name", "never started", bootLimit, 3); err != nil || recorded {
 		t.Fatalf("a name the agent is not asked for under: got = %v, %v, want = false", recorded, err)
 	}
-	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-1", bootLimit, 3); err != nil || !recorded {
+	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-1", "never started", bootLimit, 3); err != nil || !recorded {
 		t.Fatalf("past the limit: got = %v, %v, want = true", recorded, err)
 	}
 	signup, err := pes.GetAgentSignup(ctx, pe, agent)
-	if err != nil || signup.Instance.Restarts != 1 || signup.Instance.Name != "" || !strings.Contains(signup.Instance.ExitLog, "5m0s") || signup.Instance.ExitedAt == nil {
+	if err != nil || signup.Instance.Restarts != 1 || signup.Instance.Name != "" || signup.Instance.ExitLog != "never started" || signup.Instance.ExitedAt == nil {
 		t.Fatalf("recorded %+v, %v", signup.Instance, err)
 	}
 	// Asked for again, the clock starts again.
 	if err := pes.SetAgentInstanceName(ctx, pe, agent, "name-2"); err != nil {
 		t.Fatal(err)
 	}
-	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-2", bootLimit, 3); err != nil || recorded {
+	if recorded, err := pes.RecordAgentInstanceStuck(ctx, pe, agent, "name-2", "never started", bootLimit, 3); err != nil || recorded {
 		t.Fatalf("the replacement, just asked for: got = %v, %v, want = false", recorded, err)
 	}
 }

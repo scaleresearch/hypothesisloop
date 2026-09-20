@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -46,6 +47,12 @@ const coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.c
 
 // CreatePlatformExperiment inserts a new platform experiment.
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
+	return insertPlatformExperiment(ctx, s.pool.pool, pe)
+}
+
+func insertPlatformExperiment(ctx context.Context, into interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}, pe *domain.PlatformExperiment) error {
 	const q = `
 INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`
@@ -70,7 +77,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	if pe.Coordinator != nil {
 		coordinator = *pe.Coordinator
 	}
-	_, err = s.pool.pool.Exec(ctx, q,
+	_, err = into.Exec(ctx, q,
 		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
 		pe.StartsAt, pe.EndsAt, string(pe.Status),

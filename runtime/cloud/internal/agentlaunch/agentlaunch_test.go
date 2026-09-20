@@ -964,3 +964,73 @@ func TestAVendorErrorThatQuotesTheRequestBackReachesNoLogWithItsSecrets(t *testi
 		t.Fatalf("log = %q", h.log)
 	}
 }
+
+func TestAFailedCreateIsReportedWithTheNextQuestionRedactedAndOnlyWhileTheNameIsNotListed(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	refusal := fmt.Sprintf(`vendor: HTTP 422: {"error":"bad guest","env":{"HL_TOKEN":%q,"CLAUDE_CODE_OAUTH_TOKEN":%q}}`, agentToken, oauthToken)
+	failing := true
+	h.rented.Fail = func(method, name string) error {
+		if method == "Create" && failing && strings.HasSuffix(name, "-a") {
+			return errors.New(refusal)
+		}
+		return nil
+	}
+	if err := h.pass(); err == nil {
+		t.Fatal("the pass with a failed create returned no error")
+	}
+	if first := h.cp.lastQuestion(); len(first.CreateFailures) != 0 {
+		t.Fatalf("the first question reports %+v, want nothing: no create had been tried", first.CreateFailures)
+	}
+
+	_ = h.pass()
+	reported := h.cp.lastQuestion().CreateFailures
+	if len(reported) != 1 || reported[0].Name != "a" || !strings.Contains(reported[0].Reason, "bad guest") {
+		t.Fatalf("reported %+v, want the one failed create by the name it was asked for under", reported)
+	}
+	for _, secret := range []string{agentToken, oauthToken} {
+		if strings.Contains(reported[0].Reason, secret) {
+			t.Fatalf("the reason carries a secret of the instance's environment: %s", reported[0].Reason)
+		}
+	}
+	if len(reported[0].Reason) > exitLogBytes {
+		t.Fatalf("the reason is %d bytes, above the bound", len(reported[0].Reason))
+	}
+
+	// The create works on the third pass. Its failure in the second is not said of a machine
+	// the provider lists by the fourth.
+	failing = false
+	if err := h.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if third := h.cp.lastQuestion().CreateFailures; len(third) != 1 {
+		t.Fatalf("the third question reports %+v, want the second pass's failure", third)
+	}
+	if err := h.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if fourth := h.cp.lastQuestion(); len(fourth.CreateFailures) != 0 || len(fourth.Instances) != 2 {
+		t.Fatalf("the fourth question = %+v, want both listed and no failure", fourth)
+	}
+}
+
+func TestAPassThatNeverReachedItsCreatesKeepsTheFailuresItOwesTheControlPlane(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Create" {
+			return errors.New("vendor: no capacity")
+		}
+		return nil
+	}
+	_ = h.pass()
+	h.cp.answer(http.StatusServiceUnavailable, "")
+	if err := h.pass(); err == nil {
+		t.Fatal("a pass the control plane did not answer returned no error")
+	}
+	h.cp.want([]entry{agent("a")}, nil)
+	_ = h.pass()
+	if reported := h.cp.lastQuestion().CreateFailures; len(reported) != 1 || reported[0].Reason != "vendor: no capacity" {
+		t.Fatalf("reported %+v, want the failure the unanswered question carried", reported)
+	}
+}

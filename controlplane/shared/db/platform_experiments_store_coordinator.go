@@ -74,8 +74,8 @@ func (s *PlatformExperimentsStore) RecordCoordinatorInstanceExit(ctx context.Con
 }
 
 // RecordCoordinatorInstanceStuck is RecordAgentInstanceStuck for a hosted coordinator's machine.
-func (s *PlatformExperimentsStore) RecordCoordinatorInstanceStuck(ctx context.Context, platformExpID, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
-	return s.endCoordinatorInstance(ctx, platformExpID, name, stuckStartingLog(bootLimit), maxRestarts, bootLimit)
+func (s *PlatformExperimentsStore) RecordCoordinatorInstanceStuck(ctx context.Context, platformExpID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+	return s.endCoordinatorInstance(ctx, platformExpID, name, why, maxRestarts, bootLimit)
 }
 
 func (s *PlatformExperimentsStore) endCoordinatorInstance(ctx context.Context, platformExpID, name, exitLog string, maxRestarts int, askedBefore time.Duration) (bool, error) {

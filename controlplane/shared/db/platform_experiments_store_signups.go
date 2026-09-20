@@ -61,7 +61,41 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 		return 0, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	inserted, err := enrolTx(ctx, tx, platformExpID, create, signups)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
+	}
+	return inserted, nil
+}
 
+// CreatePlatformExperimentWithAgents inserts a platform experiment and enrols new agents in it,
+// both or neither: an experiment asked for with agents never exists without them.
+func (s *PlatformExperimentsStore) CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error {
+	if len(agents) != len(signups) {
+		return fmt.Errorf("platform_experiments_store.CreateWithAgents: %d agents for %d signups", len(agents), len(signups))
+	}
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.CreateWithAgents: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
+		return err
+	}
+	if _, err := enrolTx(ctx, tx, pe.ID, agents, signups); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.CreateWithAgents: commit: %w", err)
+	}
+	return nil
+}
+
+// enrolTx is enrol inside the caller's transaction.
+func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
 	var status, orgID string
 	var maxAgents int
 	if err := tx.QueryRow(ctx, `
@@ -130,9 +164,6 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if count > maxAgents {
 			return 0, ErrMaxAgentsReached
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
 	}
 	return inserted, nil
 }
@@ -309,15 +340,12 @@ func (s *PlatformExperimentsStore) RecordAgentInstanceExit(ctx context.Context, 
 	return s.endAgentInstance(ctx, platformExpID, agentID, name, exitLog, maxRestarts, 0)
 }
 
-// RecordAgentInstanceStuck records, as an exit, that the machine a hosted agent was asked for
-// under name is still starting more than bootLimit after it was asked for, on the database's
-// clock. recorded=false while it is inside the limit.
-func (s *PlatformExperimentsStore) RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name string, bootLimit time.Duration, maxRestarts int) (recorded bool, err error) {
-	return s.endAgentInstance(ctx, platformExpID, agentID, name, stuckStartingLog(bootLimit), maxRestarts, bootLimit)
-}
-
-func stuckStartingLog(bootLimit time.Duration) string {
-	return fmt.Sprintf("the machine was still starting %s after it was asked for, which is the boot limit", bootLimit)
+// RecordAgentInstanceStuck records, as an exit, that a hosted agent has had no started machine
+// for bootLimit since name was first asked for, on the database's clock: one that stayed
+// starting, or one that could not be created at all. why is kept as the exit's log. It reports
+// false, and changes nothing, while the limit has not passed.
+func (s *PlatformExperimentsStore) RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+	return s.endAgentInstance(ctx, platformExpID, agentID, name, why, maxRestarts, bootLimit)
 }
 
 func (s *PlatformExperimentsStore) endAgentInstance(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int, askedBefore time.Duration) (bool, error) {

@@ -15,6 +15,7 @@ import (
 // PlatformExperimentsStore is the persistence interface for platform experiments.
 type PlatformExperimentsStore interface {
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error
+	CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
 	// ListPlatformExperimentsByStatus is the unpaginated read the sweeps use. A sweep that
@@ -153,6 +154,8 @@ type CreatePlatformExperimentRequest struct {
 
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
 	coordinator *domain.HostedCoordinator
+	// hostedAgent is the place each of HostedAgents gets, resolved by the handler.
+	hostedAgent *domain.AgentSignup
 
 	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
 	// one stated as its zero value.

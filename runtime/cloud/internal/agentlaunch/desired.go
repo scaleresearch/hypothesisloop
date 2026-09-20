@@ -54,10 +54,19 @@ type observedInstance struct {
 type reconcileQuestion struct {
 	LaunchDigest string             `json:"launch_digest"`
 	Instances    []observedInstance `json:"instances"`
+	// CreateFailures are the creates the pass before this one could not make.
+	CreateFailures []createFailure `json:"create_failures,omitempty"`
 }
 
-func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
-	question, err := json.Marshal(reconcileQuestion{LaunchDigest: l.launchDigest, Instances: observed})
+// createFailure is one instance the provider refused to create, and what it said with every
+// value of the instance's environment taken out.
+type createFailure struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance, notCreated []createFailure) (*desired, error) {
+	question, err := json.Marshal(reconcileQuestion{LaunchDigest: l.launchDigest, Instances: observed, CreateFailures: notCreated})
 	if err != nil {
 		return nil, err
 	}

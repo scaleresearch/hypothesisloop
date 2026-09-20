@@ -89,11 +89,11 @@ func (s *launcherStore) RecordCoordinatorInstanceExit(_ context.Context, pe, nam
 	return true, nil
 }
 
-func (s *launcherStore) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+func (s *launcherStore) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
 	if s.askedAgo[coordinatorKey+pe] <= bootLimit {
 		return false, nil
 	}
-	return s.RecordCoordinatorInstanceExit(ctx, pe, name, "still starting past the boot limit", maxRestarts)
+	return s.RecordCoordinatorInstanceExit(ctx, pe, name, why, maxRestarts)
 }
 
 // coordinatorKey prefixes a platform experiment's id where askedAgo keeps its coordinator.
@@ -101,14 +101,14 @@ const coordinatorKey = "coordinator of "
 
 const testBootLimit = 5 * time.Minute
 
-func (s *launcherStore) RecordAgentInstanceStuck(ctx context.Context, pe, agent, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+func (s *launcherStore) RecordAgentInstanceStuck(ctx context.Context, pe, agent, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
 	if err := s.writeErr[agent]; err != nil {
 		return false, err
 	}
 	if s.askedAgo[agent] <= bootLimit {
 		return false, nil
 	}
-	return s.RecordAgentInstanceExit(ctx, pe, agent, name, "still starting past the boot limit", maxRestarts)
+	return s.RecordAgentInstanceExit(ctx, pe, agent, name, why, maxRestarts)
 }
 
 func (s *launcherStore) ListLauncherAgents(_ context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error) {
@@ -818,5 +818,76 @@ func TestACoordinatorsMachineIsRestartedBoundedTimedAndLeftToEndLikeAnAgents(t *
 	answer := mustReconcile(t, store, observed(ObservedInstance{Name: ending.Instance.Name, State: "exited"}))
 	if len(answer.Instances) != 0 || !slices.Equal(answer.Ending, []string{ending.Instance.Name}) {
 		t.Fatalf("answer = %+v, want the coordinator only as ending", answer)
+	}
+}
+
+func TestAMachineThatCouldNotBeCreatedIsGivenTheBootLimitAndThenSpendsARestart(t *testing.T) {
+	store := &launcherStore{
+		byLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
+		coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")},
+		askedAgo:     map[string]time.Duration{},
+	}
+	first := mustReconcile(t, store, observed())
+	agentName, coordinatorName := first.Instances[0].Name, first.Instances[1].Name
+	failed := func(names ...string) Observed {
+		body := observed()
+		for _, name := range names {
+			body.CreateFailures = append(body.CreateFailures, CreateFailure{Name: name, Reason: "vendor: HTTP 422: bad guest"})
+		}
+		return body
+	}
+
+	// Inside the limit a failed create is retried under the same name and costs nothing.
+	store.askedAgo["ag-1"] = testBootLimit - time.Second
+	if answer := mustReconcile(t, store, failed(agentName)); answer.Instances[0].Name != agentName || store.find("pe-1", "ag-1").Restarts != 0 {
+		t.Fatalf("inside the limit: %+v, recorded %+v", answer.Instances, store.find("pe-1", "ag-1"))
+	}
+
+	store.askedAgo["ag-1"] = testBootLimit + time.Second
+	store.askedAgo[coordinatorKey+"pe-1"] = testBootLimit + time.Second
+	answer := mustReconcile(t, store, failed(agentName, coordinatorName, "a-name-nobody-is-asked-for-under"))
+	if len(answer.Instances) != 2 || answer.Instances[0].Name == agentName || answer.Instances[1].Name == coordinatorName {
+		t.Fatalf("past the limit: %+v, want both under new names", answer.Instances)
+	}
+	recorded := store.find("pe-1", "ag-1")
+	if recorded.Restarts != 1 || recorded.Stopped || !strings.Contains(recorded.ExitLog, "no machine could be created") || !strings.Contains(recorded.ExitLog, "bad guest") {
+		t.Fatalf("recorded %+v, want a restart spent and the provider's words kept", recorded)
+	}
+	if got := store.coordinator("pe-1").Instance; got.Restarts != 1 || !strings.Contains(got.ExitLog, "bad guest") {
+		t.Fatalf("the coordinator's recorded %+v", got)
+	}
+
+	// Every restart ends the same way: the agent is stopped and no longer asked for.
+	name := answer.Instances[0].Name
+	for range domain.MaxAgentInstanceRestarts {
+		store.askedAgo["ag-1"] = testBootLimit + time.Second
+		next := mustReconcile(t, store, failed(name))
+		if len(next.Instances) == 2 {
+			name = next.Instances[0].Name
+		}
+	}
+	if recorded := store.find("pe-1", "ag-1"); !recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts {
+		t.Fatalf("after every restart: recorded %+v, want the agent stopped", recorded)
+	}
+}
+
+func TestAListedMachineIsBelievedOverAnEarlierFailedCreateOfItsName(t *testing.T) {
+	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}, askedAgo: map[string]time.Duration{}}
+	name := mustReconcile(t, store, observed()).Instances[0].Name
+	store.askedAgo["ag-1"] = 24 * time.Hour
+	body := observed(ObservedInstance{Name: name, State: "running"})
+	body.CreateFailures = []CreateFailure{{Name: name, Reason: "an earlier attempt"}}
+	if answer := mustReconcile(t, store, body); answer.Instances[0].Name != name || store.find("pe-1", "ag-1").Restarts != 0 {
+		t.Fatalf("a running machine was given up on for a create that failed before it: %+v", store.find("pe-1", "ag-1"))
+	}
+}
+
+func TestACreateFailureWithoutAUsableNameIsRefused(t *testing.T) {
+	for _, name := range []string{"", strings.Repeat("n", MaxInstanceNameLength+1)} {
+		body := observed()
+		body.CreateFailures = []CreateFailure{{Name: name, Reason: "r"}}
+		if code, raw := reconcileWith(t, &launcherStore{}, mainLauncher, "main", zap.NewNop(), body); code != http.StatusBadRequest {
+			t.Errorf("name %q: status = %d %s, want 400", name, code, raw)
+		}
 	}
 }

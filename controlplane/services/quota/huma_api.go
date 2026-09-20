@@ -151,7 +151,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
-			"hosted_agents: N joins N new agents the platform runs, as POST /platform-experiments/{id}/agents with hosted does. " +
+			"hosted_agents: N joins N new agents the platform runs, as POST /platform-experiments/{id}/agents with hosted does, in the same write: the experiment and its agents exist together or not at all. " +
 			"Both need the project's repository (409 no_repository without one), neither is read from the file, and coordinator_hosted is fixed from then on. " +
 			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
 	}, func(ctx context.Context, in *struct {
@@ -194,14 +194,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		if hosting.HostedAgents > 0 {
-			signups, err := peh.svc.AddAgents(ctx, pe.ID, AddAgentsRequest{Count: hosting.HostedAgents, Hosted: true}, peh.launch, peh.repos)
-			if err != nil {
-				peh.logger.Error("platform experiment created without its hosted agents", zap.String("id", pe.ID), zap.Error(err))
-				return nil, huma.Error500InternalServerError("platform experiment " + pe.ID + " was created and its hosted agents were not: add them with POST /platform-experiments/" + pe.ID + "/agents")
-			}
-			pe.SignupCount = len(signups)
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})

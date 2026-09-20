@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
 	"time"
 
@@ -110,16 +110,16 @@ func TestACoordinatorsMachineThatExitsOrNeverStartsIsRecordedAndFinallyStopped(t
 	if err := pes.SetCoordinatorInstanceName(ctx, pe, "name-0"); err != nil {
 		t.Fatal(err)
 	}
-	if recorded, err := pes.RecordCoordinatorInstanceStuck(ctx, pe, "name-0", bootLimit, maxRestarts); err != nil || recorded {
+	if recorded, err := pes.RecordCoordinatorInstanceStuck(ctx, pe, "name-0", "never started", bootLimit, maxRestarts); err != nil || recorded {
 		t.Fatalf("just asked for: got = %v, %v, want = false", recorded, err)
 	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_instance_asked_at = now() - make_interval(secs => $2) WHERE id = $1`, pe, (bootLimit + time.Second).Seconds()); err != nil {
 		t.Fatal(err)
 	}
-	if recorded, err := pes.RecordCoordinatorInstanceStuck(ctx, pe, "name-0", bootLimit, maxRestarts); err != nil || !recorded {
+	if recorded, err := pes.RecordCoordinatorInstanceStuck(ctx, pe, "name-0", "never started", bootLimit, maxRestarts); err != nil || !recorded {
 		t.Fatalf("past the limit: got = %v, %v, want = true", recorded, err)
 	}
-	if got := instance(); got.Restarts != 1 || got.Name != "" || !strings.Contains(got.ExitLog, "5m0s") {
+	if got := instance(); got.Restarts != 1 || got.Name != "" || got.ExitLog != "never started" {
 		t.Fatalf("after the boot limit: got = %+v", got)
 	}
 
@@ -151,5 +151,66 @@ func TestACoordinatorsMachineThatExitsOrNeverStartsIsRecordedAndFinallyStopped(t
 	}
 	if has, err := pes.LauncherHasCoordinators(ctx, launcher, time.Minute); err != nil || has {
 		t.Errorf("a launcher whose only coordinator stopped: got = %v, %v, want = false", has, err)
+	}
+}
+
+func TestAPlatformExperimentCreatedWithAgentsExistsWithAllOfThemOrNotAtAll(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	now := time.Now().UTC()
+	experiment := func(maxAgents int) *domain.PlatformExperiment {
+		return &domain.PlatformExperiment{
+			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "with agents", BudgetAcceleratorHours: 10,
+			MaxAgents: maxAgents, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
+			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
+			Stages:                 []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+			HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
+			CreatedAt: now, UpdatedAt: now,
+		}
+	}
+	two := func() ([]*domain.Agent, []domain.AgentSignup) {
+		agents, signups := make([]*domain.Agent, 2), make([]domain.AgentSignup, 2)
+		for i := range agents {
+			id := "ag-" + uuid.New().String()[:12]
+			agents[i] = &domain.Agent{ID: id, Name: id, Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
+			signups[i] = domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-1"}
+		}
+		return agents, signups
+	}
+
+	pe := experiment(5)
+	agents, signups := two()
+	if err := pes.CreatePlatformExperimentWithAgents(ctx, pe, agents, signups); err != nil {
+		t.Fatalf("create with agents: got = %v, want = nil", err)
+	}
+	joined, err := pes.ListAgentSignups(ctx, pe.ID)
+	if err != nil || len(joined) != 2 || !joined[0].Hosted || joined[0].Launcher != "main" {
+		t.Fatalf("joined = %+v, %v, want the two hosted agents", joined, err)
+	}
+
+	// Two competitors do not fit a field of one: the experiment is not created either, and the
+	// agents are in no org.
+	tooSmall := experiment(1)
+	agents, signups = two()
+	if err := pes.CreatePlatformExperimentWithAgents(ctx, tooSmall, agents, signups); !errors.Is(err, ErrMaxAgentsReached) {
+		t.Fatalf("agents that do not fit: got = %v, want ErrMaxAgentsReached", err)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, tooSmall.ID); err != nil || got != nil {
+		t.Fatalf("after a refused write the platform experiment: got = %+v, %v, want none", got, err)
+	}
+	if agent, err := NewAgentsStore(pool).GetAgent(ctx, agents[0].ID); err != nil || agent != nil {
+		t.Fatalf("after a refused write the agent: got = %+v, %v, want none", agent, err)
+	}
+
+	// An agent id already taken fails the second insert of the transaction.
+	taken := experiment(5)
+	agents, signups = two()
+	agents[1].ID, signups[1].AgentID = joined[0].AgentID, joined[0].AgentID
+	if err := pes.CreatePlatformExperimentWithAgents(ctx, taken, agents, signups); err == nil {
+		t.Fatal("an agent id already taken: got = nil, want an error")
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, taken.ID); err != nil || got != nil {
+		t.Fatalf("after a failed write the platform experiment: got = %+v, %v, want none", got, err)
 	}
 }

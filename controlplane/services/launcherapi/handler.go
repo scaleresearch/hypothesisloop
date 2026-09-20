@@ -20,11 +20,11 @@ type Store interface {
 	ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error)
 	SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error
 	RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (bool, error)
-	RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name string, bootLimit time.Duration, maxRestarts int) (bool, error)
+	RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error)
 	ListLauncherCoordinators(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherCoordinator, error)
 	SetCoordinatorInstanceName(ctx context.Context, platformExpID, name string) error
 	RecordCoordinatorInstanceExit(ctx context.Context, platformExpID, name, exitLog string, maxRestarts int) (bool, error)
-	RecordCoordinatorInstanceStuck(ctx context.Context, platformExpID, name string, bootLimit time.Duration, maxRestarts int) (bool, error)
+	RecordCoordinatorInstanceStuck(ctx context.Context, platformExpID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error)
 }
 
 type Handler struct {
@@ -52,6 +52,13 @@ func NewHandler(store Store, image, apiURL, signingSecret string, bootLimit time
 type Observed struct {
 	LaunchDigest string             `json:"launch_digest" doc:"Lowercase hex digest of everything the launcher itself starts an instance with: command, size and the environment it adds. A change replaces every running instance."`
 	Instances    []ObservedInstance `json:"instances" doc:"Every instance the launcher's provider lists for it, an empty list when there is none."`
+	// CreateFailures are the instances of the last answer the launcher could not create.
+	CreateFailures []CreateFailure `json:"create_failures,omitempty" doc:"Each instance of the last answer that the provider refused to create, with what it said. A name the provider lists is in instances and not here."`
+}
+
+type CreateFailure struct {
+	Name   string `json:"name" doc:"The name from the answer, without the launcher's own prefix."`
+	Reason string `json:"reason" doc:"What the provider answered, with every value of the instance's environment taken out."`
 }
 
 type ObservedInstance struct {
@@ -63,6 +70,9 @@ type ObservedInstance struct {
 const (
 	stateStarting = "starting"
 	stateExited   = "exited"
+	// stateNotCreated is no state a launcher reports of an instance: it is what a create failure
+	// reads as beside the listed instances.
+	stateNotCreated = "not created"
 )
 
 var launchDigestPattern = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
@@ -90,7 +100,7 @@ type kept struct {
 	describe func(restarts int) (Instance, error)
 	setName  func(ctx context.Context, name string) error
 	exited   func(ctx context.Context, name, exitLog string) (bool, error)
-	stuck    func(ctx context.Context, name string) (bool, error)
+	stuck    func(ctx context.Context, name, why string) (bool, error)
 }
 
 // reconcile records what the launcher observed and evaluates everything else: which agents and
@@ -106,7 +116,12 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	if err != nil {
 		return nil, err
 	}
+	// What the launcher says of a name: its machine as the provider lists it, or that none could
+	// be created. A listed name is the machine's word, whatever an earlier create answered.
 	seen := map[string]ObservedInstance{}
+	for _, failure := range observed.CreateFailures {
+		seen[failure.Name] = ObservedInstance{Name: failure.Name, State: stateNotCreated, Log: failure.Reason}
+	}
 	for _, instance := range observed.Instances {
 		seen[instance.Name] = instance
 	}
@@ -127,8 +142,8 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			exited: func(ctx context.Context, name, exitLog string) (bool, error) {
 				return h.store.RecordAgentInstanceExit(ctx, pe, id, name, exitLog, domain.MaxAgentInstanceRestarts)
 			},
-			stuck: func(ctx context.Context, name string) (bool, error) {
-				return h.store.RecordAgentInstanceStuck(ctx, pe, id, name, h.bootLimit, domain.MaxAgentInstanceRestarts)
+			stuck: func(ctx context.Context, name, why string) (bool, error) {
+				return h.store.RecordAgentInstanceStuck(ctx, pe, id, name, why, h.bootLimit, domain.MaxAgentInstanceRestarts)
 			},
 		})
 	}
@@ -143,8 +158,8 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			exited: func(ctx context.Context, name, exitLog string) (bool, error) {
 				return h.store.RecordCoordinatorInstanceExit(ctx, pe, name, exitLog, domain.MaxAgentInstanceRestarts)
 			},
-			stuck: func(ctx context.Context, name string) (bool, error) {
-				return h.store.RecordCoordinatorInstanceStuck(ctx, pe, name, h.bootLimit, domain.MaxAgentInstanceRestarts)
+			stuck: func(ctx context.Context, name, why string) (bool, error) {
+				return h.store.RecordCoordinatorInstanceStuck(ctx, pe, name, why, h.bootLimit, domain.MaxAgentInstanceRestarts)
 			},
 		})
 	}
@@ -162,15 +177,19 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			continue
 		}
 		if reported, listed := seen[current.Name]; listed && current.Name != "" {
-			// A machine that exited and one that never got past starting end the same way: the
-			// outcome is recorded, and another machine is asked for while a restart is left.
+			// A machine that exited, one that never got past starting and one that could not be
+			// created end the same way: the outcome is recorded, and another machine is asked
+			// for while a restart is left. The last two are given the boot limit first.
 			var recorded bool
 			var err error
 			switch reported.State {
 			case stateExited:
 				recorded, err = one.exited(ctx, current.Name, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes))
 			case stateStarting:
-				recorded, err = one.stuck(ctx, current.Name)
+				recorded, err = one.stuck(ctx, current.Name, fmt.Sprintf("the machine was still starting %s after it was asked for, which is the boot limit", h.bootLimit))
+			case stateNotCreated:
+				recorded, err = one.stuck(ctx, current.Name, fmt.Sprintf("no machine could be created in the %s after it was asked for, which is the boot limit. The last attempt failed with: %s",
+					h.bootLimit, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes)))
 			}
 			if err != nil {
 				log.Error("record instance outcome failed", zap.Error(err))
@@ -226,6 +245,11 @@ func (o Observed) validate() error {
 			return fmt.Errorf("an observed instance needs a name of at most %d characters", MaxInstanceNameLength)
 		}
 	}
+	for _, failure := range o.CreateFailures {
+		if failure.Name == "" || len(failure.Name) > MaxInstanceNameLength {
+			return fmt.Errorf("a create failure needs a name of at most %d characters", MaxInstanceNameLength)
+		}
+	}
 	return nil
 }
 
@@ -239,7 +263,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "The launcher sends what its provider lists, and for an exited instance the end of its output. The answer is its complete desired state. " +
 			"instances: each {name, image, env} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
-			"Any other instance of the launcher should not exist. An exited instance, and one reported as starting for longer than the platform's boot limit, " +
+			"create_failures names what the provider refused to create since the last answer. " +
+			"Any other instance of the launcher should not exist. An exited instance, and one reported as starting or as not created for longer than the platform's boot limit, " +
 			"is recorded on its agent and is never replaced by the launcher on its own: " +
 			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one.",
 	}, func(ctx context.Context, in *struct {

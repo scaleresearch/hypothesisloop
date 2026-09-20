@@ -200,7 +200,7 @@ func (noLauncherAgents) RecordAgentInstanceExit(context.Context, string, string,
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) RecordAgentInstanceStuck(context.Context, string, string, string, time.Duration, int) (bool, error) {
+func (noLauncherAgents) RecordAgentInstanceStuck(context.Context, string, string, string, string, time.Duration, int) (bool, error) {
 	panic("the launcher handler reached its store")
 }
 
@@ -216,7 +216,7 @@ func (noLauncherAgents) RecordCoordinatorInstanceExit(context.Context, string, s
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) RecordCoordinatorInstanceStuck(context.Context, string, string, time.Duration, int) (bool, error) {
+func (noLauncherAgents) RecordCoordinatorInstanceStuck(context.Context, string, string, string, time.Duration, int) (bool, error) {
 	panic("the launcher handler reached its store")
 }
 

@@ -54,6 +54,10 @@ type Launcher struct {
 	provider     provider.Provider
 	launchDigest string
 	maxAnswer    int
+	// notCreated is what the last pass's creates ended with and the next question carries. It is
+	// that pass's outcome and nothing is decided from it here: a launcher that restarts sends
+	// none, fails the same creates again and reports them one pass later.
+	notCreated []createFailure
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -154,7 +158,14 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	for _, i := range rented {
 		byName[i.Name] = append(byName[i.Name], i)
 	}
-	want, err := l.fetchDesired(ctx, l.observe(ctx, byName))
+	// A name the provider lists by now was created after all, and is reported as what it is.
+	var notCreated []createFailure
+	for _, failure := range l.notCreated {
+		if _, listed := byName[l.prefix+failure.Name]; !listed {
+			notCreated = append(notCreated, failure)
+		}
+	}
+	want, err := l.fetchDesired(ctx, l.observe(ctx, byName), notCreated)
 	if err != nil {
 		return fmt.Errorf("fetch desired state: %w", err)
 	}
@@ -198,12 +209,14 @@ func (l *Launcher) Pass(ctx context.Context) error {
 
 	var creates, failedCreates int
 	var lastCreateError error
+	l.notCreated = nil
 	for _, name := range sortedKeys(want.instances) {
 		// One instance runs the agent: the live one with the lowest id. A provider that lists
 		// with a lag or a create that failed after it succeeded leaves a second, which goes.
 		//
 		// An exited one is never rented again from here, and one that stays starting is never
-		// replaced from here. Both were reported with this pass's question, and the control
+		// replaced from here. Both were reported with this pass's question, and a failed
+		// create is reported with the next, and the control
 		// plane answers one it gives up on with another name or with none. An exited one still
 		// asked for under its own name is left as it is for the next answer, and goes only as
 		// the leftover beside a live one.
@@ -246,6 +259,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("create %s: %w", name, err))
 			failedCreates++
 			lastCreateError = err
+			l.notCreated = append(l.notCreated, createFailure{Name: name[len(l.prefix):], Reason: tail(err.Error(), exitLogBytes)})
 			continue
 		}
 		l.cfg.Log("created %s", name)

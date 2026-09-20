@@ -3,6 +3,7 @@ package agentlaunch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -76,11 +77,11 @@ func (s *signups) RecordCoordinatorInstanceExit(_ context.Context, pe, name, exi
 	return true, nil
 }
 
-func (s *signups) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+func (s *signups) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
 	if s.askedAgo[coordinatorKey+pe] <= bootLimit {
 		return false, nil
 	}
-	return s.RecordCoordinatorInstanceExit(ctx, pe, name, "still starting past the boot limit", maxRestarts)
+	return s.RecordCoordinatorInstanceExit(ctx, pe, name, why, maxRestarts)
 }
 
 // coordinatorKey prefixes a platform experiment's id where askedAgo keeps its coordinator.
@@ -88,11 +89,11 @@ const coordinatorKey = "coordinator of "
 
 const contractBootLimit = 5 * time.Minute
 
-func (s *signups) RecordAgentInstanceStuck(ctx context.Context, pe, agentID, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+func (s *signups) RecordAgentInstanceStuck(ctx context.Context, pe, agentID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
 	if s.askedAgo[agentID] <= bootLimit {
 		return false, nil
 	}
-	return s.RecordAgentInstanceExit(ctx, pe, agentID, name, "still starting past the boot limit", maxRestarts)
+	return s.RecordAgentInstanceExit(ctx, pe, agentID, name, why, maxRestarts)
 }
 
 func (s *signups) ListLauncherAgents(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherAgent, error) {
@@ -430,5 +431,58 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	c.pass()
 	if len(c.rented.Names()) != 0 {
 		t.Fatalf("still rented: %v", c.rented.Names())
+	}
+}
+
+func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsItWithTheProvidersWords(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-unrentable"), hostedAgent("pe-1", "ag-fine"))
+	c.rented.Fail = func(method, name string) error {
+		if method == "Create" && strings.Contains(name, "agunrentable") {
+			return fmt.Errorf("vendor: HTTP 422: no such size, sent %s", oauthToken)
+		}
+		return nil
+	}
+	pass := func() { _ = c.launcher.Pass(context.Background()) }
+	pass()
+	fine := c.rented.Names()
+	if len(fine) != 1 || !strings.Contains(fine[0], "agfine") {
+		t.Fatalf("rented %v, want the agent whose create works", fine)
+	}
+	c.rented.Start(fine[0])
+	first := c.store.instance("ag-unrentable").Name
+
+	// Reported from the second pass on, and nothing is spent inside the boot limit.
+	pass()
+	pass()
+	if recorded := c.store.instance("ag-unrentable"); recorded.Restarts != 0 || recorded.Name != first {
+		t.Fatalf("inside the boot limit: recorded %+v", recorded)
+	}
+
+	for restart := 1; restart <= domain.MaxAgentInstanceRestarts; restart++ {
+		c.store.askedAgo["ag-unrentable"] = contractBootLimit + time.Second
+		pass()
+		recorded := c.store.instance("ag-unrentable")
+		if recorded.Restarts != restart || recorded.Stopped || !strings.Contains(recorded.ExitLog, "no such size") {
+			t.Fatalf("restart %d: recorded %+v", restart, recorded)
+		}
+		if strings.Contains(recorded.ExitLog, oauthToken) {
+			t.Fatalf("the model credential reached the control plane: %s", recorded.ExitLog)
+		}
+		// The new name's create fails in this same pass and is reported with the next.
+		pass()
+	}
+	c.store.askedAgo["ag-unrentable"] = contractBootLimit + time.Second
+	pass()
+	if recorded := c.store.instance("ag-unrentable"); !recorded.Stopped {
+		t.Fatalf("after the last restart: recorded %+v, want the agent stopped", recorded)
+	}
+	creates := c.rented.Calls("Create")
+	pass()
+	pass()
+	if c.rented.Calls("Create") != creates {
+		t.Fatal("a stopped agent's machine is still asked of the provider")
+	}
+	if !reflect.DeepEqual(c.rented.Names(), fine) {
+		t.Fatalf("rented %v, want only %v", c.rented.Names(), fine)
 	}
 }

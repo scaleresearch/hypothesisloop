@@ -123,9 +123,6 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if req.CoordinatorModel != "" && !req.CoordinatorHosted {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_hosted is not")
 	}
-	if req.HostedAgents < 0 || req.HostedAgents > domain.MaxAgentsPerSpawn || req.HostedAgents > req.MaxAgents {
-		return req, refuseSignup(400, "invalid_request", "hosted_agents must be between 0 and max_agents, and at most %d", domain.MaxAgentsPerSpawn)
-	}
 	if !req.CoordinatorHosted && req.HostedAgents == 0 {
 		return req, nil
 	}
@@ -141,6 +138,13 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 			return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
 		}
 		req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: model}
+	}
+	if req.HostedAgents > 0 {
+		flavor, model, err := domain.ResolveAgentLaunch("", "", h.launch.DefaultModel, nil)
+		if err != nil {
+			return req, fmt.Errorf("platform_experiments.Create: %w", err)
+		}
+		req.hostedAgent = &domain.AgentSignup{Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher, Flavor: flavor, Model: model}
 	}
 	return req, nil
 }
@@ -172,6 +176,30 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	return []domain.AgentSignup{*joined}, nil
 }
 
+// newAgents are count agents to create and the place of each, which is place under the new
+// agent's id. With a name and more than one agent each gets -1, -2, ... appended.
+func newAgents(count int, name string, kind domain.AgentKind, place domain.AgentSignup, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
+	agents := make([]*domain.Agent, count)
+	signups := make([]domain.AgentSignup, count)
+	for i := range agents {
+		id, err := domain.NewAgentID()
+		if err != nil {
+			return nil, nil, err
+		}
+		agentName := name
+		switch {
+		case name == "":
+			agentName = id
+		case count > 1:
+			agentName = fmt.Sprintf("%s-%d", name, i+1)
+		}
+		agents[i] = &domain.Agent{ID: id, Name: agentName, Kind: kind, PerformanceScore: 0.5, CreatedAt: now}
+		signups[i] = place
+		signups[i].AgentID = id
+	}
+	return agents, signups, nil
+}
+
 func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentsRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
 	count := req.Count
 	if count == 0 {
@@ -198,26 +226,13 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
 
-	now := time.Now().UTC()
-	agents := make([]*domain.Agent, count)
-	signups := make([]domain.AgentSignup, count)
+	agents, signups, err := newAgents(count, req.Name, kind, signup, time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+	}
 	created := make(map[string]bool, count)
-	for i := range agents {
-		id, err := domain.NewAgentID()
-		if err != nil {
-			return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
-		}
-		name := req.Name
-		switch {
-		case name == "":
-			name = id
-		case count > 1:
-			name = fmt.Sprintf("%s-%d", req.Name, i+1)
-		}
-		agents[i] = &domain.Agent{ID: id, Name: name, Kind: kind, PerformanceScore: 0.5, CreatedAt: now}
-		signups[i] = signup
-		signups[i].AgentID = id
-		created[id] = true
+	for _, agent := range agents {
+		created[agent.ID] = true
 	}
 	err = s.store.SpawnAgents(ctx, platformExpID, agents, signups)
 	switch {
