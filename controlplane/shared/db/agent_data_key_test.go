@@ -32,7 +32,7 @@ func TestAgentDataKeyIsCreatedOnceEvenByConcurrentFirstCalls(t *testing.T) {
 	if _, err := store.AgentDataKey(ctx, pe, agent, create); !errors.Is(err, ErrNotSignedUp) {
 		t.Fatalf("before signup: err = %v, want ErrNotSignedUp", err)
 	}
-	if ok, err := store.Signup(ctx, pe, agent, domain.SignupRoleCompetitor, ""); err != nil || !ok {
+	if ok, err := store.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !ok {
 		t.Fatalf("signup = %v %v", ok, err)
 	}
 	if _, err := store.AgentDataKey(ctx, pe, agent, func(context.Context) (domain.DataKey, error) {

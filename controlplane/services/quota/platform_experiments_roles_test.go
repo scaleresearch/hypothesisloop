@@ -38,7 +38,8 @@ func (f *signupStore) GetPlatformExperiment(ctx context.Context, id string) (*do
 	return f.pe, nil
 }
 
-func (f *signupStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
+func (f *signupStore) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
+	role := signup.Role
 	f.insertCalled = true
 	if role == domain.SignupRoleCompetitor && f.byRole[role] >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
@@ -66,7 +67,7 @@ func TestMaxAgentsCountsCompetitorsOnly(t *testing.T) {
 	}
 	svc := newSignupTestService(t, store)
 
-	if err := svc.Signup(context.Background(), "pe-1", "agent-baseline", domain.SignupRoleBaseline, ""); err != nil {
+	if err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-baseline", Role: domain.SignupRoleBaseline}); err != nil {
 		t.Fatalf("baseline signup err = %v, want nil — max_agents is full of competitors, which must not block a baseline", err)
 	}
 	if got, want := store.insertedFor, domain.SignupRoleBaseline; got != want {
@@ -83,7 +84,7 @@ func TestMaxAgentsStillRejectsACompetitorOnceTheFieldIsFull(t *testing.T) {
 	}
 	svc := newSignupTestService(t, store)
 
-	err := svc.Signup(context.Background(), "pe-1", "agent-3", domain.SignupRoleCompetitor, "")
+	err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-3", Role: domain.SignupRoleCompetitor})
 	if err == nil || !strings.Contains(err.Error(), "max_agents_reached") {
 		t.Fatalf("err = %v, want max_agents_reached", err)
 	}
@@ -291,7 +292,7 @@ func TestARepeatSignupSucceedsWhateverTheExperimentsStatusOrSize(t *testing.T) {
 		{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 1},
 	} {
 		store := &signupStore{pe: pe, byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1}, alreadySignedUp: true}
-		if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, ""); err != nil {
+		if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("%s, max_agents %d: repeat signup err = %v, want nil", pe.Status, pe.MaxAgents, err)
 		}
 		if store.insertCalled {
@@ -309,7 +310,7 @@ func TestASignupThatLostTheRaceWithItsOwnTwinSucceeds(t *testing.T) {
 		refuseInsert: true,
 		racedIn:      true,
 	}
-	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, ""); err != nil {
+	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
 }
@@ -317,7 +318,7 @@ func TestASignupThatLostTheRaceWithItsOwnTwinSucceeds(t *testing.T) {
 // A newcomer still meets the closed and full checks.
 func TestANewcomerIsRefusedOnceTheExperimentStarted(t *testing.T) {
 	store := &signupStore{pe: &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, MaxAgents: 5}}
-	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-2", domain.SignupRoleCompetitor, "")
+	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-2", Role: domain.SignupRoleCompetitor})
 	if err == nil || !strings.Contains(err.Error(), "signup_closed") {
 		t.Fatalf("err = %v, want signup_closed", err)
 	}
@@ -334,7 +335,7 @@ func TestASignupThatLostTheRaceWithStartIsReportedClosed(t *testing.T) {
 		alreadySignedUp: false,
 	}
 
-	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", "agent-1", domain.SignupRoleCompetitor, "")
+	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor})
 	if err == nil || !strings.Contains(err.Error(), "signup_closed") {
 		t.Fatalf("err = %v, want signup_closed: this agent is not in the experiment and must not be told it is", err)
 	}

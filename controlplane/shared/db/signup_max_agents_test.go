@@ -38,7 +38,7 @@ func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, results[i] = pes.Signup(ctx, pe, agentID, domain.SignupRoleCompetitor, "")
+			_, results[i] = pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor})
 		}()
 	}
 	wg.Wait()
@@ -62,7 +62,7 @@ func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
 	if len(competitors) != maxAgents {
 		t.Errorf("competitors signed up: got = %v, want = %v", len(competitors), maxAgents)
 	}
-	if inserted, err := pes.Signup(ctx, pe, baseline, domain.SignupRoleBaseline, ""); err != nil || !inserted {
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: baseline, Role: domain.SignupRoleBaseline}); err != nil || !inserted {
 		t.Errorf("baseline signup into a full field: got = %v, %v, want = true, nil", inserted, err)
 	}
 }

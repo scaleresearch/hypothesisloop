@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -15,8 +17,12 @@ import (
 // ErrMaxAgentsReached is a competitor signup refused because the field is full.
 var ErrMaxAgentsReached = errors.New("max_agents reached")
 
-// Signup records an agent's intent to participate in a platform experiment. inserted=false means
-// the experiment is no longer open, or the agent was already signed up.
+// ErrSignupClosed is a signup or a removal refused because the platform experiment is no longer
+// open, or does not exist: the roster is fixed when the experiment starts.
+var ErrSignupClosed = errors.New("platform experiment is not open")
+
+// Signup records an existing agent's place in a platform experiment. inserted=false means the
+// experiment is no longer open, or the agent was already signed up.
 //
 // The experiment row is locked FOR UPDATE before its status is tested. That serializes this
 // against StartPlatformExperimentTx, whose status UPDATE takes the same row lock: a signup either
@@ -24,49 +30,236 @@ var ErrMaxAgentsReached = errors.New("max_agents reached")
 // observes 'running' and refuses. It also serializes signups against each other, which is what
 // makes the max_agents count below exact: a count taken outside this lock let concurrent
 // competitors each see room and all commit.
-func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
+func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
+	inserted, err := s.enrol(ctx, platformExpID, nil, []domain.AgentSignup{signup})
+	if errors.Is(err, ErrSignupClosed) {
+		return false, nil
+	}
+	return inserted == 1, err
+}
+
+// SpawnAgents creates agents in the platform experiment's org and signs each of them up, all of
+// them or none. signups[i] is the place of agents[i]. ErrSignupClosed when the experiment is not
+// open, ErrMaxAgentsReached when the competitors among them do not all fit.
+func (s *PlatformExperimentsStore) SpawnAgents(ctx context.Context, platformExpID string, agents []*domain.Agent, signups []domain.AgentSignup) error {
+	if len(agents) != len(signups) {
+		return fmt.Errorf("platform_experiments_store.SpawnAgents: %d agents for %d signups", len(agents), len(signups))
+	}
+	_, err := s.enrol(ctx, platformExpID, agents, signups)
+	return err
+}
+
+// enrol is the one transaction a signup row is written in. create is inserted first, into the org
+// the platform experiment belongs to.
+func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
+		return 0, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var status, orgID string
+	var maxAgents int
+	if err := tx.QueryRow(ctx, `
+SELECT pe.status, pe.max_agents, p.org_id
+FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
+WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &orgID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrSignupClosed
+		}
+		return 0, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
+	}
+	if status != string(domain.PlatformExpOpen) {
+		return 0, ErrSignupClosed
+	}
+	for _, agent := range create {
+		agent.OrgID = orgID
+		if _, err := tx.Exec(ctx, `
+INSERT INTO agents (id, name, org_id, kind, performance_score, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)`, agent.ID, agent.Name, agent.OrgID, agent.Kind, agent.PerformanceScore, agent.CreatedAt); err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: create agent %s: %w", agent.ID, err)
+		}
+	}
+	inserted, competitors := 0, false
+	for _, signup := range signups {
+		hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
+		if err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: encode hyperparameters: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+			signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model)
+		if err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
+		}
+		if tag.RowsAffected() == 1 {
+			inserted++
+			competitors = competitors || signup.Role == domain.SignupRoleCompetitor
+		}
+	}
+	if inserted == 0 {
+		return 0, nil
+	}
+	// max_agents sizes the field being ranked, so it counts competitors only.
+	if competitors {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2`,
+			platformExpID, string(domain.SignupRoleCompetitor)).Scan(&count); err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: count competitors: %w", err)
+		}
+		if count > maxAgents {
+			return 0, ErrMaxAgentsReached
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
+	}
+	return inserted, nil
+}
+
+func nonNilObject(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+// RemoveAgent takes an agent out of a platform experiment that has not started. ErrSignupClosed
+// once it has, ErrNotSignedUp when the agent is not in it. The experiment row is locked as in
+// enrol, so a removal and a start cannot both believe they came first.
+func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpID, agentID string) error {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var status string
-	var maxAgents int
-	if err := tx.QueryRow(ctx, `SELECT status, max_agents FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &maxAgents); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
+			return ErrSignupClosed
 		}
-		return false, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: lock experiment: %w", err)
 	}
 	if status != string(domain.PlatformExpOpen) {
-		return false, nil
+		return ErrSignupClosed
 	}
-	tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier)
-VALUES ($1, $2, NOW(), $3, $4)
-ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, agentID, string(role), string(quotaTier))
+	tag, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID)
 	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.Signup: %w", err)
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return false, nil
-	}
-	// max_agents sizes the field being ranked, so it counts competitors only.
-	if role == domain.SignupRoleCompetitor {
-		var competitors int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2`,
-			platformExpID, string(role)).Scan(&competitors); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.Signup: count competitors: %w", err)
-		}
-		if competitors > maxAgents {
-			return false, ErrMaxAgentsReached
-		}
+		return ErrNotSignedUp
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: commit: %w", err)
 	}
-	return true, nil
+	return nil
+}
+
+const agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
+       s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at`
+
+// scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
+func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
+	var signup domain.AgentSignup
+	var hyperparameters []byte
+	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
+		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt}, more...)...); err != nil {
+		return domain.AgentSignup{}, err
+	}
+	if err := json.Unmarshal(hyperparameters, &signup.Hyperparameters); err != nil {
+		return domain.AgentSignup{}, fmt.Errorf("decode hyperparameters of %s: %w", signup.AgentID, err)
+	}
+	return signup, nil
+}
+
+// ListAgentSignups returns every agent's place in a platform experiment, in signup order.
+func (s *PlatformExperimentsStore) ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT `+agentSignupColumns+`
+FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
+WHERE s.platform_experiment_id = $1
+ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListAgentSignups: %w", err)
+	}
+	defer rows.Close()
+	signups := []domain.AgentSignup{}
+	for rows.Next() {
+		signup, err := scanAgentSignup(rows)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.ListAgentSignups: %w", err)
+		}
+		signups = append(signups, signup)
+	}
+	return signups, rows.Err()
+}
+
+// GetAgentSignup returns one agent's place in a platform experiment, nil when it has none.
+func (s *PlatformExperimentsStore) GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error) {
+	signup, err := scanAgentSignup(s.pool.pool.QueryRow(ctx, `
+SELECT `+agentSignupColumns+`
+FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
+WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.GetAgentSignup: %w", err)
+	}
+	return &signup, nil
+}
+
+// LauncherAgent is a hosted agent as its launcher's desired state names it. Ending is true once
+// its platform experiment closed or it was cut: its machine is no longer wanted and is left to
+// finish its last turn.
+type LauncherAgent struct {
+	domain.AgentSignup
+	Ending bool
+}
+
+// ListLauncherAgents returns the hosted agents whose machine the launcher keeps or leaves alone
+// right now: those of an open or running platform experiment that were not cut, and those whose
+// experiment closed or who were cut less than windDown ago. Both moments and the comparison are
+// on the database's clock.
+func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT `+agentSignupColumns+`, (pe.status = 'closed' OR c.agent_id IS NOT NULL)
+FROM experiment_signups s
+JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
+LEFT JOIN agents a ON a.id = s.agent_id
+LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
+WHERE s.hosted AND s.launcher = $1
+  AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.status_changed_at > now() - make_interval(secs => $2)))
+  AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
+ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
+	}
+	defer rows.Close()
+	agents := []LauncherAgent{}
+	for rows.Next() {
+		var agent LauncherAgent
+		var err error
+		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.Ending); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
+		}
+		agents = append(agents, agent)
+	}
+	return agents, rows.Err()
+}
+
+// LauncherHasAgents reports whether any hosted signup names the launcher.
+func (s *PlatformExperimentsStore) LauncherHasAgents(ctx context.Context, launcher string) (bool, error) {
+	var has bool
+	if err := s.pool.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM experiment_signups WHERE hosted AND launcher = $1)`, launcher).Scan(&has); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.LauncherHasAgents: %w", err)
+	}
+	return has, nil
 }
 
 // ListSignups returns all agent IDs signed up for a platform experiment.

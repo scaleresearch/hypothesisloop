@@ -82,10 +82,10 @@ func TestStartGivesEveryParticipantGuaranteedQuotaRegardlessOfKind(t *testing.T)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
-	if _, err := pes.Signup(ctx, pe, human, domain.SignupRoleCompetitor, ""); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: human, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup human: got = %v, want = nil", err)
 	}
-	if _, err := pes.Signup(ctx, pe, agent, domain.SignupRoleCompetitor, ""); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup agent: got = %v, want = nil", err)
 	}
 
@@ -138,10 +138,10 @@ func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
-	if _, err := pes.Signup(ctx, pe, agentBurstOnly, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agentBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup agent with burst_only override: got = %v, want = nil", err)
 	}
-	if _, err := pes.Signup(ctx, pe, humanBurstOnly, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: humanBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup human with burst_only override: got = %v, want = nil", err)
 	}
 
@@ -181,7 +181,7 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range []string{humanSurvivor, agentSurvivor, cutAgent} {
-		if _, err := pes.Signup(ctx, pe, id, domain.SignupRoleCompetitor, ""); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
@@ -231,7 +231,7 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range ids {
 		createTestAgent(t, pool, id, domain.AgentKindAgent)
-		if _, err := pes.Signup(ctx, pe, id, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
@@ -311,7 +311,7 @@ func TestDonationToARecipientWithNoOverrideLandsInGuaranteedRegardlessOfKind(t *
 
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range []string{donorHuman, recipientAgent} {
-		if _, err := pes.Signup(ctx, pe, id, domain.SignupRoleCompetitor, ""); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
@@ -371,10 +371,10 @@ func TestDonationToABurstOnlyRecipientLandsEntirelyInBurstRegardlessOfKind(t *te
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
-	if _, err := pes.Signup(ctx, pe, donorHuman, domain.SignupRoleCompetitor, ""); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: donorHuman, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup %s: got = %v, want = nil", donorHuman, err)
 	}
-	if _, err := pes.Signup(ctx, pe, recipientAgent, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: recipientAgent, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup %s with burst_only override: got = %v, want = nil", recipientAgent, err)
 	}
 	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
@@ -431,7 +431,7 @@ func TestDonationCountsTheDonorsReservedHours(t *testing.T) {
 
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range []string{donor, recipient} {
-		if _, err := pes.Signup(ctx, pe, id, domain.SignupRoleCompetitor, ""); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
