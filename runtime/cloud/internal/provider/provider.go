@@ -59,8 +59,12 @@ type Provider interface {
 	// first. It must work for an instance in StateExited.
 	Logs(ctx context.Context, id string, tail int) ([]string, error)
 	// Stop sends the instance's command SIGTERM and returns without waiting for it to end. The
-	// instance stays in List: running until the command exits, StateExited after. Stopping an
-	// instance that was already stopped, has exited or is gone is not an error.
+	// instance stays in List: StateRunning until the command exits, StateExited after, with its
+	// logs still readable. The command alone decides when it exits: an adapter must not follow
+	// the signal with a kill of its own after some timeout, because how long the command may take
+	// is kept by the wrapper inside the instance. Stop is repeated on every pass while the
+	// instance runs, so stopping one that was already stopped, has exited or is gone is not an
+	// error.
 	Stop(ctx context.Context, id string) error
 	// Destroy ends the instance and everything billed for it. Destroying an instance that is
 	// already gone is not an error.
