@@ -16,7 +16,9 @@ shown. Resolve against the live environment, never guess.
     NODE_NAME=box-a
     CHIP_ARCH=tenstorrent.com/chipArch=blackhole
     API_URL=http://localhost:8081              # the whole API: platform experiments, jobs,
-                                               # hypotheses, metrics, resource catalog
+                                               # hypotheses, metrics, resource catalog. Export
+                                               # it: `hl` reads it from the environment and
+                                               # exits with an error when it is unset
     METRICS_URL=http://localhost:8084
     CODE_REPO_URL=<set below>
     GIT_TOKEN=<set below>

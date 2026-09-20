@@ -33,8 +33,9 @@ def _env_json_object(name: str, default: str = "{}") -> dict:
 
 @dataclass
 class Config:
-    # Same URLs used by tests/lib/common.sh and runtime/k8s/cmd/cluster-agent.
-    api_url: str = field(default_factory=lambda: _env("API_URL", "http://localhost:8081"))
+    # Required, with no default: the agent's own `hl` reads API_URL from this same environment
+    # and has none either.
+    api_url: str = field(default_factory=lambda: _env("API_URL", ""))
 
     agent_id: str = field(default_factory=lambda: _env("AGENT_ID", ""))
 
@@ -71,7 +72,8 @@ class Config:
     max_wall_hours: float = field(default_factory=lambda: _env_float("MAX_WALL_HOURS", 0))
 
     def validate(self) -> None:
-        for name, value in (("AGENT_ID", self.agent_id),
+        for name, value in (("API_URL", self.api_url),
+                            ("AGENT_ID", self.agent_id),
                             ("PLATFORM_EXPERIMENT_ID", self.platform_experiment_id)):
             if not value:
                 raise SystemExit(f"agent: missing required env var: {name}")
