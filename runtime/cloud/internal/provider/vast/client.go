@@ -1,10 +1,12 @@
 // Package vast rents instances on vast.ai. What real instances taught, and the code leans on:
 //
-//   - Every rentable offer has a GPU. A CPU-only spec gets the cheapest machine of any GPU model.
+//   - Every rentable offer has a GPU, so a spec with AcceleratorCount 0 rents the cheapest machine
+//     of any GPU model and leaves the GPU unused.
 //   - A command that ends is started again by the host about half a minute later, with any exit
 //     code, for as long as the instance is meant to run. Only a stopped instance stays exited,
 //     which is why every command runs under the supervisor in supervise.go.
-//   - Stopping sends the command SIGTERM and kills it within about a second.
+//   - The vendor's stop sends the command SIGTERM and kills it within about a second, so Stop
+//     does not use it: it marks the label, which the supervisor reads (stop.go).
 //   - The status an instance shows is what its host last reported, which can be minutes old.
 //   - Container output survives restarts and stops and is read through an upload the host makes
 //     on request, one to a few seconds later.

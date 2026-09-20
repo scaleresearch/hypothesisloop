@@ -38,16 +38,20 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			return nil, err
 		}
 		for _, found := range page.Instances {
-			if found.Label == nil || !strings.HasPrefix(*found.Label, namePrefix) {
+			if found.Label == nil {
+				continue
+			}
+			name := strings.TrimSuffix(*found.Label, stopMark)
+			if !strings.HasPrefix(name, namePrefix) {
 				continue
 			}
 			state, err := stateOf(found.ActualStatus)
 			if err != nil {
-				return nil, fmt.Errorf("vast: instance %d (%s): %w", found.ID, *found.Label, err)
+				return nil, fmt.Errorf("vast: instance %d (%s): %w", found.ID, name, err)
 			}
 			listed = append(listed, provider.Instance{
 				ID:        strconv.FormatInt(found.ID, 10),
-				Name:      *found.Label,
+				Name:      name,
 				State:     state,
 				StartedAt: time.Unix(0, int64(found.StartDate*float64(time.Second))),
 			})
@@ -75,27 +79,6 @@ func stateOf(actualStatus *string) (provider.State, error) {
 		return provider.StateExited, nil
 	}
 	return "", fmt.Errorf("unknown status %q", *actualStatus)
-}
-
-// Stop asks the vendor to stop the instance, which keeps its container and output. The host sends
-// the command SIGTERM and kills it within about a second.
-func (p *Provider) Stop(ctx context.Context, id string) error {
-	var stopped struct {
-		Success bool   `json:"success"`
-		Message string `json:"msg"`
-	}
-	path := "/api/v0/instances/" + url.PathEscape(id) + "/"
-	_, err := p.call(ctx, http.MethodPut, path, map[string]string{"state": "stopped"}, &stopped)
-	if isGone(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !stopped.Success {
-		return fmt.Errorf("vast: stopping instance %s was refused: %s", id, stopped.Message)
-	}
-	return nil
 }
 
 func isGone(err error) bool {

@@ -11,10 +11,14 @@ import (
 	"time"
 )
 
-// fakeCurl records each call's arguments, one per line, so a test reads what the supervisor asked
-// of the vendor.
+// fakeCurl stands in for the vendor. A write records its arguments, one per line, so a test reads
+// what the supervisor asked for. A read records its own and answers with the instance file, or
+// fails while there is none, as an unreachable API does.
 const fakeCurl = `#!/bin/sh
-printf '%s\n' "$@" >> "$CURL_CALLS"
+case " $* " in
+*" PUT "*) printf '%s\n' "$@" >> "$CURL_CALLS" ;;
+*) printf '%s\n' "$@" >> "$CURL_READS"; cat "$CURL_INSTANCE" 2>/dev/null || exit 22 ;;
+esac
 `
 
 type supervisedRun struct {
@@ -35,6 +39,8 @@ func startSupervised(t *testing.T, dir string, command ...string) *supervisedRun
 		"TMPDIR=" + dir,
 		"OUT=" + filepath.Join(dir, "out"),
 		"CURL_CALLS=" + filepath.Join(dir, "curl-calls"),
+		"CURL_READS=" + filepath.Join(dir, "curl-reads"),
+		"CURL_INSTANCE=" + filepath.Join(dir, "instance.json"),
 		"CONTAINER_API_KEY=instance-key",
 		"CONTAINER_ID=9001",
 	}
@@ -79,6 +85,7 @@ https://console.vast.ai/api/v0/instances/9001/
 `
 
 func TestSupervisorRunsTheArgvUnchangedThenStopsTheInstanceAndWaits(t *testing.T) {
+	t.Parallel()
 	argv := []string{"/bin/sh", "-c", `printf '%s\n' "$@" > "$OUT"`, "argv0", "two  spaces", `quotes ' " $HOME \ kept`, "", "--flag=a b"}
 	run := startSupervised(t, t.TempDir(), argv...)
 
@@ -95,6 +102,7 @@ func TestSupervisorRunsTheArgvUnchangedThenStopsTheInstanceAndWaits(t *testing.T
 }
 
 func TestSupervisorDoesNotRunTheCommandOnASecondStart(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	first := startSupervised(t, dir, "/bin/sh", "-c", `echo run >> "$OUT"`)
 	first.awaitFile(t, "curl-calls")
@@ -113,9 +121,67 @@ func TestSupervisorDoesNotRunTheCommandOnASecondStart(t *testing.T) {
 	}
 }
 
-func TestSupervisorPassesSIGTERMToTheCommandAndStopsOnlyAfterItEnded(t *testing.T) {
-	run := startSupervised(t, t.TempDir(), "/bin/sh", "-c",
-		`trap 'sleep 1; echo saved > "$OUT"; exit 0' TERM; echo ready > "$OUT.ready"; while :; do sleep 0.05 & wait $!; done`)
+const savingCommand = `trap 'echo term >> "$OUT.terms"; sleep 1; echo saved > "$OUT"; exit 0' TERM; echo ready > "$OUT.ready"; while :; do sleep 0.05 & wait $!; done`
+
+func (r *supervisedRun) showInstance(t *testing.T, label string) {
+	t.Helper()
+	body := `{"instances": {"actual_status": "running", "extra_env": [["NOTE", "\"label\": \"x.stop\""]], "label": "` + label + `", "id": 9001}}`
+	if err := os.WriteFile(filepath.Join(r.dir, "instance.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const wantReadCall = `-s
+-f
+-m
+20
+-H
+Authorization: Bearer instance-key
+https://console.vast.ai/api/v0/instances/9001/?owner=me
+`
+
+func TestSupervisorSendsSIGTERMOnceWhenItsLabelIsMarkedAndLetsTheCommandFinish(t *testing.T) {
+	t.Parallel()
+	run := startSupervised(t, t.TempDir(), "/bin/sh", "-c", savingCommand)
+	run.showInstance(t, "hl-exp1-a2")
+	run.awaitFile(t, "out.ready")
+	if reads := run.awaitFile(t, "curl-reads"); !strings.HasPrefix(reads, wantReadCall) {
+		t.Errorf("label read\n got %q\nwant %q", reads, wantReadCall)
+	}
+	time.Sleep(4 * time.Second)
+	if _, err := os.Stat(filepath.Join(run.dir, "out.terms")); err == nil {
+		t.Fatal("the command was signalled while its label carried no mark")
+	}
+
+	run.showInstance(t, "hl-exp1-a2.stop")
+	run.awaitFile(t, "curl-calls")
+	if saved, err := os.ReadFile(filepath.Join(run.dir, "out")); err != nil || string(saved) != "saved\n" {
+		t.Errorf("the instance was stopped before the command finished its save: %q, %v", saved, err)
+	}
+	time.Sleep(4 * time.Second)
+	if terms := run.awaitFile(t, "out.terms"); terms != "term\n" {
+		t.Errorf("the command got SIGTERM %d times, want once", strings.Count(terms, "term"))
+	}
+}
+
+func TestSupervisorKeepsTheCommandRunningWhileItsLabelCannotBeRead(t *testing.T) {
+	t.Parallel()
+	run := startSupervised(t, t.TempDir(), "/bin/sh", "-c", savingCommand)
+	run.awaitFile(t, "out.ready")
+	run.awaitFile(t, "curl-reads")
+	time.Sleep(4 * time.Second)
+
+	if _, err := os.Stat(filepath.Join(run.dir, "out.terms")); err == nil {
+		t.Error("the command was signalled because a read failed")
+	}
+	if strings.Count(run.awaitFile(t, "curl-reads"), "owner=me") < 2 {
+		t.Error("the supervisor gave up reading its label after a failed read")
+	}
+}
+
+func TestSupervisorPassesOnASIGTERMOfItsOwn(t *testing.T) {
+	t.Parallel()
+	run := startSupervised(t, t.TempDir(), "/bin/sh", "-c", savingCommand)
 	run.awaitFile(t, "out.ready")
 
 	if err := run.cmd.Process.Signal(syscall.SIGTERM); err != nil {

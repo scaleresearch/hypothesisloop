@@ -70,6 +70,25 @@ func TestListReturnsEveryInstanceOfANameTheVendorHoldsTwice(t *testing.T) {
 	}
 }
 
+func TestListReturnsAMarkedInstanceUnderItsOwnName(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, listPath, answer(200, instancesPage("",
+		instanceJSON(31, "hl-job-ns-exp1-a1.stop", "running"),
+		instanceJSON(32, "other.stop", "running"),
+	)))
+	p := newTestProvider(t, api, Settings{})
+
+	for _, prefix := range []string{"hl-job-ns-", "hl-job-ns-exp1-a1"} {
+		got, err := p.List(context.Background(), prefix)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "31" || got[0].Name != "hl-job-ns-exp1-a1" || got[0].State != provider.StateRunning {
+			t.Errorf("List(%q) = %v, want the instance under the name it was created with", prefix, got)
+		}
+	}
+}
+
 func TestListOfAnEmptyAccountIsEmpty(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, listPath, answer(200, instancesPage("")))
@@ -152,33 +171,6 @@ func TestListDoesNotRetryARateLimitOrAServerError(t *testing.T) {
 
 const gone = `{"success":false,"error":"no_such_instance","msg":"Instance 9001 not found."}`
 
-func TestStopAsksForTheStoppedState(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodPut, "/api/v0/instances/9001/", answer(200, `{"success":true}`))
-	p := newTestProvider(t, api, Settings{})
-
-	if err := p.Stop(context.Background(), "9001"); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	sent := api.sent(http.MethodPut, "/api/v0/instances/9001/")
-	if len(sent) != 1 || !reflect.DeepEqual(sent[0].Body, map[string]any{"state": "stopped"}) {
-		t.Errorf("stop requests = %+v", sent)
-	}
-	if sent[0].Auth != "Bearer "+testKey {
-		t.Errorf("Authorization = %q", sent[0].Auth)
-	}
-}
-
-func TestStopOfAGoneInstanceIsNotAnError(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodPut, "/api/v0/instances/9001/", answer(404, gone))
-	p := newTestProvider(t, api, Settings{})
-
-	if err := p.Stop(context.Background(), "9001"); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-}
-
 func TestDestroyDeletesTheInstance(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodDelete, "/api/v0/instances/9001/", answer(200, `{"success":true}`))
@@ -202,7 +194,7 @@ func TestDestroyOfAGoneInstanceIsNotAnError(t *testing.T) {
 	}
 }
 
-func TestStopAndDestroyReportEveryOtherFailure(t *testing.T) {
+func TestDestroyReportsEveryOtherFailure(t *testing.T) {
 	failures := map[string]http.HandlerFunc{
 		"rate limit":         answer(429, `{"detail":"slow down"}`),
 		"server error":       answer(500, `oops`),
@@ -210,27 +202,18 @@ func TestStopAndDestroyReportEveryOtherFailure(t *testing.T) {
 		"refusal in a 200":   answer(200, `{"success":false,"msg":"instance is locked"}`),
 		"not ours to change": answer(403, `{"success":false,"error":"not_authorized"}`),
 	}
-	calls := map[string]struct {
-		method string
-		do     func(*Provider) error
-	}{
-		"Stop":    {http.MethodPut, func(p *Provider) error { return p.Stop(context.Background(), "9001") }},
-		"Destroy": {http.MethodDelete, func(p *Provider) error { return p.Destroy(context.Background(), "9001") }},
-	}
-	for callName, call := range calls {
-		for failureName, failure := range failures {
-			t.Run(callName+" "+failureName, func(t *testing.T) {
-				api := newFakeAPI(t)
-				api.on(call.method, "/api/v0/instances/9001/", failure)
-				p := newTestProvider(t, api, Settings{})
+	for name, failure := range failures {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.on(http.MethodDelete, "/api/v0/instances/9001/", failure)
+			p := newTestProvider(t, api, Settings{})
 
-				if err := call.do(p); err == nil {
-					t.Fatal("no error")
-				}
-				if api.total() != 1 {
-					t.Errorf("requests = %d, want 1", api.total())
-				}
-			})
-		}
+			if err := p.Destroy(context.Background(), "9001"); err == nil {
+				t.Fatal("no error")
+			}
+			if api.total() != 1 {
+				t.Errorf("requests = %d, want 1", api.total())
+			}
+		})
 	}
 }
