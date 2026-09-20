@@ -123,60 +123,6 @@ func TestRegisterMissingID(t *testing.T) {
 	}
 }
 
-func TestSignup(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]string
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "signed_up"})
-	})
-	setAPIURL(t, url)
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"signup", "--platform-experiment", "pe-1", "--agent", "jane"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if gotPath != "/platform-experiments/pe-1/signup" {
-		t.Fatalf("got path %s", gotPath)
-	}
-	if gotBody["agent_id"] != "jane" {
-		t.Fatalf("unexpected body: %+v", gotBody)
-	}
-	if _, present := gotBody["quota_tier"]; present {
-		t.Fatalf("quota_tier should be omitted when --quota-tier is not passed, got %+v", gotBody)
-	}
-}
-
-func TestSignupWithQuotaTierOverride(t *testing.T) {
-	var gotBody map[string]string
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "signed_up"})
-	})
-	setAPIURL(t, url)
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"signup", "--platform-experiment", "pe-1", "--agent", "bot-1", "--quota-tier", "guaranteed"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if gotBody["quota_tier"] != "guaranteed" {
-		t.Fatalf("unexpected body: %+v", gotBody)
-	}
-}
-
-func TestSignupRejectsUnknownQuotaTier(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"signup", "--platform-experiment", "pe-1", "--agent", "jane", "--quota-tier", "vip"}, &stdout, &stderr)
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2 (rejected client-side, no request sent)", code)
-	}
-}
-
 func TestPlatformExperimentsList(t *testing.T) {
 	var gotQuery string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -663,8 +609,6 @@ func TestIdentityFlagsDefaultToEnv(t *testing.T) {
 		path      string
 		agent, pe string
 	}{
-		{[]string{"signup"}, "/platform-experiments/pe-env/signup", "agent-env", ""},
-		{[]string{"signup", "--agent", "jane", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/signup", "jane", ""},
 		{[]string{"hypothesis", "submit", "--text", "t", "--builds-on", "root"}, "/hypotheses", "agent-env", "pe-env"},
 		{[]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--builds-on", "root"}, "/hypotheses", "jane", "pe-1"},
 		{[]string{"hypothesis", "link", "--from", "h-2", "--type", "related", "--to", "h-1"}, "/hypotheses/h-2/links", "agent-env", ""},
@@ -705,8 +649,6 @@ func TestIdentityFlagsRequiredWithoutEnv(t *testing.T) {
 	t.Setenv("AGENT_ID", "")
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
 	for _, args := range [][]string{
-		{"signup"},
-		{"signup", "--agent", "jane"},
 		{"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
 		{"hypothesis", "comment", "--text", "t", "h-1"},
 		{"hypothesis", "list"},

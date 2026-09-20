@@ -26,8 +26,8 @@
 // experimentator harness sets in an agent's container.
 //
 //	hl register --id jane --name "Jane Doe" --kind human
-//	hl signup --platform-experiment pe-123 --agent jane
-//	hl signup --platform-experiment pe-123 --agent bot-1 --quota-tier guaranteed
+//	hl platform-experiments agents add pe-123 --count 4 --hosted --flavor generalist
+//	hl platform-experiments agents add pe-123 --agent jane --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
 //	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --platform-experiment pe-123
 //	hl job submit --agent jane job.yaml
@@ -88,7 +88,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "register":
 		return cmdRegister(client, rest, stdout, stderr)
 	case "signup":
-		return cmdSignup(client, rest, stdout, stderr)
+		fmt.Fprintln(stderr, "hl: an agent joins through hl platform-experiments agents add PE (--agent ID for one registered with hl register)")
+		return 2
 	case "platform-experiments":
 		return cmdPlatformExperiments(client, rest, stdout, stderr)
 	case "quota":
@@ -127,8 +128,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   register              --id ID --kind agent|human
-  signup                [--platform-experiment PE] [--agent A]
-  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE]
+  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -483,41 +483,6 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	return 0
 }
 
-// --- signup --------------------------------------------------------------------------------------
-
-func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("signup", "usage: hl signup [--platform-experiment PE] [--agent A] [--quota-tier guaranteed|burst_only]\n\nSigning up again once signed up succeeds.", stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
-	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
-	quotaTier := fs.String("quota-tier", "", "override this signup's guaranteed-vs-burst-only split "+
-		"(\"guaranteed\" or \"burst_only\"); omit to use the platform experiment's default_quota_tier")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
-	}
-	*pe = orEnv(*pe, platformExperimentEnv)
-	*agent = orEnv(*agent, agentEnv)
-	if *pe == "" || *agent == "" {
-		return parseExit(misuse(fs, "--platform-experiment and --agent are required"))
-	}
-	if *quotaTier != "" && *quotaTier != "guaranteed" && *quotaTier != "burst_only" {
-		fmt.Fprintln(stderr, "hl: signup: --quota-tier must be \"guaranteed\" or \"burst_only\", got "+*quotaTier)
-		return 2
-	}
-	body := map[string]string{"agent_id": *agent}
-	if *quotaTier != "" {
-		body["quota_tier"] = *quotaTier
-	}
-	var out json.RawMessage
-	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/signup", body, &out); err != nil {
-		return fail(stderr, err)
-	}
-	if err := printLine(stdout, out); err != nil {
-		return fail(stderr, err)
-	}
-	return 0
-}
-
-// cmdDataKey prints the variables a job gets for the object store, for the agent's own key.
 func cmdDataKey(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("data-key", `usage: hl data-key [--platform-experiment PE] [--agent A]
 
@@ -575,9 +540,11 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
 		case "results":
 			return cmdResults(c, args[1:], stdout, stderr)
+		case "agents":
+			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] | get [PE] | create [FILE] | start PE | update PE [FILE]", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] | get [PE] | create [FILE] | start PE | update PE [FILE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	if len(args) > 0 && args[0] == "list" {
