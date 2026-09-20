@@ -13,7 +13,7 @@
 # container boundary itself is the isolation, same as the request that led to this file.
 
 # Builder stage for the Go `hl` CLI (cli/) -- the platform's own client. The agent uses it (not
-# raw curl) for everything a human would do through it too: hl register/signup, hl hypothesis
+# raw curl) for everything a human would do through it too: hl platform-experiments, hl hypothesis
 # query/submit/link, hl job submit job.yaml, hl watch. Built from the repo root
 # (build context — see Makefile `experimentator-base-image`), same module as the controlplane.
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS hl-builder
@@ -64,7 +64,7 @@ ENV WORKLOAD_SAMPLES=/opt/workloads-samples
 COPY --from=samples /samples $WORKLOAD_SAMPLES
 
 # The `hl` CLI, built in the hl-builder stage above. This is how the agent talks to the platform
-# for everything a human would use it for too -- hl register/signup, hl platform-experiments
+# for everything a human would use it for too -- hl platform-experiments
 # create/start, hl hypothesis query/submit/link, hl job submit job.yaml, hl watch
 # (`hl watch --experiment ID --until '...'` holds a websocket open and exits when the platform
 # says the thing happened). A job image that

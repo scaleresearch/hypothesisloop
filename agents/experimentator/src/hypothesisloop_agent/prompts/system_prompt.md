@@ -54,7 +54,7 @@ yourself what each key changes about how you work.
 Every agent competes, ranked on the same declared metrics. The platform experiment's own
 `description` says what to run, what to optimize, how to work and the rules you work under, and
 it outranks this briefing. Roughly, not a rigid script:
-  0. You are already registered and signed up. `hl platform-experiments get`: read its
+  0. You are already in the platform experiment. `hl platform-experiments get`: read its
      `description` completely, with its `metrics`, `stages` and `current_stage`: the stage
      advances between your restarts, so re-read rather than assume what a past session concluded.
   1. Unless the description fixes it, pick your accelerator_type from `hl capacity`, copied

@@ -1,6 +1,7 @@
-"""Thin stdlib-only HTTP client for the few platform calls the outer loop makes itself: joining
-its platform experiment before the first turn, reading the rules and checking whether it has closed. Everything else
-the agent does itself through `hl`, so this client stays minimal.
+"""Thin stdlib-only HTTP client for the few platform calls the outer loop makes itself: checking
+before the first turn that it was added to its platform experiment, reading the rules and checking
+whether the experiment has closed. Everything else the agent does itself through `hl`, so this
+client stays minimal.
 """
 from __future__ import annotations
 
@@ -41,15 +42,19 @@ class PlatformClient:
         body = _send(method, f"{self.api_url}{path}", self.token, payload)
         return json.loads(body) if body else None
 
-    def join(self, agent_id: str, pe_id: str) -> None:
-        """Registers the agent and signs it up, safe to repeat on restart: a repeat register is a
-        409 and a repeat signup succeeds."""
+    def require_joined(self, agent_id: str, pe_id: str) -> None:
+        """Exits unless the platform has this agent in this platform experiment and accepts its
+        token. An agent never joins by itself: whoever runs the experiment adds it, and that is
+        where its AGENT_ID and HL_TOKEN come from."""
         try:
-            self._request("POST", "/agents", {"id": agent_id, "kind": "agent"})
+            self._request("GET", f"/platform-experiments/{pe_id}/signups/{agent_id}")
         except APIError as e:
-            if e.status != 409:
+            if e.status not in (401, 403, 404):
                 raise
-        self._request("POST", f"/platform-experiments/{pe_id}/signup", {"agent_id": agent_id})
+            raise SystemExit(
+                f"agent: {agent_id} is not in platform experiment {pe_id}, or HL_TOKEN is not its token "
+                f"(HTTP {e.status}). Add the agent with `hl platform-experiments agents add {pe_id}` and "
+                "start it with the AGENT_ID and HL_TOKEN that prints.") from None
 
     def get_platform_experiment(self, pe_id: str) -> dict:
         return self._request("GET", f"/platform-experiments/{pe_id}")

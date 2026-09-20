@@ -35,9 +35,12 @@ def _env_json_object(name: str, default: str = "{}") -> dict:
 class Config:
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
     api_url: str = field(default_factory=lambda: _required("API_URL"))
-    token: str = field(default_factory=lambda: _required("HL_TOKEN"))
 
+    # Who this agent is and the token that acts as it. Both are handed out when the agent is added
+    # to its platform experiment (POST /platform-experiments/{id}/agents): the harness registers
+    # nothing and signs up nowhere.
     agent_id: str = field(default_factory=lambda: _required("AGENT_ID"))
+    token: str = field(default_factory=lambda: _required("HL_TOKEN"))
 
     # Which platform experiment to compete in: an agent competes in exactly the one it
     # was launched for. Everything about that experiment — objective, metric, job spec, rules —
@@ -57,12 +60,9 @@ class Config:
     # looks like for that specialization.
     flavor: str = field(default_factory=lambda: os.environ.get("AGENT_FLAVOR", "generalist"))
 
-    # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) the
-    # coordinator hands this one agent at launch, on top of its flavor — a sweep is a coordinator
-    # loop that starts N agents of the same flavor, each with its own AGENT_HYPERPARAMETERS,
-    # exactly like XManager's `experiment.add` loop. Pure env var: the control plane never sees or
-    # stores it, so there is no second record of what an agent was told to try that could drift
-    # from what it actually ran. The agent reads it back via {hyperparameters} in the system
+    # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) this
+    # one agent is handed on top of its flavor when it is added. A sweep is several agents of the
+    # same flavor, each with its own. The agent reads it back via {hyperparameters} in the system
     # prompt and decides for itself what to do with it.
     hyperparameters: dict = field(default_factory=lambda: _env_json_object("AGENT_HYPERPARAMETERS"))
 
