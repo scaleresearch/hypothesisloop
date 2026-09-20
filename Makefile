@@ -250,7 +250,9 @@ tt-start:
 # podman-save-pipe-ctr-import sideload, which is what left an unpinned image ID for kubelet's
 # own image GC to reclaim mid-run (see the fix-later.md incident this replaced).
 # IMAGE_TAG_FILE hands TAG to the e2e tests, whose jobs must pin it: nodes pull IfNotPresent, so
-# a job naming latest keeps running whatever latest was when that node first pulled it.
+# a job naming latest keeps running whatever latest was when that node first pulled it. It is
+# written only by a push to the dev registry: the tests pull from there, and a publish to another
+# registry would otherwise pin them to a tag the dev registry may not hold.
 IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:. \
 	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
@@ -271,7 +273,7 @@ images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
 	done
-	echo "$(TAG)" > $(IMAGE_TAG_FILE)
+	$(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),echo "$(TAG)" > $(IMAGE_TAG_FILE))
 
 # The UI image is no part of `images`: nothing the local stack runs uses it (local development
 # serves the UI with `npm run dev`), and it cannot be built without a Supabase project. Next.js
