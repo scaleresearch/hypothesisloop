@@ -42,8 +42,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-EXP_ID = os.environ.get("HYPOTHESISLOOP_EXPERIMENT_ID", "local-test")
-API_URL = os.environ.get("HYPOTHESISLOOP_API_URL", "http://localhost:8081")
+EXP_ID = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
+API_URL = os.environ["HYPOTHESISLOOP_API_URL"]
 MODE = os.environ.get("STAGE_MODE", "write")
 CHECKPOINT_VALUE = os.environ.get("CHECKPOINT_VALUE", "0")
 # The experiment id of the stage whose checkpoint this one reads. Read mode only.
