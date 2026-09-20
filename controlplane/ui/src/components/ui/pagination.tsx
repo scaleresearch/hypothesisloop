@@ -13,16 +13,16 @@ export function Pagination({ page, pageSize, total, onPageChange }: PaginationPr
   if (pageCount <= 1) return null
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 4px 2px', gap: 12, flexWrap: 'wrap' }}>
-      <span className="text-dim mono" style={{ fontSize: 11 }}>
+    <nav aria-label="Pages" className="flex flex-wrap items-center justify-between gap-3 px-1 pb-0.5 pt-2.5">
+      <span className="font-mono text-xs text-subtle">
         {total} total · page {page + 1} of {pageCount}
       </span>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="flex gap-1.5">
         <Button size="sm" disabled={page === 0} onClick={() => onPageChange(0)}>« First</Button>
         <Button size="sm" disabled={page === 0} onClick={() => onPageChange(page - 1)}>‹ Prev</Button>
         <Button size="sm" disabled={page >= pageCount - 1} onClick={() => onPageChange(page + 1)}>Next ›</Button>
         <Button size="sm" disabled={page >= pageCount - 1} onClick={() => onPageChange(pageCount - 1)}>Last »</Button>
       </div>
-    </div>
+    </nav>
   )
 }

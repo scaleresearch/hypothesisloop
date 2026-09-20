@@ -6,15 +6,15 @@ interface PageHeaderProps {
   actions?: ReactNode
 }
 
-/** The `.wa-title` bar at the top of every page, with an optional right-aligned action row. */
+/** The title at the top of every page, with an optional right-aligned action row. */
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
-    <div className="wa-title" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+    <div className="mb-6 flex items-end justify-between gap-4 pb-1.5">
       <div>
-        <h1>{title}</h1>
-        {description && <p>{description}</p>}
+        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        {description && <p className="mt-1 text-sm text-muted">{description}</p>}
       </div>
-      {actions && <div style={{ display: 'flex', gap: 8, marginBottom: 2 }}>{actions}</div>}
+      {actions && <div className="mb-0.5 flex gap-2">{actions}</div>}
     </div>
   )
 }

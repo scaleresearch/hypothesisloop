@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Combobox, ComboboxInput, ComboboxOptions, ComboboxOption } from '@headlessui/react'
+import { clsx } from 'clsx'
+import { fieldClass } from '@/components/ui/field'
 
 interface SearchableSelectOption {
   value: string
@@ -14,8 +16,8 @@ interface SearchableSelectProps {
   onChange: (value: string) => void
   placeholder?: string
   allLabel?: string
+  /** Sizes the field; it is at least 180px wide without one. */
   className?: string
-  style?: React.CSSProperties
   /** Omit the leading "All" row — for pickers where one option must always be selected. */
   hideAllOption?: boolean
   /** Told the query once typing pauses, for a caller that loads its options from a server-side search. Must be stable across renders. */
@@ -24,23 +26,8 @@ interface SearchableSelectProps {
   hint?: string
 }
 
-const FIELD_STYLE: React.CSSProperties = {
-  fontSize: 12,
-  padding: '5px 10px',
-  border: '1px solid rgba(255,255,255,.16)',
-  borderRadius: 6,
-  background: 'var(--surface-2)',
-  color: 'var(--foreground)',
-  width: '100%',
-  boxSizing: 'border-box',
-}
-
-function optionRowStyle(focus: boolean, selected: boolean): React.CSSProperties {
-  return {
-    fontSize: 12, padding: '6px 8px', borderRadius: 4, cursor: 'pointer',
-    background: focus ? 'var(--surface-2)' : 'transparent',
-    color: selected ? 'var(--accent-light)' : 'var(--foreground)',
-  }
+function optionClass(focus: boolean, selected: boolean) {
+  return clsx('cursor-pointer rounded-sm px-2 py-1.5 font-mono text-xs', focus && 'bg-foreground/10', selected ? 'text-accent' : 'text-foreground')
 }
 
 /**
@@ -48,7 +35,7 @@ function optionRowStyle(focus: boolean, selected: boolean): React.CSSProperties 
  * raw <select> when the option list can grow long enough that scanning it beats scrolling it.
  * Options are shown in the order passed in, so callers control sort (e.g. newest first).
  */
-export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, style, hideAllOption, onSearch, hint }: SearchableSelectProps) {
+export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, hideAllOption, onSearch, hint }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
   useEffect(() => {
     if (!onSearch) return
@@ -69,8 +56,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
       onChange={(v: string | null) => onChange(v ?? '')}
       onClose={() => setQuery('')}
       as="div"
-      className={className}
-      style={{ position: 'relative', minWidth: 180, ...style }}
+      className={clsx('relative', className ?? 'min-w-[180px]')}
     >
       {({ open }) => (
         <>
@@ -80,32 +66,25 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
         onClick={e => {
           if (!open) e.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
         }}
-        className="mono"
-        style={FIELD_STYLE}
+        className={clsx(fieldClass('sm', true), 'w-full')}
         placeholder={placeholder ?? allLabel}
         displayValue={() => selected?.label ?? value}
         onChange={e => setQuery(e.target.value)}
       />
-      <ComboboxOptions
-        style={{
-          position: 'absolute', zIndex: 20, top: '100%', left: 0, right: 0, marginTop: 4,
-          maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6,
-          background: 'var(--surface-raised)', boxShadow: 'var(--shadow-lg)', padding: 4,
-        }}
-      >
+      <ComboboxOptions className="absolute inset-x-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded border bg-surface-raised p-1 shadow-lg">
         {!hideAllOption && (
-          <ComboboxOption value="" className="mono">
-            {({ focus }: { focus: boolean }) => <div style={optionRowStyle(focus, value === '')}>{allLabel}</div>}
+          <ComboboxOption value="">
+            {({ focus }: { focus: boolean }) => <div className={optionClass(focus, value === '')}>{allLabel}</div>}
           </ComboboxOption>
         )}
         {filtered.length === 0 ? (
-          <div className="text-dim" style={{ fontSize: 12, padding: '6px 8px' }}>No matches</div>
+          <div className="px-2 py-1.5 text-xs text-subtle">No matches</div>
         ) : filtered.map(o => (
-          <ComboboxOption key={o.value} value={o.value} className="mono">
-            {({ focus }: { focus: boolean }) => <div style={optionRowStyle(focus, o.value === value)}>{o.label}</div>}
+          <ComboboxOption key={o.value} value={o.value}>
+            {({ focus }: { focus: boolean }) => <div className={optionClass(focus, o.value === value)}>{o.label}</div>}
           </ComboboxOption>
         ))}
-        {hint && <div className="text-dim" style={{ fontSize: 11, padding: '6px 8px' }}>{hint}</div>}
+        {hint && <div className="px-2 py-1.5 text-xs text-subtle">{hint}</div>}
       </ComboboxOptions>
         </>
       )}

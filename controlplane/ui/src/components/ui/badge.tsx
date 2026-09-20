@@ -1,47 +1,65 @@
-import type { CSSProperties, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
-import { semantic } from '@/lib/colors'
+import { statusTone } from '@/lib/colors'
+import type { Tone } from '@/lib/colors'
 
-interface BadgeProps {
-  children: ReactNode
-  /** Lowercased and used as the `badge-<status>` CSS class, e.g. "RUNNING" -> badge-running */
-  status: string
-  className?: string
-  style?: CSSProperties
+const toneClass: Record<Tone, string> = {
+  success: 'bg-success/15 text-success',
+  warning: 'bg-warning/15 text-warning',
+  danger: 'bg-danger/15 text-danger',
+  info: 'bg-info/15 text-info',
+  accent: 'bg-accent/15 text-accent',
+  purple: 'bg-purple/15 text-purple',
+  pink: 'bg-pink/15 text-pink',
+  neutral: 'bg-neutral/15 text-neutral',
 }
 
-/** Status pill driven by the `.badge-*` classes in globals.css (job/tier/platform-experiment statuses). */
-export function Badge({ children, status, className, style }: BadgeProps) {
+interface BadgeProps {
+  children?: ReactNode
+  /** A job, platform experiment, tier or hypothesis state; it picks the tone. */
+  status?: string
+  /** For a pill that is no state of anything. */
+  tone?: Tone
+  className?: string
+  title?: string
+}
+
+export function Badge({ children, status, tone, className, title }: BadgeProps) {
   return (
-    <span className={clsx('badge', `badge-${status.toLowerCase()}`, className)} style={style}>
+    <span
+      title={title}
+      className={clsx(
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-0.5 pl-1.5 pr-2 font-mono text-2xs font-bold uppercase tracking-wide ring-1 ring-inset ring-current',
+        toneClass[tone ?? statusTone(status)],
+        className,
+      )}
+    >
+      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-current" />
       {children ?? status}
     </span>
   )
 }
 
-/** Capacity tier badge (guaranteed/burst) — renders a muted em dash when there's no tier yet. */
+/** A dot in a colour of lib/colors, for a legend entry or a status beside its name. */
+export function Dot({ color, className }: { color: string; className?: string }) {
+  return <span aria-hidden="true" className={clsx('inline-block h-2 w-2 flex-none rounded-full', className)} style={{ background: color }} />
+}
+
 export function TierBadge({ tier }: { tier?: string }) {
-  if (!tier) return <span className="text-muted">—</span>
+  if (!tier) return <span className="text-xs text-muted">—</span>
   return <Badge status={tier}>{tier}</Badge>
 }
 
-/**
- * Human vs agent participant badge, driven by domain.AgentKind. Missing/undefined (older API
- * response, or a field this build predates) is treated as "agent" — that has always been every
- * existing row's real kind.
- */
+/** Human or agent participant. A row with no kind is an agent: every row was one before kinds existed. */
 export function AgentKindBadge({ kind, className }: { kind?: string; className?: string }) {
   const isHuman = kind === 'human'
   return <Badge status={isHuman ? 'human' : 'agent'} className={className}>{isHuman ? 'Human' : 'Agent'}</Badge>
 }
 
 /** Marks a completed job whose agent filed no summary of it. */
-export function NoSummary({ style }: { style?: CSSProperties }) {
+export function NoSummary({ className }: { className?: string }) {
   return (
-    <span
-      title="This job completed and its agent filed no summary of it"
-      style={{ fontSize: 10, fontWeight: 400, whiteSpace: 'nowrap', color: semantic.warning, ...style }}
-    >
+    <span title="This job completed and its agent filed no summary of it" className={clsx('whitespace-nowrap text-2xs font-normal text-warning', className)}>
       no summary
     </span>
   )

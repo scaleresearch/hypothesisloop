@@ -1,30 +1,40 @@
 import type { ReactNode } from 'react'
+import { clsx } from 'clsx'
 import { Link } from '@/components/ui/link'
+import { Eyebrow } from '@/components/ui/text'
+import type { Tone } from '@/lib/colors'
 
 interface StatTileProps {
   label: string
   value: ReactNode
   sub?: string
-  color?: string
+  tone?: Tone
   /** When set, the whole tile becomes a link (e.g. to a pre-filtered job list). */
   href?: string
 }
 
+const toneClass: Record<Tone, string> = {
+  success: 'text-success',
+  warning: 'text-warning',
+  danger: 'text-danger',
+  info: 'text-info',
+  accent: 'text-accent',
+  purple: 'text-purple',
+  pink: 'text-pink',
+  neutral: 'text-neutral',
+}
+
+const tileClass = 'block min-w-0 overflow-hidden rounded-lg border bg-surface px-4 py-3.5 shadow-sm transition-shadow hover:border-border-strong hover:shadow-md'
+
 /** KPI box used in stat/summary rows (dashboard, jobs, platform-experiment detail). */
-export function StatTile({ label, value, sub, color, href }: StatTileProps) {
+export function StatTile({ label, value, sub, tone, href }: StatTileProps) {
   const content = (
     <>
-      <div className="uppercase-label" style={{ marginBottom: 4 }}>{label}</div>
-      <div className="mono stat-tile-value" style={color ? { color } : undefined} title={typeof value === 'string' ? value : undefined}>{value}</div>
-      {sub && <div className="stat-tile-sub" title={sub}>{sub}</div>}
+      <Eyebrow className="mb-1 block">{label}</Eyebrow>
+      <div className={clsx('truncate font-mono text-2xl font-bold tracking-tight', tone ? toneClass[tone] : 'text-foreground')} title={typeof value === 'string' ? value : undefined}>{value}</div>
+      {sub && <div className="mt-0.5 truncate text-2xs text-subtle" title={sub}>{sub}</div>}
     </>
   )
-  if (href) {
-    return (
-      <Link href={href} className="stat-tile" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
-        {content}
-      </Link>
-    )
-  }
-  return <div className="stat-tile">{content}</div>
+  if (href) return <Link href={href} className={tileClass}>{content}</Link>
+  return <div className={tileClass}>{content}</div>
 }

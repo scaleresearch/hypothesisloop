@@ -1,22 +1,17 @@
-import { semantic } from '@/lib/colors'
+import { clsx } from 'clsx'
 
-interface MetricBarProps {
-  value: number
-  max: number
-  /** Optional override; by default green/amber/red based on percentage used. */
-  color?: string
-}
-
-/** Horizontal progress bar used for budget/quota utilisation. */
-export function MetricBar({ value, max, color }: MetricBarProps) {
+/** Horizontal bar of how much of a budget or quota is used: green, amber past 70%, red past 90%. */
+export function MetricBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0
-  const fillColor = color ?? (pct > 90 ? semantic.danger : pct > 70 ? semantic.warning : semantic.success)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div className="metric-bar-track" style={{ flex: 1 }}>
-        <div className="metric-bar-fill" style={{ width: `${pct}%`, background: fillColor, boxShadow: `0 0 8px ${fillColor}66` }} />
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div
+          className={clsx('h-full rounded-full transition-[width] duration-300', pct > 90 ? 'bg-danger' : pct > 70 ? 'bg-warning' : 'bg-success')}
+          style={{ width: `${pct}%` }}
+        />
       </div>
-      <span className="mono text-muted" style={{ width: 36, textAlign: 'right', fontSize: 11 }}>{pct}%</span>
+      <span className="w-9 text-right font-mono text-xs text-muted">{pct}%</span>
     </div>
   )
 }
