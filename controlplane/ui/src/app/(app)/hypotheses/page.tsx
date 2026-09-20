@@ -8,7 +8,7 @@ import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { fetchFindings, fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
@@ -187,15 +187,15 @@ function HypothesesPageContent() {
           </div>
           {showSide && <aside className="hg-side">
             {q && (
-              <Pod>
-                <PodHeader>
+              <Card>
+                <CardHeader>
                   Search results
                   <Button variant="link" style={{ marginLeft: 'auto', fontSize: 11.5 }} onClick={() => setQ('')}>Clear</Button>
-                </PodHeader>
-                <PodContent>
+                </CardHeader>
+                <CardContent>
                   <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
-                </PodContent>
-              </Pod>
+                </CardContent>
+              </Card>
             )}
             {selected !== graph.root && (
               <HypothesisPanel

@@ -9,7 +9,7 @@ import {
 import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, agentPalette } from '@/lib/colors'
@@ -189,9 +189,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       )}
 
       {(j.metrics || j.summary || j.status === 'COMPLETED') && (
-        <Pod style={{ marginBottom: 12 }}>
-          <PodHeader>Result</PodHeader>
-          <PodContent>
+        <Card style={{ marginBottom: 12 }}>
+          <CardHeader>Result</CardHeader>
+          <CardContent>
             {(j.metrics ?? []).map(m => (
               <div key={m.name} className="mono" style={{ marginBottom: 10 }}>
                 <span style={m.name === primaryMetricName ? { fontSize: 22, fontWeight: 700, color: semantic.success } : { fontSize: 15, fontWeight: 600 }}>
@@ -206,14 +206,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             {!j.summary && j.status === 'COMPLETED' && (
               <p style={{ fontSize: 13, color: semantic.warning }}>No summary: the agent did not write up what this job found.</p>
             )}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Job metadata */}
-      <Pod style={{ marginBottom: 12 }}>
-        <PodHeader>Job Details</PodHeader>
-        <PodContent>
+      <Card style={{ marginBottom: 12 }}>
+        <CardHeader>Job Details</CardHeader>
+        <CardContent>
           <table className="wa-table">
             <tbody>
               <Row label="Agent" value={j.agent_id} />
@@ -245,13 +245,13 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               )}
             </tbody>
           </table>
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
       {/* Metric trajectories — one chart per reported metric, the ranking metric first */}
-      <Pod style={{ marginBottom: 12 }}>
-        <PodHeader>Metric Trajectories</PodHeader>
-        <PodContent>
+      <Card style={{ marginBottom: 12 }}>
+        <CardHeader>Metric Trajectories</CardHeader>
+        <CardContent>
           {metricsError ? (
             <ErrorMessage>Could not read this job&apos;s metrics.</ErrorMessage>
           ) : metricNames.length > 0 ? (
@@ -317,14 +317,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           ) : (
             <EmptyState>No metric data yet — waiting for job to start reporting.</EmptyState>
           )}
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
       {/* Lineage */}
       {(j.job?.image || j.code_ref || j.config_hash || j.data_ref) && (
-        <Pod style={{ marginBottom: 12 }}>
-          <PodHeader>Lineage &amp; Reproducibility</PodHeader>
-          <PodContent>
+        <Card style={{ marginBottom: 12 }}>
+          <CardHeader>Lineage &amp; Reproducibility</CardHeader>
+          <CardContent>
             <table className="wa-table">
               <tbody>
                 {j.job?.image && <Row label="Image" value={j.job.image} />}
@@ -333,28 +333,28 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 {j.data_ref && <Row label="Data ref" value={j.data_ref} />}
               </tbody>
             </table>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Parent lineage */}
       {j.parent_id && (
-        <Pod>
-          <PodHeader>Derived From</PodHeader>
-          <PodContent>
+        <Card>
+          <CardHeader>Derived From</CardHeader>
+          <CardContent>
             <p style={{ fontSize: 12 }}>
               Parent job: <Link href={`/jobs/${j.parent_id}`} className="text-link mono">{j.parent_id}</Link>
             </p>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
     
       {/* The job's own output. For a failed job the traceback usually lives only here — the
           record carries a reason code, not the error. Includes the crashed instance's output
           when a container restarted, which is otherwise unreachable. */}
-      <Pod style={{ marginBottom: 12 }}>
-        <PodHeader>Logs</PodHeader>
-        <PodContent>
+      <Card style={{ marginBottom: 12 }}>
+        <CardHeader>Logs</CardHeader>
+        <CardContent>
           {logsError ? (
             <ErrorMessage>Could not read this job&apos;s log tail.</ErrorMessage>
           ) : logs && logs.length > 0 ? (
@@ -370,8 +370,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           ) : (
             <EmptyState>No log output reported yet.</EmptyState>
           )}
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 </div>
   )
 }

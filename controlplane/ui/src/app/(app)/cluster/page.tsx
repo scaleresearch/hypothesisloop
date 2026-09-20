@@ -7,7 +7,7 @@ import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { OrgClusters } from '@/components/org-clusters'
 import { PageHeader } from '@/components/ui/page-header'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
@@ -43,9 +43,9 @@ function AllClusters() {
     <>
       {data && !error && <AllClustersCounts clusters={data.clusters} />}
 
-      <Pod>
-        <PodHeader>All Clusters · every org · staff only</PodHeader>
-        <PodContent>
+      <Card>
+        <CardHeader>All Clusters · every org · staff only</CardHeader>
+        <CardContent>
           {isLoading && <Loading />}
           {error && <ErrorMessage>Could not load the clusters of every org: {error.message}</ErrorMessage>}
           {data && data.clusters.length === 0 && (
@@ -101,8 +101,8 @@ function AllClusters() {
               </tbody>
             </table>
           )}
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -123,9 +123,9 @@ function LiveCapacity() {
   )
 
   return (
-    <Pod>
-      <PodHeader>Capacity {org.name} can use</PodHeader>
-      <PodContent>
+    <Card>
+      <CardHeader>Capacity {org.name} can use</CardHeader>
+      <CardContent>
         {isLoading && <Loading />}
         {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
         {data && rows.length === 0 && (
@@ -162,8 +162,8 @@ function LiveCapacity() {
             </tbody>
           </table>
         )}
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -178,12 +178,12 @@ export default function ClusterPage() {
           and reports its own presence via heartbeat."
       />
 
-      <Pod>
-        <PodHeader>Clusters {org.name} can run on</PodHeader>
-        <PodContent scrollX>
+      <Card>
+        <CardHeader>Clusters {org.name} can run on</CardHeader>
+        <CardContent scrollX>
           <OrgClusters manage={false} />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
       <LiveCapacity />
       {staff && <AllClusters />}
     </div>

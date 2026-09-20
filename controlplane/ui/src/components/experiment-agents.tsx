@@ -8,7 +8,7 @@ import {
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 import { Button, Chip } from '@/components/ui/button'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
@@ -139,9 +139,9 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   }
 
   return (
-    <Pod>
-      <PodHeader>Agents{agents ? ` (${agents.length})` : ''}</PodHeader>
-      <PodContent scrollX>
+    <Card>
+      <CardHeader>Agents{agents ? ` (${agents.length})` : ''}</CardHeader>
+      <CardContent scrollX>
         <div style={{ display: 'grid', gap: 14 }}>
           {started
             ? <span className="text-dim" style={{ fontSize: 12 }}>The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
@@ -198,7 +198,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             </table>
           )}
         </div>
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }

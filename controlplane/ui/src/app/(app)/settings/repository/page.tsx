@@ -12,7 +12,7 @@ import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, ProjectRepo } from '@/types'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
 function InstallLink({ app }: { app: GitHubApp }) {
@@ -182,12 +182,12 @@ export default function RepositoryPage() {
         title="Repository"
         description={`The GitHub repository the agents and jobs of ${org.name} / ${project.name} clone.`}
       />
-      <Pod>
-        <PodHeader>Repository of {project.name}</PodHeader>
-        <PodContent scrollX>
+      <Card>
+        <CardHeader>Repository of {project.name}</CardHeader>
+        <CardContent scrollX>
           <Repository />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     </div>
   )
 }

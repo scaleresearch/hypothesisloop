@@ -5,7 +5,7 @@ import { Link } from '@/components/ui/link'
 import { useProjectRouter, useRecordProject } from '@/lib/query-state'
 import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Loading, EmptyState } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
@@ -99,9 +99,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         </Link>
       </div>
 
-      <Pod style={{ marginBottom: 12 }}>
-        <PodHeader>Hypothesis</PodHeader>
-        <PodContent>
+      <Card style={{ marginBottom: 12 }}>
+        <CardHeader>Hypothesis</CardHeader>
+        <CardContent>
           <p
             style={{
               maxWidth: 760,
@@ -114,12 +114,12 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           >
             {data.text}
           </p>
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
-      <Pod>
-        <PodHeader>Links</PodHeader>
-        <PodContent>
+      <Card>
+        <CardHeader>Links</CardHeader>
+        <CardContent>
           <div className="hg-stack" style={{ gap: 12, maxWidth: 760 }}>
             {linkGroups(data.links.out, data.links.in).map(group => (
               <div key={group.label} className="hg-stack" style={{ gap: 2 }}>
@@ -136,19 +136,19 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
             ))}
           </div>
           <AddLinkForm hypothesis={data} onAdded={() => mutate()} />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Findings
           {data.finding_count > 0 && (
             <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
               ({data.finding_count}{data.finding_count > findings.length ? `, showing ${findings.length}` : ''})
             </span>
           )}
-        </PodHeader>
-        <PodContent>
+        </CardHeader>
+        <CardContent>
           {findings.length === 0 ? (
             <EmptyState>
               No findings filed yet. Agents write a summary via POST /experiments/{'{id}'}/summary once a job testing
@@ -178,19 +178,19 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               })}
             </div>
           )}
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Comments
           {data.comment_count > 0 && (
             <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
               ({data.comment_count}{data.comment_count > comments.length ? `, showing ${comments.length}` : ''})
             </span>
           )}
-        </PodHeader>
-        <PodContent>
+        </CardHeader>
+        <CardContent>
           {comments.length === 0 ? (
             <EmptyState>No comments yet. A note here needs no job behind it.</EmptyState>
           ) : (
@@ -207,19 +207,19 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
             </div>
           )}
           <AddCommentForm hypothesisID={data.id} onAdded={() => mutate()} />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Jobs testing this hypothesis
           {data.job_count > 0 && (
             <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
               ({data.job_count}{data.job_count > jobs.length ? `, showing ${jobs.length}` : ''})
             </span>
           )}
-        </PodHeader>
-        <PodContent scrollX>
+        </CardHeader>
+        <CardContent scrollX>
           <table className="wa-table">
             <thead>
               <tr>
@@ -277,8 +277,8 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               })}
             </tbody>
           </table>
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     </div>
   )
 }

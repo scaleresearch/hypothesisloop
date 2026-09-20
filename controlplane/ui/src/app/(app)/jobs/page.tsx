@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { AgentSelect } from '@/components/agent-select'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
@@ -190,12 +190,12 @@ function JobsPageContent() {
         </ErrorMessage>
       )}
 
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Job List
           {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
-        </PodHeader>
-        <PodContent scrollX>
+        </CardHeader>
+        <CardContent scrollX>
           {/* Fixed widths for the short columns; experiment and hypothesis share what is left. An
               experiment filter makes the experiment column the same on every row, so it goes. */}
           <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 1040 }}>
@@ -325,8 +325,8 @@ function JobsPageContent() {
             </tbody>
           </table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     </div>
   )
 }

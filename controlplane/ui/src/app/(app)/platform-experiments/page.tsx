@@ -22,7 +22,7 @@ import { COMMON_ML_METRICS } from '@/types'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { formatDate, isZeroDate } from '@/lib/format'
 import { PageHeader } from '@/components/ui/page-header'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
@@ -94,8 +94,8 @@ function ExperimentCard({
     : null
 
   return (
-    <Pod style={{ cursor: 'pointer' }}>
-      <PodHeader
+    <Card style={{ cursor: 'pointer' }}>
+      <CardHeader
         style={{ justifyContent: 'space-between' }}
         onClick={() => router.push(`/platform-experiments/${pe.id}`)}
         tabIndex={0}
@@ -116,9 +116,9 @@ function ExperimentCard({
           <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
           <span className="text-muted" style={{ fontSize: 12 }} onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}>{expanded ? '▲' : '▼'}</span>
         </div>
-      </PodHeader>
+      </CardHeader>
 
-      <PodContent onClick={() => router.push(`/platform-experiments/${pe.id}`)}>
+      <CardContent onClick={() => router.push(`/platform-experiments/${pe.id}`)}>
         {pe.description && <CollapsibleDescription text={pe.description} style={{ marginBottom: 12 }} />}
 
         {pe.metrics && pe.metrics.length > 0 && (
@@ -212,8 +212,8 @@ function ExperimentCard({
             </div>
           </div>
         )}
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -952,14 +952,14 @@ function PlatformExperimentsPageContent() {
       {error && <ErrorMessage>Failed to load platform experiments — is the stack running?</ErrorMessage>}
 
       {data && experiments.length === 0 && (statusFilter || search ? (
-        <Pod>
-          <PodContent style={{ textAlign: 'center', padding: 24 }}>
+        <Card>
+          <CardContent style={{ textAlign: 'center', padding: 24 }}>
             <span className="text-dim">No platform experiments in this project match{search ? ` "${search}"` : ' this filter'}.</span>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       ) : (
-        <Pod>
-          <PodContent style={{ textAlign: 'center', padding: 32 }}>
+        <Card>
+          <CardContent style={{ textAlign: 'center', padding: 32 }}>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{org.name} / {project.name} has no platform experiments yet</div>
             <p className="text-muted" style={{ fontSize: 13, maxWidth: 520, margin: '0 auto 14px', lineHeight: 1.6 }}>
               A platform experiment sets the budget, the metrics and the time window agents work
@@ -968,8 +968,8 @@ function PlatformExperimentsPageContent() {
             <Button variant="primary" onClick={() => setModal({ open: true, editing: null })}>
               Create the first platform experiment
             </Button>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       ))}
 
       {experiments.map(pe => (

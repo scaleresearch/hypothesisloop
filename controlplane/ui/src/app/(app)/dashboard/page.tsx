@@ -7,7 +7,7 @@ import { useTenant } from '@/lib/tenant'
 import type { Experiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
@@ -72,9 +72,9 @@ function SchedulerQuality() {
   const occupancyPct = acceleratorTotal > 0 ? Math.round((acceleratorBusy / acceleratorTotal) * 100) : null
 
   return (
-    <Pod>
-      <PodHeader>Scheduler Quality · every org · staff only</PodHeader>
-      <PodContent>
+    <Card>
+      <CardHeader>Scheduler Quality · every org · staff only</CardHeader>
+      <CardContent>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
           <StatTile label="Total Jobs" value={total} />
           <StatTile
@@ -122,8 +122,8 @@ function SchedulerQuality() {
             </tr>
           </tbody>
         </table>
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -197,9 +197,9 @@ export default function DashboardPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
         {/* Job status breakdown as donut chart */}
-        <Pod>
-          <PodHeader>Job Status Breakdown</PodHeader>
-          <PodContent>
+        <Card>
+          <CardHeader>Job Status Breakdown</CardHeader>
+          <CardContent>
             {total === 0 ? (
               <EmptyState>No jobs yet.</EmptyState>
             ) : (
@@ -244,13 +244,13 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
 
         {/* Capacity tier breakdown */}
-        <Pod>
-          <PodHeader>Jobs by Capacity Tier</PodHeader>
-          <PodContent>
+        <Card>
+          <CardHeader>Jobs by Capacity Tier</CardHeader>
+          <CardContent>
             <table className="wa-table">
               <thead>
                 <tr><th>Tier</th><th>Running</th><th>Total</th><th>Evicted</th></tr>
@@ -270,13 +270,13 @@ export default function DashboardPage() {
                 </tr>
               </tbody>
             </table>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
 
         {/* Eviction breakdown by reason */}
-        <Pod>
-          <PodHeader>Eviction Reasons</PodHeader>
-          <PodContent>
+        <Card>
+          <CardHeader>Eviction Reasons</CardHeader>
+          <CardContent>
             {faultSummary && (
               <div style={{ color: 'var(--muted-fg)', fontSize: 11, marginBottom: 8 }}>{faultSummary}</div>
             )}
@@ -303,15 +303,15 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               </div>
             )}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Recent evictions — audit log */}
       {recentEvictions.length > 0 && (
-        <Pod>
-          <PodHeader>Recent Evictions — Audit Log</PodHeader>
-          <PodContent scrollX>
+        <Card>
+          <CardHeader>Recent Evictions — Audit Log</CardHeader>
+          <CardContent scrollX>
             <table className="wa-table">
               <thead>
                 <tr>
@@ -348,8 +348,8 @@ export default function DashboardPage() {
                 ))}
               </tbody>
             </table>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {staff && <SchedulerQuality />}

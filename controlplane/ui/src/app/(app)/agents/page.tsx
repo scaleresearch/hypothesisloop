@@ -11,7 +11,7 @@ import {
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge, AgentKindBadge, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
@@ -165,9 +165,9 @@ function AgentsPageContent() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
         {/* Experiment filter */}
-        <Pod>
-          <PodHeader>Filter</PodHeader>
-          <PodContent style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <Card>
+          <CardHeader>Filter</CardHeader>
+          <CardContent style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span className="text-muted">By experiment:</span>
             <PlatformExperimentSelect
               value={experimentFilter}
@@ -177,17 +177,17 @@ function AgentsPageContent() {
             {experimentFilter && (
               <Button size="sm" onClick={() => { setExperimentFilter(''); setPage(0) }}>Clear</Button>
             )}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
 
         {/* Bonus formula — the underlying formula only produces a concrete number within a
             single platform experiment (base_share depends on that experiment's own budget and
             signup count), so show real computed numbers once one is selected; otherwise show
             the formula as a reference only. */}
         {selectedPE ? (
-          <Pod>
-            <PodHeader>Quota Formula — {selectedPE.name}</PodHeader>
-            <PodContent>
+          <Card>
+            <CardHeader>Quota Formula — {selectedPE.name}</CardHeader>
+            <CardContent>
               <table className="wa-table">
                 <tbody>
                   <tr><td>Base share</td><td className="mono" style={{ fontSize: 11.5 }}>{formatAccH(selectedPE.budget_accelerator_hours)} ÷ {selectedPE.signup_count} = {formatAccH(baseShare)} AccH</td></tr>
@@ -196,12 +196,12 @@ function AgentsPageContent() {
                   <tr><td>Burst quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>guaranteed × 2.0 — preemptable</td></tr>
                 </tbody>
               </table>
-            </PodContent>
-          </Pod>
+            </CardContent>
+          </Card>
         ) : (
-          <Pod>
-            <PodHeader>Quota Bonus Formula <span className="text-dim" style={{ fontWeight: 400, fontSize: 11 }}>(reference — select an experiment for real numbers)</span></PodHeader>
-            <PodContent>
+          <Card>
+            <CardHeader>Quota Bonus Formula <span className="text-dim" style={{ fontWeight: 400, fontSize: 11 }}>(reference — select an experiment for real numbers)</span></CardHeader>
+            <CardContent>
               <table className="wa-table">
                 <tbody>
                   <tr><td>Base share</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>total_budget_AccH ÷ signed_up_agent_count</td></tr>
@@ -210,8 +210,8 @@ function AgentsPageContent() {
                   <tr><td>Burst quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>guaranteed × 2.0 — preemptable</td></tr>
                 </tbody>
               </table>
-            </PodContent>
-          </Pod>
+            </CardContent>
+          </Card>
         )}
       </div>
 
@@ -219,12 +219,12 @@ function AgentsPageContent() {
       {error && <ErrorMessage>Cannot reach quota service.</ErrorMessage>}
 
       {/* Agent table */}
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Registered Agents
           {agents && <span className="text-dim" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
-        </PodHeader>
-        <PodContent scrollX>
+        </CardHeader>
+        <CardContent scrollX>
           <table className="wa-table">
             <thead>
               <tr>
@@ -315,16 +315,16 @@ function AgentsPageContent() {
             </tbody>
           </table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
       {/* Compute Donation Requests */}
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Compute Donation Requests
           {donationTotal > 0 && <span className="text-link" style={{ fontWeight: 400, marginLeft: 8 }}>({donationTotal} open)</span>}
-        </PodHeader>
-        <PodContent>
+        </CardHeader>
+        <CardContent>
           {donationItems.length === 0 ? (
             <EmptyState>No open donation requests. Agents can request extra compute via POST /donations.</EmptyState>
           ) : (
@@ -352,8 +352,8 @@ function AgentsPageContent() {
             </table>
           )}
           <Pagination page={donationPage} pageSize={PAGE_SIZE} total={donationTotal} onPageChange={setDonationPage} />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     </div>
   )
 }

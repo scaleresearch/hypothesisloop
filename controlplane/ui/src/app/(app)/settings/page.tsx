@@ -8,7 +8,7 @@ import { OrgClusters } from '@/components/org-clusters'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/components/ui/link'
 import { PageHeader } from '@/components/ui/page-header'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 
 /** A name with a Save beside it. `save` rejects with the API's own reason, which is shown. */
 function NameForm({ label, initial, action, placeholder, save }: {
@@ -58,9 +58,9 @@ function Organization() {
   const { org } = useTenant()
   const refreshMe = useRefreshMe()
   return (
-    <Pod>
-      <PodHeader>Organization</PodHeader>
-      <PodContent>
+    <Card>
+      <CardHeader>Organization</CardHeader>
+      <CardContent>
         <NameForm
           // Keyed by the stored name, so a rename made in another tab resets the field.
           key={org.name}
@@ -70,8 +70,8 @@ function Organization() {
           save={async name => { await renameOrg(org.id, name); await refreshMe() }}
         />
         <p className="text-dim mono" style={{ fontSize: 11, marginTop: 8 }}>{org.id}</p>
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -79,9 +79,9 @@ function Projects() {
   const { me, org, project } = useTenant()
   const refreshMe = useRefreshMe()
   return (
-    <Pod>
-      <PodHeader>Projects</PodHeader>
-      <PodContent>
+    <Card>
+      <CardHeader>Projects</CardHeader>
+      <CardContent>
         <div style={{ display: 'grid', gap: 10 }}>
           {me.projects.filter(p => p.org_id === org.id).map(p => (
             <div key={p.id} style={{ display: 'grid', gap: 3 }}>
@@ -107,8 +107,8 @@ function Projects() {
             />
           </div>
         </div>
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -128,31 +128,31 @@ export default function SettingsPage() {
         <>
           <Organization />
           <Projects />
-          <Pod>
-            <PodHeader>API keys</PodHeader>
-            <PodContent scrollX>
+          <Card>
+            <CardHeader>API keys</CardHeader>
+            <CardContent scrollX>
               <APIKeys />
-            </PodContent>
-          </Pod>
+            </CardContent>
+          </Card>
         </>
       )}
 
-      <Pod>
-        <PodHeader>Clusters</PodHeader>
-        <PodContent scrollX>
+      <Card>
+        <CardHeader>Clusters</CardHeader>
+        <CardContent scrollX>
           <OrgClusters manage />
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
-      <Pod>
-        <PodHeader>Repository</PodHeader>
-        <PodContent>
+      <Card>
+        <CardHeader>Repository</CardHeader>
+        <CardContent>
           <p className="text-muted" style={{ fontSize: 13 }}>
             The GitHub repository the agents and jobs of {project.name} clone, and its agents push their branches to.{' '}
             <Link href="/settings/repository" className="text-link">Repository of {project.name}</Link>
           </p>
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { Link } from '@/components/ui/link'
 import type { HypothesisGraph, HypothesisLinkType, HypothesisListItem, PlatformExperiment } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/status-message'
@@ -29,8 +29,8 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   onAddIdea: (parentID: string) => void
 }) {
   return (
-    <Pod>
-      <PodContent className="hg-stack">
+    <Card>
+      <CardContent className="hg-stack">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
           <span className="uppercase-label">Objective</span>
           <span style={{ fontWeight: 650 }}>{pe.name}</span>
@@ -43,8 +43,8 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
           </span>
         </div>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -52,15 +52,15 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
   const node = nodeByID.get(selected)
   if (!node) {
     return (
-      <Pod>
-        <PodHeader>Hypothesis</PodHeader>
-        <PodContent>
+      <Card>
+        <CardHeader>Hypothesis</CardHeader>
+        <CardContent>
           <EmptyState>
             <span className="mono">{selected}</span> is not in this experiment&apos;s graph.{' '}
             <Button variant="link" onClick={() => onSelect('')}>Show the objective</Button>
           </EmptyState>
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
     )
   }
 
@@ -69,12 +69,12 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
   const incoming = graph.edges.filter(e => e.to === node.id).map(e => ({ type: e.type, id: e.from }))
 
   return (
-    <Pod>
-      <PodHeader>
+    <Card>
+      <CardHeader>
         Hypothesis
         <Badge status={node.status}>{node.status}</Badge>
-      </PodHeader>
-      <PodContent className="hg-stack" style={{ gap: 12 }}>
+      </CardHeader>
+      <CardContent className="hg-stack" style={{ gap: 12 }}>
         <p style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: 240, overflowY: 'auto' }}>
           {node.text}
         </p>
@@ -114,8 +114,8 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
           <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button>
           <Link href={`/hypotheses/${node.id}`} className="text-link" style={{ fontSize: 12 }}>Open detail →</Link>
         </div>
-      </PodContent>
-    </Pod>
+      </CardContent>
+    </Card>
   )
 }
 

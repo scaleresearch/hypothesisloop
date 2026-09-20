@@ -28,7 +28,7 @@ import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
@@ -760,9 +760,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
 
       {/* Description + metrics */}
       {(pe.description || (pe.metrics && pe.metrics.length > 0)) && (
-        <Pod>
-          <PodHeader>About this Experiment</PodHeader>
-          <PodContent>
+        <Card>
+          <CardHeader>About this Experiment</CardHeader>
+          <CardContent>
             {pe.description && (
               <CollapsibleDescription text={pe.description} style={{ marginBottom: pe.metrics?.length ? 12 : 0 }} />
             )}
@@ -784,20 +784,20 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 </div>
               </div>
             )}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Findings */}
       {found.length > 0 && (
-        <Pod>
-          <PodHeader>
+        <Card>
+          <CardHeader>
             Findings
             <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>
               ({found.length} hypotheses with a verdict or a result)
             </span>
-          </PodHeader>
-          <PodContent scrollX>
+          </CardHeader>
+          <CardContent scrollX>
             <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 760 }}>
               <thead>
                 <tr>
@@ -844,15 +844,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 ))}
               </tbody>
             </table>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Competing agents over time */}
       {metrics.length > 0 && (
-        <Pod>
-          <PodHeader>Competing Agents over time</PodHeader>
-          <PodContent>
+        <Card>
+          <CardHeader>Competing Agents over time</CardHeader>
+          <CardContent>
             <div style={{ display: 'grid', gridTemplateColumns: knownAgentIds.length > 0 ? '1fr 1fr' : '1fr', gap: 24, marginBottom: 16 }}>
               <MetricSelector metrics={metrics} selected={activeMetricKeys} onChange={setSelectedMetricKeys} />
               {knownAgentIds.length > 0 && (
@@ -880,15 +880,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 ))}
               </div>
             )}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Stage ladder — boundaries are published, per-agent rank deliberately is not
           (see docs/stages.md). */}
       {stagesStatus && stagesStatus.stages.length > 0 && (
-        <Pod style={{ borderLeft: `3px solid ${stagesStatus.cut_agents.length > 0 ? semantic.warning : 'var(--accent)'}` }}>
-          <PodContent>
+        <Card style={{ borderLeft: `3px solid ${stagesStatus.cut_agents.length > 0 ? semantic.warning : 'var(--accent)'}` }}>
+          <CardContent>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div className="mono" style={{
                 fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
@@ -957,13 +957,13 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   ))}
               </div>
             </div>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Stats row */}
-      <Pod>
-        <PodContent>
+      <Card>
+        <CardContent>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile
@@ -996,18 +996,18 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               href={graphHref(pe.id)}
             />
           </div>
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
       <ExperimentAgents pe={pe} />
 
       {/* Scoreboard */}
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Scoreboard
           {primaryStandings && ` — ranked by ${primaryStandings.metric} (${primaryStandings.direction})`}
-        </PodHeader>
-        <PodContent scrollX>
+        </CardHeader>
+        <CardContent scrollX>
           {scoreboard.length === 0 ? (
             <EmptyState>No agents signed up yet.</EmptyState>
           ) : (
@@ -1137,14 +1137,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               </tbody>
             </table>
           )}
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
       {/* Running jobs */}
       {running.length > 0 && (
-        <Pod>
-          <PodHeader>Currently Running Jobs ({runningPage?.total ?? running.length})</PodHeader>
-          <PodContent scrollX>
+        <Card>
+          <CardHeader>Currently Running Jobs ({runningPage?.total ?? running.length})</CardHeader>
+          <CardContent scrollX>
             <table className="wa-table">
               <thead>
                 <tr>
@@ -1169,29 +1169,29 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 ))}
               </tbody>
             </table>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Live job metrics */}
       {(experiments ?? []).length > 0 && (
-        <Pod>
-          <PodHeader>
+        <Card>
+          <CardHeader>
             Job Metrics
             <span className="text-dim" style={{ marginLeft: 8 }}>over training progress, refreshed every 30 s</span>
-          </PodHeader>
-          <PodContent>
+          </CardHeader>
+          <CardContent>
             <LiveMetricsPicker jobs={experiments ?? []} />
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Recent jobs */}
-      <Pod>
-        <PodHeader>
+      <Card>
+        <CardHeader>
           Recent Jobs
-        </PodHeader>
-        <PodContent scrollX>
+        </CardHeader>
+        <CardContent scrollX>
           {!experiments || experiments.length === 0 ? (
             <EmptyState>No jobs submitted yet.</EmptyState>
           ) : (
@@ -1245,14 +1245,14 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               </tbody>
             </table>
           )}
-        </PodContent>
-      </Pod>
+        </CardContent>
+      </Card>
 
       {/* Quota table */}
       {quotas && quotas.length > 0 && (
-        <Pod>
-          <PodHeader>Agent Quotas</PodHeader>
-          <PodContent scrollX>
+        <Card>
+          <CardHeader>Agent Quotas</CardHeader>
+          <CardContent scrollX>
             <table className="wa-table">
               <thead>
                 <tr>
@@ -1281,15 +1281,15 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
             {/* RAM/storage quota columns intentionally omitted: those dimensions are hard
                 physical-fit-checked at admission, not hours-tracked, so AgentQuota carries no
                 RAM/storage fields at all. */}
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
 
       {/* Compute Donation Requests from agents in this experiment */}
       {relevantDonations.length > 0 && (
-        <Pod>
-          <PodHeader>Compute Donation Requests ({relevantDonations.length})</PodHeader>
-          <PodContent scrollX>
+        <Card>
+          <CardHeader>Compute Donation Requests ({relevantDonations.length})</CardHeader>
+          <CardContent scrollX>
             <table className="wa-table">
               <thead>
                 <tr>
@@ -1310,8 +1310,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 ))}
               </tbody>
             </table>
-          </PodContent>
-        </Pod>
+          </CardContent>
+        </Card>
       )}
     </div>
   )
