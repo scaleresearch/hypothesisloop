@@ -58,6 +58,15 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"org", "create", "research"}, "POST", "/orgs", map[string]any{"name": "research"}},
 		{[]string{"org", "create", "research", "--owner", "u-1"}, "POST", "/orgs", map[string]any{"name": "research", "owner_user_id": "u-1"}},
 		{[]string{"org", "rename", "new name", "--org", "org-1"}, "PATCH", "/orgs/org-1", map[string]any{"name": "new name"}},
+		{[]string{"org", "members", "list", "--org", "org-1"}, "GET", "/orgs/org-1/members", nil},
+		{[]string{"org", "members", "list", "--org", "org-1", "--limit", "50", "--offset", "20"}, "GET", "/orgs/org-1/members?limit=50&offset=20", nil},
+		{[]string{"org", "members", "set-role", "u-1", "owner", "--org", "org-1"}, "PATCH", "/orgs/org-1/members/u-1", map[string]any{"role": "owner"}},
+		{[]string{"org", "members", "remove", "u-1", "--org", "org-1"}, "DELETE", "/orgs/org-1/members/u-1", nil},
+		{[]string{"org", "invites", "create", "--org", "org-1"}, "POST", "/orgs/org-1/invites", map[string]any{"role": "member"}},
+		{[]string{"org", "invites", "create", "--role", "owner", "--org", "org-1"}, "POST", "/orgs/org-1/invites", map[string]any{"role": "owner"}},
+		{[]string{"org", "invites", "list", "--org", "org-1", "--limit", "5"}, "GET", "/orgs/org-1/invites?limit=5", nil},
+		{[]string{"org", "invites", "revoke", "inv-1"}, "DELETE", "/invites/inv-1", nil},
+		{[]string{"org", "invites", "accept", "hli_secret"}, "POST", "/invites/accept", map[string]any{"token": "hli_secret"}},
 		{[]string{"project", "list", "--org", "org-1"}, "GET", "/orgs/org-1/projects", nil},
 		{[]string{"project", "create", "vision", "--org", "org-1"}, "POST", "/orgs/org-1/projects", map[string]any{"name": "vision"}},
 		{[]string{"project", "rename", "--project", "prj-1", "vision"}, "PATCH", "/projects/prj-1", map[string]any{"name": "vision"}},
@@ -119,6 +128,8 @@ func TestACommandNeedingAnOrgNamesNoneWhenTheTokenReachesSeveral(t *testing.T) {
 			{"project", "list"}, {"project", "create", "x"}, {"org", "rename", "x"}, {"api-key", "list"},
 			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x"},
 			{"cluster", "token", "x"}, {"cluster", "remove", "x"}, {"cluster", "forget-identity", "x"},
+			{"org", "members", "list"}, {"org", "members", "set-role", "u-1", "member"}, {"org", "members", "remove", "u-1"},
+			{"org", "invites", "create"}, {"org", "invites", "list"},
 		} {
 			before := len(*calls)
 			code, stdout, stderr := hl(t, args...)
@@ -241,7 +252,7 @@ func TestAnEmptyListSaysSoOnStderr(t *testing.T) {
 func TestAccountGroupsListTheirCommands(t *testing.T) {
 	setAPIURL(t, "http://unused")
 	for group, commands := range map[string][]string{
-		"org": {"list", "create NAME", "rename NAME"}, "project": {"list", "create NAME", "rename NAME"},
+		"org": {"list", "create NAME", "rename NAME", "members <command>", "invites <command>"}, "project": {"list", "create NAME", "rename NAME"},
 		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "forget-identity NAME", "remove NAME"},
 	} {
 		code, stdout, _ := hl(t, group, "--help")
@@ -270,5 +281,103 @@ func TestPlatformExperimentsListFiltersByProject(t *testing.T) {
 	}
 	if code, _, _ := hl(t, "platform-experiments", "list", "--project", "prj-flag"); code != 0 || (*calls)[2].path != "/platform-experiments?limit=20&project_id=prj-flag" {
 		t.Fatalf("with --project: exit code = %d, call = %+v", code, (*calls)[2])
+	}
+}
+
+func TestOrgMembersAndInvitesListTheirCommands(t *testing.T) {
+	setAPIURL(t, "http://unused")
+	for group, commands := range map[string][]string{
+		"members": {"list", "set-role USER owner|member", "remove USER"},
+		"invites": {"create", "list", "revoke ID", "accept TOKEN"},
+	} {
+		code, stdout, _ := hl(t, "org", group, "--help")
+		if code != 0 {
+			t.Fatalf("hl org %s --help: exit code = %d", group, code)
+		}
+		for _, command := range commands {
+			if !strings.Contains(stdout, "\n  "+command) {
+				t.Errorf("hl org %s --help does not list %q:\n%s", group, command, stdout)
+			}
+		}
+		if code, _, stderr := hl(t, "org", group, "nonsense"); code != 2 || !strings.Contains(stderr, "unknown subcommand") {
+			t.Errorf("hl org %s nonsense: exit code = %d, stderr = %q", group, code, stderr)
+		}
+	}
+}
+
+func TestOrgMembersAndInvitesPrintOneLineEach(t *testing.T) {
+	accountsServer(t, nil, `[{"org_id":"org-1","user_id":"u-1","role":"owner"},{"org_id":"org-1","user_id":"u-2","role":"member"}]`)
+	code, stdout, stderr := hl(t, "org", "members", "list", "--org", "org-1")
+	want := `{"org_id":"org-1","user_id":"u-1","role":"owner"}` + "\n" + `{"org_id":"org-1","user_id":"u-2","role":"member"}` + "\n"
+	if code != 0 || stdout != want {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want = %q", code, stdout, stderr, want)
+	}
+	accountsServer(t, nil, `[]`)
+	for _, group := range []string{"members", "invites"} {
+		code, stdout, stderr := hl(t, "org", group, "list", "--org", "org-1")
+		if code != 0 || stdout != "" || !strings.Contains(stderr, "org "+group+" list: none") {
+			t.Fatalf("hl org %s list: exit code = %d, stdout = %q, stderr = %q", group, code, stdout, stderr)
+		}
+	}
+}
+
+func TestInviteCreatePrintsTheTokenItWillNeverSeeAgain(t *testing.T) {
+	accountsServer(t, nil, `{"id":"inv-1","org_id":"org-1","role":"member","token":"hli_secret"}`)
+	code, stdout, stderr := hl(t, "org", "invites", "create", "--org", "org-1")
+	if code != 0 || !strings.Contains(stdout, `"token":"hli_secret"`) {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the invite with its token", code, stdout, stderr)
+	}
+}
+
+// Removing and revoking answer with no body, so the command says what it did.
+func TestACommandAnsweredWithNoBodySaysWhatItDid(t *testing.T) {
+	var asked []string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	setAPIURL(t, url)
+	for args, said := range map[string]string{
+		"org members remove u-1 --org org-1": "removed u-1 from org org-1",
+		"org invites revoke inv-1":           "revoked invite inv-1",
+	} {
+		code, stdout, stderr := hl(t, strings.Fields(args)...)
+		if code != 0 || stdout != "" || !strings.Contains(stderr, said) {
+			t.Errorf("hl %s: exit code = %d, stdout = %q, stderr = %q, want %q on stderr", args, code, stdout, stderr, said)
+		}
+	}
+	if len(asked) != 2 {
+		t.Fatalf("asked %v, want one call each", asked)
+	}
+}
+
+func TestARoleNobodyDefinedIsRefusedBeforeAnyCall(t *testing.T) {
+	calls := accountsServer(t, nil, `{}`)
+	for _, args := range [][]string{
+		{"org", "members", "set-role", "u-1", "admin", "--org", "org-1"},
+		{"org", "members", "set-role", "u-1", "--org", "org-1"},
+		{"org", "invites", "create", "--role", "admin", "--org", "org-1"},
+		{"org", "invites", "accept"},
+		{"org", "invites", "revoke"},
+	} {
+		if code, stdout, stderr := hl(t, args...); code != 2 || stdout != "" || !strings.Contains(stderr, "usage: hl org") {
+			t.Errorf("hl %v: exit code = %d, stdout = %q, stderr = %q, want a usage error", args, code, stdout, stderr)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("made %+v, want no call", *calls)
+	}
+}
+
+func TestARefusalWithAReasonIsPrinted(t *testing.T) {
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"last_owner","message":"an org keeps at least one owner"}`))
+	})
+	setAPIURL(t, url)
+	code, stdout, stderr := hl(t, "org", "members", "remove", "u-1", "--org", "org-1")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "last_owner") || strings.Contains(stderr, "removed") {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal and no claim of a removal", code, stdout, stderr)
 	}
 }

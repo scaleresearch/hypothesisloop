@@ -139,7 +139,7 @@ const usage = `usage: hl <command> ...
   donation              list | request | fulfill ID | cancel ID
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
-  org                   list | create NAME | rename NAME
+  org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept
   project               list | create NAME | rename NAME
   api-key               create NAME | list | revoke ID
   cluster               add NAME | list
@@ -174,7 +174,7 @@ func groupUsage(group string, subs []subcommand) string {
 	fmt.Fprintf(&b, "usage: hl %s <command> ...\n", group)
 	for _, sub := range subs {
 		var help bytes.Buffer
-		sub.run(nil, []string{"-h"}, io.Discard, &help)
+		sub.run(nil, []string{"-h"}, &help, &help)
 		usage, _, _ := strings.Cut(help.String(), "\n\n")
 		usage, _, _ = strings.Cut(usage, "\n   or:")
 		synopsis := strings.Join(strings.Fields(strings.TrimPrefix(usage, "usage: hl "+group+" ")), " ")

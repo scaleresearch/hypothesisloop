@@ -10,13 +10,36 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
 
-// The account commands: orgs, projects, API keys and clusters. --org defaults to $HL_ORG and then
+// The account commands: orgs with their members and invites, projects, API keys and clusters. --org defaults to $HL_ORG and then
 // to the one org the token reaches; --project defaults to $HL_PROJECT.
 
 var orgCommands = []subcommand{
 	{"list", "the orgs this token reaches, with your role in each", orgList},
 	{"create", "create an org you own, with its default project", orgCreate},
 	{"rename", "rename an org; its id stays", orgRename},
+	{"members", "the people of an org: list them, change a role, remove one or leave", orgMembers},
+	{"invites", "invite people into an org by a token, and accept one", orgInvites},
+}
+
+var orgMemberCommands = []subcommand{
+	{"list", "an org's members and the role each holds", orgMembersList},
+	{"set-role", "make a member an owner, or an owner a member", orgMembersSetRole},
+	{"remove", "remove a member, or leave by naming yourself", orgMembersRemove},
+}
+
+var orgInviteCommands = []subcommand{
+	{"create", "create an invite; its token is printed once and never again", orgInvitesCreate},
+	{"list", "an org's pending invites, never their tokens", orgInvitesList},
+	{"revoke", "end an invite that was not accepted", orgInvitesRevoke},
+	{"accept", "join the org an invite is for, as the person signed in", orgInvitesAccept},
+}
+
+func orgMembers(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	return runGroup("org members", orgMemberCommands, c, args, stdout, stderr)
+}
+
+func orgInvites(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	return runGroup("org invites", orgInviteCommands, c, args, stdout, stderr)
 }
 
 var projectCommands = []subcommand{
@@ -122,6 +145,151 @@ func orgRename(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 		return fail(stderr, err)
 	}
 	return call(c, "PATCH", orgPath(id, ""), map[string]string{"name": name}, "", "", stdout, stderr)
+}
+
+// done makes a request that answers with no body and says on stderr what it did, so that no
+// output is never mistaken for a command that did nothing.
+func done(c *apiclient.Client, method, path, said string, stderr io.Writer) int {
+	if err := c.Do(method, path, nil, nil); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stderr, "hl: %s\n", said)
+	return 0
+}
+
+// pageFlags are --limit and --offset of a list the platform pages.
+func pageFlags(fs *flagSet) func() string {
+	limit := fs.Int("limit", 0, "page size (default the platform's 20, at most 200)")
+	offset := fs.Int("offset", 0, "rows to skip")
+	return func() string {
+		query := url.Values{}
+		if *limit != 0 {
+			query.Set("limit", fmt.Sprint(*limit))
+		}
+		if *offset != 0 {
+			query.Set("offset", fmt.Sprint(*offset))
+		}
+		if len(query) == 0 {
+			return ""
+		}
+		return "?" + query.Encode()
+	}
+}
+
+func orgMembersList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org members list", `usage: hl org members list [--org ORG] [--limit N] [--offset N]
+
+The org's members, oldest first: user id, role and when they joined. The platform holds no name
+and no email for a person, so a member is named by user id. An owner changes everything in the
+org; a member reads everything, runs platform experiments and creates API keys bound to one
+project.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	query := pageFlags(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, "GET", orgPath(id, "/members")+query(), nil, "", "org members list: none", stdout, stderr)
+}
+
+func orgMembersSetRole(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org members set-role", `usage: hl org members set-role USER owner|member [--org ORG]
+
+For an owner. An org keeps at least one owner, so demoting the last one is refused. Someone who
+stops being an owner loses their API keys of the whole org and the invites they made.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	operands, err := parseOperands(fs, args)
+	if err != nil {
+		return parseExit(err)
+	}
+	if len(operands) != 2 {
+		return parseExit(misuse(fs, "want USER and a role, got %d operands", len(operands)))
+	}
+	if operands[1] != "owner" && operands[1] != "member" {
+		return parseExit(misuse(fs, "the role must be owner or member, got %s", operands[1]))
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, "PATCH", orgPath(id, "/members/"+url.PathEscape(operands[0])), map[string]string{"role": operands[1]}, "", "", stdout, stderr)
+}
+
+func orgMembersRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org members remove", `usage: hl org members remove USER [--org ORG]
+
+For an owner, and for anyone naming themselves, which is how a person leaves an org. The last
+owner cannot be removed. The API keys the person created in the org stop working at once and the
+invites they made are revoked.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	user, err := parseOne(fs, args, "USER", "", "user")
+	if err != nil {
+		return parseExit(err)
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return done(c, "DELETE", orgPath(id, "/members/"+url.PathEscape(user)), fmt.Sprintf("removed %s from org %s", user, id), stderr)
+}
+
+func orgInvitesCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org invites create", `usage: hl org invites create [--role owner|member] [--org ORG]
+
+For an owner. Prints the invite with its token. The token is shown this once: the platform keeps
+only its hash and sends no email, so hand it to the person yourself. Whoever signs in and accepts
+it joins the org with the invite's role. It works once, for seven days, and until it is revoked.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	role := fs.String("role", "member", "the role the invited person joins with")
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	if *role != "owner" && *role != "member" {
+		return parseExit(misuse(fs, "--role must be owner or member, got %s", *role))
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, "POST", orgPath(id, "/invites"), map[string]string{"role": *role}, "", "", stdout, stderr)
+}
+
+func orgInvitesList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org invites list", "usage: hl org invites list [--org ORG] [--limit N] [--offset N]\n\nFor an owner. The invites that can still be accepted, newest first.", stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	query := pageFlags(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, "GET", orgPath(id, "/invites")+query(), nil, "", "org invites list: none", stdout, stderr)
+}
+
+func orgInvitesRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org invites revoke", "usage: hl org invites revoke ID\n\nFor an owner of the invite's org. The invite can no longer be accepted. One already accepted is refused: remove the member instead.", stderr)
+	id, err := parseOne(fs, args, "ID", "", "id")
+	if err != nil {
+		return parseExit(err)
+	}
+	return done(c, "DELETE", "/invites/"+url.PathEscape(id), "revoked invite "+id, stderr)
+}
+
+func orgInvitesAccept(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("org invites accept", `usage: hl org invites accept TOKEN
+
+Joins the org the invite is for, with the invite's role. Only a signed-in person joins an org, so
+HL_TOKEN must be your own sign-in: an API key is refused. Prints the membership.`, stderr)
+	token, err := parseOne(fs, args, "TOKEN", "", "token")
+	if err != nil {
+		return parseExit(err)
+	}
+	return call(c, "POST", "/invites/accept", map[string]string{"token": token}, "", "", stdout, stderr)
 }
 
 func projectList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
