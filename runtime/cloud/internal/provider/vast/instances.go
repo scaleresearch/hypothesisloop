@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -45,9 +46,9 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			if !strings.HasPrefix(name, namePrefix) {
 				continue
 			}
-			state, err := stateOf(found.ActualStatus)
-			if err != nil {
-				return nil, fmt.Errorf("vast: instance %d (%s): %w", found.ID, name, err)
+			state, known := stateOf(found.ActualStatus)
+			if !known {
+				log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as starting", found.ID, name, *found.ActualStatus)
 			}
 			listed = append(listed, provider.Instance{
 				ID:        strconv.FormatInt(found.ID, 10),
@@ -65,20 +66,28 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 
 // stateOf maps the status the host last reported. It is null until the host has answered, and
 // "offline" while the host is unreachable; in both the command is not known to be running, which
-// is what starting means to a caller waiting on it.
-func stateOf(actualStatus *string) (provider.State, error) {
+// is what starting means to a caller waiting on it. A status this adapter has never seen is
+// starting as well, and not known: the instance stays listed, so it keeps its slot and can be
+// destroyed, and the caller's boot timeout bounds it.
+//
+// "exited" may be passed on as it is, although the contract allows StateExited only once the
+// whole output is readable. An instance is exited after its supervisor stopped it, which the
+// supervisor does only after the command has ended and written its last line, or after the
+// container ended some other way, when nothing is writing any more. And Logs never reads an old
+// upload: every call has the host upload the output again and waits for that upload.
+func stateOf(actualStatus *string) (state provider.State, known bool) {
 	if actualStatus == nil {
-		return provider.StateStarting, nil
+		return provider.StateStarting, true
 	}
 	switch *actualStatus {
 	case "loading", "created", "scheduling", "offline":
-		return provider.StateStarting, nil
+		return provider.StateStarting, true
 	case "running":
-		return provider.StateRunning, nil
+		return provider.StateRunning, true
 	case "exited":
-		return provider.StateExited, nil
+		return provider.StateExited, true
 	}
-	return "", fmt.Errorf("unknown status %q", *actualStatus)
+	return provider.StateStarting, false
 }
 
 func isGone(err error) bool {

@@ -332,10 +332,9 @@ func TestCreateReturnsOnlyOnceTheInstanceIsListed(t *testing.T) {
 // instance back: by a deadline that has already ended the wait, or by a List that fails.
 func TestCreateDestroysAnInstanceItCannotConfirm(t *testing.T) {
 	unconfirmed := map[string]http.HandlerFunc{
-		"never listed":  answer(200, instancesPage("")),
-		"list failing":  answer(503, `unavailable`),
-		"rate limited":  answer(429, `API requests too frequent: endpoint threshold=1.0`),
-		"status change": answer(200, instancesPage("", instanceJSON(9001, "hl-exp1-a2", "hibernating"))),
+		"never listed": answer(200, instancesPage("")),
+		"list failing": answer(503, `unavailable`),
+		"rate limited": answer(429, `API requests too frequent: endpoint threshold=1.0`),
 	}
 	for name, list := range unconfirmed {
 		t.Run(name, func(t *testing.T) {

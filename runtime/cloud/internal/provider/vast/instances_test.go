@@ -1,8 +1,11 @@
 package vast
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -129,27 +132,34 @@ func TestListMapsVendorStatuses(t *testing.T) {
 	}
 }
 
-func TestListFailsOnAStatusItDoesNotKnow(t *testing.T) {
+// One instance in a status the adapter has never seen must not hide the account: it is listed as
+// starting, so it keeps its slot and can be destroyed, and the log says what the vendor reported.
+func TestListReportsAStatusItDoesNotKnowAsStartingAndLogsIt(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, listPath, answer(200, instancesPage("",
 		instanceJSON(1, "hl-a", "running"),
 		instanceJSON(2, "hl-b", "hibernating"),
+		instanceJSON(3, "other", "hibernating"),
+		instanceJSON(4, "hl-c", "exited"),
 	)))
 	p := newTestProvider(t, api, Settings{})
 
-	_, err := p.List(context.Background(), "hl-")
-	if err == nil || !strings.Contains(err.Error(), "hibernating") || !strings.Contains(err.Error(), "hl-b") {
-		t.Fatalf("err = %v, want one naming the status and the instance", err)
+	got, err := p.List(context.Background(), "hl-")
+	if err != nil {
+		t.Fatalf("List: %v", err)
 	}
-}
-
-func TestListIgnoresAnUnknownStatusOutsideThePrefix(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodGet, listPath, answer(200, instancesPage("", instanceJSON(2, "other", "hibernating"))))
-	p := newTestProvider(t, api, Settings{})
-
-	if got, err := p.List(context.Background(), "hl-"); err != nil || len(got) != 0 {
-		t.Fatalf("List = %v, %v", got, err)
+	want := []provider.State{provider.StateRunning, provider.StateStarting, provider.StateExited}
+	if len(got) != 3 || got[0].State != want[0] || got[1].State != want[1] || got[2].State != want[2] || got[1].Name != "hl-b" || got[1].ID != "2" {
+		t.Errorf("List = %v, want all three instances with hl-b as starting", got)
+	}
+	if line := logged.String(); !strings.Contains(line, "hl-b") || !strings.Contains(line, `"hibernating"`) {
+		t.Errorf("log = %q, want the instance name and the raw status", line)
+	}
+	if strings.Contains(logged.String(), "other") {
+		t.Errorf("log = %q, mentions an instance outside the prefix", logged.String())
 	}
 }
 
