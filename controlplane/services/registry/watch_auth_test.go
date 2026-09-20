@@ -1,14 +1,19 @@
 package registry
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -133,5 +138,58 @@ func TestAnAgentTokenWatchesOnlyItsOwnAgent(t *testing.T) {
 	}
 	if got := handler.hub.list("pe-1", "agent-b"); len(got) != 0 {
 		t.Errorf("subscriptions narrowed to agent-b: got = %d, want = 0", len(got))
+	}
+}
+
+// Naming a hypothesis of a platform experiment the caller cannot reach answers 404 before the
+// service is asked, whose own refusal would name that hypothesis's platform experiment.
+func TestAWriteNamingAHypothesisOutOfScopeIsNotFound(t *testing.T) {
+	svc := poolService(newPoolStore())
+	ctx := context.Background()
+	own, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", "", "pe-1", "warmup helps", buildOnRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, _, _, err := svc.RegisterHypothesis(ctx, "agent-9", "", "pe-other", "decay hurts",
+		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-other"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := chi.NewRouter()
+	caller := authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}})
+	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(watchTenancy)), NewHandler(svc, zap.NewNop()))
+	post := func(path string, body map[string]any) *httptest.ResponseRecorder {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+		request.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(rec, authtest.Authorize(request))
+		return rec
+	}
+	link := func(from, to string) *httptest.ResponseRecorder {
+		return post("/hypotheses/"+url.PathEscape(from)+"/links", map[string]any{"agent_id": "agent-1", "type": "related", "to": to})
+	}
+	register := func(buildsOn string, distinctFrom ...string) *httptest.ResponseRecorder {
+		return post("/hypotheses", map[string]any{
+			"agent_id": "agent-1", "platform_experiment_id": "pe-1", "text": "cosine decay",
+			"links": []map[string]string{{"type": "builds_on", "to": buildsOn}}, "distinct_from": distinctFrom,
+		})
+	}
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"link to it":         link(own.ID, foreign.ID),
+		"link from it":       link(foreign.ID, own.ID),
+		"build on it":        register(foreign.ID),
+		"told apart from it": register("pe-1", foreign.ID),
+	} {
+		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "pe-other") {
+			t.Errorf("%s: got = %d %s, want 404 naming nothing of the other platform experiment", name, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := register("pe-1"); rec.Code >= 300 {
+		t.Errorf("a hypothesis inside the caller's platform experiment: got = %d %s", rec.Code, rec.Body.String())
 	}
 }

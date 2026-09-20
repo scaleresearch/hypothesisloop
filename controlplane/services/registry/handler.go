@@ -151,6 +151,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		return access.PlatformExperiment(ctx, hyp.PlatformExperimentID)
 	}
+	// referencesInScope admits the caller to every hypothesis a write names, so a refusal for
+	// naming one of another platform experiment says nothing about a hypothesis the caller
+	// cannot read.
+	referencesInScope := func(ctx context.Context, ids ...string) error {
+		for _, id := range ids {
+			if err := hypothesisInScope(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	// ---- what hangs off an experiment ----
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -230,6 +241,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Append a metric sample for an experiment", Tags: []string{"metrics"},
 		DefaultStatus: 204,
 		Description: "Records one {metric_name, fraction_complete, metric_value} sample. No server-side validation of the value — never fabricate one. " +
+			"A job sends the token it finds in HYPOTHESISLOOP_TOKEN, which is accepted on this call for that job only and until it ends. " +
 			"metric_basis defaults to \"raw\": set it only when this value is not on the metric's usual scale (e.g. a different denormalization " +
 			"reference than normal) so it is never silently ranked against unmodified runs.",
 	}, func(ctx context.Context, in *struct {
@@ -380,6 +392,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				return nil, err
 			}
 		}
+		referenced := append([]string{}, b.DistinctFrom...)
+		for _, link := range b.Links {
+			referenced = append(referenced, link.To)
+		}
+		if err := referencesInScope(ctx, referenced...); err != nil {
+			return nil, err
+		}
 		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, auth.Author(ctx, b.Author), b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 		if err != nil {
 			h.logger.Info("register hypothesis", zap.Error(err))
@@ -416,7 +435,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status int
 		Body   []domain.Link
 	}, error) {
-		if err := hypothesisInScope(ctx, in.ID); err != nil {
+		if err := referencesInScope(ctx, in.ID, in.Body.To); err != nil {
 			return nil, err
 		}
 		if in.Body.AgentID != "" {
