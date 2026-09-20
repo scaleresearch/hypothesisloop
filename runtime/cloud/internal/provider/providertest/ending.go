@@ -79,10 +79,17 @@ func stopLetsTheCommandFinish(t *testing.T, r *run) {
 	id, _ := r.create(t, ctx, r.spec("saves", savingScript))
 	r.awaitLine(t, ctx, id, "conformance-ready", r.opts.StartTimeout)
 
+	stopped := time.Now()
 	if err := r.p.Stop(ctx, id); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
+	r.awaitLine(t, ctx, id, "conformance-saving", r.opts.SettleTimeout)
+	t.Logf("SIGTERM seen in the output %s after Stop", since(stopped))
+	if err := r.p.Stop(ctx, id); err != nil {
+		t.Errorf("Stop repeated while the command saves: %v", err)
+	}
 	r.awaitState(t, ctx, id, provider.StateExited, r.opts.SettleTimeout)
+	t.Logf("exited %s after Stop", since(stopped))
 	lines := r.logs(t, ctx, id, logTail)
 	if count(lines, "conformance-saving") != 1 {
 		t.Fatalf("Stop did not reach the command as SIGTERM; output: %q", lines)
