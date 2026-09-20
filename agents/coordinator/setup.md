@@ -19,9 +19,13 @@ shown. Resolve against the live environment, never guess.
                                                # hypotheses, metrics, resource catalog. Export
                                                # it: `hl` reads it from the environment and
                                                # exits with an error when it is unset
-    HL_TOKEN=<staff token>                     # `make -s staff-token` on the local stack. Export
-                                               # it too: every request carries it, and `hl` exits
-                                               # with an error when it is unset
+    HL_TOKEN=<org API key, hlk_...>            # `hl api-key create coordinator`, run once by a
+                                               # member of the org. Keep it in
+                                               # agents/coordinator/.env (gitignored) and load it
+                                               # with step 0: every request carries it and `hl`
+                                               # exits with an error when it is unset. Never put
+                                               # it on a command line. A staff token is for
+                                               # operating the platform itself, not for a run
     HL_PROJECT=default                         # the project the platform experiment is created in
     METRICS_URL=http://localhost:8084
     CODE_REPO_URL=<set below>
@@ -37,8 +41,8 @@ silently improvise.
 
 ## 1. Prepare the environment (all six, every time — don't assume from a prior session)
 
-0. **Claude auth.** `set -a; source agents/coordinator/.env 2>/dev/null; set +a` — loads the
-   persistent `CLAUDE_CODE_OAUTH_TOKEN` (gitignored) if present. Missing file → step 4 falls back
+0. **Tokens.** `set -a; source agents/coordinator/.env 2>/dev/null; set +a` — loads `HL_TOKEN`
+   (the org API key) and the persistent `CLAUDE_CODE_OAUTH_TOKEN` (gitignored) if present. Missing file → step 4 falls back
    to mounted dotfiles.
 1. **Capacity.** `lib_attach_node $KUBE_CONTEXT $NODE_NAME` (`localdev/lib/node.sh`, not manual
    kubectl). Confirm `GET $API_URL/resource-catalog/capacity` shows `$CHIP_ARCH` with >=
@@ -54,6 +58,16 @@ silently improvise.
 2. **Control plane + agents up**: `make controlplane-up` (podman compose, see
    `localdev/controlplane/docker-compose.yml`), cluster-agent DaemonSet/Deployment on
    `$KUBE_CONTEXT`.
+   **A cluster runs the jobs of the org that registered it, and no other.** The platform
+   experiment's project decides the org of every job in it, so the cluster must be registered
+   for that org, or be shared by staff. `hl cluster list` shows the org's clusters and whether
+   each is connected; the capacity check in step 1 lists only clusters the token's jobs can be
+   placed on, so a cluster missing there is unregistered, another org's, or disconnected. A job
+   with nowhere to go stays QUEUED with `not_admitted_reason: no_cluster_for_org`. To add a
+   cluster, `hl cluster add <name> --api-url <url> --metrics-url <url>` registers the name and
+   prints the `make cluster-agent-up` command with the cluster's runtime token filled in; run
+   it with `kubectl` pointed at the cluster. The local stack registers its own clusters for the
+   org `default`.
    **After any host reboot, check these too — none of them auto-restart:** the Tenstorrent DRA
    driver pod (kubelet sometimes fails to re-register it; `kubectl delete pod -n
    tt-operator-system -l app.kubernetes.io/name=tt-dra-driver` forces a clean re-register — job
@@ -165,12 +179,14 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   blank, is a blocker — fix `experiment.md`, re-`PUT`, and only then spawn. An agent that reads no
   baseline invents one, and every result it ranks is measured against a different reference than
   its neighbour's.
-- `starts_at` must be several minutes in the future, never "now" — signup only succeeds while
-  status is `Open`, and it auto-flips to `Running` the instant `starts_at` passes (`SweepAutoStart`
-  in `controlplane/services/quota/platform_experiments_lifecycle.go`). An agent container takes
-  ~30-55s to boot before its harness signs it up; `starts_at=now` leaves a race where a slower
-  agent gets `signup_closed: experiment is running` and exits before its first turn. A 3-5 min
-  buffer after creation covers it comfortably.
+- `starts_at` must leave time to add every agent (step 4), never "now". Agents join only while
+  the status is `open`, and it flips to `running` within a minute of `starts_at` passing once at
+  least one agent has joined (`SweepAutoStart` in
+  `controlplane/services/quota/platform_experiments_lifecycle.go`). Quota is divided at that
+  moment over the agents present, and one added later is refused `signup_closed`. How long an
+  agent's container takes to boot no longer matters: an agent is in the experiment from the
+  moment it is added, whenever its harness starts. Add the whole roster in one go, or keep
+  `starts_at` a few minutes out until it is complete.
 
 ## 3. Decide the flavor mix and the sweep
 
@@ -178,7 +194,8 @@ Every agent that signs up competes — ranked, cut at stage boundaries, eligible
 bonus. There is no other role, and the platform never branches on one: every agent's jobs are
 admitted, billed, evicted and settled by identical code.
 
-What differs between agents is two independent things, both decided here and set at launch:
+What differs between agents is two independent things, both decided here and set when the agents
+are added (step 4):
 
 - `AGENT_FLAVOR` picks which specialization the harness inlines into the agent's prompt from
   `agents/experimentator/src/hypothesisloop_agent/prompts/flavors/<flavor>.md` — what kind of
@@ -218,25 +235,47 @@ it as `generalist` with that config as its hyperparameters (or none at all, and 
 
 ## 4. Spawn agents
 
-`NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)`, one container per agent, unique
-`AGENT_ID`, shared `PLATFORM_EXPERIMENT_ID`, each agent's own `AGENT_FLAVOR` (omit it and the
-agent gets `generalist`) and `AGENT_HYPERPARAMETERS` (a JSON object; omit it and the agent gets
-`{}`). Build once: `make experimentator-image EXPERIMENT=$EXPERIMENT`. Before the agent's first
-turn the harness registers `AGENT_ID` and signs it up to `PLATFORM_EXPERIMENT_ID` (a restart
-skips what is already done), and `hl` in the container reads both as its `--agent` and
-`--platform-experiment` defaults. Each agent gets its own token, which lets it act as that agent
-in that platform experiment and nowhere else:
-`make -s token SCOPE=agent:$PLATFORM_EXPERIMENT_ID/agent-<id>`. A secret is named with a bare
-`-e NAME`, which hands the container the value from this shell's environment: written as
-`-e NAME=value` it would sit in the process list and in the shell's history.
+`NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)`. An agent joins a platform experiment
+in exactly one way: `hl platform-experiments agents add` (`POST /platform-experiments/{id}/agents`),
+while the experiment is open. It creates the agents with ids of the platform's choosing and
+records each one's flavor (`--flavor`; omit it and the agent runs `generalist`), hyperparameters
+(`--hyperparameters`, a JSON object; omit it and the agent gets `{}`) and model (`--model`, default
+`claude-sonnet-5`). One call per group that shares those values:
 
-    HL_TOKEN="$(make -s token SCOPE=agent:$PLATFORM_EXPERIMENT_ID/agent-<id>)" \
-    podman run -d --name agent-<id> --network host \
-      -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
-      -e AGENT_FLAVOR=hyperparameter-search -e AGENT_HYPERPARAMETERS='{"batch_size":64}' \
+    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --count 2 --flavor generalist
+    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
+      --hyperparameters '{"batch_size":64}'
+
+Add `--hosted` and the platform runs them: its launcher starts one machine per agent from the
+platform's own agent image, restarts one whose harness crashed, and takes it down two minutes
+after the experiment closes or the agent is cut. There is nothing more to do for a hosted agent.
+
+Without `--hosted` you run each agent yourself, which is how an experiment with its own agent
+image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
+one agent with its `agent_id` and its `token`, which acts as that agent in that platform
+experiment and nowhere else. The harness starts only with both: it registers nothing and exits
+if the platform does not know the agent. Write them to one env file per agent, readable by you
+alone, instead of putting a token on a command line, where it would sit in the process list and
+in the shell's history:
+
+    umask 077
+    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
+      --hyperparameters '{"batch_size":64}' |
+      jq -r '"AGENT_ID=\(.agent_id)\nHL_TOKEN=\(.token)\nAGENT_FLAVOR=\(.flavor // "generalist")\nAGENT_HYPERPARAMETERS=\(.hyperparameters | tojson)"' \
+      > /tmp/hlrun/<run>/agent-1.env
+
+    podman run -d --name agent-1 --network host --env-file /tmp/hlrun/<run>/agent-1.env \
+      -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
       -e API_URL=$API_URL -e CODE_REPO_URL=$CODE_REPO_URL \
-      -e HL_TOKEN -e GIT_TOKEN -e CLAUDE_CODE_OAUTH_TOKEN \
+      -e GIT_TOKEN -e CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT
+
+A secret is named with a bare `-e NAME`, which hands the container the value from this shell's
+environment. `hl` in the container reads `AGENT_ID` and `PLATFORM_EXPERIMENT_ID` as its `--agent`
+and `--platform-experiment` defaults. A lost token is printed again by
+`hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --agent <agent_id>`, which changes
+nothing for an agent that already joined. `hl platform-experiments agents remove` takes an agent
+out again while the experiment is still open.
 
 Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files
 mount with `--userns=keep-id -v ~/.claude/.credentials.json:/home/agent/.claude/.credentials.json:ro
@@ -256,18 +295,17 @@ reconnects) go to stderr and the full transcript stays in the Claude Code sessio
 `~/.claude/projects/` inside the container. For a per-agent activity file, run the container
 attached in the background instead of `-d` and redirect its streams:
 
-    podman run --name agent-<id> ... localhost/hypothesisloop-experimentator-$EXPERIMENT \
-      > /tmp/hlrun/<run>/agent-<id>.activity.log 2> /tmp/hlrun/<run>/agent-<id>.err &
-
-`ANTHROPIC_MODEL` picks the model (default `claude-sonnet-5`).
+    podman run --name agent-1 ... localhost/hypothesisloop-experimentator-$EXPERIMENT \
+      > /tmp/hlrun/<run>/agent-1.activity.log 2> /tmp/hlrun/<run>/agent-1.err &
 
 One shared private `$CODE_REPO_URL`; each agent works on branch
-`agent-<id>-$PLATFORM_EXPERIMENT_ID` (platform experiment id included so a fresh experiment always
+`<agent_id>-$PLATFORM_EXPERIMENT_ID` (platform experiment id included so a fresh experiment always
 starts from a fresh branch off current `main` — see the agent's own system prompt for why) so
 `code_ref` (`$CODE_REPO_URL@<sha>`) always resolves to a real commit.
 
-Confirm each agent is signed up before handing off (the harness exits on a refused signup): `GET
-$API_URL/platform-experiments/{id}/signups/{agent_id}` per agent.
+Confirm the roster before handing off: `hl platform-experiments agents list
+$PLATFORM_EXPERIMENT_ID` shows every agent with what it was launched with, and a self-run agent
+whose container is gone from `podman ps` has exited: read its `.err`.
 
 Hand off to `supervise.md` once agents are running.
 

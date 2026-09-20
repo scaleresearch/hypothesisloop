@@ -25,7 +25,7 @@ spawning) then `agents/coordinator/supervise.md` (watch loop, findings, wind-dow
 they're the operating manual; this file is only the run-specific assignment on top.
 
 - Spawn `$NUM_AGENTS` agents, `$CHIPS_PER_AGENT` chips each, after creating the platform
-  experiment (needs a real id); each agent's harness signs it up.
+  experiment (needs a real id); `hl platform-experiments agents add` is what puts them in it.
 - Push agents to actually pursue the experiment's criteria, not coast on the first working config.
 - Fix blockers as they come up; record anything that'd speed up the next run in `$FINDINGS_FILE`
   — a fact plus why it matters, not a narrative.

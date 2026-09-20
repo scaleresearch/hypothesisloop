@@ -7,8 +7,9 @@ never act on an agent's behalf.
 
 Every 5-10 min at first, widen once behavior looks steady.
 
-- `podman logs --tail 100 agent-<id>` (or `tail -100` of its `.activity.log`) — progress or
-  stuck loop? Each line is one `say`, `tool`, `error` or `event` (a platform update the agent was
+- `podman logs --tail 100 agent-<n>` (or `tail -100` of its `.activity.log`) for an agent you
+  run yourself — progress or stuck loop? A hosted agent's activity is read from its provider
+  through the launcher's account. Each line is one `say`, `tool`, `error` or `event` (a platform update the agent was
   handed); see setup.md section 4.
 - `GET $API_URL/platform-experiments/{id}/stages` — current stage, progress, cut agents. A job
   stuck past `max_job_hours` is a bug, not just slow.
@@ -36,7 +37,8 @@ to ask whether the *next* wave of agents should still be spawned with the same f
 (`generalist` + one of each targeted flavor) while no region is promising yet; narrowed toward
 the axis whose branch of the hypothesis graph is confirmed once one is, away from refuted
 branches. This never touches an agent already running; it only changes what flavor the next
-`podman run` uses. So read the graph before every new wave, not just at kickoff, e.g. statuses per
+`hl platform-experiments agents add` asks for, in the next platform experiment: a roster is
+fixed once its experiment starts. So read the graph before every new wave, not just at kickoff, e.g. statuses per
 direction:
 
     hl hypothesis query --platform-experiment $PLATFORM_EXPERIMENT_ID "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective {id:'$PLATFORM_EXPERIMENT_ID'})
@@ -100,6 +102,8 @@ continuing — do this as routine housekeeping, not just when someone complains 
 - `POST .../platform-experiments/{id}/close` with a JSON body — `{}` is enough (a request with no
   body at all 400s: "request body is required").
 - `lib_detach_node $KUBE_CONTEXT $NODE_NAME`.
-- `podman stop -t 90 agent-<id>` (the agent takes one last turn of up to a minute to file owed
-  summaries and verdicts); leave branches/commits in `$CODE_REPO_URL` intact.
+- `podman stop -t 90 agent-<n>` for each agent you run yourself (the agent takes one last turn
+  of up to a minute to file owed summaries and verdicts). A hosted agent needs nothing: its token
+  works for two more minutes and its machine is taken down after them. Leave branches/commits in
+  `$CODE_REPO_URL` intact.
 - Final pass over `$FINDINGS_FILE` — anything still open should say so explicitly.
