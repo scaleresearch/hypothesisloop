@@ -93,7 +93,9 @@ func (s *Store) Query(ctx context.Context, platformExperimentID, cypher string, 
 		}
 		raw = append(raw, result.Record().Values)
 	}
-	if err := result.Err(); err != nil {
+	// Discards whatever the cap left unread. With the stream still open, the next query in this
+	// transaction makes the driver pull every remaining record into memory first.
+	if _, err := result.Consume(ctx); err != nil {
 		return nil, queryError(err)
 	}
 	nodes, err := resultNodes(ctx, tx, raw)

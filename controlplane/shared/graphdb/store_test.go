@@ -579,6 +579,15 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 	if err != nil || len(capped.Rows) != QueryRowCap || !capped.Truncated {
 		t.Errorf("capped query: got = (%d rows, truncated=%v, %v), want (%d, true, nil)", len(capped.Rows), capped != nil && capped.Truncated, err, QueryRowCap)
 	}
+	// Relationships in the capped rows force the endpoint lookup, a second query in the same
+	// transaction, while the first result still has rows unread.
+	cappedRels, err := s.Query(ctx, pe, `MATCH (b:Hypothesis {text: 'b', platform_experiment_id: $pe})-[r:BUILDS_ON]->() UNWIND range(1, $n) AS i RETURN r`, map[string]any{"n": float64(QueryRowCap + 5)})
+	if err != nil || len(cappedRels.Rows) != QueryRowCap || !cappedRels.Truncated {
+		t.Fatalf("capped relationship query: got = (%+v, %v), want (%d rows, truncated, nil)", cappedRels, err, QueryRowCap)
+	}
+	if rel := cappedRels.Rows[0][0].(map[string]any); rel["_to"] != a.ID {
+		t.Errorf("capped relationship: got = %v, want its endpoints resolved to %s", rel, a.ID)
+	}
 	if literal, err := s.Query(ctx, "pe-1", `RETURN 'LOAD CSV and CALL mg.load_all()' AS s // CALL mg.load_all()`, nil); err != nil || literal.Rows[0][0] != "LOAD CSV and CALL mg.load_all()" {
 		t.Errorf("keywords inside a string and a comment: got = (%v, %v), want the string back", literal, err)
 	}
