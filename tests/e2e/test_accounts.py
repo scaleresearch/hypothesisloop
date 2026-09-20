@@ -193,20 +193,20 @@ def test_a_revoked_key_stops_at_once_with_every_key_minted_from_it(orgs):
     assert again["revoked_at"] == revoked["revoked_at"], "a second revocation moved revoked_at"
 
 
-def _report(cluster_id: str, free_accelerators: int) -> dict:
-    """What a runtime with one node of two accelerators reports. The node holds two jobs of
-    JOB_SHAPE and nothing larger."""
+def _report(cluster_id: str) -> dict:
+    """What a runtime with one idle node of two accelerators reports. The node holds two jobs of
+    JOB_SHAPE and nothing larger. The control plane takes the jobs it placed off these figures
+    itself, so a runtime that runs nothing reports the same node every time."""
     node = {"cpu_millicores": 20, "memory_bytes": 32 * MI, "storage_bytes": 32 * MI}
-    free = {k: v * free_accelerators // 2 for k, v in node.items()}
     return {
         "cluster_id": cluster_id,
-        "cpu_available_cores": free["cpu_millicores"] / 1000, "cpu_total_cores": 0.02,
-        "ram_available_bytes": free["memory_bytes"], "ram_total_bytes": node["memory_bytes"],
-        "storage_available_bytes": free["storage_bytes"], "storage_total_bytes": node["storage_bytes"],
-        "accelerator_available_by_type": {OWN_ACCELERATOR: free_accelerators},
+        "cpu_available_cores": 0.02, "cpu_total_cores": 0.02,
+        "ram_available_bytes": node["memory_bytes"], "ram_total_bytes": node["memory_bytes"],
+        "storage_available_bytes": node["storage_bytes"], "storage_total_bytes": node["storage_bytes"],
+        "accelerator_available_by_type": {OWN_ACCELERATOR: 2},
         "accelerator_total_by_type": {OWN_ACCELERATOR: 2},
-        "accelerator_available_by_node": {"node-1": {OWN_ACCELERATOR: free_accelerators}},
-        "node_resources_by_node": {"node-1": free},
+        "accelerator_available_by_node": {"node-1": {OWN_ACCELERATOR: 2}},
+        "node_resources_by_node": {"node-1": node},
         "node_resources_total_by_node": {"node-1": node},
         "node_labels_by_node": {"node-1": {}},
         "multi_node_capable": False, "autoscaler_enabled": False,
@@ -221,7 +221,7 @@ class FakeRuntime:
         self.handed: set[str] = set()
 
     def reconcile(self) -> list[dict]:
-        r = self.api.post(f"/internal/clusters/{self.name}/reconcile", _report(self.cluster_id, 2 - len(self.handed)))
+        r = self.api.post(f"/internal/clusters/{self.name}/reconcile", _report(self.cluster_id))
         assert r.status_code == 200, f"reconcile of {self.name}: {r.status_code} {r.text}"
         experiments = r.json()["experiments"] or []
         self.handed |= {e["id"] for e in experiments}
@@ -230,7 +230,7 @@ class FakeRuntime:
 
 def _running_org(org: Org, run_id: str) -> tuple[str, str]:
     """An agent in a started platform experiment of the org's default project."""
-    agent = f"agent-{org.marker}-{run_id}"
+    agent = f"agent-{uuid.uuid4().hex[:10]}-{run_id}"
     org.api.register_agent(agent)
     pe_id = org.api.create_platform_experiment(f"{org.marker}-{run_id}", 5.0, 2)
     org.api.signup_and_start(pe_id, [agent])
@@ -261,8 +261,8 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
 
     runtime, runtime_b = FakeRuntime(a.api, name, token), FakeRuntime(b.api, name_b, token_b)
     assert runtime.reconcile() == []
-    assert runtime.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime.cluster_id, 2)).status_code == 403
-    stolen = runtime_b.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime.cluster_id, 2))
+    assert runtime.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime.cluster_id)).status_code == 403
+    stolen = runtime_b.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime.cluster_id))
     assert stolen.status_code == 409, f"org B's runtime stating org A's cluster id: {stolen.status_code} {stolen.text}"
 
     listed = {c["name"]: c for c in _lines(a.api.hl("cluster", "list"))}
@@ -317,9 +317,13 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         admin.share_cluster(name, True)
         assert {c["name"]: c["shared"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"]}[name] is True
         try:
-            eventually("org B's job is handed to the shared cluster", runtime.reconcile, deadline=deadline, interval=2,
-                       accept=lambda exps: job_b in {e["id"] for e in exps})
-            assert b.api.experiment(job_b)["cluster_name"] == name
+            def placed_on_the_shared_cluster() -> dict:
+                runtime.reconcile()
+                return b.api.experiment(job_b)
+
+            eventually("org B's job is placed on the shared cluster", placed_on_the_shared_cluster, deadline=deadline, interval=2,
+                       accept=lambda exp: exp.get("cluster_name") == name)
+            assert job_b in runtime.handed, "the shared cluster's runtime was not handed the job placed on it"
             assert name in _capacity_names(b.api), "org B does not read the capacity of a cluster shared with it"
         finally:
             unshared = _status(api, "PATCH", share, {"shared": False})
