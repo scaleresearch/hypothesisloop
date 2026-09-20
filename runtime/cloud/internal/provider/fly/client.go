@@ -7,7 +7,8 @@
 //   - That log arrives a moment after it was written, so a stopped Machine is exited only once the
 //     supervisor's end mark is in it (instances.go).
 //   - The log keeps a few hundred lines of a burst and drops the rest: 3000 lines written at
-//     once left 348.
+//     once left 348, and 2500 written at twenty a second were all kept. One read gives the last
+//     500 entries at most and there is no reading further back.
 //   - A Machine with restart policy "no" stays stopped after its command ends, and a stopped
 //     Machine is billed for its root filesystem only.
 //   - The signal call reaches the Machine's main process and nothing follows it. The vendor's

@@ -21,12 +21,12 @@ const (
 	// looked at.
 	endMarkWindow = 50
 
-	// foreignAllowance is how many entries beyond the asked tail the first read of a log takes,
-	// for the lines of the vendor's init, ssh server and kernel that sit between the command's.
-	foreignAllowance = 50
+	// logPage is the most entries the log API answers one read with, whatever limit is asked
+	// for. It takes no cursor that reads backwards.
+	logPage = 500
 )
 
-type logPage struct {
+type logAnswer struct {
 	Data []struct {
 		Attributes struct {
 			Message string `json:"message"`
@@ -34,33 +34,32 @@ type logPage struct {
 	} `json:"data"`
 }
 
-// Logs reads the Machine's last log entries and keeps the command's. The API answers with the
-// last entries of the Machine, the vendor's own among them, so a read that came back full
-// without holding tail lines of the command is taken again, twice as large.
+// Logs reads the Machine's last log entries, as many as one read gives, and keeps the command's.
+// The vendor's own lines sit among them, so a full read that holds fewer lines of the command
+// than asked for is an error: older ones exist and cannot be reached.
 func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, error) {
 	if tail <= 0 {
 		return nil, fmt.Errorf("fly: logs of machine %s: tail must be positive, got %d", id, tail)
 	}
-	for limit := tail + foreignAllowance; ; limit *= 2 {
-		entries, err := p.logEntries(ctx, id, limit)
-		if err != nil {
-			return nil, err
-		}
-		lines := commandLines(entries)
-		if len(lines) >= tail {
-			return lines[len(lines)-tail:], nil
-		}
-		if len(entries) < limit {
-			return lines, nil
-		}
+	entries, err := p.logEntries(ctx, id, logPage)
+	if err != nil {
+		return nil, err
 	}
+	lines := commandLines(entries)
+	if len(lines) >= tail {
+		return lines[len(lines)-tail:], nil
+	}
+	if len(entries) >= logPage {
+		return nil, fmt.Errorf("fly: logs of machine %s: the %d entries one read of the vendor's log gives hold %d lines of the command, and %d were asked for", id, logPage, len(lines), tail)
+	}
+	return lines, nil
 }
 
 // logEntries returns the last limit entries of the Machine's log, oldest first. The log of a
 // Machine that never wrote, or that the app never had, is empty.
 func (p *Provider) logEntries(ctx context.Context, id string, limit int) ([]string, error) {
 	query := url.Values{"instance": {id}, "limit": {strconv.Itoa(limit)}}
-	var page logPage
+	var page logAnswer
 	if _, err := p.call(ctx, http.MethodGet, p.logsURL+"/api/v1/apps/"+p.cfg.App+"/logs?"+query.Encode(), nil, &page); err != nil {
 		return nil, err
 	}

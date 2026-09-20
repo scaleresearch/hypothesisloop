@@ -39,8 +39,8 @@ func TestLogsKeepsTheCommandsLinesAndDropsTheVendorsOwn(t *testing.T) {
 		t.Errorf("Logs\n got %q\nwant %q", got, want)
 	}
 	reads := api.sent(http.MethodGet, logsPath)
-	if len(reads) != 1 || reads[0].Query != "instance=9001&limit=150" || reads[0].Auth != testToken {
-		t.Errorf("reads = %+v, want one of the machine's last 150 entries", reads)
+	if len(reads) != 1 || reads[0].Query != "instance=9001&limit=500" || reads[0].Auth != testToken {
+		t.Errorf("reads = %+v, want one of the machine's last 500 entries", reads)
 	}
 }
 
@@ -55,13 +55,13 @@ func TestLogsReturnsTheLastTailLines(t *testing.T) {
 	}
 }
 
-// chatty answers a log read as the vendor does, with the last limit entries of a log in which
-// every third entry is the command's.
+// chatty answers a log read as the vendor does, with the last entries of a log of total in which
+// every third entry is the command's, and never more than a page of them.
 func chatty(total int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		var messages []string
-		for i := max(0, total-limit); i < total; i++ {
+		for i := max(0, total-min(limit, logPage)); i < total; i++ {
 			if i%3 == 0 {
 				messages = append(messages, fmt.Sprintf("hl-out|line %d", i))
 			} else {
@@ -72,7 +72,7 @@ func chatty(total int) http.HandlerFunc {
 	}
 }
 
-func TestLogsReadsFurtherBackWhenTheVendorsLinesCrowdTheCommandsOut(t *testing.T) {
+func TestLogsFindsTheTailAmongTheVendorsLines(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, logsPath, chatty(3000))
 	p := newTestProvider(t, api)
@@ -84,16 +84,26 @@ func TestLogsReadsFurtherBackWhenTheVendorsLinesCrowdTheCommandsOut(t *testing.T
 	if len(got) != 100 || got[0] != "line 2700" || got[99] != "line 2997" {
 		t.Fatalf("Logs = %d lines from %q to %q, want the last 100 the command wrote", len(got), got[0], got[len(got)-1])
 	}
-	var asked []string
-	for _, read := range api.sent(http.MethodGet, logsPath) {
-		asked = append(asked, strings.TrimPrefix(read.Query, "instance=9001&limit="))
-	}
-	if !reflect.DeepEqual(asked, []string{"150", "300"}) {
-		t.Errorf("reads asked for %v entries, want 150 and then 300", asked)
+	if api.total() != 1 {
+		t.Errorf("reads = %d, want 1", api.total())
 	}
 }
 
-func TestLogsOfAShortLogStopsAtItsStart(t *testing.T) {
+func TestLogsRefusesATailOneReadCannotHold(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, logsPath, chatty(3000))
+	p := newTestProvider(t, api)
+
+	got, err := p.Logs(context.Background(), "9001", 200)
+	if err == nil || !strings.Contains(err.Error(), "hold 166 lines of the command, and 200 were asked for") {
+		t.Fatalf("Logs = %d lines, %v, want an error: a short answer would pass for the whole output", len(got), err)
+	}
+	if api.total() != 1 {
+		t.Errorf("reads = %d, want 1: the log cannot be read further back", api.total())
+	}
+}
+
+func TestLogsOfAShortLogIsTheWholeLog(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, logsPath, chatty(30))
 	p := newTestProvider(t, api)
@@ -101,9 +111,6 @@ func TestLogsOfAShortLogStopsAtItsStart(t *testing.T) {
 	got, err := p.Logs(context.Background(), "9001", 100)
 	if err != nil || len(got) != 10 {
 		t.Fatalf("Logs = %d lines, %v, want the 10 the command wrote", len(got), err)
-	}
-	if api.total() != 1 {
-		t.Errorf("reads = %d, want 1: the first came back short, so it held the whole log", api.total())
 	}
 }
 
