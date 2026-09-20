@@ -171,7 +171,8 @@ _SHUTDOWN_PROMPT = (
 
 _COORDINATOR_SHUTDOWN_PROMPT = (
     "You are being stopped and this is your last turn, about a minute long. Start nothing new. "
-    "Commit and push the findings you have not yet pushed, then end your turn."
+    "Write the summary with everything you have found (`hl platform-experiments summary`), then "
+    "end your turn."
 )
 
 

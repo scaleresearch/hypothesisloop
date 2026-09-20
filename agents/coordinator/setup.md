@@ -154,12 +154,15 @@ platform experiment's coordinator token and briefed with
 for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
 default applies. Both keys need the project's repository (`no_repository` without one) and are
-read from the request only. With them, creating the experiment and `hl platform-experiments
-start` is all there is to do: the coordinator keeps the description true to what is learned and
-pushes its findings to `coordinator/findings.md` on the repository's branch `hl/<id>/coordinator`.
-`hl platform-experiments get` shows `coordinator`: its launcher, its model and `instance`, which
-reads as an agent's does (section 4). A hosted coordinator cannot start or close the experiment,
-run a baseline itself, or fix anything outside the description; it writes those down for you.
+read from the request only. The experiment and its hosted agents are created together or not at all. With them, creating the
+experiment and `hl platform-experiments start` is all there is to do: the coordinator keeps the
+description true to what is learned and writes its findings as the experiment's summary
+(`hl platform-experiments summary`), which `hl platform-experiments get` shows as `summary`
+beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
+(section 4). Its token still writes the summary after the close. It reads the repository and
+pushes nothing. It closes the experiment only when the run can produce nothing more, and says
+why in the summary first. It cannot start the experiment, run a baseline itself, or fix anything
+outside the description; it writes those down for you.
 
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.

@@ -377,6 +377,12 @@ def test_one_create_hosts_a_coordinator_and_agents_and_the_launcher_keeps_a_mach
         assert put.status_code == 200, f"the coordinator updating the description: {put.status_code} {put.text}"
         assert with_repo.get_json(f"/platform-experiments/{pe_id}")["description"] == "the coordinator's brief"
 
+        # Its findings are the platform experiment's summary, written through hl with no agent id.
+        as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "what the run found so far")
+        assert with_repo.get_json(f"/platform-experiments/{pe_id}")["summary"] == "what the run found so far"
+        refused = as_coordinator.hl_expect("hypothesis", "comment", "hyp-any", "--text", "t")
+        assert refused.returncode == 1 and "no agent" in refused.stderr, f"a coordinator commenting as nobody: {refused.stderr}"
+
         # Its machine exits: recorded on the platform experiment, asked for again under a new name.
         first = coordinator["name"]
         again, _ = coordinator_for(with_repo, pe_id, [{"name": first, "state": "exited", "log": "boom\nSystemExit: the reason"}])
@@ -392,6 +398,12 @@ def test_one_create_hosts_a_coordinator_and_agents_and_the_launcher_keeps_a_mach
         with_repo.close_platform_experiment(pe_id)
         gone, ending = coordinator_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
         assert gone is None and again["name"] in ending, f"after the close: instance {gone}, ending {ending}"
+
+        # After the close its token still reads and still writes the summary, and nothing else.
+        as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "the final summary")
+        assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"] == "the final summary"
+        late = as_coordinator.put(f"/platform-experiments/{pe_id}", changed)
+        assert late.status_code in (403, 409, 400), f"a description update after the close: {late.status_code} {late.text}"
     finally:
         with_repo.close_platform_experiment(pe_id)
 
@@ -412,3 +424,57 @@ def test_a_coordinators_machine_that_keeps_exiting_is_stopped_and_shown(with_rep
         assert instance["stopped"] and instance["restarts"] == MAX_RESTARTS and instance["exit_log"] == f"exit {MAX_RESTARTS + 1}", instance
     finally:
         with_repo.close_platform_experiment(pe_id)
+
+
+def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API, run_id: str):
+    r = _hosted_run(with_repo, f"coordinator-closing-{run_id}", coordinator_hosted=True)
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    try:
+        coordinator, _ = coordinator_for(with_repo, pe_id)
+        assert coordinator is not None
+        as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        with_repo.start_platform_experiment(pe_id)
+        as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "why it is closed")
+        as_coordinator.hl("platform-experiments", "close", pe_id)
+        pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
+        assert pe["status"] == "closed" and pe["summary"] == "why it is closed", pe
+    finally:
+        with_repo.close_platform_experiment(pe_id)
+
+
+def test_hosted_agents_that_do_not_fit_leave_no_platform_experiment(with_repo: API, run_id: str):
+    name = f"hosted-too-many-{run_id}"
+    r = _hosted_run(with_repo, name, hosted_agents=6)  # max_agents is 5
+    assert r.status_code == 400, f"more hosted agents than max_agents: {r.status_code} {r.text}"
+    listed = with_repo.get_json(f"/platform-experiments?q={name}&limit=50")
+    assert not [pe for pe in listed if pe["name"] == name], f"a refused create left a platform experiment: {listed}"
+
+    r = _hosted_run(with_repo, name, hosted_agents=3)
+    assert r.status_code == 201 and r.json()["signup_count"] == 3, f"create with agents: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    try:
+        agents = roster(with_repo, pe_id)
+        assert len(agents) == 3 and all(a["hosted"] for a in agents.values()), agents
+        assert set(desired_for(with_repo, pe_id)[0]) == set(agents)
+    finally:
+        with_repo.close_platform_experiment(pe_id)
+
+
+def test_a_failed_create_is_taken_with_the_question_and_costs_nothing_inside_the_boot_limit(with_repo: API, hosted_pe, run_id: str):
+    """Past the boot limit (agents.boot_limit_seconds, minutes on the local stack) a create that
+    keeps failing spends a restart, which the handler's and the store's own tests follow."""
+    pe_id = hosted_pe("hosted-create-fails", 1.0, 5)
+    agent_id = with_repo.add_agents(pe_id, hosted=True)[0]["agent_id"]
+    name = desired_for(with_repo, pe_id)[0][agent_id]["name"]
+    question = {"launch_digest": API.LAUNCH_DIGEST, "instances": [],
+                "create_failures": [{"name": name, "reason": "vendor: HTTP 422: no such size"}]}
+    answer = with_repo.post_json(f"/internal/launchers/{LAUNCHER}/reconcile", question)
+    own = [i for i in answer["instances"] if i["env"].get("AGENT_ID") == agent_id]
+    assert len(own) == 1 and own[0]["name"] == name, f"inside the boot limit the agent is asked for as {own}"
+    instance = roster(with_repo, pe_id)[agent_id]["instance"]
+    assert instance["restarts"] == 0 and not instance["stopped"], instance
+
+    question["create_failures"] = [{"name": "", "reason": "r"}]
+    r = with_repo.post(f"/internal/launchers/{LAUNCHER}/reconcile", question)
+    assert r.status_code == 400, f"a create failure with no name: {r.status_code} {r.text}"

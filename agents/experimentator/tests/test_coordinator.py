@@ -90,7 +90,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_renders_with_the_rules_the_commands_and_its_assignment(self):
         prompt = self.render()
         self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
-        self.assertIn("clone https://github.com/acme/model.git and work on branch `hl/pe-1/coordinator`", prompt)
+        self.assertIn("clone https://github.com/acme/model.git", prompt)
         self.assertIn("(:Objective {id:'pe-1'})", prompt)
         self.assertIsNone(re.search(r"\{[a-z_]+\}", prompt), "a placeholder was left unfilled")
 
@@ -98,6 +98,12 @@ class BriefingTest(unittest.TestCase):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
         self.assertLess(len(prompt.encode()), 9_000)
+
+    def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
+        prompt = self.render()
+        self.assertIn("hl platform-experiments summary --file", prompt)
+        self.assertIn("read-only", prompt)
+        self.assertIsNone(re.search(r"git push|findings\.md|hl/pe-1/coordinator", prompt, re.IGNORECASE))
 
     def test_the_commands_listed_for_a_coordinator_are_the_ones_that_change_roster_and_brief(self):
         asked = []
@@ -110,6 +116,8 @@ class BriefingTest(unittest.TestCase):
             core.hl_commands(True)
             self.assertIn(["platform-experiments", "agents", "add"], asked)
             self.assertIn(["platform-experiments", "update"], asked)
+            self.assertIn(["platform-experiments", "summary"], asked)
+            self.assertIn(["platform-experiments", "close"], asked)
             asked.clear()
             core.hl_commands()
         self.assertEqual(asked, [[], ["job"], ["hypothesis"]])
@@ -134,9 +142,10 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e["kind"] for e in events], ["experiment.status"])
         self.assertFalse(os.path.exists(command[0] + ".reads"))
 
-    def test_the_last_turn_of_a_coordinator_asks_for_no_job_summary(self):
-        self.assertNotIn("summar", run._COORDINATOR_SHUTDOWN_PROMPT)
-        self.assertIn("push", run._COORDINATOR_SHUTDOWN_PROMPT)
+    def test_the_last_turn_of_a_coordinator_writes_the_summary_and_pushes_nothing(self):
+        self.assertNotIn("job", run._COORDINATOR_SHUTDOWN_PROMPT)
+        self.assertNotIn("push", run._COORDINATOR_SHUTDOWN_PROMPT)
+        self.assertIn("hl platform-experiments summary", run._COORDINATOR_SHUTDOWN_PROMPT)
 
 
 if __name__ == "__main__":

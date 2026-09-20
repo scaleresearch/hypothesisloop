@@ -22,7 +22,8 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
-                        ["platform-experiments", "update"], ["job"], ["hypothesis"])
+                        ["platform-experiments", "update"], ["platform-experiments", "summary"],
+                        ["platform-experiments", "close"], ["job"], ["hypothesis"])
 
 
 def hl_commands(coordinates: bool = False) -> str:
