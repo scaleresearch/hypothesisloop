@@ -1,14 +1,16 @@
 package vast
 
+import "github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
+
 // supervisor is what an instance runs in place of the bare command, because the host starts a
 // container again about half a minute after its command ends, whatever the exit code, for as long
 // as the instance is meant to run. Left alone a finished job would run again, never show as
 // exited, and bill until destroyed.
 //
-// The supervisor runs the command once, with its argv as positional parameters that no shell
-// parses. Every few seconds it reads its own instance's label, with the instance's own key the
-// vendor puts in every container, and sends the command SIGTERM once when the label carries the
-// stop mark. When the command has ended, whenever it chooses to, the supervisor asks the vendor
+// The supervisor is the shared core with this vendor's ends. Beside the command it reads its own
+// instance's label every few seconds, with the instance's own key the vendor puts in every
+// container, and signals itself when the label carries the stop mark, which the core passes on
+// to the command as it does any first SIGTERM. When the command has ended, whenever it chooses to, the supervisor asks the vendor
 // to stop the instance and waits to be stopped: a stopped instance stays exited with its output
 // readable and is billed for storage only. A start that finds the marker of an earlier one (the
 // host rebooted, the container was restarted) stops the instance without running the command a
@@ -22,7 +24,8 @@ package vast
 // of what a job prints or passes on by accident and nothing more: the supervisor is process 1 of
 // the same container under the same user (root, on every instance looked at), and its own
 // environment, key included, stays readable at /proc/1/environ.
-const supervisor = `instance="` + defaultBaseURL + `/api/v0/instances/$CONTAINER_ID/"
+var supervisor = supervise.Script(supervise.Parts{
+	Before: `instance="` + defaultBaseURL + `/api/v0/instances/$CONTAINER_ID/"
 key=$CONTAINER_API_KEY
 unset CONTAINER_API_KEY
 stop() {
@@ -43,19 +46,16 @@ for tool in curl sleep; do
 done
 started="${TMPDIR:-/tmp}/.hl-supervisor-started"
 [ -e "$started" ] && stop
-: > "$started" || stop
-"$@" &
-child=$!
-trap 'kill -TERM "$child" 2>/dev/null' TERM
-(
+: > "$started" || stop`,
+	Started: `(
   trap - TERM
   until marked; do sleep ` + stopPollSeconds + `; done
-  kill -TERM "$child" 2>/dev/null
+  kill -TERM $$
 ) &
-watcher=$!
-while kill -0 "$child" 2>/dev/null; do wait "$child"; done
-kill "$watcher" 2>/dev/null
-stop`
+watcher=$!`,
+	After: `kill -KILL "$watcher" 2>/dev/null
+stop`,
+})
 
 // stopPollSeconds is how often an instance reads its own label, and so the most a Stop waits to
 // reach the command beyond the request itself.

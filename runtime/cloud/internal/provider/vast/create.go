@@ -5,19 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vendorapi"
 )
 
 const listedTimeout = 30 * time.Second
-
-// The API takes env as one JSON object shared with container options: a key such as "-p 80:80"
-// publishes a port. Only real variable names may pass.
-var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type createRequest struct {
 	ClientID string `json:"client_id"`
@@ -45,7 +41,8 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 		return "", err
 	}
 	if err := p.awaitListed(ctx, id, spec.Name); err != nil {
-		return "", p.giveBack(ctx, id, err)
+		destroy := func(ctx context.Context) error { return p.Destroy(ctx, id) }
+		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
 	}
 	return id, nil
 }
@@ -92,17 +89,6 @@ func (p *Provider) rent(ctx context.Context, chosen offer, req createRequest) (s
 		return "", fmt.Errorf("vast: renting offer %d for %q was refused: %s", chosen.ID, req.Label, created.Message)
 	}
 	return strconv.FormatInt(created.Contract, 10), nil
-}
-
-// giveBack destroys an instance Create rented and could not confirm, so that a failed Create
-// leaves nothing behind. ctx may be what ended the wait, so the destroy runs on its own time.
-func (p *Provider) giveBack(ctx context.Context, id string, cause error) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestTimeout)
-	defer cancel()
-	if err := p.Destroy(ctx, id); err != nil {
-		return fmt.Errorf("%w; destroying it failed and it may still be rented: %v", cause, err)
-	}
-	return fmt.Errorf("%w; it was destroyed", cause)
 }
 
 func (p *Provider) listed(ctx context.Context, id, name string) (bool, error) {
@@ -161,25 +147,8 @@ func newCreateRequest(spec provider.Spec) createRequest {
 }
 
 func validateSpec(spec provider.Spec) error {
-	if err := provider.ValidateName(spec.Name); err != nil {
+	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("vast: %w", err)
-	}
-	if spec.Image == "" {
-		return fmt.Errorf("vast: spec %q has no image", spec.Name)
-	}
-	if len(spec.Command) == 0 || spec.Command[0] == "" {
-		return fmt.Errorf("vast: spec %q has no command", spec.Name)
-	}
-	if spec.AcceleratorCount < 0 {
-		return fmt.Errorf("vast: spec %q asks for %d accelerators", spec.Name, spec.AcceleratorCount)
-	}
-	if spec.CPUMillis <= 0 || spec.MemoryBytes <= 0 || spec.DiskBytes <= 0 {
-		return fmt.Errorf("vast: spec %q must state cpu, memory and disk", spec.Name)
-	}
-	for name := range spec.Env {
-		if !envName.MatchString(name) {
-			return fmt.Errorf("vast: spec %q: %q is not an environment variable name", spec.Name, name)
-		}
 	}
 	return nil
 }

@@ -30,8 +30,8 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 		"type":                "ondemand",
 		"rentable":            map[string]any{"eq": true},
 		"rented":              map[string]any{"eq": false},
-		"cpu_cores_effective": map[string]any{"gte": ceilDiv(spec.CPUMillis, 1000)},
-		"cpu_ram":             map[string]any{"gte": ceilDiv(spec.MemoryBytes, bytesPerMB)},
+		"cpu_cores_effective": map[string]any{"gte": provider.CeilDiv(spec.CPUMillis, 1000)},
+		"cpu_ram":             map[string]any{"gte": provider.CeilDiv(spec.MemoryBytes, bytesPerMB)},
 		"disk_space":          map[string]any{"gte": diskGB(spec)},
 		// The quoted price covers the disk actually allocated.
 		"allocated_storage": diskGB(spec),
@@ -81,9 +81,5 @@ func (p *Provider) cheapestOffers(ctx context.Context, spec provider.Spec) ([]of
 }
 
 func diskGB(spec provider.Spec) int64 {
-	return ceilDiv(spec.DiskBytes, bytesPerGB)
-}
-
-func ceilDiv(value, unit int64) int64 {
-	return (value + unit - 1) / unit
+	return provider.CeilDiv(spec.DiskBytes, bytesPerGB)
 }
