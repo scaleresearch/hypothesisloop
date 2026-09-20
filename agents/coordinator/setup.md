@@ -22,7 +22,7 @@ shown. Resolve against the live environment, never guess.
     METRICS_URL=http://localhost:8084
     CODE_REPO_URL=<set below>
     GIT_TOKEN=<set below>
-    STAGES=<[]domain.Stage or unset>           # unset = domain.DefaultStages
+    STAGES=<[]domain.Stage or unset>           # unset = stages.default in the control plane config
     FINDINGS_FILE=fix-later.md
     PLATFORM_EXPERIMENT_ID=<set in step 2>
 
@@ -124,7 +124,7 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
   leave it as `"raw"` and rely on someone noticing the number looks off. A wrongly-"raw" value is
   how a rescaled metric quietly wins a ranking it actually lost.
 - `report_interval_seconds` = the cadence the harness actually reports at.
-- `stages` (optional; omit = `domain.DefaultStages`, 40%/75%-cut then 60%/0%): `length_pct` sums
+- `stages` (optional; omit = the control plane config's `stages.default`, 40%/75%-cut then 60%/0%): `length_pct` sums
   to 100, last stage's `evict_pct` = 0, `max_job_hours` caps a stage's job length (0/absent =
   unlimited). Working short-jobs-first example: `[{20,50,0.25},{30,50,1},{50,0}]` as
   `length_pct,evict_pct,max_job_hours`. If `experiment.md` describes a phased method (e.g.
