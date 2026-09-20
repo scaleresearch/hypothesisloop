@@ -218,6 +218,19 @@ def _context_tokens(usage: dict) -> int:
     ))
 
 
+# What the CLI answers a turn with when the model provider refuses the credential itself. A rate
+# limit, an overloaded provider or a network failure is none of these and is waited out.
+_CREDENTIAL_REFUSALS = (
+    "not logged in", "please run /login", "invalid api key", "invalid x-api-key", "authentication_error",
+    "oauth token has expired", "oauth token has been revoked", "invalid bearer token",
+)
+
+
+def credential_refused(result: str | None) -> bool:
+    text = (result or "").lower()
+    return any(marker in text for marker in _CREDENTIAL_REFUSALS)
+
+
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
                             started_at: float, stop_flag: list,
                             initial_prompt: str | None = None,
@@ -279,6 +292,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     if isinstance(message, ResultMessage):
                         got_result = True
                         turn_is_error = message.is_error
+                        if message.is_error and credential_refused(message.result):
+                            # Backing off cannot fix a credential the provider refuses. Exiting
+                            # is what tells whoever started this agent, and with what words.
+                            raise SystemExit(f"agent: the model provider refused this agent's credential: {(message.result or '').strip()[:300]}")
                         resume_id = message.session_id
                         _save_resume_id(setup, resume_id)
                         if not message.is_error:
@@ -420,7 +437,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
 
 def main() -> None:
     setup = core.prepare()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+    model = setup.cfg.model
     log.info(
         "llm_agent %s starting (claude): pe=%s model=%s",
         setup.cfg.agent_id, setup.cfg.platform_experiment_id, model,

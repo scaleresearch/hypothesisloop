@@ -113,7 +113,7 @@ class StartupTest(PlatformCase):
 
     def environment(self, **overrides):
         env = {"API_URL": self.url, "HL_TOKEN": "agent-token", "AGENT_ID": "agent-a", "PLATFORM_EXPERIMENT_ID": "pe-1",
-               "AGENT_WORKDIR": self.workdir}
+               "AGENT_FLAVOR": "generalist", "AGENT_MODEL": "model-1", "AGENT_WORKDIR": self.workdir}
         env.update(overrides)
         return {k: v for k, v in env.items() if v is not None}
 
@@ -154,7 +154,7 @@ class StartupTest(PlatformCase):
         self.assertEqual(FakePlatform.calls, [("GET", "/platform-experiments/pe-1/signups/agent-b")])
 
     def test_prepare_requires_the_identity_and_the_token_it_was_handed(self):
-        for missing in ("AGENT_ID", "HL_TOKEN", "PLATFORM_EXPERIMENT_ID", "API_URL"):
+        for missing in ("AGENT_ID", "HL_TOKEN", "PLATFORM_EXPERIMENT_ID", "API_URL", "AGENT_FLAVOR", "AGENT_MODEL"):
             FakePlatform.calls = []
             with self.assertRaises(SystemExit) as ctx:
                 self.prepare(**{missing: None})

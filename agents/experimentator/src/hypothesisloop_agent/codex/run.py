@@ -102,7 +102,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
 
 def main() -> None:
     setup = core.prepare()
-    model = os.environ.get("CODEX_MODEL", "gpt-5.4")
+    model = setup.cfg.model
     log.info(
         "llm_agent %s starting (codex): pe=%s model=%s",
         setup.cfg.agent_id, setup.cfg.platform_experiment_id, model,

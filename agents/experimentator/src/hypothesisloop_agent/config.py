@@ -52,7 +52,12 @@ class Config:
     # only selects which brief is inlined into the prompt (prompts/flavors/<flavor>.md), which
     # holds the specialized approach: what kind of trial to run, what to vary, what "winning"
     # looks like for that specialization.
-    flavor: str = field(default_factory=lambda: os.environ.get("AGENT_FLAVOR", "generalist"))
+    # Required, like the model below: both are decided when the agent is added and the platform
+    # shows them on its roster, so a default here would run something the roster does not say.
+    flavor: str = field(default_factory=lambda: _required("AGENT_FLAVOR"))
+
+    # The model this agent runs on, whichever provider's backend runs it.
+    model: str = field(default_factory=lambda: _required("AGENT_MODEL"))
 
     # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) this
     # one agent is handed on top of its flavor when it is added. A sweep is several agents of the
