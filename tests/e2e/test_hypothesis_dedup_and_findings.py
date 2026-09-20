@@ -153,7 +153,7 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     # What the experiment has settled, in one read each: the judged hypothesis with its newest
     # finding and best job, and the count of hypotheses by status.
     (judged,) = api.get_json(f"/platform-experiments/{pe_id}/findings")
-    assert (judged["id"], judged["status"], judged["finding"]) == (human["id"], "confirmed", human_finding), judged
+    assert (judged["id"], judged["status"], judged["finding"]["summary"]) == (human["id"], "confirmed", human_finding), judged
     metric = api.experiment(human_job).get("metric")
     assert judged.get("best_job") == ({"id": human_job, "metric": metric} if metric else None), judged
     stats = api.get_json(f"/hypotheses/stats?platform_experiment_id={pe_id}")
