@@ -80,7 +80,8 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 	for _, class := range classes.Items {
 		driver, err := deviceClassDriver(class)
 		if err != nil {
-			return nil, err
+			log.Printf("%v; skipping it", err)
+			continue
 		}
 		drivers[driver] = true
 	}

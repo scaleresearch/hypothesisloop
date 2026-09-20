@@ -115,6 +115,29 @@ func TestLiveDRACapacitySnapshotsReportsRealInventory(t *testing.T) {
 	}
 }
 
+func TestLiveDRACapacitySnapshotsSkipsADeviceClassItCannotRead(t *testing.T) {
+	foreignClass := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "resource.k8s.io/v1", "kind": "DeviceClass",
+		"metadata": map[string]interface{}{"name": "foreign"},
+		"spec": map[string]interface{}{"selectors": []interface{}{map[string]interface{}{
+			"cel": map[string]interface{}{"expression": `device.attributes["foreign.example"].model == "x"`},
+		}}},
+	}}
+	c := newDRATestClient(
+		foreignClass,
+		tenstorrentDeviceClass(),
+		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0", "chip-1"),
+	)
+
+	out, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true})
+	if err != nil {
+		t.Fatalf("liveDRACapacitySnapshots: %v", err)
+	}
+	if entry := out["tenstorrent.com/chipArch=blackhole"]; entry.total != 2 {
+		t.Fatalf("entry = %+v, want total=2", entry)
+	}
+}
+
 // TestLiveDRACapacitySnapshotsUnrelatedDriverUnaffected proves the fix is scoped to the
 // driver that actually went missing: a second configured driver with real inventory still
 // reports normally even while another driver's listing came back empty.
