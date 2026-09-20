@@ -103,6 +103,8 @@ cd controlplane/ui && npm install && npm run dev   # → http://localhost:3000
 ```bash
 go build -o bin/hl ./cli
 export API_URL=http://localhost:8081
+export HL_TOKEN="$(make -s staff-token)"   # every request carries a token; an API key or user token works the same
+export HL_ORG=default HL_PROJECT=default   # where `register` and `platform-experiments create` put what they make
 
 hl register --id jane --name "Jane Doe" --kind human       # register as an agent
 hl signup --platform-experiment pe-123 --agent jane        # sign up for a platform experiment
@@ -286,9 +288,10 @@ On macOS:
 
 ```bash
 # Point kubectl at your cluster, then:
-API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084 \
-  make cluster-agent-up CLUSTER=my-cluster
 make controlplane-up
+API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084 \
+  RUNTIME_TOKEN="$(make -s runtime-token CLUSTER=my-cluster)" \
+  make cluster-agent-up CLUSTER=my-cluster
 ```
 
 `make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
@@ -296,10 +299,10 @@ and `REGISTRY` must name a registry every node can pull from (`make images` push
 `API_URL` (control-service) and `METRICS_URL` (metrics-service) are both required and just need
 to be reachable *outbound* from inside the target cluster - the control
 plane never needs to reach the cluster at all, so there's no kubeconfig or credential to hand
-it. Repeat `make cluster-agent-up CLUSTER=<name>` for every additional target cluster. There is nothing to register
-control-plane side: a cluster exists as soon as its agent reports a heartbeat, and its
-capacity is read from those heartbeats. A typo'd `CLUSTER=` therefore produces a second,
-phantom cluster rather than an error - the name the agent reports is the name.
+it. Repeat both for every additional target cluster. `make runtime-token` registers the cluster
+name for an org (`ORG=`, default `default`) and prints the token its agents start with; the
+control plane refuses a token for a name nobody registered, so a typo'd `CLUSTER=` is an error.
+Capacity is read from the agent's heartbeats.
 
 ### Option C - Windows (untested)
 
@@ -323,12 +326,16 @@ on hosts that have it). Tests are grouped with pytest markers: `parallel` (API-o
 concurrently), `exclusive` (needs the whole cluster idle - node death, connectivity loss,
 daemonset redeploy, preemption), `slow`, and `hardware`.
 
-Running pytest directly requires `API_URL`, the control plane's base URL; the make targets set it
-to the local stack.
+Running pytest directly requires `API_URL`, the control plane's base URL, and `HL_TOKEN`, a staff
+token for it; the make targets set both for the local stack. Tests that register orgs and clusters
+run `hl-admin`, which reads `HYPOTHESISLOOP_CONFIG` and `DATABASE_URL`.
 
 ```bash
 make e2e-py                                              # portable lane: parallel-safe tests only
 export API_URL=http://localhost:8081                     # required by every pytest command below
+export HL_TOKEN="$(make -s staff-token)"                 # likewise
+export HYPOTHESISLOOP_CONFIG=$PWD/controlplane/settings/hypothesisloop.yaml   # read by hl-admin
+export DATABASE_URL='postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable'
 cd tests && uv run pytest e2e -k job_lifecycle           # only tests whose name matches
 cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"  # same as e2e-py
 cd tests && uv run pytest e2e -m exclusive               # cluster-mutating tests, one at a time

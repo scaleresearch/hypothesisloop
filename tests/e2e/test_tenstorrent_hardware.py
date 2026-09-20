@@ -31,7 +31,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import API_URL, REPO_ROOT, make_agent
+from conftest import API_URL, DEFAULT_ORG, REPO_ROOT, make_agent
+from support import admin
 from support.wait import eventually
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("tenstorrent")]
@@ -247,6 +248,7 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
     env = {
         "CLUSTER_NAME": bare_cluster,
         "API_URL": API_URL,
+        "RUNTIME_TOKEN": admin.add_cluster(bare_cluster, DEFAULT_ORG),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"tt-bare-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),

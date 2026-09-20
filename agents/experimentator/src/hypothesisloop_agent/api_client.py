@@ -17,14 +17,15 @@ class APIError(Exception):
         self.body = body
 
 
-def _request(method: str, url: str, payload: dict | None = None, timeout: float = 15.0) -> Any:
+def _send(method: str, url: str, token: str, payload: dict | None = None, timeout: float = 15.0) -> bytes:
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=data, method=method,
-                                  headers={"Content-Type": "application/json"} if data else {})
+    headers = {"Authorization": f"Bearer {token}"}
+    if data:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
-            return json.loads(body) if body else None
+            return resp.read()
     except urllib.error.HTTPError as e:
         raise APIError(method, url, e.code, e.read().decode(errors="replace")) from None
     except urllib.error.URLError as e:
@@ -32,30 +33,28 @@ def _request(method: str, url: str, payload: dict | None = None, timeout: float 
 
 
 class PlatformClient:
-    def __init__(self, api_url: str):
+    def __init__(self, api_url: str, token: str):
         self.api_url = api_url.rstrip("/")
+        self.token = token
+
+    def _request(self, method: str, path: str, payload: dict | None = None) -> Any:
+        body = _send(method, f"{self.api_url}{path}", self.token, payload)
+        return json.loads(body) if body else None
 
     def join(self, agent_id: str, pe_id: str) -> None:
         """Registers the agent and signs it up, safe to repeat on restart: a repeat register is a
         409 and a repeat signup succeeds."""
         try:
-            _request("POST", f"{self.api_url}/agents", {"id": agent_id, "kind": "agent"})
+            self._request("POST", "/agents", {"id": agent_id, "kind": "agent"})
         except APIError as e:
             if e.status != 409:
                 raise
-        _request("POST", f"{self.api_url}/platform-experiments/{pe_id}/signup", {"agent_id": agent_id})
+        self._request("POST", f"/platform-experiments/{pe_id}/signup", {"agent_id": agent_id})
 
     def get_platform_experiment(self, pe_id: str) -> dict:
-        return _request("GET", f"{self.api_url}/platform-experiments/{pe_id}")
+        return self._request("GET", f"/platform-experiments/{pe_id}")
 
     def fetch_rules(self) -> str:
         """The platform rules, which the system prompt carries verbatim. A failure raises: an
         agent briefed without the rules would compete blind."""
-        url = f"{self.api_url}/explore/rules"
-        try:
-            with urllib.request.urlopen(url, timeout=15.0) as resp:
-                return resp.read().decode(errors="replace")
-        except urllib.error.HTTPError as e:
-            raise APIError("GET", url, e.code, e.read().decode(errors="replace")) from None
-        except urllib.error.URLError as e:
-            raise APIError("GET", url, 0, str(e.reason)) from None
+        return _send("GET", f"{self.api_url}/explore/rules", self.token).decode(errors="replace")

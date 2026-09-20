@@ -80,7 +80,6 @@ class JobRequest:
             "agent_id": self.agent_id,
             "platform_experiment_id": self.platform_experiment_id,
             "hypothesis_id": self.hypothesis_id,
-            "project_id": "",
             "objective": "e2e pytest coverage",
             "theory": "e2e pytest coverage",
             "code_ref": "git://hypothesisloop@" + "a" * 40,
@@ -99,10 +98,16 @@ class JobRequest:
 
 
 class API:
-    def __init__(self, base_url: str, hl_bin: Path):
+    def __init__(self, base_url: str, hl_bin: Path, token: str, org_id: str, project_id: str):
+        """One caller: every request and every `hl` run carries `token`. `org_id` is where its
+        agents register and `project_id` where its platform experiments are created."""
         self.base_url = base_url.rstrip("/")
         self.hl_bin = hl_bin
+        self.token = token
+        self.org_id = org_id
+        self.project_id = project_id
         self.session = requests.Session()
+        self.session.headers["Authorization"] = f"Bearer {token}"
         # Every platform experiment created through hl, closed by conftest at session end.
         self.created_platform_experiments: list[str] = []
 
@@ -128,7 +133,14 @@ class API:
         """The env `hl()`/`hl_expect()` invoke the CLI with -- exposed so a test that needs its own
         subprocess.Popen (e.g. a long-running `hl watch` run concurrently with another action) can
         build an identical child process."""
-        return {"API_URL": self.base_url, "PATH": "/usr/bin:/bin:/usr/local/bin"}
+        return {
+            "API_URL": self.base_url, "HL_TOKEN": self.token, "HL_ORG": self.org_id, "HL_PROJECT": self.project_id,
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+        }
+
+    def as_caller(self, token: str, org_id: str = "", project_id: str = "") -> "API":
+        """The same API seen by another caller."""
+        return API(self.base_url, self.hl_bin, token, org_id, project_id)
 
     def hl_expect(self, *args: str, input: str | None = None, timeout: float = 60) -> subprocess.CompletedProcess:
         """Raw `hl` invocation returning the CompletedProcess as-is, unlike hl() which raises on a

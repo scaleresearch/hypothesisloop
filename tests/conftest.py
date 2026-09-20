@@ -26,7 +26,16 @@ if not API_URL:
         "API_URL is required: set it to the control plane's base URL, "
         "e.g. API_URL=http://localhost:8081 for the local stack (the make e2e targets pass it)."
     )
+HL_TOKEN = os.environ.get("HL_TOKEN")
+if not HL_TOKEN:
+    raise pytest.UsageError(
+        "HL_TOKEN is required: set it to a staff token of the control plane at API_URL "
+        "(the make e2e targets mint one for the local stack)."
+    )
 HL_BIN = REPO_ROOT / "bin" / "hl"
+# The org and project every deployment's schema creates, which the suite's own resources live in.
+DEFAULT_ORG = "default"
+DEFAULT_PROJECT = "default"
 
 # Which accelerator the generic scenarios schedule onto.
 TEST_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-L40"
@@ -56,9 +65,14 @@ def preflight() -> None:
     last_error: Exception | None = None
     while not deadline.expired():
         try:
-            r = requests.get(f"{API_URL}/platform-experiments", params={"limit": 1}, timeout=5)
+            r = requests.get(
+                f"{API_URL}/platform-experiments", params={"limit": 1}, timeout=5,
+                headers={"Authorization": f"Bearer {HL_TOKEN}"},
+            )
             if r.ok:
                 return
+            if r.status_code in (401, 403):
+                pytest.exit(f"the control plane at {API_URL} refused HL_TOKEN ({r.status_code}): {r.text}", returncode=2)
         except requests.RequestException as exc:
             last_error = exc
         time.sleep(2)
@@ -74,7 +88,7 @@ def preflight() -> None:
 def api(preflight: None):
     """Closes at session end every platform experiment created through it, which catches the ones
     a test created directly and failed before closing."""
-    client = API(API_URL, _build_hl_binary())
+    client = API(API_URL, _build_hl_binary(), HL_TOKEN, DEFAULT_ORG, DEFAULT_PROJECT)
     yield client
     for pe_id in client.created_platform_experiments:
         client.close_platform_experiment(pe_id)

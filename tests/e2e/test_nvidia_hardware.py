@@ -21,7 +21,8 @@ import subprocess
 
 import pytest
 
-from conftest import API_URL, REPO_ROOT
+from conftest import API_URL, DEFAULT_ORG, REPO_ROOT
+from support import admin
 from support.wait import eventually
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("nvidia")]
@@ -90,6 +91,7 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
     env = {
         "CLUSTER_NAME": cluster_name,
         "API_URL": API_URL,
+        "RUNTIME_TOKEN": admin.add_cluster(cluster_name, DEFAULT_ORG),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"nvidia-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),

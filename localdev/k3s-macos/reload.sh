@@ -8,6 +8,7 @@ set -euo pipefail
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
+source "${SCRIPT_DIR}/../lib/auth.sh"
 
 TAG="${TAG:?run make reload, which builds the images and exports their TAG}"
 
@@ -17,7 +18,7 @@ TAG="${TAG:?run make reload, which builds the images and exports their TAG}"
 HOST_ADDRESS="$(cat "${SCRIPT_DIR}/../.host-address")"
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
-  REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" RUNTIME_TOKEN="$(lib_runtime_token local)" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 
 echo "==> Recreating control-plane containers..."
@@ -25,6 +26,7 @@ TAG="${TAG}" podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker
   up -d --force-recreate control-service metrics-service >/dev/null
 wait_for 20 1 "control-service to accept connections" \
 curl -sf -o /dev/null "http://localhost:${API_HOST_PORT:-8081}/health"
+lib_register_local_clusters
 
 if kubectl --context "${CONTEXT_NAME}" get deploy/hypothesisloop-cluster-agent -n hypothesisloop &>/dev/null; then
 echo "==> Restarting cluster-agent/node-agent pods..."

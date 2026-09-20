@@ -19,6 +19,10 @@ shown. Resolve against the live environment, never guess.
                                                # hypotheses, metrics, resource catalog. Export
                                                # it: `hl` reads it from the environment and
                                                # exits with an error when it is unset
+    HL_TOKEN=<staff token>                     # `make -s staff-token` on the local stack. Export
+                                               # it too: every request carries it, and `hl` exits
+                                               # with an error when it is unset
+    HL_PROJECT=default                         # the project the platform experiment is created in
     METRICS_URL=http://localhost:8084
     CODE_REPO_URL=<set below>
     GIT_TOKEN=<set below>
@@ -220,12 +224,14 @@ agent gets `generalist`) and `AGENT_HYPERPARAMETERS` (a JSON object; omit it and
 `{}`). Build once: `make experimentator-image EXPERIMENT=$EXPERIMENT`. Before the agent's first
 turn the harness registers `AGENT_ID` and signs it up to `PLATFORM_EXPERIMENT_ID` (a restart
 skips what is already done), and `hl` in the container reads both as its `--agent` and
-`--platform-experiment` defaults.
+`--platform-experiment` defaults. Each agent gets its own token, which lets it act as that agent
+in that platform experiment and nowhere else:
+`make -s token SCOPE=agent:$PLATFORM_EXPERIMENT_ID/agent-<id>`.
 
     podman run -d --name agent-<id> --network host \
       -e AGENT_ID=agent-<id> -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
       -e AGENT_FLAVOR=hyperparameter-search -e AGENT_HYPERPARAMETERS='{"batch_size":64}' \
-      -e API_URL=$API_URL \
+      -e API_URL=$API_URL -e HL_TOKEN=<the agent's token> \
       -e CODE_REPO_URL=$CODE_REPO_URL -e GIT_TOKEN=$GIT_TOKEN \
       -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT

@@ -71,7 +71,7 @@ def prepare() -> RunSetup:
     workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
     os.makedirs(workdir, exist_ok=True)
 
-    client = api_client.PlatformClient(cfg.api_url)
+    client = api_client.PlatformClient(cfg.api_url, cfg.token)
     client.join(cfg.agent_id, cfg.platform_experiment_id)
 
     system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands())

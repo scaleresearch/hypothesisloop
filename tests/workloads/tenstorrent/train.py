@@ -61,7 +61,7 @@ TIMED_ITERS = 10
 def post_metric(fraction: float, value: float, metric_name: str) -> None:
     url = f"{API_URL}/experiments/{EXP_ID}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['HYPOTHESISLOOP_TOKEN']}"})
     try:
         urllib.request.urlopen(req, timeout=5)
     except Exception as e:

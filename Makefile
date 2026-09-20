@@ -2,7 +2,7 @@
 	experimentator-base-image experimentator-image check-tag registry-up registry-prune \
 	helm-prepare helm-lint \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
-	cluster-agent-up cluster-agent-down \
+	cluster-agent-up cluster-agent-down staff-token token runtime-token \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down k3s-e2e \
 	full-stop full-start reload \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e tt-reload \
@@ -64,6 +64,25 @@ controlplane-up: registry-up render-settings images
 	podman compose -f $(COMPOSE_FILE) up -d
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
+	bash -c '. localdev/lib/auth.sh && lib_register_local_clusters'
+
+# Every request to the control plane carries a token. These two print the ones local work needs,
+# derived from auth.signing_secret in the settings file (localdev/lib/auth.sh).
+# Usage: export HL_TOKEN="$(make -s staff-token)"
+staff-token:
+	@bash -c '. localdev/lib/auth.sh && lib_hl_admin token staff'
+
+# Usage: make -s token SCOPE=agent:<platform experiment>/<agent> (or coordinator:<platform experiment>, job:<id>)
+token:
+	@test -n "$(SCOPE)" || { echo "make token: SCOPE=<scope> is required" >&2; exit 1; }
+	@bash -c '. localdev/lib/auth.sh && lib_hl_admin token "$(SCOPE)"'
+
+# Registers CLUSTER for ORG and prints the runtime token its agents start with.
+# Usage: make -s runtime-token CLUSTER=<name> [ORG=default]
+ORG ?= default
+runtime-token:
+	@test -n "$(CLUSTER)" || { echo "make runtime-token: CLUSTER=<name> is required" >&2; exit 1; }
+	@bash -c '. localdev/lib/auth.sh && lib_hl_admin cluster add "$(CLUSTER)" "$(ORG)"'
 
 # Stops and removes the control-plane containers but KEEPS the data volumes, so `down` + `up` is
 # always safe. To delete the data too, ask for it by name: `make controlplane-destroy`.
@@ -88,9 +107,9 @@ reset:
 # Installs/removes the runtime/k8s/infra/chart helm release (node-agent DaemonSet + cluster-agent
 # Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
 # KUBECONFIG_PATH point at (or current kubectl context).
-# Usage: make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
+# Usage: make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... RUNTIME_TOKEN=... [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
 cluster-agent-up:
-	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" \
+	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" RUNTIME_TOKEN="$(RUNTIME_TOKEN)" REGISTRY_URL="$(REGISTRY)" \
 	  bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
@@ -124,12 +143,14 @@ k3s-dev-nodes-up:
 k3s-dev-nodes-down:
 	bash localdev/k3s-macos/dev-nodes-down.sh
 
-# The e2e suite requires API_URL; these targets point it at the local stack unless the caller set one.
+# The e2e suite requires API_URL and a staff HL_TOKEN; these targets point it at the local stack
+# unless the caller set them. E2E_ENV also carries what the suite's hl-admin calls read.
 E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
+E2E_ENV = . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
 
 # Provisions dev nodes, runs the portable e2e suite, tears them back down — pass/fail either way.
 k3s-e2e:
-	API_URL="$(E2E_API_URL)" bash localdev/k3s-macos/run-e2e.sh
+	bash -c '$(E2E_ENV) bash localdev/k3s-macos/run-e2e.sh'
 
 # ---- Convenience: local cluster + control plane in one command -------------
 full-up: k3s-up controlplane-up
@@ -176,7 +197,7 @@ tt-hardware-image: check-tag
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 
 tt-e2e: tt-hardware-image
-	API_URL="$(E2E_API_URL)" bash localdev/k3s-tenstorrent/run-e2e.sh
+	bash -c '$(E2E_ENV) bash localdev/k3s-tenstorrent/run-e2e.sh'
 
 # Counterpart to `reload` for the real Tenstorrent host.
 tt-reload: images
@@ -283,7 +304,7 @@ helm-prepare:
 helm-lint: helm-prepare
 	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG) \
 		--set objectStore.endpoint=http://object-store.hypothesisloop.svc:9000
-	helm lint runtime/k8s/infra/chart --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint \
+	helm lint runtime/k8s/infra/chart --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint,runtimeToken=lint \
 		--set-string images.registry=$(REGISTRY),images.tag=$(TAG)
 
 build:
@@ -303,7 +324,7 @@ agent-test:
 # Portable e2e suite (pytest), API-only/parallel lane -- fast local loop. See tests/improve.md for
 # the marker scheme (parallel/exclusive/slow/hardware/accelerator) and the migration this replaces.
 e2e-py:
-	cd tests && API_URL="$(E2E_API_URL)" uv run pytest e2e -m "not exclusive and not slow and not hardware"
+	bash -c '$(E2E_ENV) cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"'
 
 lint:
 	golangci-lint run ./...

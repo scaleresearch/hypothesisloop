@@ -11,6 +11,7 @@ class FakePlatform(BaseHTTPRequestHandler):
 
     agents: set = set()
     calls: list = []
+    tokens: set = set()
 
     def _reply(self, status, body):
         self.send_response(status)
@@ -20,6 +21,7 @@ class FakePlatform(BaseHTTPRequestHandler):
 
     def do_POST(self):
         FakePlatform.calls.append(("POST", self.path))
+        FakePlatform.tokens.add(self.headers["Authorization"])
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path == "/agents":
             if body["id"] in FakePlatform.agents:
@@ -34,12 +36,12 @@ class FakePlatform(BaseHTTPRequestHandler):
 
 class JoinTest(unittest.TestCase):
     def setUp(self):
-        FakePlatform.agents, FakePlatform.calls = set(), []
+        FakePlatform.agents, FakePlatform.calls, FakePlatform.tokens = set(), [], set()
         self.server = HTTPServer(("127.0.0.1", 0), FakePlatform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
-        self.client = api_client.PlatformClient(f"http://127.0.0.1:{self.server.server_port}")
+        self.client = api_client.PlatformClient(f"http://127.0.0.1:{self.server.server_port}", "agent-token")
 
     def test_first_start_registers_and_signs_up(self):
         self.client.join("agent-a", "pe-1")
@@ -47,6 +49,10 @@ class JoinTest(unittest.TestCase):
             ("POST", "/agents"),
             ("POST", "/platform-experiments/pe-1/signup"),
         ])
+
+    def test_every_call_carries_the_token(self):
+        self.client.join("agent-a", "pe-1")
+        self.assertEqual(FakePlatform.tokens, {"Bearer agent-token"})
 
     def test_restart_joins_again(self):
         self.client.join("agent-a", "pe-1")

@@ -33,8 +33,9 @@ def _env_json_object(name: str, default: str = "{}") -> dict:
 
 @dataclass
 class Config:
-    # The agent's own `hl` reads API_URL from this same environment.
+    # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
     api_url: str = field(default_factory=lambda: _required("API_URL"))
+    token: str = field(default_factory=lambda: _required("HL_TOKEN"))
 
     agent_id: str = field(default_factory=lambda: _required("AGENT_ID"))
 

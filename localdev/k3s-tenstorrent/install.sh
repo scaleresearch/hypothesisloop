@@ -40,6 +40,7 @@ set -euo pipefail
 CONTEXT_NAME="k3s-tt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
+source "${SCRIPT_DIR}/../lib/auth.sh"
 
 # k3s's containerd pulls images from the local registry (docker-compose.yml) over this address,
 # never localhost.
@@ -204,7 +205,7 @@ STAGE_T0=$(date +%s)
 # any pod on this node.
 CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://${HOST_ADDRESS}:8081" METRICS_URL="http://${HOST_ADDRESS}:8084" \
-  REGISTRY_URL="${HOST_ADDRESS}:5000" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" RUNTIME_TOKEN="$(lib_runtime_token box-a)" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "${HOST_ADDRESS}" > "${SCRIPT_DIR}/../.host-address"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"

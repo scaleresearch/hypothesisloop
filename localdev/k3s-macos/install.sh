@@ -10,6 +10,7 @@ set -euo pipefail
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
+source "${SCRIPT_DIR}/../lib/auth.sh"
 
 # k3s pulls images from the local registry (docker-compose.yml) over this address, not
 # localhost, since the VM/native k3s process is not in the host's network namespace.
@@ -201,7 +202,7 @@ echo "==> Installing cluster-agent bundle onto local cluster..."
 STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
-  REGISTRY_URL="${HOST_ADDRESS}:5000" \
+  REGISTRY_URL="${HOST_ADDRESS}:5000" RUNTIME_TOKEN="$(lib_runtime_token local)" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 

@@ -5,5 +5,6 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${API_URL:?API_URL must be the control-plane API base URL the e2e suite runs against}"
+: "${HL_TOKEN:?HL_TOKEN must be a staff token of that control plane (make staff-token)}"
 
 (cd "${DIR}/../../tests" && NVIDIA_K3S_CONTEXT="k3s-nvidia" uv run pytest e2e/test_nvidia_hardware.py -m hardware -v "$@")

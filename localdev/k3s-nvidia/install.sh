@@ -25,6 +25,8 @@
 # host than the GPU node itself, so there's no "just use localhost" fallback):
 #   API_URL, METRICS_URL — reachable from this host (see
 #   localdev/local-tunnels/ if the control plane is local and this is a remote rented box).
+#   RUNTIME_TOKEN — the token for cluster k3s-nvidia: `make runtime-token CLUSTER=k3s-nvidia` on
+#   the control-plane host prints it.
 #   TAG — image tag the cluster-agent/node-agent images are built and deployed under.
 #
 # Idempotent: safe to re-run.
@@ -35,6 +37,7 @@ CLUSTER_NAME="k3s-nvidia"
 
 : "${API_URL:?set API_URL (e.g. a localdev/local-tunnels/ URL reaching :8081)}"
 : "${METRICS_URL:?set METRICS_URL (e.g. a localdev/local-tunnels/ URL reaching :8084)}"
+: "${RUNTIME_TOKEN:?set RUNTIME_TOKEN (make runtime-token CLUSTER=k3s-nvidia on the control-plane host)}"
 : "${TAG:?set TAG (e.g. the git SHA of this checkout)}"
 export TAG
 
@@ -145,7 +148,7 @@ done
 lib_ensure_helm
 echo "==> Installing cluster-agent bundle (API: ${API_URL})..."
 CLUSTER_NAME="${CLUSTER_NAME}" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" \
+  API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" RUNTIME_TOKEN="${RUNTIME_TOKEN}" \
   bash "${ROOT}/runtime/k8s/infra/install.sh"
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}  Cluster name: ${CLUSTER_NAME}"

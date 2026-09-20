@@ -29,7 +29,8 @@ import uuid
 
 import pytest
 
-from conftest import API_URL, REPO_ROOT
+from conftest import API_URL, DEFAULT_ORG, REPO_ROOT
+from support import admin
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -91,6 +92,7 @@ def bare_agent(tmp_path, run_id: str):
     env = {
         "CLUSTER_NAME": cluster_name,
         "API_URL": API_URL,
+        "RUNTIME_TOKEN": admin.add_cluster(cluster_name, DEFAULT_ORG),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"bare-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),

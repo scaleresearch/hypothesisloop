@@ -80,7 +80,7 @@ def post_metric(name: str, value: float, fraction: float = 1.0) -> None:
     payload = json.dumps(
         {"metric_name": name, "fraction_complete": fraction, "metric_value": value}
     ).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['HYPOTHESISLOOP_TOKEN']}"})
     try:
         urllib.request.urlopen(req, timeout=5)
     except Exception as e:  # reporting must never take down the work it reports on
