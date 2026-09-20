@@ -113,17 +113,40 @@ func TestLogsKeepsACommandLineThatOnlyLooksLikeTheMissingContainerNote(t *testin
 	}
 }
 
-func TestLogsFailsWhenTheUploadNeverArrives(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodPut, logsPath, logRequest(api))
-	api.on(http.MethodGet, uploadPath, answer(403, `<Error><Code>AccessDenied</Code></Error>`))
-	p := newTestProvider(t, api, Settings{})
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+func TestLogsGivesUpOnAnUploadThatDoesNotArriveOnItsOwnClock(t *testing.T) {
+	stuck := map[string]http.HandlerFunc{
+		"nothing at the address": answer(403, `<Error><Code>AccessDenied</Code></Error>`),
+		"only an old upload":     upload(requestedAt.Add(-time.Minute), "stale\n"),
+	}
+	for name, store := range stuck {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.on(http.MethodPut, logsPath, logRequest(api))
+			api.on(http.MethodGet, uploadPath, store)
+			p := newTestProvider(t, api, Settings{})
+			p.logWait = 100 * time.Millisecond
 
-	_, err := p.Logs(ctx, "9001", 10)
-	if err == nil || !strings.Contains(err.Error(), "not delivered") {
-		t.Fatalf("err = %v, want not delivered", err)
+			asked := time.Now()
+			_, err := p.Logs(context.Background(), "9001", 10)
+			if err == nil || !strings.Contains(err.Error(), "did not deliver its logs within 100ms") {
+				t.Fatalf("err = %v, want one saying the host did not deliver in time", err)
+			}
+			if waited := time.Since(asked); waited > 2*time.Second {
+				t.Errorf("Logs took %s to give up", waited)
+			}
+		})
+	}
+}
+
+// A status push reads its instances one after another at a few seconds each.
+func TestLogsWaitsNoLongerThanAPushCanAfford(t *testing.T) {
+	t.Setenv("VAST_TEST_KEY", testKey)
+	p, err := New(Settings{APIKeyEnv: "VAST_TEST_KEY", MaxPricePerHour: 0.5}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.logWait <= 0 || p.logWait > 10*time.Second {
+		t.Errorf("a Logs call waits up to %s for one host", p.logWait)
 	}
 }
 

@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const logDeliveryTimeout = 60 * time.Second
+// logDeliveryTimeout is how long one Logs call waits for the host's upload. Uploads arrived 1.3
+// to 2.5 seconds after the request on every healthy instance measured, and a caller reads its
+// instances one after another, so one host that does not deliver must not hold up the rest.
+const logDeliveryTimeout = 10 * time.Second
 
 var errLogNotDelivered = errors.New("not delivered yet")
 
@@ -48,7 +51,7 @@ func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, err
 }
 
 func (p *Provider) awaitUpload(ctx context.Context, id, uploadURL string, requestedAt time.Time) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, logDeliveryTimeout)
+	ctx, cancel := context.WithTimeout(ctx, p.logWait)
 	defer cancel()
 	ticker := time.NewTicker(p.poll)
 	defer ticker.Stop()
@@ -59,7 +62,7 @@ func (p *Provider) awaitUpload(ctx context.Context, id, uploadURL string, reques
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("vast: logs of instance %s were not delivered: %w", id, ctx.Err())
+			return "", fmt.Errorf("vast: the host of instance %s did not deliver its logs within %s: %w", id, p.logWait, ctx.Err())
 		case <-ticker.C:
 		}
 	}
