@@ -128,6 +128,12 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// fine an hour ago gets condemned as if it never reported. Asked with the "even one
 		// sample" reader, not the progress one: a single point is not enough to judge movement,
 		// but it is a complete answer to "did this job ever report".
+		// The verdict waits one reconcile interval past the grace. A write to the metrics store
+		// is not readable the instant it returns, so a first sample posted just inside the grace
+		// can be missing from the pass that runs at its expiry; one pass later it is there.
+		if now.Sub(startedAt) < 2*window+c.reconcileInterval {
+			return false, "", nil
+		}
 		everReported, err := c.observed.AnyDeclaredMetricReported(ctx, exp.ID, declaredMetricKeys, now.Sub(startedAt))
 		if err != nil {
 			return false, "", fmt.Errorf("silence declared-metric ever-reported: %w", err)
@@ -139,9 +145,9 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// experiment declared. It cannot be ranked, cut, or compared — there is nothing to judge
 		// it by — while it holds an accelerator and bills for it. The reporting path is broken
 		// (wrong URL, a stale helper baked into the image, a swallowed exception), and no amount
-		// of further running fixes that. The grace above is 2x the silence window, i.e. six times
-		// the platform experiment's own declared reporting cadence: a job that has not reported
-		// in six of its own intervals is not slow, it is not reporting.
+		// of further running fixes that. The grace is 2x the silence window, i.e. six times the
+		// platform experiment's own declared reporting cadence: a job that has not reported in six
+		// of its own intervals is not slow, it is not reporting.
 		return true, domain.EvictionNeverReportedMetrics, nil
 	}
 	// Same silence, two very different causes. A job that reported and then stopped has a

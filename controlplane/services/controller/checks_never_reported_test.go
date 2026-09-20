@@ -13,7 +13,8 @@ import (
 )
 
 // silenceController wires just enough controller for checkSilence: a 30s silence window
-// (3 × 10s), and a 5 minute ceiling on how long a cluster may report nothing at all.
+// (3 × 10s), a 5s reconcile interval, and a 5 minute ceiling on how long a cluster may report
+// nothing at all.
 func silenceController(observed ObservedState) *Controller {
 	return &Controller{
 		observed:              observed,
@@ -22,6 +23,7 @@ func silenceController(observed ObservedState) *Controller {
 		defaultReportInterval: 10 * time.Second,
 		minSilenceWindow:      10 * time.Second,
 		clusterSilenceCeiling: 5 * time.Minute,
+		reconcileInterval:     5 * time.Second,
 	}
 }
 
@@ -75,6 +77,37 @@ func TestCheckSilenceEvictsLiveJobThatNeverReportedADeclaredMetric(t *testing.T)
 	if reason != domain.EvictionNeverReportedMetrics {
 		t.Fatalf("eviction reason = %q, want %q: the fault is the reporting path, not a hung trainer",
 			reason, domain.EvictionNeverReportedMetrics)
+	}
+}
+
+// The grace for a first sample is two silence windows (60s here). The pass that runs right at its
+// expiry cannot yet read a sample posted seconds before it, so the verdict is left to the first
+// pass a full reconcile interval (5s) later, which can.
+func TestCheckSilenceLeavesTheNeverReportedVerdictToThePassAfterTheGrace(t *testing.T) {
+	for _, tc := range []struct {
+		observedFor time.Duration
+		evict       bool
+	}{
+		{59 * time.Second, false},
+		{61 * time.Second, false},
+		{64 * time.Second, false},
+		{66 * time.Second, true},
+	} {
+		obs := liveJob()
+		obs.firstObserved = time.Now().UTC().Add(-tc.observedFor)
+
+		evict, reason := silence(t, obs, declared)
+		if evict != tc.evict {
+			t.Errorf("observed for %s: evict = %v (%q), want %v", tc.observedFor, evict, reason, tc.evict)
+		}
+	}
+
+	// The sample posted just inside the grace is readable by that later pass, and spares the job.
+	obs := liveJob()
+	obs.firstObserved = time.Now().UTC().Add(-66 * time.Second)
+	obs.declaredEverReported = true
+	if evict, reason := silence(t, obs, declared); evict {
+		t.Errorf("evicted as %q with a sample posted inside the grace", reason)
 	}
 }
 
