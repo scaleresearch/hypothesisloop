@@ -11,7 +11,7 @@ import (
 )
 
 var agentsCommands = []subcommand{
-	{"add", "create agents in a platform experiment, or join a registered one with --agent", agentsAdd},
+	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd},
 	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove},
 	{"list", "the agents of a platform experiment and what each was launched with", agentsList},
 }
@@ -21,21 +21,21 @@ func agentsPath(platformExperiment string) string {
 }
 
 func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [PE] [--count N] [--hosted] [--flavor F] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
+	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [PE] [--hosted] [--flavor F] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
    or: hl platform-experiments agents add [PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment (default $PLATFORM_EXPERIMENT_ID), and only
-while it is open. The first form creates agents; the second joins one registered with hl register.
-With --hosted the platform runs each agent. Without it each line printed carries the agent's
-token: start the agent yourself with that as HL_TOKEN beside its AGENT_ID. Keep the token out of
+while it is open. The first form creates one agent; the second joins one registered with hl
+register. For several agents, run it once for each. With --hosted the platform runs the agent.
+Without it the line printed carries the agent's token: start the agent yourself with that as
+HL_TOKEN beside its AGENT_ID. Keep the token out of
 command lines and shell history; write it to an env file the container reads.`, stderr)
-	agent := fs.String("agent", "", "join this registered agent instead of creating new ones")
-	count := fs.Int("count", 1, "how many agents to create")
-	hosted := fs.Bool("hosted", false, "the platform runs the agents")
-	flavor := fs.String("flavor", "", "the specialization each agent runs (AGENT_FLAVOR)")
-	hyperparameters := fs.String("hyperparameters", "", "a JSON object handed to each agent (AGENT_HYPERPARAMETERS)")
-	model := fs.String("model", "", "the model each agent runs on (AGENT_MODEL); omitted, the platform's default")
-	name := fs.String("name", "", "display name of a created agent; several get -1, -2, ... appended")
+	agent := fs.String("agent", "", "join this registered agent instead of creating a new one")
+	hosted := fs.Bool("hosted", false, "the platform runs the agent")
+	flavor := fs.String("flavor", "", "the specialization the agent runs (AGENT_FLAVOR)")
+	hyperparameters := fs.String("hyperparameters", "", "a JSON object handed to the agent (AGENT_HYPERPARAMETERS)")
+	model := fs.String("model", "", "the model the agent runs on (AGENT_MODEL); omitted, the platform's default")
+	name := fs.String("name", "", "display name of a created agent; omitted, its generated id")
 	kind := fs.String("kind", "", "kind of a created agent: agent (default) or human")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
@@ -54,11 +54,6 @@ command lines and shell history; write it to an env file the container reads.`, 
 			body[key] = value
 		}
 	}
-	if *agent == "" {
-		body["count"] = *count
-	} else if *count != 1 {
-		return parseExit(misuse(fs, "--count creates agents and cannot be set with --agent"))
-	}
 	if *hosted {
 		body["hosted"] = true
 	}
@@ -69,7 +64,7 @@ command lines and shell history; write it to an env file the container reads.`, 
 		}
 		body["hyperparameters"] = object
 	}
-	return call(c, "POST", agentsPath(pe), body, "agents", "no agents were added", stdout, stderr)
+	return call(c, "POST", agentsPath(pe), body, "agents", "no agent was added", stdout, stderr)
 }
 
 func agentsRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

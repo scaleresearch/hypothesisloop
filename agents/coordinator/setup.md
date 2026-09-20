@@ -146,16 +146,17 @@ With `from_repo: true` in the file, every field it leaves out is read from
 `budget_accelerator_hours`, `max_agents` and `ends_at` are always stated in the request and
 never read from the repository.
 
-The platform can run the whole experiment. In the request, `hosted_agents: N` joins N agents the
-platform runs (as `agents add --hosted` in section 4 does) and `coordinator_hosted: true` has it
-run the coordinator: one more machine beside the agents', started from the same image with the
+The platform can run the whole experiment. Agents the platform runs join with
+`agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
+has it run the coordinator: one more machine beside the agents', started from the same image with the
 platform experiment's coordinator token and briefed with
 `agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, which is `supervise.md`
 for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
 default applies. Both keys need the project's repository (`no_repository` without one) and are
-read from the request only. The experiment and its hosted agents are created together or not at all. With them, creating the
-experiment and `hl platform-experiments start` is all there is to do: the coordinator keeps the
+read from the request only. Creating makes the experiment and no agent. With a hosted coordinator
+and hosted agents, creating the experiment, adding the agents and `hl platform-experiments start`
+is all there is to do: the coordinator keeps the
 description true to what is learned and writes its findings as the experiment's summary
 (`hl platform-experiments summary`), which `hl platform-experiments get` shows as `summary`
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
@@ -273,15 +274,15 @@ it as `generalist` with that config as its hyperparameters (or none at all, and 
 
 `NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)`. An agent joins a platform experiment
 in exactly one way: `hl platform-experiments agents add` (`POST /platform-experiments/{id}/agents`),
-while the experiment is open. It creates the agents with ids of the platform's choosing and
-records each one's flavor (`--flavor`, one of `generalist`, `hyperparameter-search`,
+while the experiment is open. Each call creates one agent with an id of the platform's choosing
+and records its flavor (`--flavor`, one of `generalist`, `hyperparameter-search`,
 `architecture-search`, `data-search`; omit it and the agent runs `generalist`), hyperparameters
 (`--hyperparameters`, a JSON object of at most 4 KiB; omit it and the agent gets `{}`) and model
-(`--model`; omit it and the platform's default applies). What the command prints is what each
-agent runs: flavor and model are resolved at that moment and never again. One call per group
-that shares those values:
+(`--model`; omit it and the platform's default applies). What the command prints is what the
+agent runs: flavor and model are resolved at that moment and never again. One call per agent:
 
-    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --count 2 --flavor generalist
+    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor generalist
+    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor generalist
     hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}'
 

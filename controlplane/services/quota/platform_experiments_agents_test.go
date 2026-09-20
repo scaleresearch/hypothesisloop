@@ -114,28 +114,20 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 	return true, nil
 }
 
-func (f *rosterStore) SpawnAgents(_ context.Context, _ string, agents []*domain.Agent, signups []domain.AgentSignup) error {
+func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agent, signup domain.AgentSignup) error {
 	if f.pe.Status != domain.PlatformExpOpen {
 		return db.ErrSignupClosed
 	}
-	added := 0
-	for _, s := range signups {
-		if s.Role == domain.SignupRoleCompetitor {
-			added++
-		}
-	}
-	if f.competitors()+added > f.pe.MaxAgents {
+	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
 		return db.ErrMaxAgentsReached
 	}
-	if f.machines(signups...) > f.pe.MaxHosted {
+	if f.machines(signup) > f.pe.MaxHosted {
 		return db.ErrMaxHostedReached
 	}
-	for i, agent := range agents {
-		agent.OrgID = "org-a"
-		f.agents[agent.ID] = agent
-		signups[i].PlatformExperimentID, signups[i].Name = f.pe.ID, agent.Name
-		f.signups = append(f.signups, signups[i])
-	}
+	agent.OrgID = "org-a"
+	f.agents[agent.ID] = agent
+	signup.PlatformExperimentID, signup.Name = f.pe.ID, agent.Name
+	f.signups = append(f.signups, signup)
 	return nil
 }
 
@@ -205,6 +197,25 @@ func call(t *testing.T, r http.Handler, method, path, body string) (int, map[str
 	return rec.Code, out
 }
 
+// addEach makes the same request n times, as a client that wants n agents does, and returns the
+// one agent each answered with.
+func addEach(t *testing.T, r http.Handler, n int, body string) []map[string]any {
+	t.Helper()
+	var all []map[string]any
+	for range n {
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+		if code != http.StatusCreated {
+			t.Fatalf("%s: got = %d %v, want = 201", body, code, out)
+		}
+		one := joined(t, out)
+		if len(one) != 1 {
+			t.Fatalf("%s: answered %d agents, want the one it added", body, len(one))
+		}
+		all = append(all, one[0])
+	}
+	return all
+}
+
 func joined(t *testing.T, body map[string]any) []map[string]any {
 	t.Helper()
 	list, ok := body["agents"].([]any)
@@ -223,12 +234,7 @@ var staff = auth.Principal{Kind: auth.KindStaff}
 func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	code, body := call(t, r, "POST", "/platform-experiments/pe-1/agents",
-		`{"count":3,"hosted":true,"name":"sweep","flavor":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
-	if code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %v", code, body)
-	}
-	agents := joined(t, body)
+	agents := addEach(t, r, 3, `{"hosted":true,"name":"sweep","flavor":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
 	if len(agents) != 3 || len(store.signups) != 3 {
 		t.Fatalf("agents = %d, signups = %d, want 3 and 3", len(agents), len(store.signups))
 	}
@@ -256,7 +262,7 @@ func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testi
 		}
 	}
 	names := []string{agents[0]["name"].(string), agents[1]["name"].(string), agents[2]["name"].(string)}
-	if !reflect.DeepEqual(names, []string{"sweep-1", "sweep-2", "sweep-3"}) {
+	if !reflect.DeepEqual(names, []string{"sweep", "sweep", "sweep"}) {
 		t.Errorf("names = %v", names)
 	}
 }
@@ -334,8 +340,8 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"running":                 {domain.PlatformExpRunning, "pe-1", `{}`, 400, "signup_closed"},
 		"closed":                  {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 400, "signup_closed"},
 		"registered, running":     {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 400, "signup_closed"},
-		"field full":              {domain.PlatformExpOpen, "pe-1", `{"count":3}`, 400, "max_agents_reached"},
-		"registered, full":        {domain.PlatformExpOpen, "pe-1", `{"count":2}` + "\x00" + `{"agent_id":"dana"}`, 400, "max_agents_reached"},
+		"field full":              {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 400, "max_agents_reached"},
+		"registered, full":        {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 400, "max_agents_reached"},
 		"no such experiment":      {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
 		"no such agent":           {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
 		"unknown role":            {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
@@ -343,25 +349,21 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"unknown kind":            {domain.PlatformExpOpen, "pe-1", `{"kind":"robot"}`, 400, "invalid_request"},
 		"hosted human":            {domain.PlatformExpOpen, "pe-1", `{"kind":"human","hosted":true}`, 400, "invalid_request"},
 		"hosted registered human": {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","hosted":true}`, 400, "invalid_request"},
-		"count too high":          {domain.PlatformExpOpen, "pe-1", `{"count":101}`, 400, "invalid_request"},
-		"negative count":          {domain.PlatformExpOpen, "pe-1", `{"count":-1}`, 400, "invalid_request"},
-		"count with agent_id":     {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","count":2}`, 400, "invalid_request"},
+		"kind with agent_id":      {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","kind":"human"}`, 400, "invalid_request"},
 		"name with agent_id":      {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
 		"flavor not an id":        {domain.PlatformExpOpen, "pe-1", `{"flavor":"../x"}`, 400, "invalid_request"},
 		"unknown flavor":          {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search"}`, 400, "invalid_request"},
-		"unknown flavor, hosted":  {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search","hosted":true,"count":2}`, 400, "invalid_request"},
+		"unknown flavor, hosted":  {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search","hosted":true}`, 400, "invalid_request"},
 		"model with a space":      {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(tc.status, 2)
 			store.agents["dana"] = &domain.Agent{ID: "dana", Name: "Dana", Kind: domain.AgentKindHuman, OrgID: "org-a"}
 			r := agentsRouter(t, store, staff)
-			body := tc.body
-			if before, last, split := strings.Cut(tc.body, "\x00"); split {
-				if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", before); code != http.StatusCreated {
-					t.Fatalf("setup: %d %v", code, out)
-				}
-				body = last
+			bodies := strings.Split(tc.body, "\x00")
+			body := bodies[len(bodies)-1]
+			for _, before := range bodies[:len(bodies)-1] {
+				addEach(t, r, 1, before)
 			}
 			had := len(store.signups)
 			code, out := call(t, r, "POST", "/platform-experiments/"+tc.path+"/agents", body)
@@ -381,7 +383,7 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 func TestBaselinesAndReviewersJoinAFullField(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 1)
 	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{}`, `{"role":"baseline"}`, `{"role":"reviewer","count":2}`} {
+	for _, body := range []string{`{}`, `{"role":"baseline"}`, `{"role":"reviewer"}`, `{"role":"reviewer"}`} {
 		if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body); code != http.StatusCreated {
 			t.Fatalf("%s: %d %v", body, code, out)
 		}
@@ -398,12 +400,9 @@ func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) 
 	store.pe.CoordinatorHosted = true
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{"hosted":true,"role":"baseline","count":2}`, `{"hosted":true,"role":"reviewer","count":2}`, `{"hosted":true,"role":"baseline"}`} {
-		if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body); code != http.StatusCreated {
-			t.Fatalf("%s: got = %d %v, want = 201", body, code, out)
-		}
-	}
-	for _, body := range []string{`{"hosted":true,"role":"baseline"}`, `{"hosted":true,"role":"reviewer","count":3}`, `{"hosted":true}`, `{"agent_id":"veteran","hosted":true,"role":"reviewer"}`} {
+	addEach(t, r, 3, `{"hosted":true,"role":"baseline"}`)
+	addEach(t, r, 2, `{"hosted":true,"role":"reviewer"}`)
+	for _, body := range []string{`{"hosted":true,"role":"baseline"}`, `{"hosted":true,"role":"reviewer"}`, `{"hosted":true}`, `{"agent_id":"veteran","hosted":true,"role":"reviewer"}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		if code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" {
 			t.Fatalf("%s with the coordinator and five agents hosted: got = %d %v, want = 400 max_hosted_reached", body, code, out)
@@ -416,9 +415,7 @@ func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) 
 		t.Fatalf("machines = %d, want %d", store.machines(), rosterMaxHosted)
 	}
 	// An agent its owner runs is no machine of the platform's.
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"role":"reviewer","count":3}`); code != http.StatusCreated {
-		t.Fatalf("self-run reviewers: got = %d %v, want = 201", code, out)
-	}
+	addEach(t, r, 3, `{"role":"reviewer"}`)
 }
 
 func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T) {
@@ -426,7 +423,7 @@ func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T
 	store.unregistered = true
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{"count":2,"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
+	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		if code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" {
 			t.Fatalf("%s: got = %d %v, want = 503 launcher_not_registered", body, code, out)
@@ -438,9 +435,7 @@ func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T
 	if len(store.signups) != 0 {
 		t.Fatalf("a refused hosted join left %d signups behind", len(store.signups))
 	}
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2}`); code != http.StatusCreated {
-		t.Fatalf("self-run agents: got = %d %v, want = 201", code, out)
-	}
+	addEach(t, r, 2, `{}`)
 }
 
 // A coordinator's token outlives the close by its wind-down, and adds nothing in it.
@@ -449,7 +444,7 @@ func TestACoordinatorAddsNoAgentOnceItsExperimentHasStartedOrClosed(t *testing.T
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		store := newRosterStore(status, 5)
 		r := agentsRouter(t, store, coordinator)
-		for _, body := range []string{`{"hosted":true,"count":2}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
+		for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
 			code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 			if code != http.StatusBadRequest || out["reason"] != "signup_closed" {
 				t.Fatalf("%s, %s: got = %d %v, want = 400 signup_closed", status, body, code, out)
@@ -464,8 +459,7 @@ func TestACoordinatorAddsNoAgentOnceItsExperimentHasStartedOrClosed(t *testing.T
 func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	_, body := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2,"hosted":true}`)
-	agents := joined(t, body)
+	agents := addEach(t, r, 2, `{"hosted":true}`)
 	first, second := agents[0]["agent_id"].(string), agents[1]["agent_id"].(string)
 
 	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+first, ""); code != http.StatusOK || out["status"] != "removed" {
@@ -565,7 +559,7 @@ func TestAHostedAgentIsRefusedWhileItsProjectHasNoRepository(t *testing.T) {
 	store.cloneURL = ""
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{"count":2,"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
+	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		if code != http.StatusConflict || out["reason"] != "no_repository" {
 			t.Fatalf("%s: got = %d %v, want = 409 no_repository", body, code, out)
@@ -578,14 +572,10 @@ func TestAHostedAgentIsRefusedWhileItsProjectHasNoRepository(t *testing.T) {
 		t.Fatalf("a refused hosted join left %d signups and %d agents behind", len(store.signups), len(store.agents)-1)
 	}
 	// An agent the caller runs itself needs nothing of the platform's to start, and joins.
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2}`); code != http.StatusCreated {
-		t.Fatalf("self-run agents in a project with no repository: got = %d %v, want = 201", code, out)
-	}
+	addEach(t, r, 2, `{}`)
 	// With a repository attached the same hosted request goes through.
 	store.cloneURL = "https://git.example.invalid/org/repo.git"
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2,"hosted":true}`); code != http.StatusCreated {
-		t.Fatalf("hosted agents once a repository is attached: got = %d %v, want = 201", code, out)
-	}
+	addEach(t, r, 2, `{"hosted":true}`)
 }
 
 func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
@@ -609,9 +599,8 @@ func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
 
 func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 200)
-	store.pe.MaxHosted = 100
 	r := agentsRouter(t, store, staff)
-	big := `{"count":100,"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
+	big := `{"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", big)
 	if code != http.StatusBadRequest || out["reason"] != "invalid_request" || !strings.Contains(out["message"].(string), "4096") {
 		t.Fatalf("got = %d %v, want = 400 naming the limit", code, out)
@@ -619,7 +608,7 @@ func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 	if len(store.signups) != 0 {
 		t.Fatalf("%d signups were written", len(store.signups))
 	}
-	fits := `{"count":100,"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes-len(`{"blob":""}`)) + `"}}`
+	fits := `{"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes-len(`{"blob":""}`)) + `"}}`
 	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", fits); code != http.StatusCreated {
 		t.Fatalf("hyperparameters of exactly the limit: got = %d %v", code, out)
 	}
@@ -634,5 +623,20 @@ func TestARegisteredAgentOfAnotherOrgIsNotFoundEvenForACallerOfBothOrgs(t *testi
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"outsider"}`)
 	if code != http.StatusNotFound || out["reason"] != "agent_not_found" || len(store.signups) != 0 {
 		t.Fatalf("got = %d %v with %d signups, want = 404 agent_not_found and none", code, out, len(store.signups))
+	}
+}
+
+// One call adds one agent. A body that still asks for several is refused whole: answered with
+// one agent, a client that sent count would believe it had the rest.
+func TestACountIsNoPartOfTheRequest(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	r := agentsRouter(t, store, staff)
+	for _, body := range []string{`{"count":3}`, `{"count":1,"hosted":true}`} {
+		if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body); code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: got = %d %v, want = 422", body, code, out)
+		}
+	}
+	if len(store.signups) != 0 || len(store.agents) != 0 {
+		t.Fatalf("a refused request added %d agents", len(store.signups))
 	}
 }

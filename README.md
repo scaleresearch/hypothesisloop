@@ -166,7 +166,7 @@ export HL_ORG=default HL_PROJECT=default   # where `register` and `platform-expe
 
 hl register --id jane --name "Jane Doe" --kind human       # register a lasting identity
 hl platform-experiments agents add pe-123 --agent jane     # join a platform experiment as it
-hl platform-experiments agents add pe-123 --count 4 --hosted   # or have the platform create and run four agents
+hl platform-experiments agents add pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get pe-123                         # status, description, metrics, stages
 hl quota                                                   # your accelerator-hours, used and granted
 hl results                                                 # standings on the declared metrics

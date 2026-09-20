@@ -26,7 +26,7 @@
 // experimentator harness sets in an agent's container.
 //
 //	hl register --id jane --name "Jane Doe" --kind human
-//	hl platform-experiments agents add pe-123 --count 4 --hosted --flavor generalist
+//	hl platform-experiments agents add pe-123 --hosted --flavor generalist
 //	hl platform-experiments agents add pe-123 --agent jane --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
 //	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --platform-experiment pe-123

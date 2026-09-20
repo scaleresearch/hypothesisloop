@@ -119,7 +119,7 @@ def test_an_agent_is_hosted_only_in_a_project_with_a_repository(api: API, run_id
     project = _new_project(api, "bare")
     pe_id = project.create_platform_experiment(f"hosted-no-repo-{run_id}", 1.0, 5)
     try:
-        r = project.post(f"/platform-experiments/{pe_id}/agents", {"count": 2, "hosted": True})
+        r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
         assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"hosted with no repository: {r.status_code} {r.text}"
         assert project.project_id in r.json()["message"], r.text
         assert project.agents(pe_id) == [], "a refused hosted join left agents behind"
@@ -158,7 +158,9 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     own_id, own_token = self_run[0]["agent_id"], self_run[0]["token"]
     assert all(a["hosted"] and a["launcher"] == LAUNCHER and "token" not in a for a in hosted), hosted
     assert all(a["instance"] == {"restarts": 0, "stopped": False} for a in hosted), hosted
-    assert [a["name"] for a in hosted] == [f"hosted-{run_id}-1", f"hosted-{run_id}-2"]
+    assert [a["name"] for a in hosted] == [f"hosted-{run_id}"] * 2
+    r = api.post(f"/platform-experiments/{pe_id}/agents", {"count": 2})
+    assert r.status_code == 422, f"a request that still asks for several agents: {r.status_code} {r.text}"
     assert not self_run[0]["hosted"] and "launcher" not in self_run[0] and own_token.startswith("hls_")
     assert len(set(hosted_ids + [own_id])) == 3 and all(i.startswith("ag-") for i in hosted_ids + [own_id])
 
@@ -200,7 +202,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
 
     # An agent cannot add itself or anyone else, and a token for an agent nobody added is refused.
     as_hosted = api.as_caller(instances[hosted_ids[0]]["env"]["HL_TOKEN"])
-    r = as_hosted.post(f"/platform-experiments/{pe_id}/agents", {"count": 1})
+    r = as_hosted.post(f"/platform-experiments/{pe_id}/agents", {})
     assert r.status_code == 403, f"an agent adding agents: {r.status_code} {r.text}"
     stranger = api.as_caller(admin.token(f"agent:{pe_id}/ag-{uuid.uuid4().hex}"))
     r = stranger.get(f"/platform-experiments/{pe_id}")
@@ -238,7 +240,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
 
     # Started: the roster is fixed. Nobody joins, nobody is removed, and the instance stays.
     api.start_platform_experiment(pe_id)
-    r = api.post(f"/platform-experiments/{pe_id}/agents", {"count": 1, "hosted": True})
+    r = api.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
     assert r.status_code == 400 and r.json()["reason"] == "signup_closed", f"join after start: {r.status_code} {r.text}"
     r = api.remove_agent(pe_id, kept)
     assert r.status_code == 409 and r.json()["reason"] == "experiment_started", f"remove after start: {r.status_code} {r.text}"
@@ -340,19 +342,19 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
 
 def test_a_coordinator_is_hosted_only_in_a_project_with_a_repository(api: API, run_id: str):
     project = _new_project(api, "bare-coordinator")
-    for more in ({"coordinator_hosted": True}, {"hosted_agents": 1}):
-        r = _hosted_run(project, f"coordinated-no-repo-{run_id}", **more)
-        assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"{more}: {r.status_code} {r.text}"
+    r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_hosted=True)
+    assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"{r.status_code} {r.text}"
     r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_model="some-model")
     assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
 
 
-def test_one_create_hosts_a_coordinator_and_agents_and_the_launcher_keeps_a_machine_for_each(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"coordinated-{run_id}", coordinator_hosted=True, hosted_agents=2)
+def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_keeps(with_repo: API, run_id: str):
+    r = _hosted_run(with_repo, f"coordinated-{run_id}", coordinator_hosted=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
-        assert r.json()["coordinator_hosted"] is True and r.json()["signup_count"] == 2, r.json()
+        assert r.json()["coordinator_hosted"] is True and r.json()["signup_count"] == 0, r.json()
+        with_repo.add_agents(pe_id, count=2, hosted=True)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
         assert pe["coordinator"]["launcher"] == LAUNCHER and pe["coordinator"]["model"], pe.get("coordinator")
         assert pe["coordinator"]["instance"]["restarts"] == 0 and not pe["coordinator"]["instance"]["stopped"], pe["coordinator"]
@@ -448,22 +450,12 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
         with_repo.close_platform_experiment(pe_id)
 
 
-def test_hosted_agents_that_do_not_fit_leave_no_platform_experiment(with_repo: API, run_id: str):
-    name = f"hosted-too-many-{run_id}"
-    r = _hosted_run(with_repo, name, hosted_agents=6)  # max_agents is 5
-    assert r.status_code == 400, f"more hosted agents than max_agents: {r.status_code} {r.text}"
+def test_creating_a_platform_experiment_adds_no_agent(with_repo: API, run_id: str):
+    name = f"hosted-with-agents-{run_id}"
+    r = _hosted_run(with_repo, name, hosted_agents=3)
+    assert r.status_code == 422, f"a create that asks for agents: {r.status_code} {r.text}"
     listed = with_repo.get_json(f"/platform-experiments?q={name}&limit=50")
     assert not [pe for pe in listed if pe["name"] == name], f"a refused create left a platform experiment: {listed}"
-
-    r = _hosted_run(with_repo, name, hosted_agents=3)
-    assert r.status_code == 201 and r.json()["signup_count"] == 3, f"create with agents: {r.status_code} {r.text}"
-    pe_id = r.json()["id"]
-    try:
-        agents = roster(with_repo, pe_id)
-        assert len(agents) == 3 and all(a["hosted"] for a in agents.values()), agents
-        assert set(desired_for(with_repo, pe_id)[0]) == set(agents)
-    finally:
-        with_repo.close_platform_experiment(pe_id)
 
 
 def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_reported_and_gone_is_an_exit(with_repo: API, hosted_pe, run_id: str):
@@ -530,7 +522,7 @@ def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role
         for _ in range(bound - 1):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "reviewer"})
             assert r.status_code == 201, f"a hosted reviewer below the bound: {r.status_code} {r.text}"
-        for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True, "role": "baseline", "count": 2}, {"hosted": True}):
+        for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True, "role": "baseline"}, {"hosted": True}):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", body)
             assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"{body} at the bound: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"role": "reviewer"})
@@ -541,11 +533,12 @@ def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role
 
 
 def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"coordinator-bounds-{run_id}", coordinator_hosted=True, hosted_agents=1)
+    r = _hosted_run(with_repo, f"coordinator-bounds-{run_id}", coordinator_hosted=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe = r.json()
     pe_id = pe["id"]
     try:
+        with_repo.add_agents(pe_id, hosted=True)
         coordinator, _ = coordinator_for(with_repo, pe_id)
         agent_id = next(iter(roster(with_repo, pe_id)))
         as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)

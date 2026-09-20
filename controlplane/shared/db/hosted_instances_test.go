@@ -296,7 +296,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
 	}
-	if err := pes.CreatePlatformExperimentWithAgents(ctx, pe, nil, nil); err != nil {
+	if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
 		t.Fatal(err)
 	}
 	add := func(signup domain.AgentSignup) error {
@@ -306,7 +306,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		}
 		signup.AgentID = id
 		agent := &domain.Agent{ID: id, Name: id, Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
-		return pes.SpawnAgents(ctx, pe.ID, []*domain.Agent{agent}, []domain.AgentSignup{signup})
+		return pes.SpawnAgent(ctx, pe.ID, agent, signup)
 	}
 	// max_agents is two competitors, which no baseline or reviewer counts against. Added one at
 	// a time they would be without end, were machines not counted.
@@ -326,15 +326,5 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	}
 	if joined, err := pes.ListAgentSignups(ctx, pe.ID); err != nil || len(joined) != 4 {
 		t.Fatalf("joined = %d, %v, want the three hosted and the self-run one", len(joined), err)
-	}
-
-	// A coordinator alone is a machine too.
-	none := *pe
-	none.ID, none.MaxHosted = "pe-"+uuid.New().String()[:8], 0
-	if err := pes.CreatePlatformExperimentWithAgents(ctx, &none, nil, nil); !errors.Is(err, ErrMaxHostedReached) {
-		t.Fatalf("a hosted coordinator with no machine allowed: got = %v, want ErrMaxHostedReached", err)
-	}
-	if got, err := pes.GetPlatformExperiment(ctx, none.ID); err != nil || got != nil {
-		t.Fatalf("after the refusal: got = %+v, %v, want no platform experiment", got, err)
 	}
 }

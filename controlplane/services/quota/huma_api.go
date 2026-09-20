@@ -152,9 +152,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
-			"hosted_agents: N joins N new agents the platform runs, as POST /platform-experiments/{id}/agents with hosted does, in the same write: the experiment and its agents exist together or not at all. " +
-			"Both need the project's repository (409 no_repository without one), neither is read from the file, and coordinator_hosted is fixed from then on. " +
-			"Together they are at most the platform's bound on machines per platform experiment (400 max_hosted_reached), which the answer shows as max_hosted. " +
+			"It needs the project's repository (409 no_repository without one), is not read from the file, and is fixed from then on. " +
+			"This call creates the experiment and no agent: each agent joins by its own POST /platform-experiments/{id}/agents. " +
+			"max_hosted in the answer is how many machines the platform runs for this platform experiment, its hosted agents of every role and its coordinator together. " +
 			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
@@ -193,10 +193,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		pe, err := peh.svc.Create(ctx, hosting)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, invalid(err.Error())
-		}
-		var refused *signupRefusal
-		if errors.As(err, &refused) {
-			return nil, peh.refusal("create platform experiment", err)
 		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())

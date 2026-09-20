@@ -14,7 +14,7 @@ import (
 
 // PlatformExperimentsStore is the persistence interface for platform experiments.
 type PlatformExperimentsStore interface {
-	CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error
+	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
 	// ListPlatformExperimentsByStatus is the unpaginated read the sweeps use. A sweep that
@@ -30,9 +30,9 @@ type PlatformExperimentsStore interface {
 	// or the agent was already signed up. A competitor past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
-	// SpawnAgents creates agents in the experiment's org and signs them all up, or none of them.
 	LauncherKnown(ctx context.Context, name string) (bool, error)
-	SpawnAgents(ctx context.Context, platformExpID string, agents []*domain.Agent, signups []domain.AgentSignup) error
+	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
+	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
 	ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error)
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
@@ -146,16 +146,13 @@ type CreatePlatformExperimentRequest struct {
 	// create; accepted values are "guaranteed" and "burst_only".
 	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
 	// CoordinatorHosted has the platform run this platform experiment's coordinator, on
-	// CoordinatorModel or the platform's default model. HostedAgents joins that many new agents
-	// the platform runs. All three rent machines, so none is read from the experiment file.
+	// CoordinatorModel or the platform's default model. It rents a machine, so neither is read
+	// from the experiment file.
 	CoordinatorHosted bool   `json:"coordinator_hosted,omitempty"`
 	CoordinatorModel  string `json:"coordinator_model,omitempty"`
-	HostedAgents      int    `json:"hosted_agents,omitempty"`
 
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
 	coordinator *domain.HostedCoordinator
-	// hostedAgent is the place each of HostedAgents gets, resolved by the handler.
-	hostedAgent *domain.AgentSignup
 	// maxHosted is how many machines the platform may run for the experiment, from config.
 	maxHosted int
 

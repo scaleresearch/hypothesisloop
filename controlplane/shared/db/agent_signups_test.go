@@ -15,7 +15,6 @@ import (
 
 func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, signups ...domain.AgentSignup) []string {
 	t.Helper()
-	agents := make([]*domain.Agent, len(signups))
 	ids := make([]string, len(signups))
 	for i := range signups {
 		id, err := domain.NewAgentID()
@@ -26,10 +25,10 @@ func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, sig
 		if signups[i].Role == "" {
 			signups[i].Role = domain.SignupRoleCompetitor
 		}
-		agents[i] = &domain.Agent{ID: id, Name: "display-" + id, Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-	}
-	if err := pes.SpawnAgents(context.Background(), pe, agents, signups); err != nil {
-		t.Fatalf("spawn agents: got = %v, want = nil", err)
+		agent := &domain.Agent{ID: id, Name: "display-" + id, Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+		if err := pes.SpawnAgent(context.Background(), pe, agent, signups[i]); err != nil {
+			t.Fatalf("spawn agent: got = %v, want = nil", err)
+		}
 	}
 	return ids
 }
@@ -116,15 +115,10 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 		return n
 	}
 	before := agentCount()
-	spawn := func(pe string, n int) error {
-		agents := make([]*domain.Agent, n)
-		signups := make([]domain.AgentSignup, n)
-		for i := range agents {
-			id, _ := domain.NewAgentID()
-			agents[i] = &domain.Agent{ID: id, Name: "spawn-rollback-" + id, Kind: domain.AgentKindAgent, CreatedAt: time.Now().UTC()}
-			signups[i] = domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor}
-		}
-		return pes.SpawnAgents(ctx, pe, agents, signups)
+	spawn := func(pe string) error {
+		id, _ := domain.NewAgentID()
+		agent := &domain.Agent{ID: id, Name: "spawn-rollback-" + id, Kind: domain.AgentKindAgent, CreatedAt: time.Now().UTC()}
+		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor})
 	}
 
 	full := "pe-" + uuid.New().String()[:8]
@@ -132,13 +126,12 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_agents = 2 WHERE id = $1`, full); err != nil {
 		t.Fatal(err)
 	}
-	if err := spawn(full, 3); !errors.Is(err, ErrMaxAgentsReached) {
-		t.Fatalf("three competitors into a field of two: got = %v, want = ErrMaxAgentsReached", err)
+	for range 2 {
+		if err := spawn(full); err != nil {
+			t.Fatalf("a competitor into a field of two: got = %v, want = nil", err)
+		}
 	}
-	if err := spawn(full, 2); err != nil {
-		t.Fatalf("two competitors into a field of two: got = %v, want = nil", err)
-	}
-	if err := spawn(full, 1); !errors.Is(err, ErrMaxAgentsReached) {
+	if err := spawn(full); !errors.Is(err, ErrMaxAgentsReached) {
 		t.Fatalf("a third competitor: got = %v, want = ErrMaxAgentsReached", err)
 	}
 
@@ -146,11 +139,11 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 		pe := "pe-" + uuid.New().String()[:8]
 		createTestPE(t, pool, pe, 10)
 		setPEStatus(t, pool, pe, status, 0)
-		if err := spawn(pe, 1); !errors.Is(err, ErrSignupClosed) {
+		if err := spawn(pe); !errors.Is(err, ErrSignupClosed) {
 			t.Fatalf("spawn into a %s experiment: got = %v, want = ErrSignupClosed", status, err)
 		}
 	}
-	if err := spawn("pe-that-does-not-exist", 1); !errors.Is(err, ErrSignupClosed) {
+	if err := spawn("pe-that-does-not-exist"); !errors.Is(err, ErrSignupClosed) {
 		t.Fatalf("spawn into no experiment: got = %v, want = ErrSignupClosed", err)
 	}
 	if got := agentCount() - before; got != 2 {

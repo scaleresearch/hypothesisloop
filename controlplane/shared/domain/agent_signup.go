@@ -100,9 +100,6 @@ var AgentFlavors = []string{"generalist", "hyperparameter-search", "architecture
 // DefaultAgentFlavor is what an agent runs when it joins without naming one.
 const DefaultAgentFlavor = "generalist"
 
-// MaxAgentsPerSpawn bounds how many agents one request may create.
-const MaxAgentsPerSpawn = 100
-
 const maxModelLength = 128
 
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$`)

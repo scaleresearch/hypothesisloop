@@ -34,8 +34,7 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 		path, field, why string
 	}{
 		{"/platform-experiments/{id}/agents", "role", "competitor is the documented default, and a caller adding competitors omits it"},
-		{"/platform-experiments/{id}/agents", "agent_id", "a caller creating agents names none"},
-		{"/platform-experiments/{id}/agents", "count", "one agent is the documented default"},
+		{"/platform-experiments/{id}/agents", "agent_id", "a caller creating an agent names none"},
 		{"/platform-experiments/{id}/agents", "hosted", "an agent the caller runs itself is the default"},
 		{"/platform-experiments/{id}/agents", "flavor", "an agent with no flavor runs the harness's default"},
 		{"/platform-experiments/{id}/agents", "hyperparameters", "an agent with none gets an empty object"},

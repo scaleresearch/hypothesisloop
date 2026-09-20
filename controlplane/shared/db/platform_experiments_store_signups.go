@@ -46,14 +46,11 @@ func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID str
 	return inserted == 1, err
 }
 
-// SpawnAgents creates agents in the platform experiment's org and signs each of them up, all of
-// them or none. signups[i] is the place of agents[i]. ErrSignupClosed when the experiment is not
-// open, ErrMaxAgentsReached when the competitors among them do not all fit.
-func (s *PlatformExperimentsStore) SpawnAgents(ctx context.Context, platformExpID string, agents []*domain.Agent, signups []domain.AgentSignup) error {
-	if len(agents) != len(signups) {
-		return fmt.Errorf("platform_experiments_store.SpawnAgents: %d agents for %d signups", len(agents), len(signups))
-	}
-	_, err := s.enrol(ctx, platformExpID, agents, signups)
+// SpawnAgent creates an agent in the platform experiment's org and signs it up, both or neither.
+// ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
+// with no place left, ErrMaxHostedReached when it is one machine too many.
+func (s *PlatformExperimentsStore) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
+	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup})
 	return err
 }
 
@@ -73,31 +70,6 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 		return 0, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
 	}
 	return inserted, nil
-}
-
-// CreatePlatformExperimentWithAgents inserts a platform experiment and enrols new agents in it,
-// both or neither: an experiment asked for with agents never exists without them. With no agents
-// it is the plain create. ErrMaxHostedReached when its hosted agents and coordinator are more
-// machines than pe.MaxHosted.
-func (s *PlatformExperimentsStore) CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error {
-	if len(agents) != len(signups) {
-		return fmt.Errorf("platform_experiments_store.CreateWithAgents: %d agents for %d signups", len(agents), len(signups))
-	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateWithAgents: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
-		return err
-	}
-	if _, err := enrolTx(ctx, tx, pe.ID, agents, signups); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateWithAgents: commit: %w", err)
-	}
-	return nil
 }
 
 // enrolTx is enrol inside the caller's transaction.

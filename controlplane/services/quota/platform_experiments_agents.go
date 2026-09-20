@@ -15,12 +15,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// AddAgentsRequest is the body of POST /platform-experiments/{id}/agents: the one way an agent
+// AddAgentRequest is the body of POST /platform-experiments/{id}/agents: the one way an agent
 // joins a platform experiment.
-type AddAgentsRequest struct {
-	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating new ones. Joining again once joined succeeds and changes nothing."`
-	Count           int            `json:"count,omitempty" doc:"How many agents to create, 1 to 100. Default 1."`
-	Name            string         `json:"name,omitempty" doc:"Display name of a created agent; with count above 1 each gets -1, -2, ... appended. Defaults to the generated id."`
+type AddAgentRequest struct {
+	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
+	Name            string         `json:"name,omitempty" doc:"Display name of a created agent. Defaults to the generated id."`
 	Kind            string         `json:"kind,omitempty" doc:"Kind of a created agent: \"agent\" (default) or \"human\"."`
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
@@ -64,10 +63,10 @@ func refuseSignup(status int, reason, format string, args ...any) error {
 	return &signupRefusal{status: status, reason: reason, detail: fmt.Sprintf(format, args...)}
 }
 
-// AddAgents joins agents to a platform experiment: the registered agent req names, or req.Count
-// new ones created in the experiment's org. repos says whether the experiment's project has the
+// AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
+// one created in the experiment's org. The answer holds that one agent. repos says whether the experiment's project has the
 // repository a hosted agent works in.
-func (s *PlatformExperimentsService) AddAgents(ctx context.Context, platformExpID string, req AddAgentsRequest, launch AgentLaunch, repos ProjectRepos) ([]domain.AgentSignup, error) {
+func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, launch AgentLaunch, repos ProjectRepos) ([]domain.AgentSignup, error) {
 	role, err := domain.ParseSignupRole(req.Role)
 	if err != nil {
 		return nil, refuseSignup(400, "unknown_role", "%s", err)
@@ -104,7 +103,7 @@ func (s *PlatformExperimentsService) AddAgents(ctx context.Context, platformExpI
 func (s *PlatformExperimentsService) requireRepo(ctx context.Context, platformExpID string, repos ProjectRepos) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
-		return fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if pe == nil {
 		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
@@ -136,14 +135,14 @@ func requireProjectRepo(ctx context.Context, projectID string, repos ProjectRepo
 	return nil
 }
 
-// withHosting resolves what a create asks the platform to run: the coordinator's launcher and
-// model, and that the project has the repository hosted agents and a coordinator work in.
+// withHosting resolves the coordinator a create asks the platform to run: its launcher and
+// model, and that the project has the repository it works in.
 func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	if req.CoordinatorModel != "" && !req.CoordinatorHosted {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_hosted is not")
 	}
 	req.maxHosted = h.launch.MaxHosted
-	if !req.CoordinatorHosted && req.HostedAgents == 0 {
+	if !req.CoordinatorHosted {
 		return req, nil
 	}
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
@@ -155,30 +154,21 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if err := requireProjectRepo(ctx, req.ProjectID, h.repos); err != nil {
 		return req, err
 	}
-	if req.CoordinatorHosted {
-		_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.DefaultModel, nil)
-		if err != nil {
-			return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
-		}
-		req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: model}
+	_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.DefaultModel, nil)
+	if err != nil {
+		return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
 	}
-	if req.HostedAgents > 0 {
-		flavor, model, err := domain.ResolveAgentLaunch("", "", h.launch.DefaultModel, nil)
-		if err != nil {
-			return req, fmt.Errorf("platform_experiments.Create: %w", err)
-		}
-		req.hostedAgent = &domain.AgentSignup{Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher, Flavor: flavor, Model: model}
-	}
+	req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: model}
 	return req, nil
 }
 
-func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platformExpID string, req AddAgentsRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
-	if req.Count > 1 || req.Name != "" || req.Kind != "" {
-		return nil, refuseSignup(400, "invalid_request", "count, name and kind describe agents to create and cannot be set with agent_id")
+func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
+	if req.Name != "" || req.Kind != "" {
+		return nil, refuseSignup(400, "invalid_request", "name and kind describe an agent to create and cannot be set with agent_id")
 	}
 	agent, err := s.store.GetAgent(ctx, req.AgentID)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if agent == nil {
 		return nil, refuseSignup(404, "agent_not_found", "no agent %s is registered", req.AgentID)
@@ -191,46 +181,15 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	}
 	joined, err := s.store.GetAgentSignup(ctx, platformExpID, req.AgentID)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if joined == nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgents: agent %s is not signed up after signing up", req.AgentID)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: agent %s is not signed up after signing up", req.AgentID)
 	}
 	return []domain.AgentSignup{*joined}, nil
 }
 
-// newAgents are count agents to create and the place of each, which is place under the new
-// agent's id. With a name and more than one agent each gets -1, -2, ... appended.
-func newAgents(count int, name string, kind domain.AgentKind, place domain.AgentSignup, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
-	agents := make([]*domain.Agent, count)
-	signups := make([]domain.AgentSignup, count)
-	for i := range agents {
-		id, err := domain.NewAgentID()
-		if err != nil {
-			return nil, nil, err
-		}
-		agentName := name
-		switch {
-		case name == "":
-			agentName = id
-		case count > 1:
-			agentName = fmt.Sprintf("%s-%d", name, i+1)
-		}
-		agents[i] = &domain.Agent{ID: id, Name: agentName, Kind: kind, PerformanceScore: 0.5, CreatedAt: now}
-		signups[i] = place
-		signups[i].AgentID = id
-	}
-	return agents, signups, nil
-}
-
-func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentsRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
-	count := req.Count
-	if count == 0 {
-		count = 1
-	}
-	if count < 0 || count > domain.MaxAgentsPerSpawn {
-		return nil, refuseSignup(400, "invalid_request", "count must be 1 to %d, got %d", domain.MaxAgentsPerSpawn, req.Count)
-	}
+func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
 	kind := domain.AgentKind(req.Kind)
 	if kind == "" {
 		kind = domain.AgentKindAgent
@@ -243,21 +202,22 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if pe == nil {
 		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
-
-	agents, signups, err := newAgents(count, req.Name, kind, signup, time.Now().UTC())
+	id, err := domain.NewAgentID()
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
-	created := make(map[string]bool, count)
-	for _, agent := range agents {
-		created[agent.ID] = true
+	name := req.Name
+	if name == "" {
+		name = id
 	}
-	err = s.store.SpawnAgents(ctx, platformExpID, agents, signups)
+	signup.AgentID = id
+	agent := &domain.Agent{ID: id, Name: name, Kind: kind, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+	err = s.store.SpawnAgent(ctx, platformExpID, agent, signup)
 	switch {
 	case errors.Is(err, db.ErrSignupClosed):
 		return nil, refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
@@ -266,21 +226,18 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	case errors.Is(err, db.ErrMaxHostedReached):
 		return nil, refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	case err != nil:
-		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
-	all, err := s.store.ListAgentSignups(ctx, platformExpID)
+	joined, err := s.store.GetAgentSignup(ctx, platformExpID, id)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
-	joined := make([]domain.AgentSignup, 0, count)
-	for _, one := range all {
-		if created[one.AgentID] {
-			joined = append(joined, one)
-		}
+	if joined == nil {
+		return nil, fmt.Errorf("platform_experiments.AddAgent: agent %s is not signed up after being created", id)
 	}
-	s.logger.Info("agents spawned", zap.String("platformExpID", platformExpID), zap.Int("count", count),
+	s.logger.Info("agent spawned", zap.String("platformExpID", platformExpID), zap.String("agentID", id),
 		zap.Bool("hosted", signup.Hosted), zap.String("launcher", signup.Launcher))
-	return joined, nil
+	return []domain.AgentSignup{*joined}, nil
 }
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. Once it has, the
@@ -335,21 +292,22 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	access := doc.Access
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "add-platform-experiment-agents", Method: "POST", Path: "/platform-experiments/{id}/agents",
-		Summary: "Add agents to a platform experiment", Tags: []string{"platform-experiments"},
+		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",
+		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present. " +
-			"Creates count agents with generated ids and signs them up, all of them or none; or, with agent_id, signs up that registered agent. " +
-			"hosted=true has the platform start and keep one machine per agent until the experiment closes or the agent is cut; it is refused " +
+			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
+			"The answer is agents, a list holding that one agent. " +
+			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut; it is refused " +
 			"with 409 no_repository while the project has no repository attached, since the agent works in it. " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
-			"hosted=false returns each agent's token: run the agent yourself with it as HL_TOKEN, beside AGENT_ID and PLATFORM_EXPERIMENT_ID. " +
+			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN, beside AGENT_ID and PLATFORM_EXPERIMENT_ID. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
-		Body AddAgentsRequest
+		Body AddAgentRequest
 	}) (*struct{ Body joinedAgentsBody }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
@@ -359,9 +317,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 				return nil, err
 			}
 		}
-		signups, err := h.svc.AddAgents(ctx, in.ID, in.Body, h.launch, h.repos)
+		signups, err := h.svc.AddAgent(ctx, in.ID, in.Body, h.launch, h.repos)
 		if err != nil {
-			return nil, h.refusal("add agents", err)
+			return nil, h.refusal("add agent", err)
 		}
 		out := &struct{ Body joinedAgentsBody }{}
 		out.Body.Agents = make([]JoinedAgent, len(signups))

@@ -97,8 +97,8 @@ The `BASELINE` block of the description is what every agent is ranked against.
 ## The roster and the flavor mix
 
 The roster can change only while the experiment is `open`. Until it starts you may set the mix
-with `hl platform-experiments agents add --hosted --flavor F` and `agents remove`, within
-`max_agents`: broad while no region is promising (generalists and one of each targeted flavor),
+with `hl platform-experiments agents add --hosted --flavor F` (one agent per call) and
+`agents remove`, within `max_agents`: broad while no region is promising (generalists and one of each targeted flavor),
 narrowed toward the axis of a confirmed branch once there is one, away from refuted branches.
 Record the mix and its reasoning in the summary each time you change it.
 

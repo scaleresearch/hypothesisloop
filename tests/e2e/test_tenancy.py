@@ -205,7 +205,7 @@ def test_another_org_writes_nothing(tenants):
     pe_update = _platform_experiment_body("taken over")
     writes = [
         ("POST", f"/platform-experiments/{b.pe_id}/agents", {"agent_id": a.agent}),
-        ("POST", f"/platform-experiments/{b.pe_id}/agents", {"count": 1, "hosted": True}),
+        ("POST", f"/platform-experiments/{b.pe_id}/agents", {"hosted": True}),
         ("DELETE", f"/platform-experiments/{b.pe_id}/agents/{b.agent}", None),
         ("PUT", f"/platform-experiments/{b.pe_id}", pe_update),
         ("POST", f"/platform-experiments/{b.pe_id}/start", None),

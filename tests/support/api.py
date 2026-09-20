@@ -270,10 +270,16 @@ class API:
         r = self.signup(pe_id, agent_id, role, quota_tier)
         r.raise_for_status()
 
-    def add_agents(self, pe_id: str, **body: Any) -> list[dict]:
-        """POST /platform-experiments/{id}/agents with no agent_id: the platform creates the
-        agents. Returns each one as answered, with its token when it is not hosted."""
-        return self.post_json(f"/platform-experiments/{pe_id}/agents", body)["agents"]
+    def add_agents(self, pe_id: str, count: int = 1, **body: Any) -> list[dict]:
+        """POST /platform-experiments/{id}/agents with no agent_id, `count` times: each call has
+        the platform create one agent. Returns each one as answered, with its token when it is
+        not hosted."""
+        added: list[dict] = []
+        for _ in range(count):
+            answered = self.post_json(f"/platform-experiments/{pe_id}/agents", body)["agents"]
+            assert len(answered) == 1, f"one call added {len(answered)} agents: {answered}"
+            added += answered
+        return added
 
     def agents(self, pe_id: str) -> list[dict]:
         return self.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]

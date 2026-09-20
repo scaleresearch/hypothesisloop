@@ -98,7 +98,7 @@ type createdStore struct {
 	created []*domain.PlatformExperiment
 }
 
-func (s *createdStore) CreatePlatformExperimentWithAgents(_ context.Context, pe *domain.PlatformExperiment, _ []*domain.Agent, _ []domain.AgentSignup) error {
+func (s *createdStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment) error {
 	s.created = append(s.created, pe)
 	return nil
 }

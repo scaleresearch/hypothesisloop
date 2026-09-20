@@ -72,12 +72,6 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if req.EndsAt.IsZero() {
 		return nil, invalidPlatformExperiment(errors.New("ends_at is required"))
 	}
-	if req.HostedAgents < 0 || req.HostedAgents > domain.MaxAgentsPerSpawn || req.HostedAgents > req.MaxAgents {
-		return nil, invalidPlatformExperiment(fmt.Errorf("hosted_agents must be between 0 and max_agents, and at most %d", domain.MaxAgentsPerSpawn))
-	}
-	if (req.HostedAgents > 0) != (req.hostedAgent != nil) {
-		return nil, fmt.Errorf("platform_experiments.Create: hosted_agents is %d and their place is resolved: %v", req.HostedAgents, req.hostedAgent != nil)
-	}
 	if req.CoordinatorHosted != (req.coordinator != nil) {
 		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
 	}
@@ -105,23 +99,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Coordinator:               req.coordinator,
 		MaxHosted:                 req.maxHosted,
 	}
-	// The experiment and its agents are one write: one asked for with agents never exists
-	// without them.
-	var agents []*domain.Agent
-	var signups []domain.AgentSignup
-	if req.HostedAgents > 0 {
-		if agents, signups, err = newAgents(req.HostedAgents, "", domain.AgentKindAgent, *req.hostedAgent, now); err != nil {
-			return nil, fmt.Errorf("platform_experiments.Create: %w", err)
-		}
-	}
-	err = s.store.CreatePlatformExperimentWithAgents(ctx, pe, agents, signups)
-	if errors.Is(err, db.ErrMaxHostedReached) {
-		return nil, refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
-	}
-	if err != nil {
+	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
-	pe.SignupCount = len(signups)
 	s.logger.Info("platform experiment created", zap.String("id", pe.ID), zap.String("name", pe.Name))
 	return pe, nil
 }

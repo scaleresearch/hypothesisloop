@@ -15,7 +15,7 @@ type createStore struct {
 	created *domain.PlatformExperiment
 }
 
-func (f *createStore) CreatePlatformExperimentWithAgents(_ context.Context, pe *domain.PlatformExperiment, _ []*domain.Agent, _ []domain.AgentSignup) error {
+func (f *createStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment) error {
 	f.created = pe
 	return nil
 }
