@@ -158,10 +158,13 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		return nil
 	}
 
-	for _, exp := range running {
-		tierExhausted := (guaranteedExhausted && exp.CapacityTier == domain.CapacityGuaranteed) ||
+	tierExhausted := func(exp *domain.Experiment) bool {
+		return (guaranteedExhausted && exp.CapacityTier == domain.CapacityGuaranteed) ||
 			(burstExhausted && exp.CapacityTier == domain.CapacityBurst)
-		if !tierExhausted {
+	}
+
+	for _, exp := range running {
+		if !tierExhausted(exp) {
 			continue
 		}
 		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
@@ -180,50 +183,37 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		c.settleAndMark(ctx, exp)
 	}
 
-	// Cancel QUEUED and SUBMITTED jobs and return their reservations — spec 7b.
-	// No refund for running jobs (budget genuinely exhausted), but pre-run reservations are returned.
-	cancelPreRun := func(exps []*domain.Experiment, finalStatus domain.ExperimentStatus) {
-		for _, exp := range exps {
-			tierExhausted := (guaranteedExhausted && exp.CapacityTier == domain.CapacityGuaranteed) ||
-				(burstExhausted && exp.CapacityTier == domain.CapacityBurst)
-			if !tierExhausted {
-				continue
-			}
-			prevStatus := exp.Status
-			outcome, err := c.store.ResolveTermination(ctx, exp.ID, prevStatus, finalStatus,
-				string(domain.EvictionQuotaExhaustion), "")
-			if err != nil {
-				c.logger.Error("quota exhaustion cancel pre-run", zap.String("id", exp.ID), zap.Error(err))
-				continue
-			}
-			if outcome != domain.TerminationWritten {
-				continue
-			}
-			obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
-			// exp never reached RUNNING, so Settle derives zero usage from metrics
-			// regardless of the quota_exhaustion reason string — it never consumed anything.
-			exp.Status = finalStatus
-			exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
-			c.settleAndMark(ctx, exp)
-			// Status is already updated above (away from SUBMITTED) — if a Job was created
-			// for this experiment, it disappears on the cluster-agent's next reconcile pass.
-			c.logger.Info("quota exhaustion: cancelled pre-run job",
-				zap.String("agent", agentID),
-				zap.String("exp", exp.ID),
-				zap.String("status", string(exp.Status)),
-			)
-		}
-	}
-
-	// GetAgentQueuedExperiments returns both QUEUED and SUBMITTED experiments.
-	// SUBMITTED jobs have a backend workload created but not yet admitted — handled by cancelPreRun.
+	// Cancel pre-run jobs and return their reservations — spec 7b. No refund for running jobs
+	// (budget genuinely exhausted), but pre-run reservations are returned.
 	preRun, err := c.store.GetAgentQueuedExperiments(ctx, agentID, platformExpID)
 	if err != nil {
 		c.logger.Error("quota exhaustion: list pre-run jobs", zap.String("agent", agentID), zap.Error(err))
-	} else {
-		cancelPreRun(preRun, domain.StatusRejected)
+		return nil
 	}
-
+	for _, exp := range preRun {
+		if !tierExhausted(exp) {
+			continue
+		}
+		outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusRejected,
+			string(domain.EvictionQuotaExhaustion), "")
+		if err != nil {
+			c.logger.Error("quota exhaustion cancel pre-run", zap.String("id", exp.ID), zap.Error(err))
+			continue
+		}
+		if outcome != domain.TerminationWritten {
+			continue
+		}
+		obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
+		// exp never reached RUNNING, so Settle derives zero usage from metrics. If a Job was
+		// created for it, it disappears on the cluster-agent's next reconcile pass.
+		exp.Status = domain.StatusRejected
+		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
+		c.settleAndMark(ctx, exp)
+		c.logger.Info("quota exhaustion: cancelled pre-run job",
+			zap.String("agent", agentID),
+			zap.String("exp", exp.ID),
+		)
+	}
 	return nil
 }
 

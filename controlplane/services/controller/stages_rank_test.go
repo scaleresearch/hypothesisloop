@@ -166,7 +166,7 @@ func bestPerAgent(values map[string]float64) fakeObserved {
 }
 
 // rolesController takes an ObservedState rather than a URL, so a test that must prove no metric
-// was read can pass nil — the same "not wired to a metrics store" state cutOnMetric checks for.
+// was read can pass nil: reaching a metric read then panics.
 func rolesController(store *rolesStagesStore, observed ObservedState) *Controller {
 	return &Controller{stagesStore: store, observed: observed}
 }

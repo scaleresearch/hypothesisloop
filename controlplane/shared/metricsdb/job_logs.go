@@ -69,11 +69,6 @@ func GetLatestLogTail(ctx context.Context, dbURL, experimentID string, n int) ([
 	)
 	rows, err := querySQLRows(ctx, dbURL, querySQL)
 	if err != nil {
-		// The table not existing yet (nothing has ever been reported for any job) is not an
-		// error from the caller's point of view -- same as no rows.
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist") {
-			return []string{}, nil
-		}
 		return nil, fmt.Errorf("metricsdb.GetLatestLogTail: %w", err)
 	}
 	if len(rows) == 0 || len(rows[0]) == 0 {

@@ -37,6 +37,7 @@ func TestCreatePlatformExperimentRoundTripsMaxConcurrentAccelerators(t *testing.
 
 	pe, err := svc.Create(context.Background(), CreatePlatformExperimentRequest{
 		Name: "exp", BudgetAcceleratorHours: 10, StartsAt: time.Now(), EndsAt: time.Now().Add(time.Hour),
+		MaxAgents: 5, ReportIntervalSeconds: 10,
 		Metrics:                   []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		Stages:                    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		MaxConcurrentAccelerators: intPtr(4),
@@ -58,6 +59,7 @@ func TestCreatePlatformExperimentRejectsZeroMaxConcurrentAccelerators(t *testing
 
 	_, err := svc.Create(context.Background(), CreatePlatformExperimentRequest{
 		Name: "exp", BudgetAcceleratorHours: 10, StartsAt: time.Now(), EndsAt: time.Now().Add(time.Hour),
+		MaxAgents: 5, ReportIntervalSeconds: 10,
 		Metrics:                   []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		Stages:                    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		MaxConcurrentAccelerators: intPtr(0),

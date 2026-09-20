@@ -97,11 +97,6 @@ func GetLatestPhaseDetailFull(ctx context.Context, dbURL, experimentID, clusterN
 	)
 	rows, err := querySQLRows(ctx, dbURL, querySQL)
 	if err != nil {
-		// The table not existing yet (nothing has ever been reported for any job) is not an
-		// error from the caller's point of view -- same as no rows.
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist") {
-			return PhaseDetailRow{}, false, nil
-		}
 		return PhaseDetailRow{}, false, fmt.Errorf("metricsdb.GetLatestPhaseDetailFull: %w", err)
 	}
 	if len(rows) == 0 || len(rows[0]) != 5 {
@@ -180,11 +175,6 @@ func GetLatestPhaseDetailBatch(ctx context.Context, dbURL string, ids []string) 
 	)
 	rows, err := querySQLRows(ctx, dbURL, querySQL)
 	if err != nil {
-		// The table not existing yet (nothing has ever been reported for any job) is not an
-		// error from the caller's point of view -- same as no rows.
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist") {
-			return out, nil
-		}
 		return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: %w", err)
 	}
 	for _, row := range rows {

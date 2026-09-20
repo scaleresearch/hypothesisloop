@@ -35,9 +35,11 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := domain.RequireRankingMetric(metrics); err != nil {
 		return nil, invalidPlatformExperiment(err)
 	}
-	reportInterval := req.ReportIntervalSeconds
-	if reportInterval <= 0 {
-		reportInterval = 30
+	if req.ReportIntervalSeconds <= 0 {
+		return nil, invalidPlatformExperiment(errors.New("report_interval_seconds must be positive"))
+	}
+	if req.MaxAgents <= 0 {
+		return nil, invalidPlatformExperiment(errors.New("max_agents must be positive"))
 	}
 	stages := req.Stages
 	if len(stages) == 0 {
@@ -75,7 +77,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,
 		MaxAgents:                 req.MaxAgents,
 		Metrics:                   metrics,
-		ReportIntervalSeconds:     reportInterval,
+		ReportIntervalSeconds:     req.ReportIntervalSeconds,
 		StartsAt:                  req.StartsAt,
 		EndsAt:                    req.EndsAt,
 		Status:                    domain.PlatformExpOpen,
@@ -87,9 +89,6 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
-	}
-	if pe.MaxAgents <= 0 {
-		pe.MaxAgents = 100
 	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
@@ -380,15 +379,6 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			if pe.EndsAt.IsZero() || pe.EndsAt.After(now) {
 				continue
 			}
-			// TODO(winners): topResults is nil here, so Close never calls RecordTop3 for an
-			// auto-closed (ends_at-expired) platform experiment — the only realistic path for a
-			// real deadline-bound experiment. RecordTop3/HasTop3History (the quota bonus new
-			// experiments give agents with a prior top-3) is effectively dead code as a result.
-			// Fix: compute topResults here from the same per-agent-best-metric ranking the stage
-			// boundary and the final standings both already use
-			// (metricsdb.BestPerAgentOnMetric), keyed off pe.Metrics[0] as the primary metric,
-			// sorted best-first, then pass the top 3 into Close. Deliberately not done here —
-			// see agent/ session notes: no leaderboard/reputation use case needs it yet.
 			if err := s.Close(ctx, pe.ID, nil); err != nil {
 				s.logger.Error("sweep_expired: close failed",
 					zap.String("platform_experiment_id", pe.ID), zap.Error(err))

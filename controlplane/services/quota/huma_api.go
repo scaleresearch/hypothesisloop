@@ -124,7 +124,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "Operator/dashboard endpoint. name and budget_accelerator_hours are required. " +
+		Description: "Operator/dashboard endpoint. name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
 			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\".",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
@@ -467,7 +467,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		ID      string `path:"id"`
 		AgentID string `path:"agentID"`
 	}) (*struct{ Body *domain.AgentQuota }, error) {
-		aq, err := peh.svc.GetQuota(ctx, in.AgentID, in.ID)
+		aq, err := peh.svc.GetAgentQuota(ctx, in.AgentID, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

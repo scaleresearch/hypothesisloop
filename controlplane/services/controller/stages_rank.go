@@ -127,10 +127,6 @@ type ranked struct {
 
 // cutOnMetric returns the agents cut on one metric, and whether the metric produced usable data.
 func (c *Controller) cutOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, stage domain.Stage, survivors []string) ([]string, bool, error) {
-	if c.observed == nil {
-		return nil, false, nil
-	}
-
 	// Ranked by the same call the final standings use, so a mid-run cut and the final results can
 	// never rank the same field differently. Agents that only ever reported this metric on a
 	// non-"raw" basis come back flagged rather than ranked, and are treated here as no data on it

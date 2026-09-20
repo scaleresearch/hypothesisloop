@@ -339,9 +339,6 @@ func (s *Service) GetPlatformExperimentTimeseries(ctx context.Context, platformE
 // platformExperimentSeries reads one of the two gauges a metric sample is written as: its value
 // or the fraction_complete it was reported at.
 func (s *Service) platformExperimentSeries(ctx context.Context, gauge, platformExpID, metricName string, lookback time.Duration, end time.Time) ([]*domain.AgentMetricSeries, error) {
-	if lookback <= 0 {
-		lookback = 24 * time.Hour
-	}
 	if now := time.Now().UTC(); end.IsZero() || end.After(now) {
 		end = now
 	}

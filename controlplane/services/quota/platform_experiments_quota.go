@@ -9,43 +9,38 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// GetQuota returns an agent's allocation and current usage for a platform experiment, merging
+// GetAgentQuota returns an agent's allocation and current usage for a platform experiment, merging
 // the allocation and current desired estimates (Postgres) with observed consumption (metrics DB).
-func (s *PlatformExperimentsService) GetQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.GetQuota: %w", err)
+		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: %w", err)
 	}
 	if aq == nil {
 		return nil, nil
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.GetQuota: get platform experiment: %w", err)
+		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: get platform experiment: %w", err)
 	}
 	if pe == nil {
-		return nil, fmt.Errorf("platform_experiments.GetQuota: platform experiment %s not found", platformExpID)
+		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: platform experiment %s not found", platformExpID)
 	}
 	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
-		return nil, fmt.Errorf("platform_experiments.GetQuota: populate usage: %w", err)
+		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: populate usage: %w", err)
 	}
 	if err := s.store.AddDesiredQuotaUsageOne(ctx, aq); err != nil {
-		return nil, fmt.Errorf("platform_experiments.GetQuota: desired usage: %w", err)
+		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: desired usage: %w", err)
 	}
 	if err := s.correctRunningCosts(ctx, pe, []*domain.AgentQuota{aq}); err != nil {
-		return nil, fmt.Errorf("platform_experiments.GetQuota: running cost correction: %w", err)
+		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: running cost correction: %w", err)
 	}
 	return aq, nil
 }
 
-// GetAgentQuota is an alias for GetQuota satisfying the scheduler's QuotaService interface.
-func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
-	return s.GetQuota(ctx, agentID, platformExpID)
-}
-
 // GetObservedAgentQuota returns an agent's allocation with usage that counts only what has
 // actually happened: settled observed consumption plus each running job's observed-elapsed cost.
-// No reservation term — deliberately not GetQuota. Admission asks "may I start one more?", which
+// No reservation term — deliberately not GetAgentQuota. Admission asks "may I start one more?", which
 // no amount of actual state can answer, so it sums reservations. Eviction and billing ask "has
 // this budget been spent?", which is a claim about the actual state and nothing else; sharing one
 // figure between the two evicts running jobs for budget that only queued work reserved.
