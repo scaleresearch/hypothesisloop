@@ -28,8 +28,6 @@ shown. Resolve against the live environment, never guess.
                                                # operating the platform itself, not for a run
     HL_PROJECT=default                         # the project the platform experiment is created in
     METRICS_URL=http://localhost:8084
-    CODE_REPO_URL=<set below>
-    GIT_TOKEN=<set below>
     STAGES=<[]domain.Stage or unset>           # unset = stages.default in the control plane config
     FINDINGS_FILE=fix-later.md
     PLATFORM_EXPERIMENT_ID=<set in step 2>
@@ -70,28 +68,43 @@ silently improvise.
    **After any host reboot, check these too — none of them auto-restart:** the Tenstorrent DRA
    driver pod (kubelet sometimes fails to re-register it; `kubectl delete pod -n
    tt-operator-system -l app.kubernetes.io/name=tt-dra-driver` forces a clean re-register — job
-   pods fail with `CDI device injection failed` until this is done), `git-daemon` (`make
-   git-daemon-start`; job pods fail cloning with `connection refused` until it's back), and any
+   pods fail with `CDI device injection failed` until this is done), and any
    bare-metal node's `bare-agent` process (no systemd unit — restart its `start.sh` by hand; if it
    used an ephemeral cloudflare tunnel URL, prefer a plain LAN URL instead since that survives
    reboots without needing a new tunnel).
-3. **Shared code repo** `$CODE_REPO_URL` seeded with `$EXPERIMENT`'s own `seed/` (never
-   `tests/workloads/`). A missing `seed/` isn't automatically a bug — some experiments point at a
-   sibling's `seed/` in prose; check `experiment.md` first.
-   **`$CODE_REPO_URL` is a separate repo, not a live mirror of this one** — after editing
-   `seed/`, push it to `$CODE_REPO_URL`'s `main` too, and diff-check before spawning agents.
-   **`CODE_REPO_URL` must use the host address in `localdev/.host-address` (written by
-   `make render-settings`: `host.containers.internal` on macOS, the LAN IP on a Linux host, e.g.
-   `git://host.containers.internal/...`), never `127.0.0.1`.** The coordinator/agent containers run `--network host` so `127.0.0.1` resolves
-   there, but a job pod (k3s) is in a separate network namespace and can't reach the host's
-   loopback — `code_ref` built from a `127.0.0.1` `CODE_REPO_URL` fails to clone inside every job,
-   with no useful error beyond "connection refused". On macOS `host.containers.internal` is
-   answered inside the podman machine with a fixed address that leads to the Mac's loopback, so
-   it keeps working when the Mac changes networks; the git daemon listens on every interface.
-   Confirm reachability from *inside a real job pod*, not just from the coordinator container.
-   **`data_store.endpoint` in `controlplane/settings/hypothesisloop.yaml` has the same rule and
-   the same reason.** Job pods reach the object store directly to write checkpoints (the platform
-   is not in the data path), so it must be the host address too — the shipped value is the
+3. **Code repository**: a GitHub repository attached to the project `$HL_PROJECT`, holding
+   `$EXPERIMENT`'s own `seed/` (never `tests/workloads/`). A missing `seed/` isn't automatically
+   a bug — some experiments point at a sibling's `seed/` in prose; check `experiment.md` first.
+   Attach it once per project: in the UI under Settings, or with `POST /projects/{id}/repo`,
+   after installing the platform's GitHub App on the repository. An operator with the database
+   can record it with `hl-admin repo attach PROJECT INSTALLATION REPOSITORY_ID`.
+   `GET /projects/{id}/repo` shows what is attached. No address and no git token is handed to
+   anyone: an agent reads the address from its platform experiment (`code_repo_url` in
+   `hl platform-experiments get`) and does not start while the project has no repository.
+   **The attached repository is a separate repo, and no live mirror of this one** — after editing
+   `seed/`, push it to the repository's default branch too, and diff-check before spawning
+   agents. The experiment base lives there as `.hypothesisloop/job.yaml`, the job spec agents
+   submit, and optionally `.hypothesisloop/experiment.yaml`, the create body step 2 can read.
+   Agents can push to the repository, so protecting its default branch is the repository
+   owner's job, in the repository's own settings on GitHub.
+   Agents and jobs clone through `hl git-credential`, git's credential helper: it asks the
+   platform for a token minted for that call, limited to the one repository and good for about
+   an hour. The agent image and the platform's job image are configured for it. A job that runs
+   an image of its own needs `hl` in it and these two lines, or its clone of a private
+   repository is refused:
+
+       git config --system credential.https://github.com.helper \
+         '!API_URL="$HYPOTHESISLOOP_API_URL" HL_TOKEN="$HYPOTHESISLOOP_TOKEN" hl git-credential'
+       git config --system credential.https://github.com.useHttpPath true
+
+   Confirm the clone from *inside a real job pod*, not just from the coordinator container.
+   **`data_store.endpoint` in `controlplane/settings/hypothesisloop.yaml` must use the host
+   address in `localdev/.host-address` (written by `make render-settings`:
+   `host.containers.internal` on macOS, the LAN IP on a Linux host), never `127.0.0.1`.** The
+   coordinator/agent containers run `--network host` so `127.0.0.1` resolves there, but a job
+   pod (k3s) is in a separate network namespace and can't reach the host's loopback. Job pods
+   reach the object store directly to write checkpoints (the platform
+   is not in the data path) — the shipped value is the
    placeholder `http://REPLACE-WITH-HOST-ADDRESS:9000`, and loading a config whose endpoint is
    loopback is refused outright rather than failing later inside a job. `make controlplane-up`
    publishes the S3 store (Silo) on `:9000` and creates the bucket; the host address is reachable from the
@@ -107,11 +120,10 @@ silently improvise.
    (`imagePullPolicy: IfNotPresent`) — a build that never made it past `podman build` (no
    `podman push`) is invisible to every cluster node the same way a typo'd tag is. Build with
    the per-experiment `seed/build_and_push.sh` where one exists (it takes the registry from `localdev/.host-address`, pushes and renders the
-   job.yaml's placeholder image ref into `job.rendered.yaml`; push that to `$CODE_REPO_URL` with
+   job.yaml's placeholder image ref into `job.rendered.yaml`; push that to the attached repository with
    the rest of `seed/`, and run it again whenever the host address changes), or `make <name>-workload-image` for the platform's
    own images. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
    `localdev/.host-address`) from any cluster node before spawning any agents.
-5. `make git-daemon-start` (safe to re-run).
 
 ## 2. Create the platform experiment
 
@@ -128,6 +140,11 @@ thing agents read about the objective — system prompt is experiment-agnostic),
 Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `description`,
 `budget_accelerator_hours`, `max_agents`, `metrics`, `report_interval_seconds`, `starts_at`,
 `ends_at` (RFC3339).
+
+With `from_repo: true` in the file, every field it leaves out is read from
+`.hypothesisloop/experiment.yaml` at the head of the default branch of the project's repository.
+`budget_accelerator_hours`, `max_agents` and `ends_at` are always stated in the request and
+never read from the repository.
 
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.
@@ -265,8 +282,7 @@ in the shell's history:
 
     podman run -d --name agent-1 --network host --env-file /tmp/hlrun/<run>/agent-1.env \
       -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
-      -e API_URL=$API_URL -e CODE_REPO_URL=$CODE_REPO_URL \
-      -e GIT_TOKEN -e CLAUDE_CODE_OAUTH_TOKEN \
+      -e API_URL=$API_URL -e CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT
 
 A secret is named with a bare `-e NAME`, which hands the container the value from this shell's
@@ -297,10 +313,12 @@ attached in the background instead of `-d` and redirect its streams:
     podman run --name agent-1 ... localhost/hypothesisloop-experimentator-$EXPERIMENT \
       > /tmp/hlrun/<run>/agent-1.activity.log 2> /tmp/hlrun/<run>/agent-1.err &
 
-One shared private `$CODE_REPO_URL`; each agent works on branch
-`<agent_id>-$PLATFORM_EXPERIMENT_ID` (platform experiment id included so a fresh experiment always
-starts from a fresh branch off current `main` — see the agent's own system prompt for why) so
-`code_ref` (`$CODE_REPO_URL@<sha>`) always resolves to a real commit.
+One private repository per project; each agent works on branch
+`hl/$PLATFORM_EXPERIMENT_ID/<agent_id>` (platform experiment id included so a fresh experiment always
+starts from a fresh branch off the current default branch — see the agent's own system prompt for why) so
+`code_ref` (`<clone address>@<sha>`) always resolves to a real commit. An agent's credential
+can push, a job's and a coordinator's can only read, and none is handed out once the platform
+experiment is closed or the agent cut.
 
 Confirm the roster before handing off: `hl platform-experiments agents list
 $PLATFORM_EXPERIMENT_ID` shows every agent with what it was launched with, and a self-run agent
