@@ -1,16 +1,93 @@
 'use client'
 
+import { useState } from 'react'
+import { createOrg, createProject } from '@/lib/api'
 import { useProjectParam } from '@/lib/query-state'
-import { useTenant } from '@/lib/tenant'
+import { useRefreshMe, useTenant } from '@/lib/tenant'
+import type { Me, Project } from '@/types'
+import { Button } from '@/components/ui/button'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
-/** Picks the org and the project every page shows. The choice lives in the URL. */
+// Two orgs may carry the same name, so one that shares its name is told apart by the end of its id.
+function orgLabels(me: Me): Map<string, string> {
+  const shared = (name: string) => me.orgs.filter(o => o.name === name).length > 1
+  return new Map(me.orgs.map(o => [o.id, shared(o.name) ? `${o.name} (${o.id.slice(-6)})` : o.name]))
+}
+
+/**
+ * A "New ..." link that opens a name field in place. `create` makes the thing and switches to
+ * it. A refusal is shown and the field stays open with what was typed.
+ */
+function CreateByName({ what, create }: { what: string; create: (name: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  if (!open) return <Button variant="link" onClick={() => setOpen(true)}>+ New {what}</Button>
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await create(name.trim())
+      setName('')
+      setOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="wa-nav-create" onSubmit={submit}>
+      <input
+        className="field-sm"
+        autoFocus
+        aria-label={`New ${what} name`}
+        placeholder={`${what} name`}
+        value={name}
+        onChange={e => setName(e.target.value)}
+      />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
+          {busy ? 'Creating…' : 'Create'}
+        </Button>
+        <Button size="sm" type="button" disabled={busy} onClick={() => { setOpen(false); setError('') }}>Cancel</Button>
+      </div>
+      {error && <span className="text-error" style={{ fontSize: 11 }}>{error}</span>}
+    </form>
+  )
+}
+
+/** Picks the org and the project every page shows, and creates either. The choice lives in the URL. */
 export function ProjectSwitcher() {
-  const { me, org, project } = useTenant()
+  const { me, org, project, administers } = useTenant()
   const [, selectProject] = useProjectParam()
+  const refreshMe = useRefreshMe()
 
   const projectsOf = (orgID: string) => me.projects.filter(p => p.org_id === orgID)
   const orgs = me.orgs.filter(o => projectsOf(o.id).length > 0)
+  const labels = orgLabels(me)
+
+  // What was just created is switched to once GET /me lists it, which is what every page reads.
+  async function land(find: (p: Project) => boolean, missing: string) {
+    const created = (await refreshMe()).projects.find(find)
+    if (!created) throw new Error(missing)
+    selectProject(created.id)
+  }
+
+  async function newOrg(name: string) {
+    const created = await createOrg(name)
+    await land(p => p.org_id === created.id, `org ${created.id} was created, but GET /me lists no project of it`)
+  }
+
+  async function newProject(name: string) {
+    const created = await createProject(org.id, name)
+    await land(p => p.id === created.id, `project ${created.id} was created, but GET /me does not list it`)
+  }
 
   return (
     <div className="wa-nav-tenant">
@@ -19,11 +96,12 @@ export function ProjectSwitcher() {
         <SearchableSelect
           hideAllOption
           value={org.id}
-          options={orgs.map(o => ({ value: o.id, label: o.name }))}
+          options={orgs.map(o => ({ value: o.id, label: labels.get(o.id) as string }))}
           // Clearing the field picks nothing; switching org lands on its first project.
           onChange={id => { if (id && id !== org.id) selectProject(projectsOf(id)[0].id) }}
         />
       </label>
+      <CreateByName what="organization" create={newOrg} />
       <label>
         <span className="uppercase-label">Project</span>
         <SearchableSelect
@@ -33,6 +111,7 @@ export function ProjectSwitcher() {
           onChange={id => { if (id && id !== project.id) selectProject(id) }}
         />
       </label>
+      {administers && <CreateByName what="project" create={newProject} />}
     </div>
   )
 }

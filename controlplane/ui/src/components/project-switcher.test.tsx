@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createOrg, createProject, fetchMe } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ProjectSwitcher } from '@/components/project-switcher'
 import { Link } from '@/components/ui/link'
@@ -13,6 +15,8 @@ vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
+
+vi.mock('@/lib/api', () => ({ createOrg: vi.fn(), createProject: vi.fn(), fetchMe: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {
@@ -32,11 +36,21 @@ const me: Me = {
   ],
 }
 
-function show(projectID: string, children = <ProjectSwitcher />) {
+function show(projectID: string, children = <ProjectSwitcher />, as: Me = me) {
   navigation.search = projectID ? `project=${projectID}` : ''
-  const resolved = resolveTenant(me, projectID)
+  const resolved = resolveTenant(as, projectID)
   if (resolved.state !== 'selected') throw new Error(`no tenant for ${projectID}`)
-  return render(<TenantContext.Provider value={resolved.tenant}>{children}</TenantContext.Provider>)
+  return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
+      <TenantContext.Provider value={resolved.tenant}>{children}</TenantContext.Provider>
+    </SWRConfig>,
+  )
+}
+
+async function createByName(what: string, name: string) {
+  await userEvent.click(screen.getByRole('button', { name: `+ New ${what}` }))
+  await userEvent.type(screen.getByLabelText(`New ${what} name`), name)
+  await userEvent.click(screen.getByRole('button', { name: 'Create' }))
 }
 
 function field(label: string) {
@@ -107,6 +121,102 @@ describe('the org and project switcher', () => {
     await userEvent.click(field('Project'))
     await userEvent.click(screen.getByRole('option', { name: 'default' }))
     expect(navigation.push).not.toHaveBeenCalled()
+  })
+})
+
+describe('creating an organization', () => {
+  const created = { id: 'org_new', name: 'Robotics', role: 'owner' as const, created_at: at }
+  const after: Me = {
+    ...me,
+    orgs: [...me.orgs, created],
+    projects: [...me.projects, { id: 'prj_new', org_id: 'org_new', name: 'default', created_at: at }],
+  }
+
+  beforeEach(() => {
+    vi.mocked(createOrg).mockResolvedValue(created)
+    vi.mocked(fetchMe).mockResolvedValue(after)
+  })
+
+  it('creates it and switches to its default project', async () => {
+    show('prj_a1')
+    await createByName('organization', '  Robotics ')
+    expect(createOrg).toHaveBeenCalledExactlyOnceWith('Robotics')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_new')
+    expect(screen.queryByLabelText('New organization name')).toBeNull()
+  })
+
+  it('is open to a member, who owns what they create', async () => {
+    show('prj_b1')
+    expect(screen.getByRole('button', { name: '+ New organization' })).toBeTruthy()
+  })
+
+  it('shows the API\'s refusal, keeps what was typed and switches nowhere', async () => {
+    vi.mocked(createOrg).mockRejectedValue(new Error('org name is longer than 100 bytes'))
+    show('prj_a1')
+    await createByName('organization', 'Robotics')
+    expect(await screen.findByText('org name is longer than 100 bytes')).toBeTruthy()
+    expect(screen.getByLabelText('New organization name')).toHaveProperty('value', 'Robotics')
+    expect(navigation.push).not.toHaveBeenCalled()
+    expect(fetchMe).not.toHaveBeenCalled()
+  })
+
+  it('says so when the org was created but reading the account again fails', async () => {
+    vi.mocked(fetchMe).mockRejectedValue(new Error('Failed to fetch'))
+    show('prj_a1')
+    await createByName('organization', 'Robotics')
+    expect(await screen.findByText('Failed to fetch')).toBeTruthy()
+    expect(navigation.push).not.toHaveBeenCalled()
+  })
+
+  it('needs a name, and can be cancelled', async () => {
+    show('prj_a1')
+    await userEvent.click(screen.getByRole('button', { name: '+ New organization' }))
+    expect(screen.getByRole('button', { name: 'Create' })).toHaveProperty('disabled', true)
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('button', { name: '+ New organization' })).toBeTruthy()
+    expect(createOrg).not.toHaveBeenCalled()
+  })
+})
+
+describe('creating a project', () => {
+  const created = { id: 'prj_a3', org_id: 'org_a', name: 'speech', created_at: at }
+
+  beforeEach(() => {
+    vi.mocked(createProject).mockResolvedValue(created)
+    vi.mocked(fetchMe).mockResolvedValue({ ...me, projects: [...me.projects, created] })
+  })
+
+  it('creates it in the selected org and switches to it', async () => {
+    show('prj_a1')
+    await createByName('project', 'speech')
+    expect(createProject).toHaveBeenCalledExactlyOnceWith('org_a', 'speech')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_a3')
+  })
+
+  it('shows a name that is taken as the API says it, and switches nowhere', async () => {
+    vi.mocked(createProject).mockRejectedValue(new Error('project name default is already taken in this org'))
+    show('prj_a1')
+    await createByName('project', 'default')
+    expect(await screen.findByText('project name default is already taken in this org')).toBeTruthy()
+    expect(navigation.push).not.toHaveBeenCalled()
+  })
+
+  it('is not offered to a member, who may not change the org', () => {
+    show('prj_b1')
+    expect(screen.queryByRole('button', { name: '+ New project' })).toBeNull()
+  })
+})
+
+describe('two orgs with the same name', () => {
+  it('are told apart by the end of their ids', async () => {
+    const twins: Me = {
+      ...me,
+      orgs: [...me.orgs, { id: 'org_01aaaa-zzz999', name: 'Lab', role: 'owner', created_at: at }],
+      projects: [...me.projects, { id: 'prj_t', org_id: 'org_01aaaa-zzz999', name: 'default', created_at: at }],
+    }
+    show('prj_a1', <ProjectSwitcher />, twins)
+    await userEvent.click(field('Organization'))
+    expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['Ada', 'Lab (org_b)', 'Lab (zzz999)'])
   })
 })
 
