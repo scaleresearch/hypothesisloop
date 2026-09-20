@@ -132,6 +132,14 @@ def _list_reads(t: Tenant) -> list[str]:
     ]
 
 
+# Routes of the coordinator audience: an agent token is refused on them whatever they name.
+COORDINATOR_ONLY = ("/agents", "/findings", "/hypotheses/graph", "/hypotheses/stats")
+
+
+def _coordinator_only(path: str) -> bool:
+    return any(part in path for part in COORDINATOR_ONLY)
+
+
 def _leaks(response: requests.Response, t: Tenant) -> list[str]:
     return [identifier for identifier in t.identifiers() if identifier in response.text]
 
@@ -171,9 +179,7 @@ def test_another_orgs_rows_are_in_no_list(tenants):
     a, b = tenants
     for path in _list_reads(b):
         r = a.api.get(path)
-        assert r.status_code in (200, 404), f"org A GET {path}: {r.status_code} {r.text}"
-        if r.status_code == 404:
-            continue
+        assert r.status_code == 200, f"org A GET {path}: {r.status_code} {r.text}"
         assert not _leaks(r, b), f"org A GET {path} shows {_leaks(r, b)} of org B: {r.text}"
         assert r.headers.get("X-Total-Count", "0") == "0" or "?limit=200" in path, (
             f"org A GET {path} counts {r.headers['X-Total-Count']} rows of org B"
@@ -232,7 +238,7 @@ def test_another_org_writes_nothing(tenants):
     ]
     for method, path, body in writes:
         r = a.api.session.request(method, a.api._url(path), json=body, timeout=30)
-        assert r.status_code in (403, 404), f"org A {method} {path}: {r.status_code} {r.text}"
+        assert r.status_code == 404, f"org A {method} {path}: {r.status_code} {r.text}"
 
     after = {
         "pe": b.api.get_json(f"/platform-experiments/{b.pe_id}"),
@@ -300,14 +306,17 @@ def test_derived_tokens_stay_inside_their_platform_experiment(tenants):
     for scope in (f"agent:{a.pe_id}/{a.agent}", f"coordinator:{a.pe_id}"):
         caller = a.api.as_caller(admin.token(scope))
         assert caller.get(f"/platform-experiments/{a.pe_id}").status_code == 200, scope
+        is_agent = scope.startswith("agent:")
         for path in _reads_of_one_resource(b):
+            want = 403 if is_agent and _coordinator_only(path) else 404
             r = caller.get(path)
-            assert r.status_code in (403, 404), f"{scope} GET {path}: {r.status_code} {r.text}"
+            assert r.status_code == want, f"{scope} GET {path}: got {r.status_code}, want {want}: {r.text}"
         for path in _list_reads(b):
+            # A token bound to one platform experiment cannot ask for another project's listing.
+            want = 403 if is_agent and _coordinator_only(path) else 404 if "project_id=" in path else 200
             r = caller.get(path)
-            assert r.status_code in (200, 403, 404) and (r.status_code != 200 or not _leaks(r, b)), (
-                f"{scope} GET {path}: {r.status_code} {r.text}"
-            )
+            assert r.status_code == want, f"{scope} GET {path}: got {r.status_code}, want {want}: {r.text}"
+            assert r.status_code != 200 or not _leaks(r, b), f"{scope} GET {path} shows {_leaks(r, b)} of org B: {r.text}"
 
     agent = a.api.as_caller(admin.token(f"agent:{a.pe_id}/{a.agent}"))
     r = agent.post("/hypotheses", {"agent_id": b.agent, "platform_experiment_id": a.pe_id, "text": "as another agent",
