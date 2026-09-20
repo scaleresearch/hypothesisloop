@@ -58,14 +58,13 @@ type StoreDirectory struct {
 }
 
 // LauncherKnown reports whether a launcher of this name has anything to ask for: it is the one
-// config gives new hosted agents to, or its list still names an agent, running or in its
-// wind-down. The second half keeps a launcher that config no longer names working until its last
-// machine is gone, and no longer.
+// config gives new hosted agents to, or an agent is still assigned to it. The second half keeps
+// a launcher that config no longer names working until its last agent is gone.
 func (d StoreDirectory) LauncherKnown(ctx context.Context, name string) (bool, error) {
 	if name == d.ConfiguredLauncher {
 		return true, nil
 	}
-	return d.LauncherHasAgents(ctx, name, domain.AgentWindDown)
+	return d.LauncherHasAgents(ctx, name)
 }
 
 func NewStoreDirectory(pool *db.Pool) StoreDirectory {
