@@ -175,6 +175,12 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 	if err := e.pullImage(ctx, spec.Image); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Past the pull nothing is slow, and a cancel landing between create and start would leave a
+	// created container that no pass ever starts: reconcile counts it as already there.
+	ctx = context.WithoutCancel(ctx)
 	result, err := e.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: spec.Name,
 		Config: &container.Config{

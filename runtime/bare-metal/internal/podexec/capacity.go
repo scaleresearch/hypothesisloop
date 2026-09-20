@@ -23,30 +23,31 @@ type runningRequests struct {
 	accelerators map[string]int64 // "key=value" -> count in use
 }
 
+// A job with an operation in flight is counted from the operation: its requests are taken from
+// before its pull starts until its stop returns, whatever state the engine shows meanwhile.
 func (e *Executor) sumRunningRequests(ctx context.Context) (runningRequests, error) {
-	return e.sumRunningRequestsExcluding(ctx, "")
-}
-
-// sumRunningRequestsExcluding is sumRunningRequests but skips excludeExperimentID's own
-// container(s) — used by resolvePlacementFor so an experiment's already-running container never
-// counts as "in use" against its own placement recomputation. Without this, re-resolving
-// placement for an already-running job (every reconcile tick) would see its own device claim in
-// the running-requests tally and, whenever more than one device of that type exists, pick a
-// *different* free device each time — flipping the desired spec hash and looping
-// delete-then-recreate forever (see CreateWorkload's drift check).
-func (e *Executor) sumRunningRequestsExcluding(ctx context.Context, excludeExperimentID string) (runningRequests, error) {
+	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return runningRequests{}, err
 	}
-	out := runningRequests{accelerators: map[string]int64{}}
+	claims := make([]containerInfo, 0, len(ops)+len(containers))
+	for id, op := range ops {
+		if op.labels != nil {
+			claims = append(claims, containerInfo{Names: []string{containerName(id)}, Labels: op.labels})
+		}
+	}
 	for _, c := range containers {
-		if excludeExperimentID != "" && c.Labels[LabelExperimentID] == excludeExperimentID {
+		if _, busy := ops[c.Labels[LabelExperimentID]]; busy {
 			continue
 		}
 		if c.State != "running" && c.State != "created" {
 			continue
 		}
+		claims = append(claims, c)
+	}
+	out := runningRequests{accelerators: map[string]int64{}}
+	for _, c := range claims {
 		cpuMilli, err := requestLabel(c, LabelCPUCores)
 		if err != nil {
 			return runningRequests{}, err
@@ -142,7 +143,7 @@ func (e *Executor) GetLiveStorageCapacity(ctx context.Context) (available, total
 // e.nodeName — the bare-node shape of the same cluster->node->flavor->count contract k8sexec
 // reports. Every type the hardware publishes is reported; the control plane keeps the priced ones.
 func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (available, total map[string]int64, byNode map[string]map[string]int64, nodeLabels map[string]map[string]string, err error) {
-	devices, err := probeAccelerators(ctx)
+	devices, err := e.probe(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -252,8 +253,9 @@ func (e *Executor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[str
 
 // devicesInUseExcluding returns the set of host device paths (case-folded, matching the
 // case-insensitive comparison already used by GetLiveAcceleratorCapacitySnapshot above) actually
-// bound to a running/pending managed container, skipping excludeExperimentID's own container(s)
-// for the same reason sumRunningRequestsExcluding does.
+// bound to a running/pending managed container or held by an operation in flight, skipping
+// excludeExperimentID's own: counting a job's devices against its own placement would move it to
+// a different device every pass, flip its spec hash and recreate it forever.
 //
 // resolvePlacementFor used to infer "in use" positionally — treating the first N devices (in
 // probe order) matching a type as claimed, where N was just a per-type running count. That
@@ -262,11 +264,20 @@ func (e *Executor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[str
 // could then hand out an already-claimed device. Inspecting each container's actual
 // HostConfig.Devices instead ties "in use" to the specific device path really passed through.
 func (e *Executor) devicesInUseExcluding(ctx context.Context, excludeExperimentID string) (map[string]bool, error) {
+	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	inUse := map[string]bool{}
+	for id, op := range ops {
+		if id == excludeExperimentID {
+			continue
+		}
+		for _, d := range op.devices {
+			inUse[strings.ToLower(d)] = true
+		}
+	}
 	for _, c := range containers {
 		if excludeExperimentID != "" && c.Labels[LabelExperimentID] == excludeExperimentID {
 			continue
@@ -316,8 +327,12 @@ func nvidiaDevicePath(deviceID string) string {
 
 // currentDevicesFor returns the device paths the experiment's container was created with, in the
 // order they were assigned, or nil if it has no container. An exited container counts: placing
-// it afresh would change its spec hash, so reconcile would remove it and run the job again.
+// it afresh would change its spec hash, so reconcile would remove it and run the job again. A job
+// still pulling has no container yet and keeps the devices its operation was started with.
 func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) ([]string, error) {
+	if op, busy := e.operations()[experimentID]; busy && op.devices != nil {
+		return op.devices, nil
+	}
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return nil, err
@@ -351,9 +366,9 @@ func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) (
 }
 
 // resolvePlacementFor picks which free local devices satisfy exp's AcceleratorType/Count —
-// the single-node analogue of k8sexec's ResolveAcceleratorPlacement. Placement is a pure
-// function of live device probes plus current container labels, recomputed every call: no
-// reservation ledger (different-backend.md §4.4).
+// the single-node analogue of k8sexec's ResolveAcceleratorPlacement. Placement is a function of
+// live device probes, current containers and the operations in flight, recomputed every call.
+// Only the reconcile pass calls it, so two jobs are never placed at the same time.
 func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experiment) (Placement, error) {
 	// The job's TOTAL, not its top-level count: a grouped job states its accelerators per group
 	// and leaves the top-level count at zero, so keying on that resolved no devices and then
@@ -363,7 +378,7 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 	if count <= 0 {
 		return Placement{}, nil
 	}
-	devices, err := probeAccelerators(ctx)
+	devices, err := e.probe(ctx)
 	if err != nil {
 		return Placement{}, err
 	}

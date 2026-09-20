@@ -89,6 +89,7 @@ func main() {
 		Log:               log,
 	}
 	a.Run(ctx)
+	exec.Wait()
 }
 
 // parseNodeLabels parses "k1=v1,k2=v2" into a map — the bare-node equivalent of one fleet.yaml

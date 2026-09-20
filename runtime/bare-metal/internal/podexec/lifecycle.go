@@ -14,7 +14,14 @@ import (
 
 // CreateWorkload places exp's container on this node. No admission handshake: the scheduler
 // loop already decided this experiment fits before calling this, matching k8sexec.CreateWorkload.
+//
+// The devices are chosen here, in the pass. The pull and start then run in their own goroutine
+// under ctx, so a slow pull holds up no other job; a failure is logged and the next pass, finding
+// the job still without a container, tries again.
 func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
+	if _, busy := e.operations()[exp.ID]; busy {
+		return nil
+	}
 	placement, err := e.resolvePlacementFor(ctx, exp)
 	if err != nil {
 		return err
@@ -42,16 +49,20 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 			}
 			return nil // already running the desired spec
 		}
-		// Drifted: remove the stale container (whatever state it's in) so this call can
-		// recreate it fresh, mirroring k8sexec's delete-then-error-for-retry pattern.
-		if err := e.removeContainer(ctx, c.name()); err != nil {
-			return fmt.Errorf("podexec: remove drifted container %s: %w", c.name(), err)
+		// Drifted: remove the stale container (whatever state it's in). A later pass, finding
+		// it gone, creates the desired one.
+		name := c.name()
+		e.begin(ctx, exp.ID, "remove drifted container of", operation{}, func(ctx context.Context) error {
+			return e.removeContainer(ctx, name)
+		})
+		return nil
+	}
+	e.begin(ctx, exp.ID, "create workload", operation{starting: true, labels: spec.Labels, devices: placement.DevicePaths}, func(ctx context.Context) error {
+		if err := e.startContainer(ctx, spec); err != nil {
+			return fmt.Errorf("podexec: start container for %s: %w", exp.ID, err)
 		}
-		return fmt.Errorf("podexec: stale container for %s removed; retry creation", exp.ID)
-	}
-	if err := e.startContainer(ctx, spec); err != nil {
-		return fmt.Errorf("podexec: start container for %s: %w", exp.ID, err)
-	}
+		return nil
+	})
 	return nil
 }
 
@@ -59,7 +70,18 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 // stopped IS the "gone" record until pruneTerminal removes it (different-backend.md §4.6).
 // A naive remove-on-delete would mean status reporting could never observe
 // a "gone" phase for a container that no longer exists to be listed.
+//
+// The stop runs in its own goroutine under ctx and may take the whole grace. Until it returns the
+// job keeps its requests and devices, whatever state the engine reports for a container that is
+// on its way down. A job still pulling has its pull cancelled instead; if a container came up
+// anyway, a later pass finds it and stops it here.
 func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error {
+	if op, busy := e.operations()[experimentID]; busy {
+		if op.starting {
+			op.cancel()
+		}
+		return nil
+	}
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return err
@@ -72,7 +94,15 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 		if err != nil {
 			return fmt.Errorf("podexec: container %s: %w", c.name(), err)
 		}
-		return e.stopContainer(ctx, c.name(), grace)
+		devices, err := e.currentDevicesFor(ctx, experimentID)
+		if err != nil {
+			return err
+		}
+		name := c.name()
+		e.begin(ctx, experimentID, "delete workload", operation{labels: c.Labels, devices: devices}, func(ctx context.Context) error {
+			return e.stopContainer(ctx, name, grace)
+		})
+		return nil
 	}
 	return nil // nothing to delete
 }
@@ -105,12 +135,22 @@ func stopGrace(labels map[string]string, grantCheckpointWindow bool) (int64, err
 // still running or pending — used by the reconcile loop to diff actual vs desired. A container
 // already stopped is not "actual" (its job no longer occupies capacity), matching k8sexec
 // excluding Jobs mid-teardown.
+//
+// A job with an operation in flight is listed from the operation alone: one that is pulling is
+// actual, so the pass compares it with desired state and deletes it when it is no longer wanted,
+// and one being stopped or removed is left out, so the pass starts nothing more for it.
 func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
+	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var ids []string
+	for id, op := range ops {
+		if op.starting {
+			ids = append(ids, id)
+		}
+	}
 	for _, c := range containers {
 		if c.State != "running" && c.State != "created" {
 			continue
@@ -120,6 +160,9 @@ func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
 			// One unidentifiable container must not brick the node: this list drives both
 			// reconcile and status reporting (important.md #19).
 			log.Printf("podexec: skipping managed container %q with no experiment identity", c.name())
+			continue
+		}
+		if _, busy := ops[id]; busy {
 			continue
 		}
 		ids = append(ids, id)
@@ -166,6 +209,9 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 	desired, err := e.BuildContainerSpec(exp, placement)
 	if err != nil {
 		return false, err
+	}
+	if op, busy := e.operations()[exp.ID]; busy && op.starting {
+		return op.labels[LabelDesiredSpecHash] == desired.Labels[LabelDesiredSpecHash], nil
 	}
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
@@ -259,7 +305,12 @@ func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.
 // (different-backend.md §4.6: the stopped container is the "gone" record right up until it's
 // pruned). No retained cleanup queue — every tick recomputes purely from currently-listed
 // containers, so a restart of this process loses nothing.
+//
+// A job with an operation in flight is skipped: an engine can report a container as neither
+// running nor created while its stop is still inside the grace, and removing it then would kill a
+// job in the middle of its checkpoint.
 func (e *Executor) reapTerminal(ctx context.Context, desiredIDs map[string]bool) error {
+	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return err
@@ -268,15 +319,17 @@ func (e *Executor) reapTerminal(ctx context.Context, desiredIDs map[string]bool)
 		if c.State == "running" || c.State == "created" {
 			continue
 		}
-		if desiredIDs[c.Labels[LabelExperimentID]] {
+		id := c.Labels[LabelExperimentID]
+		if desiredIDs[id] {
 			continue
 		}
-		if err := e.removeContainer(ctx, c.name()); err != nil {
-			// Finish the pass: one container that refuses to be removed must not leave every
-			// other terminal container on the node un-reaped (important.md #19).
-			log.Printf("podexec: reap terminal container %s: %v", c.name(), err)
+		if _, busy := ops[id]; busy {
 			continue
 		}
+		name := c.name()
+		e.begin(ctx, id, "reap terminal container of", operation{}, func(ctx context.Context) error {
+			return e.removeContainer(ctx, name)
+		})
 	}
 	return nil
 }

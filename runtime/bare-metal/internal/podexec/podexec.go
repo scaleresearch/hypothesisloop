@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/moby/moby/client"
 
@@ -61,7 +62,7 @@ type Executor struct {
 	// docker is the Engine API client connected to whichever engine resolveEngineClient found
 	// (podman's Docker-compatible socket, or dockerd's own) — every container operation this
 	// package makes goes through it; nothing here shells out.
-	docker *client.Client
+	docker engine
 	// engineName is the resolved engine's name ("podman" or "docker"), for logging only.
 	engineName string
 	// storageQuotaEnforced is decided once at startup (see scratchQuotaSupported): whether
@@ -70,6 +71,24 @@ type Executor struct {
 	// as a hard dimension) but is not passed to the engine as an enforced quota — see
 	// BuildContainerSpec.
 	storageQuotaEnforced bool
+	probe                func(context.Context) ([]acceleratorDevice, error)
+
+	mu       sync.Mutex
+	inFlight map[string]operation
+	workers  sync.WaitGroup
+}
+
+// engine is the part of the Engine API client this package calls.
+type engine interface {
+	ContainerList(ctx context.Context, options client.ContainerListOptions) (client.ContainerListResult, error)
+	ContainerInspect(ctx context.Context, containerID string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error)
+	ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error)
+	ContainerStart(ctx context.Context, containerID string, options client.ContainerStartOptions) (client.ContainerStartResult, error)
+	ContainerStop(ctx context.Context, containerID string, options client.ContainerStopOptions) (client.ContainerStopResult, error)
+	ContainerRemove(ctx context.Context, containerID string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
+	ContainerLogs(ctx context.Context, containerID string, options client.ContainerLogsOptions) (client.ContainerLogsResult, error)
+	ImageInspect(ctx context.Context, imageID string, inspectOpts ...client.ImageInspectOption) (client.ImageInspectResult, error)
+	ImagePull(ctx context.Context, refStr string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 }
 
 func New(cfg Config) (*Executor, error) {
@@ -106,6 +125,7 @@ func New(cfg Config) (*Executor, error) {
 		docker:               docker,
 		engineName:           engineName,
 		storageQuotaEnforced: quotaSupported,
+		probe:                probeAccelerators,
 	}, nil
 }
 

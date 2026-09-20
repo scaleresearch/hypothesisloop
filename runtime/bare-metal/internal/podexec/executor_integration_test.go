@@ -59,8 +59,10 @@ func TestIntegrationLifecycle(t *testing.T) {
 	if err := e.CreateWorkload(ctx, exp); err != nil {
 		t.Fatalf("CreateWorkload: %v", err)
 	}
+	e.Wait()
 	t.Cleanup(func() {
 		_ = e.DeleteWorkload(context.Background(), exp.ID, false)
+		e.Wait()
 		_ = e.removeContainer(context.Background(), containerName(exp.ID))
 	})
 
@@ -105,9 +107,11 @@ func TestIntegrationLifecycle(t *testing.T) {
 	if err := e.DeleteWorkload(ctx, exp.ID, false); err != nil {
 		t.Fatalf("DeleteWorkload: %v", err)
 	}
+	e.Wait()
 	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{}); err != nil {
 		t.Fatalf("ReapTerminal: %v", err)
 	}
+	e.Wait()
 	status, err = e.PollJobStatus(ctx, exp.ID)
 	if err != nil {
 		t.Fatalf("PollJobStatus after delete: %v", err)
