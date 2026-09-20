@@ -44,10 +44,8 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	if basis == "" {
 		basis = "raw"
 	}
-	// Both become Prometheus labels, so both must stay small and bounded — unconstrained free
-	// text is unbounded label cardinality in the metrics store. metric_name matters at least as
-	// much as metric_basis: a job embedding a step counter in the name creates one series per
-	// sample, degrading the exact ranking and silence queries this check protects.
+	// Both become Prometheus labels, so each is held to a short printable value. How many
+	// distinct names one job may report is not bounded: see fix-later.md.
 	if err := validMetricLabel("metric_name", metricName); err != nil {
 		return err
 	}
