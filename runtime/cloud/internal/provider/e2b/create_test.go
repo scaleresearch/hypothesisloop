@@ -193,7 +193,7 @@ func TestCreateNamesTheTemplateThatIsNotBuiltAndHowToBuildIt(t *testing.T) {
 	p := newTestProvider(t, api)
 
 	_, err := p.Create(context.Background(), agentSpec())
-	want := "build it with `infra/images/e2b-template.sh registry.example/agent:1 2 4096`"
+	want := "build it with `go run ./runtime/cloud/cmd/e2b-template registry.example/agent:1 2 4096`"
 	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), agentTemplate) {
 		t.Fatalf("err = %v, want one naming template %s and saying %q", err, agentTemplate, want)
 	}

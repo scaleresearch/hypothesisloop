@@ -10,8 +10,9 @@ import (
 
 const bytesPerMB = 1 << 20
 
-// templateScript builds the template an image and size need.
-const templateScript = "infra/images/e2b-template.sh"
+// templateCommand builds the template an image and size need (TemplateBuilder), run from the
+// repository's root with the image, the cores and the memory in MiB after it.
+const templateCommand = "go run ./runtime/cloud/cmd/e2b-template"
 
 // size is what a template fixes for every sandbox started from it.
 type size struct {
@@ -24,7 +25,7 @@ func sizeOf(spec provider.Spec) size {
 }
 
 // templateName is the name of the template for an image at a size. It is a function of the two
-// and nothing else, so there is no table of images to keep: templateScript computes the same
+// and nothing else, so there is no table of images to keep: TemplateBuilder builds it under the same
 // name when it builds the template, and a spec whose template was never built fails at Create
 // with the command that builds it. The image reference is hashed because a template name holds
 // neither slashes nor colons.

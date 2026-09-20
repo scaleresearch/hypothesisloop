@@ -1,7 +1,6 @@
 package e2b
 
 import (
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -9,7 +8,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
-// The names below are what infra/images/e2b-template.sh printed when it built these templates.
+// The names below are the ones these templates were built under.
 func TestTemplateNameIsTheOneTheBuildScriptGives(t *testing.T) {
 	cases := map[string]struct {
 		image string
@@ -52,15 +51,5 @@ func TestSizeRoundsUpToWholeCoresAndMebibytes(t *testing.T) {
 		if got := sizeOf(spec); got != want {
 			t.Errorf("sizeOf(%d millicores, %d bytes) = %+v, want %+v", spec.CPUMillis, spec.MemoryBytes, got, want)
 		}
-	}
-}
-
-func TestTheBuildScriptThisPackageNamesExistsAndWritesTheFileTheSupervisorReads(t *testing.T) {
-	script, err := os.ReadFile("../../../../../" + templateScript)
-	if err != nil {
-		t.Fatalf("the script named in Create's error: %v", err)
-	}
-	if !strings.Contains(string(script), "> "+imageEnvPath) {
-		t.Errorf("%s does not write %s, which every launch file reads first", templateScript, imageEnvPath)
 	}
 }

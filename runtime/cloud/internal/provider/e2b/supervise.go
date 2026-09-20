@@ -21,7 +21,7 @@ const (
 	// supervisorTag is the name envd knows the supervisor's process by.
 	supervisorTag = "hl-supervisor"
 
-	// imageEnvPath is where templateScript leaves the image's own environment, which a template
+	// imageEnvPath is where a template build leaves the image's own environment, which a template
 	// does not carry into its sandboxes.
 	imageEnvPath = "/etc/hl-image.env"
 )

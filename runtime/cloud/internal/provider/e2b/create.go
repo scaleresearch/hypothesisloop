@@ -47,7 +47,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	_, err := p.call(ctx, http.MethodPost, "/v2/sandboxes", req, &created)
 	if hasStatus(err, http.StatusNotFound) {
 		return "", fmt.Errorf("e2b: template %s for image %q with %d cores and %d MiB of memory is not built; build it with `%s %s %d %d`: %w",
-			template, spec.Image, asked.CPUs, asked.MemoryMB, templateScript, spec.Image, asked.CPUs, asked.MemoryMB, err)
+			template, spec.Image, asked.CPUs, asked.MemoryMB, templateCommand, spec.Image, asked.CPUs, asked.MemoryMB, err)
 	}
 	if err != nil {
 		return "", err
@@ -109,7 +109,7 @@ func (p *Provider) awaitSupervisor(ctx context.Context, inside envd, id, name, t
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("e2b: sandbox %s was created for %q and its supervisor did not start; it needs sh and %s as %s writes it into template %s: %w",
-				id, name, imageEnvPath, templateScript, template, ctx.Err())
+				id, name, imageEnvPath, templateCommand, template, ctx.Err())
 		case <-ticker.C:
 		}
 	}
