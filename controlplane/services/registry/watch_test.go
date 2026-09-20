@@ -42,10 +42,16 @@ type fakeEvents struct {
 	next int64
 	// concernsCalls counts the times the agent scope was asked, each one a graph read.
 	concernsCalls atomic.Int32
+	// listenGate, when set, holds LISTEN back until it is closed: the window in which a client
+	// can connect to a hub nothing is feeding.
+	listenGate chan struct{}
+	// listening is closed once LISTEN is first in effect.
+	listening     chan struct{}
+	listeningOnce sync.Once
 }
 
 func newFakeEvents(stored ...db.Event) *fakeEvents {
-	return &fakeEvents{stored: stored, live: make(chan db.Event, 16)}
+	return &fakeEvents{stored: stored, live: make(chan db.Event, 16), listening: make(chan struct{})}
 }
 
 func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int64) ([]db.Event, error) {
@@ -93,7 +99,16 @@ func (f *fakeEvents) concerns(filter db.EventFilter, e db.Event) bool {
 	}
 }
 
-func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- db.Event) error {
+func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- db.Event, listening func()) error {
+	if f.listenGate != nil {
+		select {
+		case <-f.listenGate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	listening()
+	f.listeningOnce.Do(func() { close(f.listening) })
 	for {
 		select {
 		case e := <-f.live:
@@ -119,11 +134,14 @@ func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment
 	return s.exp, nil
 }
 
-func watchServer(t *testing.T, source EventSource) *httptest.Server {
+func watchServer(t *testing.T, source *fakeEvents) *httptest.Server {
 	t.Helper()
 	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
+	if source.listenGate == nil {
+		<-source.listening
+	}
 	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
 	t.Cleanup(func() {
 		server.Close()
@@ -973,11 +991,13 @@ func TestAControlFrameNamingAnUnknownKindIsRefusedAndLeavesTheFilterAlone(t *tes
 // being a subscriber registry: an entry exists for exactly as long as its socket does, so a
 // watcher that died is not listed — which is the true answer, not a missing one.
 func TestListingSubscriptionsReportsTheLiveConnectionsAndForgetsThemWhenTheyClose(t *testing.T) {
-	handler := NewWatchHandler(newFakeEvents(),
+	source := newFakeEvents()
+	handler := NewWatchHandler(source,
 		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	handler.Start(ctx)
+	<-source.listening
 	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
 	defer server.Close()
 
@@ -1193,5 +1213,28 @@ func TestAConnectionForgetsTheEventsItsFloorHasPassedAndStillDropsTheirRepeats(t
 	}
 	if wire.writes == written {
 		t.Errorf("another event of the transaction at the floor was dropped")
+	}
+}
+
+// A client that connects while LISTEN is down replays and then waits on a hub nothing feeds.
+// Whatever commits before LISTEN is back is in neither its replay nor its stream, and later
+// cursors pass it, so the connection has to end once LISTEN is back: the reconnect replays.
+func TestAClientConnectedWhileNothingWasListeningIsDroppedOnceListenIsBack(t *testing.T) {
+	source := newFakeEvents(statusEvent("exp-1", "RUNNING", "agent-a", 100))
+	source.listenGate = make(chan struct{})
+	server := watchServer(t, source)
+	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
+	if got := client.next(t).Value; got != "RUNNING" {
+		t.Fatalf("replay on connect: got = %v, want = %v", got, "RUNNING")
+	}
+
+	close(source.listenGate)
+
+	if err := client.conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: got = %v, want = nil", err)
+	}
+	_, err := io.Copy(io.Discard, client.r)
+	if err != nil {
+		t.Fatalf("connection after LISTEN came back: got = %v, want = closed by the server", err)
 	}
 }

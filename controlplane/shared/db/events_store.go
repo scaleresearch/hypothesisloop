@@ -295,8 +295,9 @@ func NewEventsStore(pool *Pool, hypotheses HypothesisEvents) *EventsStore {
 // ListenEvents holds one dedicated connection on LISTEN and forwards every notification to out
 // until ctx ends or the connection breaks, returning why. It never reconnects itself: the caller
 // owns the retry policy, and a caller that reconnects must also replay from its last cursor,
-// which only the caller knows.
-func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event) error {
+// which only the caller knows. listening is called once LISTEN is in effect: every event
+// committed after it returns is forwarded, and none committed before it is.
+func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event, listening func()) error {
 	conn, err := s.pool.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("events_store.ListenEvents: acquire: %w", err)
@@ -306,6 +307,7 @@ func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event) error 
 	if _, err := conn.Exec(ctx, "LISTEN "+eventsChannel); err != nil {
 		return fmt.Errorf("events_store.ListenEvents: listen: %w", err)
 	}
+	listening()
 	for {
 		n, err := conn.Conn().WaitForNotification(ctx)
 		if err != nil {

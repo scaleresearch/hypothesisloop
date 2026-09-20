@@ -23,7 +23,7 @@ import (
 // owns them (db.EventsStore): the live one from Postgres LISTEN/NOTIFY, the catch-up one derived
 // from the rows the events describe. Concerns completes db.EventFilter.Matches for an agent filter.
 type EventSource interface {
-	ListenEvents(ctx context.Context, out chan<- db.Event) error
+	ListenEvents(ctx context.Context, out chan<- db.Event, listening func()) error
 	Replay(ctx context.Context, filter db.EventFilter, since int64) ([]db.Event, error)
 	Concerns(ctx context.Context, filter db.EventFilter, events []db.Event) ([]db.Event, error)
 }
@@ -176,7 +176,7 @@ func (h *hub) broadcast(e db.Event) {
 
 // dropAll ends every live connection. Called when the LISTEN connection breaks: from that moment
 // this process cannot know what it is not being told, and a stream that silently stops carrying
-// events is worse than one that visibly ends.
+// events is worse than one that visibly ends. Called again when LISTEN is back, see Start.
 func (h *hub) dropAll() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -209,14 +209,16 @@ func NewWatchHandler(source EventSource, experiments experimentLookup, logger *z
 }
 
 // Start runs the single LISTEN connection for this process until ctx ends, re-establishing it
-// when it breaks.
+// when it breaks. A client that connected while nothing was listening replayed before LISTEN took
+// effect, so events committed in between reached neither its replay nor its stream: every
+// connection is dropped again once LISTEN is in effect, and replays.
 func (h *WatchHandler) Start(ctx context.Context) {
 	go func() {
 		for ctx.Err() == nil {
 			events := make(chan db.Event, listenerBuffer)
 			done := make(chan error, 1)
 			listenCtx, cancel := context.WithCancel(ctx)
-			go func() { done <- h.source.ListenEvents(listenCtx, events) }()
+			go func() { done <- h.source.ListenEvents(listenCtx, events, h.hub.dropAll) }()
 
 			for draining := true; draining; {
 				select {
