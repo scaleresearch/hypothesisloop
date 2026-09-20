@@ -797,8 +797,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 <tr>
                   <th style={{ width: 110 }}>Verdict</th>
                   <th>Hypothesis</th>
-                  <th>Newest finding</th>
                   <th style={{ width: 170, textAlign: 'right' }}>Best job</th>
+                  <th title="The best job's own summary. Without one, the newest finding of the hypothesis, named with the job it is about.">Finding</th>
                 </tr>
               </thead>
               <tbody>
@@ -815,11 +815,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                     <td style={{ fontSize: 12 }}>
                       <Link href={`/hypotheses/${h.id}`} className="text-link" style={TWO_LINES} title={h.text}>{h.text}</Link>
                     </td>
-                    <td style={{ fontSize: 12 }}>
-                      {h.finding
-                        ? <span style={TWO_LINES} title={h.finding.summary}>{h.finding.summary}</span>
-                        : <span className="text-muted">no finding filed</span>}
-                    </td>
                     <td className="mono" style={{ textAlign: 'right' }}>
                       {h.best_job ? (
                         <Link href={`/jobs/${h.best_job.id}`} className="text-link" title={h.best_job.id}>
@@ -827,6 +822,16 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         </Link>
                       ) : <span className="text-muted">—</span>}
                       {h.best_job && unsummarized?.has(h.best_job.id) && <div><NoSummary /></div>}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {h.best_job?.summary ? (
+                        <span style={TWO_LINES} title={h.best_job.summary}>{h.best_job.summary}</span>
+                      ) : h.finding ? (
+                        <span style={TWO_LINES} title={h.finding.summary}>
+                          <Link href={`/jobs/${h.finding.experiment_id}`} className="text-link mono">{h.finding.experiment_id}</Link>
+                          {': '}{h.finding.summary}
+                        </span>
+                      ) : <span className="text-muted">no finding filed</span>}
                     </td>
                   </tr>
                 ))}

@@ -18,6 +18,7 @@ import type {
   HypothesisListItem,
   HypothesisStatus,
   HypothesisWithJobs,
+  JobMetric,
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
@@ -265,7 +266,8 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
 // testing it that did best on the ranking metric.
 export interface HypothesisEvidence extends Hypothesis {
   finding?: HypothesisFinding
-  best_job?: { id: string; metric: { name: string; best: number; basis: string } }
+  // summary is the write-up filed for that job, absent when none was.
+  best_job?: { id: string; metric: JobMetric; summary?: string }
 }
 
 // Drawn from the 200 newest hypotheses.

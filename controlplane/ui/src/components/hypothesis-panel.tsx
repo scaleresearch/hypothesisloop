@@ -93,7 +93,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
         {finding && (
           <div className="hg-stack" style={{ gap: 4 }}>
             <span className="uppercase-label">
-              Newest finding
+              Newest finding · <Link href={`/jobs/${finding.experiment_id}`} className="text-link mono" style={{ textTransform: 'none' }}>{finding.experiment_id}</Link>
               {filedAfterVerdict(node, finding.created_at) && <span style={{ color: semantic.warning }}> · filed after the verdict</span>}
             </span>
             <p style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: 160, overflowY: 'auto' }}>
