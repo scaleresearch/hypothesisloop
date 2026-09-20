@@ -2,12 +2,14 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { addPlatformExperimentAgents, fetchPlatformExperimentAgents, removePlatformExperimentAgent } from '@/lib/api'
+import {
+  addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
+} from '@/lib/api'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 import { Button, Chip } from '@/components/ui/button'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { SecretOnce } from '@/components/ui/secret-once'
+import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
 // The specializations the agent harness ships: see agents/coordinator/setup.md. Another name is
@@ -25,15 +27,13 @@ function envFile(agent: JoinedAgent): string {
   ].join('\n')
 }
 
-function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: () => Promise<unknown> }) {
+function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: JoinedAgent[]) => Promise<unknown> }) {
   const [count, setCount] = useState('1')
   const [hosted, setHosted] = useState(true)
   const [flavor, setFlavor] = useState('')
   const [model, setModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  // Agents the operator runs, each with the token this answer alone carries.
-  const [selfRun, setSelfRun] = useState<JoinedAgent[]>([])
 
   const n = Number(count)
   const countValid = Number.isInteger(n) && n >= 1 && n <= 100
@@ -43,11 +43,9 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: () => Pro
     setBusy(true)
     setError('')
     try {
-      const joined = await addPlatformExperimentAgents(pe.id, {
+      await onAdded(await addPlatformExperimentAgents(pe.id, {
         count: n, hosted, flavor: flavor.trim() || undefined, model: model.trim() || undefined,
-      })
-      setSelfRun(current => [...current, ...joined.filter(a => a.token)])
-      await onAdded()
+      }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -98,23 +96,10 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: () => Pro
       <span className="text-dim" style={{ fontSize: 11 }}>
         {hosted
           ? 'The platform starts one machine per agent and keeps it until the experiment closes or the agent is cut.'
-          : 'Each agent comes back with a token. You start the agent yourself with it.'}
+          : 'Each agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
         {!countValid && ' Count must be 1 to 100.'}
       </span>
       {error && <ErrorMessage>{error}</ErrorMessage>}
-      {selfRun.map(agent => (
-        <SecretOnce
-          key={agent.agent_id}
-          label={`Env file of ${agent.name}`}
-          value={envFile(agent)}
-          note={<>
-            Save it as an env file readable by you alone and start the agent with it. The token acts
-            as this agent in this platform experiment and nowhere else. This page shows it now and
-            never again.
-          </>}
-          onDismiss={() => setSelfRun(current => current.filter(a => a.agent_id !== agent.agent_id))}
-        />
-      ))}
     </div>
   )
 }
@@ -126,18 +111,39 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
     () => fetchPlatformExperimentAgents(pe.id),
     { refreshInterval: 15_000 },
   )
-  const [removeError, setRemoveError] = useState('')
+  const [rowError, setRowError] = useState('')
+  // Self-run agents whose token is on screen: the ones just added, and any asked for again.
+  const [shown, setShown] = useState<JoinedAgent[]>([])
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
 
   async function remove(agent: AgentSignup) {
     if (!confirm(`Remove ${agent.name} from this platform experiment? Its token stops working${agent.hosted ? ' and its machine is taken down' : ''}.`)) return
-    setRemoveError('')
+    setRowError('')
     try {
       await removePlatformExperimentAgent(pe.id, agent.agent_id)
+      hide(agent.agent_id)
       await mutate()
     } catch (e) {
-      setRemoveError(e instanceof Error ? e.message : String(e))
+      setRowError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  function hide(agentID: string) {
+    setShown(current => current.filter(a => a.agent_id !== agentID))
+  }
+
+  function show(agents: JoinedAgent[]) {
+    const tokens = agents.filter(a => a.token)
+    setShown(current => [...current.filter(a => !tokens.some(t => t.agent_id === a.agent_id)), ...tokens])
+  }
+
+  async function showToken(agent: AgentSignup) {
+    setRowError('')
+    try {
+      show([await fetchPlatformExperimentAgentToken(pe.id, agent.agent_id)])
+    } catch (e) {
+      setRowError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -148,9 +154,26 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
         <div style={{ display: 'grid', gap: 14 }}>
           {started
             ? <span className="text-dim" style={{ fontSize: 12 }}>The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
-            : <AddAgents pe={pe} onAdded={() => mutate()} />}
+            : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
+          {shown.map(agent => (
+            <Secret
+              key={agent.agent_id}
+              label={`Env file of ${agent.name}`}
+              value={envFile(agent)}
+              note={<>
+                Save it as an env file readable by you alone and start the agent with it. The token
+                acts as this agent in this platform experiment and nowhere else. It is derived from
+                the agent&apos;s place here, so <span className="mono">Show token</span> in the
+                agent&apos;s row brings the same one back, as does{' '}
+                <span className="mono">hl platform-experiments agents add {pe.id} --agent {agent.agent_id}</span>.
+                Removing the agent is what stops it working.
+              </>}
+              dismiss="Hide"
+              onDismiss={() => hide(agent.agent_id)}
+            />
+          ))}
           {error && <ErrorMessage>Could not load agents: {error.message}</ErrorMessage>}
-          {removeError && <ErrorMessage>{removeError}</ErrorMessage>}
+          {rowError && <ErrorMessage>{rowError}</ErrorMessage>}
           {!agents && !error && <Loading />}
           {agents && agents.length === 0 && (
             <EmptyState>No agents yet. Nothing runs in this experiment until at least one joins.</EmptyState>
@@ -172,7 +195,12 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                     <td className="mono" style={{ fontSize: 12 }}>{agent.flavor ?? 'default'}</td>
                     <td className="mono" style={{ fontSize: 12 }}>{agent.model ?? 'default'}</td>
                     <td className="mono text-muted" style={{ fontSize: 12 }}>{new Date(agent.signed_up_at).toLocaleString()}</td>
-                    <td>{!started && <Button size="sm" variant="danger" onClick={() => remove(agent)}>Remove</Button>}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
+                        {!started && <Button size="sm" variant="danger" onClick={() => remove(agent)}>Remove</Button>}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -5,7 +5,7 @@ import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api'
 import type { ClustersResponse, ClusterInfo } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
-import { OrgClustersTable } from '@/components/org-clusters'
+import { OrgClusters } from '@/components/org-clusters'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { StatTile } from '@/components/ui/stat-tile'
@@ -174,9 +174,9 @@ export default function ClusterPage() {
       />
 
       <Pod>
-        <PodHeader>Clusters of {org.name}</PodHeader>
+        <PodHeader>Clusters {org.name} can run on</PodHeader>
         <PodContent scrollX>
-          <OrgClustersTable />
+          <OrgClusters manage={false} />
         </PodContent>
       </Pod>
       <LiveCapacity />

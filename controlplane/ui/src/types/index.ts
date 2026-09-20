@@ -492,20 +492,29 @@ export interface CreatedAPIKey extends APIKey {
   token: string
 }
 
-// A cluster an org registered. cluster_id is the identity its runtime reported, the key of its
-// settings, absent until its agent first connects.
+// A cluster an org's jobs can be placed on: one it registered, or one of another org that the
+// platform shares with every org. cluster_id is the identity its runtime reported, the key of its
+// settings, absent until its agent first connects. A shared cluster of another org comes without
+// org_id and cluster_id.
 export interface OrgCluster {
   name: string
-  org_id: string
+  org_id?: string
   // The platform places every org's jobs on a shared cluster. Staff decide it.
   shared: boolean
   cluster_id?: string
   created_at: string
+  // The org registered the cluster and may change its settings.
+  owned: boolean
   connected: boolean
 }
 
-export interface RegisteredCluster extends Omit<OrgCluster, 'connected'> {
+// A cluster in the answer to registering it, with everything its agent is started with.
+export interface RegisteredCluster {
+  name: string
   runtime_token: string
+  // Where the cluster's agent reaches the API and sends metrics.
+  api_url: string
+  metrics_url: string
 }
 
 // One agent's place in a platform experiment and what it was launched with.

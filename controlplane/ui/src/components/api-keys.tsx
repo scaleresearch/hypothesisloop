@@ -6,7 +6,7 @@ import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api'
 import type { APIKey, CreatedAPIKey } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'
-import { SecretOnce } from '@/components/ui/secret-once'
+import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
 const WHOLE_ORG = ''
@@ -74,7 +74,7 @@ export function APIKeys() {
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {created && (
-        <SecretOnce
+        <Secret
           label={`Token of "${created.name}"`}
           value={created.token}
           note={<>
@@ -82,6 +82,7 @@ export function APIKeys() {
             line or an outside agent. This is the only time it is shown: the platform keeps its
             hash. If you lose it, revoke the key and create another.
           </>}
+          dismiss="I have saved it"
           onDismiss={() => setCreated(null)}
         />
       )}

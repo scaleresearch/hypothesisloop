@@ -25,7 +25,7 @@ function LiveStrip() {
   const { data: stats } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
   const { data: agents } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
 
-  const clusterList = clusters ?? []
+  const clusterList = (clusters ?? []).filter(c => c.owned)
   const connected = clusterList.filter(c => c.connected).length
   const running = stats?.by_status?.RUNNING ?? 0
 

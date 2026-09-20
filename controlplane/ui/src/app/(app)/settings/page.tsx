@@ -1,21 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { useSWRConfig } from 'swr'
 import { createProject, renameOrg, renameProject } from '@/lib/api'
-import { useTenant } from '@/lib/tenant'
+import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
-import { AddCluster, OrgClustersTable } from '@/components/org-clusters'
+import { OrgClusters } from '@/components/org-clusters'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { ErrorMessage } from '@/components/ui/status-message'
-
-// Orgs and projects are read from GET /me, so a change to either is followed by reading it again.
-function useRefreshMe() {
-  const { mutate } = useSWRConfig()
-  return () => mutate('me')
-}
 
 /** A name with a Save beside it. `save` rejects with the API's own reason, which is shown. */
 function NameForm({ label, initial, action, placeholder, save }: {
@@ -126,9 +118,9 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description={`${org.name}: its name, projects, API keys and clusters.`} />
 
       {!administers && (
-        <ErrorMessage>
+        <p className="text-muted" style={{ fontSize: 13, marginBottom: 16 }}>
           You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and clusters.
-        </ErrorMessage>
+        </p>
       )}
 
       {administers && (
@@ -147,10 +139,7 @@ export default function SettingsPage() {
       <Pod>
         <PodHeader>Clusters</PodHeader>
         <PodContent scrollX>
-          <div style={{ display: 'grid', gap: 14 }}>
-            {administers && <AddCluster />}
-            <OrgClustersTable />
-          </div>
+          <OrgClusters manage />
         </PodContent>
       </Pod>
 

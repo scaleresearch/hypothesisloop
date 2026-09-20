@@ -2,133 +2,145 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { API_URL, fetchOrgClusters, registerCluster } from '@/lib/api'
+import { fetchOrgClusters, registerCluster } from '@/lib/api'
 import type { RegisteredCluster } from '@/types'
 import { semantic } from '@/lib/colors'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { Button } from '@/components/ui/button'
-import { SecretOnce } from '@/components/ui/secret-once'
+import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
-function useOrgClusters() {
-  const { org } = useTenant()
-  return useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
+// The command `hl cluster add` prints, with the addresses the platform says its agents use.
+function startCommand(cluster: RegisteredCluster): string {
+  return `RUNTIME_TOKEN=${cluster.runtime_token} make cluster-agent-up CLUSTER=${cluster.name} API_URL=${cluster.api_url} METRICS_URL=${cluster.metrics_url}`
 }
 
-/** The org's own clusters: whether each agent is connected, and each cluster's scheduler settings. */
-export function OrgClustersTable() {
-  const { org } = useTenant()
-  const { data, error, isLoading } = useOrgClusters()
-
-  if (isLoading) return <Loading />
-  if (error || !data) return <ErrorMessage>Could not load the clusters of {org.name}: {error?.message}</ErrorMessage>
-  if (data.length === 0) {
-    return (
-      <EmptyState>
-        {org.name} has no cluster of its own. Its jobs run on the clusters the platform shares. Add
-        a cluster in Settings to run them on your own hardware.
-      </EmptyState>
-    )
-  }
+function Status({ connected }: { connected: boolean }) {
+  const color = connected ? semantic.success : semantic.danger
   return (
-    <table className="wa-table">
-      <thead>
-        <tr>
-          <th>Cluster</th>
-          <th>Status</th>
-          <th>Takes jobs of</th>
-          <th>Scheduler settings</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map(c => (
-          <tr key={c.name}>
-            <td className="mono" style={{ fontWeight: 600 }}>
-              {c.name}
-              {c.cluster_id && <div className="text-muted" style={{ fontSize: 11 }}>{c.cluster_id}</div>}
-            </td>
-            <td>
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                color: c.connected ? semantic.success : semantic.danger, fontSize: 12, fontWeight: 600,
-              }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: c.connected ? semantic.success : semantic.danger }} />
-                {c.connected ? 'Connected' : 'Disconnected'}
-              </span>
-            </td>
-            <td style={{ fontSize: 12 }}>{c.shared ? 'every org (shared by the platform)' : 'this org only'}</td>
-            <td>
-              {c.cluster_id
-                ? <ClusterSettingsEditor clusterID={c.cluster_id} />
-                : <span className="text-muted" style={{ fontSize: 12 }}>available once its agent has connected</span>}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color, fontSize: 12, fontWeight: 600 }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+      {connected ? 'Connected' : 'Disconnected'}
+    </span>
   )
 }
 
-// The command `hl cluster add` prints. Where the cluster reaches the two services is the
-// operator's knowledge: the API address is the one this page uses, and the metrics address is
-// left to fill in.
-function startCommand(cluster: RegisteredCluster): string {
-  return `make cluster-agent-up CLUSTER=${cluster.name} API_URL=${API_URL} METRICS_URL=<metrics-service-url> RUNTIME_TOKEN=${cluster.runtime_token}`
-}
-
-/** Registers a cluster name for the org and shows the command that starts its agent. */
-export function AddCluster() {
-  const { org } = useTenant()
-  const { mutate } = useOrgClusters()
+/**
+ * The clusters the org's jobs can run on: its own, with their scheduler settings, and any the
+ * platform shares with it, which are read-only here. With `manage` an owner also registers a
+ * cluster and reads the command that starts its agent.
+ */
+export function OrgClusters({ manage }: { manage: boolean }) {
+  const { org, administers } = useTenant()
+  const { data, error, mutate } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [registered, setRegistered] = useState<RegisteredCluster | null>(null)
+  const manages = manage && administers
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
+  // Registering a name the org already owns changes nothing and answers with the same token,
+  // so adding a cluster and reading an existing one's command again are the same call.
+  async function register(clusterName: string) {
     setBusy(true)
-    setError('')
+    setActionError('')
     try {
-      setRegistered(await registerCluster(org.id, name.trim()))
-      setName('')
+      setRegistered(await registerCluster(org.id, clusterName))
       await mutate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setActionError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
   }
 
+  async function add(e: React.FormEvent) {
+    e.preventDefault()
+    await register(name.trim())
+    setName('')
+  }
+
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <form className="settings-row" onSubmit={submit}>
-        <input
-          className="field-sm mono"
-          style={{ width: 240 }}
-          aria-label="Cluster name"
-          placeholder="cluster name, e.g. lab-k8s"
-          value={name}
-          onChange={e => setName(e.target.value)}
-        />
-        <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
-          {busy ? 'Adding…' : 'Add cluster'}
-        </Button>
-        {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
-      </form>
+    <div style={{ display: 'grid', gap: 14 }}>
+      {manages && (
+        <form className="settings-row" onSubmit={add}>
+          <input
+            className="field-sm mono"
+            style={{ width: 240 }}
+            aria-label="Cluster name"
+            placeholder="cluster name, e.g. lab-k8s"
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+          <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
+            {busy ? 'Adding…' : 'Add cluster'}
+          </Button>
+        </form>
+      )}
+      {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
       {registered && (
-        <SecretOnce
+        <Secret
           label={`Start the agent of ${registered.name}`}
           value={startCommand(registered)}
           note={<>
-            Run it from a checkout of the repository on a machine that reaches the cluster, with
-            API_URL and METRICS_URL set to the addresses the cluster reaches the control plane at.
-            The command carries the cluster&apos;s runtime token, which this page shows now and
-            never again. Adding the same name again returns the same token.
+            Run it from a checkout of the repository on a machine that reaches the cluster. The
+            command carries the cluster&apos;s runtime token, which is derived from its name:{' '}
+            <span className="mono">Show start command</span> in the cluster&apos;s row brings the
+            same one back, as does <span className="mono">hl cluster add {registered.name}</span>.
           </>}
+          dismiss="Hide"
           onDismiss={() => setRegistered(null)}
         />
+      )}
+
+      {error && <ErrorMessage>Could not load the clusters of {org.name}: {error.message}</ErrorMessage>}
+      {!data && !error && <Loading />}
+      {data && data.length === 0 && (
+        <EmptyState>
+          No cluster is registered for {org.name}, and the platform shares none with it.
+          {manages ? ' Add one above to run jobs on your own hardware.' : ' An owner adds one in Settings.'}
+        </EmptyState>
+      )}
+      {data && data.length > 0 && (
+        <table className="wa-table">
+          <thead>
+            <tr>
+              <th>Cluster</th>
+              <th>Status</th>
+              <th>Belongs to</th>
+              <th>Scheduler settings</th>
+              {manages && <th />}
+            </tr>
+          </thead>
+          <tbody>
+            {data.map(c => (
+              <tr key={c.name}>
+                <td className="mono" style={{ fontWeight: 600 }}>
+                  {c.name}
+                  {c.cluster_id && <div className="text-muted" style={{ fontSize: 11 }}>{c.cluster_id}</div>}
+                </td>
+                <td><Status connected={c.connected} /></td>
+                <td style={{ fontSize: 12 }}>
+                  {c.owned ? org.name : 'the platform'}
+                  {c.shared && <div className="text-muted" style={{ fontSize: 11 }}>shared with every org</div>}
+                </td>
+                <td>
+                  {!c.owned
+                    ? <span className="text-muted" style={{ fontSize: 12 }}>set by the platform</span>
+                    : c.cluster_id
+                      ? <ClusterSettingsEditor clusterID={c.cluster_id} />
+                      : <span className="text-muted" style={{ fontSize: 12 }}>available once its agent has connected</span>}
+                </td>
+                {manages && (
+                  <td>
+                    {c.owned && <Button size="sm" disabled={busy} onClick={() => register(c.name)}>Show start command</Button>}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   )

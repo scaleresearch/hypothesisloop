@@ -27,7 +27,7 @@ const navItems = [
 function SystemStatus() {
   const { org } = useTenant()
   const { data } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
-  const clusters = data ?? []
+  const clusters = (data ?? []).filter(c => c.owned)
   const connected = clusters.filter(c => c.connected).length
   const allUp = clusters.length > 0 && connected === clusters.length
   const someUp = connected > 0

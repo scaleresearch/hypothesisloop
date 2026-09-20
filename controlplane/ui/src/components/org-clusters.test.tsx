@@ -4,11 +4,10 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchClusterSettings, fetchOrgClusters, putClusterSettings, registerCluster } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { AddCluster, OrgClustersTable } from '@/components/org-clusters'
+import { OrgClusters } from '@/components/org-clusters'
 import type { ClusterSettings, Me, OrgCluster } from '@/types'
 
 vi.mock('@/lib/api', () => ({
-  API_URL: 'http://api.test',
   fetchClusterSettings: vi.fn(), fetchOrgClusters: vi.fn(), putClusterSettings: vi.fn(), registerCluster: vi.fn(),
 }))
 
@@ -24,28 +23,30 @@ const me: Me = {
 let clusters: OrgCluster[]
 let settings: ClusterSettings
 
-function show() {
-  const resolved = resolveTenant(me, '')
+function show({ manage = true, as = me }: { manage?: boolean; as?: Me } = {}) {
+  const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <TenantContext.Provider value={resolved.tenant}><AddCluster /><OrgClustersTable /></TenantContext.Provider>
+      <TenantContext.Provider value={resolved.tenant}><OrgClusters manage={manage} /></TenantContext.Provider>
     </SWRConfig>,
   )
 }
 
 beforeEach(() => {
   clusters = [
-    { name: 'lab', org_id: 'org_a', shared: false, cluster_id: 'cid-1', created_at: at, connected: true },
-    { name: 'new', org_id: 'org_a', shared: false, created_at: at, connected: false },
+    { name: 'lab', org_id: 'org_a', shared: false, cluster_id: 'cid-1', created_at: at, owned: true, connected: true },
+    { name: 'new', org_id: 'org_a', shared: false, created_at: at, owned: true, connected: false },
   ]
   settings = { cluster_id: 'cid-1', scale_up_timeout_seconds: 600, max_speculative_accelerators: null, stuck_pending_timeout_seconds: null }
   vi.mocked(fetchOrgClusters).mockImplementation(async () => [...clusters])
   vi.mocked(fetchClusterSettings).mockImplementation(async () => ({ ...settings }))
   vi.mocked(putClusterSettings).mockImplementation(async (id, next) => (settings = { cluster_id: id, ...next }))
   vi.mocked(registerCluster).mockImplementation(async (orgID, name) => {
-    clusters = [...clusters, { name, org_id: orgID, shared: false, created_at: at, connected: false }]
-    return { name, org_id: orgID, shared: false, created_at: at, runtime_token: 'hls_runtime-token' }
+    if (!clusters.some(c => c.name === name)) {
+      clusters = [...clusters, { name, org_id: orgID, shared: false, created_at: at, owned: true, connected: false }]
+    }
+    return { name, runtime_token: 'hls_runtime-token', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test' }
   })
 })
 
@@ -105,17 +106,59 @@ describe('the org\'s clusters', () => {
   })
 })
 
+describe('a cluster the platform shares with the org', () => {
+  beforeEach(() => {
+    clusters = [...clusters, { name: 'platform-gpu', shared: true, created_at: at, owned: false, connected: true }]
+  })
+
+  it('is listed with its status, as the platform\'s, with nothing to change', async () => {
+    show()
+    const row = (await screen.findByRole('cell', { name: /^platform-gpu/ })).closest('tr')!
+    expect(within(row).getByText('Connected')).toBeTruthy()
+    expect(within(row).getByText('the platform')).toBeTruthy()
+    expect(within(row).getByText('shared with every org')).toBeTruthy()
+    expect(within(row).getByText('set by the platform')).toBeTruthy()
+    expect(within(row).queryByRole('button')).toBeNull()
+    expect(fetchClusterSettings).toHaveBeenCalledExactlyOnceWith('cid-1')
+  })
+})
+
+describe('a cluster\'s start command', () => {
+  it('is shown again on request: registering an owned name answers with the same token', async () => {
+    show()
+    const lab = (await screen.findByRole('cell', { name: /^lab/ })).closest('tr')!
+    await userEvent.click(within(lab).getByRole('button', { name: 'Show start command' }))
+    expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'lab')
+    expect((await screen.findByTestId('secret')).textContent).toContain('CLUSTER=lab')
+    expect(screen.getByText(/brings the\s+same one back/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/never again|only time/)
+  })
+
+  it('is not offered where clusters are only shown, nor to a member', async () => {
+    const shown = show({ manage: false })
+    await screen.findByRole('cell', { name: /^lab/ })
+    expect(screen.queryByRole('button', { name: 'Show start command' })).toBeNull()
+    expect(screen.queryByLabelText('Cluster name')).toBeNull()
+    shown.unmount()
+
+    show({ as: { ...me, orgs: [{ ...me.orgs[0], role: 'member' }] } })
+    await screen.findByRole('cell', { name: /^lab/ })
+    expect(screen.queryByRole('button', { name: 'Show start command' })).toBeNull()
+    expect(screen.queryByLabelText('Cluster name')).toBeNull()
+  })
+})
+
 describe('adding a cluster', () => {
-  it('shows the start command with the runtime token once, and lists the cluster', async () => {
+  it('shows the start command with the runtime token, and lists the cluster', async () => {
     show()
     await userEvent.type(screen.getByLabelText('Cluster name'), 'edge')
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'edge')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      'make cluster-agent-up CLUSTER=edge API_URL=http://api.test METRICS_URL=<metrics-service-url> RUNTIME_TOKEN=hls_runtime-token',
+      'RUNTIME_TOKEN=hls_runtime-token make cluster-agent-up CLUSTER=edge API_URL=http://api.cluster.test METRICS_URL=http://metrics.cluster.test',
     )
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'I have saved it' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hide' }))
     expect(document.body.textContent).not.toContain('hls_runtime-token')
   })
 

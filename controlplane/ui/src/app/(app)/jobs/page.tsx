@@ -62,8 +62,8 @@ function JobsPageContent() {
   const [sortKey, setSortKey] = useState<SortKey>('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
-  // Connectivity is known for the org's own clusters. A job placed on a cluster the platform
-  // shares shows its name alone.
+  // Every cluster a job of this org can be on, its own and the ones the platform shares. A job
+  // on a cluster no longer listed, such as one that stopped being shared, shows its name alone.
   const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
   const connectedByCluster = new Map((clusters ?? []).map(c => [c.name, c.connected]))
 

@@ -379,7 +379,7 @@ select:focus-visible,
   letter-spacing: -0.02em;
 }
 
-.secret-once {
+.secret {
   display: grid;
   gap: 8px;
   padding: 12px 14px;
@@ -388,7 +388,7 @@ select:focus-visible,
   background: var(--surface-2);
 }
 
-.secret-once-value {
+.secret-value {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -421,6 +421,17 @@ select:focus-visible,
 .wa-nav-tenant label {
   display: grid;
   gap: 3px;
+}
+
+.wa-nav-tenant .wa-btn-link {
+  justify-self: start;
+  font-size: 11px;
+  margin-top: -4px;
+}
+
+.wa-nav-create {
+  display: grid;
+  gap: 6px;
 }
 
 .wa-nav-account {

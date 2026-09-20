@@ -1,6 +1,8 @@
 'use client'
 
 import { createContext, useContext } from 'react'
+import { useSWRConfig } from 'swr'
+import { fetchMe } from '@/lib/api'
 import type { Me, Org, Project } from '@/types'
 
 /** The signed-in caller and the org and project every page is showing. */
@@ -45,4 +47,17 @@ export function useTenant(): Tenant {
   const tenant = useContext(TenantContext)
   if (!tenant) throw new Error('useTenant is called outside the signed-in app shell')
   return tenant
+}
+
+/**
+ * Orgs and projects are read from GET /me, so a change to either is followed by reading it again.
+ * The answer replaces what every page holds and is handed back to the caller.
+ */
+export function useRefreshMe(): () => Promise<Me> {
+  const { mutate } = useSWRConfig()
+  return async () => {
+    const me = await mutate('me', fetchMe(), { revalidate: false })
+    if (!me) throw new Error('GET /me answered with nothing')
+    return me
+  }
 }

@@ -32,7 +32,7 @@ import { isZeroDate } from '@/lib/format'
 import { accessToken, endSession } from '@/lib/auth'
 
 // One API, one base URL — quota, scheduler and registry operations are all served together.
-export const API_URL = process.env.NEXT_PUBLIC_API_URL as string
+const API_URL = process.env.NEXT_PUBLIC_API_URL as string
 
 /** A refusal or failure the API answered with, carrying its status and its own message. */
 export class ApiError extends Error {
@@ -128,13 +128,14 @@ export function fetchAllClusters(): Promise<ClustersResponse> {
   return apiFetch<ClustersResponse>(`${API_URL}/internal/clusters`)
 }
 
-// The clusters one org registered and whether each one's cluster-agent is connected right now
-// (has polled desired-state recently). The control plane never dials a cluster itself.
+// The clusters an org's jobs run on, its own and the ones the platform shares, and whether each
+// one's cluster-agent is connected right now (has polled desired-state recently). The control
+// plane never dials a cluster itself.
 export function fetchOrgClusters(orgID: string): Promise<OrgCluster[]> {
   return apiFetch<{ clusters: OrgCluster[] }>(`${API_URL}/orgs/${orgID}/clusters`).then(r => r.clusters)
 }
 
-// Registering a name the org already owns answers with the same token again.
+// Registering a name the org already owns changes nothing and answers with the same token.
 export function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
   return apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
 }
@@ -566,9 +567,16 @@ export interface AddAgentsRequest {
   model?: string
 }
 
-// An agent the platform does not run comes back with its token, which no later read lists.
+// An agent the platform does not run comes back with its token.
 export function addPlatformExperimentAgents(platformExpID: string, req: AddAgentsRequest): Promise<JoinedAgent[]> {
   return apiSend<{ agents: JoinedAgent[] }>('POST', `/platform-experiments/${platformExpID}/agents`, req).then(r => r.agents)
+}
+
+// The token of an agent that already joined: joining again changes nothing and answers with the
+// same token, which is derived from the agent's place in the experiment.
+export async function fetchPlatformExperimentAgentToken(platformExpID: string, agentID: string): Promise<JoinedAgent> {
+  const { agents } = await apiSend<{ agents: JoinedAgent[] }>('POST', `/platform-experiments/${platformExpID}/agents`, { agent_id: agentID })
+  return agents[0]
 }
 
 // Answered 409 once the platform experiment has started.
@@ -582,6 +590,11 @@ export async function removePlatformExperimentAgent(platformExpID: string, agent
 
 export function fetchMe(): Promise<Me> {
   return apiFetch<Me>(`${API_URL}/me`)
+}
+
+// The new org starts with the caller as owner and a project named default.
+export function createOrg(name: string): Promise<Org> {
+  return apiSend<Org>('POST', '/orgs', { name })
 }
 
 export function renameOrg(orgID: string, name: string): Promise<Org> {
