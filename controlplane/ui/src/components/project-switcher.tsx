@@ -6,6 +6,9 @@ import { useProjectParam } from '@/lib/query-state'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import type { Me, Project } from '@/types'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { InlineError } from '@/components/ui/status-message'
+import { Eyebrow } from '@/components/ui/text'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
 // Two orgs may carry the same name, so one that shares its name is told apart by the end of its id.
@@ -24,7 +27,7 @@ function CreateByName({ what, create }: { what: string; create: (name: string) =
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  if (!open) return <Button variant="link" onClick={() => setOpen(true)}>+ New {what}</Button>
+  if (!open) return <Button variant="link" size="sm" className="-mt-1 justify-self-start" onClick={() => setOpen(true)}>+ New {what}</Button>
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -42,22 +45,22 @@ function CreateByName({ what, create }: { what: string; create: (name: string) =
   }
 
   return (
-    <form className="wa-nav-create" onSubmit={submit}>
-      <input
-        className="field-sm"
+    <form className="wa-nav-create grid gap-1.5" onSubmit={submit}>
+      <Input
+        fieldSize="sm"
         autoFocus
         aria-label={`New ${what} name`}
         placeholder={`${what} name`}
         value={name}
         onChange={e => setName(e.target.value)}
       />
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="flex gap-1.5">
         <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
           {busy ? 'Creating…' : 'Create'}
         </Button>
         <Button size="sm" type="button" disabled={busy} onClick={() => { setOpen(false); setError('') }}>Cancel</Button>
       </div>
-      {error && <span className="text-error" style={{ fontSize: 11 }}>{error}</span>}
+      {error && <InlineError>{error}</InlineError>}
     </form>
   )
 }
@@ -90,9 +93,10 @@ export function ProjectSwitcher() {
   }
 
   return (
-    <div className="wa-nav-tenant">
-      <label>
-        <span className="uppercase-label">Organization</span>
+    // wa-nav-tenant, wa-nav-create and the labels around the pickers are what the browser suite finds them by.
+    <div className="wa-nav-tenant grid gap-2 px-2.5 pt-3">
+      <label className="grid gap-1">
+        <Eyebrow>Organization</Eyebrow>
         <SearchableSelect
           hideAllOption
           value={org.id}
@@ -102,8 +106,8 @@ export function ProjectSwitcher() {
         />
       </label>
       <CreateByName what="organization" create={newOrg} />
-      <label>
-        <span className="uppercase-label">Project</span>
+      <label className="grid gap-1">
+        <Eyebrow>Project</Eyebrow>
         <SearchableSelect
           hideAllOption
           value={project.id}

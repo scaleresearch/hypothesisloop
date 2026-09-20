@@ -6,7 +6,11 @@ import {
   FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Search, CornerDownLeft,
   ArrowUp, ArrowDown, Hash, Zap, type LucideIcon,
 } from 'lucide-react'
+import { clsx } from 'clsx'
 import { fetchExperiment, fetchPlatformExperiment } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/text'
 
 type CommandItem = {
   id: string
@@ -146,48 +150,59 @@ export function CommandPalette() {
   if (!open) return null
 
   return (
-    <div className="cmdk-overlay" onClick={close}>
-      <div className="cmdk-panel" onClick={e => e.stopPropagation()}>
-        <div className="cmdk-input-row">
-          <Search size={16} strokeWidth={2} className="cmdk-search-icon" />
-          <input
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/60 pt-[14vh] backdrop-blur-sm" onClick={close}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Jump to a page or record"
+        className="w-full max-w-xl overflow-hidden rounded-lg border border-border-strong bg-surface-raised shadow-lg"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 border-b px-4 py-3.5">
+          <Search size={16} strokeWidth={2} className="flex-none text-muted" />
+          <Input
             ref={inputRef}
-            className="cmdk-input"
+            bare
+            className="flex-1 text-base"
+            aria-label="Search"
             placeholder="Jump to a page, or paste a job / experiment ID…"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDownInList}
           />
-          {resolving && <span className="cmdk-resolving">resolving…</span>}
-          <kbd className="cmdk-esc">ESC</kbd>
+          {resolving && <span className="whitespace-nowrap font-mono text-2xs text-accent">resolving…</span>}
+          <Kbd>ESC</Kbd>
         </div>
-        <div className="cmdk-list">
+        <div className="max-h-[340px] overflow-y-auto p-1.5" role="listbox" aria-label="Results">
           {items.length === 0 && (
-            <div className="cmdk-empty">No matches. Try a page name or paste a full job/experiment ID.</div>
+            <div className="px-3 py-6 text-center text-sm text-subtle">No matches. Try a page name or paste a full job/experiment ID.</div>
           )}
           {items.map((item, i) => {
             const Icon = item.icon
+            const active = i === activeIndex
             return (
               <div
                 key={item.id}
-                className={`cmdk-item${i === activeIndex ? ' active' : ''}`}
+                role="option"
+                aria-selected={active}
+                className={clsx('flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2', active ? 'bg-primary/15 text-foreground' : 'text-muted')}
                 onMouseEnter={() => setActiveIndex(i)}
                 onClick={item.action}
               >
-                <Icon size={15} strokeWidth={2} />
-                <div className="cmdk-item-text">
-                  <div className="cmdk-item-label">{item.label}</div>
-                  {item.sub && <div className="cmdk-item-sub">{item.sub}</div>}
+                <Icon size={15} strokeWidth={2} className={clsx('flex-none', active && 'text-accent')} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">{item.label}</div>
+                  {item.sub && <div className="text-xs text-subtle">{item.sub}</div>}
                 </div>
-                {i === activeIndex && <CornerDownLeft size={13} strokeWidth={2} className="cmdk-item-enter" />}
+                {active && <CornerDownLeft size={13} strokeWidth={2} className="flex-none text-accent" />}
               </div>
             )
           })}
         </div>
-        <div className="cmdk-footer">
-          <span><ArrowUp size={11} /><ArrowDown size={11} /> navigate</span>
-          <span><CornerDownLeft size={11} /> select</span>
-          <span className="cmdk-footer-agent"><Zap size={11} /> agent- and human-readable IDs both work</span>
+        <div className="flex items-center gap-4 border-t bg-surface-inset px-4 py-2 text-2xs text-subtle">
+          <span className="inline-flex items-center gap-1"><ArrowUp size={11} /><ArrowDown size={11} /> navigate</span>
+          <span className="inline-flex items-center gap-1"><CornerDownLeft size={11} /> select</span>
+          <span className="ml-auto inline-flex items-center gap-1 text-accent"><Zap size={11} /> agent- and human-readable IDs both work</span>
         </div>
       </div>
     </div>
@@ -197,13 +212,14 @@ export function CommandPalette() {
 /** Small pill shown in the nav / top bar that opens the palette — mirrors the ⌘K hint. */
 export function CommandPaletteTrigger() {
   return (
-    <button
-      className="cmdk-trigger"
+    <Button
+      size="sm"
+      className="w-full"
       onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
     >
-      <Search size={13} strokeWidth={2} />
-      <span>Search or jump to…</span>
-      <kbd>⌘K</kbd>
-    </button>
+      <Search size={13} strokeWidth={2} className="flex-none text-subtle" />
+      <span className="flex-1 text-left font-normal text-subtle">Search or jump to…</span>
+      <Kbd>⌘K</Kbd>
+    </Button>
   )
 }

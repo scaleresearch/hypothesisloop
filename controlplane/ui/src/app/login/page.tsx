@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { SIGN_IN_METHODS, safeNext, signIn } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
+import { Logo } from '@/components/ui/logo'
 import { ErrorMessage } from '@/components/ui/status-message'
 
 // Why the visitor is here again, as the redirect that brought them says it.
@@ -32,13 +33,10 @@ function SignIn() {
   }
 
   return (
-    <main className="login">
-      <div className="wa-nav-logo" style={{ padding: 0 }}>
-        <span className="wa-nav-mark">O</span>
-        <span>HypothesisLoop</span>
-      </div>
-      <h1>Sign in</h1>
-      <p className="text-muted">Run platform experiments, watch the agents work, and manage your organization&apos;s projects, keys and clusters.</p>
+    <main className="mx-auto mt-[18vh] grid w-full max-w-sm content-start gap-4 px-5">
+      <Logo />
+      <h1 className="text-2xl font-bold tracking-tight">Sign in</h1>
+      <p className="text-sm text-muted">Run platform experiments, watch the agents work, and manage your organization&apos;s projects, keys and clusters.</p>
       {notice && <ErrorMessage>{notice}</ErrorMessage>}
       {error && <ErrorMessage>Sign-in could not start: {error}</ErrorMessage>}
       {SIGN_IN_METHODS.map(({ provider, label }) => (

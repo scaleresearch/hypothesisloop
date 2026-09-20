@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
 function Standalone({ children }: { children: ReactNode }) {
-  return <main className="flex-1 wa-main" style={{ maxWidth: 560, margin: '80px auto' }}>{children}</main>
+  return <main className="mx-auto mt-20 grid w-full max-w-xl content-start gap-4 px-8">{children}</main>
 }
 
 /**
@@ -46,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <Standalone>
         <ErrorMessage>
-          Project <span className="mono">{resolution.projectID}</span> is not available to you: it was removed, or your access to its organization ended.
+          Project <span className="font-mono text-xs">{resolution.projectID}</span> is not available to you: it was removed, or your access to its organization ended.
         </ErrorMessage>
         {home.state === 'selected' && (
           <Button variant="primary" onClick={() => selectProject(home.tenant.project.id)}>
@@ -63,9 +63,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <TenantContext.Provider value={resolution.tenant}>
       <Nav />
-      <main key={project.id} className="flex-1 overflow-auto wa-main">
+      <main key={project.id} className="max-w-[1220px] flex-1 overflow-auto px-8 py-7">
         {error && (
-          <ErrorMessage>
+          <ErrorMessage className="mb-4">
             Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.
           </ErrorMessage>
         )}

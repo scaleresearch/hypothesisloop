@@ -9,13 +9,13 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 const LISTED = 50
 
 /** Picks a platform experiment by name; typing searches all of them on the server. */
-export function PlatformExperimentSelect({ value, onChange, allLabel, placeholder, hideAllOption, style }: {
+export function PlatformExperimentSelect({ value, onChange, allLabel, placeholder, hideAllOption, className }: {
   value: string
   onChange: (id: string) => void
   allLabel?: string
   placeholder?: string
   hideAllOption?: boolean
-  style?: React.CSSProperties
+  className?: string
 }) {
   const { project } = useTenant()
   const [q, setQ] = useState('')
@@ -36,7 +36,7 @@ export function PlatformExperimentSelect({ value, onChange, allLabel, placeholde
       allLabel={allLabel}
       placeholder={placeholder}
       hideAllOption={hideAllOption}
-      style={style}
+      className={className}
       options={(selected && !listed.some(p => p.id === selected.id) ? [selected, ...listed] : listed)
         .map(p => ({ value: p.id, label: `${p.name} (${p.status})` }))}
       hint={more > 0 ? `${more} more, type to search` : undefined}

@@ -7,12 +7,13 @@ import useSWR from 'swr'
 import { FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Settings } from 'lucide-react'
 import { fetchOrgClusters } from '@/lib/api'
 import { LOGIN_PATH, signOut } from '@/lib/auth'
-import { semantic } from '@/lib/colors'
 import { useTenant } from '@/lib/tenant'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 import { ProjectSwitcher } from '@/components/project-switcher'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/components/ui/link'
+import { Logo } from '@/components/ui/logo'
+import { InlineError } from '@/components/ui/status-message'
 
 const navItems = [
   { href: '/platform-experiments', label: 'Platform Experiments', icon: FlaskConical },
@@ -24,19 +25,31 @@ const navItems = [
   { href: '/settings',             label: 'Settings',             icon: Settings     },
 ]
 
+const statusTone = {
+  idle: 'text-subtle',
+  success: 'text-success',
+  warning: 'text-warning',
+  danger: 'text-danger',
+}
+
+function StatusLine({ tone, label, sub }: { tone: keyof typeof statusTone; label: string; sub?: string }) {
+  return (
+    <div className={clsx('mb-3 flex items-center gap-2 rounded border bg-surface-inset px-2.5 py-2', statusTone[tone])}>
+      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none animate-pulse rounded-full bg-current" />
+      <div className="min-w-0">
+        <div className="truncate text-xs font-semibold">{label}</div>
+        {sub && <div className="truncate font-mono text-2xs text-subtle" title={sub}>{sub}</div>}
+      </div>
+    </div>
+  )
+}
+
 function SystemStatus() {
   const { org } = useTenant()
   const { data, error } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
   if (error || !data) {
-    const color = error ? semantic.danger : 'var(--dim-fg)'
     return (
-      <div className="wa-nav-status">
-        <span className="wa-nav-status-dot" style={{ background: color }} />
-        <div style={{ minWidth: 0 }}>
-          <div className="wa-nav-status-label" style={{ color }}>{error ? 'Cluster status unknown' : 'Checking clusters…'}</div>
-          {error && <div className="wa-nav-status-sub" title={error.message}>{error.message}</div>}
-        </div>
-      </div>
+      <StatusLine tone={error ? 'danger' : 'idle'} label={error ? 'Cluster status unknown' : 'Checking clusters…'} sub={error?.message} />
     )
   }
   const clusters = data.filter(c => c.owned)
@@ -44,18 +57,10 @@ function SystemStatus() {
   const allUp = clusters.length > 0 && connected === clusters.length
   const someUp = connected > 0
   // An org with no cluster of its own is not degraded: its jobs run on the shared ones.
-  const color = clusters.length === 0 ? 'var(--dim-fg)' : allUp ? semantic.success : someUp ? semantic.warning : semantic.danger
+  const tone = clusters.length === 0 ? 'idle' : allUp ? 'success' : someUp ? 'warning' : 'danger'
   const label = clusters.length === 0 ? 'No clusters of your own' : allUp ? 'All systems nominal' : someUp ? 'Degraded' : 'Offline'
 
-  return (
-    <div className="wa-nav-status">
-      <span className="wa-nav-status-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-      <div style={{ minWidth: 0 }}>
-        <div className="wa-nav-status-label" style={{ color }}>{label}</div>
-        <div className="wa-nav-status-sub">{connected}/{clusters.length} clusters online</div>
-      </div>
-    </div>
-  )
+  return <StatusLine tone={tone} label={label} sub={`${connected}/${clusters.length} clusters online`} />
 }
 
 function Account() {
@@ -74,10 +79,10 @@ function Account() {
   }
 
   return (
-    <div className="wa-nav-account">
-      <span className="wa-nav-account-name" title={me.name}>{me.name || 'Signed in'}</span>
-      <Button variant="link" onClick={leave}>Sign out</Button>
-      {error && <span className="text-error" style={{ fontSize: 11 }}>Sign-out failed: {error}</span>}
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+      <span className="min-w-0 truncate font-semibold" title={me.name}>{me.name || 'Signed in'}</span>
+      <Button variant="link" size="sm" onClick={leave}>Sign out</Button>
+      {error && <InlineError>Sign-out failed: {error}</InlineError>}
     </div>
   )
 }
@@ -86,25 +91,28 @@ export function Nav() {
   const pathname = usePathname()
 
   return (
-    <nav className="wa-nav flex h-screen w-56 flex-col">
-      <Link href="/" className="wa-nav-logo" style={{ textDecoration: 'none', color: 'inherit' }}>
-        <span className="wa-nav-mark">O</span>
-        <span>HypothesisLoop</span>
+    <nav className="flex h-screen w-56 flex-none flex-col border-r bg-surface">
+      <Link href="/" className="border-b px-4 py-5">
+        <Logo />
       </Link>
       <ProjectSwitcher />
-      <div className="mt-3">
+      <div className="mb-2 mt-3 px-2.5">
         <CommandPaletteTrigger />
       </div>
-      <ul className="flex flex-col mt-1 px-1 gap-0.5">
+      <ul className="mt-1 flex flex-col gap-0.5 px-2.5">
         {navItems.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
             <li key={href}>
               <Link
                 href={href}
-                className={clsx('wa-nav-item', active && 'active')}
+                aria-current={active ? 'page' : undefined}
+                className={clsx(
+                  'flex items-center gap-2.5 rounded px-3 py-2 text-sm font-medium transition-colors',
+                  active ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted hover:bg-foreground/5 hover:text-foreground',
+                )}
               >
-                <Icon size={16} strokeWidth={2} className="wa-nav-icon" />
+                <Icon size={16} strokeWidth={2} className="flex-none" />
                 {label}
               </Link>
             </li>
@@ -114,9 +122,9 @@ export function Nav() {
       <div className="mt-auto px-4 pb-5">
         <SystemStatus />
         <Account />
-        <div className="wa-nav-footer">
-          <p className="wa-nav-footer-title">HypothesisLoop v2.0</p>
-          <p className="wa-nav-footer-sub">Budget: normalized compute-hours</p>
+        <div className="border-t pt-3">
+          <p className="text-xs font-semibold text-muted">HypothesisLoop v2.0</p>
+          <p className="mt-0.5 font-mono text-2xs text-subtle">Budget: normalized compute-hours</p>
         </div>
       </div>
     </nav>
