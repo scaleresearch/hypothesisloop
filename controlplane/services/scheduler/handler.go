@@ -519,11 +519,26 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		return nil, huma.Error409Conflict("experiment still has an unresolved job.cpu/memory/storage \"max\" sentinel — manual admission does not resolve it; wait for the ordinary scheduler tick to admit this experiment")
 	}
 
+	// The same capability admission checks: a job that spans nodes goes only to a cluster that
+	// reports it runs such jobs. Admitted anywhere else it is refused by the runtime every pass.
+	if exp.Job.Nodes() > 1 {
+		capable, err := h.svc.workload.GetMultiNodeCapability(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if !capable[clusterName] {
+			return nil, huma.Error422UnprocessableEntity("cluster does not run jobs that span more than one node")
+		}
+	}
+
 	resolved, err := h.svc.grace.Resolve(exp.Job)
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
-	fp := exp.Footprint()
+	// The job is planned as this admission resolves it, from the submitted job. Whatever an
+	// earlier admission resolved, a slot pin included, belongs to that admission.
+	candidate := *exp
+	candidate.ResolvedJob = &resolved
 	clusterActive := false
 	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, &resolved, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 		gAvail, _, err := readFlavorCapacity(ctx, h.svc.workload, h.svc.logger)
@@ -532,7 +547,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		}
 		avail, ok := gAvail[clusterName]
 		clusterActive = ok
-		if !ok || !domain.Fits(avail, fp) {
+		if !ok {
 			return false, nil
 		}
 		nodeAvail, err := h.svc.workload.GetAcceleratorCapacityByNode(ctx)
@@ -547,7 +562,20 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		if err != nil {
 			return false, err
 		}
-		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp, &resolved), nil
+		// On a cluster of slots the job is sized to a free one, as the tick would size it.
+		if hasSlots(nodeLabels[clusterName]) {
+			onSlot, misfit := resolveOntoSlot(exp, clusterName, nodeResources[clusterName], nodeResources[clusterName], nodeLabels[clusterName])
+			if misfit != "" {
+				return false, nil
+			}
+			if resolved, err = h.svc.grace.Resolve(*onSlot); err != nil {
+				return false, err
+			}
+		}
+		if !domain.Fits(avail, candidate.Footprint()) {
+			return false, nil
+		}
+		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, &candidate, &resolved), nil
 	})
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())

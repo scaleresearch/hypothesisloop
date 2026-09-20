@@ -62,7 +62,7 @@ func TestResolveClusterLocalResourcesMaxUsesMinimumAcrossEligibleNodes(t *testin
 		"tight": {"example.com/product=test-accelerator": 1},
 	}
 
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestResolveClusterLocalResourcesGroupedJobUsesPerGroupAcceleratorCount(t *t
 		"node-a": {string(flavor): 3},
 	}
 
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestResolveClusterLocalResourcesExplicitNumberJudgedOnlyAgainstSelectedClus
 		"roomy": {"example.com/product=test-accelerator": 1},
 	}
 
-	_, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	_, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestResolveClusterLocalResourcesExplicitNumberExceedingEveryEligibleNodeDoe
 		"tight-b": {"example.com/product=test-accelerator": 1},
 	}
 
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestResolveClusterLocalResourcesNoEligibleNodeDoesNotFit(t *testing.T) {
 		"node-a": {"example.com/product=test-accelerator": 0},
 	}
 
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestResolveClusterLocalResourcesSingleEligibleNodeIsItsOwnMinimum(t *testin
 		"only": {"example.com/product=test-accelerator": 1},
 	}
 
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveClusterLocalResources: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestResolveClusterLocalResourcesTiedNodesResolveDeterministically(t *testin
 
 	for i := 0; i < 25; i++ {
 		exp := maxAcceleratorExperiment(1)
-		resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil)
+		resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
 		if err != nil {
 			t.Fatalf("resolveClusterLocalResources: %v", err)
 		}

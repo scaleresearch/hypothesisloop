@@ -155,7 +155,15 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 // share, capacity_unavailable when a "max" has no eligible node to resolve against. The caller
 // un-picks the cluster exactly like a scalar or topology miss; a later tick, or a node with more
 // cpu/memory/storage per accelerator, may still admit it, so this is never a hard rejection.
-func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resolutionCache, exp *domain.Experiment, cluster string, nodeResourcesTotal, nodeAvail map[string]map[string]int64, nodeLabels map[string]map[string]string) (resolved *domain.JobSpec, misfit string, err error) {
+//
+// On a cluster of slots (domain.NodeSlotLabel) none of the above applies: the job is sized to the
+// slot it is to hold, see resolveOntoSlot. nodeResources is what each node has free now, which
+// only that case reads.
+func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resolutionCache, exp *domain.Experiment, cluster string, nodeResourcesTotal, nodeAvail, nodeResources map[string]map[string]int64, nodeLabels map[string]map[string]string) (resolved *domain.JobSpec, misfit string, err error) {
+	if hasSlots(nodeLabels) {
+		resolved, misfit = resolveOntoSlot(exp, cluster, nodeResourcesTotal, nodeResources, nodeLabels)
+		return resolved, misfit, nil
+	}
 	out := exp.Job
 	if len(exp.Job.Groups) > 0 {
 		out.Groups = append([]domain.JobGroup(nil), exp.Job.Groups...)

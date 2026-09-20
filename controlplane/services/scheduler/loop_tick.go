@@ -309,7 +309,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// request is oversized for every node, so there is nothing else to try here.
 		misfit := ""
 		if cluster != "" {
-			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeLabels[cluster])
+			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeResources[cluster], nodeLabels[cluster])
 			if rerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
 				continue
@@ -352,7 +352,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				// the wrong cluster's nodes, or (if never resolved at all) leave the literal
 				// "max" sentinel in the submitted spec.
 				if specCluster != cluster {
-					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvailAtTickStart[specCluster], nodeLabels[specCluster])
+					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvailAtTickStart[specCluster], nodeResources[specCluster], nodeLabels[specCluster])
 					if rerr != nil {
 						l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources for speculative target: %w", rerr))
 						continue
@@ -561,7 +561,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// before the fit check.
 		misfit := ""
 		if cluster != "" {
-			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeLabels[cluster])
+			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeResources[cluster], nodeLabels[cluster])
 			if rerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
 				continue
@@ -684,7 +684,13 @@ func exceedsInstalled(installed map[string]domain.Footprint, autoscalerEnabled m
 		return false
 	}
 	probe := *exp
-	for _, t := range candidateAcceleratorTypes(exp) {
+	// A job without accelerators has no type to vary and is judged once, as it is. Ranging over
+	// its empty type list judged it nowhere and so answered that it exceeds every cluster.
+	types := candidateAcceleratorTypes(exp)
+	if len(types) == 0 {
+		types = []domain.AcceleratorType{exp.AcceleratorType}
+	}
+	for _, t := range types {
 		probe.AcceleratorType = t
 		fp := probe.Footprint()
 		for cluster := range clusters {
@@ -974,7 +980,16 @@ func placeAtFlavor(avail map[string]domain.Footprint, nodeAvail, nodeResources m
 	}
 	sort.Strings(clusters)
 	for _, candidate := range clusters {
-		if domain.Fits(avail[candidate], fp) && topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], exp) {
+		// The job is not resolved yet, and on a cluster of slots it only fits as the slot it
+		// would be resolved to.
+		probe, ok := onSlots(exp, candidate, nodeResources[candidate], nodeLabels[candidate])
+		if !ok {
+			continue
+		}
+		if probe != exp {
+			fp = probe.Footprint()
+		}
+		if domain.Fits(avail[candidate], fp) && topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], probe) {
 			return candidate, true
 		}
 	}
@@ -1022,11 +1037,7 @@ func desiredPlacementFits(byNode map[string]map[string]int64, nodeResources map[
 	jobs := make([]*domain.Experiment, 0, len(desired)+1)
 	for _, d := range desired {
 		if slot := d.EffectiveJob().NodeSelector[domain.NodeSlotLabel]; slot != "" {
-			for node, labels := range labelsByNode {
-				if labels[domain.NodeSlotLabel] == slot {
-					occupyNode(byNode, nodeResources, node)
-				}
-			}
+			holdSlot(byNode, nodeResources, labelsByNode, slot)
 			continue
 		}
 		jobs = append(jobs, d)
@@ -1050,25 +1061,6 @@ func desiredPlacementFits(byNode map[string]map[string]int64, nodeResources map[
 		}
 	}
 	return true
-}
-
-// occupyNode takes everything node has left and returns what it took, for a search that has to
-// give it back.
-func occupyNode(byNode, nodeResources map[string]map[string]int64, node string) (accelerators, resources map[string]int64) {
-	accelerators, resources = byNode[node], nodeResources[node]
-	if accelerators != nil {
-		byNode[node] = make(map[string]int64, len(accelerators))
-		for key := range accelerators {
-			byNode[node][key] = 0
-		}
-	}
-	if resources != nil {
-		nodeResources[node] = make(map[string]int64, len(resources))
-		for key := range resources {
-			nodeResources[node][key] = 0
-		}
-	}
-	return accelerators, resources
 }
 
 func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string]int64 {
@@ -1110,10 +1102,6 @@ func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsB
 		return false
 	}
 	for _, p := range plan {
-		if labelsByNode[p.node][domain.NodeSlotLabel] != "" {
-			occupyNode(byNode, nodeResources, p.node)
-			continue
-		}
 		if p.shape.AcceleratorCount > 0 {
 			byNode[p.node][p.key] -= p.shape.AcceleratorCount
 		}
@@ -1201,6 +1189,9 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		if !nodeHasRoom(nodeResources[node], r.shape.Resources) {
 			return "", false
 		}
+		if isSlot(labelsByNode[node]) && !takesWholeSlot(r.shape, nodeKey, byNode[node], nodeResources[node]) {
+			return "", false
+		}
 		return nodeKey, true
 	}
 	// leftover is what node would have left after hosting r, summed into one number per family —
@@ -1226,12 +1217,6 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 	// them as a duplicate of the other and lost every assignment that needed the discarded one,
 	// reporting a placeable job as not fitting.
 	equivalentState := func(r rank, node, nodeKey string) string {
-		// A slot is left empty by whatever is placed on it, so slots of different sizes would
-		// all read as the same state, and a later job may be pinned to one of them by name.
-		// Each is its own choice.
-		if slot := labelsByNode[node][domain.NodeSlotLabel]; slot != "" {
-			return "slot=" + slot
-		}
 		dimensions := make([]string, 0, len(nodeResources[node]))
 		for k := range nodeResources[node] {
 			dimensions = append(dimensions, k)
@@ -1287,35 +1272,19 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 				return false
 			}
 			budget--
-			// A slot is full once one job is on it, whatever that job asked for.
-			slot := labelsByNode[c.node][domain.NodeSlotLabel] != ""
-			var tookAccelerators, tookResources map[string]int64
-			if slot {
-				tookAccelerators, tookResources = occupyNode(byNode, nodeResources, c.node)
-			} else {
-				if r.shape.AcceleratorCount > 0 {
-					byNode[c.node][c.key] -= r.shape.AcceleratorCount
-				}
-				subtractNodeResources(nodeResources[c.node], r.shape.Resources)
+			if r.shape.AcceleratorCount > 0 {
+				byNode[c.node][c.key] -= r.shape.AcceleratorCount
 			}
+			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
 			used[r.job][c.node] = true
 			plan[i] = rankAssignment{job: r.job, shape: r.shape, node: c.node, key: c.key}
 			if place(i + 1) {
 				return true
 			}
 			used[r.job][c.node] = false
-			if slot {
-				if tookAccelerators != nil {
-					byNode[c.node] = tookAccelerators
-				}
-				if tookResources != nil {
-					nodeResources[c.node] = tookResources
-				}
-			} else {
-				addNodeResources(nodeResources[c.node], r.shape.Resources)
-				if r.shape.AcceleratorCount > 0 {
-					byNode[c.node][c.key] += r.shape.AcceleratorCount
-				}
+			addNodeResources(nodeResources[c.node], r.shape.Resources)
+			if r.shape.AcceleratorCount > 0 {
+				byNode[c.node][c.key] += r.shape.AcceleratorCount
 			}
 			if budget <= 0 {
 				return false

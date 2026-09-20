@@ -76,6 +76,8 @@ type WorkloadClient interface {
 	// job fits one node in every dimension, not just in accelerators.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
+	// GetMultiNodeCapability reports which clusters run a job that spans more than one node.
+	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
 	// GetClusterIDs maps each connected cluster's name to the id it reports.
 	GetClusterIDs(ctx context.Context) (map[string]string, error)
 }
