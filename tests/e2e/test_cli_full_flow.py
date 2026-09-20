@@ -132,7 +132,6 @@ def test_cli_full_flow_happy_path(api, run_id):
         "id": job_id,
         "metadata": {
             "platform_experiment_id": pe_id,
-            "project_id": "e2e",
             "hypothesis_id": hyp_id,
             "theory": "e2e scenario coverage",
             "objective": "maximize val_accuracy",

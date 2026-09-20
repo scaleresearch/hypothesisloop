@@ -22,7 +22,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	var jobSpec, resolvedJobSpec, triedClusters []byte
 
 	if err := row.Scan(
-		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ProjectID, &exp.ClusterName,
+		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ClusterName,
 		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec, &resolvedJobSpec,
 		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory,
 		&acceleratorType, &exp.AcceleratorCount,
@@ -32,6 +32,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &triedClusters,
 		&exp.DataKey.AccessKeyID, &exp.DataKey.SecretAccessKey,
 		&exp.CreatedAt, &exp.UpdatedAt,
+		&exp.ProjectID,
 	); err != nil {
 		return nil, err
 	}

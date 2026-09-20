@@ -20,7 +20,8 @@ type Experiment struct {
 	ParentID             *string `json:"parent_id,omitempty"`
 	AgentID              string  `json:"agent_id"`
 	PlatformExperimentID string  `json:"platform_experiment_id"`
-	ProjectID            string  `json:"project_id"`
+	// ProjectID is the platform experiment's project, read with the job and stored there only.
+	ProjectID string `json:"project_id"`
 	// ClusterName is the target execution cluster this experiment is (or will be) admitted onto
 	// (a k8s cluster today, but domain has no dependency on that). Empty means "not yet
 	// assigned" or "default" for old rows / single-cluster deployments.

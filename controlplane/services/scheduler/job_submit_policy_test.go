@@ -41,7 +41,7 @@ func agentOwnHypothesis() oneHypothesis {
 func jobSubmitPolicySubmission() *domain.Experiment {
 	retries := 0
 	return &domain.Experiment{
-		ID: "policy-job", AgentID: "agent-1", ProjectID: "proj", PlatformExperimentID: "pe-1",
+		ID: "policy-job", AgentID: "agent-1", PlatformExperimentID: "pe-1",
 		HypothesisID: "h-agent", Theory: "t", Objective: "o", EstimatedDurationHours: 1,
 		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40),
 		Job: domain.JobSpec{

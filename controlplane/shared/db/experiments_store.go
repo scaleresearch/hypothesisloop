@@ -27,10 +27,17 @@ func NewExperimentsStore(pool *Pool) *ExperimentsStore {
 	return &ExperimentsStore{pool: pool}
 }
 
-// experimentColumns is the canonical column list for SELECT queries.
-// experimentColumnsQualified is experimentColumns with every name prefixed by an "e." alias, for
-// queries where a second relation is in scope and a bare column name would be ambiguous.
-var experimentColumnsQualified = qualifyColumns(experimentColumns, "e")
+// experimentColumns is the canonical column list for SELECT queries: the stored columns, then
+// the job's project, which is read off its platform experiment where it is stored.
+// experimentColumnsQualified is the same with every name prefixed by an "e." alias, for queries
+// where a second relation is in scope and a bare column name would be ambiguous.
+const experimentColumns = experimentStoredColumns + `,
+	(SELECT tpe.project_id FROM platform_experiments tpe WHERE tpe.id = platform_experiment_id) AS project_id
+`
+
+var experimentColumnsQualified = qualifyColumns(experimentStoredColumns, "e") + `,
+	(SELECT tpe.project_id FROM platform_experiments tpe WHERE tpe.id = e.platform_experiment_id) AS project_id
+`
 
 func qualifyColumns(cols, alias string) string {
 	var b strings.Builder
@@ -41,12 +48,11 @@ func qualifyColumns(cols, alias string) string {
 		}
 		b.WriteString(alias + "." + strings.TrimSpace(c))
 	}
-	b.WriteString("\n")
 	return b.String()
 }
 
-const experimentColumns = `
-	id, parent_id, agent_id, platform_experiment_id, project_id, cluster_name,
+const experimentStoredColumns = `
+	id, parent_id, agent_id, platform_experiment_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec, resolved_job_spec,
 	hypothesis_id, hypothesis, objective, theory,
 	accelerator_type, accelerator_count,
@@ -55,8 +61,7 @@ const experimentColumns = `
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
 	quota_settled_at, attempt_count, infra_requeue_count, tried_clusters,
 	data_access_key_id, data_secret_access_key,
-	created_at, updated_at
-`
+	created_at, updated_at`
 
 // pgUniqueViolation is PostgreSQL's SQLSTATE for a unique-constraint violation.
 const pgUniqueViolation = "23505"
@@ -78,7 +83,7 @@ func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Exp
 
 	const q = `
 INSERT INTO experiments (
-	id, parent_id, agent_id, platform_experiment_id, project_id, cluster_name,
+	id, parent_id, agent_id, platform_experiment_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec,
 	hypothesis_id, hypothesis, objective, theory,
 	accelerator_type, accelerator_count,
@@ -88,15 +93,15 @@ INSERT INTO experiments (
 	data_access_key_id, data_secret_access_key,
 	created_at, updated_at
 ) VALUES (
-	$1, $2, $3, $4, $5, $6,
-	$7, $8, $9, $10,
-	$11, $12, $13, $14,
-	$15, $16,
-	$17, $18,
-	$19, $20, $21, $22,
-	$23, NULLIF($24, ''),
-	$25, $26,
-	$27, $28
+	$1, $2, $3, $4, $5,
+	$6, $7, $8, $9,
+	$10, $11, $12, $13,
+	$14, $15,
+	$16, $17,
+	$18, $19, $20, $21,
+	$22, NULLIF($23, ''),
+	$24, $25,
+	$26, $27
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -109,7 +114,7 @@ INSERT INTO experiments (
 	}
 
 	_, err = executor.Exec(ctx, q,
-		exp.ID, exp.ParentID, exp.AgentID, exp.PlatformExperimentID, exp.ProjectID, exp.ClusterName,
+		exp.ID, exp.ParentID, exp.AgentID, exp.PlatformExperimentID, exp.ClusterName,
 		exp.CodeRef, exp.ConfigHash, exp.DataRef, jobSpec,
 		exp.HypothesisID, exp.Hypothesis, exp.Objective, exp.Theory,
 		string(exp.AcceleratorType), exp.AcceleratorCount,

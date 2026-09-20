@@ -67,10 +67,10 @@ func TestSchemaCancelsActiveRowsWithoutADataKey(t *testing.T) {
 	}
 	insert := func(id, status, notAdmitted, key string) error {
 		_, err := pool.pool.Exec(ctx, `INSERT INTO experiments
-(id, agent_id, project_id, platform_experiment_id, code_ref, config_hash, data_ref,
+(id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
  estimated_duration_hours, data_access_key_id, data_secret_access_key)
-VALUES ($1, 'legacy-agent', 'p', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'objective', 'cpu',
+VALUES ($1, 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'objective', 'cpu',
         $2, NULLIF($3, ''), 1, $4, $4)`, id, status, notAdmitted, key)
 		return err
 	}

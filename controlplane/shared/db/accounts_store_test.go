@@ -417,3 +417,43 @@ func assertSameSet(t *testing.T, what string, got, want []string) {
 		t.Errorf("%s: got = %v, want = %v", what, got, want)
 	}
 }
+
+// A job's project is its platform experiment's, wherever the job is read: one row, a list, and
+// the lineage walk, which reads through an aliased self-join.
+func TestAJobReadsItsProjectOffItsPlatformExperiment(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	accounts := NewAccountsStore(pool)
+	_, orgID := newTestUserHome(t, accounts)
+	projectID := defaultProjectOf(t, accounts, orgID).ID
+	suffix := uuid.New().String()
+	agentID, peID := "agent-jp-"+suffix, "pe-jp-"+suffix
+	if err := NewAgentsStore(pool).CreateAgent(ctx, &domain.Agent{ID: agentID, Name: agentID, OrgID: orgID, Kind: domain.AgentKindAgent}); err != nil {
+		t.Fatalf("create agent: got = %v, want = nil", err)
+	}
+	createTestPEIn(t, pool, peID, projectID)
+
+	parentID, childID := "job-jp-parent-"+suffix, "job-jp-child-"+suffix
+	seedExperimentForCapTest(t, pool, parentID, agentID, peID, 1, domain.StatusQueued)
+	seedExperimentForCapTest(t, pool, childID, agentID, peID, 1, domain.StatusQueued)
+	exec(t, pool, `UPDATE experiments SET parent_id = $2 WHERE id = $1`, childID, parentID)
+
+	store := NewExperimentsStore(pool)
+	got, err := store.GetExperiment(ctx, childID)
+	if err != nil || got.ProjectID != projectID {
+		t.Fatalf("get: got = %+v, %v, want project %q", got, err, projectID)
+	}
+	listed, err := store.ListExperiments(ctx, domain.ExperimentFilter{Scope: domain.TenantScope{AllOrgs: true, ProjectID: projectID}})
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("list by project: got = %d jobs, %v, want = 2", len(listed), err)
+	}
+	lineage, err := store.GetLineage(ctx, childID)
+	if err != nil || len(lineage) != 2 {
+		t.Fatalf("lineage: got = %d jobs, %v, want = 2", len(lineage), err)
+	}
+	for _, exp := range append(listed, lineage...) {
+		if exp.ProjectID != projectID {
+			t.Errorf("job %s: project = %q, want = %q", exp.ID, exp.ProjectID, projectID)
+		}
+	}
+}

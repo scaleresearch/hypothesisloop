@@ -184,7 +184,6 @@ CREATE TABLE IF NOT EXISTS experiments (
     id                       TEXT              PRIMARY KEY,
     parent_id                TEXT              REFERENCES experiments(id),
     agent_id                 TEXT              NOT NULL REFERENCES agents(id),
-    project_id               TEXT              NOT NULL,
     cluster_name             TEXT              NOT NULL DEFAULT 'default',
     -- Every job must belong to exactly one platform experiment — there is no such thing as
     -- an unscoped job. Required so quota, the summary gate, and the hypothesis pool below
@@ -301,7 +300,6 @@ CREATE INDEX IF NOT EXISTS idx_experiments_status     ON experiments(status);
 -- usage hasn't been durably written yet — stays tiny since settled rows drop out of it.
 CREATE INDEX IF NOT EXISTS idx_experiments_unsettled  ON experiments(updated_at)
     WHERE quota_settled_at IS NULL AND status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED');
-CREATE INDEX IF NOT EXISTS idx_experiments_project    ON experiments(project_id);
 CREATE INDEX IF NOT EXISTS idx_experiments_platform   ON experiments(platform_experiment_id);
 CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis ON experiments(hypothesis_id);
 -- Every cluster-agent polls its desired workload set continuously, and ClaimSubmitted re-reads it
@@ -892,5 +890,9 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS org_id TEXT REFERENCES orgs(id);
 UPDATE agents SET org_id = 'default' WHERE org_id IS NULL;
 ALTER TABLE agents ALTER COLUMN org_id SET NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org_id);
+
+-- A job's project is its platform experiment's. The column was a free-text tag before projects
+-- existed.
+ALTER TABLE experiments DROP COLUMN IF EXISTS project_id;
 
 COMMIT;

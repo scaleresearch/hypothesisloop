@@ -51,7 +51,6 @@ Minimal shape:
 
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
-    project_id: my-project
     objective: "maximize val_accuracy"
   job:
     image: ...

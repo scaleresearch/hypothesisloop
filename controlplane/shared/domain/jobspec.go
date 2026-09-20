@@ -383,13 +383,9 @@ var groupNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 // ExperimentMeta holds the fields a submission needs to describe research intent and
 // bookkeeping around a run — never how it executes (that's JobSpec).
 type ExperimentMeta struct {
-	AgentID              string `json:"agent_id" yaml:"agent_id"`
-	PlatformExperimentID string `json:"platform_experiment_id" yaml:"platform_experiment_id"`
-	// ProjectID is an optional free-text grouping tag (queryable via GET /experiments?project_id=)
-	// -- there is no Project entity anywhere in the domain, so this is a caller-chosen label, not
-	// a foreign key. Leave it empty if you have no grouping need.
-	ProjectID string  `json:"project_id,omitempty" yaml:"project_id,omitempty"`
-	ParentID  *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
+	AgentID              string  `json:"agent_id" yaml:"agent_id"`
+	PlatformExperimentID string  `json:"platform_experiment_id" yaml:"platform_experiment_id"`
+	ParentID             *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
 
 	// HypothesisID is required: the ID of a hypothesis previously registered (or retrieved,
 	// if equivalent text already existed) via POST /hypotheses.

@@ -104,7 +104,7 @@ func (s oneHypothesis) GetHypothesis(_ context.Context, _ string) (*domain.Hypot
 func humanIdeaSubmission() *domain.Experiment {
 	retries := 0
 	return &domain.Experiment{
-		ID: "human-idea-job", AgentID: "agent-1", ProjectID: "proj", PlatformExperimentID: "pe-1",
+		ID: "human-idea-job", AgentID: "agent-1", PlatformExperimentID: "pe-1",
 		HypothesisID: "h-human", Theory: "t", Objective: "o", EstimatedDurationHours: 1,
 		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40),
 		Job: domain.JobSpec{

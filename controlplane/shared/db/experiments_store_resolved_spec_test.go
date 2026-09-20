@@ -19,7 +19,7 @@ type fakeExperimentRow struct {
 func (r fakeExperimentRow) Scan(dest ...any) error {
 	now := time.Now()
 	values := []any{
-		"exp-1", (*string)(nil), "agent-1", "pe-1", "", "cluster-a",
+		"exp-1", (*string)(nil), "agent-1", "pe-1", "cluster-a",
 		"repo@" + fortyHexChars(), "cfg", "s3://data", r.jobSpec, r.resolvedJobSpec,
 		"hyp-1", "hypothesis text", "objective", "theory",
 		"example.com/product=test-accelerator", 2,
@@ -29,6 +29,7 @@ func (r fakeExperimentRow) Scan(dest ...any) error {
 		(*time.Time)(nil), 0, 0, []byte("[]"),
 		"AK", "SK",
 		now, now,
+		"prj-1",
 	}
 	if len(values) != len(dest) {
 		panic("fakeExperimentRow: column count drifted from scanExperiment's Scan call")

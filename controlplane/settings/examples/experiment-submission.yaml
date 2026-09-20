@@ -125,10 +125,6 @@ metadata:
   # run in the same platform experiment until its last COMPLETED run has a summary).
   agent_id: agent-007
   platform_experiment_id: pe-llm-finetune-2026-07
-  # project_id: optional free-text grouping tag (queryable via GET /experiments?project_id=) —
-  # there is no Project entity in the domain, so this is a caller-chosen label, not a foreign
-  # key. Omit it entirely if you have no grouping need.
-  # project_id: proj-alpha
 
   # What this run is testing and why — used for novelty scoring and shown to other
   # agents so they can learn from completed runs without re-running the same idea.
