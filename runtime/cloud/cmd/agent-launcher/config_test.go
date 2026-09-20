@@ -38,15 +38,16 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := agentlaunch.Config{
-		Name:        "main",
-		APIURL:      "https://api.example.invalid",
-		Namespace:   "main",
-		Command:     []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
-		Size:        agentlaunch.Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 10 << 30},
-		Env:         map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
-		Interval:    15 * time.Second,
-		BootLimit:   120 * time.Second,
-		CreatePause: time.Second,
+		Name:          "main",
+		APIURL:        "https://api.example.invalid",
+		Namespace:     "main",
+		Command:       []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
+		Size:          agentlaunch.Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 10 << 30},
+		ModelProvider: "anthropic",
+		Env:           map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
+		Interval:      15 * time.Second,
+		BootLimit:     120 * time.Second,
+		CreatePause:   time.Second,
 	}
 	if got := cfg.launch(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("launch config = %+v\nwant          %+v", got, want)
@@ -56,21 +57,24 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 	}
 }
 
-func TestTheClaudeCredentialComesFromTheNamedVariableAndIsRequired(t *testing.T) {
+func TestTheModelProvidersEnvironmentComesFromTheNamedVariablesAndIsRequired(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	if _, err := loadConfig(shippedConfig); err == nil || !strings.Contains(err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Fatalf("with the variable unset: err = %v, want one naming it", err)
 	}
 
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "the-default-variable")
-	t.Setenv("TEAM_CLAUDE_TOKEN", "the-named-variable")
-	text := strings.Replace(shipped(t), "claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN", "claude_code_oauth_token_env: TEAM_CLAUDE_TOKEN", 1)
+	t.Setenv("TEAM_MODEL_KEY", "the-named-variable")
+	t.Setenv("TEAM_MODEL_ORG", "the-second-variable")
+	text := strings.Replace(shipped(t), "  name: anthropic\n  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN",
+		"  name: another\n  env:\n    - name: MODEL_API_KEY\n      value_env: TEAM_MODEL_KEY\n    - name: MODEL_ORG\n      value_env: TEAM_MODEL_ORG", 1)
 	cfg, err := loadText(t, text)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.launch().Env; !reflect.DeepEqual(got, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "the-named-variable"}) {
-		t.Fatalf("instance env added by the launcher = %v", got)
+	launch := cfg.launch()
+	if launch.ModelProvider != "another" || !reflect.DeepEqual(launch.Env, map[string]string{"MODEL_API_KEY": "the-named-variable", "MODEL_ORG": "the-second-variable"}) {
+		t.Fatalf("model provider %q with instance env %v", launch.ModelProvider, launch.Env)
 	}
 }
 
@@ -96,8 +100,14 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"no cpu":                 {`cpu: "2"`, `cpu: "0"`},
 		"no storage":             {"storage: 10Gi\n", ""},
 		"misspelled in instance": {"storage: 10Gi", "disk: 20Gi"},
-		"no credential variable": {"claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN", `claude_code_oauth_token_env: ""`},
-		"the credential itself":  {"claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN", "claude_code_oauth_token: sk-something"},
+		"no model provider":      {"model_provider:\n  name: anthropic\n  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN\n", ""},
+		"no model provider name": {"  name: anthropic", `  name: ""`},
+		"no model provider env":  {"  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN", "  env: []"},
+		"the credential itself":  {"      value_env: CLAUDE_CODE_OAUTH_TOKEN", "      value: sk-ant-oat01-something"},
+		"a value for a name":     {"      value_env: CLAUDE_CODE_OAUTH_TOKEN", "      value_env: sk-ant-oat01-something"},
+		"a variable not a name":  {"    - name: CLAUDE_CODE_OAUTH_TOKEN", "    - name: claude token"},
+		"one variable twice":     {"      value_env: CLAUDE_CODE_OAUTH_TOKEN", "      value_env: CLAUDE_CODE_OAUTH_TOKEN\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN"},
+		"the old credential key": {"model_provider:", "claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN\nmodel_provider:"},
 	} {
 		text := shipped(t)
 		if !strings.Contains(text, edit[0]) {

@@ -27,8 +27,8 @@ func TestTheChartStartsTheLauncherWithAConfigAndEnvironmentItAccepts(t *testing.
 	if _, err := providers.New(cfg.Provider.Name, cfg.Provider.Settings, nil); err != nil {
 		t.Fatalf("provider: %v", err)
 	}
-	if cfg.claudeToken != charttest.Secret["CLAUDE_CODE_OAUTH_TOKEN"] {
-		t.Errorf("the agents' Claude credential = %q, want the Secret's", cfg.claudeToken)
+	if got := cfg.launch().Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != charttest.Secret["CLAUDE_CODE_OAUTH_TOKEN"] {
+		t.Errorf("the model provider's credential in an instance = %q, want the Secret's", got)
 	}
 	if cfg.LauncherName != "main" {
 		t.Errorf("launcher_name = %q, want the name the values give hosted agents to", cfg.LauncherName)

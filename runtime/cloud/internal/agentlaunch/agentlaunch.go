@@ -1,14 +1,15 @@
-// Package agentlaunch converges one provider account onto the agent instances the control plane
-// says should exist. It names no vendor and keeps nothing between passes: every pass asks the
-// control plane for its list and the provider for what is rented, and acts on the difference.
 package agentlaunch
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -33,12 +34,14 @@ type Config struct {
 	// Command is the argv every instance runs.
 	Command []string
 	Size    Size
-	// Env is added to every instance's environment here, so what it holds never passes through
-	// the control plane. The control plane's list may not set any of its names.
-	Env        map[string]string
-	Provider   provider.Provider
-	HTTPClient *http.Client
-	Interval   time.Duration
+	// ModelProvider names whose models the agents run on, and Env is what that provider's
+	// harness needs in every instance: its credential. Env is added here, so what it holds never
+	// passes through the control plane, and the control plane's list may not set any of its names.
+	ModelProvider string
+	Env           map[string]string
+	Provider      provider.Provider
+	HTTPClient    *http.Client
+	Interval      time.Duration
 	// BootLimit is how long an instance may stay in StateStarting, counted from the StartedAt its
 	// provider reports, before it is destroyed and rented again.
 	BootLimit time.Duration
@@ -49,9 +52,11 @@ type Config struct {
 }
 
 type Launcher struct {
-	cfg      Config
-	prefix   string
-	provider provider.Provider
+	cfg          Config
+	prefix       string
+	provider     provider.Provider
+	launchDigest string
+	maxAnswer    int
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -61,7 +66,32 @@ func New(cfg Config) (*Launcher, error) {
 	if cfg.Token == "" || cfg.Provider == nil || cfg.HTTPClient == nil || cfg.Log == nil {
 		return nil, errors.New("agentlaunch: Token, Provider, HTTPClient and Log are required")
 	}
-	return &Launcher{cfg: cfg, prefix: provider.AgentPrefix(cfg.Namespace), provider: provider.Bounded(cfg.Provider)}, nil
+	digest, err := cfg.launchDigest()
+	if err != nil {
+		return nil, err
+	}
+	return &Launcher{
+		cfg: cfg, prefix: provider.AgentPrefix(cfg.Namespace), provider: provider.Bounded(cfg.Provider),
+		launchDigest: digest, maxAnswer: maxAnswerBytes,
+	}, nil
+}
+
+// launchDigest is a digest of everything this launcher itself starts an instance with. The
+// control plane makes it part of each instance's name, so a changed command, size or credential
+// replaces the running instances as a changed image does. It holds a credential only hashed
+// together with the rest.
+func (cfg Config) launchDigest() (string, error) {
+	inputs, err := json.Marshal(struct {
+		Command       []string          `json:"command"`
+		Size          Size              `json:"size"`
+		ModelProvider string            `json:"model_provider"`
+		Env           map[string]string `json:"env"`
+	}{cfg.Command, cfg.Size, cfg.ModelProvider, cfg.Env})
+	if err != nil {
+		return "", fmt.Errorf("agentlaunch: digest launch inputs: %w", err)
+	}
+	digest := sha256.Sum256(inputs)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 // Validate checks what a config file decides, so the file is refused when it is loaded, before
@@ -88,6 +118,9 @@ func (cfg Config) Validate() error {
 	if cfg.CreatePause < 0 {
 		return errors.New("agentlaunch: CreatePause must not be negative")
 	}
+	if cfg.ModelProvider == "" || len(cfg.Env) == 0 {
+		return errors.New("agentlaunch: ModelProvider and its Env are required")
+	}
 	for name, value := range cfg.Env {
 		if name == "" || value == "" {
 			return fmt.Errorf("agentlaunch: Env entry %q needs a name and a value", name)
@@ -113,15 +146,12 @@ func (l *Launcher) Run(ctx context.Context) {
 	}
 }
 
-// Pass is one convergence. The desired list is read before anything is touched, so a control
-// plane that cannot be reached or answers with anything but a complete list changes nothing.
-// After that every instance is handled by itself: one that cannot be created or destroyed is
-// reported in the returned error and the rest of the pass still runs.
+// Pass is one convergence. The provider is listed and the control plane told what was found
+// before anything is touched, so a provider that cannot be listed, or a control plane that cannot
+// be reached or answers with anything but a complete list, changes nothing. After that every
+// instance is handled by itself: one that cannot be created, stopped or destroyed is reported in
+// the returned error and the rest of the pass still runs.
 func (l *Launcher) Pass(ctx context.Context) error {
-	want, err := l.fetchDesired(ctx)
-	if err != nil {
-		return fmt.Errorf("fetch desired state: %w", err)
-	}
 	rented, err := l.provider.List(ctx, l.prefix)
 	if err != nil {
 		return fmt.Errorf("list instances: %w", err)
@@ -129,6 +159,10 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	byName := map[string][]provider.Instance{}
 	for _, i := range rented {
 		byName[i.Name] = append(byName[i.Name], i)
+	}
+	want, err := l.fetchDesired(ctx, l.observe(ctx, byName))
+	if err != nil {
+		return fmt.Errorf("fetch desired state: %w", err)
 	}
 
 	now := time.Now()
@@ -153,30 +187,60 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 	}
 
+	// An ending instance is told to stop on every pass until its command has exited: the signal
+	// is what starts the agent's last turn, and the provider takes it any number of times.
+	for _, name := range sortedKeys(want.ending) {
+		for _, i := range byName[name] {
+			if i.State == provider.StateExited {
+				continue
+			}
+			if err := l.provider.Stop(ctx, i.ID); err != nil {
+				l.cfg.Log("stop %s (ending): %v", i.Name, err)
+				failures = append(failures, fmt.Errorf("stop %s: %w", i.Name, err))
+				continue
+			}
+			l.cfg.Log("told %s to stop (ending)", i.Name)
+		}
+	}
+
 	var creates, failedCreates int
 	var lastCreateError error
 	for _, name := range sortedKeys(want.instances) {
 		// One instance runs the agent: the live one with the lowest id. A provider that lists
-		// with a lag or a create that failed after it succeeded leaves a second, an exited one
-		// is a harness that crashed, and one starting for longer than the boot limit will never
-		// run its command. All three go, and a name left with nothing live is rented again,
-		// unless something of it could not be destroyed: then the next pass decides.
-		kept, cleared := false, true
+		// with a lag or a create that failed after it succeeded leaves a second, and one
+		// starting for longer than the boot limit will never run its command. Both go.
+		//
+		// An exited one is never rented again from here. It was reported with this pass's
+		// question, and the control plane answers an exit it accepts with another name or with
+		// none. One still asked for under its own name is left as it is for the next answer, and
+		// goes only as the leftover beside a live one.
+		var live, exited []provider.Instance
+		cleared := true
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
 		for _, i := range instances {
 			switch {
 			case i.State == provider.StateExited:
-				cleared = destroy(i, "its command exited") && cleared
+				exited = append(exited, i)
 			case l.stuckStarting(i, now):
 				cleared = destroy(i, fmt.Sprintf("still starting after %s, the boot limit is %s", now.Sub(i.StartedAt).Round(time.Second), l.cfg.BootLimit)) && cleared
-			case kept:
+			case len(live) > 0:
 				cleared = destroy(i, "duplicate") && cleared
 			default:
-				kept = true
+				live = append(live, i)
 			}
 		}
-		if kept || !cleared {
+		if len(live) > 0 {
+			for _, i := range exited {
+				destroy(i, "its command exited beside a live instance of the name")
+			}
+			continue
+		}
+		if len(exited) > 0 {
+			l.cfg.Log("%s exited and is still asked for: reported, and left for the control plane's next answer", name)
+			continue
+		}
+		if !cleared {
 			continue
 		}
 		if creates > 0 && !l.pause(ctx) {
@@ -184,7 +248,9 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			break
 		}
 		creates++
-		if _, err := l.provider.Create(ctx, l.spec(want.instances[name])); err != nil {
+		spec := l.spec(want.instances[name])
+		if _, err := l.provider.Create(ctx, spec); err != nil {
+			err = withoutEnvironment(err, spec.Env)
 			l.cfg.Log("create %s: %v", name, err)
 			failures = append(failures, fmt.Errorf("create %s: %w", name, err))
 			failedCreates++
@@ -199,6 +265,47 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		l.cfg.Log("NO AGENT COULD BE STARTED: all %d creates of this pass failed, the last with: %v", creates, lastCreateError)
 	}
 	return errors.Join(failures...)
+}
+
+const (
+	// exitLogLines and exitLogBytes bound the end of an exited instance's output that is sent
+	// to the control plane.
+	exitLogLines = 60
+	exitLogBytes = 4 << 10
+)
+
+// observe is what the control plane is told with the question: every name of this launcher's
+// namespace once, live if any instance of it is, and for a name whose instances all exited the
+// end of the output of the newest. The output is sent and never logged here.
+func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []observedInstance {
+	observed := []observedInstance{}
+	for _, name := range sortedKeys(byName) {
+		instances := byName[name]
+		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
+		state, last := provider.StateExited, instances[len(instances)-1]
+		for _, i := range instances {
+			if i.State == provider.StateRunning || (i.State == provider.StateStarting && state != provider.StateRunning) {
+				state = i.State
+			}
+		}
+		entry := observedInstance{Name: name[len(l.prefix):], State: string(state)}
+		if state == provider.StateExited {
+			lines, err := l.provider.Logs(ctx, last.ID, exitLogLines)
+			if err != nil {
+				l.cfg.Log("read the output of exited %s: %v", name, err)
+			}
+			entry.Log = tail(strings.Join(lines, "\n"), exitLogBytes)
+		}
+		observed = append(observed, entry)
+	}
+	return observed
+}
+
+func tail(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	return strings.ToValidUTF8(text[len(text)-limit:], "")
 }
 
 // stuckStarting reports an instance that has been starting for longer than the boot limit. An
@@ -224,6 +331,26 @@ func (l *Launcher) pause(ctx context.Context) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// minRedactedLength keeps short values such as a flavor readable in an error: nothing that
+// short is a secret.
+const minRedactedLength = 8
+
+// withoutEnvironment is err with every value of the instance's environment taken out of its
+// text. A vendor that refuses a create may quote the request back, and the request holds the
+// agent's token and the model provider's credential.
+func withoutEnvironment(err error, env map[string]string) error {
+	text := err.Error()
+	for _, name := range sortedKeys(env) {
+		if value := env[name]; len(value) >= minRedactedLength {
+			text = strings.ReplaceAll(text, value, "<"+name+">")
+		}
+	}
+	if text == err.Error() {
+		return err
+	}
+	return errors.New(text)
 }
 
 func (l *Launcher) spec(i instance) provider.Spec {

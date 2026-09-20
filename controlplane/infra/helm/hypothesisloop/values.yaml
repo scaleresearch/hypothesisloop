@@ -208,8 +208,8 @@ agentLauncher:
   # Required with enabled: the whole config file, as runtime/cloud/settings/agent-launcher.yaml
   # describes it. Its launcher_name must be agents.launcher above.
   config: ""
-  # Secret keys handed to the process as environment variables of the same name: the variable
-  # claude_code_oauth_token_env names and the provider's. The pod takes its own token for
+  # Secret keys handed to the process as environment variables of the same name: the variables
+  # model_provider.env names and the provider's. The pod takes its own token for
   # agents.launcher from the control plane's tool at every start.
   secretEnv: []
   resources:

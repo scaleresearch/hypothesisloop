@@ -1,6 +1,7 @@
 package agentlaunch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,13 +42,32 @@ type reconcileAnswer struct {
 // maxAnswerBytes bounds what one answer may hold in memory.
 const maxAnswerBytes = 64 << 20
 
-func (l *Launcher) fetchDesired(ctx context.Context) (*desired, error) {
+// observedInstance is one name of this launcher's namespace as its provider lists it, without
+// the launcher's prefix.
+type observedInstance struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+	Log   string `json:"log,omitempty"`
+}
+
+// reconcileQuestion is what the launcher tells the control plane with every question.
+type reconcileQuestion struct {
+	LaunchDigest string             `json:"launch_digest"`
+	Instances    []observedInstance `json:"instances"`
+}
+
+func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
+	question, err := json.Marshal(reconcileQuestion{LaunchDigest: l.launchDigest, Instances: observed})
+	if err != nil {
+		return nil, err
+	}
 	endpoint := fmt.Sprintf("%s/internal/launchers/%s/reconcile", l.cfg.APIURL, url.PathEscape(l.cfg.Name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(question))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+l.cfg.Token)
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := l.cfg.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -56,12 +76,12 @@ func (l *Launcher) fetchDesired(ctx context.Context) (*desired, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswerBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(l.maxAnswer)+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) > maxAnswerBytes {
-		return nil, fmt.Errorf("answer is larger than %d bytes", maxAnswerBytes)
+	if len(raw) > l.maxAnswer {
+		return nil, fmt.Errorf("answer is larger than %d bytes", l.maxAnswer)
 	}
 	var answer reconcileAnswer
 	if err := json.Unmarshal(raw, &answer); err != nil {

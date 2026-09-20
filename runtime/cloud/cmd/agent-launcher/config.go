@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -11,9 +12,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/agentlaunch"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/configfile"
 )
-
-// claudeTokenVariable is the variable an agent's harness reads its Claude credential from.
-const claudeTokenVariable = "CLAUDE_CODE_OAUTH_TOKEN"
 
 type config struct {
 	// LauncherName is the name the control plane gives hosted agents to (its agents.launcher),
@@ -31,16 +29,28 @@ type config struct {
 	BootLimitSeconds int `yaml:"boot_limit_seconds"`
 	// CreatePauseMilliseconds is waited between two creates of one pass. 0 is no pause, and the
 	// key must be present either way.
-	CreatePauseMilliseconds *int           `yaml:"create_pause_milliseconds"`
-	Provider                providerConfig `yaml:"provider"`
-	Instance                instanceConfig `yaml:"instance"`
-	// ClaudeCodeOAuthTokenEnv names the environment variable of this process that holds the
-	// Claude credential every agent runs with. The launcher adds it to each instance itself, so
-	// it never passes through the control plane or its database.
-	ClaudeCodeOAuthTokenEnv string `yaml:"claude_code_oauth_token_env"`
+	CreatePauseMilliseconds *int                `yaml:"create_pause_milliseconds"`
+	Provider                providerConfig      `yaml:"provider"`
+	Instance                instanceConfig      `yaml:"instance"`
+	ModelProvider           modelProviderConfig `yaml:"model_provider"`
 
-	size        agentlaunch.Size
-	claudeToken string
+	size             agentlaunch.Size
+	modelProviderEnv map[string]string
+}
+
+// modelProviderConfig is whose models the agents run on and what that provider's harness needs
+// in every instance. The launcher adds it itself, so a credential never passes through the
+// control plane or its database.
+type modelProviderConfig struct {
+	Name string             `yaml:"name"`
+	Env  []instanceVariable `yaml:"env"`
+}
+
+// instanceVariable is one variable of every instance and the variable of this process that
+// holds its value. The file names variables and never holds a value.
+type instanceVariable struct {
+	Name     string `yaml:"name"`
+	ValueEnv string `yaml:"value_env"`
 }
 
 type providerConfig struct {
@@ -74,11 +84,22 @@ func loadConfig(path string) (*config, error) {
 		return nil, fmt.Errorf("config: instance: %w", err)
 	}
 	cfg.size = size
-	if cfg.ClaudeCodeOAuthTokenEnv == "" {
-		return nil, fmt.Errorf("config: claude_code_oauth_token_env is required: the environment variable that holds the agents' Claude credential")
+	if cfg.ModelProvider.Name == "" || len(cfg.ModelProvider.Env) == 0 {
+		return nil, fmt.Errorf("config: model_provider needs a name and env: the variables every agent instance is given, each with the variable of this process that holds its value (value_env)")
 	}
-	if cfg.claudeToken = os.Getenv(cfg.ClaudeCodeOAuthTokenEnv); cfg.claudeToken == "" {
-		return nil, fmt.Errorf("config: environment variable %s, named by claude_code_oauth_token_env, is not set", cfg.ClaudeCodeOAuthTokenEnv)
+	cfg.modelProviderEnv = make(map[string]string, len(cfg.ModelProvider.Env))
+	for _, variable := range cfg.ModelProvider.Env {
+		if !variableName.MatchString(variable.Name) || !variableName.MatchString(variable.ValueEnv) {
+			return nil, fmt.Errorf("config: model_provider.env entry %q: name and value_env are both names of environment variables, and a value is never written here", variable.Name)
+		}
+		if _, twice := cfg.modelProviderEnv[variable.Name]; twice {
+			return nil, fmt.Errorf("config: model_provider.env names %s twice", variable.Name)
+		}
+		value := os.Getenv(variable.ValueEnv)
+		if value == "" {
+			return nil, fmt.Errorf("config: environment variable %s, which model_provider.env gives to instances as %s, is not set", variable.ValueEnv, variable.Name)
+		}
+		cfg.modelProviderEnv[variable.Name] = value
 	}
 	if err := cfg.launch().Validate(); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -86,19 +107,22 @@ func loadConfig(path string) (*config, error) {
 	return &cfg, nil
 }
 
+var variableName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
 // launch is the launcher's configuration as the file decides it. The token, the provider, the
 // HTTP client and the log are the process's to add.
 func (cfg *config) launch() agentlaunch.Config {
 	return agentlaunch.Config{
-		Name:        cfg.LauncherName,
-		APIURL:      cfg.APIURL,
-		Namespace:   cfg.Namespace,
-		Command:     cfg.Instance.Command,
-		Size:        cfg.size,
-		Env:         map[string]string{claudeTokenVariable: cfg.claudeToken},
-		Interval:    time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
-		BootLimit:   time.Duration(cfg.BootLimitSeconds) * time.Second,
-		CreatePause: time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
+		Name:          cfg.LauncherName,
+		APIURL:        cfg.APIURL,
+		Namespace:     cfg.Namespace,
+		Command:       cfg.Instance.Command,
+		Size:          cfg.size,
+		ModelProvider: cfg.ModelProvider.Name,
+		Env:           cfg.modelProviderEnv,
+		Interval:      time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
+		BootLimit:     time.Duration(cfg.BootLimitSeconds) * time.Second,
+		CreatePause:   time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
 	}
 }
 

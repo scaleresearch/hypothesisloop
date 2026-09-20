@@ -51,7 +51,14 @@ instance:
   memory: 4Gi
   storage: 10Gi
 
-# The environment variable of this process that holds the Claude credential every agent runs
-# with. The launcher adds it to each instance as CLAUDE_CODE_OAUTH_TOKEN, so it never passes
-# through the control plane or its database. The file names the variable and never the value.
-claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN
+# Whose models the agents run on, and what that provider's harness needs in every instance. Each
+# env entry is a variable of the instance (name) and the variable of this process that holds its
+# value (value_env): the file names variables and never holds a value. The launcher adds them to each instance itself, so the
+# credential never passes through the control plane or its database. It is the platform's own
+# credential, the same in every agent of every org. Changing a value replaces every running
+# instance. Another model provider is its own name and env here and its own command above.
+model_provider:
+  name: anthropic
+  env:
+    - name: CLAUDE_CODE_OAUTH_TOKEN
+      value_env: CLAUDE_CODE_OAUTH_TOKEN

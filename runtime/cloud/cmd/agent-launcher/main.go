@@ -1,6 +1,3 @@
-// hypothesisloop-agent-launcher keeps the agent instances the control plane asks for on one
-// provider account. The pass lives in runtime/cloud/internal/agentlaunch; this file builds it
-// from the one config file AGENT_LAUNCHER_CONFIG names.
 package main
 
 import (
@@ -44,7 +41,7 @@ func main() {
 
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
-	log("starting: launcher=%s provider=%s namespace=%s control_plane=%s interval=%s boot_limit=%s create_pause=%s",
-		cfg.LauncherName, cfg.Provider.Name, cfg.Namespace, cfg.APIURL, launch.Interval, launch.BootLimit, launch.CreatePause)
+	log("starting: launcher=%s provider=%s namespace=%s control_plane=%s model_provider=%s interval=%s boot_limit=%s create_pause=%s",
+		cfg.LauncherName, cfg.Provider.Name, cfg.Namespace, cfg.APIURL, cfg.ModelProvider.Name, launch.Interval, launch.BootLimit, launch.CreatePause)
 	launcher.Run(ctx)
 }

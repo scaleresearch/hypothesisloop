@@ -29,7 +29,15 @@ type controlPlane struct {
 	status int
 	body   string
 	calls  []*http.Request
+	// asked holds the body of every call, as the launcher sent it.
+	asked  []reconcileQuestion
 	server *httptest.Server
+}
+
+func (cp *controlPlane) lastQuestion() reconcileQuestion {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	return cp.asked[len(cp.asked)-1]
 }
 
 func newControlPlane(t *testing.T) *controlPlane {
@@ -39,6 +47,11 @@ func newControlPlane(t *testing.T) *controlPlane {
 		cp.mu.Lock()
 		defer cp.mu.Unlock()
 		cp.calls = append(cp.calls, r)
+		var question reconcileQuestion
+		if err := json.NewDecoder(r.Body).Decode(&question); err != nil {
+			t.Errorf("the reconcile call carries no readable question: %v", err)
+		}
+		cp.asked = append(cp.asked, question)
 		w.WriteHeader(cp.status)
 		_, _ = w.Write([]byte(cp.body))
 	}))
@@ -96,17 +109,18 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) config() Config {
 	return Config{
-		Name:       "main",
-		APIURL:     h.cp.server.URL,
-		Token:      launcherToken,
-		Namespace:  "ns",
-		Command:    []string{"uv", "run", "agent"},
-		Size:       Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30},
-		Env:        map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": oauthToken},
-		Provider:   h.rented,
-		HTTPClient: h.cp.server.Client(),
-		Interval:   time.Second,
-		BootLimit:  2 * time.Minute,
+		Name:          "main",
+		APIURL:        h.cp.server.URL,
+		Token:         launcherToken,
+		Namespace:     "ns",
+		Command:       []string{"uv", "run", "agent"},
+		Size:          Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30},
+		ModelProvider: "example",
+		Env:           map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": oauthToken},
+		Provider:      h.rented,
+		HTTPClient:    h.cp.server.Client(),
+		Interval:      time.Second,
+		BootLimit:     2 * time.Minute,
 		Log: func(format string, args ...any) {
 			h.logMu.Lock()
 			defer h.logMu.Unlock()
@@ -213,23 +227,28 @@ func TestAnInstanceTheListNoLongerNamesIsDestroyed(t *testing.T) {
 	h.names()
 }
 
-func TestAnEndingInstanceIsLeftAloneWhateverItsState(t *testing.T) {
+func TestAnEndingInstanceIsToldToStopOnEveryPassAndOtherwiseLeftAlone(t *testing.T) {
 	h := newHarness(t)
-	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
 	h.rented.Exit(full("b"))
-	idsA, idsB := h.rented.IDs(full("a")), h.rented.IDs(full("b"))
+	idsA, idsB, idsC := h.rented.IDs(full("a")), h.rented.IDs(full("b")), h.rented.IDs(full("c"))
 
-	h.cp.want(nil, []string{"a", "b", "never-rented"})
+	h.cp.want(nil, []string{"a", "b", "c", "never-rented"})
 	h.mustPass()
 	h.mustPass()
-	h.names(full("a"), full("b"))
-	if !reflect.DeepEqual(h.rented.IDs(full("a")), idsA) || !reflect.DeepEqual(h.rented.IDs(full("b")), idsB) {
+	h.names(full("a"), full("b"), full("c"))
+	if !reflect.DeepEqual(h.rented.IDs(full("a")), idsA) || !reflect.DeepEqual(h.rented.IDs(full("b")), idsB) || !reflect.DeepEqual(h.rented.IDs(full("c")), idsC) {
 		t.Fatal("an ending instance was replaced")
 	}
-	if h.rented.Calls("Create") != 2 || h.rented.Calls("Destroy") != 0 || h.rented.Stops(full("a")) != 0 {
+	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 0 {
 		t.Fatalf("creates %d destroys %d", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+	}
+	// The signal is what starts the agent's last turn. Running or still starting, an ending
+	// instance gets it on every pass, and one whose command already exited needs none.
+	if a, b, c := h.rented.Stops(full("a")), h.rented.Stops(full("b")), h.rented.Stops(full("c")); a != 2 || b != 0 || c != 2 {
+		t.Fatalf("stops: running %d, exited %d, starting %d, want 2, 0, 2", a, b, c)
 	}
 
 	h.cp.want(nil, nil)
@@ -237,44 +256,213 @@ func TestAnEndingInstanceIsLeftAloneWhateverItsState(t *testing.T) {
 	h.names()
 }
 
-func TestAnInstanceWhoseCommandExitedIsReplaced(t *testing.T) {
+func TestAnInstanceThatIsNotEndingIsNeverToldToStop(t *testing.T) {
 	h := newHarness(t)
-	h.cp.want([]entry{agent("a")}, nil)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
-	crashed := h.rented.IDs(full("a"))
-	h.rented.Exit(full("a"), "Traceback")
-
 	h.mustPass()
-	h.names(full("a"))
-	if got := h.rented.IDs(full("a")); reflect.DeepEqual(got, crashed) {
-		t.Fatal("the exited instance is still the one rented")
+	h.mustPass()
+	if h.rented.Calls("Stop") != 0 {
+		t.Fatalf("stops = %d", h.rented.Calls("Stop"))
 	}
 }
 
-func TestAnExitedInstanceThatCannotBeDestroyedIsNotRentedBeside(t *testing.T) {
+func TestAStopThatFailsIsReportedAndTheRestOfThePassRuns(t *testing.T) {
 	h := newHarness(t)
-	h.cp.want([]entry{agent("a")}, nil)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
 	h.mustPass()
-	h.rented.Exit(full("a"))
-	h.rented.Fail = func(method, _ string) error {
-		if method == "Destroy" {
-			return errors.New("vendor down")
+	h.rented.Start(full("a"))
+	h.rented.Start(full("b"))
+	h.cp.want([]entry{agent("new")}, []string{"a", "b"})
+	h.rented.Fail = func(method, name string) error {
+		if method == "Stop" && name == full("a") {
+			return errors.New("vendor refused")
 		}
 		return nil
 	}
-	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "destroy "+full("a")) {
+	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "stop "+full("a")) {
 		t.Fatalf("err = %v", err)
 	}
-	h.names(full("a"))
-	if h.rented.Calls("Create") != 1 {
-		t.Fatal("a second instance was rented beside one that could not be destroyed")
+	h.names(full("a"), full("b"), full("new"))
+	if h.rented.Stops(full("b")) != 1 {
+		t.Fatal("the other ending instance was not told to stop")
 	}
-	h.rented.Fail = nil
+}
+
+func TestAnExitedInstanceIsReportedWithTheEndOfItsOutputAndNeverRentedAgainFromHere(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
 	h.mustPass()
-	h.names(full("a"))
-	if h.rented.Calls("Create") != 2 {
-		t.Fatalf("creates = %d, want the replacement once the destroy went through", h.rented.Calls("Create"))
+	h.rented.Start(full("a"))
+	h.rented.Start(full("b"))
+	crashed := h.rented.IDs(full("a"))
+	h.rented.Exit(full("a"), "starting", "Traceback (most recent call last):", "SystemExit: agent: the reason")
+
+	// The control plane has not taken the exit in yet and still asks for the same name.
+	for pass := 1; pass <= 3; pass++ {
+		h.mustPass()
+		question := h.cp.lastQuestion()
+		want := []observedInstance{
+			{Name: "a", State: "exited", Log: "starting\nTraceback (most recent call last):\nSystemExit: agent: the reason"},
+			{Name: "b", State: "running"},
+		}
+		if !reflect.DeepEqual(question.Instances, want) {
+			t.Fatalf("pass %d told the control plane %+v\nwant %+v", pass, question.Instances, want)
+		}
+	}
+	if got := h.rented.IDs(full("a")); !reflect.DeepEqual(got, crashed) || h.rented.Calls("Create") != 2 || h.rented.Calls("Destroy") != 0 {
+		t.Fatalf("instances of a %v (was %v), creates %d, destroys %d: an exited instance is the control plane's to decide", got, crashed, h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+	}
+	if h.logged("SystemExit") != 0 || h.logged("Traceback") != 0 {
+		t.Fatalf("the instance's output reached the launcher's log: %q", h.log)
+	}
+	if h.logged(full("a")+" exited and is still asked for") != 3 {
+		t.Fatalf("log = %q", h.log)
+	}
+
+	// Its answer to the exit is another name: the old machine goes and a new one is rented.
+	h.cp.want([]entry{agent("a-again"), agent("b")}, nil)
+	h.mustPass()
+	h.names(full("a-again"), full("b"))
+
+	// Or no name at all: the machine goes and nothing takes its place.
+	h.rented.Start(full("a-again"))
+	h.rented.Exit(full("a-again"), "the last words")
+	h.cp.want([]entry{agent("b")}, nil)
+	h.mustPass()
+	h.names(full("b"))
+	if h.rented.Calls("Create") != 3 {
+		t.Fatalf("creates = %d", h.rented.Calls("Create"))
+	}
+}
+
+func TestOnlyTheEndOfAnExitedInstancesOutputIsSent(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	lines := make([]string, 500)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %03d %s", i, strings.Repeat("x", 200))
+	}
+	h.rented.Exit(full("a"), lines...)
+	h.mustPass()
+	sent := h.cp.lastQuestion().Instances[0].Log
+	if len(sent) > exitLogBytes || !strings.HasSuffix(sent, lines[499]) || strings.Contains(sent, "line 400") {
+		t.Fatalf("sent %d bytes ending %q", len(sent), sent[max(0, len(sent)-30):])
+	}
+}
+
+func TestAnExitWhoseOutputCannotBeReadIsStillReported(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	h.rented.Exit(full("a"), "unreadable")
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Logs" {
+			return errors.New("vendor log API down")
+		}
+		return nil
+	}
+	h.mustPass()
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "exited"}}) {
+		t.Fatalf("told the control plane %+v", got)
+	}
+	if h.logged("read the output of exited "+full("a")) != 1 {
+		t.Fatalf("log = %q", h.log)
+	}
+}
+
+func TestANameIsReportedOnceAndAsLiveWhileAnyInstanceOfItIs(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c")}, nil)
+	rent(t, h.rented, full("a"))
+	h.rented.Exit(full("a"), "the first one crashed")
+	rent(t, h.rented, full("a"))
+	rent(t, h.rented, full("b"))
+	h.rented.Start(full("b"))
+	rent(t, h.rented, full("b"))
+	rent(t, h.rented, "hl-agent-other-zzz")
+	h.mustPass()
+	want := []observedInstance{{Name: "a", State: "starting"}, {Name: "b", State: "running"}}
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
+		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
+	}
+	if h.rented.Calls("Logs") != 0 {
+		t.Fatal("the output of an instance with a live twin was read")
+	}
+}
+
+func TestALauncherWithNothingRentedSaysSoWithAnEmptyList(t *testing.T) {
+	h := newHarness(t)
+	h.mustPass()
+	h.cp.mu.Lock()
+	defer h.cp.mu.Unlock()
+	if h.cp.asked[0].Instances == nil || len(h.cp.asked[0].Instances) != 0 {
+		t.Fatalf("instances = %#v, want an empty list and never null", h.cp.asked[0].Instances)
+	}
+}
+
+func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.T) {
+	h := newHarness(t)
+	h.mustPass()
+	h.mustPass()
+	digest := h.cp.lastQuestion().LaunchDigest
+	h.cp.mu.Lock()
+	first := h.cp.asked[0].LaunchDigest
+	h.cp.mu.Unlock()
+	if len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" || digest != first {
+		t.Fatalf("digest %q (first pass %q): want 64 hex characters, the same on every pass", digest, first)
+	}
+	if strings.Contains(digest, oauthToken) || strings.Contains(digest, launcherToken) {
+		t.Fatal("the digest holds a secret")
+	}
+	again, err := h.config().launchDigest()
+	if err != nil || again != digest {
+		t.Fatalf("a second launcher of the same config digests to %q, %v", again, err)
+	}
+	for what, edit := range map[string]func(*Config){
+		"command":        func(c *Config) { c.Command = []string{"uv", "run", "another"} },
+		"cpu":            func(c *Config) { c.Size.CPUMillis = 4000 },
+		"memory":         func(c *Config) { c.Size.MemoryBytes = 8 << 30 },
+		"disk":           func(c *Config) { c.Size.DiskBytes = 5 << 30 },
+		"credential":     func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "a-rotated-credential"} },
+		"credential key": func(c *Config) { c.Env = map[string]string{"ANOTHER_KEY": oauthToken} },
+		"model provider": func(c *Config) { c.ModelProvider = "another" },
+	} {
+		cfg := h.config()
+		edit(&cfg)
+		if changed, err := cfg.launchDigest(); err != nil || changed == digest {
+			t.Errorf("a changed %s left the digest as it was (%v)", what, err)
+		}
+	}
+	for what, edit := range map[string]func(*Config){
+		"token":     func(c *Config) { c.Token = "hls_another" },
+		"interval":  func(c *Config) { c.Interval = time.Hour },
+		"namespace": func(c *Config) { c.Namespace = "other" },
+	} {
+		cfg := h.config()
+		edit(&cfg)
+		if same, _ := cfg.launchDigest(); same != digest {
+			t.Errorf("a changed %s changed the digest, which would replace every running agent", what)
+		}
+	}
+}
+
+func TestAnAnswerLargerThanTheBoundChangesNothing(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("kept")}, nil)
+	h.mustPass()
+	h.launcher.maxAnswer = 256
+	big := agent("big")
+	big.Env["AGENT_HYPERPARAMETERS"] = strings.Repeat("x", 1024)
+	h.cp.want([]entry{big}, nil)
+	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "larger than 256 bytes") {
+		t.Fatalf("err = %v", err)
+	}
+	h.names(full("kept"))
+	if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
+		t.Fatal("the provider was changed after an answer that was not read whole")
 	}
 }
 
@@ -452,8 +640,8 @@ func TestAnAnswerThatIsNotACompleteListChangesNothing(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 			h.names(full("kept"))
-			if h.rented.Calls("List") != 1 || h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
-				t.Fatal("the provider was touched after a failed fetch")
+			if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Stop") != 0 {
+				t.Fatal("the provider was changed after a failed fetch")
 			}
 		})
 	}
@@ -563,6 +751,8 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 		"no memory":           func(c *Config) { c.Size.MemoryBytes = 0 },
 		"no disk":             func(c *Config) { c.Size.DiskBytes = 0 },
 		"no interval":         func(c *Config) { c.Interval = 0 },
+		"no model provider":   func(c *Config) { c.ModelProvider = "" },
+		"no provider env":     func(c *Config) { c.Env = nil },
 		"no boot limit":       func(c *Config) { c.BootLimit = 0 },
 		"negative pause":      func(c *Config) { c.CreatePause = -time.Second },
 		"empty env value":     func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
@@ -823,19 +1013,50 @@ func (p halfRented) Create(ctx context.Context, spec provider.Spec) (string, err
 	return "", errors.New("the command could not be launched")
 }
 
-func TestACreateThatFailsAndLeavesAnExitedInstanceNeverLeavesMoreThanOne(t *testing.T) {
+func TestACreateThatFailsAndLeavesAnExitedInstanceIsNotRepeated(t *testing.T) {
 	h := newHarness(t)
 	launcher := h.launcherWith(func(c *Config) { c.Provider = halfRented{h.rented} })
 	h.cp.want([]entry{agent("a"), agent("b")}, nil)
-	for pass := 1; pass <= 4; pass++ {
-		if err := launcher.Pass(context.Background()); err == nil {
-			t.Fatalf("pass %d: no error", pass)
+	if err := launcher.Pass(context.Background()); err == nil {
+		t.Fatal("the failed creates were not reported")
+	}
+	for pass := 2; pass <= 5; pass++ {
+		if err := launcher.Pass(context.Background()); err != nil {
+			t.Fatalf("pass %d: %v", pass, err)
 		}
-		if a, b := h.rented.IDs(full("a")), h.rented.IDs(full("b")); len(a) != 1 || len(b) != 1 {
-			t.Fatalf("pass %d: instances of a %v, of b %v, want one each", pass, a, b)
+		if got := h.cp.lastQuestion().Instances; len(got) != 2 || got[0].State != "exited" || got[1].State != "exited" {
+			t.Fatalf("pass %d told the control plane %+v", pass, got)
 		}
 	}
-	if h.rented.Calls("Destroy") != 6 {
-		t.Fatalf("destroys = %d, want each leftover destroyed before its replacement", h.rented.Calls("Destroy"))
+	if h.rented.Calls("Create") != 2 || h.rented.Calls("Destroy") != 0 {
+		t.Fatalf("creates %d destroys %d, want each instance rented once and left for the control plane", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+	}
+}
+
+func TestAVendorErrorThatQuotesTheRequestBackReachesNoLogWithItsSecrets(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	refusal := fmt.Sprintf(`vendor: POST /machines: HTTP 422: {"error":"bad guest","request":{"env":{"HL_TOKEN":%q,"CLAUDE_CODE_OAUTH_TOKEN":%q,"AGENT_ID":"a"}}}`, agentToken, oauthToken)
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Create" {
+			return fmt.Errorf("create machine: %w", errors.New(refusal))
+		}
+		return nil
+	}
+	err := h.pass()
+	if err == nil || !strings.Contains(err.Error(), "HTTP 422") || !strings.Contains(err.Error(), "bad guest") {
+		t.Fatalf("err = %v, want the vendor's refusal", err)
+	}
+	said := err.Error() + strings.Join(h.log, "\n")
+	for _, secret := range []string{agentToken, oauthToken} {
+		if strings.Contains(said, secret) {
+			t.Fatalf("a secret of the instance's environment was logged or returned: %s", said)
+		}
+	}
+	if !strings.Contains(said, "<HL_TOKEN>") || !strings.Contains(said, "<CLAUDE_CODE_OAUTH_TOKEN>") {
+		t.Fatalf("the error does not say what was taken out: %s", said)
+	}
+	if h.logged("NO AGENT COULD BE STARTED") != 1 {
+		t.Fatalf("log = %q", h.log)
 	}
 }

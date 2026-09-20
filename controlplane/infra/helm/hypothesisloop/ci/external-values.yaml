@@ -99,4 +99,8 @@ agentLauncher:
       cpu: "2"
       memory: 4Gi
       storage: 10Gi
-    claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN
+    model_provider:
+      name: anthropic
+      env:
+        - name: CLAUDE_CODE_OAUTH_TOKEN
+          value_env: CLAUDE_CODE_OAUTH_TOKEN
