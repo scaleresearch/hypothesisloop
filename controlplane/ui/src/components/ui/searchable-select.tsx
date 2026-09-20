@@ -66,7 +66,12 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
     <Combobox
       immediate
       value={value}
-      onChange={(v: string | null) => onChange(v ?? '')}
+      onChange={(v: string | null) => {
+        onChange(v ?? '')
+        // The list opens on focus, so the field gives focus up once a choice is made: the next
+        // click on it opens the list again.
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      }}
       onClose={() => setQuery('')}
       as="div"
       className={className}

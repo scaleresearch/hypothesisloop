@@ -1,8 +1,3 @@
-// A stand-in for the identity provider, for the browser run only. It answers the Supabase Auth
-// endpoints supabase-js calls and signs tokens with local development's JWT key, which is the
-// key the local control plane verifies a person against (localdev/lib/auth.sh). Where the real
-// provider would send the browser to GitHub, this one approves at once as the user the test named.
-
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -12,7 +7,7 @@ const ISSUER = 'http://localhost/hypothesisloop-dev'
 
 const base64url = value => Buffer.from(value).toString('base64url')
 
-export function startIdentityProvider({ port, keyPath }) {
+export function startIdentityProvider({ port, keyPath, ui }) {
   const privateKey = createPrivateKey(readFileSync(keyPath))
   const jwk = { ...createPublicKey(privateKey).export({ format: 'jwk' }), kid: KID, alg: 'ES256', use: 'sig' }
 
@@ -24,6 +19,7 @@ export function startIdentityProvider({ port, keyPath }) {
     refreshTokens: new Map(),
     refreshes: 0,
     authorizeRequests: [],
+    githubCodes: [],
   }
 
   function accessToken(user) {
@@ -52,7 +48,7 @@ export function startIdentityProvider({ port, keyPath }) {
   }
 
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url, `http://localhost:${port}`)
+    const url = new URL(req.url, `http://127.0.0.1:${port}`)
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}
@@ -96,6 +92,24 @@ export function startIdentityProvider({ port, keyPath }) {
 
     if (route === 'POST /auth/v1/logout') return res.writeHead(204).end()
 
+    // GitHub, stood in for: installing the App and authorising it both approve at once and
+    // return as GitHub does, to the App's setup address and to redirect_uri.
+    if (route === 'GET /github/install') {
+      const back = new URL('/settings/repository', ui)
+      back.searchParams.set('installation_id', '4242')
+      back.searchParams.set('setup_action', 'install')
+      back.searchParams.set('state', url.searchParams.get('state'))
+      return res.writeHead(302, { Location: back.toString() }).end()
+    }
+    if (route === 'GET /github/authorize') {
+      const code = randomUUID()
+      state.githubCodes.push(code)
+      const back = new URL(url.searchParams.get('redirect_uri'))
+      back.searchParams.set('code', code)
+      back.searchParams.set('state', url.searchParams.get('state'))
+      return res.writeHead(302, { Location: back.toString() }).end()
+    }
+
     // What a test sets before it acts: who signs in next, how long tokens live, what audience
     // they name, and which user's sessions are revoked.
     if (route === 'POST /test/configure') {
@@ -107,11 +121,11 @@ export function startIdentityProvider({ port, keyPath }) {
       }
       return json(200, {})
     }
-    if (route === 'GET /test/state') return json(200, { refreshes: state.refreshes, authorizeRequests: state.authorizeRequests })
+    if (route === 'GET /test/state') return json(200, { refreshes: state.refreshes, authorizeRequests: state.authorizeRequests, githubCodes: state.githubCodes })
     if (route === 'POST /test/token') return json(200, { access_token: accessToken(body.user) })
 
     json(404, { msg: `the identity provider stand-in does not answer ${route}` })
   })
 
-  return new Promise(resolve => server.listen(port, () => resolve(server)))
+  return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve(server)))
 }

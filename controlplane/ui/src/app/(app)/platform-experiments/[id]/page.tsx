@@ -657,7 +657,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   // pass through as an empty array: an unreachable quota service would render as "no agents
   // signed up", which is a different answer, not a missing one.
   const failed = [
-    peError && 'the experiment',
     quotasError && 'quotas',
     (experimentsError || runningError) && 'jobs',
     stagesError && 'stage status',
@@ -668,6 +667,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   ].filter(Boolean) as string[]
 
   if (peLoading) return <Loading />
+  if (peError) return <ErrorMessage>Could not load this platform experiment: {peError.message}</ErrorMessage>
   if (failed.length > 0) return <ErrorMessage>Could not load {failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>
 
