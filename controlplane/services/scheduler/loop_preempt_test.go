@@ -339,3 +339,41 @@ func TestSubmitErrorLevelLogsALostCapacityRaceAsInfo(t *testing.T) {
 		t.Errorf("other submit failure: got = %v, want error", got)
 	}
 }
+
+func TestPreemptNeverReservesMoreThanTheStintLeft(t *testing.T) {
+	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	for name, tc := range map[string]struct{ estimate, stint, want float64 }{
+		"a remainder under the floor is kept":      {1, 0.9, 0.1},
+		"a stint past its estimate gets the floor": {1, 1.2, domain.MinRemainingHours},
+		"the floor never exceeds the estimate":     {0.1, 0.2, 0.1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			victim := burstVictim("victim", flavor)
+			victim.EstimatedDurationHours = tc.estimate
+			store := &preemptStore{}
+			l, _ := preemptLoop(store, fakeObserved{stint: map[string]float64{"victim": tc.stint}})
+
+			if _, err := l.preempt(context.Background(), needAccelerators(flavor, 1), []*domain.Experiment{victim}, burstVictim("preemptor", flavor)); err != nil {
+				t.Fatalf("preempt: %v", err)
+			}
+			if got := store.remaining["victim"]; got < tc.want-1e-9 || got > tc.want+1e-9 {
+				t.Fatalf("remaining = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+type quotaRefusal struct{}
+
+func (quotaRefusal) Error() string           { return "need 0.15 additional accelerator_hours" }
+func (quotaRefusal) InsufficientQuota() bool { return true }
+
+func TestAQuotaRefusalAtClaimHasItsOwnReason(t *testing.T) {
+	err := fmt.Errorf("reserve selected accelerator flavor: %w", quotaRefusal{})
+	if got, want := notAdmittedReasonForSubmitError(err), "insufficient_quota: need 0.15 additional accelerator_hours"; got != want {
+		t.Fatalf("reason = %q, want %q", got, want)
+	}
+	if got := submitErrorLevel(err); got != zapcore.InfoLevel {
+		t.Fatalf("level = %v, want info", got)
+	}
+}

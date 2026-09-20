@@ -21,13 +21,25 @@ var errAdmissionCapacityChanged = errors.New("capacity changed during admission"
 // rejection from a generic submit failure without importing the quota package's concrete type.
 type concurrencyCapExceeded interface{ ConcurrencyCapExceeded() bool }
 
+type insufficientQuota interface {
+	error
+	InsufficientQuota() bool
+}
+
+// notAdmittedInsufficientQuota is the reason of a queued job whose reservation its agent's quota
+// no longer covers at claim time.
+const notAdmittedInsufficientQuota = "insufficient_quota"
+
 // notAdmittedReasonForSubmitError maps a submitJob/submitJobTo error to the not_admitted_reason
 // the row should carry. Order matters: check the most specific error first.
 func notAdmittedReasonForSubmitError(err error) string {
 	var capErr concurrencyCapExceeded
+	var quotaErr insufficientQuota
 	switch {
 	case errors.As(err, &capErr):
 		return domain.NotAdmittedConcurrencyCap
+	case errors.As(err, &quotaErr):
+		return notAdmittedInsufficientQuota + ": " + quotaErr.Error()
 	case errors.Is(err, errAdmissionCapacityChanged):
 		return domain.NotAdmittedCapacityUnavailable
 	default:
@@ -35,10 +47,11 @@ func notAdmittedReasonForSubmitError(err error) string {
 	}
 }
 
-// submitErrorLevel logs a lost race for the last free capacity at info: the job stays queued and
-// the next tick admits it, so it is no error.
+// submitErrorLevel logs a lost race for the last free capacity and a quota refusal at info: the
+// job stays queued with the reason on its row, so neither is an error.
 func submitErrorLevel(err error) zapcore.Level {
-	if errors.Is(err, errAdmissionCapacityChanged) {
+	var quotaErr insufficientQuota
+	if errors.Is(err, errAdmissionCapacityChanged) || errors.As(err, &quotaErr) {
 		return zapcore.InfoLevel
 	}
 	return zapcore.ErrorLevel
@@ -175,13 +188,12 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 			l.logger.Error("stint elapsed for preemption rescale", zap.String("id", victim.ID), zap.Error(err))
 			continue
 		}
+		// The floor is for a stint that used up its whole estimate. Applied to a positive
+		// remainder it reserves more than the job was admitted with, and a tight quota then
+		// refuses every re-claim.
 		remaining := victim.EstimatedDurationHours - stintElapsed
-		minimum := domain.MinRemainingHours
-		if victim.EstimatedDurationHours < minimum {
-			minimum = victim.EstimatedDurationHours
-		}
-		if remaining < minimum {
-			remaining = minimum
+		if remaining <= 0 {
+			remaining = min(domain.MinRemainingHours, victim.EstimatedDurationHours)
 		}
 		ratio := 0.0
 		if victim.EstimatedDurationHours > 0 {
