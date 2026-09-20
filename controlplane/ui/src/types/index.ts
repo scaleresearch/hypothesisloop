@@ -534,3 +534,23 @@ export interface AgentSignup {
 export interface JoinedAgent extends AgentSignup {
   token?: string
 }
+
+/** The platform's GitHub App: where a person installs it and where they authorise it. */
+export interface GitHubApp {
+  slug: string
+  client_id: string
+  install_url: string
+  authorize_url: string
+}
+
+/** The repository a project's agents and jobs clone. */
+export interface ProjectRepo {
+  project_id: string
+  installation_id: number
+  repository_id: number
+  /** owner/name. */
+  repo: string
+  default_branch: string
+  attached_at: string
+  clone_url: string
+}

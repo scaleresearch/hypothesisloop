@@ -7,6 +7,7 @@ import { resolveTenant, TenantContext } from '@/lib/tenant'
 import SettingsPage from '@/app/(app)/settings/page'
 import type { Me } from '@/types'
 
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOrg: vi.fn(), renameProject: vi.fn() }))
 vi.mock('@/components/api-keys', () => ({ APIKeys: () => <p>api keys</p> }))
 vi.mock('@/components/org-clusters', () => ({ OrgClusters: () => <p>clusters</p> }))
@@ -120,10 +121,10 @@ describe('a member of the org', () => {
 })
 
 describe('the repository section', () => {
-  it('is a marked place with nothing to operate', () => {
+  it('leads to the repository of the selected project', () => {
     show()
     const section = screen.getByText('Repository').closest('.wa-pod')!
-    expect(section.textContent).toContain('Not available yet.')
-    expect(section.querySelector('button, input, a')).toBeNull()
+    expect(section.querySelector('a')!.textContent).toBe('Repository of default')
+    expect(section.querySelector('a')!.getAttribute('href')).toBe('/settings/repository?project=prj_1')
   })
 })

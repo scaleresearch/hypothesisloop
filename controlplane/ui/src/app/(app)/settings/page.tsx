@@ -6,6 +6,7 @@ import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
 import { OrgClusters } from '@/components/org-clusters'
 import { Button } from '@/components/ui/button'
+import { Link } from '@/components/ui/link'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 
@@ -112,7 +113,7 @@ function Projects() {
 }
 
 export default function SettingsPage() {
-  const { org, administers } = useTenant()
+  const { org, project, administers } = useTenant()
   return (
     <div>
       <PageHeader title="Settings" description={`${org.name}: its name, projects, API keys and clusters.`} />
@@ -147,8 +148,8 @@ export default function SettingsPage() {
         <PodHeader>Repository</PodHeader>
         <PodContent>
           <p className="text-muted" style={{ fontSize: 13 }}>
-            Not available yet. This is where a GitHub repository will be attached to a project as
-            the code base its agents and jobs start from.
+            The GitHub repository the agents and jobs of {project.name} clone, and its agents push their branches to.{' '}
+            <Link href="/settings/repository" className="text-link">Repository of {project.name}</Link>
           </p>
         </PodContent>
       </Pod>

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
-  ApiError, addHumanHypothesisComment, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
+  ApiError, addHumanHypothesisComment, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
   fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings,
   registerHumanHypothesis, revokeAPIKey,
 } from '@/lib/api'
@@ -199,5 +199,37 @@ describe('what a person writes is filed under their session, with no author in t
     await expect(registerHumanHypothesis('pe-1', 'an idea', [])).resolves.toEqual({
       similar: [{ id: 'h2', status: 'open', text: 't', reason: 'close_text' }],
     })
+  })
+})
+
+describe('a project\'s repository', () => {
+  it('is null for a project that has none, which the API answers 404', async () => {
+    fetchMock().mockResolvedValue(answer(404, { message: 'no repository is attached to this project' }))
+    await expect(fetchProjectRepo('prj_1')).resolves.toBeNull()
+    expect(sent().url.pathname).toBe('/projects/prj_1/repo')
+  })
+
+  it('is a failure when the read fails any other way', async () => {
+    fetchMock().mockResolvedValue(answer(500, { message: 'internal error' }))
+    await expect(fetchProjectRepo('prj_1')).rejects.toThrow('internal error')
+  })
+
+  it('is attached with the installation, the name and the code GitHub returned', async () => {
+    fetchMock().mockResolvedValue(answer(200, { project_id: 'prj_1', repo: 'acme/widgets' }))
+    await attachProjectRepo('prj_1', 4242, 'acme/widgets', 'code-1')
+    expect(sent().init.method).toBe('POST')
+    expect(sent().url.pathname).toBe('/projects/prj_1/repo')
+    expect(sent().body).toEqual({ installation_id: 4242, repo: 'acme/widgets', code: 'code-1' })
+  })
+
+  it('is detached by a call that answers with no body', async () => {
+    fetchMock().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(detachProjectRepo('prj_1')).resolves.toBeUndefined()
+    expect(sent().init.method).toBe('DELETE')
+  })
+
+  it('cannot be attached on a deployment without a GitHub App, which answers 503', async () => {
+    fetchMock().mockResolvedValue(answer(503, { message: 'this deployment has no GitHub App configured' }))
+    await expect(fetchGitHubApp()).rejects.toMatchObject({ status: 503 })
   })
 })

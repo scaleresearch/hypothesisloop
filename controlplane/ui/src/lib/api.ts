@@ -26,6 +26,8 @@ import type {
   HypothesisStatus,
   HypothesisWithJobs,
   JobMetric,
+  GitHubApp,
+  ProjectRepo,
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
@@ -622,4 +624,31 @@ export function createAPIKey(orgID: string, name: string, projectID?: string): P
 
 export function revokeAPIKey(keyID: string): Promise<APIKey> {
   return apiSend<APIKey>('DELETE', `/api-keys/${keyID}`)
+}
+
+// ---------------------------------------------------------------------------
+// Repositories
+// ---------------------------------------------------------------------------
+
+// Answered 503 on a deployment that has no GitHub App.
+export function fetchGitHubApp(): Promise<GitHubApp> {
+  return apiFetch<GitHubApp>('/github/app')
+}
+
+// A project with no repository is answered 404, which is an answer and no failure here.
+export async function fetchProjectRepo(projectID: string): Promise<ProjectRepo | null> {
+  const res = await request('GET', `/projects/${projectID}/repo`)
+  if (res.status === 404) return null
+  if (!res.ok) throw await failure(res)
+  return res.json()
+}
+
+// `code` is what GitHub returned from authorising the App: it proves the person can push to the
+// repository, and works once.
+export function attachProjectRepo(projectID: string, installationID: number, repo: string, code: string): Promise<ProjectRepo> {
+  return apiSend<ProjectRepo>('POST', `/projects/${projectID}/repo`, { installation_id: installationID, repo, code })
+}
+
+export async function detachProjectRepo(projectID: string): Promise<void> {
+  await answer('DELETE', `/projects/${projectID}/repo`)
 }

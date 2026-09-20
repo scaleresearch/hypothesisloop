@@ -141,6 +141,15 @@ npm run lint && npm run typecheck && npm test      # static checks and unit test
 npm run e2e                                        # a real browser against the local stack, port 3000
 ```
 
+### Repository
+
+Settings, then Repository, attaches a GitHub repository to the selected project: the person
+installs the platform's GitHub App, confirms on GitHub who they are, and names the repository.
+GitHub returns both times to `<ui origin>/settings/repository`, so the App's setup URL and its
+callback URL must be that address (`infra/github/app-manifest.json`). The page builds the address
+from the origin it is served on and takes the App's addresses from `GET /github/app`. A
+deployment without a GitHub App says so on the page.
+
 Another sign-in method is an entry in `SIGN_IN_METHODS` (`controlplane/ui/src/lib/auth.ts`) and
 the provider switched on in Supabase.
 
