@@ -297,9 +297,12 @@ make controlplane-up
 # with the cluster's runtime token filled in:
 hl cluster add my-cluster --api-url https://your-control-plane:8081 --metrics-url https://your-control-plane:8084
 # Point kubectl at the cluster and run what it printed:
-make cluster-agent-up CLUSTER=my-cluster API_URL=https://your-control-plane:8081 \
-  METRICS_URL=https://your-control-plane:8084 RUNTIME_TOKEN=hls_...
+RUNTIME_TOKEN=hls_... make cluster-agent-up CLUSTER=my-cluster \
+  API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084
 ```
+
+`RUNTIME_TOKEN` goes in the environment, as above, and reaches helm on stdin: a token given as
+a make argument or a flag is readable in the process list.
 
 `make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
 and `REGISTRY` must name a registry every node can pull from (`make images` pushes there).
@@ -317,6 +320,11 @@ the same token, and a name another org holds is refused. The control plane refus
 a name nobody registered, so a typo'd `CLUSTER=` is an error and never a second cluster.
 An operator who holds the signing secret and the database can do the same without an API key:
 `make -s runtime-token CLUSTER=my-cluster ORG=<org id>`.
+
+The signing secret is the deployment's own: control-service and metrics-service read it from
+`HYPOTHESISLOOP_SIGNING_SECRET` and do not start without it, and the settings file only names
+the variable. Local development's value lives in `localdev/lib/auth.sh` and is supplied by
+`make`. Whoever holds the secret can derive every token, so rotating it ends them all.
 
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with
