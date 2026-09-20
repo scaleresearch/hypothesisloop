@@ -2,12 +2,15 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -28,16 +31,23 @@ type AgentDataCost struct {
 	ObjectCount int    `json:"object_count"`
 }
 
-// DataUsageHandler serves the durable-data half of what a platform experiment costs.
+// AgentDataKeyStore keeps one object-store key per signup; see db.PlatformExperimentsStore.AgentDataKey.
+type AgentDataKeyStore interface {
+	AgentDataKey(ctx context.Context, platformExperimentID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error)
+}
+
+// DataUsageHandler serves the durable-data half of what a platform experiment costs, and each
+// agent's own key to that data.
 type DataUsageHandler struct {
 	dataStore        *objectstore.Client
+	keys             AgentDataKeyStore
 	maxBytesPerAgent int64
 }
 
 // NewDataUsageHandler returns a handler reporting against client, with the same per-agent ceiling
 // admission enforces so a caller can see how close it is to being refused.
-func NewDataUsageHandler(client *objectstore.Client, maxBytesPerAgent int64) *DataUsageHandler {
-	return &DataUsageHandler{dataStore: client, maxBytesPerAgent: maxBytesPerAgent}
+func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, maxBytesPerAgent int64) *DataUsageHandler {
+	return &DataUsageHandler{dataStore: client, keys: keys, maxBytesPerAgent: maxBytesPerAgent}
 }
 
 // RegisterDataUsageHuma registers the durable-data usage operation on doc.
@@ -57,6 +67,56 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		}
 		return &struct{ Body *DataUsage }{Body: usage}, nil
 	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-agent-data-key", Method: "POST", Path: "/platform-experiments/{id}/data-key",
+		Summary: "Get an agent's own key to the platform experiment's data", Tags: []string{"platform-experiments"},
+		Description: "S3 credentials for a signed-up agent: read everything under shared, write under uri, the prefix " +
+			"its jobs write below. The same key on every call, with no expiry. Refused once the platform experiment " +
+			"is closed. `hl data-key` prints it as environment variables.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			AgentID string `json:"agent_id"`
+		}
+	}) (*struct{ Body *domain.DataAccess }, error) {
+		if in.Body.AgentID == "" {
+			return nil, huma.Error400BadRequest("agent_id is required")
+		}
+		access, err := h.AgentDataAccess(ctx, in.ID, in.Body.AgentID)
+		switch {
+		case errors.Is(err, db.ErrNotSignedUp):
+			return nil, huma.Error404NotFound(err.Error())
+		case errors.Is(err, db.ErrPlatformExperimentClosed):
+			return nil, huma.Error409Conflict(err.Error())
+		case err != nil:
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body *domain.DataAccess }{Body: access}, nil
+	})
+}
+
+// AgentDataAccess is the agent's key and the two prefixes it opens. The key is created in the
+// object store on the first call and read from the signup afterwards.
+func (h *DataUsageHandler) AgentDataAccess(ctx context.Context, platformExperimentID, agentID string) (*domain.DataAccess, error) {
+	key, err := h.keys.AgentDataKey(ctx, platformExperimentID, agentID, func(ctx context.Context) (domain.DataKey, error) {
+		key, err := objectstore.NewDataKey()
+		if err != nil {
+			return domain.DataKey{}, err
+		}
+		return key, h.dataStore.CreateAgentDataKey(ctx, key, platformExperimentID, agentID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &domain.DataAccess{
+		URI:             h.dataStore.URI(objectstore.AgentPrefix(platformExperimentID, agentID)),
+		Shared:          h.dataStore.URI(objectstore.PlatformExperimentPrefix(platformExperimentID)),
+		Endpoint:        h.dataStore.Endpoint,
+		Region:          h.dataStore.Region,
+		AccessKeyID:     key.AccessKeyID,
+		SecretAccessKey: key.SecretAccessKey,
+	}, nil
 }
 
 // Usage lists the platform experiment's whole prefix once and attributes each object to the agent

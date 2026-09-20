@@ -18,8 +18,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// NewDataKey draws a fresh job key. It is created in the store once at submission, stored with the
-// job and never rotated or deleted, so a restarted pod starts with the same working key. The store bounds access keys to 3..20 characters and secrets to
+// NewDataKey draws a fresh key for a job or an agent. A job's is created in the store once at
+// submission, an agent's on its first request; either is stored and never rotated or deleted, so a
+// restarted pod or agent starts with the same working key. The store bounds access keys to 3..20 characters and secrets to
 // 8..40; 12 and 25 random bytes encode to exactly 20 and 40.
 func NewDataKey() (domain.DataKey, error) {
 	access := make([]byte, 12)
@@ -51,16 +52,29 @@ func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platform
 	if err != nil {
 		return err
 	}
+	return c.createKey(ctx, key, policy, "job "+JobPrefix(platformExperimentID, agentID, experimentID))
+}
+
+// CreateAgentDataKey is CreateDataKey for an agent's own key, limited by AgentPolicy.
+func (c *Client) CreateAgentDataKey(ctx context.Context, key domain.DataKey, platformExperimentID, agentID string) error {
+	policy, err := AgentPolicy(c.Bucket, platformExperimentID, agentID)
+	if err != nil {
+		return err
+	}
+	return c.createKey(ctx, key, policy, "agent "+AgentPrefix(platformExperimentID, agentID))
+}
+
+func (c *Client) createKey(ctx context.Context, key domain.DataKey, policy Policy, description string) error {
 	document, err := policy.JSON()
 	if err != nil {
 		return err
 	}
 	body, err := json.Marshal(addServiceAccountRequest{
 		Policy: json.RawMessage(document), AccessKey: key.AccessKeyID, SecretKey: key.SecretAccessKey,
-		Description: "job " + JobPrefix(platformExperimentID, agentID, experimentID),
+		Description: description,
 	})
 	if err != nil {
-		return fmt.Errorf("objectstore: encode job key request: %w", err)
+		return fmt.Errorf("objectstore: encode data key request: %w", err)
 	}
 	encrypted, err := encryptAdminBody(c.SecretAccessKey, body)
 	if err != nil {
@@ -72,12 +86,12 @@ func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platform
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("objectstore: create job key for %s: %w", experimentID, err)
+		return fmt.Errorf("objectstore: create data key for %s: %w", description, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("objectstore: create job key for %s: status %d: %s", experimentID, resp.StatusCode, strings.TrimSpace(string(msg)))
+		return fmt.Errorf("objectstore: create data key for %s: status %d: %s", description, resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	return nil
 }

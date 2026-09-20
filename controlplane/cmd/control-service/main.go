@@ -168,7 +168,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph 
 	registryHandler := registry.NewHandler(registrySvc, logger)
 	watchHandler := registry.NewWatchHandler(events, store, logger)
 	watchHandler.Start(runCtx)
-	dataUsageHandler := quota.NewDataUsageHandler(dataStore, pcfg.DataStore.MaxBytesPerAgent)
+	dataUsageHandler := quota.NewDataUsageHandler(dataStore, store, pcfg.DataStore.MaxBytesPerAgent)
 
 	r := chi.NewRouter()
 	r.Use(api.RecoveryMiddleware(logger))

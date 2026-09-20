@@ -11,8 +11,8 @@ func PlatformExperimentPrefix(platformExperimentID string) string {
 	return platformExperimentID + "/"
 }
 
-// AgentPrefix is everything one agent has written within a platform experiment. Measured, never
-// handed out as an address.
+// AgentPrefix is everything one agent has written within a platform experiment: what the per-agent
+// ceiling measures, and what the agent's own key may write.
 func AgentPrefix(platformExperimentID, agentID string) string {
 	return platformExperimentID + "/" + agentID + "/"
 }

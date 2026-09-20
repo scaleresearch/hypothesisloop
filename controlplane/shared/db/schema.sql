@@ -413,12 +413,17 @@ CREATE TABLE IF NOT EXISTS experiment_signups (
     -- signup for the same reason role is: the allocation it decides is made once, at start, and
     -- changing the input afterwards would describe a split that never happened.
     quota_tier             TEXT        NOT NULL DEFAULT '',
+    -- The agent's own object-store key, created on its first request and never rotated; '' until then.
+    data_access_key_id     TEXT        NOT NULL DEFAULT '',
+    data_secret_access_key TEXT        NOT NULL DEFAULT '',
     PRIMARY KEY (platform_experiment_id, agent_id),
     CONSTRAINT experiment_signups_quota_tier CHECK (quota_tier IN ('', 'guaranteed', 'burst_only'))
 );
 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL DEFAULT 'competitor';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS quota_tier TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS data_access_key_id     TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS data_secret_access_key TEXT NOT NULL DEFAULT '';
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN

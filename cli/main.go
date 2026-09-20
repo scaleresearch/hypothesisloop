@@ -92,6 +92,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdResults(client, rest, stdout, stderr)
 	case "capacity":
 		return cmdCapacity(client, rest, stdout, stderr)
+	case "data-key":
+		return cmdDataKey(client, rest, stdout, stderr)
 	case "donation":
 		return cmdDonation(client, rest, stdout, stderr)
 	case "hypothesis":
@@ -117,6 +119,7 @@ const usage = `usage: hl <command> ...
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
+  data-key              your S3 key to the experiment's data: eval "$(hl data-key)"
   donation              list | request | fulfill ID | cancel ID
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
@@ -485,6 +488,49 @@ func cmdSignup(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	}
 	if err := printLine(stdout, out); err != nil {
 		return fail(stderr, err)
+	}
+	return 0
+}
+
+// cmdDataKey prints the variables a job gets for the object store, for the agent's own key.
+func cmdDataKey(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("data-key", `usage: hl data-key [--platform-experiment PE] [--agent A]
+
+Your own S3 key to the platform experiment's data, as export lines: eval "$(hl data-key)".
+It reads everything under $HYPOTHESISLOOP_DATA_SHARED and writes under $HYPOTHESISLOOP_DATA_URI,
+where your jobs write. The same key every time; it does not expire. Any S3 client works:
+  uvx --from awscli aws s3 ls "$HYPOTHESISLOOP_DATA_SHARED"`, stderr)
+	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
+	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
+	if err := fs.Parse(args); err != nil {
+		return parseExit(err)
+	}
+	*pe = orEnv(*pe, platformExperimentEnv)
+	*agent = orEnv(*agent, agentEnv)
+	if *pe == "" || *agent == "" || fs.NArg() > 0 {
+		return parseExit(misuse(fs, "--platform-experiment and --agent are required, and nothing else"))
+	}
+	var out struct {
+		URI             string `json:"uri"`
+		Shared          string `json:"shared"`
+		Endpoint        string `json:"endpoint"`
+		Region          string `json:"region"`
+		AccessKeyID     string `json:"access_key_id"`
+		SecretAccessKey string `json:"secret_access_key"`
+	}
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/data-key", map[string]string{"agent_id": *agent}, &out); err != nil {
+		return fail(stderr, err)
+	}
+	for _, v := range [][2]string{
+		{"AWS_ACCESS_KEY_ID", out.AccessKeyID},
+		{"AWS_SECRET_ACCESS_KEY", out.SecretAccessKey},
+		{"AWS_ENDPOINT_URL", out.Endpoint},
+		{"AWS_ENDPOINT_URL_S3", out.Endpoint},
+		{"AWS_REGION", out.Region},
+		{"HYPOTHESISLOOP_DATA_URI", out.URI},
+		{"HYPOTHESISLOOP_DATA_SHARED", out.Shared},
+	} {
+		fmt.Fprintf(stdout, "export %s='%s'\n", v[0], strings.ReplaceAll(v[1], "'", `'\''`))
 	}
 	return 0
 }

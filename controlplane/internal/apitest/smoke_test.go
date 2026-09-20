@@ -36,7 +36,7 @@ func TestSmoke(t *testing.T) {
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
-	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, 0))
+	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, 0))
 	doc.MountExplore(r)
 
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
@@ -57,6 +57,7 @@ func TestSmoke(t *testing.T) {
 			"GET /experiments/{id}/lineage",
 			"GET /experiments/{id}/data",
 			"GET /platform-experiments/{id}/data-usage",
+			"POST /platform-experiments/{id}/data-key",
 			"POST /hypotheses",
 			"POST /hypotheses/{id}/links",
 			"POST /hypotheses/query",

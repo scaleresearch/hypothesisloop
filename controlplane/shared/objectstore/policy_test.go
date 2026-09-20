@@ -112,3 +112,53 @@ func TestJobPolicyRefusesAnEmptyIdentifier(t *testing.T) {
 		t.Error("JobPolicy accepted an empty agent id")
 	}
 }
+
+func TestAgentPolicyWritesTheAgentsPrefixAndReadsThePlatformExperiment(t *testing.T) {
+	policy, err := AgentPolicy(testBucket, testPE, testAgent)
+	if err != nil {
+		t.Fatalf("AgentPolicy: %v", err)
+	}
+	for _, own := range []string{
+		"arn:aws:s3:::hl-data/pe-1/agent-a/notes.md",
+		"arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/checkpoint.pt",
+	} {
+		for _, action := range []string{"s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"} {
+			if !policy.Allows(action, own) {
+				t.Errorf("policy denies %s on %s, inside the agent's own prefix", action, own)
+			}
+		}
+	}
+	for _, other := range []string{
+		"arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt",
+		"arn:aws:s3:::hl-data/pe-1/agent-ab/x",
+		"arn:aws:s3:::hl-data/pe-1/rogue.pt",
+		"arn:aws:s3:::hl-data/pe-2/agent-a/x",
+	} {
+		for _, action := range []string{"s3:PutObject", "s3:DeleteObject"} {
+			if policy.Allows(action, other) {
+				t.Errorf("policy allows %s on %s, outside the agent's own prefix", action, other)
+			}
+		}
+	}
+	if !policy.Allows("s3:GetObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt") {
+		t.Error("policy denies reading another agent's object in the same platform experiment")
+	}
+	if policy.Allows("s3:GetObject", "arn:aws:s3:::hl-data/pe-2/agent-a/x") {
+		t.Error("policy allows reading another platform experiment")
+	}
+	document, err := policy.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(document, `"s3:prefix":["pe-1/*"]`) {
+		t.Errorf("listing is not scoped to pe-1/: %s", document)
+	}
+}
+
+func TestAgentPolicyRefusesAWildcardOrEmptyIdentifier(t *testing.T) {
+	for _, bad := range []struct{ pe, agent string }{{testPE, "agent-*"}, {"pe-?", testAgent}, {testPE, ""}} {
+		if _, err := AgentPolicy(testBucket, bad.pe, bad.agent); err == nil {
+			t.Errorf("AgentPolicy accepted platform experiment %q, agent %q", bad.pe, bad.agent)
+		}
+	}
+}

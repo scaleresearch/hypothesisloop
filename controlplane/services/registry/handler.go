@@ -160,8 +160,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "List what a job wrote to durable storage", Tags: []string{"experiments"},
 		Description: "Checkpoints and datasets the job left under its own prefix, listed live from the object store. " +
 			"A job that kept nothing lists as an empty array — that is the ordinary case, not an error. " +
-			"Read any of them with the credentials in your own job's environment: HYPOTHESISLOOP_DATA_SHARED spans " +
-			"the whole platform experiment, so any agent can load the bytes behind any claim.",
+			"Read any of them from a job, or from your own shell after `eval \"$(hl data-key)\"`: " +
+			"HYPOTHESISLOOP_DATA_SHARED spans the whole platform experiment.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body []objectstore.Object }, error) {

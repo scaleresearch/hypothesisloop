@@ -100,6 +100,35 @@ func TestCreateDataKeySendsTheKeyAndItsPolicyEncryptedToTheAdminAPI(t *testing.T
 	}
 }
 
+func TestCreateAgentDataKeyAsksForTheAgentsWriteScope(t *testing.T) {
+	var got addServiceAccountRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(decryptAdminBody(t, "root-secret", body), &got); err != nil {
+			t.Errorf("decrypted body is not JSON: %v", err)
+		}
+	}))
+	defer srv.Close()
+	client, err := New(srv.URL, "us-east-1", testBucket, "root", "root-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CreateAgentDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent); err != nil {
+		t.Fatalf("CreateAgentDataKey: %v", err)
+	}
+	if got.AccessKey != "AK" || got.SecretKey != "SK" || got.Description != "agent pe-1/agent-a/" {
+		t.Fatalf("store was asked for %q/%q %q", got.AccessKey, got.SecretKey, got.Description)
+	}
+	var policy Policy
+	if err := json.Unmarshal(got.Policy, &policy); err != nil {
+		t.Fatalf("policy is not a JSON document: %v", err)
+	}
+	if !policy.Allows("s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/x") ||
+		policy.Allows("s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/x") {
+		t.Fatalf("key policy is not the agent's write scope: %s", got.Policy)
+	}
+}
+
 // A refusal must reach the submitter as an error: a key the store never created would be stored
 // with the job and hand it credentials that work nowhere.
 func TestCreateDataKeyReportsAStoreRefusal(t *testing.T) {

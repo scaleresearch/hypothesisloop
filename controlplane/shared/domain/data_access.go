@@ -3,7 +3,8 @@ package domain
 // DataAccess is where a job writes durable data, where it may read it, and the key for both. It
 // is part of an experiment's desired state and nothing else: the control plane assembles it from
 // the platform experiment, the agent, the job id and the job's stored key, hands it to the
-// runtime, and never touches the bytes.
+// runtime, and never touches the bytes. An agent asking for its own key gets the same shape, with
+// URI its agent prefix.
 type DataAccess struct {
 	// URI is this job's own prefix, writable. Shared is the platform experiment's prefix,
 	// readable: any agent can load the checkpoint behind any claim, and no agent can overwrite

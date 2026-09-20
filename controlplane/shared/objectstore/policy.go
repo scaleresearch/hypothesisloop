@@ -67,19 +67,30 @@ func matchesAny(patterns []string, value string) bool {
 // function decides what a job may touch, so it must not be reachable with input that changes the
 // meaning of what it emits, whatever a future caller does upstream.
 func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Policy, error) {
-	for _, part := range []struct{ kind, value string }{
-		{"bucket", bucket},
-		{"platform_experiment_id", platformExperimentID},
-		{"agent_id", agentID},
-		{"experiment_id", experimentID},
-	} {
+	return prefixPolicy(bucket, platformExperimentID, JobPrefix(platformExperimentID, agentID, experimentID),
+		policyID{"agent_id", agentID}, policyID{"experiment_id", experimentID})
+}
+
+// AgentPolicy is the grant an agent holds outside its jobs: the same read span, and write
+// confined to the prefix its own jobs write under.
+func AgentPolicy(bucket, platformExperimentID, agentID string) (Policy, error) {
+	return prefixPolicy(bucket, platformExperimentID, AgentPrefix(platformExperimentID, agentID),
+		policyID{"agent_id", agentID})
+}
+
+type policyID struct{ kind, value string }
+
+// prefixPolicy grants list and read across the platform experiment and write under writePrefix.
+func prefixPolicy(bucket, platformExperimentID, writePrefix string, ids ...policyID) (Policy, error) {
+	ids = append([]policyID{{"bucket", bucket}, {"platform_experiment_id", platformExperimentID}}, ids...)
+	for _, part := range ids {
 		if strings.ContainsAny(part.value, "*?") {
 			return Policy{}, fmt.Errorf(
-				"objectstore: refusing to build a job policy from %s %q: IAM reads '*' and '?' as wildcards, so this would widen what the job may reach",
+				"objectstore: refusing to build a data policy from %s %q: IAM reads '*' and '?' as wildcards, so this would widen what the key may reach",
 				part.kind, part.value)
 		}
 		if part.value == "" {
-			return Policy{}, fmt.Errorf("objectstore: job policy needs a non-empty %s", part.kind)
+			return Policy{}, fmt.Errorf("objectstore: data policy needs a non-empty %s", part.kind)
 		}
 	}
 	bucketARN := "arn:aws:s3:::" + bucket
@@ -107,7 +118,7 @@ func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Poli
 				Sid:      "WriteOwnPrefixOnly",
 				Effect:   "Allow",
 				Action:   []string{"s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"},
-				Resource: []string{bucketARN + "/" + JobPrefix(platformExperimentID, agentID, experimentID) + "*"},
+				Resource: []string{bucketARN + "/" + writePrefix + "*"},
 			},
 		},
 	}, nil
@@ -117,7 +128,7 @@ func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Poli
 func (p Policy) JSON() (string, error) {
 	buf, err := json.Marshal(p)
 	if err != nil {
-		return "", fmt.Errorf("objectstore: encode job policy: %w", err)
+		return "", fmt.Errorf("objectstore: encode data policy: %w", err)
 	}
 	return string(buf), nil
 }
