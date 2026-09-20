@@ -547,10 +547,9 @@ type statusReport struct {
 // the requeue would be recorded as the observation of the attempt that just started, and fail it
 // again immediately.
 //
-// AttemptUnknown is accepted rather than dropped. It means a cluster-agent that predates the
-// field, which can still be trusted for everything ownership already establishes; dropping it
-// would black out status for every job on that cluster until it was upgraded — the far larger
-// harm, and the reason absence must survive decoding as absence rather than as attempt 0.
+// AttemptUnknown is accepted rather than dropped. Every cluster-agent sends it for a job it holds
+// no workload for (phase gone), which has no generation to name, so absence must survive decoding
+// as absence rather than as attempt 0.
 func rejectReport(rep statusReport, placement domain.Placement, clusterName string) (string, bool) {
 	if placement.ClusterName != clusterName {
 		return "dropping status report for an experiment this cluster no longer owns", false
