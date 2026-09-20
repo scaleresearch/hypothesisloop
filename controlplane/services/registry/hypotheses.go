@@ -214,6 +214,8 @@ type HypothesisEvidence struct {
 type BestJob struct {
 	ID     string            `json:"id"`
 	Metric *domain.JobMetric `json:"metric"`
+	// Summary is the write-up filed for this job, absent when none was.
+	Summary string `json:"summary,omitempty"`
 }
 
 // maxFindings bounds how many hypotheses Findings reads.
@@ -221,7 +223,7 @@ const maxFindings = 200
 
 // Findings returns what a platform experiment has found: among its newest maxFindings hypotheses,
 // each one that holds a verdict, a finding or a job with a metric, with its newest finding and its
-// best job.
+// best job, which carries its own summary.
 func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]*HypothesisEvidence, error) {
 	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, platformExperimentID)
 	if err != nil {
@@ -266,11 +268,19 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 		}
 		best[job.HypothesisID] = job
 	}
+	bestIDs := make([]string, 0, len(best))
+	for _, job := range best {
+		bestIDs = append(bestIDs, job.ID)
+	}
+	summaries, err := s.store.FindingSummaries(ctx, bestIDs)
+	if err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
 	out := []*HypothesisEvidence{}
 	for _, h := range hypotheses {
 		e := &HypothesisEvidence{Hypothesis: h.Hypothesis, Finding: newest[h.ID]}
 		if job := best[h.ID]; job != nil {
-			e.BestJob = &BestJob{ID: job.ID, Metric: job.Metric}
+			e.BestJob = &BestJob{ID: job.ID, Metric: job.Metric, Summary: summaries[job.ID]}
 		}
 		if h.Status != domain.HypothesisOpen || e.Finding != nil || e.BestJob != nil {
 			out = append(out, e)

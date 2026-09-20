@@ -33,6 +33,7 @@ type Store interface {
 	ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error)
 	CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error)
+	FindingSummaries(ctx context.Context, experimentIDs []string) (map[string]string, error)
 	CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error)
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)

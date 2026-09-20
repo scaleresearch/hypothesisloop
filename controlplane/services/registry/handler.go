@@ -493,8 +493,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "platform-experiment-findings", Method: "GET", Path: "/platform-experiments/{id}/findings",
 		Summary: "What a platform experiment has found", Tags: []string{"hypotheses"},
 		Description: "Among its 200 newest hypotheses, each one that holds a verdict, a finding or a job with a " +
-			"metric, whatever its status, with finding, the newest one filed against it, and best_job {id, metric}, " +
-			"the job testing it with the best raw value on the first ranking metric. A finding whose created_at is " +
+			"metric, whatever its status, with finding, the newest one filed against it, and best_job {id, metric, summary}, " +
+			"the job testing it with the best raw value on the first ranking metric and the summary filed for that job, if any. A finding whose created_at is " +
 			"later than status_changed_at was filed after the verdict.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`

@@ -603,6 +603,13 @@ func (findingsStore) NewestFindings(_ context.Context, _ []string) (map[string]*
 	}, nil
 }
 
+func (findingsStore) FindingSummaries(_ context.Context, ids []string) (map[string]string, error) {
+	if !reflect.DeepEqual(ids, []string{"job-b"}) {
+		return nil, errors.New("asked for the summaries of other than the best jobs")
+	}
+	return map[string]string{"job-b": "the best job's write-up"}, nil
+}
+
 func (findingsStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
 	if !reflect.DeepEqual(ids, []string{"hyp-tested", "hyp-untested", "hyp-open", "hyp-idle"}) {
 		return nil, errors.New("asked for the jobs of other hypotheses")
@@ -649,8 +656,9 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 	}
 	tested, untested, open := got[0], got[1], got[2]
 	if tested.ID != "hyp-tested" || tested.Finding == nil || tested.Finding.Summary != "the newest write-up" || tested.BestJob == nil ||
-		tested.BestJob.ID != "job-b" || *tested.BestJob.Metric != (domain.JobMetric{Name: "loss", Best: 0.10, Last: 0.10, Basis: "raw"}) {
-		t.Errorf("tested hypothesis: got = %+v (best job %+v), want its newest finding and job-b at loss 0.10", tested, tested.BestJob)
+		tested.BestJob.ID != "job-b" || *tested.BestJob.Metric != (domain.JobMetric{Name: "loss", Best: 0.10, Last: 0.10, Basis: "raw"}) ||
+		tested.BestJob.Summary != "the best job's write-up" {
+		t.Errorf("tested hypothesis: got = %+v (best job %+v), want its newest finding and job-b at loss 0.10 with its own summary", tested, tested.BestJob)
 	}
 	if untested.ID != "hyp-untested" || untested.Finding != nil || untested.BestJob != nil {
 		t.Errorf("untested hypothesis: got = %+v, want no finding and no best job", untested)

@@ -107,6 +107,24 @@ func (s *HypothesesStore) FindingSummary(ctx context.Context, experimentID strin
 	return summary, nil
 }
 
+// FindingSummaries returns the summary filed for each job in experimentIDs that has one.
+func (s *HypothesesStore) FindingSummaries(ctx context.Context, experimentIDs []string) (map[string]string, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT experiment_id, summary FROM hypothesis_findings WHERE experiment_id = ANY($1)`, experimentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.FindingSummaries: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, summary string
+		if err := rows.Scan(&id, &summary); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.FindingSummaries: scan: %w", err)
+		}
+		out[id] = summary
+	}
+	return out, rows.Err()
+}
+
 // NewestFindings returns the newest finding filed against each hypothesis in ids, in one query. A
 // hypothesis with no finding is absent.
 func (s *HypothesesStore) NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error) {
