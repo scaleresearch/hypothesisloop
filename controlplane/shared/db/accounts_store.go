@@ -14,6 +14,7 @@ import (
 )
 
 var (
+	ErrUserNotFound    = errors.New("user not found")
 	ErrOrgNotFound     = errors.New("org not found")
 	ErrProjectNotFound = errors.New("project not found")
 	ErrAPIKeyNotFound  = errors.New("api key not found")
@@ -39,11 +40,15 @@ func newAccountID(prefix string) (string, error) {
 	return prefix + "_" + id.String(), nil
 }
 
-// EnsureUserHome returns the user and the orgs they belong to, creating on first sight the user,
-// an org named orgName with them as owner, and its default project, all in one transaction. The
-// org is keyed off the winning users insert: of two concurrent first requests one inserts the
-// user and creates the home, the other waits on the row and then finds it.
+// EnsureUserHome returns the user and the orgs they belong to, creating the user with a home org
+// and its default project on their first request. The common case, a user who exists, is one
+// read. A first request inserts the user and the org in one transaction keyed off the users
+// insert, so two concurrent first requests make one org.
 func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, orgName string) (*domain.User, []string, error) {
+	user, orgIDs, err := readUserHome(ctx, s.pool.pool, userID)
+	if err != nil || user != nil {
+		return user, orgIDs, err
+	}
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: begin: %w", err)
@@ -59,20 +64,33 @@ func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, orgName stri
 			return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: %w", err)
 		}
 	}
-	user := &domain.User{ID: userID}
-	if err := tx.QueryRow(ctx, `SELECT staff, created_at FROM users WHERE id = $1`, userID).Scan(&user.Staff, &user.CreatedAt); err != nil {
-		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: read user: %w", err)
-	}
-	rows, err := tx.Query(ctx, `SELECT org_id FROM org_members WHERE user_id = $1 ORDER BY created_at, org_id`, userID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: read orgs: %w", err)
-	}
-	orgIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: read orgs: %w", err)
+	if user, orgIDs, err = readUserHome(ctx, tx, userID); err != nil {
+		return nil, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: commit: %w", err)
+	}
+	return user, orgIDs, nil
+}
+
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// readUserHome returns a nil user when there is none.
+func readUserHome(ctx context.Context, q rowQuerier, userID string) (*domain.User, []string, error) {
+	user := &domain.User{ID: userID}
+	var orgIDs []string
+	err := q.QueryRow(ctx, `
+SELECT u.staff, u.created_at,
+       COALESCE(array_agg(m.org_id ORDER BY m.created_at, m.org_id) FILTER (WHERE m.org_id IS NOT NULL), '{}')
+FROM users u LEFT JOIN org_members m ON m.user_id = u.id
+WHERE u.id = $1 GROUP BY u.id`, userID).Scan(&user.Staff, &user.CreatedAt, &orgIDs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: read user: %w", err)
 	}
 	return user, orgIDs, nil
 }
@@ -102,7 +120,8 @@ func createOrg(ctx context.Context, tx pgx.Tx, name, ownerUserID string) (*domai
 	return org, nil
 }
 
-// CreateOrg creates an org owned by ownerUserID, with its default project.
+// CreateOrg creates an org owned by ownerUserID, with its default project. ErrUserNotFound when
+// there is no such user.
 func (s *AccountsStore) CreateOrg(ctx context.Context, name, ownerUserID string) (*domain.Org, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -111,6 +130,10 @@ func (s *AccountsStore) CreateOrg(ctx context.Context, name, ownerUserID string)
 	defer tx.Rollback(ctx) //nolint:errcheck
 	org, err := createOrg(ctx, tx, name, ownerUserID)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return nil, ErrUserNotFound
+		}
 		return nil, fmt.Errorf("accounts_store.CreateOrg: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -126,6 +149,58 @@ func (s *AccountsStore) RenameOrg(ctx context.Context, id, name string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrOrgNotFound
+	}
+	return nil
+}
+
+// GetOrg returns an org, or nil when there is none.
+func (s *AccountsStore) GetOrg(ctx context.Context, id string) (*domain.Org, error) {
+	org := &domain.Org{}
+	err := s.pool.pool.QueryRow(ctx, `SELECT id, name, created_at FROM orgs WHERE id = $1`, id).Scan(&org.ID, &org.Name, &org.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("accounts_store.GetOrg: %w", err)
+	}
+	return org, nil
+}
+
+// ListOrgs returns the given orgs, oldest first, with no role set.
+func (s *AccountsStore) ListOrgs(ctx context.Context, orgIDs []string) ([]*domain.Org, error) {
+	return s.listOrgs(ctx, `WHERE id = ANY($1)`, orgIDs)
+}
+
+// ListAllOrgs returns every org, oldest first, with no role set.
+func (s *AccountsStore) ListAllOrgs(ctx context.Context) ([]*domain.Org, error) {
+	return s.listOrgs(ctx, ``)
+}
+
+func (s *AccountsStore) listOrgs(ctx context.Context, where string, args ...any) ([]*domain.Org, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT id, name, created_at FROM orgs `+where+` ORDER BY created_at, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("accounts_store.ListOrgs: %w", err)
+	}
+	defer rows.Close()
+	out := []*domain.Org{}
+	for rows.Next() {
+		org := &domain.Org{}
+		if err := rows.Scan(&org.ID, &org.Name, &org.CreatedAt); err != nil {
+			return nil, fmt.Errorf("accounts_store.ListOrgs: scan: %w", err)
+		}
+		out = append(out, org)
+	}
+	return out, rows.Err()
+}
+
+// SetUserStaff records whether a user is one of the platform's own operators.
+func (s *AccountsStore) SetUserStaff(ctx context.Context, userID string, staff bool) error {
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE users SET staff = $2 WHERE id = $1`, userID, staff)
+	if err != nil {
+		return fmt.Errorf("accounts_store.SetUserStaff: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
 	}
 	return nil
 }
@@ -249,11 +324,11 @@ SELECT id, org_id, name, created_at FROM projects WHERE org_id = ANY($1) ORDER B
 	return out, rows.Err()
 }
 
-const apiKeyColumns = `id, org_id, COALESCE(project_id, ''), created_by, name, created_at, revoked_at`
+const apiKeyColumns = `id, org_id, COALESCE(project_id, ''), created_by, COALESCE(minted_by, ''), name, created_at, revoked_at`
 
 func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
-	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.Name, &k.CreatedAt, &k.RevokedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt); err != nil {
 		return nil, err
 	}
 	return k, nil
@@ -262,7 +337,10 @@ func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 // CreateAPIKey stores a key under the hash of its token. key.ID, OrgID, CreatedBy and Name are
 // required; the project, when set, must belong to the org.
 func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, keyHash string) error {
-	var projectID *string
+	var projectID, mintedBy *string
+	if key.MintedBy != "" {
+		mintedBy = &key.MintedBy
+	}
 	if key.ProjectID != "" {
 		project, err := s.GetProject(ctx, key.ProjectID)
 		if err != nil {
@@ -274,8 +352,8 @@ func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, ke
 		projectID = &key.ProjectID
 	}
 	err := s.pool.pool.QueryRow(ctx, `
-INSERT INTO api_keys (id, key_hash, org_id, project_id, created_by, name) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING created_at`, key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, key.Name).Scan(&key.CreatedAt)
+INSERT INTO api_keys (id, key_hash, org_id, project_id, created_by, minted_by, name) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING created_at`, key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, mintedBy, key.Name).Scan(&key.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("accounts_store.CreateAPIKey: %w", err)
 	}
@@ -321,9 +399,16 @@ func (s *AccountsStore) apiKeyWhere(ctx context.Context, op, where, arg string) 
 	return k, nil
 }
 
-// RevokeAPIKey ends a key. Revoking a revoked key keeps its first revocation time.
+// RevokeAPIKey ends a key and every key minted from it, directly or through another. One
+// already revoked keeps its first revocation time.
 func (s *AccountsStore) RevokeAPIKey(ctx context.Context, id string) error {
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE api_keys SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1`, id, time.Now().UTC())
+	tag, err := s.pool.pool.Exec(ctx, `
+WITH RECURSIVE lineage AS (
+	SELECT id FROM api_keys WHERE id = $1
+	UNION ALL
+	SELECT k.id FROM api_keys k JOIN lineage l ON k.minted_by = l.id
+)
+UPDATE api_keys SET revoked_at = COALESCE(revoked_at, $2) WHERE id IN (SELECT id FROM lineage)`, id, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("accounts_store.RevokeAPIKey: %w", err)
 	}
@@ -333,35 +418,35 @@ func (s *AccountsStore) RevokeAPIKey(ctx context.Context, id string) error {
 	return nil
 }
 
-// PlatformExperimentTenancy places a platform experiment and reports whether it is closed. nil
-// when there is no such platform experiment.
-func (s *AccountsStore) PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (*domain.Tenancy, bool, error) {
+// PlatformExperimentTenancy places a platform experiment and reports when it closed, nil while
+// it has not. A nil tenancy means there is no such platform experiment.
+func (s *AccountsStore) PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (*domain.Tenancy, *time.Time, error) {
 	t := &domain.Tenancy{PlatformExperimentID: platformExperimentID}
-	var closed bool
+	var closedAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.project_id, p.org_id, pe.status = 'closed'
+SELECT pe.project_id, p.org_id, pe.closed_at
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &closed)
+WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("accounts_store.PlatformExperimentTenancy: %w", err)
+		return nil, nil, fmt.Errorf("accounts_store.PlatformExperimentTenancy: %w", err)
 	}
-	return t, closed, nil
+	return t, closedAt, nil
 }
 
-// ExperimentTenancy places a job through its platform experiment and reports whether the job
-// has ended. nil when there is no such job.
+// ExperimentTenancy places a job through its platform experiment, names the agent it belongs to
+// and reports whether the job has ended. nil when there is no such job.
 func (s *AccountsStore) ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error) {
 	t := &domain.Tenancy{}
 	var terminal bool
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.id, pe.project_id, p.org_id, e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')
+SELECT pe.id, pe.project_id, p.org_id, e.agent_id, e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')
 FROM experiments e
 JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
-WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &terminal)
+WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.AgentID, &terminal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -371,16 +456,16 @@ WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.O
 	return t, terminal, nil
 }
 
-// DonationTenancy places a donation request through its platform experiment. nil when there is
-// no such request.
+// DonationTenancy places a donation request through its platform experiment and names the agent
+// that asked. nil when there is no such request.
 func (s *AccountsStore) DonationTenancy(ctx context.Context, donationID string) (*domain.Tenancy, error) {
 	t := &domain.Tenancy{}
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.id, pe.project_id, p.org_id
+SELECT pe.id, pe.project_id, p.org_id, d.agent_id
 FROM donation_requests d
 JOIN platform_experiments pe ON pe.id = d.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
-WHERE d.id = $1`, donationID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID)
+WHERE d.id = $1`, donationID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.AgentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -296,7 +296,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "admit-experiment", Method: "POST", Path: "/experiments/{id}/admit",
 		Summary: "Force-admit a QUEUED experiment onto a named cluster", Tags: []string{"experiments"},
-		Description: "Operator endpoint. Requires an explicit valid cluster_name and still respects capacity accounting.",
+		Description: "Operator endpoint. Requires an explicit valid cluster_name and still respects capacity accounting. " +
+			"The cluster must be the caller's own and must take the job: one of the job's org, or a shared one.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -325,7 +326,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status string `json:"status"`
 		}
 	}, error) {
-		if err := access.Experiment(ctx, in.ID); err != nil {
+		if err := access.OwnExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if err := h.svc.CancelExperiment(ctx, in.ID); err != nil {
@@ -354,7 +355,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Summary string `json:"summary"`
 		}
 	}) (*struct{ Body summaryReply }, error) {
-		if err := access.Experiment(ctx, in.ID); err != nil {
+		if err := access.OwnExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if in.Body.Summary == "" {
@@ -377,7 +378,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "reprioritize", Method: "POST", Path: "/experiments/reprioritize",
 		Summary: "Trigger an immediate re-prioritization pass", Tags: []string{"experiments"},
-		Description: "Recomputes novelty and priority for every QUEUED experiment now, instead of " +
+		Description: "Staff only: the pass covers every org's queue. " +
+			"Recomputes novelty and priority for every QUEUED experiment now, instead of " +
 			"waiting for the next scheduled pass. Priority affects admission ORDER only -- it " +
 			"never admits a job that does not fit, and never evicts one. A job whose recompute " +
 			"fails keeps its previous score rather than blocking the rest of the queue.",
@@ -386,6 +388,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status string `json:"status"`
 		}
 	}, error) {
+		// One queue serves every org and the pass re-scores all of it, so it is the platform's
+		// to trigger. Nobody loses by that: the loop runs the same pass after every tick.
+		if err := access.Staff(ctx); err != nil {
+			return nil, err
+		}
 		if err := h.svc.RePrioritize(ctx); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
@@ -462,8 +469,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	})
 }
 
-// clusterAccess admits the caller to the settings of the cluster reporting clusterID. An id no
-// connected cluster reports resolves to no name, which only staff reach.
+// clusterAccess admits the caller to the settings of the registered cluster bound to clusterID.
+// An id bound to no cluster resolves to no name, which only staff reach.
 func (h *Handler) clusterAccess(ctx context.Context, access *auth.Access, clusterID string) error {
 	name, err := h.svc.ClusterName(ctx, clusterID)
 	if err != nil {
@@ -508,6 +515,18 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	}
 	if exp.Status != domain.StatusQueued {
 		return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
+	}
+	// The same rule the tick places by (eligibleClusters): a job goes to a cluster of its own
+	// org or to a shared one, whoever asks.
+	cluster, err := h.svc.store.GetCluster(ctx, clusterName)
+	if err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
+	if cluster == nil {
+		return nil, huma.Error400BadRequest("cluster is not registered")
+	}
+	if !cluster.Hosts(exp.OrgID) {
+		return nil, huma.Error409Conflict("cluster " + clusterName + " takes the jobs of its own org only, and this job is another org's")
 	}
 	// This manual admit path bypasses the ordinary tick's cluster-local "max" resolution (see
 	// loop_tick.go's resolveClusterLocalResources) entirely — it names a cluster directly rather

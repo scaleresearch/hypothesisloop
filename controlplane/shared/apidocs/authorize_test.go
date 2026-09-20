@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -20,7 +21,7 @@ type tokenTable map[string]auth.Principal
 
 func (table tokenTable) Authenticate(_ context.Context, token string) (auth.Principal, error) {
 	if token == "broken-directory" {
-		return auth.Principal{}, errors.New("database is down")
+		return auth.Principal{}, errors.New("pq: database is down at 10.0.0.7")
 	}
 	p, ok := table[token]
 	if !ok {
@@ -43,7 +44,7 @@ var everyKind = tokenTable{
 func audienceRouter(t *testing.T) (chi.Router, *auth.Principal) {
 	t.Helper()
 	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}))
+	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	var seen auth.Principal
 	handler := func(ctx context.Context, _ *struct {
 		Name string `path:"name"`
@@ -120,6 +121,48 @@ func TestARequestWithoutAUsableTokenNeverReachesTheHandler(t *testing.T) {
 		if !strings.Contains(recorder.Body.String(), `"error"`) {
 			t.Errorf("%s: body %q is not the API's error envelope", name, recorder.Body.String())
 		}
+		if strings.Contains(recorder.Body.String(), "pq:") {
+			t.Errorf("%s: body %q carries the platform's own error", name, recorder.Body.String())
+		}
+	}
+}
+
+// Once its platform experiment has closed, a coordinator token reads and files the summary.
+func TestACoordinatorOfAClosedPlatformExperimentReadsAndFilesTheSummaryOnly(t *testing.T) {
+	tokens := tokenTable{
+		"open":   {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a"},
+		"closed": {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a", PlatformExperimentClosed: true},
+	}
+	r := chi.NewRouter()
+	doc := New(r, "t", "1.0.0", "", tokens, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	ran := 0
+	handler := func(context.Context, *struct{}) (*struct{}, error) {
+		ran++
+		return nil, nil
+	}
+	Register(doc, AudienceAgent, huma.Operation{OperationID: "read", Method: "GET", Path: "/read"}, handler)
+	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "write", Method: "POST", Path: "/write"}, handler)
+	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "patch", Method: "PATCH", Path: "/write"}, handler)
+	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "delete", Method: "DELETE", Path: "/write"}, handler)
+	Register(doc, AudienceCoordinator, AfterClose(huma.Operation{OperationID: "summary", Method: "POST", Path: "/summary"}), handler)
+	for _, tc := range []struct {
+		token, method, path string
+		want                int
+	}{
+		{"open", "GET", "/read", http.StatusNoContent}, {"open", "POST", "/write", http.StatusNoContent},
+		{"open", "POST", "/summary", http.StatusNoContent},
+		{"closed", "GET", "/read", http.StatusNoContent}, {"closed", "POST", "/summary", http.StatusNoContent},
+		{"closed", "POST", "/write", http.StatusForbidden}, {"closed", "PATCH", "/write", http.StatusForbidden},
+		{"closed", "DELETE", "/write", http.StatusForbidden},
+	} {
+		before := ran
+		request := httptest.NewRequest(tc.method, tc.path, nil)
+		request.Header.Set("Authorization", "Bearer "+tc.token)
+		recorder := httptest.NewRecorder()
+		r.ServeHTTP(recorder, request)
+		if recorder.Code != tc.want || (ran > before) != (tc.want == http.StatusNoContent) {
+			t.Errorf("%s %s as the %s coordinator: got = %d handler ran=%v, want = %d", tc.method, tc.path, tc.token, recorder.Code, ran > before, tc.want)
+		}
 	}
 }
 
@@ -145,7 +188,7 @@ func TestTheDocumentDeclaresBearerAuthOnEveryOperation(t *testing.T) {
 // operation and excludes everything coordinator-only.
 func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 	r, _ := audienceRouter(t)
-	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}))
+	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	Register(doc, AudienceJob, huma.Operation{OperationID: "m", Method: "POST", Path: "/metrics-op", Summary: "s"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "c", Method: "POST", Path: "/coordinator-op", Summary: "s"},

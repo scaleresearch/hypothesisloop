@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -241,5 +242,85 @@ func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 		if err != nil || (got != nil) != tc.want || tc.want && *got != tc.h || store.filed != 1 {
 			t.Fatalf("%+v: got = (%+v, %v), filed %d, want it named: %v, filed 1", tc.h, got, err, store.filed, tc.want)
 		}
+	}
+}
+
+type closedStore struct{ poolOnlyStore }
+
+func (closedStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpClosed}, nil
+}
+
+type cutStore struct{ poolOnlyStore }
+
+func (cutStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return true, nil }
+
+// An agent's token stays alive for a wind-down after a close or its cut. A submission through
+// that window is refused all the same.
+func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testing.T) {
+	for name, tc := range map[string]struct {
+		store  Store
+		reason string
+	}{
+		"closed platform experiment": {closedStore{}, "experiment_closed"},
+		"cut agent":                  {cutStore{}, "agent_held"},
+	} {
+		s := &Service{store: tc.store, hypotheses: humanHypothesis("pe-1")}
+		var admission *AdmissionError
+		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != tc.reason {
+			t.Errorf("%s: got = %v, want a refusal with reason %s", name, err, tc.reason)
+		}
+	}
+}
+
+// A hypothesis of another platform experiment and one that does not exist are one answer, so a
+// submission cannot be used to learn which ids exist elsewhere.
+func TestSubmitAnswersAHypothesisElsewhereAsItDoesAnAbsentOne(t *testing.T) {
+	refusal := func(hypotheses oneHypothesis) *AdmissionError {
+		t.Helper()
+		s := &Service{store: poolOnlyStore{}, hypotheses: hypotheses}
+		var admission *AdmissionError
+		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) {
+			t.Fatalf("got = %v, want an AdmissionError", err)
+		}
+		return admission
+	}
+	elsewhere, absent := refusal(humanHypothesis("pe-other")), refusal(oneHypothesis{})
+	if *elsewhere != *absent {
+		t.Fatalf("elsewhere: %+v\n   absent: %+v\nwant the same refusal", *elsewhere, *absent)
+	}
+	if strings.Contains(elsewhere.Message, "pe-other") {
+		t.Fatalf("message %q names the other platform experiment", elsewhere.Message)
+	}
+}
+
+type twoExperimentsStore struct{ poolOnlyStore }
+
+func (twoExperimentsStore) GetRunningAndQueued(context.Context) ([]*domain.Experiment, error) {
+	return []*domain.Experiment{
+		{ID: "mine-1", PlatformExperimentID: "pe-1"}, {ID: "theirs-1", PlatformExperimentID: "pe-other"},
+		{ID: "mine-2", PlatformExperimentID: "pe-1"}, {ID: "human-idea-job", PlatformExperimentID: "pe-1"},
+	}, nil
+}
+
+type recordingNovelty struct{ compared []string }
+
+func (n *recordingNovelty) ComputeNovelty(_ context.Context, _ string, existing []*domain.Experiment) (float64, error) {
+	for _, e := range existing {
+		n.compared = append(n.compared, e.ID)
+	}
+	return 0, errReachedScoring
+}
+
+// Novelty is a comparison within one platform experiment: a hypothesis belongs to one, and
+// another's jobs may be another org's.
+func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing.T) {
+	novelty := &recordingNovelty{}
+	s := &Service{store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novelty}
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("Submit: got = %v, want it to reach novelty scoring", err)
+	}
+	if want := []string{"mine-1", "mine-2"}; !slices.Equal(novelty.compared, want) {
+		t.Fatalf("compared against: got = %v, want = %v", novelty.compared, want)
 	}
 }

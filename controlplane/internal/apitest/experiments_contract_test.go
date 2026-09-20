@@ -1,7 +1,6 @@
 package apitest
 
 import (
-	"go.uber.org/zap"
 	"reflect"
 
 	"context"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -60,7 +60,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	}))
 	t.Cleanup(metrics.Close)
 	r := chi.NewRouter()
-	d := apidocs.New(r, "scheduler", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}))
+	d := apidocs.New(r, "scheduler", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{DefaultShutdownSeconds: 5, MaxShutdownSeconds: 30, MaxCheckpointSeconds: 600}, metrics.URL, zap.NewNop()).WithLoop(noopLoop{})))
 	return r
 }

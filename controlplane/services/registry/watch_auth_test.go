@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -25,8 +30,11 @@ var watchTenancy = authtest.Placement{
 		"pe-other": {PlatformExperimentID: "pe-other", ProjectID: "prj-b", OrgID: "org-b"},
 	},
 	Experiments: map[string]domain.Tenancy{
-		"exp-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"},
+		"exp-1":     {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a", AgentID: "agent-1"},
+		"exp-of-2":  {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a", AgentID: "agent-2"},
+		"exp-other": {PlatformExperimentID: "pe-other", ProjectID: "prj-b", OrgID: "org-b", AgentID: "agent-9"},
 	},
+	Agents: map[string]string{"agent-1": "org-a", "agent-2": "org-a", "agent-9": "org-b"},
 }
 
 func watchServerAs(t *testing.T, principal auth.Principal) (*httptest.Server, *WatchHandler) {
@@ -141,6 +149,70 @@ func TestAnAgentTokenWatchesOnlyItsOwnAgent(t *testing.T) {
 	}
 }
 
+// switchable answers as one principal until refused or failed is set.
+type switchable struct {
+	mu        sync.Mutex
+	principal auth.Principal
+	err       error
+}
+
+func (s *switchable) Authenticate(context.Context, string) (auth.Principal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.principal, s.err
+}
+
+func (s *switchable) set(principal auth.Principal, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.principal, s.err = principal, err
+}
+
+// streamEnds reports whether the server closes the connection within the wait.
+func streamEnds(client *watchClient, wait time.Duration) bool {
+	_ = client.conn.SetReadDeadline(time.Now().Add(wait))
+	_, err := io.Copy(io.Discard, client.r)
+	var timeout net.Error
+	return !(errors.As(err, &timeout) && timeout.Timeout())
+}
+
+// A stream outlives the request that opened it, so the token is asked again on every ping.
+func TestAnOpenWatchStreamClosesOnceItsTokenIsRefused(t *testing.T) {
+	inOrgA := auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}}
+	for name, tc := range map[string]struct {
+		principal auth.Principal
+		err       error
+		closes    bool
+	}{
+		"the token died":                         {auth.Principal{}, auth.Forbidden("revoked"), true},
+		"the user left the org":                  {auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-b"}}, nil, true},
+		"the token became one that cannot watch": {auth.Principal{Kind: auth.KindRuntime, ClusterName: "c", OrgIDs: []string{"org-a"}}, nil, true},
+		"nothing changed":                        {inOrgA, nil, false},
+		"the directory is down":                  {auth.Principal{}, errors.New("database is down"), false},
+	} {
+		source := newFakeEvents()
+		caller := &switchable{principal: inOrgA}
+		handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
+			caller, auth.NewAccess(watchTenancy), zap.NewNop())
+		handler.recheckEvery = 20 * time.Millisecond
+		ctx, cancel := context.WithCancel(context.Background())
+		handler.Start(ctx)
+		<-source.listening
+		server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
+
+		client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
+		client.sendText(t, "{}")
+		readSubscription(t, client)
+		caller.set(tc.principal, tc.err)
+		if got := streamEnds(client, 400*time.Millisecond); got != tc.closes {
+			t.Errorf("%s: stream closed = %v, want = %v", name, got, tc.closes)
+		}
+		client.conn.Close()
+		server.Close()
+		cancel()
+	}
+}
+
 // Naming a hypothesis of a platform experiment the caller cannot reach answers 404 before the
 // service is asked, whose own refusal would name that hypothesis's platform experiment.
 func TestAWriteNamingAHypothesisOutOfScopeIsNotFound(t *testing.T) {
@@ -158,7 +230,7 @@ func TestAWriteNamingAHypothesisOutOfScopeIsNotFound(t *testing.T) {
 
 	r := chi.NewRouter()
 	caller := authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}})
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(watchTenancy)), NewHandler(svc, zap.NewNop()))
+	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
 	post := func(path string, body map[string]any) *httptest.ResponseRecorder {
 		encoded, err := json.Marshal(body)
 		if err != nil {

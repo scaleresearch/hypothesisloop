@@ -59,6 +59,12 @@ type hypothesisGraph struct {
 	Edges []domain.GraphEdge           `json:"edges"`
 }
 
+// internal logs a failure of the platform's own and answers 500 without it.
+func (h *Handler) internal(what string, err error) error {
+	h.logger.Error(what, zap.Error(err))
+	return huma.Error500InternalServerError(auth.InternalError)
+}
+
 // similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
 // not been told apart from: the problem details plus the hypotheses themselves.
 type similarHypothesesError struct {
@@ -140,25 +146,42 @@ const (
 
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	access := doc.Access
-	// hypothesisInScope admits the caller to a hypothesis through its platform experiment.
-	hypothesisInScope := func(ctx context.Context, id string) error {
+	// loadHypothesis returns a hypothesis the caller reaches. One it does not reach and one that
+	// does not exist are the same answer.
+	loadHypothesis := func(ctx context.Context, id string) (*domain.Hypothesis, error) {
 		hyp, err := h.svc.GetHypothesis(ctx, id)
 		if err != nil {
-			return huma.Error500InternalServerError(err.Error())
+			return nil, h.internal("get hypothesis", err)
 		}
 		if hyp == nil {
-			return nil
+			return nil, auth.NotFound("hypothesis")
 		}
-		return access.PlatformExperiment(ctx, hyp.PlatformExperimentID)
+		return hyp, access.Within(ctx, "hypothesis", hyp.PlatformExperimentID)
 	}
-	// referencesInScope admits the caller to every hypothesis a write names, so a refusal for
-	// naming one of another platform experiment says nothing about a hypothesis the caller
-	// cannot read.
+	// referencesInScope admits the caller to everything a write names as a link target or in
+	// distinct_from: a hypothesis it reaches, or its platform experiment's id for the objective.
+	// The service's own refusal for a target elsewhere names that platform experiment.
 	referencesInScope := func(ctx context.Context, ids ...string) error {
 		for _, id := range ids {
-			if err := hypothesisInScope(ctx, id); err != nil {
+			hyp, err := h.svc.GetHypothesis(ctx, id)
+			if err != nil {
+				return h.internal("get hypothesis", err)
+			}
+			placedIn := id
+			if hyp != nil {
+				placedIn = hyp.PlatformExperimentID
+			}
+			if err := access.Within(ctx, "hypothesis", placedIn); err != nil {
 				return err
 			}
+		}
+		return nil
+	}
+	// recordHumanWrite is called once a person's write is in. A failure here leaves the write
+	// without its account, so it is an error to the caller and loud in the log.
+	recordHumanWrite := func(ctx context.Context, origin auth.Origin, kind domain.HumanWriteKind, subject, platformExperimentID string) error {
+		if err := h.svc.RecordHumanWrite(ctx, origin, kind, subject, platformExperimentID); err != nil {
+			return h.internal("record the account behind a "+string(kind), err)
 		}
 		return nil
 	}
@@ -253,7 +276,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			MetricValue      float64 `json:"metric_value"`
 		}
 	}) (*struct{}, error) {
-		if err := access.Experiment(ctx, in.ID); err != nil {
+		if err := access.OwnExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if err := h.svc.RecordMetric(ctx, in.ID, in.Body.MetricName, in.Body.MetricBasis, in.Body.FractionComplete, in.Body.MetricValue); err != nil {
@@ -367,7 +390,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// set, which is a rule about the PAIR that no per-field "required" can express.
 			// domain.ClassifyHypothesisOrigin owns it.
 			AgentID              string            `json:"agent_id,omitempty" required:"false"`
-			Author               string            `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. Ignored for a signed-in user, whose name the identity provider states."`
+			Author               string            `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. A signed-in user is named by the identity provider whatever is sent here, and an agent token may not set it."`
 			PlatformExperimentID string            `json:"platform_experiment_id"`
 			Text                 string            `json:"text"`
 			Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
@@ -387,10 +410,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := access.PlatformExperiment(ctx, b.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		if b.AgentID != "" {
-			if err := access.Agent(ctx, b.AgentID); err != nil {
-				return nil, err
-			}
+		origin, err := access.Origin(ctx, b.AgentID, b.Author)
+		if err != nil {
+			return nil, err
 		}
 		referenced := append([]string{}, b.DistinctFrom...)
 		for _, link := range b.Links {
@@ -399,7 +421,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := referencesInScope(ctx, referenced...); err != nil {
 			return nil, err
 		}
-		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, b.AgentID, auth.Author(ctx, b.Author), b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
+		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, origin.AgentID, origin.Author, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 		if err != nil {
 			h.logger.Info("register hypothesis", zap.Error(err))
 			return nil, hypothesisWriteError(err)
@@ -407,6 +429,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		status := http.StatusCreated
 		if existed {
 			status = http.StatusOK
+		} else if err := recordHumanWrite(ctx, origin, domain.HumanWriteHypothesis, hyp.ID, hyp.PlatformExperimentID); err != nil {
+			return nil, err
 		}
 		return &struct {
 			Status int
@@ -427,7 +451,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string          `json:"agent_id,omitempty" required:"false"`
-			Author  string          `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. Ignored for a signed-in user, whose name the identity provider states."`
+			Author  string          `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. A signed-in user is named by the identity provider whatever is sent here, and an agent token may not set it."`
 			Type    domain.LinkType `json:"type" doc:"builds_on, contradicts or related."`
 			To      string          `json:"to" doc:"A hypothesis id, or the platform_experiment_id for the objective (builds_on only)."`
 		}
@@ -435,18 +459,25 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status int
 		Body   []domain.Link
 	}, error) {
-		if err := referencesInScope(ctx, in.ID, in.Body.To); err != nil {
+		from, err := loadHypothesis(ctx, in.ID)
+		if err != nil {
 			return nil, err
 		}
-		if in.Body.AgentID != "" {
-			if err := access.Agent(ctx, in.Body.AgentID); err != nil {
-				return nil, err
-			}
+		if err := referencesInScope(ctx, in.Body.To); err != nil {
+			return nil, err
 		}
-		links, err := h.svc.AddHypothesisLink(ctx, in.ID, in.Body.AgentID, auth.Author(ctx, in.Body.Author), domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
+		origin, err := access.Origin(ctx, in.Body.AgentID, in.Body.Author)
+		if err != nil {
+			return nil, err
+		}
+		links, err := h.svc.AddHypothesisLink(ctx, in.ID, origin.AgentID, origin.Author, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
 		if err != nil {
 			h.logger.Info("add hypothesis link", zap.Error(err))
 			return nil, hypothesisWriteError(err)
+		}
+		subject := in.ID + " " + string(in.Body.Type) + " " + in.Body.To
+		if err := recordHumanWrite(ctx, origin, domain.HumanWriteLink, subject, from.PlatformExperimentID); err != nil {
+			return nil, err
 		}
 		return &struct {
 			Status int
@@ -454,11 +485,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Status: http.StatusCreated, Body: links}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "query-hypotheses", Method: "POST", Path: "/hypotheses/query",
 		Summary: "Query the hypothesis graph with read-only Cypher", Tags: []string{"hypotheses"},
 		Description: queryDescription,
-	}, func(ctx context.Context, in *struct {
+	}), func(ctx context.Context, in *struct {
 		Body struct {
 			PlatformExperimentID string         `json:"platform_experiment_id" doc:"The platform experiment whose graph the query reads, bound as $pe."`
 			Cypher               string         `json:"cypher"`
@@ -621,14 +652,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		} else if in.Limit > maxHypothesisDetailLimit {
 			in.Limit = maxHypothesisDetailLimit
 		}
-		hyp, err := h.svc.GetHypothesis(ctx, in.ID)
+		hyp, err := loadHypothesis(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		if hyp == nil {
-			return nil, huma.Error404NotFound("hypothesis not found")
-		}
-		if err := access.PlatformExperiment(ctx, hyp.PlatformExperimentID); err != nil {
 			return nil, err
 		}
 		links, err := h.svc.GetHypothesisLinks(ctx, in.ID)
@@ -676,7 +701,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// See the register-hypothesis body above: exactly-one-of is a rule about the pair,
 			// so neither field can be schema-required without rejecting the other's valid case.
 			AgentID string `json:"agent_id,omitempty" required:"false"`
-			Author  string `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. Ignored for a signed-in user, whose name the identity provider states."`
+			Author  string `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. A signed-in user is named by the identity provider whatever is sent here, and an agent token may not set it."`
 			Text    string `json:"text"`
 		}
 	}) (*struct {
@@ -686,18 +711,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Body.Text == "" {
 			return nil, huma.Error400BadRequest("text is required")
 		}
-		if err := hypothesisInScope(ctx, in.ID); err != nil {
+		if _, err := loadHypothesis(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if in.Body.AgentID != "" {
-			if err := access.Agent(ctx, in.Body.AgentID); err != nil {
-				return nil, err
-			}
+		origin, err := access.Origin(ctx, in.Body.AgentID, in.Body.Author)
+		if err != nil {
+			return nil, err
 		}
-		c, err := h.svc.AddHypothesisComment(ctx, in.ID, in.Body.AgentID, auth.Author(ctx, in.Body.Author), in.Body.Text)
+		c, err := h.svc.AddHypothesisComment(ctx, in.ID, origin.AgentID, origin.Author, in.Body.Text)
 		if err != nil {
 			h.logger.Info("add hypothesis comment", zap.Error(err))
 			return nil, hypothesisWriteError(err)
+		}
+		if err := recordHumanWrite(ctx, origin, domain.HumanWriteComment, c.ID, c.PlatformExperimentID); err != nil {
+			return nil, err
 		}
 		return &struct {
 			Status int
@@ -726,7 +753,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if !domain.ValidHypothesisStatus(in.Body.Status) {
 			return nil, huma.Error400BadRequest("status must be one of: open, confirmed, refuted, inconclusive")
 		}
-		if err := hypothesisInScope(ctx, in.ID); err != nil {
+		if _, err := loadHypothesis(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if err := access.Agent(ctx, in.Body.AgentID); err != nil {

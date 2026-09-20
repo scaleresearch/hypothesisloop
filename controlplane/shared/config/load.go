@@ -184,11 +184,20 @@ func (c *Config) build() error {
 	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
 		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
 	}
+	if err := domain.ValidateIdentifier("agents launcher", c.Agents.Launcher); err != nil {
+		return err
+	}
+	if c.Agents.Image == "" {
+		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
+	}
+	if apiURL, err := url.Parse(c.Agents.APIURL); err != nil || apiURL.Host == "" || (apiURL.Scheme != "http" && apiURL.Scheme != "https") {
+		return fmt.Errorf("agents api_url %q must be the http(s) address hosted agents reach this API at", c.Agents.APIURL)
+	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
 	}
-	if len(c.Auth.JWTKeys) > 0 && c.Auth.Issuer == "" {
-		return fmt.Errorf("auth issuer is required when jwt_keys are listed")
+	if len(c.Auth.JWTKeys) > 0 && (c.Auth.Issuer == "" || c.Auth.Audience == "") {
+		return fmt.Errorf("auth issuer and audience are required when jwt_keys are listed")
 	}
 	return nil
 }

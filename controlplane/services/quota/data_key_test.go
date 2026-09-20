@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -39,6 +40,10 @@ func (s *signupKeys) AgentDataKey(ctx context.Context, _, agentID string, create
 	return key, nil
 }
 
+type anyoneActive struct{}
+
+func (anyoneActive) RequireActive(context.Context, string, string) error { return nil }
+
 func dataKeyRouter(t *testing.T, keys AgentDataKeyStore, storeStatus int) (http.Handler, *int) {
 	t.Helper()
 	created := 0
@@ -52,7 +57,7 @@ func dataKeyRouter(t *testing.T, keys AgentDataKeyStore, storeStatus int) (http.
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{})), NewDataUsageHandler(client, keys, 0))
+	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewDataUsageHandler(client, keys, anyoneActive{}, 0))
 	return r, &created
 }
 

@@ -33,17 +33,17 @@ func TestSmoke(t *testing.T) {
 	// together exactly as control-service wires them, so /openapi.json and /explore describe
 	// every operation a caller can reach at the single base URL.
 	r := chi.NewRouter()
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, authtest.Staff, auth.NewAccess(authtest.Placement{}))
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, nil))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
-	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, 0))
+	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0))
 	doc.MountExplore(r)
 
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := chi.NewRouter()
-	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}))
+	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", nil, 0, nil, 0, "", nil))
 	dc.MountExplore(rc)
 

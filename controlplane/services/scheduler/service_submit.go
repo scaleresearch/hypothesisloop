@@ -139,7 +139,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if hyp == nil {
 		return &AdmissionError{
 			Reason:  ReasonMalformed,
-			Message: fmt.Sprintf("hypothesis %s not found — register it first via POST /hypotheses", exp.HypothesisID),
+			Message: hypothesisNotInExperiment(exp),
 		}
 	}
 	// A human-submitted idea is testable like any other: any agent may bind a job to it. The
@@ -156,7 +156,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if hyp.PlatformExperimentID != exp.PlatformExperimentID {
 		return &AdmissionError{
 			Reason:  ReasonMalformed,
-			Message: fmt.Sprintf("hypothesis %s belongs to platform experiment %s, not %s", exp.HypothesisID, hyp.PlatformExperimentID, exp.PlatformExperimentID),
+			Message: hypothesisNotInExperiment(exp),
 		}
 	}
 	exp.Hypothesis = hyp.Text
@@ -178,10 +178,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// This is advisory — low novelty is NOT a hard rejection. The score is stored on the
 	// experiment so agents can see it and decide whether to refine. Agents should proactively
 	// check GET /experiments?status=QUEUED to spot duplicates before submitting.
+	// Within this platform experiment only: a hypothesis belongs to one, so a job elsewhere
+	// tests nothing this one could duplicate, and may be another org's.
 	activeExps, err := s.store.GetRunningAndQueued(ctx)
 	if err != nil {
 		return fmt.Errorf("scheduler: get running and queued: %w", err)
 	}
+	activeExps = inPlatformExperiment(activeExps, exp.PlatformExperimentID)
 	// Never against itself. Re-submitting an already-QUEUED job (step 7's `existing` branch)
 	// otherwise finds its own row in the active set, scores itself a duplicate of itself, and
 	// persists the depressed priority that follows — reprioritize excludes it for the same
@@ -293,4 +296,20 @@ func (s *Service) enforceDataCeiling(ctx context.Context, exp *domain.Experiment
 			"agent holds %d bytes of durable data in this platform experiment, at or over the %d-byte ceiling — delete what you no longer need under HYPOTHESISLOOP_DATA_URI (list a job's files with GET /experiments/{id}/data) before submitting again",
 			held, s.maxDataBytesPerAgent),
 	}
+}
+
+// hypothesisNotInExperiment is the one answer for a hypothesis that does not exist and for one
+// of another platform experiment, so a submission cannot probe for the latter.
+func hypothesisNotInExperiment(exp *domain.Experiment) string {
+	return fmt.Sprintf("hypothesis %s not found in platform experiment %s — register it first via POST /hypotheses", exp.HypothesisID, exp.PlatformExperimentID)
+}
+
+func inPlatformExperiment(exps []*domain.Experiment, platformExperimentID string) []*domain.Experiment {
+	kept := make([]*domain.Experiment, 0, len(exps))
+	for _, e := range exps {
+		if e.PlatformExperimentID == platformExperimentID {
+			kept = append(kept, e)
+		}
+	}
+	return kept
 }

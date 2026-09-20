@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -254,13 +255,23 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	seedExperimentForCapTest(t, pool, jobID, agentID, peID, 1, domain.StatusQueued)
 
 	want := domain.Tenancy{PlatformExperimentID: peID, ProjectID: project.ID, OrgID: orgID}
-	got, closed, err := accounts.PlatformExperimentTenancy(ctx, peID)
-	if err != nil || got == nil || *got != want || closed {
-		t.Fatalf("platform experiment tenancy: got = %+v closed=%v, %v, want %+v open", got, closed, err, want)
+	got, closedAt, err := accounts.PlatformExperimentTenancy(ctx, peID)
+	if err != nil || got == nil || *got != want || closedAt != nil {
+		t.Fatalf("platform experiment tenancy: got = %+v closed at %v, %v, want %+v open", got, closedAt, err, want)
 	}
+	ofAgent := want
+	ofAgent.AgentID = agentID
 	job, ended, err := accounts.ExperimentTenancy(ctx, jobID)
-	if err != nil || job == nil || *job != want || ended {
-		t.Fatalf("job tenancy: got = %+v ended=%v, %v, want %+v running", job, ended, err, want)
+	if err != nil || job == nil || *job != ofAgent || ended {
+		t.Fatalf("job tenancy: got = %+v ended=%v, %v, want %+v running", job, ended, err, ofAgent)
+	}
+	donationID := uuid.New().String()
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO donation_requests (id, agent_id, platform_experiment_id, credits_want, reason, status)
+VALUES ($1, $2, $3, 1, 'r', 'open')`, donationID, agentID, peID); err != nil {
+		t.Fatalf("seed donation request: %v", err)
+	}
+	if donation, err := accounts.DonationTenancy(ctx, donationID); err != nil || donation == nil || *donation != ofAgent {
+		t.Fatalf("donation tenancy: got = %+v, %v, want %+v", donation, err, ofAgent)
 	}
 
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'EVICTED', not_admitted_reason = NULL WHERE id = $1`, jobID); err != nil {
@@ -269,11 +280,41 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	if _, ended, _ := accounts.ExperimentTenancy(ctx, jobID); !ended {
 		t.Fatal("tenancy of an evicted job: got ended = false, want true")
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID); err != nil {
+	pes := NewPlatformExperimentsStore(pool)
+	if err := pes.UpdatePlatformExperimentStatus(ctx, peID, domain.PlatformExpRunning); err != nil {
+		t.Fatalf("start platform experiment: %v", err)
+	}
+	if _, closedAt, _ := accounts.PlatformExperimentTenancy(ctx, peID); closedAt != nil {
+		t.Fatalf("tenancy of a running platform experiment: got closed at %v, want nil", closedAt)
+	}
+	before := time.Now().Add(-time.Second)
+	if err := pes.UpdatePlatformExperimentStatus(ctx, peID, domain.PlatformExpClosed); err != nil {
 		t.Fatalf("close platform experiment: %v", err)
 	}
-	if _, closed, _ := accounts.PlatformExperimentTenancy(ctx, peID); !closed {
-		t.Fatal("tenancy of a closed platform experiment: got closed = false, want true")
+	_, closedAt, _ = accounts.PlatformExperimentTenancy(ctx, peID)
+	if closedAt == nil || closedAt.Before(before) || closedAt.After(time.Now().Add(time.Second)) {
+		t.Fatalf("tenancy of a closed platform experiment: got closed at %v, want about now", closedAt)
+	}
+	// The wind-down is counted from the close, which later writes to the row must not move.
+	time.Sleep(20 * time.Millisecond)
+	if err := pes.SetPlatformExperimentSummary(ctx, peID, "done"); err != nil {
+		t.Fatalf("file summary: %v", err)
+	}
+	if err := pes.UpdatePlatformExperimentStatus(ctx, peID, domain.PlatformExpClosed); err != nil {
+		t.Fatalf("close again: %v", err)
+	}
+	if _, again, _ := accounts.PlatformExperimentTenancy(ctx, peID); again == nil || !again.Equal(*closedAt) {
+		t.Fatalf("closed at after a summary and a second close: got = %v, want it unchanged from %v", again, closedAt)
+	}
+
+	if cutAt, err := pes.AgentCutAt(ctx, peID, agentID); err != nil || cutAt != nil {
+		t.Fatalf("cut time of an agent that was not cut: got = %v, %v, want nil", cutAt, err)
+	}
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, peID, agentID); err != nil {
+		t.Fatalf("cut agent: %v", err)
+	}
+	if cutAt, err := pes.AgentCutAt(ctx, peID, agentID); err != nil || cutAt == nil || time.Since(*cutAt) > time.Minute {
+		t.Fatalf("cut time of a cut agent: got = %v, %v, want about now", cutAt, err)
 	}
 
 	if got, _, err := accounts.PlatformExperimentTenancy(ctx, "pe-missing-"+suffix); err != nil || got != nil {
@@ -318,7 +359,7 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	}
 	pes := NewPlatformExperimentsStore(pool)
 	for pe, agent := range map[string]string{peA: agentA, peB: agentB} {
-		if _, err := pes.Signup(ctx, pe, agent, domain.SignupRoleCompetitor, ""); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup: %v", err)
 		}
 	}
@@ -420,7 +461,7 @@ func assertSameSet(t *testing.T, what string, got, want []string) {
 
 // A job's project is its platform experiment's, wherever the job is read: one row, a list, and
 // the lineage walk, which reads through an aliased self-join.
-func TestAJobReadsItsProjectOffItsPlatformExperiment(t *testing.T) {
+func TestAJobReadsItsProjectAndOrgOffItsPlatformExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	accounts := NewAccountsStore(pool)
@@ -440,8 +481,17 @@ func TestAJobReadsItsProjectOffItsPlatformExperiment(t *testing.T) {
 
 	store := NewExperimentsStore(pool)
 	got, err := store.GetExperiment(ctx, childID)
-	if err != nil || got.ProjectID != projectID {
-		t.Fatalf("get: got = %+v, %v, want project %q", got, err, projectID)
+	if err != nil || got.ProjectID != projectID || got.OrgID != orgID {
+		t.Fatalf("get: got = %+v, %v, want project %q of org %q", got, err, projectID, orgID)
+	}
+	queued, err := store.ListQueuedExperiments(ctx)
+	if err != nil {
+		t.Fatalf("list queued: got = %v, want = nil", err)
+	}
+	for _, exp := range queued {
+		if (exp.ID == parentID || exp.ID == childID) && exp.OrgID != orgID {
+			t.Errorf("queued job %s: org = %q, want = %q", exp.ID, exp.OrgID, orgID)
+		}
 	}
 	listed, err := store.ListExperiments(ctx, domain.ExperimentFilter{Scope: domain.TenantScope{AllOrgs: true, ProjectID: projectID}})
 	if err != nil || len(listed) != 2 {
@@ -452,8 +502,8 @@ func TestAJobReadsItsProjectOffItsPlatformExperiment(t *testing.T) {
 		t.Fatalf("lineage: got = %d jobs, %v, want = 2", len(lineage), err)
 	}
 	for _, exp := range append(listed, lineage...) {
-		if exp.ProjectID != projectID {
-			t.Errorf("job %s: project = %q, want = %q", exp.ID, exp.ProjectID, projectID)
+		if exp.ProjectID != projectID || exp.OrgID != orgID {
+			t.Errorf("job %s: project = %q, org = %q, want = %q, %q", exp.ID, exp.ProjectID, exp.OrgID, projectID, orgID)
 		}
 	}
 }

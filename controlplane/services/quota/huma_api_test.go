@@ -27,7 +27,7 @@ func (noExperimentStore) ListAgentQuotas(context.Context, string) ([]*domain.Age
 
 func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
 	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}))
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, noExperimentStore{})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, zap.NewNop()))
 

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,75 +67,100 @@ func bigInt(b64 string) (*big.Int, error) {
 	return new(big.Int).SetBytes(raw), nil
 }
 
+// audiences is the aud claim, which the JWT standard lets be one string or a list.
+type audiences []string
+
+func (a *audiences) UnmarshalJSON(raw []byte) error {
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		*a = audiences{one}
+		return nil
+	}
+	return json.Unmarshal(raw, (*[]string)(a))
+}
+
 type jwtClaims struct {
-	Issuer  string  `json:"iss"`
-	Subject string  `json:"sub"`
-	Expiry  float64 `json:"exp"`
+	Issuer    string    `json:"iss"`
+	Subject   string    `json:"sub"`
+	Audience  audiences `json:"aud"`
+	Expiry    float64   `json:"exp"`
+	NotBefore float64   `json:"nbf"`
 	// Name is the OIDC standard claim. Supabase states the same fact under user_metadata.
 	Name         string `json:"name"`
 	UserMetadata struct {
 		Name string `json:"name"`
 	} `json:"user_metadata"`
+	// IsAnonymous is Supabase's mark on a session nobody signed in to.
+	IsAnonymous bool `json:"is_anonymous"`
 }
 
-// verifyJWT checks a JWT's signature against the configured key its header names, its issuer and
-// its expiry, and returns the subject and display name it carries.
-func verifyJWT(token, issuer string, keys map[string]verifyingKey, now time.Time) (subject, name string, err error) {
+func (c jwtClaims) displayName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.UserMetadata.Name
+}
+
+// verifyJWT checks a JWT's signature against the configured key its header names, then its
+// issuer, audience and validity window, and returns its claims. An anonymous session is refused:
+// an account is a person the identity provider knows.
+func verifyJWT(token, issuer, audience string, keys map[string]verifyingKey, now time.Time) (jwtClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", "", errors.New("malformed token")
+		return jwtClaims{}, errors.New("malformed token")
 	}
 	var header struct {
 		Alg string `json:"alg"`
 		Kid string `json:"kid"`
 	}
 	if err := decodeSegment(parts[0], &header); err != nil {
-		return "", "", errors.New("malformed token header")
+		return jwtClaims{}, errors.New("malformed token header")
 	}
 	key, ok := keys[header.Kid]
 	if !ok {
-		return "", "", errors.New("token is signed by a key that is not configured")
+		return jwtClaims{}, errors.New("token is signed by a key that is not configured")
 	}
 	if header.Alg != key.alg {
-		return "", "", errors.New("token algorithm does not match its key")
+		return jwtClaims{}, errors.New("token algorithm does not match its key")
 	}
 	signature, err := encoding.DecodeString(parts[2])
 	if err != nil {
-		return "", "", errors.New("malformed token signature")
+		return jwtClaims{}, errors.New("malformed token signature")
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	switch public := key.public.(type) {
 	case *ecdsa.PublicKey:
 		if len(signature) != 64 {
-			return "", "", errors.New("bad signature")
+			return jwtClaims{}, errors.New("bad signature")
 		}
 		r, s := new(big.Int).SetBytes(signature[:32]), new(big.Int).SetBytes(signature[32:])
 		if !ecdsa.Verify(public, digest[:], r, s) {
-			return "", "", errors.New("bad signature")
+			return jwtClaims{}, errors.New("bad signature")
 		}
 	case *rsa.PublicKey:
 		if rsa.VerifyPKCS1v15(public, crypto.SHA256, digest[:], signature) != nil {
-			return "", "", errors.New("bad signature")
+			return jwtClaims{}, errors.New("bad signature")
 		}
 	}
 	var claims jwtClaims
 	if err := decodeSegment(parts[1], &claims); err != nil {
-		return "", "", errors.New("malformed token claims")
+		return jwtClaims{}, errors.New("malformed token claims")
 	}
-	if claims.Issuer != issuer {
-		return "", "", errors.New("token is from another issuer")
+	switch {
+	case claims.Issuer != issuer:
+		return jwtClaims{}, errors.New("token is from another issuer")
+	case !slices.Contains(claims.Audience, audience):
+		return jwtClaims{}, errors.New("token is for another audience")
+	case claims.Expiry == 0 || !now.Before(time.Unix(int64(claims.Expiry), 0)):
+		return jwtClaims{}, errors.New("token has expired")
+	case claims.NotBefore != 0 && now.Before(time.Unix(int64(claims.NotBefore), 0)):
+		return jwtClaims{}, errors.New("token is not valid yet")
+	case claims.Subject == "":
+		return jwtClaims{}, errors.New("token has no subject")
+	case claims.IsAnonymous:
+		return jwtClaims{}, errors.New("anonymous sessions have no account: sign in")
 	}
-	if claims.Expiry == 0 || !now.Before(time.Unix(int64(claims.Expiry), 0)) {
-		return "", "", errors.New("token has expired")
-	}
-	if claims.Subject == "" {
-		return "", "", errors.New("token has no subject")
-	}
-	name = claims.Name
-	if name == "" {
-		name = claims.UserMetadata.Name
-	}
-	return claims.Subject, name, nil
+	return claims, nil
 }
 
 func decodeSegment(segment string, into any) error {

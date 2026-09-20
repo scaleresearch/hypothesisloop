@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -38,10 +40,12 @@ func unauthenticated(format string, args ...any) *Error {
 type Directory interface {
 	EnsureUserHome(ctx context.Context, userID, orgName string) (*domain.User, []string, error)
 	APIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error)
-	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (*domain.Tenancy, bool, error)
+	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (tenancy *domain.Tenancy, closedAt *time.Time, err error)
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
-	IsAgentCut(ctx context.Context, platformExperimentID, agentID string) (bool, error)
+	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
+	IsSignedUp(ctx context.Context, platformExperimentID, agentID string) (bool, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
+	LauncherKnown(ctx context.Context, name string) (bool, error)
 }
 
 // StoreDirectory is the Directory over the platform's own database.
@@ -49,10 +53,22 @@ type StoreDirectory struct {
 	*db.AccountsStore
 	*db.ClustersStore
 	*db.PlatformExperimentsStore
+	// ConfiguredLauncher is the launcher new hosted agents are given to (config agents.launcher).
+	ConfiguredLauncher string
+}
+
+// LauncherKnown reports whether a launcher of this name has anything to ask for: it is the one
+// config gives new hosted agents to, or an agent is still assigned to it. The second half keeps
+// a launcher that config no longer names working until its last agent is gone.
+func (d StoreDirectory) LauncherKnown(ctx context.Context, name string) (bool, error) {
+	if name == d.ConfiguredLauncher {
+		return true, nil
+	}
+	return d.LauncherHasAgents(ctx, name)
 }
 
 func NewStoreDirectory(pool *db.Pool) StoreDirectory {
-	return StoreDirectory{db.NewAccountsStore(pool), db.NewClustersStore(pool), db.NewPlatformExperimentsStore(pool)}
+	return StoreDirectory{AccountsStore: db.NewAccountsStore(pool), ClustersStore: db.NewClustersStore(pool), PlatformExperimentsStore: db.NewPlatformExperimentsStore(pool)}
 }
 
 // Authenticator turns a token into a Principal. Nothing is kept between requests: a derived
@@ -60,6 +76,7 @@ func NewStoreDirectory(pool *db.Pool) StoreDirectory {
 type Authenticator struct {
 	signingSecret string
 	issuer        string
+	audience      string
 	keys          map[string]verifyingKey
 	directory     Directory
 	now           func() time.Time
@@ -77,7 +94,9 @@ func NewAuthenticator(cfg config.AuthConfig, directory Directory) (*Authenticato
 		}
 		keys[k.Kid] = parsed
 	}
-	return &Authenticator{signingSecret: cfg.SigningSecret, issuer: cfg.Issuer, keys: keys, directory: directory, now: time.Now}, nil
+	return &Authenticator{
+		signingSecret: cfg.SigningSecret, issuer: cfg.Issuer, audience: cfg.Audience, keys: keys, directory: directory, now: time.Now,
+	}, nil
 }
 
 // BearerToken returns the token of an Authorization header.
@@ -117,6 +136,14 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, unauthenticated("cluster %s is not registered", p.ClusterName)
 		}
 		p.OrgIDs = []string{orgID}
+	case KindLauncher:
+		known, err := a.directory.LauncherKnown(ctx, p.LauncherName)
+		if err != nil {
+			return Principal{}, err
+		}
+		if !known {
+			return Principal{}, unauthenticated("launcher %s is not configured and runs no agent", p.LauncherName)
+		}
 	case KindJob:
 		tenancy, ended, err := a.directory.ExperimentTenancy(ctx, p.ExperimentID)
 		if err != nil {
@@ -126,26 +153,50 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, unauthenticated("job %s is not running", p.ExperimentID)
 		}
 		p = p.within(tenancy)
-	case KindAgent, KindCoordinator:
-		tenancy, closed, err := a.directory.PlatformExperimentTenancy(ctx, p.PlatformExperimentID)
+	case KindCoordinator:
+		tenancy, closedAt, err := a.directory.PlatformExperimentTenancy(ctx, p.PlatformExperimentID)
 		if err != nil {
 			return Principal{}, err
 		}
-		if tenancy == nil || closed {
-			return Principal{}, unauthenticated("platform experiment %s is closed or does not exist", p.PlatformExperimentID)
+		if tenancy == nil {
+			return Principal{}, unauthenticated("platform experiment %s does not exist", p.PlatformExperimentID)
 		}
-		if p.Kind == KindAgent {
-			cut, err := a.directory.IsAgentCut(ctx, p.PlatformExperimentID, p.AgentID)
-			if err != nil {
-				return Principal{}, err
-			}
-			if cut {
-				return Principal{}, unauthenticated("agent %s was cut from platform experiment %s", p.AgentID, p.PlatformExperimentID)
-			}
+		p = p.within(tenancy)
+		p.PlatformExperimentClosed = closedAt != nil
+	case KindAgent:
+		tenancy, closedAt, err := a.directory.PlatformExperimentTenancy(ctx, p.PlatformExperimentID)
+		if err != nil {
+			return Principal{}, err
+		}
+		if tenancy == nil {
+			return Principal{}, unauthenticated("platform experiment %s does not exist", p.PlatformExperimentID)
+		}
+		signedUp, err := a.directory.IsSignedUp(ctx, p.PlatformExperimentID, p.AgentID)
+		if err != nil {
+			return Principal{}, err
+		}
+		if !signedUp {
+			return Principal{}, unauthenticated("agent %s is not in platform experiment %s", p.AgentID, p.PlatformExperimentID)
+		}
+		if a.woundDown(closedAt) {
+			return Principal{}, unauthenticated("platform experiment %s is closed", p.PlatformExperimentID)
+		}
+		cutAt, err := a.directory.AgentCutAt(ctx, p.PlatformExperimentID, p.AgentID)
+		if err != nil {
+			return Principal{}, err
+		}
+		if a.woundDown(cutAt) {
+			return Principal{}, unauthenticated("agent %s was cut from platform experiment %s", p.AgentID, p.PlatformExperimentID)
 		}
 		p = p.within(tenancy)
 	}
 	return p, nil
+}
+
+// woundDown reports whether an agent's time after its platform experiment closed, or after it
+// was cut, has run out.
+func (a *Authenticator) woundDown(endedAt *time.Time) bool {
+	return endedAt != nil && !a.now().Before(endedAt.Add(domain.AgentWindDown))
 }
 
 func (p Principal) within(t *domain.Tenancy) Principal {
@@ -164,19 +215,20 @@ func (a *Authenticator) apiKey(ctx context.Context, token string) (Principal, er
 	if key.RevokedAt != nil {
 		return Principal{}, unauthenticated("api key %s is revoked", key.ID)
 	}
-	return Principal{Kind: KindKey, OrgIDs: []string{key.OrgID}, ProjectID: key.ProjectID}, nil
+	return Principal{Kind: KindKey, KeyID: key.ID, OrgIDs: []string{key.OrgID}, ProjectID: key.ProjectID}, nil
 }
 
 func (a *Authenticator) user(ctx context.Context, token string) (Principal, error) {
-	subject, name, err := verifyJWT(token, a.issuer, a.keys, a.now())
+	claims, err := verifyJWT(token, a.issuer, a.audience, a.keys, a.now())
 	if err != nil {
 		return Principal{}, unauthenticated("%s", err)
 	}
+	name := claims.displayName()
 	orgName := name
 	if orgName == "" {
-		orgName = subject
+		orgName = claims.Subject
 	}
-	user, orgIDs, err := a.directory.EnsureUserHome(ctx, subject, orgName)
+	user, orgIDs, err := a.directory.EnsureUserHome(ctx, claims.Subject, orgName)
 	if err != nil {
 		return Principal{}, err
 	}
@@ -187,30 +239,58 @@ func (a *Authenticator) user(ctx context.Context, token string) (Principal, erro
 	return p, nil
 }
 
-// RequireRuntime serves next only to a runtime token of a registered cluster, or to staff. It
-// guards the plain HTTP endpoints runtimes push to outside the documented API.
-func (a *Authenticator) RequireRuntime(next http.Handler) http.Handler {
+// RequireRuntime serves next only to a runtime token of a registered cluster, or to staff, with
+// the principal in the request's context. It guards the plain HTTP endpoints runtimes push to
+// outside the documented API.
+func (a *Authenticator) RequireRuntime(logger *zap.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, err := BearerToken(r.Header.Get("Authorization"))
-		if err == nil {
-			var p Principal
-			if p, err = a.Authenticate(r.Context(), token); err == nil && p.Kind != KindRuntime && p.Kind != KindStaff {
-				err = forbidden("forbidden: only a runtime token may push here")
-			}
+		p, err := a.AuthenticateRequest(r)
+		if err == nil && p.Kind != KindRuntime && p.Kind != KindStaff {
+			err = forbidden("forbidden: only a runtime token may push here")
 		}
 		if err != nil {
-			WriteError(w, err)
+			WriteError(w, logger, err)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
+	})
+}
+
+// RequireStaff serves next only to staff.
+func (a *Authenticator) RequireStaff(logger *zap.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, err := a.AuthenticateRequest(r)
+		if err == nil && p.Kind != KindStaff {
+			err = forbidden("forbidden: staff only")
+		}
+		if err != nil {
+			WriteError(w, logger, err)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-// WriteError answers a refusal in the API's {"error": ...} shape; any other error is a 500.
-func WriteError(w http.ResponseWriter, err error) {
+// AuthenticateRequest resolves the bearer token of a plain HTTP request.
+func (a *Authenticator) AuthenticateRequest(r *http.Request) (Principal, error) {
+	token, err := BearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		return Principal{}, err
+	}
+	return a.Authenticate(r.Context(), token)
+}
+
+// InternalError is the body of every answer to a failure of the platform's own. What failed is
+// logged and never sent: the caller may be anyone.
+const InternalError = "internal error"
+
+// WriteError answers a refusal in the API's {"error": ...} shape; any other error is logged and
+// answered as a 500 that says nothing about it.
+func WriteError(w http.ResponseWriter, logger *zap.Logger, err error) {
 	var refusal *Error
 	if !errors.As(err, &refusal) {
-		refusal = &Error{status: http.StatusInternalServerError, Message: "could not authenticate the request: " + err.Error()}
+		logger.Error("request failed before its handler", zap.Error(err))
+		refusal = &Error{status: http.StatusInternalServerError, Message: InternalError}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(refusal.status)

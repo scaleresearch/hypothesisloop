@@ -26,6 +26,16 @@ import (
 // It embeds Store so any method a test did not think about panics instead of quietly answering zero.
 type poolStore struct {
 	Store
+	humanWrites []domain.HumanWrite
+	failRecord  error
+}
+
+func (s *poolStore) RecordHumanWrite(_ context.Context, w domain.HumanWrite) error {
+	if s.failRecord != nil {
+		return s.failRecord
+	}
+	s.humanWrites = append(s.humanWrites, w)
+	return nil
 }
 
 func newPoolStore() *poolStore { return &poolStore{} }
@@ -529,7 +539,7 @@ func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
 
 func TestHypothesisGraphOfAnUnknownPlatformExperimentIsNotFound(t *testing.T) {
 	r := chi.NewRouter()
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{})), NewHandler(poolService(&missingExperimentStore{}), zap.NewNop()))
+	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(poolService(&missingExperimentStore{}), zap.NewNop()))
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses/graph?platform_experiment_id=pe-missing", nil)))

@@ -4,6 +4,7 @@ package authtest
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -35,8 +36,8 @@ type Placement struct {
 	Projects            map[string]domain.Project
 }
 
-func (p Placement) PlatformExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, bool, error) {
-	return lookup(p.PlatformExperiments, id), false, nil
+func (p Placement) PlatformExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, *time.Time, error) {
+	return lookup(p.PlatformExperiments, id), nil, nil
 }
 
 func (p Placement) ExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, bool, error) {

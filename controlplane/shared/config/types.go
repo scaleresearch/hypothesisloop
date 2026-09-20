@@ -207,14 +207,30 @@ type JWTKey struct {
 // AuthConfig is everything a token is checked against. There is no switch that turns the check
 // off: local development authenticates with a staff token derived from SigningSecret.
 type AuthConfig struct {
-	// Issuer and JWTKeys verify a person's JWT. The keys are listed here and never fetched, so
-	// rotating one is a config change and a restart. With no keys listed no JWT is accepted.
-	Issuer  string   `yaml:"issuer"`
-	JWTKeys []JWTKey `yaml:"jwt_keys"`
-	// SigningSecret derives every hls_ token the platform hands to what it launches.
+	// Issuer, Audience and JWTKeys verify a person's JWT: who issued it, that it was issued for
+	// this API, and its signature. The keys are listed here and never fetched, so rotating one
+	// is a config change and a restart. With no keys listed no JWT is accepted.
+	Issuer   string   `yaml:"issuer"`
+	Audience string   `yaml:"audience"`
+	JWTKeys  []JWTKey `yaml:"jwt_keys"`
+	// SigningSecret derives every hls_ token the platform hands to what it launches. It is a
+	// secret of the deployment: the settings file names the environment variable that holds it.
 	SigningSecret string `yaml:"signing_secret"`
 	// UIOrigin is the one browser origin allowed to call the API.
 	UIOrigin string `yaml:"ui_origin"`
+}
+
+// AgentsConfig decides where an agent the platform runs is started and from what. Each value is
+// read when an agent joins or when its launcher asks, and none of it names a provider: which
+// account a launcher rents from is that launcher's own config.
+type AgentsConfig struct {
+	// Launcher is the launcher a newly hosted agent is given to. It is written onto the agent's
+	// signup, so changing it moves new agents only.
+	Launcher string `yaml:"launcher"`
+	// Image is what every hosted agent's machine boots.
+	Image string `yaml:"image"`
+	// APIURL is the address a hosted agent reaches this API at, from wherever its launcher rents.
+	APIURL string `yaml:"api_url"`
 }
 
 // MinSigningSecretLength keeps the HMAC key at least as long as its output.
@@ -229,6 +245,7 @@ type Config struct {
 	Stages           StagesConfig            `yaml:"stages"`
 	Services         ServicesConfig          `yaml:"services"`
 	Auth             AuthConfig              `yaml:"auth"`
+	Agents           AgentsConfig            `yaml:"agents"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName map[string]float64 // accelerator name → AccH rate

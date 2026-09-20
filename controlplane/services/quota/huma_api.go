@@ -33,11 +33,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 	// ---- agents ----
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
-		Description:   "Identity registration. Returns 409 if the id already exists, which after a restart just means you are registered. Do this once before signing up to a platform experiment. A human participant registers exactly the same way, with kind=\"human\".",
+		Description:   "Registers a lasting identity under an id of your choosing: a person (kind=\"human\"), or an agent whose standing should carry from one platform experiment to the next. Returns 409 if the id already exists. It joins nothing: POST /platform-experiments/{id}/agents with agent_id does, and that call alone creates agents that need no identity of their own.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ID    string `json:"id" doc:"Stable unique agent id"`
@@ -60,9 +60,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		name := in.Body.Name
 		if name == "" {
 			name = in.Body.ID
-		}
-		if err := access.Self(ctx, in.Body.ID); err != nil {
-			return nil, err
 		}
 		orgID, err := access.Org(ctx, in.Body.OrgID)
 		if err != nil {
@@ -296,59 +293,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "signup-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/signup",
-		Summary: "Sign up an agent to a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Join before submitting jobs. Every job's metadata.platform_experiment_id must be one you are signed up to. " +
-			"Signing up again once signed up succeeds and changes nothing, whatever the experiment's status. " +
-			"role decides how the signup is treated by ranking and cuts: \"competitor\" (default) is ranked, cut-eligible, " +
-			"and counted against max_agents; \"baseline\" and \"reviewer\" are neither ranked nor cut nor counted against " +
-			"max_agents, though their jobs are billed and gated identically to a competitor's. An unrecognized role is " +
-			"refused, never defaulted. quota_tier optionally overrides this signup's guaranteed-vs-burst-only split " +
-			"(\"guaranteed\" or \"burst_only\"), independent of whether the signup is a human or an agent — quota " +
-			"tier never depends on kind. Omit it to use the platform experiment's default_quota_tier " +
-			"(\"guaranteed\" for new experiments, and — since a legacy experiment predating that policy has no " +
-			"other fallback left — guaranteed there too).",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			AgentID   string `json:"agent_id"`
-			Role      string `json:"role,omitempty"`
-			QuotaTier string `json:"quota_tier,omitempty"`
-		}
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
-		if in.Body.AgentID == "" {
-			return nil, huma.Error400BadRequest("agent_id is required")
-		}
-		if !domain.ValidQuotaTierOverride(in.Body.QuotaTier) {
-			return nil, huma.Error400BadRequest("quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got " + in.Body.QuotaTier)
-		}
-		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
-			return nil, err
-		}
-		role, err := domain.ParseSignupRole(in.Body.Role)
-		if err != nil {
-			return nil, &reasonError{status: 400, Reason: "unknown_role", Message: err.Error()}
-		}
-		if err := peh.svc.Signup(ctx, in.ID, in.Body.AgentID, role, domain.QuotaTier(in.Body.QuotaTier)); err != nil {
-			return nil, &reasonError{status: 400, Reason: err.Error(), Message: err.Error()}
-		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "signed_up"
-		return out, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-signup", Method: "GET", Path: "/platform-experiments/{id}/signups/{agent_id}",
 		Summary: "Read an agent's signup role", Tags: []string{"platform-experiments"},
 		Description: "The role an agent was signed up under, which is what decides whether it is ranked and cut. " +
@@ -471,12 +415,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *PlatformExperimentResults }{Body: results}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
 		OperationID: "set-platform-experiment-summary", Method: "POST", Path: "/platform-experiments/{id}/summary",
 		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
 		Description: "Writable after the experiment closes — this is the one field whose whole point " +
 			"is to be written once the run is over and the results are in.",
-	}, func(ctx context.Context, in *struct {
+	}), func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			Summary string `json:"summary"`
@@ -669,6 +613,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := access.Agent(ctx, b.AgentID); err != nil {
 			return nil, err
 		}
+		if err := peh.svc.RequireActive(ctx, b.PlatformExperimentID, b.AgentID); err != nil {
+			return nil, err
+		}
 		now := time.Now().UTC()
 		req := &domain.DonationRequest{
 			ID: uuid.New().String(), AgentID: b.AgentID, PlatformExperimentID: b.PlatformExperimentID,
@@ -692,7 +639,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Status string `json:"status"`
 		}
 	}, error) {
-		if err := access.Donation(ctx, in.ID); err != nil {
+		if err := access.OwnDonation(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if err := peh.svc.store.UpdateDonationStatus(ctx, in.ID, "cancelled"); err != nil {
@@ -759,7 +706,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
-		Description: "Live {accelerator_type, available, total} per cluster. accelerator_type is the exact " +
+		Description: "Live {accelerator_type, available, total} per cluster your jobs can be placed on: your org's own " +
+			"clusters and the ones the platform shares. accelerator_type is the exact " +
 			"driver-published string a job spec takes, so what you read here is what you submit. Check before " +
 			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
 			"currently-schedulable nodes count — powered-off hardware never appears."}, func(ctx context.Context, _ *struct{}) (*struct {

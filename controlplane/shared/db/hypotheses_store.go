@@ -202,6 +202,17 @@ VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
 	return c, nil
 }
 
+// RecordHumanWrite keeps the account behind a person's contribution.
+func (s *HypothesesStore) RecordHumanWrite(ctx context.Context, w domain.HumanWrite) error {
+	_, err := s.pool.pool.Exec(ctx, `
+INSERT INTO human_writes (user_id, author, kind, subject, platform_experiment_id) VALUES ($1, $2, $3, $4, $5)`,
+		w.UserID, w.Author, string(w.Kind), w.Subject, w.PlatformExperimentID)
+	if err != nil {
+		return fmt.Errorf("hypotheses_store.RecordHumanWrite: %w", err)
+	}
+	return nil
+}
+
 // ListCommentsByHypothesis returns one page of the comments filed against a hypothesis, oldest
 // first — bounded like ListFindingsByHypothesis, for the same reason.
 func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {

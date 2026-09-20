@@ -1,12 +1,15 @@
 package metrics
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
@@ -44,20 +47,30 @@ type PodSample struct {
 	ExperimentID string `json:"experiment_id,omitempty"`
 }
 
+// Placements resolves where each named job is placed. Implemented by db.ExperimentsStore.
+type Placements interface {
+	PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error)
+}
+
 // NewPushHandler returns an HTTP handler that accepts node-agent push payloads and writes every
 // tagged sample to GreptimeDB as an observed-alive heartbeat (metricsdb.RecordObservations) in one
-// remote-write request per push — a node reporting N pods sends one push, and that becomes one
-// write to GreptimeDB, not N — using the agent's own collection timestamp (req.Timestamp), not
-// receipt time, so a payload delayed or buffered through a network blip and flushed later still
-// lands at the moment it actually happened, not the moment it happened to arrive.
+// remote-write request per push, using the agent's own collection timestamp (req.Timestamp), so a
+// payload buffered through a network blip still lands at the moment it happened.
 //
-// Deliberately stateless: this handler holds nothing in memory between requests. Every reader
-// (silence detection, quota accounting, Cancel) recomputes straight from GreptimeDB, so there is
-// no cache here to fall out of sync with it, drop on restart, or diverge between processes.
-func NewPushHandler(dbURL string) http.Handler {
+// It must sit behind auth.RequireRuntime: a sample counts only for a job placed on the cluster
+// the token names, since a heartbeat keeps a job alive and is what its runtime is billed from.
+//
+// Stateless: every reader (silence detection, quota accounting, Cancel) recomputes from
+// GreptimeDB, so there is no cache here to fall out of sync with it.
+func NewPushHandler(dbURL string, placements Placements) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		caller, ok := auth.FromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
 		var req PushRequest
@@ -74,9 +87,27 @@ func NewPushHandler(dbURL string) http.Handler {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
+		ids := make([]string, 0, len(req.Pods))
+		for _, p := range req.Pods {
+			if p.ExperimentID != "" {
+				ids = append(ids, p.ExperimentID)
+			}
+		}
+		placed, err := placements.PlacementByID(r.Context(), ids)
+		if err != nil {
+			log.Printf("metrics: resolve placements for node %s: %v", req.Node, err)
+			http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		observations := make([]metricsdb.Observation, 0, len(req.Pods))
 		for _, p := range req.Pods {
 			if p.ExperimentID == "" {
+				continue
+			}
+			// As with a status report, a sample for a job this cluster does not hold is dropped
+			// and the rest of the push stands: mid-reschedule that is the ordinary state.
+			if !ownSample(caller, placed, p.ExperimentID) {
+				log.Printf("metrics: dropping a sample for job %s, which is not placed on cluster %s", p.ExperimentID, caller.ClusterName)
 				continue
 			}
 			observations = append(observations, metricsdb.Observation{
@@ -97,4 +128,12 @@ func NewPushHandler(dbURL string) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+func ownSample(caller auth.Principal, placed map[string]domain.Placement, experimentID string) bool {
+	if caller.Kind == auth.KindStaff {
+		return true
+	}
+	placement, found := placed[experimentID]
+	return found && caller.ClusterName != "" && placement.ClusterName == caller.ClusterName
 }

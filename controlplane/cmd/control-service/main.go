@@ -15,8 +15,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/dedup"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
@@ -116,6 +118,7 @@ func main() {
 	defer runCancel()
 
 	directory := auth.NewStoreDirectory(pool)
+	directory.ConfiguredLauncher = pcfg.Agents.Launcher
 	authenticator, err := auth.NewAuthenticator(pcfg.Auth, directory)
 	if err != nil {
 		logger.Fatal("control-service: configure auth", zap.Error(err))
@@ -179,7 +182,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db
 	}
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).
 		WithCatalog(resourceCatalog).
-		WithLiveCapacity(metricsDBURL, connectedWithin)
+		WithLiveCapacity(metricsDBURL, connectedWithin, store).
+		WithAgentLaunch(pcfg.Agents.Launcher, pcfg.Auth.SigningSecret)
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
@@ -190,13 +194,13 @@ func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db
 	registryHandler := registry.NewHandler(registrySvc, logger)
 	watchHandler := registry.NewWatchHandler(events, store, gate.authenticator, gate.access, logger)
 	watchHandler.Start(runCtx)
-	dataUsageHandler := quota.NewDataUsageHandler(dataStore, store, pcfg.DataStore.MaxBytesPerAgent)
+	dataUsageHandler := quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent)
 
 	r := chi.NewRouter()
 	r.Use(api.RecoveryMiddleware(logger))
 	r.Use(api.LoggingMiddleware(logger))
 	r.Use(api.CORSMiddleware(pcfg.Auth.UIOrigin))
-	r.Handle("/metrics", promhttp.Handler())
+	r.Handle("/metrics", gate.authenticator.RequireStaff(logger, promhttp.Handler()))
 	for _, path := range []string{"/health", "/healthz"} {
 		r.Get(path, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -214,11 +218,24 @@ func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db
 	// registration and its own docs under a distinct prefix — a different audience entirely.
 	r.Mount("/internal/clusters", clusterAgentRouter)
 
+	// Agent-launchers ask here which agent instances should exist. A third audience with its own
+	// registration and docs, like the cluster-agents above.
+	launcherRouter := chi.NewRouter()
+	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.authenticator, gate.access, logger)
+	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, pcfg.Agents.Image, pcfg.Agents.APIURL, pcfg.Auth.SigningSecret, logger))
+	launcherDoc.MountExplore(launcherRouter)
+	r.Mount("/internal/launchers", launcherRouter)
+
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access)
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access, logger)
 	quota.RegisterHuma(doc, handler, peHandler)
+	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
+	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
+		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
+	}
+	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret))
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
@@ -314,7 +331,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, pool *db.Pool, stor
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
 		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, logger)
 	clusterAgentRouter := chi.NewRouter()
-	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access)
+	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access, logger)
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
 	caDoc.MountExplore(clusterAgentRouter)
 

@@ -36,3 +36,9 @@ func ValidateIdentifier(kind, value string) error {
 	}
 	return nil
 }
+
+// IdentifierShaped reports whether value has the shape of an id the platform issues or accepts,
+// whatever its length: what a path parameter must have before anything is built from it.
+func IdentifierShaped(value string) bool {
+	return identifierPattern.MatchString(value)
+}

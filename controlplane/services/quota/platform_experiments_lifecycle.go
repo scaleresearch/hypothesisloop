@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -200,16 +201,17 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 	return pe, nil
 }
 
-// Signup registers an agent for a platform experiment in a fixed role. quotaTierOverride is the
-// signup-time explicit tier override ("" defers to the experiment's default_quota_tier policy,
-// see domain.ResolveQuotaTier).
-func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTierOverride domain.QuotaTier) error {
+// Signup gives a registered agent its place in a platform experiment: a fixed role, and
+// everything it is launched with. An empty QuotaTier defers to the experiment's
+// default_quota_tier policy (see domain.ResolveQuotaTier).
+func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) error {
+	agentID := signup.AgentID
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return err
 	}
 	if pe == nil {
-		return fmt.Errorf("experiment_not_found")
+		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
 	// A member signing up again has what it asked for, whatever the experiment's status or size.
 	already, err := s.store.IsSignedUp(ctx, platformExpID, agentID)
@@ -220,12 +222,12 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 		return nil
 	}
 	if pe.Status != domain.PlatformExpOpen {
-		return fmt.Errorf("signup_closed: experiment is %s", pe.Status)
+		return refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
 	}
 
-	inserted, err := s.store.Signup(ctx, platformExpID, agentID, role, quotaTierOverride)
+	inserted, err := s.store.Signup(ctx, platformExpID, signup)
 	if errors.Is(err, db.ErrMaxAgentsReached) {
-		return fmt.Errorf("max_agents_reached: limit is %d", pe.MaxAgents)
+		return refuseSignup(400, "max_agents_reached", "limit is %d", pe.MaxAgents)
 	}
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
@@ -238,11 +240,32 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 			return fmt.Errorf("platform_experiments.Signup: %w", err)
 		}
 		if !already {
-			return fmt.Errorf("signup_closed: experiment started")
+			return refuseSignup(400, "signup_closed", "experiment started")
 		}
 	}
 	s.logger.Info("agent signed up", zap.String("platformExpID", platformExpID),
-		zap.String("agentID", agentID), zap.String("role", string(role)))
+		zap.String("agentID", agentID), zap.String("role", string(signup.Role)))
+	return nil
+}
+
+// RequireActive refuses a request that starts work or spends for an agent that has no further
+// part in the platform experiment: it closed, or the agent was cut. A token that is still alive
+// to file summaries does not reopen either.
+func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platformExpID, agentID string) error {
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
+	}
+	if pe == nil || pe.Status == domain.PlatformExpClosed {
+		return &reasonError{status: http.StatusConflict, Reason: "experiment_closed", Message: "platform experiment " + platformExpID + " is closed"}
+	}
+	cut, err := s.store.IsAgentCut(ctx, platformExpID, agentID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
+	}
+	if cut {
+		return &reasonError{status: http.StatusConflict, Reason: "agent_held", Message: "agent " + agentID + " was cut from platform experiment " + platformExpID}
+	}
 	return nil
 }
 

@@ -36,18 +36,25 @@ type AgentDataKeyStore interface {
 	AgentDataKey(ctx context.Context, platformExperimentID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error)
 }
 
+// ActiveGate is PlatformExperimentsService.RequireActive.
+type ActiveGate interface {
+	RequireActive(ctx context.Context, platformExperimentID, agentID string) error
+}
+
 // DataUsageHandler serves the durable-data half of what a platform experiment costs, and each
 // agent's own key to that data.
 type DataUsageHandler struct {
-	dataStore        *objectstore.Client
-	keys             AgentDataKeyStore
+	dataStore *objectstore.Client
+	keys      AgentDataKeyStore
+	// active refuses a key to an agent that was cut or whose platform experiment closed.
+	active           ActiveGate
 	maxBytesPerAgent int64
 }
 
 // NewDataUsageHandler returns a handler reporting against client, with the same per-agent ceiling
 // admission enforces so a caller can see how close it is to being refused.
-func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, maxBytesPerAgent int64) *DataUsageHandler {
-	return &DataUsageHandler{dataStore: client, keys: keys, maxBytesPerAgent: maxBytesPerAgent}
+func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, active ActiveGate, maxBytesPerAgent int64) *DataUsageHandler {
+	return &DataUsageHandler{dataStore: client, keys: keys, active: active, maxBytesPerAgent: maxBytesPerAgent}
 }
 
 // RegisterDataUsageHuma registers the durable-data usage operation on doc.
@@ -92,6 +99,9 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 			return nil, err
 		}
 		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
+			return nil, err
+		}
+		if err := h.active.RequireActive(ctx, in.ID, in.Body.AgentID); err != nil {
 			return nil, err
 		}
 		dataAccess, err := h.AgentDataAccess(ctx, in.ID, in.Body.AgentID)

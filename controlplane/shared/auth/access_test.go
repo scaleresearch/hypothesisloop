@@ -18,11 +18,16 @@ var (
 	inB  = domain.Tenancy{PlatformExperimentID: "pe-b", ProjectID: "prj-b", OrgID: "org-b"}
 )
 
+func by(t domain.Tenancy, agentID string) domain.Tenancy {
+	t.AgentID = agentID
+	return t
+}
+
 func twoOrgs() *auth.Access {
 	return auth.NewAccess(authtest.Placement{
 		PlatformExperiments: map[string]domain.Tenancy{"pe-a": inA, "pe-a2": inA2, "pe-b": inB},
-		Experiments:         map[string]domain.Tenancy{"job-a": inA, "job-a2": inA2, "job-b": inB},
-		Donations:           map[string]domain.Tenancy{"don-a": inA, "don-b": inB},
+		Experiments:         map[string]domain.Tenancy{"job-a": by(inA, "agent-a"), "job-a-other": by(inA, "agent-a-other"), "job-a2": inA2, "job-b": inB},
+		Donations:           map[string]domain.Tenancy{"don-a": by(inA, "agent-a"), "don-a-other": by(inA, "agent-a-other"), "don-b": inB},
 		Agents:              map[string]string{"agent-a": "org-a", "agent-a-other": "org-a", "agent-b": "org-b"},
 		Clusters:            map[string]string{"cluster-a": "org-a", "cluster-b": "org-b"},
 		Projects: map[string]domain.Project{
@@ -32,15 +37,17 @@ func twoOrgs() *auth.Access {
 }
 
 var callers = map[string]auth.Principal{
-	"user of A":            {Kind: auth.KindUser, UserID: "u", OrgIDs: []string{"org-a"}},
-	"user of A and B":      {Kind: auth.KindUser, UserID: "u2", OrgIDs: []string{"org-a", "org-b"}},
-	"key of A":             {Kind: auth.KindKey, OrgIDs: []string{"org-a"}},
-	"key of A's project a": {Kind: auth.KindKey, OrgIDs: []string{"org-a"}, ProjectID: "prj-a"},
-	"agent in pe-a":        {Kind: auth.KindAgent, AgentID: "agent-a", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
-	"coordinator of pe-a":  {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
-	"job job-a":            {Kind: auth.KindJob, ExperimentID: "job-a", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
-	"staff":                {Kind: auth.KindStaff},
-	"user with no org":     {Kind: auth.KindUser, UserID: "u3"},
+	"user of A":                     {Kind: auth.KindUser, UserID: "u", OrgIDs: []string{"org-a"}},
+	"user of A and B":               {Kind: auth.KindUser, UserID: "u2", OrgIDs: []string{"org-a", "org-b"}},
+	"key of A":                      {Kind: auth.KindKey, OrgIDs: []string{"org-a"}},
+	"key of A's project a":          {Kind: auth.KindKey, OrgIDs: []string{"org-a"}, ProjectID: "prj-a"},
+	"agent in pe-a":                 {Kind: auth.KindAgent, AgentID: "agent-a", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+	"agent token for an agent of B": {Kind: auth.KindAgent, AgentID: "agent-b", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+	"agent token for no agent":      {Kind: auth.KindAgent, AgentID: "agent-unregistered", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+	"coordinator of pe-a":           {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+	"job job-a":                     {Kind: auth.KindJob, ExperimentID: "job-a", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+	"staff":                         {Kind: auth.KindStaff},
+	"user with no org":              {Kind: auth.KindUser, UserID: "u3"},
 }
 
 func status(err error) int {
@@ -80,8 +87,29 @@ func TestPlatformExperimentAccess(t *testing.T) {
 		{"coordinator of pe-a", "pe-a", 200}, {"coordinator of pe-a", "pe-a2", 404}, {"coordinator of pe-a", "pe-b", 404},
 		{"staff", "pe-a", 200}, {"staff", "pe-b", 200},
 		{"user with no org", "pe-a", 404},
-		{"user of A", "pe-missing", 200},
+		{"user of A", "pe-missing", 404}, {"agent in pe-a", "pe-missing", 404}, {"staff", "pe-missing", 200},
+		{"user of A", "pe-b/agent-1", 404}, {"user of A and B", "pe-b/agent-1", 404}, {"staff", "pe-b/agent-1", 404},
+		{"user of A", "pe-*", 404}, {"user of A", "", 404}, {"staff", "", 404},
 	})
+}
+
+func TestAnAbsentRowAndAnotherOrgsRowReadTheSame(t *testing.T) {
+	access := twoOrgs()
+	ctx := auth.WithPrincipal(context.Background(), callers["user of A"])
+	for what, pair := range map[string][2]error{
+		"platform experiment": {access.PlatformExperiment(ctx, "pe-b"), access.PlatformExperiment(ctx, "pe-missing")},
+		"hypothesis":          {access.Within(ctx, "hypothesis", "pe-b"), access.Within(ctx, "hypothesis", "pe-missing")},
+		"job":                 {access.Experiment(ctx, "job-b"), access.Experiment(ctx, "job-missing")},
+		"donation":            {access.Donation(ctx, "don-b"), access.Donation(ctx, "don-missing")},
+		"agent":               {access.Agent(ctx, "agent-b"), access.Agent(ctx, "agent-unregistered")},
+		"cluster":             {access.Cluster(ctx, "cluster-b"), access.Cluster(ctx, "cluster-unregistered")},
+		"project":             {access.Project(ctx, "prj-b"), access.Project(ctx, "prj-missing")},
+	} {
+		theirs, absent := pair[0], pair[1]
+		if status(theirs) != 404 || status(absent) != 404 || theirs.Error() != absent.Error() {
+			t.Errorf("%s: another org's answers %q, an absent one %q, want the same 404", what, theirs, absent)
+		}
+	}
 }
 
 func TestExperimentAccess(t *testing.T) {
@@ -92,6 +120,24 @@ func TestExperimentAccess(t *testing.T) {
 		{"coordinator of pe-a", "job-a2", 404},
 		{"job job-a", "job-a", 200}, {"job job-a", "job-a2", 403}, {"job job-a", "job-b", 403}, {"job job-a", "job-missing", 403},
 		{"staff", "job-b", 200},
+		{"user of A", "job-missing", 404}, {"agent in pe-a", "job-missing", 404}, {"staff", "job-missing", 200},
+		{"user of A", "job-b/x", 404}, {"staff", "job-b/x", 404},
+		{"agent in pe-a", "job-a-other", 200},
+	})
+}
+
+func TestAnAgentActsOnItsOwnJobsAndDonationRequestsOnly(t *testing.T) {
+	runChecks(t, "own job", twoOrgs().OwnExperiment, []check{
+		{"agent in pe-a", "job-a", 200}, {"agent in pe-a", "job-a-other", 403},
+		{"agent in pe-a", "job-b", 404}, {"agent in pe-a", "job-missing", 404},
+		{"user of A", "job-a-other", 200}, {"coordinator of pe-a", "job-a-other", 200}, {"key of A", "job-a-other", 200},
+		{"job job-a", "job-a", 200}, {"job job-a", "job-a-other", 403},
+		{"staff", "job-a-other", 200}, {"staff", "job-missing", 200},
+	})
+	runChecks(t, "own donation", twoOrgs().OwnDonation, []check{
+		{"agent in pe-a", "don-a", 200}, {"agent in pe-a", "don-a-other", 403}, {"agent in pe-a", "don-b", 404},
+		{"user of A", "don-a-other", 200}, {"coordinator of pe-a", "don-a-other", 200},
+		{"staff", "don-a-other", 200},
 	})
 }
 
@@ -100,6 +146,8 @@ func TestDonationAccess(t *testing.T) {
 		{"user of A", "don-a", 200}, {"user of A", "don-b", 404},
 		{"agent in pe-a", "don-a", 200}, {"agent in pe-a", "don-b", 404},
 		{"staff", "don-b", 200},
+		{"agent in pe-a", "don-a-other", 200},
+		{"user of A", "don-missing", 404}, {"staff", "don-missing", 200},
 	})
 }
 
@@ -110,8 +158,11 @@ func TestNamingAnAgent(t *testing.T) {
 		{"user of A", "agent-a", 200}, {"user of A", "agent-a-other", 200}, {"user of A", "agent-b", 404},
 		{"key of A", "agent-b", 404},
 		{"coordinator of pe-a", "agent-a-other", 200}, {"coordinator of pe-a", "agent-b", 404},
-		{"staff", "agent-b", 200},
-		{"user of A", "agent-unregistered", 200},
+		{"staff", "agent-b", 200}, {"staff", "agent-unregistered", 200},
+		{"user of A", "agent-unregistered", 404},
+		{"agent token for an agent of B", "agent-b", 404},
+		{"agent token for no agent", "agent-unregistered", 404},
+		{"user of A", "agent-*", 404}, {"staff", "agent-*", 404},
 	})
 	runChecks(t, "self", access.Self, []check{
 		{"agent in pe-a", "agent-a", 200}, {"agent in pe-a", "agent-new", 403},
@@ -123,14 +174,35 @@ func TestClusterAccess(t *testing.T) {
 	runChecks(t, "cluster", twoOrgs().Cluster, []check{
 		{"user of A", "cluster-a", 200}, {"user of A", "cluster-b", 404}, {"user of A", "cluster-unregistered", 404},
 		{"staff", "cluster-b", 200}, {"staff", "cluster-unregistered", 200},
+		{"user of A and B", "cluster-b", 200}, {"key of A", "cluster-a", 200}, {"key of A", "cluster-b", 404},
+		{"key of A's project a", "cluster-a", 404}, {"coordinator of pe-a", "cluster-a", 404},
+		{"agent in pe-a", "cluster-a", 404}, {"user with no org", "cluster-a", 404},
 	})
+}
+
+func TestOnlyStaffPassTheStaffCheck(t *testing.T) {
+	access := twoOrgs()
+	for name, caller := range callers {
+		want := 403
+		if caller.Kind == auth.KindStaff {
+			want = 200
+		}
+		if got := status(access.Staff(auth.WithPrincipal(context.Background(), caller))); got != want {
+			t.Errorf("%s: got = %d, want = %d", name, got, want)
+		}
+	}
+	if got := status(access.Staff(context.Background())); got != 401 {
+		t.Errorf("no principal: got = %d, want = 401", got)
+	}
 }
 
 func TestProjectAccess(t *testing.T) {
 	runChecks(t, "project", twoOrgs().Project, []check{
 		{"user of A", "prj-a", 200}, {"user of A", "prj-b", 404}, {"user of A", "prj-missing", 404},
 		{"key of A's project a", "prj-a", 200}, {"key of A's project a", "prj-a2", 404},
-		{"coordinator of pe-a", "prj-a", 200}, {"coordinator of pe-a", "prj-a2", 404},
+		{"coordinator of pe-a", "prj-a", 403}, {"coordinator of pe-a", "prj-a2", 403},
+		{"agent in pe-a", "prj-a", 403}, {"job job-a", "prj-a", 403},
+		{"key of A", "prj-a", 200}, {"key of A", "prj-a2", 200}, {"key of A", "prj-b", 404},
 		{"staff", "prj-b", 200}, {"staff", "prj-missing", 404},
 	})
 }
@@ -205,13 +277,39 @@ func TestARequestWithNoPrincipalReachesNothing(t *testing.T) {
 	}
 }
 
-func TestAuthorIsTheProvidersNameForAUserAndTheStatedOneOtherwise(t *testing.T) {
-	user := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindUser, Name: "Ada Lovelace"})
-	if got := auth.Author(user, "Mallory"); got != "Ada Lovelace" {
-		t.Errorf("user: got = %q, want the name the identity provider states", got)
-	}
-	key := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindKey})
-	if got := auth.Author(key, "Grace"); got != "Grace" {
-		t.Errorf("key: got = %q, want the stated name", got)
+func TestWhoAHypothesisWriteIsBy(t *testing.T) {
+	access := twoOrgs()
+	ada := auth.Principal{Kind: auth.KindUser, UserID: "user-ada", Name: "Ada Lovelace", OrgIDs: []string{"org-a"}}
+	nameless := auth.Principal{Kind: auth.KindUser, UserID: "user-x", OrgIDs: []string{"org-a"}}
+	staffUser := auth.Principal{Kind: auth.KindStaff, UserID: "user-ops", Name: "Ops"}
+	for name, tc := range map[string]struct {
+		caller          auth.Principal
+		agentID, author string
+		want            auth.Origin
+		status          int
+	}{
+		"agent as itself":                         {callers["agent in pe-a"], "agent-a", "", auth.Origin{AgentID: "agent-a"}, 200},
+		"agent naming no agent":                   {callers["agent in pe-a"], "", "", auth.Origin{}, 403},
+		"agent writing as a person":               {callers["agent in pe-a"], "", "Mallory", auth.Origin{}, 403},
+		"agent as itself and as a person":         {callers["agent in pe-a"], "agent-a", "Mallory", auth.Origin{}, 403},
+		"agent as another agent":                  {callers["agent in pe-a"], "agent-a-other", "", auth.Origin{}, 403},
+		"user as a person":                        {ada, "", "", auth.Origin{Author: "Ada Lovelace", UserID: "user-ada"}, 200},
+		"user stating another name":               {ada, "", "Mallory", auth.Origin{Author: "Ada Lovelace", UserID: "user-ada"}, 200},
+		"user for an agent of their org":          {ada, "agent-a", "", auth.Origin{AgentID: "agent-a"}, 200},
+		"user for an agent, name sent as the UI":  {ada, "agent-a", "Ada Lovelace", auth.Origin{AgentID: "agent-a"}, 200},
+		"user for an agent of another org":        {ada, "agent-b", "", auth.Origin{}, 404},
+		"user the provider gave no name":          {nameless, "", "", auth.Origin{}, 400},
+		"nameless user for an agent":              {nameless, "agent-a", "", auth.Origin{AgentID: "agent-a"}, 200},
+		"staff user as a person":                  {staffUser, "", "", auth.Origin{Author: "Ops", UserID: "user-ops"}, 200},
+		"key stating an author":                   {callers["key of A"], "", "Grace", auth.Origin{Author: "Grace"}, 200},
+		"key stating nobody":                      {callers["key of A"], "", "", auth.Origin{}, 200},
+		"key for an agent":                        {callers["key of A"], "agent-a", "", auth.Origin{AgentID: "agent-a"}, 200},
+		"key for an agent and a person":           {callers["key of A"], "agent-a", "Grace", auth.Origin{AgentID: "agent-a", Author: "Grace"}, 200},
+		"coordinator for an agent of another org": {callers["coordinator of pe-a"], "agent-b", "", auth.Origin{}, 404},
+	} {
+		got, err := access.Origin(auth.WithPrincipal(context.Background(), tc.caller), tc.agentID, tc.author)
+		if status(err) != tc.status || got != tc.want {
+			t.Errorf("%s: got = %+v, %d (%v), want = %+v, %d", name, got, status(err), err, tc.want, tc.status)
+		}
 	}
 }

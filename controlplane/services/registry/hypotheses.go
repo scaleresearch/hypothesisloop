@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
@@ -369,6 +370,17 @@ func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentI
 	s.logger.Info("hypothesis comment added",
 		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID), zap.String("author", author))
 	return c, nil
+}
+
+// RecordHumanWrite keeps the account behind a signed-in person's contribution. Origin.UserID is
+// empty for every other write, which records nothing.
+func (s *Service) RecordHumanWrite(ctx context.Context, origin auth.Origin, kind domain.HumanWriteKind, subject, platformExperimentID string) error {
+	if origin.UserID == "" {
+		return nil
+	}
+	return s.store.RecordHumanWrite(ctx, domain.HumanWrite{
+		UserID: origin.UserID, Author: origin.Author, Kind: kind, Subject: subject, PlatformExperimentID: platformExperimentID,
+	})
 }
 
 // ListHypothesisComments returns one page of the comments filed against a hypothesis, oldest

@@ -326,7 +326,11 @@ func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context,
 
 // UpdatePlatformExperimentStatus transitions a platform experiment to a new status.
 func (s *PlatformExperimentsStore) UpdatePlatformExperimentStatus(ctx context.Context, id string, status domain.PlatformExperimentStatus) error {
-	const q = `UPDATE platform_experiments SET status = $2, updated_at = NOW() WHERE id = $1`
+	const q = `
+UPDATE platform_experiments
+SET status = $2::platform_experiment_status, updated_at = NOW(),
+    closed_at = CASE WHEN $2 = 'closed' THEN COALESCE(closed_at, NOW()) ELSE closed_at END
+WHERE id = $1`
 	_, err := s.pool.pool.Exec(ctx, q, id, string(status))
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.UpdateStatus: %w", err)
@@ -669,6 +673,20 @@ func (s *PlatformExperimentsStore) IsAgentCut(ctx context.Context, platformExpID
 		return false, fmt.Errorf("platform_experiments_store.IsAgentCut: %w", err)
 	}
 	return true, nil
+}
+
+// AgentCutAt returns when the agent was cut from the platform experiment, nil when it was not.
+func (s *PlatformExperimentsStore) AgentCutAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
+	var cutAt time.Time
+	err := s.pool.pool.QueryRow(ctx,
+		`SELECT cut_at FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID).Scan(&cutAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.AgentCutAt: %w", err)
+	}
+	return &cutAt, nil
 }
 
 // FulfillDonationTx performs a donation transfer as a single atomic, idempotent operation: it

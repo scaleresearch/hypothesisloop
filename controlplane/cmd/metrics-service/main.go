@@ -134,8 +134,8 @@ func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peF
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.Handle("/internal/node-metrics", authenticator.RequireRuntime(metrics.NewPushHandler(metricsDBURL)))
+	mux.Handle("/metrics", authenticator.RequireStaff(logger, promhttp.Handler()))
+	mux.Handle("/internal/node-metrics", authenticator.RequireRuntime(logger, metrics.NewPushHandler(metricsDBURL, store)))
 	// Both spellings, same as the API server — a caller should never have to remember which
 	// of /health and /healthz a given process happens to answer.
 	health := func(w http.ResponseWriter, _ *http.Request) {

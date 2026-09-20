@@ -19,6 +19,7 @@ package clusteragentapi
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -41,12 +43,18 @@ type Store interface {
 	// desired — the ones an agent is about to delete — so the reconcile response can name which
 	// of them earned a checkpoint window. Not per-cluster: a termination clears the row's
 	// cluster_name in the same statement that records it, so the cluster is no longer on the row
-	// to filter by (see db.ListRecentlyUndesiredWorkloads).
+	// to filter by (see db.ListRecentlyUndesiredWorkloads). hostedBy narrows it to the orgs the
+	// cluster runs jobs for.
 	ListRecentlyUndesiredWorkloads(ctx context.Context, within time.Duration) ([]*domain.Experiment, error)
 	// PlacementByID resolves many experiments' assigned cluster and current attempt at once — a
 	// status push is a whole-cluster snapshot, so this is asked once per push rather than once
 	// per job.
 	PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error)
+	// GetCluster returns a registered cluster, nil when the name is not registered.
+	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
+	// BindReportedID records the identity a registered cluster's runtime states about itself,
+	// and refuses one another registered cluster holds (db.ErrClusterIDBound).
+	BindReportedID(ctx context.Context, name, reportedID string) error
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -86,6 +94,19 @@ func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string,
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
 		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, logger: logger}
+}
+
+// hostedBy keeps the jobs the cluster could have been running. A terminated job no longer names
+// its cluster, so the org the cluster runs jobs for is the narrowest fact left: an org's own
+// cluster is told of that org's terminations only, a shared one of every org's.
+func hostedBy(cluster domain.Cluster, exps []*domain.Experiment) []*domain.Experiment {
+	kept := make([]*domain.Experiment, 0, len(exps))
+	for _, exp := range exps {
+		if cluster.Hosts(exp.OrgID) {
+			kept = append(kept, exp)
+		}
+	}
+	return kept
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
@@ -306,6 +327,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("invalid memory or storage capacity values")
 		}
 
+		// cluster_settings are keyed by the id a runtime reports, so an id is one cluster's. A
+		// runtime stating another cluster's id is refused before anything it reports is recorded.
+		if report.ClusterID != "" {
+			switch err := h.store.BindReportedID(ctx, clusterName, report.ClusterID); {
+			case errors.Is(err, db.ErrClusterNotFound):
+				return nil, auth.NotFound("cluster")
+			case errors.Is(err, db.ErrClusterIDBound):
+				return nil, huma.Error409Conflict("cluster_id " + report.ClusterID + " is the identity of another registered cluster")
+			case err != nil:
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+		}
+
 		if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
 			ClusterName: clusterName, At: time.Now().UTC(),
 			CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
@@ -339,6 +373,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		cluster, err := h.store.GetCluster(ctx, clusterName)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if cluster == nil {
+			return nil, auth.NotFound("cluster")
+		}
+		undesired = hostedBy(*cluster, undesired)
 		resp := &struct {
 			Body reconcileBody
 		}{}

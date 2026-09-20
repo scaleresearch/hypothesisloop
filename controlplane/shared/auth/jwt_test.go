@@ -17,7 +17,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 )
 
-const testIssuer = "https://issuer.example/auth/v1"
+const (
+	testIssuer   = "https://issuer.example/auth/v1"
+	testAudience = "authenticated"
+)
 
 var testNow = time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 
@@ -87,7 +90,7 @@ func segment(t *testing.T, v any) string {
 }
 
 func goodClaims() map[string]any {
-	return map[string]any{"iss": testIssuer, "sub": "user-1", "exp": testNow.Add(time.Hour).Unix(), "name": "Ada Lovelace"}
+	return map[string]any{"iss": testIssuer, "aud": testAudience, "sub": "user-1", "exp": testNow.Add(time.Hour).Unix(), "name": "Ada Lovelace"}
 }
 
 func keysOf(t *testing.T, signers ...testSigner) map[string]verifyingKey {
@@ -107,10 +110,20 @@ func TestAJWTSignedByAConfiguredKeyVerifies(t *testing.T) {
 	ec, rs := newECSigner(t, "ec-1"), newRSASigner(t, "rsa-1")
 	keys := keysOf(t, ec, rs)
 	for _, signer := range []testSigner{ec, rs} {
-		subject, name, err := verifyJWT(signer.token(t, goodClaims()), testIssuer, keys, testNow)
-		if err != nil || subject != "user-1" || name != "Ada Lovelace" {
-			t.Errorf("%s: got = %q, %q, %v, want user-1, Ada Lovelace", signer.jwk.Alg, subject, name, err)
+		claims, err := verifyJWT(signer.token(t, goodClaims()), testIssuer, testAudience, keys, testNow)
+		if err != nil || claims.Subject != "user-1" || claims.displayName() != "Ada Lovelace" {
+			t.Errorf("%s: got = %+v, %v, want user-1, Ada Lovelace", signer.jwk.Alg, claims, err)
 		}
+	}
+}
+
+func TestTheAudienceMayBeOneOfSeveralAndNotBeforeMayHavePassed(t *testing.T) {
+	ec := newECSigner(t, "ec-1")
+	claims := goodClaims()
+	claims["aud"] = []string{"another-service", testAudience}
+	claims["nbf"] = testNow.Unix()
+	if _, err := verifyJWT(ec.token(t, claims), testIssuer, testAudience, keysOf(t, ec), testNow); err != nil {
+		t.Fatalf("got = %v, want it accepted", err)
 	}
 }
 
@@ -119,13 +132,13 @@ func TestTheNameIsReadWhereSupabasePutsItToo(t *testing.T) {
 	claims := goodClaims()
 	delete(claims, "name")
 	claims["user_metadata"] = map[string]any{"name": "Grace Hopper"}
-	_, name, err := verifyJWT(ec.token(t, claims), testIssuer, keysOf(t, ec), testNow)
-	if err != nil || name != "Grace Hopper" {
-		t.Fatalf("got = %q, %v, want Grace Hopper", name, err)
+	got, err := verifyJWT(ec.token(t, claims), testIssuer, testAudience, keysOf(t, ec), testNow)
+	if err != nil || got.displayName() != "Grace Hopper" {
+		t.Fatalf("got = %q, %v, want Grace Hopper", got.displayName(), err)
 	}
 	delete(claims, "user_metadata")
-	if _, name, err := verifyJWT(ec.token(t, claims), testIssuer, keysOf(t, ec), testNow); err != nil || name != "" {
-		t.Fatalf("a token with no name: got = %q, %v, want it accepted with an empty name", name, err)
+	if got, err := verifyJWT(ec.token(t, claims), testIssuer, testAudience, keysOf(t, ec), testNow); err != nil || got.displayName() != "" {
+		t.Fatalf("a token with no name: got = %q, %v, want it accepted with an empty name", got.displayName(), err)
 	}
 }
 
@@ -157,6 +170,11 @@ func TestJWTsThatMustBeRefused(t *testing.T) {
 		"no expiry":                          configured.token(t, with(func(c map[string]any) { delete(c, "exp") })),
 		"another issuer":                     configured.token(t, with(func(c map[string]any) { c["iss"] = "https://evil.example" })),
 		"no issuer":                          configured.token(t, with(func(c map[string]any) { delete(c, "iss") })),
+		"another audience":                   configured.token(t, with(func(c map[string]any) { c["aud"] = "another-service" })),
+		"audiences that leave ours out":      configured.token(t, with(func(c map[string]any) { c["aud"] = []string{"a", "b"} })),
+		"no audience":                        configured.token(t, with(func(c map[string]any) { delete(c, "aud") })),
+		"not valid yet":                      configured.token(t, with(func(c map[string]any) { c["nbf"] = testNow.Add(time.Second).Unix() })),
+		"anonymous session":                  configured.token(t, with(func(c map[string]any) { c["is_anonymous"] = true })),
 		"no subject":                         configured.token(t, with(func(c map[string]any) { delete(c, "sub") })),
 		"claims edited after signing":        parts[0] + "." + segment(t, with(func(c map[string]any) { c["sub"] = "user-2" })) + "." + parts[2],
 		"alg none":                           segment(t, map[string]any{"alg": "none", "kid": "ec-1"}) + "." + parts[1] + ".",
@@ -172,11 +190,11 @@ func TestJWTsThatMustBeRefused(t *testing.T) {
 		"not a token":                        "hello",
 		"empty":                              "",
 	} {
-		if subject, _, err := verifyJWT(token, testIssuer, keys, testNow); err == nil {
-			t.Errorf("%s: got subject %q, want a refusal", name, subject)
+		if claims, err := verifyJWT(token, testIssuer, testAudience, keys, testNow); err == nil {
+			t.Errorf("%s: got subject %q, want a refusal", name, claims.Subject)
 		}
 	}
-	if _, _, err := verifyJWT(good, testIssuer, map[string]verifyingKey{}, testNow); err == nil {
+	if _, err := verifyJWT(good, testIssuer, testAudience, map[string]verifyingKey{}, testNow); err == nil {
 		t.Error("a valid token with no keys configured: got = nil, want a refusal")
 	}
 }

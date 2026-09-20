@@ -201,6 +201,8 @@ type WatchHandler struct {
 	access        *auth.Access
 	hub           *hub
 	logger        *zap.Logger
+	// recheckEvery is how often an open stream is pinged and its token asked again.
+	recheckEvery time.Duration
 }
 
 type experimentLookup interface {
@@ -209,7 +211,7 @@ type experimentLookup interface {
 
 // NewWatchHandler returns a handler over source. Start must be called once to begin listening.
 func NewWatchHandler(source EventSource, experiments experimentLookup, authenticator apidocs.Authenticator, access *auth.Access, logger *zap.Logger) *WatchHandler {
-	return &WatchHandler{source: source, experiments: experiments, authenticator: authenticator, access: access, hub: newHub(), logger: logger}
+	return &WatchHandler{source: source, experiments: experiments, authenticator: authenticator, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
 }
 
 // Start runs the single LISTEN connection for this process until ctx ends, re-establishing it
@@ -247,6 +249,30 @@ func (h *WatchHandler) Start(ctx context.Context) {
 	}()
 }
 
+// authenticate resolves the caller from the token offered as a WebSocket subprotocol and admits
+// the callers the agent audience does. A browser cannot set a header on a WebSocket, so the
+// subprotocol is the one place every client, hl included, puts its token.
+func (h *WatchHandler) authenticate(ctx context.Context, token string) (context.Context, auth.Principal, error) {
+	principal, err := h.authenticator.Authenticate(ctx, token)
+	if err != nil {
+		return nil, auth.Principal{}, err
+	}
+	if !apidocs.AudienceAgent.Admits(principal, "") {
+		return nil, auth.Principal{}, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
+	}
+	return auth.WithPrincipal(ctx, principal), principal, nil
+}
+
+// stillAdmitted asks again what the upgrade asked: a stream outlives the request that opened
+// it, and the token may have died or lost the platform experiment since.
+func (h *WatchHandler) stillAdmitted(ctx context.Context, token, platformExperimentID string) error {
+	ctx, _, err := h.authenticate(ctx, token)
+	if err != nil {
+		return err
+	}
+	return h.access.PlatformExperiment(ctx, platformExperimentID)
+}
+
 // ServeHTTP upgrades to a WebSocket and streams events: first everything missed since the
 // caller's cursor, then everything as it happens. A caller with no cursor (`since` omitted or 0)
 // gets the current snapshot of everything its filter admits, so watching a job that is already
@@ -261,28 +287,15 @@ func (h *WatchHandler) Start(ctx context.Context) {
 // is written as desired state the runtime fetches; anything a job or an agent could be *told* down
 // this socket would be a second path to an effect that already has one, and the two would disagree
 // the first time this connection dropped.
-// authenticate resolves the caller from the token offered as a WebSocket subprotocol and admits
-// the callers the agent audience does. A browser cannot set a header on a WebSocket, so the
-// subprotocol is the one place every client, hl included, puts its token.
-func (h *WatchHandler) authenticate(r *http.Request) (context.Context, auth.Principal, error) {
+func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token, err := watchToken(r.Header)
 	if err != nil {
-		return nil, auth.Principal{}, err
+		auth.WriteError(w, h.logger, err)
+		return
 	}
-	principal, err := h.authenticator.Authenticate(r.Context(), token)
+	ctx, principal, err := h.authenticate(r.Context(), token)
 	if err != nil {
-		return nil, auth.Principal{}, err
-	}
-	if !apidocs.AudienceAgent.Admits(principal, "") {
-		return nil, auth.Principal{}, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
-	}
-	return auth.WithPrincipal(r.Context(), principal), principal, nil
-}
-
-func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, principal, err := h.authenticate(r)
-	if err != nil {
-		auth.WriteError(w, err)
+		auth.WriteError(w, h.logger, err)
 		return
 	}
 	r = r.WithContext(ctx)
@@ -296,7 +309,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if filter.ExperimentID != "" {
 		if err := h.access.Experiment(ctx, filter.ExperimentID); err != nil {
-			auth.WriteError(w, err)
+			auth.WriteError(w, h.logger, err)
 			return
 		}
 	}
@@ -314,7 +327,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		filter.PlatformExperimentID = exp.PlatformExperimentID
 	}
 	if err := h.access.PlatformExperiment(ctx, filter.PlatformExperimentID); err != nil {
-		auth.WriteError(w, err)
+		auth.WriteError(w, h.logger, err)
 		return
 	}
 
@@ -368,7 +381,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ping := time.NewTicker(watchPingInterval)
+	ping := time.NewTicker(h.recheckEvery)
 	defer ping.Stop()
 	for {
 		select {
@@ -383,6 +396,16 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-ping.C:
+			if err := h.stillAdmitted(r.Context(), token, filter.PlatformExperimentID); err != nil {
+				var refusal *auth.Error
+				if errors.As(err, &refusal) {
+					h.logger.Info("watch: closing a stream whose token is no longer admitted",
+						zap.String("platform_experiment_id", filter.PlatformExperimentID), zap.String("reason", refusal.Message))
+					return
+				}
+				// The platform's own failure says nothing about the caller: ask again next tick.
+				h.logger.Warn("watch: could not re-check a stream's token", zap.Error(err))
+			}
 			if err := conn.WritePing(watchWriteTimeout); err != nil {
 				return
 			}

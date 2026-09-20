@@ -32,15 +32,20 @@ type Principal struct {
 	UserID string
 	// Name is the person's display name as the identity provider states it on this request.
 	Name string
+	// KeyID names the API key a key principal presented.
+	KeyID string
 
 	OrgIDs    []string
 	ProjectID string
 
 	PlatformExperimentID string
-	AgentID              string
-	ExperimentID         string
-	ClusterName          string
-	LauncherName         string
+	// PlatformExperimentClosed is set on a coordinator token whose platform experiment has
+	// closed: it still reads and files the summary, and does nothing else.
+	PlatformExperimentClosed bool
+	AgentID                  string
+	ExperimentID             string
+	ClusterName              string
+	LauncherName             string
 }
 
 // Scope is the part of the platform this principal may see.
