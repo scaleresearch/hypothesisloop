@@ -25,12 +25,6 @@ type Stage struct {
 	MaxJobHours float64 `json:"max_job_hours,omitempty" yaml:"max_job_hours"`
 }
 
-// DefaultStages is the ladder used when a platform experiment supplies none.
-var DefaultStages = []Stage{
-	{LengthPct: 40, EvictPct: 75},
-	{LengthPct: 60, EvictPct: 0},
-}
-
 // AgentCut records that an agent was cut at the end of stage StageIndex (1-based).
 type AgentCut struct {
 	AgentID    string `json:"agent_id"`

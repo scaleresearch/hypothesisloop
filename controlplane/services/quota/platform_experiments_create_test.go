@@ -63,7 +63,7 @@ func TestTheExamplePlatformExperimentIsAccepted(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewPlatformExperimentsService(&createStore{}, domain.QuotaConfig{DefaultStages: domain.DefaultStages}, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(&createStore{}, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
 	if _, err := svc.Create(context.Background(), req); err != nil {
 		t.Fatalf("Create from the example: %v", err)
 	}

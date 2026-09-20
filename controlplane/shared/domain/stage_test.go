@@ -11,7 +11,7 @@ func TestValidateStages(t *testing.T) {
 		stages  []Stage
 		wantErr bool
 	}{
-		{"platform default", DefaultStages, false},
+		{"two stages", []Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}}, false},
 		{"single stage no cut", []Stage{{LengthPct: 100, EvictPct: 0}}, false},
 		{"three stages", []Stage{{LengthPct: 20, EvictPct: 25}, {LengthPct: 30, EvictPct: 25}, {LengthPct: 50, EvictPct: 0}}, false},
 		{"max stages", []Stage{{LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 10, EvictPct: 5}, {LengthPct: 30, EvictPct: 0}}, false},
