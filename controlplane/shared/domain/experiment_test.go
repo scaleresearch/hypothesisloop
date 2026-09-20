@@ -281,3 +281,29 @@ func TestGroupedSpecExpandsToOneNodeShapePerReplicaOfEachGroup(t *testing.T) {
 		}
 	}
 }
+
+// A job that asked for "max" holds what admission resolved it to. Read from the submitted job,
+// its footprint had no cpu, memory or storage at all, so the cluster's desired-free capacity and
+// a preemption's credit both counted it as holding nothing but its accelerators.
+func TestExperimentFootprintCountsWhatAdmissionResolved(t *testing.T) {
+	exp := &Experiment{Job: JobSpec{CPU: MaxResourceSentinel, Memory: MaxResourceSentinel, Storage: "10Gi"}}
+	submitted := exp.Footprint()
+	if _, counted := submitted[ResourceKey{Kind: ResourceKindCPU}]; counted || submitted[ResourceKey{Kind: ResourceKindStorage}] != 10<<30 {
+		t.Fatalf("before admission: %v", submitted)
+	}
+
+	resolved := exp.Job
+	resolved.CPU, resolved.Memory, resolved.Storage = "8", "32Gi", "100Gi"
+	exp.ResolvedJob = &resolved
+	got := exp.Footprint()
+	for key, want := range map[ResourceKey]int64{
+		{Kind: ResourceKindCPU}: 8000, {Kind: ResourceKindMemory}: 32 << 30, {Kind: ResourceKindStorage}: 100 << 30,
+	} {
+		if got[key] != want {
+			t.Errorf("%v = %d, want %d", key, got[key], want)
+		}
+	}
+	if exp.Job.CPU != MaxResourceSentinel {
+		t.Error("the submitted job was rewritten")
+	}
+}

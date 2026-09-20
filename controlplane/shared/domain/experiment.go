@@ -165,7 +165,8 @@ func (e *Experiment) RatedCost(estimated, hours float64) float64 {
 
 // Footprint returns e's physical resource footprint in canonical units, across every dimension
 // with live per-cluster capacity reporting: CPU (millicores), memory/storage (bytes) — read
-// straight from e.Job's own quantity strings, scaled by e.Job.Nodes() — plus its accelerator, if
+// from e.EffectiveJob()'s quantity strings, so what admission resolved (a "max", or the slot a
+// job holds whole) is what the job is counted as holding — plus its accelerator, if
 // any, keyed by the accelerator type string itself — the same driver-published "key=value" the
 // agent submitted and that capacity reports, so the two sides join with no translation step.
 //
@@ -185,7 +186,8 @@ func (e *Experiment) Footprint() Footprint {
 	// one group of Nodes() identical replicas, so this is the per-node shape x Nodes() it has
 	// always been; a grouped job's true demand is the sum of its groups, never a multiple of any
 	// one of them.
-	for _, group := range e.Job.NodeGroups() {
+	job := e.EffectiveJob()
+	for _, group := range job.NodeGroups() {
 		perNode := NewFootprint()
 		if group.CPU != "" {
 			if q, err := resource.ParseQuantity(group.CPU); err == nil {
@@ -202,7 +204,7 @@ func (e *Experiment) Footprint() Footprint {
 				perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
 			}
 		}
-		for name, qty := range e.Job.ExtraResources {
+		for name, qty := range job.ExtraResources {
 			if q, err := resource.ParseQuantity(qty); err == nil {
 				perNode.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
 			}
