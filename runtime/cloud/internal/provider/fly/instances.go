@@ -1,0 +1,121 @@
+package fly
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+)
+
+type machine struct {
+	ID        string    `json:"id"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Config    struct {
+		Metadata map[string]string `json:"metadata"`
+	} `json:"config"`
+}
+
+// List reads every Machine of the app in one call: the API filters on a whole metadata value and
+// has no prefix match, and without a page size it answers with all of them.
+func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Instance, error) {
+	var machines []machine
+	header, err := p.call(ctx, http.MethodGet, p.machinesPath(""), nil, &machines)
+	if err != nil {
+		return nil, err
+	}
+	now, err := http.ParseTime(header.Get("Date"))
+	if err != nil {
+		return nil, fmt.Errorf("fly: the machine list carries no usable Date: %w", err)
+	}
+	listed := []provider.Instance{}
+	for _, found := range machines {
+		name, named := found.Config.Metadata[nameKey]
+		if !named || !strings.HasPrefix(name, namePrefix) {
+			continue
+		}
+		state, exists := p.stateOf(ctx, found, now)
+		if !exists {
+			continue
+		}
+		listed = append(listed, provider.Instance{ID: found.ID, Name: name, State: state, StartedAt: found.CreatedAt})
+	}
+	return listed, nil
+}
+
+// stateOf maps a Machine's state. A Machine being destroyed is gone to a caller. A state this
+// adapter does not know is starting: the Machine stays listed, so it keeps its name and can be
+// destroyed, and the caller's boot timeout bounds it.
+//
+// A stopped Machine is exited only once its output is complete, and until then it is running:
+// the log trails the Machine by a moment, and the contract lets a caller read the last lines
+// once, at the first look that shows exited.
+func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (state provider.State, exists bool) {
+	switch found.State {
+	case "created", "creating", "starting", "restarting", "updating", "replacing":
+		return provider.StateStarting, true
+	case "started", "stopping":
+		return provider.StateRunning, true
+	case "stopped", "failed":
+		if p.outputComplete(ctx, found, now) {
+			return provider.StateExited, true
+		}
+		return provider.StateRunning, true
+	case "destroying", "destroyed":
+		return "", false
+	}
+	log.Printf("fly: machine %s (%s) has state %q, which this adapter does not know; reporting it as starting", found.ID, found.Config.Metadata[nameKey], found.State)
+	return provider.StateStarting, true
+}
+
+// outputComplete tells whether everything a stopped Machine's command wrote is in the log: the
+// supervisor's end mark is there, or the Machine stopped longer ago than the log ever trails.
+// The second covers a Machine that stopped without its supervisor finishing (the host killed it,
+// it ran out of memory, the image has no shell), which writes no mark and nothing more either.
+func (p *Provider) outputComplete(ctx context.Context, found machine, now time.Time) bool {
+	if now.Sub(found.UpdatedAt) > logSettle {
+		return true
+	}
+	entries, err := p.logEntries(ctx, found.ID, endMarkWindow)
+	if err != nil {
+		log.Printf("fly: machine %s stopped and its log could not be read for the end mark; reporting it as running: %v", found.ID, err)
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, endMark) {
+			return true
+		}
+	}
+	return false
+}
+
+func isGone(err error) bool {
+	var failure *statusError
+	return errors.As(err, &failure) && failure.Status == http.StatusNotFound
+}
+
+// Destroy deletes the Machine whatever its state. The API answers 200 for a Machine it deleted
+// before and 404 for an id it never had.
+func (p *Provider) Destroy(ctx context.Context, id string) error {
+	var destroyed struct {
+		OK bool `json:"ok"`
+	}
+	_, err := p.call(ctx, http.MethodDelete, p.machinesPath("/"+url.PathEscape(id))+"?force=true", nil, &destroyed)
+	if isGone(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !destroyed.OK {
+		return fmt.Errorf("fly: destroying machine %s was refused", id)
+	}
+	return nil
+}
