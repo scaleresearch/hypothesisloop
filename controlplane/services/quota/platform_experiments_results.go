@@ -104,19 +104,9 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
-		standings, err := s.rank(ctx, pe, metric, best)
+		eligible, err := s.eligibleStandings(ctx, pe, metric, best, ineligible)
 		if err != nil {
 			return nil, err
-		}
-		eligible := make([]AgentStanding, 0, len(standings))
-		for _, st := range standings {
-			if ineligible[st.AgentID] {
-				continue
-			}
-			eligible = append(eligible, st)
-		}
-		for i := range eligible {
-			eligible[i].Rank = i + 1
 		}
 		out.Metrics = append(out.Metrics, MetricStandings{
 			Metric:            metric.Key,
@@ -180,7 +170,15 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if !ok {
 		return nil, nil
 	}
-	standings, _, err := s.standingsOnMetric(ctx, pe, primary)
+	ineligible, err := s.constraintIneligibleAgents(ctx, pe, pe.Metrics)
+	if err != nil {
+		return nil, err
+	}
+	best, _, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, primary)
+	if err != nil {
+		return nil, fmt.Errorf("results: %w", err)
+	}
+	standings, err := s.eligibleStandings(ctx, pe, primary, best, ineligible)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +187,24 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 		out = append(out, AgentResult{AgentID: st.AgentID, FinalMetric: st.Best})
 	}
 	return out, nil
+}
+
+// eligibleStandings is the ranking a run is judged by: competitors that pass every constraint,
+// best-first. Results and the top-3 recorded at close both read it, so they cannot diverge.
+func (s *PlatformExperimentsService) eligibleStandings(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, ineligible map[string]bool) ([]AgentStanding, error) {
+	standings, err := s.rank(ctx, pe, metric, best)
+	if err != nil {
+		return nil, err
+	}
+	eligible := make([]AgentStanding, 0, len(standings))
+	for _, st := range standings {
+		if ineligible[st.AgentID] {
+			continue
+		}
+		st.Rank = len(eligible) + 1
+		eligible = append(eligible, st)
+	}
+	return eligible, nil
 }
 
 // standingsOnMetric ranks every agent by its best "raw"-basis value on one metric, best-first.
@@ -208,8 +224,7 @@ func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *
 func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest) ([]AgentStanding, error) {
 	// Only competitors are ranked. The metrics store answers for every agent that reported —
 	// which is the point, a baseline's numbers stay fully readable — so the roles are applied
-	// here rather than to the query, and every caller of this function (Results,
-	// derivedTopResults and through it the top-3 bonus, constraintIneligibleAgents) inherits it.
+	// here rather than to the query, and every caller of this function inherits it.
 	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
 	if err != nil {
 		return nil, fmt.Errorf("results: %w", err)

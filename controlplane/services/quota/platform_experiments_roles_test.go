@@ -236,6 +236,34 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 	}
 }
 
+func (f *standingsStore) ListSignups(ctx context.Context, platformExpID string) ([]string, error) {
+	return f.competitors, nil
+}
+
+// An agent that breaks a constraint is not in the standings Results serves, so it must not be in
+// the top 3 recorded at close either: that record is what earns the bonus in the next run.
+func TestCloseDerivesTheTopResultsFromConstraintEligibleAgentsOnly(t *testing.T) {
+	bound := 60.0
+	// Every metric answers the same values, so c1 leads on score and breaks the bound on memory.
+	srv := bestPerAgentMetricServer(t, map[string]float64{"c1": 90, "c2": 50, "c3": 40})
+	defer srv.Close()
+	store := &standingsStore{competitors: []string{"c1", "c2", "c3"}}
+	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
+		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
+		{Key: "memory", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
+	}}
+	svc := newSignupTestService(t, store)
+	svc.metricsDBURL = srv.URL
+
+	top, err := svc.derivedTopResults(context.Background(), "pe-1")
+	if err != nil {
+		t.Fatalf("derivedTopResults err = %v, want nil", err)
+	}
+	if len(top) != 2 || top[0].AgentID != "c2" || top[1].AgentID != "c3" {
+		t.Fatalf("top results = %+v, want c2 then c3: c1 breaks the memory constraint", top)
+	}
+}
+
 // bestPerAgentMetricServer answers BestPerAgentOnMetric's single PromQL query with one sample per
 // agent.
 func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest.Server {
