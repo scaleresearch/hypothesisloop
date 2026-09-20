@@ -99,7 +99,7 @@ The control plane normally runs locally (`make controlplane-up`). The rented nod
 needs outbound URLs that actually reach it — use Cloudflare Quick Tunnels:
 
 ```bash
-bash localdev/local-tunnels/tunnels.sh up      # prints URLs for :8081-8084
+bash localdev/local-tunnels/tunnels.sh up      # prints URLs for the API, metrics and the object store
 bash localdev/local-tunnels/tunnels.sh status  # re-check anytime; URLs re-randomize on restart
 ```
 
@@ -114,8 +114,8 @@ ssh ... 'CLUSTER_NAME=my-gpu-node \
   nohup /root/bare-agent > /root/bare-agent.log 2>&1 &'
 ```
 
-Verify registration: `curl <scheduler tunnel>/internal/clusters` and
-`curl <quota tunnel>/resource-catalog/capacity`.
+Verify registration: `curl <api tunnel>/internal/clusters` and
+`curl <api tunnel>/resource-catalog/capacity`.
 
 ## 7B. k3s / cluster-agent path
 
@@ -144,7 +144,7 @@ See `tests/support/api.py`'s `API.register_agent`/`create_platform_experiment`/`
 + optional k3s leg, positive completion, negative-admission, mid-run eviction). Force-admit
 onto your specific node while testing (bypasses the normal capacity-based scheduling race):
 ```bash
-curl -X POST <scheduler tunnel>/experiments/<job_id>/admit \
+curl -X POST <api tunnel>/experiments/<job_id>/admit \
   -H 'Content-Type: application/json' -d '{"cluster_name": "my-gpu-node"}'
 ```
 
