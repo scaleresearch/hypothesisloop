@@ -83,6 +83,10 @@ func Run(opts Options) int {
 		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL or pass --url)")
 		return UsageExitCode
 	}
+	if opts.Timeout <= 0 {
+		fmt.Fprintln(opts.Stderr, "hl watch: --timeout must be positive")
+		return UsageExitCode
+	}
 	if opts.Experiment == "" && opts.PlatformExperiment == "" {
 		fmt.Fprintln(opts.Stderr, "hl watch: one of --experiment or --platform-experiment is required")
 		return UsageExitCode
@@ -132,10 +136,6 @@ type watch struct {
 }
 
 func (w *watch) run() int {
-	timeout := w.opts.Timeout
-	if timeout <= 0 {
-		timeout = 540 * time.Second
-	}
 	query := url.Values{}
 	if w.opts.Experiment != "" {
 		query.Set("experiment_id", w.opts.Experiment)
@@ -150,7 +150,7 @@ func (w *watch) run() int {
 		query.Set("kinds", w.opts.Kinds)
 	}
 
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(w.opts.Timeout)
 	connected := false
 	var connectErr error
 	for time.Now().Before(w.until(deadline)) {
@@ -191,11 +191,11 @@ func (w *watch) run() int {
 	}
 
 	if w.satisfied != nil {
-		fmt.Fprintf(w.opts.Stderr, "hl watch: timed out after %gs without: %s\n", timeout.Seconds(), w.opts.Until)
+		fmt.Fprintf(w.opts.Stderr, "hl watch: timed out after %gs without: %s\n", w.opts.Timeout.Seconds(), w.opts.Until)
 		return TimeoutExitCode
 	}
 	if !connected {
-		fmt.Fprintf(w.opts.Stderr, "hl watch: never connected to %s in %gs: %v\n", w.opts.URL, timeout.Seconds(), connectErr)
+		fmt.Fprintf(w.opts.Stderr, "hl watch: never connected to %s in %gs: %v\n", w.opts.URL, w.opts.Timeout.Seconds(), connectErr)
 		return 1
 	}
 	return 0

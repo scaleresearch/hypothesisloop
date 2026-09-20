@@ -826,7 +826,7 @@ agent's own resources, resuming from where its last watch stopped.`, stderr)
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
 	since := fs.Int64("since", 0, "resume from this cursor instead of the saved one: replays from it, the events at it included, before going live")
-	urlFlag := fs.String("url", "", "platform API base URL (defaults to $HYPOTHESISLOOP_API_URL, then $API_URL)")
+	watchURL := fs.String("url", apiURL, "platform API base URL (default $API_URL)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -850,16 +850,8 @@ agent's own resources, resuming from where its last watch stopped.`, stderr)
 		cursorFile = filepath.Join(dir, "watch-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
 	}
 
-	watchURL := *urlFlag
-	if watchURL == "" {
-		watchURL = os.Getenv("HYPOTHESISLOOP_API_URL")
-	}
-	if watchURL == "" {
-		watchURL = apiURL
-	}
-
 	return watchclient.Run(watchclient.Options{
-		URL:                watchURL,
+		URL:                *watchURL,
 		Experiment:         *experiment,
 		PlatformExperiment: *platformExperiment,
 		Agent:              *agent,

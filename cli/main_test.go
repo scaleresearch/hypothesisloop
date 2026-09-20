@@ -667,7 +667,6 @@ func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
 		http.Error(w, `{"error":"refused"}`, http.StatusBadRequest)
 	})
 	setAPIURL(t, url)
-	t.Setenv("HYPOTHESISLOOP_API_URL", "")
 	t.Setenv("HYPOTHESISLOOP_EXPERIMENT_ID", "")
 	t.Setenv("AGENT_ID", "agent-env")
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
