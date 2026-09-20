@@ -395,8 +395,9 @@ another is refused with 409. After the machines behind a name are rebuilt, the o
 `hl cluster forget-identity` (`DELETE /orgs/{id}/clusters/{name}/identity`), which also deletes
 the settings kept under the old id.
 
-`hl capacity` and `GET /resource-catalog/capacity` show the clusters your jobs can land on:
-your org's own and the shared ones. `hl cluster list` shows the same clusters and whether each
+`hl capacity` and `GET /resource-catalog/capacity` show the clusters one org's jobs can land on:
+the org's own and the shared ones. A key or an agent token has one org; a person in several
+names it with `--org` or `?org_id=`. `hl cluster list` shows the same clusters and whether each
 is connected; `owned` marks the ones your org registered and may change. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
 registered the cluster and stay reachable while its agent is away; `cluster_id` is the identity
 the cluster's runtime reported, shown by `hl cluster list` once it has connected.

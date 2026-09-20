@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -250,10 +251,17 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     name, name_b = f"own-{a.marker}"[:40], f"own-{b.marker}"[:40]
 
     command = a.api.hl("cluster", "add", name)
-    match = re.fullmatch(rf"RUNTIME_TOKEN=(hls_\S+) make cluster-agent-up CLUSTER={name} API_URL=(http://\S+:8081) METRICS_URL=(http://\S+:8084)\n", command)
+    match = re.fullmatch(
+        rf"""RUNTIME_TOKEN="\$\(hl cluster token '{name}' --org '{a.org_id}'\)" make cluster-agent-up CLUSTER='{name}' """
+        r"API_URL='(http://\S+:8081)' METRICS_URL='(http://\S+:8084)'\n", command)
     assert match, f"hl cluster add printed {command!r}"
-    token, api_url, metrics_url = match.groups()
+    assert "hls_" not in command, "hl cluster add prints the runtime token, which then sits in scrollback and shell history"
+    api_url, metrics_url = match.groups()
+    token = a.api.hl("cluster", "token", name).strip()
     assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
+    unregistered = a.api.hl_expect("cluster", "token", f"never-{a.marker}"[:40])
+    assert unregistered.returncode != 0 and "hls_" not in unregistered.stdout, "hl cluster token registered a name to print its token"
+    assert b.api.hl_expect("cluster", "token", name).returncode != 0, "org B read the runtime token of org A's cluster"
     for address in (api_url, metrics_url):
         assert "localhost" not in address and "127.0.0.1" not in address and "REPLACE" not in address, (
             f"hl cluster add printed {address}, which no runtime inside a cluster reaches"
@@ -273,6 +281,10 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     assert runtime.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime.cluster_id)).status_code == 403
     stolen = runtime_b.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime.cluster_id))
     assert stolen.status_code == 409, f"org B's runtime stating org A's cluster id: {stolen.status_code} {stolen.text}"
+    changed = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(f"other-{runtime.cluster_id}"))
+    assert changed.status_code == 409, f"org A's runtime stating a second cluster id: {changed.status_code} {changed.text}"
+    malformed = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report("../" + runtime.cluster_id))
+    assert malformed.status_code == 400, f"a cluster id that is a path: {malformed.status_code} {malformed.text}"
 
     listed = {c["name"]: c for c in _lines(a.api.hl("cluster", "list"))}
     assert listed[name] == {**listed[name], "org_id": a.org_id, "shared": False, "owned": True, "connected": True, "cluster_id": runtime.cluster_id}
@@ -309,10 +321,18 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
             runtime.reconcile()
             return b.api.experiment(job_b)
 
-        waiting = eventually("org B's job says its org has no cluster", waiting_for_a_cluster, deadline=deadline, interval=2,
-                             accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
-        assert waiting["status"] == "QUEUED" and not waiting.get("cluster_name")
+        # Org B's own cluster is registered and away, so its job waits for it and is told nothing
+        # of a missing cluster. The reconciles give admission ticks in which it could be misplaced.
+        for _ in range(4):
+            waiting = waiting_for_a_cluster()
+            assert waiting["status"] == "QUEUED" and not waiting.get("cluster_name"), f"org B's job beside org A's free cluster: {waiting}"
+            assert waiting.get("not_admitted_reason") != "no_cluster_for_org", "an org whose cluster is away was told it has none"
+            time.sleep(2)
         assert job_b not in runtime.handed, "org A's runtime was handed org B's job with its token and data key"
+        handed = next(e for e in runtime.reconcile() if e["id"] == job_a)
+        assert handed["token"] and handed["data"]["secret_access_key"], "the runtime is not handed what the workload runs with"
+        kept = {k for k in ("hypothesis", "objective", "theory", "org_id", "platform_experiment_id", "hypothesis_id") if handed.get(k)}
+        assert not kept, f"the runtime is handed {kept} of the job, which no workload is built from"
 
         assert b.api.admit(job_b, name).status_code == 404, "org B force-admitted onto org A's cluster"
         assert a.api.admit(job_b, name).status_code == 404, "org A force-admitted org B's job"
@@ -341,14 +361,54 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
             assert "org_id" not in shared and "cluster_id" not in shared and a.org_id not in seen.text and runtime.cluster_id not in seen.text, (
                 f"org B is shown the owner or the settings key of the shared cluster: {seen.text}"
             )
+            before = b.api.experiment(job_b)
         finally:
             unshared = _status(api, "PATCH", share, {"shared": False})
         assert unshared.status_code == 200 and unshared.json()["shared"] is False
+        assert unshared.json()["requeued"] == [job_b], f"ending the sharing requeued {unshared.json()['requeued']}, want org B's job alone"
+        requeued = b.api.experiment(job_b)
+        assert requeued["status"] == "QUEUED" and not requeued.get("cluster_name"), f"org B's job after the sharing ended: {requeued}"
+        assert requeued["eviction_reason"] == "cluster_withdrawn"
+        assert requeued["attempt_count"] == before["attempt_count"] + 1, "the requeue is not a new attempt, so the runtime would keep the old workload"
+        assert requeued["attempt_count"] - requeued["infra_requeue_count"] == before["attempt_count"] - before["infra_requeue_count"], (
+            "ending the sharing spent one of the job's retries"
+        )
+        answer = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(runtime.cluster_id)).json()
+        assert job_b not in {e["id"] for e in answer["experiments"] or []}, "the cluster is still told to run another org's job"
+        assert job_b in (answer["checkpoint_window"] or []), "the withdrawn job is stopped without its checkpoint window"
+        assert a.api.experiment(job_a)["cluster_name"] == name, "the owner's own job was withdrawn with the others"
         assert name not in _capacity_names(b.api)
         assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text, "a cluster no longer shared is still listed to another org"
         assert b.api.get(settings).status_code == 404, "sharing a cluster gave another org its settings"
+
+        # Org B removes its own cluster, which nothing ran on, and is then an org with none.
+        assert a.api.hl_expect("cluster", "remove", name_b).returncode != 0, "org A removed org B's cluster"
+        assert json.loads(b.api.hl("cluster", "remove", name_b))["requeued"] == []
+        assert runtime_b.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime_b.cluster_id)).status_code == 401, (
+            "the runtime token of a removed cluster still works"
+        )
+        eventually("org B's job says its org has no cluster", waiting_for_a_cluster, deadline=deadline, interval=2,
+                   accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
+
+        # Forgetting the identity deletes the settings kept under it and lets the cluster bind again.
+        assert b.api.hl_expect("cluster", "forget-identity", name).returncode != 0, "org B cleared the identity of org A's cluster"
+        assert json.loads(a.api.hl("cluster", "forget-identity", name)).get("cluster_id", "") == ""
+        rebuilt = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(f"other-{runtime.cluster_id}"))
+        assert rebuilt.status_code == 200, f"binding to a new identity after the old one was forgotten: {rebuilt.status_code} {rebuilt.text}"
+        assert a.api.get(settings).status_code == 404, "the forgotten identity still reaches settings"
+        assert a.api.get_json(f"/clusters/other-{runtime.cluster_id}/settings").get("stuck_pending_timeout_seconds") != 600, (
+            "the settings of the old identity came along to the new one"
+        )
+
+        removed = json.loads(a.api.hl("cluster", "remove", name))
+        assert removed["requeued"] == [job_a], f"removing the cluster requeued {removed['requeued']}, want the job placed on it"
+        assert a.api.experiment(job_a)["status"] == "QUEUED"
+        assert runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(runtime.cluster_id)).status_code == 401
+        assert name not in a.api.get(f"/orgs/{a.org_id}/clusters").text
     finally:
-        admin.share_cluster(name, False)
+        # Removing the clusters, already gone on the passing path, also ends any sharing left on.
+        _status(api, "DELETE", f"/orgs/{a.org_id}/clusters/{name}")
+        _status(api, "DELETE", f"/orgs/{b.org_id}/clusters/{name_b}")
         for org, job_id, pe_id in ((a, job_a, pe_a), (b, job_b, pe_b)):
             org.api.post(f"/experiments/{job_id}/cancel")
             org.api.close_platform_experiment(pe_id)

@@ -413,7 +413,7 @@ def test_another_orgs_accounts_are_out_of_reach(tenants):
 
 def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
     """The connected clusters of the local stack belong to the default org and are not shared."""
-    a, _ = tenants
+    a, b = tenants
     connected = {c["cluster_name"] for c in api.list_internal_clusters() if c["connected"]}
     assert connected, "no connected cluster to check capacity against"
     assert connected <= {c["cluster_name"] for c in api.capacity()["clusters"]}, "staff do not read every cluster's capacity"
@@ -422,20 +422,53 @@ def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
     capacity = a.api.hl("capacity")
     assert not any(name in capacity for name in connected)
 
+    # Capacity is read for one org. A caller names its own or none, and no other.
+    path = "/resource-catalog/capacity"
+    assert a.api.capacity(a.org_id) == a.api.capacity(), "naming the token's own org changes what it reads"
+    agent, coordinator = (a.api.as_caller(admin.token(scope)) for scope in (f"agent:{a.pe_id}/{a.agent}", f"coordinator:{a.pe_id}"))
+    for caller, who in ((a.api, "an API key"), (agent, "an agent"), (coordinator, "a coordinator")):
+        assert not {c["cluster_name"] for c in caller.capacity()["clusters"]} & connected, f"{who} reads another org's clusters"
+        for org_id in (b.org_id, "default", f"org-never-made-{uuid.uuid4().hex[:8]}"):
+            r = caller.get(f"{path}?org_id={org_id}")
+            assert r.status_code == 404, f"{who} reading the capacity of {org_id}: {r.status_code} {r.text}"
+    assert connected <= {c["cluster_name"] for c in api.capacity("default")["clusters"]}, "staff do not read the default org's clusters by naming it"
+    assert not {c["cluster_name"] for c in api.capacity(a.org_id)["clusters"]} & connected, "staff reading one org are shown another's clusters"
+    assert api.get(f"{path}?org_id=org-never-made-{uuid.uuid4().hex[:8]}").status_code == 404
+
     assert a.api.post("/experiments/reprioritize").status_code == 403
     for scope in (f"agent:{a.pe_id}/{a.agent}", f"coordinator:{a.pe_id}"):
         assert a.api.as_caller(admin.token(scope)).post("/experiments/reprioritize").status_code == 403, scope
 
 
-def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenants, api, deadline):
-    """A job any local cluster could run, from an org that owns none of them and with none shared."""
+HOSTLESS_JOB = {"accelerator_count": 0, "accelerator_type": None, "acceptable_accelerator_types": None}
+
+
+def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenants, api, run_id, deadline):
+    """A job any local cluster could run, from orgs that own none of them and with none shared.
+    An org with no cluster registered is told so. An org whose registered cluster is away is
+    waiting for it, and is told nothing about a cluster being missing."""
     a, _ = tenants
-    job_id = a.api.submit_job(a.pe_id, a.agent, job_overrides={"accelerator_count": 0, "accelerator_type": None,
-                                                              "acceptable_accelerator_types": None})
+    marker = f"tenancylone{uuid.uuid4().hex[:10]}"
+    home = admin.add_user(f"user-{marker}-{run_id}", f"Tenant lone {marker}")
+    lone = api.as_caller(admin.add_api_key(f"user-{marker}-{run_id}", home["org_id"]), home["org_id"], home["project_id"])
+    lone_agent = f"agent-{marker}-{run_id}"
+    lone.register_agent(lone_agent)
+    lone_pe = lone.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
+    lone.signup_and_start(lone_pe, [lone_agent])
+
+    away_job = a.api.submit_job(a.pe_id, a.agent, job_overrides=HOSTLESS_JOB)
+    lone_job = lone.submit_job(lone_pe, lone_agent, job_overrides=HOSTLESS_JOB)
     try:
-        waiting = eventually("the job says its org has no cluster", lambda: a.api.experiment(job_id), deadline=deadline, interval=2,
+        waiting = eventually("the job says its org has no cluster", lambda: lone.experiment(lone_job), deadline=deadline, interval=2,
                              accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
         assert waiting["status"] == "QUEUED" and not waiting.get("cluster_name")
-        assert waiting["org_id"] == a.org_id
+        assert waiting["org_id"] == home["org_id"]
+
+        # The same ticks passed over org A's job, whose own cluster is registered and away.
+        away = a.api.experiment(away_job)
+        assert away["status"] == "QUEUED" and not away.get("cluster_name"), f"placed beside its org's own cluster: {away}"
+        assert away.get("not_admitted_reason") != "no_cluster_for_org", "an org whose cluster is away was told it has none"
     finally:
-        a.api.post(f"/experiments/{job_id}/cancel")
+        a.api.post(f"/experiments/{away_job}/cancel")
+        lone.post(f"/experiments/{lone_job}/cancel")
+        lone.close_platform_experiment(lone_pe)
