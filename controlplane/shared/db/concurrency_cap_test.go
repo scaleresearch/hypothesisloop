@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -37,7 +38,7 @@ func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string
 	}
 }
 
-func noopObserve(context.Context, string, string) (*domain.AgentQuota, error) {
+func noopObserve(context.Context, string, string, time.Time) (*domain.AgentQuota, error) {
 	return &domain.AgentQuota{}, nil
 }
 

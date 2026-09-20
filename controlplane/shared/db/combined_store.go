@@ -217,7 +217,7 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 // the cap), and persists the flavor — all under the same cross-replica quota lock used by initial
 // admission. defaultMaxConcurrent is quota.default_max_concurrent_accelerators, used when the
 // platform experiment has no override.
-func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(context.Context, string, string) (*domain.AgentQuota, error)) (string, error) {
+func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (string, error) {
 	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: begin: %w", err)
@@ -226,8 +226,12 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 	var agentID, platformExpID string
 	var tier domain.CapacityTier
 	var oldCost float64
-	if err := tx.QueryRow(ctx, `SELECT agent_id, platform_experiment_id, capacity_tier, estimated_cost_acch FROM experiments WHERE id=$1`, experimentID).
-		Scan(&agentID, &platformExpID, &tier, &oldCost); err != nil {
+	// The platform experiment's start bounds the usage lookback. It is read here, on the
+	// transaction's connection, so observe needs no second one from the pool.
+	var platformExpStart time.Time
+	if err := tx.QueryRow(ctx, `SELECT e.agent_id, e.platform_experiment_id, e.capacity_tier, e.estimated_cost_acch, pe.created_at
+		FROM experiments e JOIN platform_experiments pe ON pe.id = e.platform_experiment_id WHERE e.id=$1`, experimentID).
+		Scan(&agentID, &platformExpID, &tier, &oldCost, &platformExpStart); err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: experiment: %w", err)
 	}
 	key := agentID + "/" + platformExpID
@@ -235,7 +239,7 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 		return "", fmt.Errorf("reserve admitted flavor: lock: %w", err)
 	}
 	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
-	observed, err := observe(observedCtx, agentID, platformExpID)
+	observed, err := observe(observedCtx, agentID, platformExpID, platformExpStart)
 	cancelObserved()
 	if err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: observed usage: %w", err)

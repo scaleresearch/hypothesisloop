@@ -53,7 +53,7 @@ type PlatformExperimentsStore interface {
 	// standingsOnMetric, where a standing without it is a number nobody can reproduce.
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error), rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (decision db.AdmitDecision, rejectionReason string, err error)
-	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observed func(context.Context, string, string) (*domain.AgentQuota, error)) (rejectionReason string, err error)
+	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observed func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
 	ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error)

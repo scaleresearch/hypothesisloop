@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -120,15 +121,18 @@ func (e *concurrencyCapError) ConcurrencyCapExceeded() bool { return true }
 // answer by refreshing priority alone. createDataKey runs only for an inserted row, inside the
 // transaction (see db.AdmitExperimentTx).
 func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error) {
+	// Read before the transaction opens: created_at never changes, and a pool read made while the
+	// transaction holds its own connection needs a second one, which a burst of submissions as
+	// large as the pool can never get.
+	pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
+	if err != nil {
+		return db.AdmitRejected, fmt.Errorf("platform_experiments.AdmitExperiment: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return db.AdmitRejected, fmt.Errorf("platform_experiments.AdmitExperiment: platform experiment %s not found", exp.PlatformExperimentID)
+	}
 	decision, reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
-		pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
-		if err != nil {
-			return nil, err
-		}
-		if pe == nil {
-			return nil, fmt.Errorf("platform_experiments.AdmitExperiment: platform experiment %s not found", exp.PlatformExperimentID)
-		}
 		if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
 			return nil, err
 		}
@@ -148,16 +152,9 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 // acceleratorCount is the job's total accelerator footprint (0 for jobs with none).
 func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error {
 	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost, acceleratorCount, s.cfg.DefaultMaxConcurrentAccelerators,
-		func(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+		func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error) {
 			aq := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID}
-			pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
-			if err != nil {
-				return nil, err
-			}
-			if pe == nil {
-				return nil, fmt.Errorf("platform_experiments.ReserveAdmittedFlavor: platform experiment %s not found", platformExpID)
-			}
-			if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+			if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), platformExpStart, aq); err != nil {
 				return nil, err
 			}
 			return aq, nil
