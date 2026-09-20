@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func productionConfig(t *testing.T) string {
@@ -73,5 +75,44 @@ func TestLoadRequiresStartTimeout(t *testing.T) {
 	text := strings.Replace(productionConfig(t), "  start_timeout_seconds: 1800\n", "", 1)
 	if err := loadText(t, text); err == nil {
 		t.Fatal("Load accepted a config with no start_timeout_seconds")
+	}
+}
+
+func TestLoadExpandsEnvReferences(t *testing.T) {
+	t.Setenv("TEST_STORE_SECRET", "p@ss: #word\"")
+	text := strings.Replace(productionConfig(t), "  secret_access_key: hypothesisloop", "  secret_access_key: ${TEST_STORE_SECRET}", 1)
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DataStore.SecretAccessKey != "p@ss: #word\"" {
+		t.Fatalf("secret_access_key = %q", cfg.DataStore.SecretAccessKey)
+	}
+}
+
+func TestLoadRejectsUndefinedEnvReference(t *testing.T) {
+	text := strings.Replace(productionConfig(t), "  secret_access_key: hypothesisloop", "  secret_access_key: ${TEST_UNDEFINED_SECRET}", 1)
+	err := loadText(t, text)
+	if err == nil || !strings.Contains(err.Error(), "TEST_UNDEFINED_SECRET") {
+		t.Fatalf("Load error = %v, want one naming TEST_UNDEFINED_SECRET", err)
+	}
+}
+
+func TestExpandEnvLeavesCommentsAndKeysAlone(t *testing.T) {
+	t.Setenv("TEST_HOST", "store.example")
+	out, err := ExpandEnv([]byte("# ${TEST_UNDEFINED_SECRET} in a comment\n${TEST_HOST}: 1\nurl: http://${TEST_HOST}:9000/x\n"))
+	if err != nil {
+		t.Fatalf("ExpandEnv: %v", err)
+	}
+	var got map[string]string
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["url"] != "http://store.example:9000/x" || got["${TEST_HOST}"] != "1" {
+		t.Fatalf("got %v", got)
 	}
 }

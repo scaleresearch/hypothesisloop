@@ -105,3 +105,7 @@ localdev/.host-address
 localdev/.image-tag
 controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml
 local.secrets.env
+
+# Pulumi local state and stack config (stack config holds secrets)
+infra/.state/
+infra/pulumi/Pulumi.*.yaml

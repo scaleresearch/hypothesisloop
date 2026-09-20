@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -18,6 +19,10 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
+	data, err = ExpandEnv(data)
+	if err != nil {
+		return nil, fmt.Errorf("config: expand %s: %w", path, err)
+	}
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -28,6 +33,63 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: validate: %w", err)
 	}
 	return &cfg, nil
+}
+
+var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// ExpandEnv replaces every ${NAME} inside a YAML value with that environment variable, so a
+// config file kept in plain sight can name a secret without holding it. It works on the parsed
+// values and writes the document back out, which keeps a secret holding YAML syntax (a colon, a
+// hash, a quote) one string. An expanded value is always a string. A reference to a variable
+// that is not set is an error.
+func ExpandEnv(data []byte) ([]byte, error) {
+	if !envReference.Match(data) {
+		return data, nil
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	if err := expandNode(&document); err != nil {
+		return nil, err
+	}
+	return yaml.Marshal(&document)
+}
+
+func expandNode(node *yaml.Node) error {
+	if node.Kind == yaml.MappingNode {
+		for i := 1; i < len(node.Content); i += 2 {
+			if err := expandNode(node.Content[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		for _, child := range node.Content {
+			if err := expandNode(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if !envReference.MatchString(node.Value) {
+		return nil
+	}
+	var missing string
+	node.Value = envReference.ReplaceAllStringFunc(node.Value, func(reference string) string {
+		name := envReference.FindStringSubmatch(reference)[1]
+		value, ok := os.LookupEnv(name)
+		if !ok && missing == "" {
+			missing = name
+		}
+		return value
+	})
+	if missing != "" {
+		return fmt.Errorf("line %d: environment variable %s is not set", node.Line, missing)
+	}
+	node.SetString(node.Value)
+	return nil
 }
 
 // MustLoad calls Load and panics on error. Suitable for use in main().
