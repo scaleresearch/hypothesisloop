@@ -32,9 +32,9 @@ beforeEach(() => {
   roster = [signup('ag-old', true)]
   vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => [...roster])
   vi.mocked(addPlatformExperimentAgents).mockImplementation(async (_pe, req) => {
-    const added = Array.from({ length: req.count }, (_, i) => signup(`ag-new${i + 1}`, req.hosted, req.flavor))
-    roster = [...roster, ...added]
-    return added.map(a => (req.hosted ? a : { ...a, token: `hls_token-of-${a.agent_id}` }))
+    const added = signup(`ag-new${roster.length}`, req.hosted, req.flavor)
+    roster = [...roster, added]
+    return [req.hosted ? added : { ...added, token: `hls_token-of-${added.agent_id}` }]
   })
   vi.mocked(fetchPlatformExperimentAgentToken).mockImplementation(async (_pe, id) => (
     { ...roster.find(a => a.agent_id === id)!, token: `hls_token-of-${id}` }
@@ -49,26 +49,23 @@ describe('adding agents', () => {
   it('asks the platform to run them by default and shows no token', async () => {
     show()
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { count: 1, hosted: true, flavor: undefined, model: undefined })
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { hosted: true, flavor: undefined, model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
   })
 
-  it('sends count, flavor and model, and shows each self-run agent\'s token', async () => {
+  it('adds one agent a click, with flavor and model, and shows the self-run agent\'s token', async () => {
     show()
-    await userEvent.clear(screen.getByLabelText('Count'))
-    await userEvent.type(screen.getByLabelText('Count'), '2')
     await userEvent.type(screen.getByLabelText('Flavor'), 'data-search')
     await userEvent.type(screen.getByLabelText('Model'), 'claude-opus-4-5')
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Add 2 agents' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      count: 2, hosted: false, flavor: 'data-search', model: 'claude-opus-4-5',
+      hosted: false, flavor: 'data-search', model: 'claude-opus-4-5',
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([
       'AGENT_ID=ag-new1\nHL_TOKEN=hls_token-of-ag-new1\nPLATFORM_EXPERIMENT_ID=pe-1\nAGENT_FLAVOR=data-search',
-      'AGENT_ID=ag-new2\nHL_TOKEN=hls_token-of-ag-new2\nPLATFORM_EXPERIMENT_ID=pe-1\nAGENT_FLAVOR=data-search',
     ])
   })
 
@@ -110,14 +107,6 @@ describe('adding agents', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Show token' }))
     expect(await screen.findByText('internal error')).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
-  })
-
-  it('refuses a count outside 1 to 100 before asking the API', async () => {
-    show()
-    await userEvent.clear(screen.getByLabelText('Count'))
-    await userEvent.type(screen.getByLabelText('Count'), '101')
-    expect(screen.getByRole('button', { name: /^Add/ })).toHaveProperty('disabled', true)
-    expect(screen.getByText(/Count must be 1 to 100/)).toBeTruthy()
   })
 
   it('shows the API\'s refusal', async () => {

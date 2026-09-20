@@ -28,15 +28,11 @@ function envFile(agent: JoinedAgent): string {
 }
 
 function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: JoinedAgent[]) => Promise<unknown> }) {
-  const [count, setCount] = useState('1')
   const [hosted, setHosted] = useState(true)
   const [flavor, setFlavor] = useState('')
   const [model, setModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  const n = Number(count)
-  const countValid = Number.isInteger(n) && n >= 1 && n <= 100
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -44,7 +40,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
     setError('')
     try {
       await onAdded(await addPlatformExperimentAgents(pe.id, {
-        count: n, hosted, flavor: flavor.trim() || undefined, model: model.trim() || undefined,
+        hosted, flavor: flavor.trim() || undefined, model: model.trim() || undefined,
       }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -56,10 +52,6 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       <form className="settings-row" style={{ alignItems: 'flex-end' }} onSubmit={submit}>
-        <label style={{ display: 'grid', gap: 2 }}>
-          <span className="uppercase-label">Count</span>
-          <input className="field-sm" style={{ width: 70 }} inputMode="numeric" value={count} onChange={e => setCount(e.target.value)} />
-        </label>
         <label style={{ display: 'grid', gap: 2 }}>
           <span className="uppercase-label">Flavor</span>
           <input
@@ -89,15 +81,14 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
             <Chip type="button" active={!hosted} onClick={() => setHosted(false)}>Me</Chip>
           </div>
         </div>
-        <Button size="sm" variant="primary" type="submit" disabled={busy || !countValid}>
-          {busy ? 'Adding…' : n === 1 ? 'Add agent' : `Add ${countValid ? n : ''} agents`}
+        <Button size="sm" variant="primary" type="submit" disabled={busy}>
+          {busy ? 'Adding…' : 'Add agent'}
         </Button>
       </form>
       <span className="text-dim" style={{ fontSize: 11 }}>
         {hosted
-          ? 'The platform starts one machine per agent and keeps it until the experiment closes or the agent is cut.'
-          : 'Each agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
-        {!countValid && ' Count must be 1 to 100.'}
+          ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent is cut.'
+          : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
       </span>
       {error && <ErrorMessage>{error}</ErrorMessage>}
     </div>

@@ -564,8 +564,7 @@ export function fetchPlatformExperimentAgents(platformExpID: string): Promise<Ag
 }
 
 export interface AddAgentsRequest {
-  count: number
-  /** true: the platform runs the agents. false: each one's token comes back, to run it yourself. */
+  /** true: the platform runs the agent. false: its token comes back, to run it yourself. */
   hosted: boolean
   flavor?: string
   model?: string
