@@ -20,6 +20,7 @@ func orgsWithAMember() *auth.Access {
 		Keys: map[string]domain.APIKey{
 			"key-a": {ID: "key-a", OrgID: "org-a"}, "key-a-prj": {ID: "key-a-prj", OrgID: "org-a", ProjectID: "prj-a"},
 			"key-a-prj2": {ID: "key-a-prj2", OrgID: "org-a", ProjectID: "prj-a2"}, "key-b": {ID: "key-b", OrgID: "org-b"},
+			"k": {ID: "k", OrgID: "org-a", CreatedBy: "u-owner"},
 		},
 		Members: map[string]bool{"org-a/u-member": true},
 	})
@@ -55,6 +56,9 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"administer cluster-a under org b":       func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-b", "cluster-a"); return err },
 		"administer an unregistered cluster":     func(ctx context.Context) error { return access.Cluster(ctx, "cluster-none") },
 		"settings of the cluster bound to uid-a": func(ctx context.Context) error { _, err := access.ClusterByID(ctx, "uid-a"); return err },
+		"read the settings under uid-a":          func(ctx context.Context) error { _, err := access.ReadClusterByID(ctx, "uid-a"); return err },
+		"read the settings under uid-b":          func(ctx context.Context) error { _, err := access.ReadClusterByID(ctx, "uid-b"); return err },
+		"read settings under an id of nothing":   func(ctx context.Context) error { _, err := access.ReadClusterByID(ctx, "uid-none"); return err },
 		"settings under an id bound to nothing":  func(ctx context.Context) error { _, err := access.ClusterByID(ctx, "uid-none"); return err },
 		"settings under an id that is a path":    func(ctx context.Context) error { _, err := access.ClusterByID(ctx, "uid-a/../uid-b"); return err },
 		"change project prj-a":                   func(ctx context.Context) error { _, err := access.ProjectAdmin(ctx, "prj-a"); return err },
@@ -64,6 +68,21 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"place a key of project prj-a":           func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-a-prj"); return err },
 		"place a key of project prj-a2":          func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-a-prj2"); return err },
 		"place a key that does not exist":        func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-none"); return err },
+		"be a signed-in person":                  func(ctx context.Context) error { _, err := access.Person(ctx); return err },
+		"invite into org a":                      func(ctx context.Context) error { _, err := access.Inviter(ctx, "org-a"); return err },
+		"invite into an org that is missing":     func(ctx context.Context) error { _, err := access.Inviter(ctx, "org-missing"); return err },
+		"remove the owner from org a":            func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-a", "u-owner") },
+		"remove the member from org a":           func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-a", "u-member") },
+		"remove someone from a missing org":      func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-missing", "u-member") },
+		"mint an org-wide key of org a":          func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", ""); return err },
+		"mint a key of project prj-a":            func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", "prj-a"); return err },
+		"mint a key in an org that is missing":   func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-missing", "prj-a"); return err },
+		"end a key the owner made": func(ctx context.Context) error {
+			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", CreatedBy: "u-owner"})
+		},
+		"end a key the member made": func(ctx context.Context) error {
+			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", ProjectID: "prj-a", CreatedBy: "u-member"})
+		},
 	}
 	//                                            owner member outsider org-key prj-key agent coord job runtime launcher staff
 	want := map[string][]int{
@@ -79,6 +98,9 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"administer cluster-a under org b":       {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
 		"administer an unregistered cluster":     {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 200},
 		"settings of the cluster bound to uid-a": {200, 403, 404, 200, 404, 404, 404, 404, 403, 404, 200},
+		"read the settings under uid-a":          {200, 200, 404, 200, 404, 404, 404, 404, 403, 404, 200},
+		"read the settings under uid-b":          {404, 404, 200, 404, 404, 404, 404, 404, 404, 404, 200},
+		"read settings under an id of nothing":   {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404},
 		"settings under an id bound to nothing":  {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404},
 		"settings under an id that is a path":    {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404},
 		"change project prj-a":                   {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
@@ -88,6 +110,17 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"place a key of project prj-a":           {200, 200, 404, 200, 200, 403, 403, 403, 403, 403, 200},
 		"place a key of project prj-a2":          {200, 200, 404, 200, 404, 403, 403, 403, 403, 403, 200},
 		"place a key that does not exist":        {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"be a signed-in person":                  {200, 200, 200, 403, 403, 403, 403, 403, 403, 403, 403},
+		"invite into org a":                      {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 403},
+		"invite into an org that is missing":     {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"remove the owner from org a":            {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"remove the member from org a":           {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"remove someone from a missing org":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"mint an org-wide key of org a":          {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"mint a key of project prj-a":            {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"mint a key in an org that is missing":   {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"end a key the owner made":               {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"end a key the member made":              {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
 	}
 	order := []string{"owner", "member", "outsider", "org key", "project key", "agent", "coordinator", "job", "runtime", "launcher", "staff"}
 	if len(want) != len(rules) {
@@ -166,5 +199,21 @@ func TestAProjectAndAKeyAreFoundUnderTheIdsTheStoreIssues(t *testing.T) {
 	}
 	if key, err := access.APIKey(ctx, "key_01A10AF4"); err != nil || key == nil {
 		t.Errorf("a key under the id the store issued: got = %v, %v", key, err)
+	}
+}
+
+// An invite is answered for by a person: the owner who makes it, or the one who made the key
+// that makes it.
+func TestAnInviteIsAnsweredForByAPerson(t *testing.T) {
+	access := orgsWithAMember()
+	for caller, want := range map[string]string{"owner": "u-owner", "org key": "u-owner"} {
+		got, err := access.Inviter(auth.WithPrincipal(context.Background(), accountCallers[caller]), "org-a")
+		if err != nil || got != want {
+			t.Errorf("inviter as %s: got = %q, %v, want = %q", caller, got, err, want)
+		}
+	}
+	signedInStaff := auth.Principal{Kind: auth.KindStaff, UserID: "u-staff"}
+	if got, err := access.Inviter(auth.WithPrincipal(context.Background(), signedInStaff), "org-a"); err != nil || got != "u-staff" {
+		t.Errorf("inviter as staff signed in: got = %q, %v, want = u-staff", got, err)
 	}
 }

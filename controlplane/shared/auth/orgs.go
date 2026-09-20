@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -12,7 +13,13 @@ import (
 //     something it launched (agent, coordinator, job, runtime, launcher) does not.
 //   - Whoever reaches an org reads it. An org outside the caller's reach is not found.
 //   - An org and what it owns are changed by its administrators: staff, a signed-in owner, and
-//     an API key of the whole org. A member and a key bound to one project are refused.
+//     an API key of the whole org. A member and a key bound to one project are refused. What an
+//     org owns is its settings and its projects' settings, the repository attached to a project,
+//     its members and invites, its API keys and its clusters.
+//   - A member reads the org and works in its projects. Of what the org owns a member makes one
+//     thing, API keys bound to one project, and ends only the keys they made.
+//   - A person leaves an org by themselves, whatever their role. An invite is accepted by a
+//     signed-in person, for themselves. The store keeps an org from losing its last owner.
 //   - A cluster is administered by the administrators of the org that registered it, whatever is
 //     done to it: its settings, its identity, placing a job on it by hand, removing it. Only
 //     staff share it.
@@ -89,6 +96,82 @@ func (a *Access) administers(ctx context.Context, p Principal, orgID string) err
 	}
 }
 
+// Person returns the principal when a signed-in person is behind it: a user, or staff signed in
+// as one.
+func (a *Access) Person(ctx context.Context) (Principal, error) {
+	p, err := a.Account(ctx)
+	if err != nil {
+		return p, err
+	}
+	if p.UserID == "" {
+		return p, forbidden("forbidden: only a signed-in person does this, for themselves")
+	}
+	return p, nil
+}
+
+// Inviter admits the caller to invite people into the org and names the person answerable for
+// the invite: the one who asks, or the one who created the API key that asks.
+func (a *Access) Inviter(ctx context.Context, orgID string) (userID string, err error) {
+	p, err := a.OrgAdmin(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	if p.Kind == KindKey {
+		key, err := a.placement.GetAPIKey(ctx, p.KeyID)
+		if err != nil {
+			return "", err
+		}
+		if key == nil {
+			return "", fmt.Errorf("the calling api key %s has no row", p.KeyID)
+		}
+		return key.CreatedBy, nil
+	}
+	if p.UserID == "" {
+		return "", forbidden("forbidden: an invite is made by a signed-in person or with an API key of the org")
+	}
+	return p.UserID, nil
+}
+
+// MemberRemoval admits the caller to end userID's membership of the org: an administrator
+// anyone's, a person their own.
+func (a *Access) MemberRemoval(ctx context.Context, orgID, userID string) error {
+	p, err := a.OrgMember(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if p.Kind == KindUser && p.UserID == userID {
+		return nil
+	}
+	return a.administers(ctx, p, orgID)
+}
+
+// KeyMinter admits a person to create an API key of the org, bound to projectID when set: an
+// administrator any key, a member one bound to a project. What a key may mint is the accounts
+// policy's.
+func (a *Access) KeyMinter(ctx context.Context, orgID, projectID string) (Principal, error) {
+	p, err := a.OrgMember(ctx, orgID)
+	if err != nil {
+		return p, err
+	}
+	if p.Kind == KindUser && projectID != "" {
+		return p, nil
+	}
+	return p, a.administers(ctx, p, orgID)
+}
+
+// KeyEnd admits a person to end an API key placed by APIKey: an administrator any key of the
+// org, a member the keys they made. Which keys a key may end is the accounts policy's.
+func (a *Access) KeyEnd(ctx context.Context, key *domain.APIKey) error {
+	p, err := a.OrgMember(ctx, key.OrgID)
+	if err != nil {
+		return err
+	}
+	if p.Kind == KindUser && p.UserID == key.CreatedBy {
+		return nil
+	}
+	return a.administers(ctx, p, key.OrgID)
+}
+
 // Cluster admits the principal to administer one registered cluster by its name alone. A cluster
 // outside the caller's reach, and every cluster for a token narrowed to one project or one
 // platform experiment, is not found. Staff pass on a name with no row and get the handler's own
@@ -117,28 +200,51 @@ func (a *Access) Cluster(ctx context.Context, name string) error {
 // an id bound to no cluster and a cluster outside the caller's reach are all not found, for staff
 // too: settings exist only under an id the platform bound, never under one a request states.
 func (a *Access) ClusterByID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
-	p, err := principal(ctx)
+	p, cluster, err := a.clusterByID(ctx, reportedID)
+	if err != nil || p.Kind == KindStaff {
+		return cluster, err
+	}
+	return cluster, a.administers(ctx, p, cluster.OrgID)
+}
+
+// ReadClusterByID admits the principal to read the settings of that cluster: whoever reads its
+// org as a whole, so a member too. What is not found is what ClusterByID does not find.
+func (a *Access) ReadClusterByID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
+	p, cluster, err := a.clusterByID(ctx, reportedID)
 	if err != nil {
 		return nil, err
 	}
+	switch p.Kind {
+	case KindUser, KindKey, KindStaff:
+		return cluster, nil
+	default:
+		return nil, forbidden("forbidden: a " + string(p.Kind) + " token does not read a cluster's settings")
+	}
+}
+
+func (a *Access) clusterByID(ctx context.Context, reportedID string) (Principal, *domain.Cluster, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return p, nil, err
+	}
 	if domain.ValidateClusterID(reportedID) != nil {
-		return nil, NotFound("cluster")
+		return p, nil, NotFound("cluster")
 	}
 	cluster, err := a.placement.ClusterByReportedID(ctx, reportedID)
 	if err != nil {
-		return nil, err
+		return p, nil, err
 	}
 	if cluster == nil {
-		return nil, NotFound("cluster")
+		return p, nil, NotFound("cluster")
 	}
 	if p.Kind == KindStaff {
-		return cluster, nil
+		return p, cluster, nil
 	}
 	scope := p.Scope()
 	if !scope.AdmitsOrg(cluster.OrgID) || scope.ProjectID != "" || scope.PlatformExperimentID != "" {
-		return nil, NotFound("cluster")
+		return p, nil, NotFound("cluster")
 	}
-	return cluster, a.administers(ctx, p, cluster.OrgID)
+	return p, cluster, nil
 }
 
 // ProjectAdmin admits the caller to change one project, and returns it. A project the caller

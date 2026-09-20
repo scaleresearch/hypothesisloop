@@ -408,13 +408,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "get-cluster-settings", Method: "GET", Path: "/clusters/{cluster_id}/settings",
 		Summary: "Read a cluster's autoscaler-speculation overrides", Tags: []string{"clusters"},
-		Description: "Null fields mean the cluster uses the global scheduler defaults.",
+		Description: "Null fields mean the cluster uses the global scheduler defaults. Every member of the org that registered the cluster reads them; its owners change them.",
 	}, func(ctx context.Context, in *struct {
 		ClusterID string `path:"cluster_id"`
 	}) (*struct {
 		Body domain.ClusterSettings
 	}, error) {
-		if err := h.clusterAccess(ctx, access, in.ClusterID); err != nil {
+		if err := readClusterSettings(ctx, access, in.ClusterID); err != nil {
 			return nil, err
 		}
 		cs, err := h.svc.GetClusterSettings(ctx, in.ClusterID)
@@ -469,11 +469,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	})
 }
 
-// clusterAccess admits the caller to the settings of the registered cluster bound to clusterID.
-// The access check decides it before the handler reads anything: an id bound to no cluster is
-// not found.
+// clusterAccess admits the caller to change the settings of the registered cluster bound to
+// clusterID. The access check decides it before the handler reads anything: an id bound to no
+// cluster is not found.
 func (h *Handler) clusterAccess(ctx context.Context, access *auth.Access, clusterID string) error {
 	_, err := access.ClusterByID(ctx, clusterID)
+	return err
+}
+
+// readClusterSettings admits the caller to read them, which every member of the cluster's org may.
+func readClusterSettings(ctx context.Context, access *auth.Access, clusterID string) error {
+	_, err := access.ReadClusterByID(ctx, clusterID)
 	return err
 }
 
