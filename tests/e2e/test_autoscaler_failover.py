@@ -97,12 +97,10 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
         deadline=Deadline.in_seconds(30),
     )
 
-    # Without a cap, a second job that also doesn't fit live is itself a valid speculative
-    # candidate on this same untried cluster (autoscaler.md's own "two gangs competing on one
-    # cluster" case permits exactly that -- confirmed live: an uncapped second job here also goes
-    # SUBMITTED instead of waiting). Capping max_speculative_accelerators at the first job's own
-    # footprint forces the second job past its own speculative candidacy, which is what actually
-    # exercises "does not preempt/does not double-book" rather than proving nothing.
+    # The cap equals the first job's footprint. While that job is still SUBMITTED its claim uses the
+    # cap up and the second job waits QUEUED; once it runs, the cluster is saturated with no bet
+    # outstanding, and the second job is a scale-up bet of its own: SUBMITTED with a Pending pod.
+    # Either way it must not run, and the first job must not be displaced for it.
     cluster_id = api.cluster_id_for_name(cluster_agent_name())
     assert cluster_id
     api.put_cluster_settings_ok(cluster_id, max_speculative_accelerators=8)
@@ -112,16 +110,18 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
         job_overrides={"accelerator_type": SOLO_TYPE, "accelerator_count": 1},
     )
     assert_stable(
-        "a second job on the same (now fully claimed) flavor is not admitted while the first "
-        "holds the only node of this type",
-        lambda: api.experiment(second)["status"],
-        ok=lambda s: s in ("QUEUED",),
+        "a second job on the same (now fully claimed) flavor does not run, and the first keeps the "
+        "only node of this type",
+        lambda: (api.experiment(second)["status"], api.experiment(big)["status"]),
+        ok=lambda s: s[0] in ("QUEUED", "SUBMITTED") and s[1] in ("SUBMITTED", "RUNNING"),
         duration=15,
     )
-    assert _reason(api.experiment(second)) in ("waiting-for-scale-up", "capacity_unavailable"), (
-        f"second job must wait, not preempt or speculate, while the first job holds the node "
-        f"(observed reason={_reason(api.experiment(second))!r})"
-    )
+    waiting = api.experiment(second)
+    if waiting["status"] == "QUEUED":
+        assert _reason(waiting) in ("waiting-for-scale-up", "capacity_unavailable"), (
+            f"second job must wait, not preempt, while the first job holds the node "
+            f"(observed reason={_reason(waiting)!r})"
+        )
     api.cancel_job(second)
     api.cancel_job(big)
     api.put_cluster_settings_ok(cluster_id)  # clear the cap so it doesn't leak into later tests
