@@ -1,0 +1,38 @@
+# The cloud-agent's one config file: one provider account, registered as one cluster.
+# CLOUD_AGENT_CONFIG names the copy the process reads.
+
+cluster_name: rented
+
+# Polled by the agent and handed to every job, so a rented instance must be able to reach it.
+api_url: https://api.example.invalid
+
+# What every instance boots. It carries hl, which each job's command runs under.
+job_image: registry.example.invalid/hypothesisloop-job:latest
+
+provider:
+  # One of the adapters the binary was built with.
+  name: example
+  # Tells two accounts on one provider apart. With the name it is the cluster's id, which
+  # per-cluster settings are keyed on.
+  account_id: "1"
+  # The adapter's own section. Nothing else reads it.
+  settings: {}
+
+# What this account may rent. Each of a shape's max_instances is reported as a node, so the
+# control plane needs no provider settings of its own, and max_instances bounds what can be billed
+# at once. A job is rented at the size it asked for; the shape is the most one may ask for.
+shapes:
+  # accelerator_type is the resource catalog string, written exactly as jobs request it. It must
+  # be priced in the control plane's accelerator_types for a job to be admitted.
+  - name: h100
+    accelerator_type: nvidia.com/gpu.product=NVIDIA-H100
+    accelerators: 1
+    cpu: "16"
+    memory: 64Gi
+    storage: 200Gi
+    max_instances: 2
+  - name: cpu
+    cpu: "8"
+    memory: 32Gi
+    storage: 100Gi
+    max_instances: 4
