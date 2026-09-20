@@ -28,6 +28,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/queuebackend"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -72,6 +73,13 @@ func main() {
 	migrateCancel()
 	if err != nil {
 		logger.Fatal("control-service: apply schema", zap.Error(err))
+	}
+
+	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = metricsdb.EnsureObservationTables(metricsCtx, metricsDBURL)
+	metricsCancel()
+	if err != nil {
+		logger.Fatal("control-service: metrics store tables", zap.Error(err))
 	}
 
 	graphCtx, graphCancel := context.WithTimeout(context.Background(), 30*time.Second)

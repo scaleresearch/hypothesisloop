@@ -242,28 +242,39 @@ func approxHours(got, want float64) bool {
 	return d < 1e-9
 }
 
-// ObserveSpan's query UNIONs two series with independent lifecycles: the runtime's liveness
-// heartbeat (created on a deployment's very first job) and a job's own reported training metric
-// (created only once some job actually posts one -- never, on a deployment that only ever runs
-// jobs that don't report training metrics, e.g. the bare-node-agent e2e test's plain busybox
-// jobs). GreptimeDB fails the whole UNION at plan time if either half names a table that has
-// never been written to, so every terminal job's reconcile hit this same error forever, and the
-// row was never finalized in Postgres. querySingleRow must give this the same "no rows" treatment
-// querySQLRows already gives it (see that function's comment), not propagate it as a query error.
-func TestObserveSpanTreatsATableNeverWrittenToAsNotObserved(t *testing.T) {
+// ObserveSpan reads two series in one statement, and GreptimeDB fails the whole statement when
+// either table is missing. Reading that as "never observed" billed a job with heartbeats as zero
+// hours for as long as no job had posted a metric. Both tables exist from startup (see
+// EnsureObservationTables), so a missing one is a fault.
+func TestObserveSpanFailsOnAMissingTable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"code":4001,"error":"Failed to plan SQL: Table not found: greptime.public.experiment_metric_value","execution_time_ms":1}`))
+		_, _ = w.Write([]byte(`{"code":3000,"error":"Failed to plan SQL: Table not found: greptime.public.experiment_metric_value","execution_time_ms":1}`))
 	}))
 	defer server.Close()
 
 	now := time.Now().UTC()
-	span, err := ObserveSpan(context.Background(), server.URL, "exp-1", now.Add(-time.Hour), now, 3*time.Minute)
-	if err != nil {
-		t.Fatalf("ObserveSpan returned %v, want no error -- a never-written table reads as no observations", err)
+	if _, err := ObserveSpan(context.Background(), server.URL, "exp-1", now.Add(-time.Hour), now, 3*time.Minute); err == nil {
+		t.Fatal("ObserveSpan: got = nil, want an error for a missing observation table")
 	}
-	if span.Observed {
-		t.Fatalf("span.Observed = true, want false: nothing was ever written to either series")
+}
+
+func TestEnsureObservationTablesCreatesBothSeries(t *testing.T) {
+	var statements []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		statements = append(statements, r.FormValue("sql"))
+		_, _ = w.Write([]byte(`{"output":[{"affectedrows":0}]}`))
+	}))
+	defer server.Close()
+
+	if err := EnsureObservationTables(context.Background(), server.URL); err != nil {
+		t.Fatalf("EnsureObservationTables: got = %v, want = nil", err)
+	}
+	all := strings.Join(statements, "\n")
+	for _, table := range []string{aliveHeartbeatMetric, ExperimentMetricValue} {
+		if !strings.Contains(all, "CREATE TABLE IF NOT EXISTS "+table+" ") {
+			t.Errorf("no CREATE TABLE issued for %s", table)
+		}
 	}
 }
 

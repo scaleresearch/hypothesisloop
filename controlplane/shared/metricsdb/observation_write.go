@@ -2,6 +2,7 @@ package metricsdb
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -23,6 +24,47 @@ const (
 	ExperimentMetricValue    = "experiment_metric_value"
 	ExperimentMetricFraction = "experiment_metric_fraction"
 )
+
+// The observation tables as remote write would create them on a first sample, declared up front
+// with every label a reader filters on. ObserveSpan reads both series in one statement, which
+// fails as a whole while either table is missing, so a store where no job had reported a metric
+// yet billed every job as never observed.
+var ensureObservationTablesSQL = []string{
+	`CREATE TABLE IF NOT EXISTS greptime_physical_table (
+	greptime_timestamp TIMESTAMP(3) NOT NULL,
+	greptime_value DOUBLE NULL,
+	TIME INDEX (greptime_timestamp)
+) ENGINE=metric WITH ("physical_metric_table" = "")`,
+	`CREATE TABLE IF NOT EXISTS ` + aliveHeartbeatMetric + ` (
+	greptime_timestamp TIMESTAMP(3) NOT NULL,
+	greptime_value DOUBLE NULL,
+	experiment_id STRING NULL,
+	TIME INDEX (greptime_timestamp),
+	PRIMARY KEY (experiment_id)
+) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
+	`CREATE TABLE IF NOT EXISTS ` + ExperimentMetricValue + ` (
+	greptime_timestamp TIMESTAMP(3) NOT NULL,
+	greptime_value DOUBLE NULL,
+	agent_id STRING NULL,
+	job_id STRING NULL,
+	metric_basis STRING NULL,
+	metric_name STRING NULL,
+	platform_experiment_id STRING NULL,
+	TIME INDEX (greptime_timestamp),
+	PRIMARY KEY (agent_id, job_id, metric_basis, metric_name, platform_experiment_id)
+) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
+}
+
+// EnsureObservationTables creates the two series ObserveSpan reads, so that a missing one is a
+// fault and never an empty answer. Idempotent; run once at startup.
+func EnsureObservationTables(ctx context.Context, dbURL string) error {
+	for _, ddl := range ensureObservationTablesSQL {
+		if err := execSQL(ctx, dbURL, ddl); err != nil {
+			return fmt.Errorf("metricsdb.EnsureObservationTables: %w", err)
+		}
+	}
+	return nil
+}
 
 // Observation is one pod's "experimentID was alive" reading at its collection time. ExtraLabels
 // (pod_uid, node, ...) are carried for debugging only; every read collapses across them.

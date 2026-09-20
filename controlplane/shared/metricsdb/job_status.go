@@ -3,6 +3,7 @@ package metricsdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -144,6 +145,10 @@ func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterNa
 		clusterJobObservedAtMetric, quote(experimentID), quote(clusterName), bounds,
 	)
 	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.ClusterSnapshotPresence", query, 3)
+	// The snapshot series are created by a cluster's first report, so before it they do not exist.
+	if errors.Is(err, errTableNotFound) {
+		return SnapshotPresence{}, nil
+	}
 	if err != nil {
 		return SnapshotPresence{}, err
 	}
@@ -213,6 +218,9 @@ func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string
 
 func queryJobStatusSnapshot(ctx context.Context, dbURL, query string) (float64, *float64, *float64, bool, error) {
 	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.LatestJobPhase", query, 3)
+	if errors.Is(err, errTableNotFound) {
+		return 0, nil, nil, false, nil
+	}
 	if err != nil || !found {
 		return 0, nil, nil, false, err
 	}
@@ -258,19 +266,11 @@ func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, false, fmt.Errorf("%s: decode query: %w", op, err)
 	}
-	// A table that has never been written to (nothing has ever reported this series) reads as no
-	// rows, not a failure -- the same treatment querySQLRows already gives it (see that function's
-	// comment). ObserveSpan is the sole input to every quota-consumption calculation and UNIONs two
-	// series with independent lifecycles (the runtime's liveness heartbeat and a job's own reported
-	// training metric): a deployment whose jobs never report a training metric would otherwise never
-	// finalize a single experiment, forever re-erroring the same reconcile pass.
-	//
-	// GreptimeDB's SQL endpoint reports this same condition under different numeric codes depending
-	// on which HTTP method issued the query (4001 observed via POST /v1/sql, 3000 via the GET this
-	// function uses) -- matched on the message text for that reason, the same fallback
-	// GetLatestLogTail already uses, rather than trusting either code to stay the one in use here.
+	// GreptimeDB reports a missing table under different numeric codes depending on which HTTP
+	// method issued the query (4001 via POST /v1/sql, 3000 via the GET used here), so the message
+	// text is matched as well. Whether a missing table is an empty answer is the caller's call.
 	if result.Code == greptimeCodeTableNotFound || strings.Contains(result.Error, "Table not found") {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("%s: %s: %w", op, result.Error, errTableNotFound)
 	}
 	if resp.StatusCode/100 != 2 {
 		return nil, false, fmt.Errorf("%s: greptimedb returned %d: %s", op, resp.StatusCode, body)
