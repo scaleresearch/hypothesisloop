@@ -14,6 +14,8 @@ written as ${NAME}: both services replace it from their environment, which the S
   (list "agents" "launcher" (required "agents.launcher is required: the launcher a newly hosted agent is given to" .Values.agents.launcher))
   (list "agents" "image" (required "agents.image is required: the image a hosted agent's machine boots" .Values.agents.image))
   (list "agents" "api_url" (required "agents.apiURL is required: the address a hosted agent reaches the API at" .Values.agents.apiURL))
+  (list "runtimes" "api_url" (required "runtimes.apiURL is required: the address a cluster's runtime reaches the API at" .Values.runtimes.apiURL))
+  (list "runtimes" "metrics_url" (required "runtimes.metricsURL is required: the address a cluster's runtime reaches metrics-service at" .Values.runtimes.metricsURL))
   (list "data_store" "endpoint" (required "objectStore.endpoint is required: the address the control plane and every job reach the object store at" .Values.objectStore.endpoint))
   (list "data_store" "access_key_id" "${OBJECT_STORE_ACCESS_KEY_ID}")
   (list "data_store" "secret_access_key" "${OBJECT_STORE_SECRET_ACCESS_KEY}")

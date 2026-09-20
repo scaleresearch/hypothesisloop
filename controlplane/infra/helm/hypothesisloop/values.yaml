@@ -65,6 +65,15 @@ agents:
   # Required: the address a hosted agent reaches the API at.
   apiURL: ""
 
+# Where a cluster's runtime reaches the platform: the runtimes section of hypothesisloop.yaml.
+# Both are handed out when a cluster is registered and must be reachable from inside every
+# cluster that runs jobs.
+runtimes:
+  # Required: this API.
+  apiURL: ""
+  # Required: metrics-service.
+  metricsURL: ""
+
 postgres:
   # false when DATABASE_URL in the Secret points at a database run elsewhere.
   enabled: true

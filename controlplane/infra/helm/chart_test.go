@@ -64,6 +64,12 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	}); got != want {
 		t.Errorf("in-cluster agents = %+v, want %+v", got, want)
 	}
+	if got, want := inCluster.Runtimes, (config.RuntimesConfig{
+		APIURL:     "http://api.example.invalid:30081",
+		MetricsURL: "http://metrics.example.invalid:30084",
+	}); got != want {
+		t.Errorf("in-cluster runtimes = %+v, want %+v", got, want)
+	}
 	if got := inCluster.DataStore.Endpoint; got != "http://object-store.hypothesisloop.svc:9000" {
 		t.Errorf("in-cluster data_store.endpoint = %q", got)
 	}
@@ -184,6 +190,8 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no launcher":                {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
 		"no agent image":             {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no agent API address":       {charttest.InCluster, `agents.apiURL=""`, "agents.apiURL is required"},
+		"no runtime API address":     {charttest.InCluster, `runtimes.apiURL=""`, "runtimes.apiURL is required"},
+		"no runtime metrics address": {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":    {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
 		"no Supabase address":        {charttest.InCluster, `ui.supabaseURL=""`, "ui.supabaseURL is required"},
 		"no publishable key":         {charttest.InCluster, `ui.supabasePublishableKey=""`, "ui.supabasePublishableKey is required"},

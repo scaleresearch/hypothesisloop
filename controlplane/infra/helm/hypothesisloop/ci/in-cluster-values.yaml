@@ -11,6 +11,9 @@ auth:
 agents:
   image: registry.example.invalid/hypothesisloop-experimentator-base:test
   apiURL: http://api.example.invalid:30081
+runtimes:
+  apiURL: http://api.example.invalid:30081
+  metricsURL: http://metrics.example.invalid:30084
 objectStore:
   endpoint: http://object-store.hypothesisloop.svc:9000
 ui:

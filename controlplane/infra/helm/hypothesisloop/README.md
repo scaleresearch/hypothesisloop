@@ -78,6 +78,9 @@ again prints the same tokens.
   Supabase values as the pod's environment.
 - **Hosted agents.** `agents.launcher`, `agents.image` and `agents.apiURL` are the `agents`
   section of the config and are required, since the control plane does not start without them.
+- **Runtimes.** `runtimes.apiURL` and `runtimes.metricsURL` are where a cluster's runtime
+  reaches the API and metrics-service. Registering a cluster hands both out, so they must be
+  reachable from inside every cluster that runs jobs.
 - **cloud-agent and agent-launcher.** Off by default. Each is one image and one config file,
   passed whole through `config` and mounted from a ConfigMap. The file names environment
   variables and never holds a secret; list those variables in `secretEnv` and keep their values

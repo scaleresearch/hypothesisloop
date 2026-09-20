@@ -111,6 +111,18 @@
         }
       }
     },
+    "runtimes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apiURL": {
+          "type": "string"
+        },
+        "metricsURL": {
+          "type": "string"
+        }
+      }
+    },
     "postgres": {
       "type": "object",
       "additionalProperties": false,
