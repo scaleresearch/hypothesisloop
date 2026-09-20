@@ -281,9 +281,15 @@ class API:
     def remove_agent(self, pe_id: str, agent_id: str) -> requests.Response:
         return self.session.delete(self._url(f"/platform-experiments/{pe_id}/agents/{agent_id}"), timeout=30)
 
-    def launcher_desired(self, launcher: str) -> dict:
-        """What the agent-launcher of that name is told should exist right now."""
-        return self.post_json(f"/internal/launchers/{launcher}/reconcile")
+    # What a launcher says of its own launch inputs. Tests that ask as one launcher all say the
+    # same, since a change of it renames every instance of that launcher.
+    LAUNCH_DIGEST = "e2e0e2e0e2e0e2e0e2e0e2e0e2e0e2e0"
+
+    def launcher_desired(self, launcher: str, observed: list[dict] | None = None) -> dict:
+        """One reconcile call as the agent-launcher of that name makes it: `observed` is what its
+        provider lists ({name, state, log}), and the answer is what should exist right now."""
+        return self.post_json(f"/internal/launchers/{launcher}/reconcile",
+                              {"launch_digest": self.LAUNCH_DIGEST, "instances": observed or []})
 
     def signup_role(self, pe_id: str, agent_id: str) -> tuple[int, str | None]:
         r = self.get(f"/platform-experiments/{pe_id}/signups/{agent_id}")
