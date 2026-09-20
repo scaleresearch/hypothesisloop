@@ -1,5 +1,5 @@
 .PHONY: reset build test agent-test e2e-py lint check images sparse-sdpa-workload-image \
-	experimentator-base-image experimentator-image check-tag registry-up registry-prune \
+	experimentator-base-image experimentator-image check-tag check-ui-build-args registry-up registry-prune \
 	helm-prepare helm-lint \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
@@ -41,9 +41,11 @@ export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh 
 REGISTRY_TLS_VERIFY ?= false
 # Empty builds for this host. Set it (linux/amd64) to build for nodes of another architecture.
 IMAGE_PLATFORM ?=
-# Passed to every image build. The UI image takes what the browser needs this way
-# (--build-arg NEXT_PUBLIC_..., see controlplane/build/Dockerfile.ui).
-IMAGE_BUILD_ARGS ?=
+# What the UI image compiles into the browser bundle (controlplane/build/Dockerfile.ui): the
+# Supabase project that signs people in, and the API address when it is not the Dockerfile's
+# localhost one. They come from the environment or the command line and have no default, since
+# no project is a safe guess; all three are public values.
+UI_BUILD_ARGS := NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY $(if $(NEXT_PUBLIC_API_URL),NEXT_PUBLIC_API_URL)
 
 check-tag:
 	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
@@ -260,12 +262,17 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here.
 # The dev registry is started only when it is the one pushed to.
-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
+check-ui-build-args:
+	@test -n "$(NEXT_PUBLIC_SUPABASE_URL)" && test -n "$(NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)" || { \
+		echo "make images: the UI image needs NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, the Supabase project that signs people in (controlplane/ui/.env.example). Set both in the environment or on the command line." >&2; exit 1; }
+
+images: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	go mod vendor
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
+		build_args=""; if [ "$$name" = ui ]; then build_args="$(foreach arg,$(UI_BUILD_ARGS),--build-arg $(arg)=$($(arg)))"; fi; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
-		podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) $(IMAGE_BUILD_ARGS) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
+		podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) $$build_args -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
