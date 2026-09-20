@@ -98,6 +98,15 @@ type Executor interface {
 	GetClusterID(ctx context.Context) (string, error)
 }
 
+// PassScoped is implemented by an executor whose every read of actual state is a call to a
+// remote API with a rate limit. The loop asks it for an executor once at the top of each
+// reconcile pass and each status push, and runs the whole pass against that one, which may then
+// answer every read from a single look at actual state. What it read dies with the pass: the
+// next pass asks again.
+type PassScoped interface {
+	ForPass(ctx context.Context) (Executor, error)
+}
+
 // JobStatus is what one poll of a managed workload observed.
 type JobStatus struct {
 	Phase workload.JobPhase

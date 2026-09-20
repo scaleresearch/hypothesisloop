@@ -62,6 +62,16 @@ func (a *Agent) Run(ctx context.Context) {
 	wg.Wait()
 }
 
+// executorForPass is the executor one reconcile pass or one status push runs against: the
+// agent's own, or the one a PassScoped executor hands out for the pass.
+func (a *Agent) executorForPass(ctx context.Context) (agentexec.Executor, error) {
+	scoped, ok := a.Executor.(agentexec.PassScoped)
+	if !ok {
+		return a.Executor, nil
+	}
+	return scoped.ForPass(ctx)
+}
+
 func (a *Agent) reconcileLoop(ctx context.Context) {
 	ticker := time.NewTicker(a.ReconcileInterval)
 	defer ticker.Stop()
@@ -78,15 +88,19 @@ func (a *Agent) reconcileLoop(ctx context.Context) {
 }
 
 func (a *Agent) reconcileOnce(ctx context.Context) error {
-	desired, checkpointWindow, err := a.fetchDesiredState(ctx)
+	exec, err := a.executorForPass(ctx)
+	if err != nil {
+		return fmt.Errorf("read actual state: %w", err)
+	}
+	desired, checkpointWindow, err := a.fetchDesiredState(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("fetch desired state: %w", err)
 	}
-	actual, err := a.Executor.ListManagedJobs(ctx)
+	actual, err := exec.ListManagedJobs(ctx)
 	if err != nil {
 		return fmt.Errorf("list local workloads: %w", err)
 	}
-	auxiliary, err := a.Executor.ListManagedAuxiliaryWorkloads(ctx)
+	auxiliary, err := exec.ListManagedAuxiliaryWorkloads(ctx)
 	if err != nil {
 		return fmt.Errorf("list local auxiliary resources: %w", err)
 	}
@@ -115,7 +129,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 
 	for id, exp := range desiredByID {
 		if actualSet[id] {
-			matches, err := a.Executor.WorkloadMatchesDesired(ctx, exp)
+			matches, err := exec.WorkloadMatchesDesired(ctx, exp)
 			if err != nil {
 				a.Log("compare workload %s with desired spec: %v", id, err)
 				reconcileErrors = append(reconcileErrors, fmt.Errorf("compare workload %s: %w", id, err))
@@ -126,7 +140,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 				// being replaced with the one desired state now asks for, and the next pass
 				// recreates it — making the job save a checkpoint it is about to be restarted
 				// past would only delay its own replacement.
-				if err := a.Executor.DeleteWorkload(ctx, id, false); err != nil {
+				if err := exec.DeleteWorkload(ctx, id, false); err != nil {
 					a.Log("delete drifted workload %s: %v", id, err)
 					reconcileErrors = append(reconcileErrors, fmt.Errorf("delete drifted workload %s: %w", id, err))
 					continue
@@ -135,7 +149,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := a.Executor.CreateWorkload(ctx, exp); err != nil {
+		if err := exec.CreateWorkload(ctx, exp); err != nil {
 			a.Log("create workload %s: %v", id, err)
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("create workload %s: %w", id, err))
 			continue
@@ -166,7 +180,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	}
 	if needsFinalCapture {
 		captureCtx, cancelCapture := context.WithTimeout(ctx, finalStatusCaptureBudget)
-		a.reportChangedStatuses(captureCtx)
+		a.reportStatuses(captureCtx, exec)
 		cancelCapture()
 	}
 
@@ -177,7 +191,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		// The one place a checkpoint window can apply: this workload is no longer desired, so
 		// something ended it, and the control plane has already said which endings earn a
 		// window. A workload absent from the grant list is deleted as it always has been.
-		if err := a.Executor.DeleteWorkload(ctx, id, checkpointWindow[id]); err != nil {
+		if err := exec.DeleteWorkload(ctx, id, checkpointWindow[id]); err != nil {
 			a.Log("delete workload %s: %v", id, err)
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("delete workload %s: %w", id, err))
 			continue
@@ -185,7 +199,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("deleted workload %s (no longer desired)", id)
 	}
 	for _, id := range orphanAuxiliaryIDs(desiredByID, actualSet, auxiliary) {
-		if err := a.Executor.DeleteWorkload(ctx, id, false); err != nil {
+		if err := exec.DeleteWorkload(ctx, id, false); err != nil {
 			a.Log("delete orphan auxiliary resources %s: %v", id, err)
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("delete orphan auxiliary resources %s: %w", id, err))
 			continue
@@ -193,7 +207,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("deleted orphan auxiliary resources %s", id)
 	}
 
-	if err := a.Executor.ReapTerminal(ctx, desiredByID); err != nil {
+	if err := exec.ReapTerminal(ctx, desiredByID); err != nil {
 		a.Log("reap terminal workloads: %v", err)
 		reconcileErrors = append(reconcileErrors, fmt.Errorf("reap terminal workloads: %w", err))
 	}
@@ -213,32 +227,32 @@ func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[st
 // fetchDesiredState returns this cluster's desired workloads and the set of experiment ids whose
 // termination the control plane granted a checkpoint window — the two halves of one pass's view:
 // what should exist, and which of the things that should not may still exist for a moment.
-func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, map[string]bool, error) {
-	cpuAvail, cpuTotal, err := a.Executor.GetLiveCPUCapacity(ctx)
+func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) ([]*domain.Experiment, map[string]bool, error) {
+	cpuAvail, cpuTotal, err := exec.GetLiveCPUCapacity(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get live CPU capacity: %w", err)
 	}
-	acceleratorAvail, acceleratorTotal, acceleratorByNode, nodeLabels, err := a.Executor.GetLiveAcceleratorCapacitySnapshot(ctx)
+	acceleratorAvail, acceleratorTotal, acceleratorByNode, nodeLabels, err := exec.GetLiveAcceleratorCapacitySnapshot(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get live accelerator capacity: %w", err)
 	}
-	ramAvail, ramTotal, err := a.Executor.GetLiveRAMCapacity(ctx)
+	ramAvail, ramTotal, err := exec.GetLiveRAMCapacity(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get live RAM capacity: %w", err)
 	}
-	storageAvail, storageTotal, err := a.Executor.GetLiveStorageCapacity(ctx)
+	storageAvail, storageTotal, err := exec.GetLiveStorageCapacity(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get live storage capacity: %w", err)
 	}
-	nodeResources, err := a.Executor.GetLiveNodeResourceCapacity(ctx)
+	nodeResources, err := exec.GetLiveNodeResourceCapacity(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get live per-node resource capacity: %w", err)
 	}
-	nodeResourcesTotal, err := a.Executor.GetNodeTotalCapacity(ctx)
+	nodeResourcesTotal, err := exec.GetNodeTotalCapacity(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get per-node total resource capacity: %w", err)
 	}
-	clusterID, err := a.Executor.GetClusterID(ctx)
+	clusterID, err := exec.GetClusterID(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get cluster id: %w", err)
 	}
@@ -249,7 +263,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, ma
 		"node_resources_by_node":        nodeResources,
 		"node_resources_total_by_node":  nodeResourcesTotal,
 		"node_labels_by_node":           nodeLabels,
-		"multi_node_capable":            a.Executor.SupportsMultiNodeJobs(),
+		"multi_node_capable":            exec.SupportsMultiNodeJobs(),
 		"autoscaler_enabled":            a.AutoscalerEnabled,
 		"cluster_id":                    clusterID,
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
@@ -324,7 +338,18 @@ func (a *Agent) statusReportLoop(ctx context.Context) {
 }
 
 func (a *Agent) reportChangedStatuses(ctx context.Context) {
-	ids, err := a.Executor.ListManagedJobsForStatus(ctx)
+	exec, err := a.executorForPass(ctx)
+	if err != nil {
+		a.Log("read actual state for status: %v", err)
+		return
+	}
+	a.reportStatuses(ctx, exec)
+}
+
+// reportStatuses pushes one snapshot observed through exec. The reconcile pass hands it its own
+// executor for the last push before a delete, so that push costs no second read of actual state.
+func (a *Agent) reportStatuses(ctx context.Context, exec agentexec.Executor) {
+	ids, err := exec.ListManagedJobsForStatus(ctx)
 	if err != nil {
 		a.Log("list managed jobs for status: %v", err)
 		return
@@ -338,7 +363,7 @@ func (a *Agent) reportChangedStatuses(ctx context.Context) {
 	// controller declines to act on it (see checkSilence's !found branch).
 	reports := make([]statusReportWire, 0, len(ids))
 	for _, id := range ids {
-		report, ok := a.statusReportFor(ctx, id)
+		report, ok := a.statusReportFor(ctx, exec, id)
 		if !ok {
 			a.Log("status snapshot incomplete (%s unobservable); skipping this push rather than reporting the rest as gone", id)
 			return
@@ -352,10 +377,10 @@ func (a *Agent) reportChangedStatuses(ctx context.Context) {
 // statusReportFor observes one job: its phase, where it landed, its log tail and why its
 // container is in the state it is in. ok is false when the job could not be observed coherently,
 // which costs the whole snapshot — see reportChangedStatuses for why a partial one is dangerous.
-func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWire, bool) {
+func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id string) (statusReportWire, bool) {
 	// One combined poll keeps phase, UID and attempt from separate reads from being combined
 	// into an impossible observation during a delete/recreate race.
-	observed, err := a.Executor.PollJobStatus(ctx, id)
+	observed, err := exec.PollJobStatus(ctx, id)
 	if err != nil {
 		a.Log("poll job phase %s: %v", id, err)
 		return statusReportWire{}, false
@@ -370,7 +395,7 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 	// runningTypeUnobservable), which it can only do if it keeps hearing the phase.
 	var admittedAcceleratorType, admittedNode string
 	if phase != workload.JobPhaseGone {
-		t, node, consistent, err := a.Executor.ResolveAdmittedAcceleratorType(ctx, id)
+		t, node, consistent, err := exec.ResolveAdmittedAcceleratorType(ctx, id)
 		switch {
 		case err != nil:
 			a.Log("resolve admitted accelerator type %s: %v", id, err)
@@ -392,12 +417,12 @@ func (a *Agent) statusReportFor(ctx context.Context, id string) (statusReportWir
 		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
 		// not stop this batch reporting phase for every other job (important.md #19), so it is
 		// logged and that job reports phase alone.
-		logTail, err = a.Executor.FetchLogTail(ctx, id, a.logTailLines())
+		logTail, err = exec.FetchLogTail(ctx, id, a.logTailLines())
 		if err != nil {
 			a.Log("fetch log tail %s: %v", id, err)
 			logTail = nil
 		}
-		reason, message, restartCount, scheduledNodes, schedulingReason, err = a.Executor.PollPhaseDetail(ctx, id, observed.Attempt)
+		reason, message, restartCount, scheduledNodes, schedulingReason, err = exec.PollPhaseDetail(ctx, id, observed.Attempt)
 		if err != nil {
 			a.Log("poll phase detail %s: %v", id, err)
 			reason, message, restartCount, scheduledNodes, schedulingReason = "", "", 0, 0, ""
