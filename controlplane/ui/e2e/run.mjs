@@ -131,6 +131,8 @@ async function scenarios(browser) {
     if (request.url().startsWith(API) && request.method() !== 'OPTIONS') apiCalls.push(request)
   })
   page.on('dialog', dialog => dialog.accept())
+  const crashes = []
+  page.on('pageerror', error => crashes.push(error.message))
 
   section('a visitor without a session is sent to sign in, and returns to where they were going')
   await page.goto(`${UI}/jobs?status=RUNNING`)
@@ -324,6 +326,14 @@ async function scenarios(browser) {
   await page.unroute(`${API}/me`)
   await page.getByRole('heading', { name: 'Jobs' }).waitFor({ timeout: 60_000 })
 
+  section('editing the experiment keeps it in its project')
+  await page.goto(`${UI}/platform-experiments`)
+  await page.getByRole('button', { name: 'Edit' }).first().click()
+  await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(`${experimentName}-edited`)
+  await page.getByRole('button', { name: 'Next: competition settings' }).click()
+  await page.getByRole('button', { name: 'Save Changes' }).click()
+  await page.getByText(`${experimentName}-edited`).first().waitFor()
+
   section('a second account sees none of the first one\'s work')
   const other = await browser.newContext(VIEW)
   const otherPage = await other.newPage()
@@ -404,6 +414,7 @@ async function scenarios(browser) {
   await refused.close()
   await configure({ audience: 'hypothesisloop-dev' })
 
+  assert.deepEqual(crashes, [], 'no page threw an uncaught error')
   await context.close()
 }
 
