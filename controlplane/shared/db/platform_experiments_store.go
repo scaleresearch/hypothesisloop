@@ -43,19 +43,15 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // coordinatorColumns are what a platform experiment says of the coordinator the platform runs
 // for it, read from platform_experiments as pe.
 const coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model, pe.coordinator_instance_name,
-       pe.coordinator_instance_restarts, pe.coordinator_instance_stopped, pe.coordinator_instance_exited_at, pe.coordinator_instance_exit_log`
-
-// CreatePlatformExperiment inserts a new platform experiment.
-func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
-	return insertPlatformExperiment(ctx, s.pool.pool, pe)
-}
+       pe.coordinator_instance_restarts, pe.coordinator_instance_stopped, pe.coordinator_instance_exited_at, pe.coordinator_instance_exit_log,
+       pe.coordinator_instance_seen_at, pe.coordinator_instance_launch`
 
 func insertPlatformExperiment(ctx context.Context, into interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -84,7 +80,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		stages, 1,
 		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
-		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model,
+		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -96,7 +92,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier,
-       ` + coordinatorColumns + `
+       ` + coordinatorColumns + `, pe.max_hosted
 FROM platform_experiments pe
 WHERE id = $1`
 
@@ -113,6 +109,7 @@ WHERE id = $1`
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
+		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &pe.MaxHosted,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -294,7 +291,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.stages, pe.current_stage, pe.summary,
        pe.hypothesis_submit_policy, pe.job_submit_policy,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier,
-       pe.coordinator_hosted,
+       pe.coordinator_hosted, pe.max_hosted,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
 LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
@@ -322,7 +319,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&hypothesisPolicy, &jobPolicy,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier,
-			&pe.CoordinatorHosted,
+			&pe.CoordinatorHosted, &pe.MaxHosted,
 			&pe.SignupCount,
 		); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: scan: %w", err)

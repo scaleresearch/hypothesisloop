@@ -98,7 +98,7 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
+		if err := access.ActAs(ctx, in.Body.AgentID); err != nil {
 			return nil, err
 		}
 		if err := h.active.RequireActive(ctx, in.ID, in.Body.AgentID); err != nil {

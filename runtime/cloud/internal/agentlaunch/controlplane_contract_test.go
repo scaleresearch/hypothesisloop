@@ -2,7 +2,6 @@ package agentlaunch
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http/httptest"
 	"reflect"
@@ -14,129 +13,23 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi/launchertest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
 
-// The launcher and the control plane's handler are written against each other's JSON. These
-// tests run the launcher's pass against the handler itself, over HTTP, so a field renamed on
-// either side fails here instead of in a deployment.
-
 const contractSecret = "a-signing-secret-only-this-test-knows"
-
-// signups holds hosted signups as the database does, with the store's own conditions on the two
-// writes the handler makes.
-type signups struct {
-	agents []db.LauncherAgent
-	// askedAgo is how long ago each agent's current instance name was first asked for.
-	askedAgo     map[string]time.Duration
-	coordinators []db.LauncherCoordinator
-}
-
-func (s *signups) coordinator(pe string) *db.LauncherCoordinator {
-	for i := range s.coordinators {
-		if s.coordinators[i].PlatformExperimentID == pe {
-			return &s.coordinators[i]
-		}
-	}
-	panic("no coordinator of " + pe)
-}
-
-func (s *signups) ListLauncherCoordinators(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherCoordinator, error) {
-	listed := []db.LauncherCoordinator{}
-	for _, coordinator := range s.coordinators {
-		if coordinator.Launcher == launcher && !coordinator.Instance.Stopped {
-			listed = append(listed, coordinator)
-		}
-	}
-	return listed, nil
-}
-
-func (s *signups) SetCoordinatorInstanceName(_ context.Context, pe, name string) error {
-	s.coordinator(pe).Instance.Name = name
-	delete(s.askedAgo, coordinatorKey+pe)
-	return nil
-}
-
-func (s *signups) RecordCoordinatorInstanceExit(_ context.Context, pe, name, exitLog string, maxRestarts int) (bool, error) {
-	instance := &s.coordinator(pe).Instance
-	if instance.Stopped || name == "" || instance.Name != name {
-		return false, nil
-	}
-	now := time.Now()
-	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
-	if instance.Restarts >= maxRestarts {
-		instance.Stopped = true
-	} else {
-		instance.Restarts++
-	}
-	return true, nil
-}
-
-func (s *signups) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
-	if s.askedAgo[coordinatorKey+pe] <= bootLimit {
-		return false, nil
-	}
-	return s.RecordCoordinatorInstanceExit(ctx, pe, name, why, maxRestarts)
-}
-
-// coordinatorKey prefixes a platform experiment's id where askedAgo keeps its coordinator.
-const coordinatorKey = "coordinator of "
 
 const contractBootLimit = 5 * time.Minute
 
-func (s *signups) RecordAgentInstanceStuck(ctx context.Context, pe, agentID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
-	if s.askedAgo[agentID] <= bootLimit {
-		return false, nil
-	}
-	return s.RecordAgentInstanceExit(ctx, pe, agentID, name, why, maxRestarts)
-}
-
-func (s *signups) ListLauncherAgents(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherAgent, error) {
-	listed := []db.LauncherAgent{}
-	for _, agent := range s.agents {
-		if agent.Launcher != launcher || agent.Instance.Stopped {
-			continue
-		}
-		instance := *agent.Instance
-		agent.Instance = &instance
-		listed = append(listed, agent)
-	}
-	return listed, nil
-}
-
-func (s *signups) instance(agentID string) *domain.AgentInstance {
-	for i := range s.agents {
-		if s.agents[i].AgentID == agentID {
-			return s.agents[i].Instance
-		}
-	}
-	panic("no agent " + agentID)
-}
-
-func (s *signups) SetAgentInstanceName(_ context.Context, _, agentID, name string) error {
-	s.instance(agentID).Name = name
-	delete(s.askedAgo, agentID)
-	return nil
-}
-
-func (s *signups) RecordAgentInstanceExit(_ context.Context, _, agentID, name, exitLog string, maxRestarts int) (bool, error) {
-	instance := s.instance(agentID)
-	if instance.Stopped || name == "" || instance.Name != name {
-		return false, nil
-	}
-	now := time.Now()
-	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
-	if instance.Restarts >= maxRestarts {
-		instance.Stopped = true
-	} else {
-		instance.Restarts++
-	}
-	return true, nil
+var contractSettings = launcherapi.Settings{
+	Image: "registry.example.invalid/agent:1", APIURL: "https://api.example.invalid",
+	SigningSecret: contractSecret, BootLimit: contractBootLimit, MaxNewPerAnswer: 50,
 }
 
 func hostedAgent(pe, agent string) db.LauncherAgent {
@@ -147,37 +40,56 @@ func hostedAgent(pe, agent string) db.LauncherAgent {
 	}}
 }
 
-// onlyTheLauncher admits the launcher's own token as that launcher and nothing else.
-type onlyTheLauncher struct{}
+// registered is the authenticator's directory with the launchers table in it and nothing else:
+// a launcher's token asks it nothing more.
+type registered struct {
+	auth.Directory
+	launchers map[string]bool
+}
 
-func (onlyTheLauncher) Authenticate(_ context.Context, token string) (auth.Principal, error) {
-	if token != launcherToken {
-		return auth.Principal{}, errors.New("not the launcher's token")
-	}
-	return auth.Principal{Kind: auth.KindLauncher, LauncherName: "main"}, nil
+func (r *registered) LauncherKnown(_ context.Context, name string) (bool, error) {
+	return r.launchers[name], nil
 }
 
 type contract struct {
-	t        *testing.T
-	store    *signups
-	rented   *fake.Provider
-	launcher *Launcher
-	log      []string
+	t          *testing.T
+	store      *launchertest.Store
+	rented     *fake.Provider
+	launcher   *Launcher
+	registered *registered
 }
 
 func newContract(t *testing.T, agents ...db.LauncherAgent) *contract {
 	t.Helper()
-	c := &contract{t: t, store: &signups{agents: agents, askedAgo: map[string]time.Duration{}}, rented: fake.New()}
+	return newContractUnder(t, contractSettings, agents...)
+}
+
+// newContractUnder runs the launcher's pass against the control plane's own handler behind its
+// own authenticator, over HTTP, so a field renamed on either side fails here.
+func newContractUnder(t *testing.T, settings launcherapi.Settings, agents ...db.LauncherAgent) *contract {
+	t.Helper()
+	c := &contract{
+		t: t, rented: fake.New(), registered: &registered{launchers: map[string]bool{"main": true}},
+		store: &launchertest.Store{ByLauncher: map[string][]db.LauncherAgent{"main": agents}},
+	}
+	authenticator, err := auth.NewAuthenticator(config.AuthConfig{SigningSecret: contractSecret}, c.registered)
+	if err != nil {
+		t.Fatal(err)
+	}
 	launchers := chi.NewRouter()
-	doc := apidocs.New(launchers, "launcher", "1.0.0", "", onlyTheLauncher{}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, "registry.example.invalid/agent:1", "https://api.example.invalid", contractSecret, contractBootLimit, zap.NewNop()))
+	doc := apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, settings, zap.NewNop()))
 	root := chi.NewRouter()
 	root.Mount("/internal/launchers", launchers)
 	server := httptest.NewServer(root)
 	t.Cleanup(server.Close)
 
+	token, err := auth.Mint(contractSecret, auth.LauncherScope("main"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	launcher, err := New(Config{
-		Name: "main", APIURL: server.URL, Token: launcherToken, Namespace: "ns",
+		Name: "main", APIURL: server.URL, Token: token,
 		Command: []string{"run-agent"}, Size: Size{CPUMillis: 1000, MemoryBytes: 1 << 30, DiskBytes: 1 << 30},
 		ModelProvider: "example", Env: map[string]string{"MODEL_CREDENTIAL": oauthToken},
 		Provider: c.rented, HTTPClient: server.Client(), Interval: time.Second,
@@ -197,11 +109,15 @@ func (c *contract) pass() {
 	}
 }
 
+func (c *contract) instance(agentID string) domain.AgentInstance {
+	return *c.store.Find("pe-1", agentID)
+}
+
 func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"), hostedAgent("pe-1", "ag-two"))
 	c.pass()
 	names := c.rented.Names()
-	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-ns-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-ns-pe1-agtwo-") {
+	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-main-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-main-pe1-agtwo-") {
 		t.Fatalf("rented %v", names)
 	}
 	spec := c.rented.Spec(names[0])
@@ -217,7 +133,7 @@ func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	if spec.Image != "registry.example.invalid/agent:1" || !reflect.DeepEqual(spec.Env, wantEnv) || !reflect.DeepEqual(spec.Command, []string{"run-agent"}) {
 		t.Fatalf("spec = %+v\nwant env %v", spec, wantEnv)
 	}
-	if got := c.store.instance("ag-one").Name; "hl-agent-ns-"+got != names[0] {
+	if got := c.instance("ag-one").Name; "hl-agent-main-"+got != names[0] {
 		t.Fatalf("the control plane recorded the name %q for the instance rented as %q", got, names[0])
 	}
 
@@ -240,7 +156,7 @@ func TestAnExitTravelsToTheControlPlaneWhichRestartsTheAgentAFewTimesAndThenStop
 	seen := map[string]bool{}
 	for exit := 1; exit <= domain.MaxAgentInstanceRestarts+1; exit++ {
 		crashing := c.rented.Names()[0]
-		if seen[crashing] || !strings.HasPrefix(crashing, "hl-agent-ns-pe1-agcrashing-") {
+		if seen[crashing] || !strings.HasPrefix(crashing, "hl-agent-main-pe1-agcrashing-") {
 			t.Fatalf("exit %d: the agent runs as %q, seen before = %v", exit, crashing, seen[crashing])
 		}
 		seen[crashing] = true
@@ -248,7 +164,7 @@ func TestAnExitTravelsToTheControlPlaneWhichRestartsTheAgentAFewTimesAndThenStop
 		c.rented.Exit(crashing, "Traceback", "SystemExit: the reason")
 		c.pass()
 
-		recorded := c.store.instance("ag-crashing")
+		recorded := c.instance("ag-crashing")
 		if recorded.ExitLog != "Traceback\nSystemExit: the reason" || recorded.ExitedAt == nil {
 			t.Fatalf("exit %d: recorded %+v", exit, recorded)
 		}
@@ -280,7 +196,7 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	c.rented.Start(name)
 	ids := c.rented.IDs(name)
 
-	c.store.agents[0].Ending = true
+	c.store.ByLauncher["main"][0].Ending = true
 	c.pass()
 	c.pass()
 	if c.rented.Stops(name) != 2 || !reflect.DeepEqual(c.rented.IDs(name), ids) {
@@ -288,7 +204,7 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	}
 	c.rented.Exit(name, "last turn done")
 	c.pass()
-	if recorded := c.store.instance("ag-one"); recorded.Restarts != 0 || recorded.ExitedAt != nil || recorded.Name == "" {
+	if recorded := c.instance("ag-one"); recorded.Restarts != 0 || recorded.ExitedAt != nil || recorded.Name == "" {
 		t.Fatalf("an ending agent's exit was recorded as a crash: %+v", recorded)
 	}
 	if !reflect.DeepEqual(c.rented.IDs(name), ids) || c.rented.Calls("Create") != 1 {
@@ -296,7 +212,7 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	}
 
 	// Its wind-down has passed: the control plane no longer lists it.
-	c.store.agents = nil
+	c.store.ByLauncher = nil
 	c.pass()
 	if len(c.rented.Names()) != 0 {
 		t.Fatalf("still rented: %v", c.rented.Names())
@@ -330,57 +246,12 @@ func TestARotatedCredentialReplacesEveryRunningInstance(t *testing.T) {
 	}
 }
 
-func TestAMachineThatNeverStartsIsReplacedByTheControlPlanesDecisionAndCountedAsARestart(t *testing.T) {
-	c := newContract(t, hostedAgent("pe-1", "ag-slow"))
-	c.pass()
-	first := c.rented.Names()[0]
-	firstIDs := c.rented.IDs(first)
-
-	c.store.askedAgo["ag-slow"] = contractBootLimit - time.Second
-	c.pass()
-	if !reflect.DeepEqual(c.rented.IDs(first), firstIDs) {
-		t.Fatal("a machine inside the boot limit was replaced")
-	}
-
-	for restart := 1; restart <= domain.MaxAgentInstanceRestarts; restart++ {
-		before := c.rented.Names()[0]
-		c.store.askedAgo["ag-slow"] = contractBootLimit + time.Second
-		c.pass()
-		names := c.rented.Names()
-		if len(names) != 1 || names[0] == before {
-			t.Fatalf("restart %d: rented %v, want one machine under a new name (was %q)", restart, names, before)
-		}
-		if recorded := c.store.instance("ag-slow"); recorded.Restarts != restart || recorded.Stopped {
-			t.Fatalf("restart %d: recorded %+v", restart, recorded)
-		}
-	}
-	c.store.askedAgo["ag-slow"] = contractBootLimit + time.Second
-	c.pass()
-	if recorded := c.store.instance("ag-slow"); !recorded.Stopped || len(c.rented.Names()) != 0 {
-		t.Fatalf("after the last restart: recorded %+v, rented %v, want the agent stopped and nothing rented", recorded, c.rented.Names())
-	}
-	if creates := c.rented.Calls("Create"); creates != 1+domain.MaxAgentInstanceRestarts {
-		t.Fatalf("creates = %d, want %d ever", creates, 1+domain.MaxAgentInstanceRestarts)
-	}
-
-	// A machine that came up is never held to the limit.
-	running := newContract(t, hostedAgent("pe-1", "ag-up"))
-	running.pass()
-	name := running.rented.Names()[0]
-	running.rented.Start(name)
-	running.store.askedAgo["ag-up"] = 24 * time.Hour
-	running.pass()
-	if running.store.instance("ag-up").Restarts != 0 || running.rented.Calls("Create") != 1 {
-		t.Fatal("a running machine was held to the boot limit")
-	}
-}
-
 func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"))
-	c.store.coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
+	c.store.Coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
 	c.pass()
 	names := c.rented.Names()
-	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-ns-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-ns-pe1-coordinator-") {
+	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-main-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-main-pe1-coordinator-") {
 		t.Fatalf("rented %v, want the agent and the coordinator", names)
 	}
 	agent, coordinator := names[0], names[1]
@@ -403,9 +274,9 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	c.rented.Start(coordinator)
 	c.rented.Exit(coordinator, "SystemExit: the reason")
 	c.pass()
-	recorded := c.store.coordinator("pe-1").Instance
+	recorded := c.instance("")
 	replacement := c.rented.Names()[1]
-	if recorded.Restarts != 1 || recorded.ExitLog != "SystemExit: the reason" || replacement == coordinator || !strings.HasPrefix(replacement, "hl-agent-ns-pe1-coordinator-") {
+	if recorded.Restarts != 1 || recorded.ExitLog != "SystemExit: the reason" || replacement == coordinator || !strings.HasPrefix(replacement, "hl-agent-main-pe1-coordinator-") {
 		t.Fatalf("after an exit: recorded %+v, rented %v", recorded, c.rented.Names())
 	}
 	if !reflect.DeepEqual(c.rented.IDs(agent), agentIDs) {
@@ -415,26 +286,70 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	// The platform experiment closes: both are told to stop and left to finish.
 	c.rented.Start(replacement)
 	ids := c.rented.IDs(replacement)
-	c.store.agents[0].Ending = true
-	c.store.coordinators[0].Ending = true
+	c.store.ByLauncher["main"][0].Ending = true
+	c.store.Coordinators[0].Ending = true
 	c.pass()
 	if c.rented.Stops(replacement) != 1 || c.rented.Stops(agent) != 1 || !reflect.DeepEqual(c.rented.IDs(replacement), ids) {
 		t.Fatalf("stops: coordinator %d, agent %d", c.rented.Stops(replacement), c.rented.Stops(agent))
 	}
 	c.rented.Exit(replacement, "last turn done")
 	c.pass()
-	if after := c.store.coordinator("pe-1").Instance; after.Restarts != 1 || c.rented.Calls("Create") != 3 {
+	if after := c.instance(""); after.Restarts != 1 || c.rented.Calls("Create") != 3 {
 		t.Fatalf("an ending coordinator's exit was counted or its machine rented again: %+v, %d creates", after, c.rented.Calls("Create"))
 	}
 
-	c.store.agents, c.store.coordinators = nil, nil
+	c.store.ByLauncher, c.store.Coordinators = nil, nil
 	c.pass()
 	if len(c.rented.Names()) != 0 {
 		t.Fatalf("still rented: %v", c.rented.Names())
 	}
 }
 
-func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsItWithTheProvidersWords(t *testing.T) {
+func TestAMachineThatStaysStartingIsReplacedByTheControlPlanesDecisionAndCountedAsARestart(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-slow"))
+	c.pass()
+	for restart := 1; restart <= domain.MaxAgentInstanceRestarts+1; restart++ {
+		name := c.rented.Names()[0]
+		ids := c.rented.IDs(name)
+		// First listed in this pass, which is when its time to start begins.
+		c.pass()
+		c.store.Advance(contractBootLimit - time.Second)
+		c.pass()
+		if !reflect.DeepEqual(c.rented.IDs(name), ids) {
+			t.Fatalf("restart %d: a machine inside the boot limit was replaced", restart)
+		}
+		c.store.Advance(time.Second)
+		c.pass()
+		recorded := c.instance("ag-slow")
+		if restart > domain.MaxAgentInstanceRestarts {
+			if !recorded.Stopped || len(c.rented.Names()) != 0 {
+				t.Fatalf("after the last restart: recorded %+v, rented %v, want the agent stopped and nothing rented", recorded, c.rented.Names())
+			}
+			break
+		}
+		if names := c.rented.Names(); len(names) != 1 || names[0] == name || recorded.Restarts != restart || recorded.Stopped {
+			t.Fatalf("restart %d: rented %v (was %q), recorded %+v", restart, names, name, recorded)
+		}
+	}
+	if creates := c.rented.Calls("Create"); creates != 1+domain.MaxAgentInstanceRestarts {
+		t.Fatalf("creates = %d, want %d ever", creates, 1+domain.MaxAgentInstanceRestarts)
+	}
+
+	// A machine that came up is never held to the limit.
+	running := newContract(t, hostedAgent("pe-1", "ag-up"))
+	running.pass()
+	running.rented.Start(running.rented.Names()[0])
+	running.pass()
+	running.store.Advance(24 * time.Hour)
+	running.pass()
+	if running.instance("ag-up").Restarts != 0 || running.rented.Calls("Create") != 1 {
+		t.Fatal("a running machine was held to the boot limit")
+	}
+}
+
+// The launcher says nothing of a create that failed. The control plane sees a name it asked for
+// and was never shown, and decides from that.
+func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsIt(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-unrentable"), hostedAgent("pe-1", "ag-fine"))
 	c.rented.Fail = func(method, name string) error {
 		if method == "Create" && strings.Contains(name, "agunrentable") {
@@ -449,40 +364,133 @@ func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsItWithTheProv
 		t.Fatalf("rented %v, want the agent whose create works", fine)
 	}
 	c.rented.Start(fine[0])
-	first := c.store.instance("ag-unrentable").Name
+	first := c.instance("ag-unrentable").Name
 
-	// Reported from the second pass on, and nothing is spent inside the boot limit.
 	pass()
+	c.store.Advance(contractBootLimit - time.Second)
 	pass()
-	if recorded := c.store.instance("ag-unrentable"); recorded.Restarts != 0 || recorded.Name != first {
+	if recorded := c.instance("ag-unrentable"); recorded.Restarts != 0 || recorded.Name != first {
 		t.Fatalf("inside the boot limit: recorded %+v", recorded)
 	}
-
+	c.store.Advance(time.Second)
 	for restart := 1; restart <= domain.MaxAgentInstanceRestarts; restart++ {
-		c.store.askedAgo["ag-unrentable"] = contractBootLimit + time.Second
 		pass()
-		recorded := c.store.instance("ag-unrentable")
-		if recorded.Restarts != restart || recorded.Stopped || !strings.Contains(recorded.ExitLog, "no such size") {
+		recorded := c.instance("ag-unrentable")
+		if recorded.Restarts != restart || recorded.Stopped || !strings.Contains(recorded.ExitLog, "no machine was listed") {
 			t.Fatalf("restart %d: recorded %+v", restart, recorded)
 		}
-		if strings.Contains(recorded.ExitLog, oauthToken) {
-			t.Fatalf("the model credential reached the control plane: %s", recorded.ExitLog)
-		}
-		// The new name's create fails in this same pass and is reported with the next.
-		pass()
+		c.store.Advance(contractBootLimit)
 	}
-	c.store.askedAgo["ag-unrentable"] = contractBootLimit + time.Second
 	pass()
-	if recorded := c.store.instance("ag-unrentable"); !recorded.Stopped {
+	if recorded := c.instance("ag-unrentable"); !recorded.Stopped {
 		t.Fatalf("after the last restart: recorded %+v, want the agent stopped", recorded)
 	}
 	creates := c.rented.Calls("Create")
+	c.store.Advance(contractBootLimit)
 	pass()
 	pass()
 	if c.rented.Calls("Create") != creates {
 		t.Fatal("a stopped agent's machine is still asked of the provider")
 	}
-	if !reflect.DeepEqual(c.rented.Names(), fine) {
-		t.Fatalf("rented %v, want only %v", c.rented.Names(), fine)
+	if !reflect.DeepEqual(c.rented.Names(), fine) || c.instance("ag-fine").Restarts != 0 {
+		t.Fatalf("rented %v, want only %v and nothing spent on it", c.rented.Names(), fine)
+	}
+
+	// The operator fixes the size, which changes the launcher's digest: the agent is asked for
+	// again, with every restart back.
+	cfg := c.launcher.cfg
+	cfg.Size.CPUMillis = 500
+	c.rented.Fail = nil
+	fixed, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixed.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recorded := c.instance("ag-unrentable"); recorded.Stopped || recorded.Restarts != 0 || len(c.rented.Names()) != 2 {
+		t.Fatalf("after the launcher's config changed: recorded %+v, rented %v", recorded, c.rented.Names())
+	}
+}
+
+func TestAMachineThatRanAndIsNoLongerListedIsRentedAgainAndCountedAsARestart(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	name := c.rented.Names()[0]
+	c.rented.Start(name)
+	c.pass()
+	// The provider took the machine away: a host failed, or its lifetime ran out.
+	if err := c.rented.Destroy(context.Background(), c.rented.IDs(name)[0]); err != nil {
+		t.Fatal(err)
+	}
+	c.pass()
+	names := c.rented.Names()
+	recorded := c.instance("ag-one")
+	if len(names) != 1 || names[0] == name || recorded.Restarts != 1 || !strings.Contains(recorded.ExitLog, "no longer lists it") {
+		t.Fatalf("rented %v (was %q), recorded %+v", names, name, recorded)
+	}
+}
+
+// Creates are serial and paused, so a long list takes a pass longer than the boot limit. The
+// control plane asks for a few new machines per answer, and none spends a restart waiting.
+func TestAListLongerThanOnePassCanCreateIsRentedOverSeveralPassesAndSpendsNoRestart(t *testing.T) {
+	settings := contractSettings
+	settings.MaxNewPerAnswer = 2
+	var agents []db.LauncherAgent
+	for i := range 5 {
+		agents = append(agents, hostedAgent("pe-1", fmt.Sprintf("ag-%d", i)))
+	}
+	c := newContractUnder(t, settings, agents...)
+	var rented []int
+	for range 4 {
+		c.pass()
+		for _, name := range c.rented.Names() {
+			c.rented.Start(name)
+		}
+		rented = append(rented, len(c.rented.Names()))
+		// Every pass takes the whole boot limit.
+		c.store.Advance(contractBootLimit)
+	}
+	if !reflect.DeepEqual(rented, []int{2, 4, 5, 5}) {
+		t.Fatalf("rented after each pass = %v, want two more each", rented)
+	}
+	for i := range 5 {
+		if recorded := c.instance(fmt.Sprintf("ag-%d", i)); recorded.Restarts != 0 {
+			t.Fatalf("ag-%d spent a restart waiting its turn: %+v", i, recorded)
+		}
+	}
+	if c.rented.Calls("Create") != 5 || c.rented.Calls("Destroy") != 0 {
+		t.Fatalf("creates %d, destroys %d", c.rented.Calls("Create"), c.rented.Calls("Destroy"))
+	}
+}
+
+// A launcher is taken out of service by giving its agents to none: its token works while it is
+// registered, so its last passes end what it holds. Removing its row first would leave them.
+func TestARegisteredLauncherNoAgentIsGivenToDestroysWhatItHoldsAndAnUnregisteredOneCanDoNothing(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"), hostedAgent("pe-1", "ag-two"))
+	c.pass()
+	if len(c.rented.Names()) != 2 {
+		t.Fatalf("rented %v", c.rented.Names())
+	}
+	c.store.ByLauncher["main"] = c.store.ByLauncher["main"][:1]
+	c.pass()
+	if len(c.rented.Names()) != 1 {
+		t.Fatalf("rented %v, want the one agent still listed", c.rented.Names())
+	}
+
+	c.registered.launchers["main"] = false
+	c.store.ByLauncher = nil
+	err := c.launcher.Pass(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("a pass of a launcher that is not registered: got = %v, want its token refused", err)
+	}
+	if len(c.rented.Names()) != 1 || c.rented.Calls("Destroy") != 1 {
+		t.Fatalf("rented %v: a refused launcher changed what it holds", c.rented.Names())
+	}
+
+	c.registered.launchers["main"] = true
+	c.pass()
+	if len(c.rented.Names()) != 0 {
+		t.Fatalf("still rented: %v, want nothing once the empty list reached the launcher", c.rented.Names())
 	}
 }

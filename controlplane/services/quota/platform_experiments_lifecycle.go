@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -102,23 +103,25 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		UpdatedAt:                 now,
 		CoordinatorHosted:         req.CoordinatorHosted,
 		Coordinator:               req.coordinator,
+		MaxHosted:                 req.maxHosted,
 	}
-	if req.HostedAgents == 0 {
-		if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
+	// The experiment and its agents are one write: one asked for with agents never exists
+	// without them.
+	var agents []*domain.Agent
+	var signups []domain.AgentSignup
+	if req.HostedAgents > 0 {
+		if agents, signups, err = newAgents(req.HostedAgents, "", domain.AgentKindAgent, *req.hostedAgent, now); err != nil {
 			return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 		}
-	} else {
-		// The experiment and its agents are one write: one asked for with agents never exists
-		// without them.
-		agents, signups, err := newAgents(req.HostedAgents, "", domain.AgentKindAgent, *req.hostedAgent, now)
-		if err != nil {
-			return nil, fmt.Errorf("platform_experiments.Create: %w", err)
-		}
-		if err := s.store.CreatePlatformExperimentWithAgents(ctx, pe, agents, signups); err != nil {
-			return nil, fmt.Errorf("platform_experiments.Create: %w", err)
-		}
-		pe.SignupCount = len(signups)
 	}
+	err = s.store.CreatePlatformExperimentWithAgents(ctx, pe, agents, signups)
+	if errors.Is(err, db.ErrMaxHostedReached) {
+		return nil, refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+	}
+	pe.SignupCount = len(signups)
 	s.logger.Info("platform experiment created", zap.String("id", pe.ID), zap.String("name", pe.Name))
 	return pe, nil
 }
@@ -225,6 +228,45 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req 
 	return pe, nil
 }
 
+// UpdateDescription is the update a coordinator's token may make: the description and nothing
+// else. Every other field decides what the run spends or how long it lasts, which is stated by
+// whoever created it, so a body that differs from the live experiment in one of them is refused.
+func (s *PlatformExperimentsService) UpdateDescription(ctx context.Context, id string, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
+	pe, err := s.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if pe == nil {
+		return nil, fmt.Errorf("not_found")
+	}
+	var differs []string
+	differ := func(field string, changed bool) {
+		if changed {
+			differs = append(differs, field)
+		}
+	}
+	differ("name", req.Name != pe.Name)
+	differ("budget_accelerator_hours", req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours)
+	differ("max_agents", req.MaxAgents != pe.MaxAgents)
+	differ("metrics", !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics))
+	differ("report_interval_seconds", req.ReportIntervalSeconds != pe.ReportIntervalSeconds)
+	differ("starts_at", !req.StartsAt.Truncate(time.Minute).Equal(pe.StartsAt.Truncate(time.Minute)))
+	differ("ends_at", !req.EndsAt.Truncate(time.Minute).Equal(pe.EndsAt.Truncate(time.Minute)))
+	differ("stages", len(req.Stages) > 0 && !reflect.DeepEqual(req.Stages, pe.Stages))
+	differ("hypothesis_submit_policy", req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy)
+	differ("job_submit_policy", req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy)
+	differ("default_quota_tier", req.DefaultQuotaTier != "" && domain.QuotaTier(req.DefaultQuotaTier) != pe.DefaultQuotaTier)
+	differ("max_concurrent_accelerators", req.MaxConcurrentAccelerators != nil && (pe.MaxConcurrentAccelerators == nil || *req.MaxConcurrentAccelerators != *pe.MaxConcurrentAccelerators))
+	if len(differs) > 0 {
+		return nil, refuseSignup(403, "coordinator_changes_description_only", "a coordinator's token changes the description and nothing else, and these fields differ from the live experiment: %s. Send them at their live values (hl platform-experiments get)", strings.Join(differs, ", "))
+	}
+	return s.Update(ctx, id, CreatePlatformExperimentRequest{Description: req.Description})
+}
+
+func maxHostedReached(limit int) string {
+	return fmt.Sprintf("the platform runs at most %d machines for one platform experiment, its hosted agents of every role and its coordinator together", limit)
+}
+
 // Signup gives a registered agent its place in a platform experiment: a fixed role, and
 // everything it is launched with. An empty QuotaTier defers to the experiment's
 // default_quota_tier policy (see domain.ResolveQuotaTier).
@@ -252,6 +294,9 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 	inserted, err := s.store.Signup(ctx, platformExpID, signup)
 	if errors.Is(err, db.ErrMaxAgentsReached) {
 		return refuseSignup(400, "max_agents_reached", "limit is %d", pe.MaxAgents)
+	}
+	if errors.Is(err, db.ErrMaxHostedReached) {
+		return refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	}
 	// Not found either way: an agent of another org is not this experiment's to learn of.
 	if errors.Is(err, db.ErrAgentOutsideOrg) {

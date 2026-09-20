@@ -31,6 +31,9 @@ const usage = `usage: hl-admin <command>
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
+  launcher add NAME                register an agent-launcher and print its token
+  launcher remove NAME             end a launcher's token. Empty it first: what it still holds
+                                   is then nobody's to take down
   repo attach PROJECT INSTALLATION REPOSITORY_ID
                                    make a GitHub repository the project's, as an operator who
                                    vouches for it. GitHub is asked, as the App, that the installation
@@ -104,6 +107,29 @@ func run(args []string, stdout io.Writer) error {
 				return err
 			}
 			fmt.Fprintln(stdout, token)
+			return nil
+		})
+	case len(args) == 3 && args[0] == "launcher" && args[1] == "add":
+		return withPool(func(ctx context.Context, pool *db.Pool) error {
+			if err := db.NewPlatformExperimentsStore(pool).RegisterLauncher(ctx, args[2]); err != nil {
+				return err
+			}
+			token, err := auth.Mint(cfg.Auth.SigningSecret, auth.LauncherScope(args[2]))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, token)
+			return nil
+		})
+	case len(args) == 3 && args[0] == "launcher" && args[1] == "remove":
+		return withPool(func(ctx context.Context, pool *db.Pool) error {
+			removed, err := db.NewPlatformExperimentsStore(pool).RemoveLauncher(ctx, args[2])
+			if err != nil {
+				return err
+			}
+			if !removed {
+				return fmt.Errorf("no launcher %s is registered", args[2])
+			}
 			return nil
 		})
 	case len(args) == 5 && args[0] == "repo" && args[1] == "attach":

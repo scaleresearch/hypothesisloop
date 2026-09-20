@@ -23,14 +23,13 @@ type Size struct {
 }
 
 type Config struct {
-	// Name is the launcher the control plane knows this process as.
+	// Name is the launcher the control plane knows this process as. It is part of every instance
+	// name: the launcher lists, creates and destroys the instances that start with it and no
+	// others, so two launchers on one provider account keep apart by their names.
 	Name   string
 	APIURL string
 	// Token is this launcher's own token, sent on every call to the control plane.
 	Token string
-	// Namespace is part of every instance name. The launcher lists, creates and destroys the
-	// instances of its namespace and no others.
-	Namespace string
 	// Command is the argv every instance runs.
 	Command []string
 	Size    Size
@@ -54,10 +53,6 @@ type Launcher struct {
 	provider     provider.Provider
 	launchDigest string
 	maxAnswer    int
-	// notCreated is what the last pass's creates ended with and the next question carries. It is
-	// that pass's outcome and nothing is decided from it here: a launcher that restarts sends
-	// none, fails the same creates again and reports them one pass later.
-	notCreated []createFailure
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -72,7 +67,7 @@ func New(cfg Config) (*Launcher, error) {
 		return nil, err
 	}
 	return &Launcher{
-		cfg: cfg, prefix: provider.AgentPrefix(cfg.Namespace), provider: provider.Bounded(cfg.Provider),
+		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
 		launchDigest: digest, maxAnswer: maxAnswerBytes,
 	}, nil
 }
@@ -98,11 +93,14 @@ func (cfg Config) launchDigest() (string, error) {
 // Validate checks what a config file decides, so the file is refused when it is loaded, before
 // the provider is built or the control plane contacted.
 func (cfg Config) Validate() error {
-	if cfg.Name == "" || cfg.APIURL == "" {
-		return errors.New("agentlaunch: Name and APIURL are required")
+	if cfg.APIURL == "" {
+		return errors.New("agentlaunch: APIURL is required")
 	}
-	if err := provider.ValidateSegment("namespace", cfg.Namespace); err != nil {
+	if err := provider.ValidateSegment("launcher name", cfg.Name); err != nil {
 		return fmt.Errorf("agentlaunch: %w", err)
+	}
+	if cfg.Interval%time.Second != 0 || cfg.CreatePause%time.Millisecond != 0 {
+		return errors.New("agentlaunch: Interval is whole seconds and CreatePause whole milliseconds, as the control plane is told them")
 	}
 	if len(cfg.Command) == 0 {
 		return errors.New("agentlaunch: Command is required")
@@ -128,17 +126,20 @@ func (cfg Config) Validate() error {
 }
 
 // Run passes until ctx is cancelled. A pass that fails is logged and the next one starts from
-// nothing, like every other.
-func (l *Launcher) Run(ctx context.Context) {
+// nothing, like every other. Only the control plane refusing this launcher's configuration ends
+// it: that is returned, since no later pass can end differently.
+func (l *Launcher) Run(ctx context.Context) error {
 	ticker := time.NewTicker(l.cfg.Interval)
 	defer ticker.Stop()
 	for {
-		if err := l.Pass(ctx); err != nil {
+		if err := l.Pass(ctx); errors.Is(err, ErrRefused) {
+			return err
+		} else if err != nil {
 			l.cfg.Log("pass: %v", err)
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 		}
 	}
@@ -158,14 +159,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	for _, i := range rented {
 		byName[i.Name] = append(byName[i.Name], i)
 	}
-	// A name the provider lists by now was created after all, and is reported as what it is.
-	var notCreated []createFailure
-	for _, failure := range l.notCreated {
-		if _, listed := byName[l.prefix+failure.Name]; !listed {
-			notCreated = append(notCreated, failure)
-		}
-	}
-	want, err := l.fetchDesired(ctx, l.observe(ctx, byName), notCreated)
+	want, err := l.fetchDesired(ctx, l.observe(ctx, byName))
 	if err != nil {
 		return fmt.Errorf("fetch desired state: %w", err)
 	}
@@ -209,14 +203,12 @@ func (l *Launcher) Pass(ctx context.Context) error {
 
 	var creates, failedCreates int
 	var lastCreateError error
-	l.notCreated = nil
 	for _, name := range sortedKeys(want.instances) {
 		// One instance runs the agent: the live one with the lowest id. A provider that lists
 		// with a lag or a create that failed after it succeeded leaves a second, which goes.
 		//
 		// An exited one is never rented again from here, and one that stays starting is never
-		// replaced from here. Both were reported with this pass's question, and a failed
-		// create is reported with the next, and the control
+		// replaced from here. Both were reported with this pass's question, and the control
 		// plane answers one it gives up on with another name or with none. An exited one still
 		// asked for under its own name is left as it is for the next answer, and goes only as
 		// the leftover beside a live one.
@@ -259,15 +251,16 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("create %s: %w", name, err))
 			failedCreates++
 			lastCreateError = err
-			l.notCreated = append(l.notCreated, createFailure{Name: name[len(l.prefix):], Reason: tail(err.Error(), exitLogBytes)})
 			continue
 		}
 		l.cfg.Log("created %s", name)
 	}
-	// Every create failing is the account, the image or the size in this launcher's config, and
-	// nothing will run until it is changed, so it is said once more in a line of its own.
+	// Every create failing is rarely one agent's fault, so it is said once more in a line of its
+	// own. Nothing is given up on here: the control plane asks again until a machine has gone
+	// unlisted for its boot limit, spends a restart then, and starts every agent afresh once the
+	// image or this launcher's config changes.
 	if creates > 0 && failedCreates == creates {
-		l.cfg.Log("NO AGENT COULD BE STARTED: all %d creates of this pass failed, the last with: %v", creates, lastCreateError)
+		l.cfg.Log("NO INSTANCE COULD BE CREATED: all %d creates of this pass failed, the last with: %v. Look at the provider account and its limits, the image the control plane names, and instance in this launcher's config", creates, lastCreateError)
 	}
 	return errors.Join(failures...)
 }
@@ -299,11 +292,23 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 			if err != nil {
 				l.cfg.Log("read the output of exited %s: %v", name, err)
 			}
-			entry.Log = tail(strings.Join(lines, "\n"), exitLogBytes)
+			entry.Log = tail(l.withoutOwnEnvironment(strings.Join(lines, "\n")), exitLogBytes)
 		}
 		observed = append(observed, entry)
 	}
 	return observed
+}
+
+// withoutOwnEnvironment is text with every value this launcher adds to an instance's environment
+// taken out: an agent may print the model provider's credential, and its output is stored by the
+// control plane. The instance's own token is the control plane's to take out, which minted it.
+func (l *Launcher) withoutOwnEnvironment(text string) string {
+	for _, name := range sortedKeys(l.cfg.Env) {
+		if value := l.cfg.Env[name]; len(value) >= minRedactedLength {
+			text = strings.ReplaceAll(text, value, "<"+name+">")
+		}
+	}
+	return text
 }
 
 func tail(text string, limit int) string {

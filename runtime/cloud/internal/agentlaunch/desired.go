@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
@@ -54,19 +55,20 @@ type observedInstance struct {
 type reconcileQuestion struct {
 	LaunchDigest string             `json:"launch_digest"`
 	Instances    []observedInstance `json:"instances"`
-	// CreateFailures are the creates the pass before this one could not make.
-	CreateFailures []createFailure `json:"create_failures,omitempty"`
+	// How this launcher paces its passes, which the control plane holds against its boot limit.
+	ReconcileIntervalSeconds int `json:"reconcile_interval_seconds"`
+	CreatePauseMilliseconds  int `json:"create_pause_milliseconds"`
 }
 
-// createFailure is one instance the provider refused to create, and what it said with every
-// value of the instance's environment taken out.
-type createFailure struct {
-	Name   string `json:"name"`
-	Reason string `json:"reason"`
-}
+// ErrRefused is the control plane refusing this launcher's own configuration. No later pass
+// can end differently, so the process stops on it.
+var ErrRefused = errors.New("the control plane refuses this launcher's configuration")
 
-func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance, notCreated []createFailure) (*desired, error) {
-	question, err := json.Marshal(reconcileQuestion{LaunchDigest: l.launchDigest, Instances: observed, CreateFailures: notCreated})
+func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
+	question, err := json.Marshal(reconcileQuestion{
+		LaunchDigest: l.launchDigest, Instances: observed,
+		ReconcileIntervalSeconds: int(l.cfg.Interval / time.Second), CreatePauseMilliseconds: int(l.cfg.CreatePause / time.Millisecond),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +84,15 @@ func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusConflict {
+		var refusal struct {
+			Detail string `json:"detail"`
+			Error  string `json:"error"`
+		}
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		_ = json.Unmarshal(raw, &refusal)
+		return nil, fmt.Errorf("%w: %s%s", ErrRefused, refusal.Detail, refusal.Error)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}

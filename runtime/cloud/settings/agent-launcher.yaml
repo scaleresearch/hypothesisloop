@@ -2,18 +2,23 @@
 # launcher. AGENT_LAUNCHER_CONFIG names the copy the process reads, and LAUNCHER_TOKEN holds its
 # token (scope launcher:<launcher_name>).
 
-# The name the control plane gives hosted agents to: its agents.launcher. The launcher asks for
-# its list under this name, and its token is accepted for this name only.
+# The name this launcher is registered under with the control plane (`hl-admin launcher add`),
+# 1 to 16 lowercase letters and digits. The launcher asks for its list under this name and its
+# token is accepted for this name only. It is also part of every instance name,
+# hl-agent-<launcher_name>-<name the control plane chose>: the launcher lists, creates and
+# destroys the instances that start so and no others, which keeps two launchers on one provider
+# account apart. The control plane gives newly hosted agents to the launcher its agents.launcher
+# names.
+#
+# The launcher keeps nothing between passes and sees only this prefix on the account of the
+# provider section below. Changing provider.name, the account in provider.settings or this name
+# leaves the machines rented before where it no longer looks, running and billing: drain first
+# (infra/README.md).
 launcher_name: main
 
 # Where this process reaches the control plane. The address the agents reach it at is the control
 # plane's own agents.api_url and arrives in each instance's environment.
 api_url: https://api.example.invalid
-
-# Part of every instance name: hl-agent-<namespace>-<name the control plane chose>. The launcher
-# lists, creates and destroys the instances of its namespace only, so launchers sharing an account
-# each take their own. 1 to 16 lowercase letters and digits.
-namespace: main
 
 # One pass costs the provider one list call, and a create or destroy call for each instance that
 # has to change. Set this against the provider's rate limit.

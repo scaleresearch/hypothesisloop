@@ -2,7 +2,6 @@ package launcherapi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi/launchertest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -35,140 +34,11 @@ const (
 
 const testDigest = "0123456789abcdef0123456789abcdef"
 
-// launcherStore holds signups as the database does and applies the two writes with the store's
-// own conditions, so a test can follow an agent over several reconciles.
-type launcherStore struct {
-	byLauncher map[string][]db.LauncherAgent
-	err        error
-	writeErr   map[string]error
-	asked      []string
-	windDown   time.Duration
-	exitLogs   map[string]string
-	// askedAgo is how long ago each agent's current instance name was first asked for.
-	askedAgo     map[string]time.Duration
-	coordinators []db.LauncherCoordinator
-}
-
-func (s *launcherStore) coordinator(pe string) *db.LauncherCoordinator {
-	for i := range s.coordinators {
-		if s.coordinators[i].PlatformExperimentID == pe {
-			return &s.coordinators[i]
-		}
-	}
-	panic("no coordinator of " + pe)
-}
-
-func (s *launcherStore) ListLauncherCoordinators(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherCoordinator, error) {
-	listed := []db.LauncherCoordinator{}
-	for _, coordinator := range s.coordinators {
-		if coordinator.Launcher == launcher && !coordinator.Instance.Stopped {
-			listed = append(listed, coordinator)
-		}
-	}
-	return listed, nil
-}
-
-func (s *launcherStore) SetCoordinatorInstanceName(_ context.Context, pe, name string) error {
-	s.coordinator(pe).Instance.Name = name
-	delete(s.askedAgo, coordinatorKey+pe)
-	return nil
-}
-
-func (s *launcherStore) RecordCoordinatorInstanceExit(_ context.Context, pe, name, exitLog string, maxRestarts int) (bool, error) {
-	instance := &s.coordinator(pe).Instance
-	if instance.Stopped || name == "" || instance.Name != name {
-		return false, nil
-	}
-	now := time.Now()
-	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
-	if instance.Restarts >= maxRestarts {
-		instance.Stopped = true
-	} else {
-		instance.Restarts++
-	}
-	return true, nil
-}
-
-func (s *launcherStore) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
-	if s.askedAgo[coordinatorKey+pe] <= bootLimit {
-		return false, nil
-	}
-	return s.RecordCoordinatorInstanceExit(ctx, pe, name, why, maxRestarts)
-}
-
-// coordinatorKey prefixes a platform experiment's id where askedAgo keeps its coordinator.
-const coordinatorKey = "coordinator of "
+type launcherStore = launchertest.Store
 
 const testBootLimit = 5 * time.Minute
 
-func (s *launcherStore) RecordAgentInstanceStuck(ctx context.Context, pe, agent, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
-	if err := s.writeErr[agent]; err != nil {
-		return false, err
-	}
-	if s.askedAgo[agent] <= bootLimit {
-		return false, nil
-	}
-	return s.RecordAgentInstanceExit(ctx, pe, agent, name, why, maxRestarts)
-}
-
-func (s *launcherStore) ListLauncherAgents(_ context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error) {
-	s.asked = append(s.asked, launcher)
-	s.windDown = windDown
-	listed := []db.LauncherAgent{}
-	for _, agent := range s.byLauncher[launcher] {
-		if agent.Instance != nil && agent.Instance.Stopped {
-			continue
-		}
-		if agent.Instance != nil {
-			instance := *agent.Instance
-			agent.Instance = &instance
-		}
-		listed = append(listed, agent)
-	}
-	return listed, s.err
-}
-
-func (s *launcherStore) find(pe, agent string) *domain.AgentInstance {
-	for _, agents := range s.byLauncher {
-		for i := range agents {
-			if agents[i].PlatformExperimentID == pe && agents[i].AgentID == agent {
-				return agents[i].Instance
-			}
-		}
-	}
-	return nil
-}
-
-func (s *launcherStore) SetAgentInstanceName(_ context.Context, pe, agent, name string) error {
-	if err := s.writeErr[agent]; err != nil {
-		return err
-	}
-	s.find(pe, agent).Name = name
-	delete(s.askedAgo, agent)
-	return nil
-}
-
-func (s *launcherStore) RecordAgentInstanceExit(_ context.Context, pe, agent, name, exitLog string, maxRestarts int) (bool, error) {
-	if err := s.writeErr[agent]; err != nil {
-		return false, err
-	}
-	instance := s.find(pe, agent)
-	if instance.Stopped || name == "" || instance.Name != name {
-		return false, nil
-	}
-	now := time.Now()
-	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
-	if instance.Restarts >= maxRestarts {
-		instance.Stopped = true
-	} else {
-		instance.Restarts++
-	}
-	if s.exitLogs == nil {
-		s.exitLogs = map[string]string{}
-	}
-	s.exitLogs[agent] = exitLog
-	return true, nil
-}
+var testSettings = Settings{Image: testImage, APIURL: testAPIURL, SigningSecret: testSecret, BootLimit: testBootLimit, MaxNewPerAnswer: 50}
 
 func hosted(pe, agent string) domain.AgentSignup {
 	return domain.AgentSignup{
@@ -189,7 +59,7 @@ func observed(instances ...ObservedInstance) Observed {
 	if instances == nil {
 		instances = []ObservedInstance{}
 	}
-	return Observed{LaunchDigest: testDigest, Instances: instances}
+	return Observed{LaunchDigest: testDigest, Instances: instances, ReconcileIntervalSeconds: 15, CreatePauseMilliseconds: 1000}
 }
 
 func reconcile(t *testing.T, store Store, caller auth.Principal, launcher string, logger *zap.Logger) (int, []byte) {
@@ -201,7 +71,7 @@ func reconcileWith(t *testing.T, store Store, caller auth.Principal, launcher st
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(store, testImage, testAPIURL, testSecret, testBootLimit, logger))
+	RegisterHuma(doc, NewHandler(store, testSettings, logger))
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +114,7 @@ func decode(t *testing.T, raw []byte) Desired {
 var mainLauncher = auth.Principal{Kind: auth.KindLauncher, LauncherName: "main"}
 
 func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{
 		"main": {
 			{AgentSignup: hosted("pe-1", "ag-running")},
 			{AgentSignup: named("pe-1", "ag-cut", "pe1-agcut-aaaaaaaaaaaa"), Ending: true},
@@ -258,8 +128,8 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
-	if !reflect.DeepEqual(store.asked, []string{"main"}) || store.windDown != domain.AgentWindDown {
-		t.Fatalf("store asked for %v with wind-down %s", store.asked, store.windDown)
+	if !reflect.DeepEqual(store.Listed, []string{"main"}) || store.WindDown != domain.AgentWindDown {
+		t.Fatalf("store asked for %v with wind-down %s", store.Listed, store.WindDown)
 	}
 	desired := decode(t, raw)
 	if len(desired.Instances) != 2 || len(desired.Ending) != 2 {
@@ -289,7 +159,7 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	if !reflect.DeepEqual(desired.Ending, []string{"pe1-agcut-aaaaaaaaaaaa", "pe2-agclosed-bbbbbbbbbbbb"}) {
 		t.Errorf("ending = %v, want the two names the instances were created under", desired.Ending)
 	}
-	if got := store.find("pe-1", "ag-running").Name; got != running.Name {
+	if got := store.Find("pe-1", "ag-running").Name; got != running.Name {
 		t.Errorf("the name asked for was recorded as %q, want %q", got, running.Name)
 	}
 	if strings.Contains(string(raw), "ag-elsewhere") {
@@ -322,7 +192,7 @@ func TestEveryInstanceIsToldItsFlavorAndModelAndASignupWithoutThemIsLeftOutAndLo
 	noFlavor, noModel := hosted("pe-1", "ag-no-flavor"), hosted("pe-1", "ag-no-model")
 	noFlavor.Flavor, noModel.Model = "", ""
 	core, logs := observer.New(zap.ErrorLevel)
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
 		{AgentSignup: noFlavor}, {AgentSignup: hosted("pe-1", "ag-whole")}, {AgentSignup: noModel},
 	}}}
 	code, raw := reconcileWith(t, store, mainLauncher, "main", zap.New(core), observed())
@@ -339,7 +209,7 @@ func TestEveryInstanceIsToldItsFlavorAndModelAndASignupWithoutThemIsLeftOutAndLo
 }
 
 func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsRestartsAreSpent(t *testing.T) {
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
 		{AgentSignup: hosted("pe-1", "ag-crashing")}, {AgentSignup: hosted("pe-1", "ag-steady")},
 	}}}
 	first := mustReconcile(t, store, observed())
@@ -362,23 +232,23 @@ func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsResta
 			t.Fatalf("exit %d: the agent is asked for under %q again, so its exited machine would be kept", exit, next)
 		}
 		seen[next] = true
-		recorded := store.find("pe-1", "ag-crashing")
+		recorded := store.Find("pe-1", "ag-crashing")
 		if recorded.Restarts != exit || recorded.Stopped || recorded.Name != next || recorded.ExitLog != fmt.Sprintf("exit %d", exit) {
 			t.Fatalf("exit %d: recorded %+v", exit, recorded)
 		}
 		// The launcher could not destroy the old machine and reports it again: nothing is counted.
-		again := mustReconcile(t, store, observed(ObservedInstance{Name: crashing, State: "exited", Log: "said again"}))
-		if again.Instances[0].Name != next || store.find("pe-1", "ag-crashing").Restarts != exit {
+		again := mustReconcile(t, store, observed(ObservedInstance{Name: crashing, State: "exited", Log: "said again"}, ObservedInstance{Name: steady, State: "running"}))
+		if again.Instances[0].Name != next || store.Find("pe-1", "ag-crashing").Restarts != exit {
 			t.Fatalf("exit %d reported twice was counted twice", exit)
 		}
 		crashing = next
 	}
 
-	last := mustReconcile(t, store, observed(ObservedInstance{Name: crashing, State: "exited", Log: "the last words"}))
+	last := mustReconcile(t, store, observed(ObservedInstance{Name: crashing, State: "exited", Log: "the last words"}, ObservedInstance{Name: steady, State: "running"}))
 	if len(last.Instances) != 1 || last.Instances[0].Name != steady || len(last.Ending) != 0 {
 		t.Fatalf("after the last restart: %+v, want the agent in neither list", last)
 	}
-	recorded := store.find("pe-1", "ag-crashing")
+	recorded := store.Find("pe-1", "ag-crashing")
 	if !recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts || recorded.ExitLog != "the last words" || recorded.ExitedAt == nil {
 		t.Fatalf("recorded %+v, want stopped with its last log", recorded)
 	}
@@ -387,37 +257,12 @@ func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsResta
 	}
 }
 
-func TestOnlyAnExitOfTheMachineAnAgentIsAskedForUnderIsRecorded(t *testing.T) {
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {
-		{AgentSignup: hosted("pe-1", "ag-1")},
-		{AgentSignup: named("pe-1", "ag-ending", "pe1-agending-aaaaaaaaaaaa"), Ending: true},
-	}}}
-	name := mustReconcile(t, store, observed()).Instances[0].Name
-	for what, instance := range map[string]ObservedInstance{
-		"still starting":       {Name: name, State: "starting"},
-		"running":              {Name: name, State: "running", Log: "ignored"},
-		"another name exited":  {Name: "pe1-ag1-000000000000", State: "exited"},
-		"an ending one exited": {Name: "pe1-agending-aaaaaaaaaaaa", State: "exited", Log: "finished its last turn"},
-	} {
-		answer := mustReconcile(t, store, observed(instance))
-		if len(answer.Instances) != 1 || answer.Instances[0].Name != name || !reflect.DeepEqual(answer.Ending, []string{"pe1-agending-aaaaaaaaaaaa"}) {
-			t.Errorf("%s: answer = %+v", what, answer)
-		}
-		if got := store.find("pe-1", "ag-1"); got.Restarts != 0 || got.ExitedAt != nil {
-			t.Errorf("%s: recorded as an exit: %+v", what, got)
-		}
-		if got := store.find("pe-1", "ag-ending"); got.Restarts != 0 || got.ExitedAt != nil {
-			t.Errorf("%s: the ending agent's normal exit was recorded as a crash: %+v", what, got)
-		}
-	}
-}
-
 func TestTheLogOfAnExitIsKeptToItsLastBytes(t *testing.T) {
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 	name := mustReconcile(t, store, observed()).Instances[0].Name
 	long := strings.Repeat("an early line that is dropped\n", 400) + "Traceback: the reason it exited"
 	mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: long}))
-	kept := store.exitLogs["ag-1"]
+	kept := store.Find("pe-1", "ag-1").ExitLog
 	if len(kept) > domain.MaxAgentInstanceLogBytes || !strings.HasSuffix(kept, "Traceback: the reason it exited") || !strings.HasPrefix(kept, "an early line") {
 		t.Fatalf("kept %d bytes ending %q", len(kept), kept[max(0, len(kept)-40):])
 	}
@@ -430,7 +275,7 @@ func TestAChangeOfConfigOrOfTheLaunchersInputsRenamesRunningInstancesAndLeavesEn
 			{AgentSignup: named("pe-1", "ag-cut", "pe1-agcut-createdunder1"), Ending: true},
 		}}
 	}
-	store := &launcherStore{byLauncher: agents()}
+	store := &launcherStore{ByLauncher: agents()}
 	before := mustReconcile(t, store, observed())
 
 	rotated := observed()
@@ -442,33 +287,35 @@ func TestAChangeOfConfigOrOfTheLaunchersInputsRenamesRunningInstancesAndLeavesEn
 	if !reflect.DeepEqual(after.Ending, []string{"pe1-agcut-createdunder1"}) {
 		t.Errorf("ending = %v, want the name the instance was created under", after.Ending)
 	}
-	if got := store.find("pe-1", "ag-running").Name; got != after.Instances[0].Name {
+	if got := store.Find("pe-1", "ag-running").Name; got != after.Instances[0].Name {
 		t.Errorf("recorded name %q, want the new one %q", got, after.Instances[0].Name)
 	}
 
 	// The same agents under another image: the handler is built anew, as after a config change.
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(store, "registry.example.invalid/agent:2", "https://moved.example.invalid", testSecret, testBootLimit, zap.NewNop()))
+	moved := testSettings
+	moved.Image, moved.APIURL = "registry.example.invalid/agent:2", "https://moved.example.invalid"
+	RegisterHuma(doc, NewHandler(store, moved, zap.NewNop()))
 	raw, _ := json.Marshal(rotated)
 	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(req))
-	moved := decode(t, rec.Body.Bytes())
-	if moved.Instances[0].Name == after.Instances[0].Name || moved.Instances[0].Image != "registry.example.invalid/agent:2" {
-		t.Errorf("after an image change: %+v", moved.Instances[0])
+	answer := decode(t, rec.Body.Bytes())
+	if answer.Instances[0].Name == after.Instances[0].Name || answer.Instances[0].Image != "registry.example.invalid/agent:2" {
+		t.Errorf("after an image change: %+v", answer.Instances[0])
 	}
-	if !reflect.DeepEqual(moved.Ending, []string{"pe1-agcut-createdunder1"}) {
-		t.Errorf("after an image change the ending instance was renamed: %v", moved.Ending)
+	if !reflect.DeepEqual(answer.Ending, []string{"pe1-agcut-createdunder1"}) {
+		t.Errorf("after an image change the ending instance was renamed: %v", answer.Ending)
 	}
 }
 
 func TestAnAgentWhoseWriteFailsIsLeftOutAndTheRestOfTheListStands(t *testing.T) {
 	core, logs := observer.New(zap.ErrorLevel)
 	store := &launcherStore{
-		byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-broken")}, {AgentSignup: hosted("pe-1", "ag-fine")}}},
-		writeErr:   map[string]error{"ag-broken": errors.New("row lock timeout")},
+		ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-broken")}, {AgentSignup: hosted("pe-1", "ag-fine")}}},
+		WriteErr:   map[string]error{"ag-broken": errors.New("row lock timeout")},
 	}
 	code, raw := reconcileWith(t, store, mainLauncher, "main", zap.New(core), observed())
 	if code != http.StatusOK {
@@ -483,7 +330,7 @@ func TestAnAgentWhoseWriteFailsIsLeftOutAndTheRestOfTheListStands(t *testing.T) 
 }
 
 func TestARequestThatDoesNotSayWhatWasObservedIsRefused(t *testing.T) {
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 	for what, body := range map[string]any{
 		"no body fields":        map[string]any{},
 		"no digest":             map[string]any{"instances": []any{}},
@@ -495,12 +342,12 @@ func TestARequestThatDoesNotSayWhatWasObservedIsRefused(t *testing.T) {
 		"instance with no name": map[string]any{"launch_digest": testDigest, "instances": []any{map[string]any{"name": "", "state": "running"}}},
 		"unknown field":         map[string]any{"launch_digest": testDigest, "instances": []any{}, "desired": []any{}},
 	} {
-		store.asked = nil
+		store.Listed = nil
 		code, raw := reconcileWith(t, store, mainLauncher, "main", zap.NewNop(), body)
 		if code != http.StatusBadRequest && code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: status = %d: %s", what, code, raw)
 		}
-		if len(store.asked) != 0 || strings.Contains(string(raw), "hls_") {
+		if len(store.Listed) != 0 || strings.Contains(string(raw), "hls_") {
 			t.Errorf("%s: a refused request reached the store or was shown a token", what)
 		}
 	}
@@ -521,12 +368,12 @@ func TestTheReconcileEndpointAdmitsItsOwnLauncherAndStaffOnly(t *testing.T) {
 		"agent it launched":             {auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "ag-1"}, http.StatusForbidden},
 		"job":                           {auth.Principal{Kind: auth.KindJob, ExperimentID: "main"}, http.StatusForbidden},
 	} {
-		store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+		store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 		code, raw := reconcile(t, store, tc.caller, "main", zap.NewNop())
 		if code != tc.want {
 			t.Errorf("%s: got = %d %s, want = %d", name, code, raw, tc.want)
 		}
-		if tc.want != http.StatusOK && (len(store.asked) != 0 || strings.Contains(string(raw), "hls_")) {
+		if tc.want != http.StatusOK && (len(store.Listed) != 0 || strings.Contains(string(raw), "hls_")) {
 			t.Errorf("%s: a refused caller reached the store or was shown a token: %s", name, raw)
 		}
 	}
@@ -536,22 +383,22 @@ func TestARequestWithNoTokenIsRefused(t *testing.T) {
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	store := &launcherStore{}
-	RegisterHuma(doc, NewHandler(store, testImage, testAPIURL, testSecret, testBootLimit, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(store, testSettings, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	raw, _ := json.Marshal(observed())
 	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized || len(store.asked) != 0 {
-		t.Fatalf("got = %d, store asked %v", rec.Code, store.asked)
+	if rec.Code != http.StatusUnauthorized || len(store.Listed) != 0 {
+		t.Fatalf("got = %d, store asked %v", rec.Code, store.Listed)
 	}
 }
 
 func TestAStoreFailureIsAnErrorAndNeverAnEmptyList(t *testing.T) {
 	core, logs := observer.New(zap.ErrorLevel)
 	store := &launcherStore{
-		byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
-		err:        errors.New("connection refused to 10.0.0.5"),
+		ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
+		Err:        errors.New("connection refused to 10.0.0.5"),
 	}
 	code, raw := reconcile(t, store, mainLauncher, "main", zap.New(core))
 	if code != http.StatusInternalServerError {
@@ -567,11 +414,11 @@ func TestAStoreFailureIsAnErrorAndNeverAnEmptyList(t *testing.T) {
 
 func TestNoTokenIsLogged(t *testing.T) {
 	core, logs := observer.New(zap.DebugLevel)
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 	if code, raw := reconcile(t, store, mainLauncher, "main", zap.New(core)); code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
-	store.err = errors.New("down")
+	store.Err = errors.New("down")
 	reconcile(t, store, mainLauncher, "main", zap.New(core))
 	for _, entry := range logs.All() {
 		line, _ := json.Marshal(entry.ContextMap())
@@ -683,73 +530,14 @@ func TestANameChangesWithWhatTheInstanceRunsAndNotWithTheSecret(t *testing.T) {
 	}
 }
 
-func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
-	for name, build := range map[string]func(){
-		"no store":  func() { NewHandler(nil, testImage, testAPIURL, testSecret, testBootLimit, zap.NewNop()) },
-		"no image":  func() { NewHandler(&launcherStore{}, "", testAPIURL, testSecret, testBootLimit, zap.NewNop()) },
-		"no url":    func() { NewHandler(&launcherStore{}, testImage, "", testSecret, testBootLimit, zap.NewNop()) },
-		"no secret": func() { NewHandler(&launcherStore{}, testImage, testAPIURL, "", testBootLimit, zap.NewNop()) },
-		"no logger": func() { NewHandler(&launcherStore{}, testImage, testAPIURL, testSecret, testBootLimit, nil) },
-		"no limit":  func() { NewHandler(&launcherStore{}, testImage, testAPIURL, testSecret, 0, zap.NewNop()) },
-	} {
-		func() {
-			defer func() {
-				if recover() == nil {
-					t.Errorf("%s: built", name)
-				}
-			}()
-			build()
-		}()
-	}
-}
-
-func TestAMachineReportedAsStartingPastTheBootLimitIsGivenUpOnLikeAnExit(t *testing.T) {
-	store := &launcherStore{
-		byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-slow")}, {AgentSignup: hosted("pe-1", "ag-absent")}}},
-		askedAgo:   map[string]time.Duration{},
-	}
-	first := mustReconcile(t, store, observed())
-	slow, absent := first.Instances[0].Name, first.Instances[1].Name
-
-	// Inside the limit, and for a machine the provider does not list at all, nothing is decided:
-	// a create that keeps failing is no boot.
-	store.askedAgo = map[string]time.Duration{"ag-slow": testBootLimit - time.Second, "ag-absent": 24 * time.Hour}
-	answer := mustReconcile(t, store, observed(ObservedInstance{Name: slow, State: "starting"}))
-	if answer.Instances[0].Name != slow || answer.Instances[1].Name != absent {
-		t.Fatalf("answer = %+v, want both names unchanged", answer.Instances)
-	}
-
-	store.askedAgo["ag-slow"] = testBootLimit + time.Second
-	answer = mustReconcile(t, store, observed(ObservedInstance{Name: slow, State: "starting"}))
-	if answer.Instances[0].Name == slow || answer.Instances[1].Name != absent {
-		t.Fatalf("answer = %+v, want the slow agent under a new name", answer.Instances)
-	}
-	recorded := store.find("pe-1", "ag-slow")
-	if recorded.Restarts != 1 || recorded.Stopped || recorded.ExitedAt == nil || recorded.Name != answer.Instances[0].Name {
-		t.Fatalf("recorded %+v", recorded)
-	}
-	// The replacement's time starts when it is asked for.
-	again := mustReconcile(t, store, observed(ObservedInstance{Name: answer.Instances[0].Name, State: "starting"}))
-	if again.Instances[0].Name != answer.Instances[0].Name {
-		t.Fatal("the replacement was given up on at once")
-	}
-
-	// Running, however long ago it was asked for, is no boot.
-	store.askedAgo["ag-slow"] = 24 * time.Hour
-	up := mustReconcile(t, store, observed(ObservedInstance{Name: again.Instances[0].Name, State: "running"}))
-	if up.Instances[0].Name != again.Instances[0].Name || store.find("pe-1", "ag-slow").Restarts != 1 {
-		t.Fatal("a running machine was held to the boot limit")
-	}
-}
-
 func hostedCoordinator(pe string) db.LauncherCoordinator {
 	return db.LauncherCoordinator{PlatformExperimentID: pe, HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "claude-sonnet-5"}}
 }
 
 func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t *testing.T) {
 	store := &launcherStore{
-		byLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
-		coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1"), {PlatformExperimentID: "pe-2", HostedCoordinator: domain.HostedCoordinator{Launcher: "other", Model: "m"}}},
+		ByLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
+		Coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1"), {PlatformExperimentID: "pe-2", HostedCoordinator: domain.HostedCoordinator{Launcher: "other", Model: "m"}}},
 	}
 	answer := mustReconcile(t, store, observed())
 	if len(answer.Instances) != 2 {
@@ -769,7 +557,7 @@ func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t 
 	if !strings.HasPrefix(coordinator.Name, "pe1-coordinator-") || len(coordinator.Name) > MaxInstanceNameLength || strings.Contains(coordinator.Name, token) {
 		t.Errorf("name = %q", coordinator.Name)
 	}
-	if store.coordinator("pe-1").Instance.Name != coordinator.Name {
+	if store.Find("pe-1", "").Name != coordinator.Name {
 		t.Error("the name asked for was not recorded")
 	}
 	if again := mustReconcile(t, store, observed(ObservedInstance{Name: coordinator.Name, State: "running"})); again.Instances[1].Name != coordinator.Name {
@@ -779,8 +567,8 @@ func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t 
 
 func TestAnAgentWhoseIDIsTheCoordinatorsNameGetsAnotherInstanceName(t *testing.T) {
 	store := &launcherStore{
-		byLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "coordinator")}}},
-		coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")},
+		ByLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "coordinator")}}},
+		Coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")},
 	}
 	answer := mustReconcile(t, store, observed())
 	if len(answer.Instances) != 2 || answer.Instances[0].Name == answer.Instances[1].Name {
@@ -788,106 +576,338 @@ func TestAnAgentWhoseIDIsTheCoordinatorsNameGetsAnotherInstanceName(t *testing.T
 	}
 }
 
-func TestACoordinatorsMachineIsRestartedBoundedTimedAndLeftToEndLikeAnAgents(t *testing.T) {
-	store := &launcherStore{coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")}, askedAgo: map[string]time.Duration{}}
-	name := mustReconcile(t, store, observed()).Instances[0].Name
-
-	store.askedAgo[coordinatorKey+"pe-1"] = testBootLimit + time.Second
-	stuck := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "starting"}))
-	if len(stuck.Instances) != 1 || stuck.Instances[0].Name == name || store.coordinator("pe-1").Instance.Restarts != 1 {
-		t.Fatalf("after a boot past the limit: %+v, recorded %+v", stuck.Instances, store.coordinator("pe-1").Instance)
+func reconcileUnder(t *testing.T, store Store, cfg Settings, body Observed) (int, []byte) {
+	t.Helper()
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	RegisterHuma(doc, NewHandler(store, cfg, zap.NewNop()))
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
 	}
-	name = stuck.Instances[0].Name
+	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, authtest.Authorize(req))
+	return rec.Code, rec.Body.Bytes()
+}
 
-	for restarts := 2; restarts <= domain.MaxAgentInstanceRestarts; restarts++ {
-		answer := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: "boom"}))
-		if len(answer.Instances) != 1 || answer.Instances[0].Name == name {
-			t.Fatalf("exit %d: %+v, want a new name", restarts, answer.Instances)
-		}
-		name = answer.Instances[0].Name
-	}
-	last := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: "boom"}))
-	recorded := store.coordinator("pe-1").Instance
-	if len(last.Instances) != 0 || !recorded.Stopped || recorded.ExitLog != "boom" {
-		t.Fatalf("after the last restart: %+v, recorded %+v", last.Instances, recorded)
-	}
-
-	ending := hostedCoordinator("pe-9")
-	ending.Ending, ending.Instance.Name = true, "pe9-coordinator-0123456789ab"
-	store = &launcherStore{coordinators: []db.LauncherCoordinator{ending}}
-	answer := mustReconcile(t, store, observed(ObservedInstance{Name: ending.Instance.Name, State: "exited"}))
-	if len(answer.Instances) != 0 || !slices.Equal(answer.Ending, []string{ending.Instance.Name}) {
-		t.Fatalf("answer = %+v, want the coordinator only as ending", answer)
+func oneAgentAndACoordinator() *launcherStore {
+	return &launcherStore{
+		ByLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
+		Coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")},
 	}
 }
 
-func TestAMachineThatCouldNotBeCreatedIsGivenTheBootLimitAndThenSpendsARestart(t *testing.T) {
-	store := &launcherStore{
-		byLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
-		coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")},
-		askedAgo:     map[string]time.Duration{},
+func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
+	for name, build := range map[string]func(){
+		"no store":       func() { NewHandler(nil, testSettings, zap.NewNop()) },
+		"no logger":      func() { NewHandler(&launcherStore{}, testSettings, nil) },
+		"no image":       func() { c := testSettings; c.Image = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no api url":     func() { c := testSettings; c.APIURL = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no secret":      func() { c := testSettings; c.SigningSecret = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no boot limit":  func() { c := testSettings; c.BootLimit = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no answer size": func() { c := testSettings; c.MaxNewPerAnswer = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s: built", name)
+				}
+			}()
+			build()
+		}()
 	}
+}
+
+// What is reported of another name, of a machine that is running, and of one whose run is over
+// spends nothing.
+func TestOnlyTheEndOfTheMachineAskedForIsRecorded(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
+		{AgentSignup: hosted("pe-1", "ag-1")},
+		{AgentSignup: named("pe-1", "ag-ending", "pe1-agending-aaaaaaaaaaaa"), Ending: true},
+	}}}
+	name := mustReconcile(t, store, observed()).Instances[0].Name
+	for _, reported := range [][]ObservedInstance{
+		{{Name: name, State: "starting"}},
+		{{Name: name, State: "running", Log: "ignored"}},
+		{{Name: name, State: "running"}, {Name: "pe1-ag1-000000000000", State: "exited"}},
+		{{Name: name, State: "running"}, {Name: "pe1-agending-aaaaaaaaaaaa", State: "exited", Log: "finished its last turn"}},
+		{{Name: name, State: "running"}},
+	} {
+		store.Advance(testBootLimit)
+		answer := mustReconcile(t, store, observed(reported...))
+		if len(answer.Instances) != 1 || answer.Instances[0].Name != name || !reflect.DeepEqual(answer.Ending, []string{"pe1-agending-aaaaaaaaaaaa"}) {
+			t.Errorf("%+v: answer = %+v", reported, answer)
+		}
+		for _, agent := range []string{"ag-1", "ag-ending"} {
+			if got := store.Find("pe-1", agent); got.Restarts != 0 || got.ExitedAt != nil {
+				t.Errorf("%+v: recorded as an end of %s: %+v", reported, agent, got)
+			}
+		}
+	}
+}
+
+func TestAMachineNeverListedIsGivenTheBootLimitAndThenSpendsARestart(t *testing.T) {
+	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
-	agentName, coordinatorName := first.Instances[0].Name, first.Instances[1].Name
-	failed := func(names ...string) Observed {
-		body := observed()
-		for _, name := range names {
-			body.CreateFailures = append(body.CreateFailures, CreateFailure{Name: name, Reason: "vendor: HTTP 422: bad guest"})
+	names := []string{first.Instances[0].Name, first.Instances[1].Name}
+
+	// Inside the limit the create is asked for again under the same name and costs nothing.
+	store.Advance(testBootLimit - time.Second)
+	if answer := mustReconcile(t, store, observed()); answer.Instances[0].Name != names[0] || answer.Instances[1].Name != names[1] {
+		t.Fatalf("inside the limit: %+v, want both names unchanged", answer.Instances)
+	}
+	store.Advance(time.Second)
+	answer := mustReconcile(t, store, observed())
+	if len(answer.Instances) != 2 || answer.Instances[0].Name == names[0] || answer.Instances[1].Name == names[1] {
+		t.Fatalf("at the limit: %+v, want both under new names", answer.Instances)
+	}
+	for _, agent := range []string{"ag-1", ""} {
+		recorded := store.Find("pe-1", agent)
+		if recorded.Restarts != 1 || recorded.Stopped || !strings.Contains(recorded.ExitLog, "no machine was listed 5m0s after it was asked for") {
+			t.Fatalf("%q: recorded %+v, want a restart spent and why", agent, recorded)
 		}
-		return body
+	}
+	// The replacement's time starts when it is asked for.
+	if again := mustReconcile(t, store, observed()); again.Instances[0].Name != answer.Instances[0].Name {
+		t.Fatal("the replacement was given up on at once")
 	}
 
-	// Inside the limit a failed create is retried under the same name and costs nothing.
-	store.askedAgo["ag-1"] = testBootLimit - time.Second
-	if answer := mustReconcile(t, store, failed(agentName)); answer.Instances[0].Name != agentName || store.find("pe-1", "ag-1").Restarts != 0 {
-		t.Fatalf("inside the limit: %+v, recorded %+v", answer.Instances, store.find("pe-1", "ag-1"))
-	}
-
-	store.askedAgo["ag-1"] = testBootLimit + time.Second
-	store.askedAgo[coordinatorKey+"pe-1"] = testBootLimit + time.Second
-	answer := mustReconcile(t, store, failed(agentName, coordinatorName, "a-name-nobody-is-asked-for-under"))
-	if len(answer.Instances) != 2 || answer.Instances[0].Name == agentName || answer.Instances[1].Name == coordinatorName {
-		t.Fatalf("past the limit: %+v, want both under new names", answer.Instances)
-	}
-	recorded := store.find("pe-1", "ag-1")
-	if recorded.Restarts != 1 || recorded.Stopped || !strings.Contains(recorded.ExitLog, "no machine could be created") || !strings.Contains(recorded.ExitLog, "bad guest") {
-		t.Fatalf("recorded %+v, want a restart spent and the provider's words kept", recorded)
-	}
-	if got := store.coordinator("pe-1").Instance; got.Restarts != 1 || !strings.Contains(got.ExitLog, "bad guest") {
-		t.Fatalf("the coordinator's recorded %+v", got)
-	}
-
-	// Every restart ends the same way: the agent is stopped and no longer asked for.
-	name := answer.Instances[0].Name
+	// Every restart ends the same way, and then nothing is asked of the launcher.
 	for range domain.MaxAgentInstanceRestarts {
-		store.askedAgo["ag-1"] = testBootLimit + time.Second
-		next := mustReconcile(t, store, failed(name))
-		if len(next.Instances) == 2 {
-			name = next.Instances[0].Name
+		store.Advance(testBootLimit)
+		answer = mustReconcile(t, store, observed())
+	}
+	if len(answer.Instances) != 0 || !store.Find("pe-1", "ag-1").Stopped || !store.Find("pe-1", "").Stopped {
+		t.Fatalf("after every restart: %+v, agent %+v, coordinator %+v", answer.Instances, store.Find("pe-1", "ag-1"), store.Find("pe-1", ""))
+	}
+}
+
+func TestAMachineThatStaysStartingIsTimedFromWhenItWasFirstListed(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	starting := func() Observed {
+		return observed(ObservedInstance{Name: agent, State: "starting"}, ObservedInstance{Name: coordinator, State: "starting"})
+	}
+
+	// First listed long after it was asked for, as the last machine of a slow pass is: the limit
+	// starts now, and nothing is spent on the pass having been slow.
+	store.Advance(3 * testBootLimit)
+	if answer := mustReconcile(t, store, starting()); answer.Instances[0].Name != agent || store.Find("pe-1", "ag-1").SeenAt == nil {
+		t.Fatalf("first listed: %+v, recorded %+v", answer.Instances, store.Find("pe-1", "ag-1"))
+	}
+	store.Advance(testBootLimit - time.Second)
+	if answer := mustReconcile(t, store, starting()); answer.Instances[0].Name != agent || answer.Instances[1].Name != coordinator {
+		t.Fatalf("inside the limit: %+v", answer.Instances)
+	}
+	store.Advance(time.Second)
+	answer := mustReconcile(t, store, starting())
+	if answer.Instances[0].Name == agent || answer.Instances[1].Name == coordinator {
+		t.Fatalf("at the limit: %+v, want new names", answer.Instances)
+	}
+	if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 1 || !strings.Contains(recorded.ExitLog, "still starting 5m0s after it was first listed") {
+		t.Fatalf("recorded %+v", recorded)
+	}
+
+	// Running, however long, is no boot.
+	next := answer.Instances[0].Name
+	mustReconcile(t, store, observed(ObservedInstance{Name: next, State: "running"}, ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
+	store.Advance(100 * testBootLimit)
+	up := mustReconcile(t, store, observed(ObservedInstance{Name: next, State: "running"}, ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
+	if up.Instances[0].Name != next || store.Find("pe-1", "ag-1").Restarts != 1 {
+		t.Fatal("a running machine was held to the boot limit")
+	}
+}
+
+func TestAMachineThatWasListedAndIsGoneIsAnExitAtOnce(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "running"}, ObservedInstance{Name: coordinator, State: "running"}))
+
+	answer := mustReconcile(t, store, observed(ObservedInstance{Name: coordinator, State: "running"}))
+	if len(answer.Instances) != 2 || answer.Instances[0].Name == agent || answer.Instances[1].Name != coordinator {
+		t.Fatalf("answer = %+v, want the agent under a new name and the coordinator as it was", answer.Instances)
+	}
+	if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 1 || !strings.Contains(recorded.ExitLog, "no longer lists it") {
+		t.Fatalf("recorded %+v", recorded)
+	}
+	if recorded := store.Find("pe-1", ""); recorded.Restarts != 0 {
+		t.Fatalf("the coordinator, still listed: recorded %+v", recorded)
+	}
+	gone := mustReconcile(t, store, observed())
+	if gone.Instances[1].Name == coordinator || store.Find("pe-1", "").Restarts != 1 {
+		t.Fatalf("the coordinator gone: %+v, recorded %+v", gone.Instances, store.Find("pe-1", ""))
+	}
+}
+
+// Restarts are spent under one image and one launcher config. What stopped an agent may have
+// been either, for every agent of every org at once, so a change of either starts it again.
+func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *testing.T) {
+	stopped := func() (*launcherStore, string) {
+		store := oneAgentAndACoordinator()
+		answer := mustReconcile(t, store, observed())
+		for len(answer.Instances) > 0 {
+			var exited []ObservedInstance
+			for _, instance := range answer.Instances {
+				exited = append(exited, ObservedInstance{Name: instance.Name, State: "exited", Log: "the credential was refused"})
+			}
+			answer = mustReconcile(t, store, observed(exited...))
+		}
+		if !store.Find("pe-1", "ag-1").Stopped || !store.Find("pe-1", "").Stopped {
+			t.Fatal("not stopped after every restart")
+		}
+		return store, store.Find("pe-1", "ag-1").Launch
+	}
+
+	store, launch := stopped()
+	if again := mustReconcile(t, store, observed()); len(again.Instances) != 0 {
+		t.Fatalf("under the same image and launcher inputs: %+v, want nothing asked for", again.Instances)
+	}
+	rotated := observed()
+	rotated.LaunchDigest = "fedcba9876543210fedcba9876543210"
+	answer := mustReconcile(t, store, rotated)
+	if len(answer.Instances) != 2 {
+		t.Fatalf("after the launcher's inputs changed: %+v, want the agent and the coordinator", answer.Instances)
+	}
+	for _, agent := range []string{"ag-1", ""} {
+		if recorded := store.Find("pe-1", agent); recorded.Stopped || recorded.Restarts != 0 || recorded.Launch == launch || recorded.Name == "" {
+			t.Fatalf("%q: recorded %+v, want a fresh budget under the new launch", agent, recorded)
 		}
 	}
-	if recorded := store.find("pe-1", "ag-1"); !recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts {
-		t.Fatalf("after every restart: recorded %+v, want the agent stopped", recorded)
+	// The budget is whole again, and no more than whole.
+	for exit := 1; exit <= domain.MaxAgentInstanceRestarts+1; exit++ {
+		body := rotated
+		body.Instances = []ObservedInstance{{Name: answer.Instances[0].Name, State: "exited"}, {Name: answer.Instances[len(answer.Instances)-1].Name, State: "running"}}
+		answer = mustReconcile(t, store, body)
+	}
+	if recorded := store.Find("pe-1", "ag-1"); !recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts {
+		t.Fatalf("after the new budget was spent: %+v", recorded)
+	}
+
+	store, _ = stopped()
+	newImage := testSettings
+	newImage.Image = "registry.example.invalid/agent:2"
+	code, raw := reconcileUnder(t, store, newImage, observed())
+	if code != http.StatusOK || len(decode(t, raw).Instances) != 2 || store.Find("pe-1", "ag-1").Stopped {
+		t.Fatalf("after the image changed: %d %s", code, raw)
 	}
 }
 
-func TestAListedMachineIsBelievedOverAnEarlierFailedCreateOfItsName(t *testing.T) {
-	store := &launcherStore{byLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}, askedAgo: map[string]time.Duration{}}
-	name := mustReconcile(t, store, observed()).Instances[0].Name
-	store.askedAgo["ag-1"] = 24 * time.Hour
-	body := observed(ObservedInstance{Name: name, State: "running"})
-	body.CreateFailures = []CreateFailure{{Name: name, Reason: "an earlier attempt"}}
-	if answer := mustReconcile(t, store, body); answer.Instances[0].Name != name || store.find("pe-1", "ag-1").Restarts != 0 {
-		t.Fatalf("a running machine was given up on for a create that failed before it: %+v", store.find("pe-1", "ag-1"))
+// A machine whose name config has since changed is replaced, and what became of it is no end:
+// the launcher destroys it because it is no longer asked for.
+func TestAMachineReplacedByAConfigChangeSpendsNoRestartWhenItIsGone(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	running := observed(ObservedInstance{Name: first.Instances[0].Name, State: "running"}, ObservedInstance{Name: first.Instances[1].Name, State: "running"})
+	mustReconcile(t, store, running)
+
+	moved := testSettings
+	moved.APIURL = "https://moved.example.invalid"
+	code, raw := reconcileUnder(t, store, moved, observed())
+	answer := decode(t, raw)
+	if code != http.StatusOK || answer.Instances[0].Name == first.Instances[0].Name {
+		t.Fatalf("after the address changed: %d %+v", code, answer.Instances)
+	}
+	if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 0 || recorded.ExitedAt != nil {
+		t.Fatalf("the replaced machine was recorded as an end: %+v", recorded)
 	}
 }
 
-func TestACreateFailureWithoutAUsableNameIsRefused(t *testing.T) {
-	for _, name := range []string{"", strings.Repeat("n", MaxInstanceNameLength+1)} {
-		body := observed()
-		body.CreateFailures = []CreateFailure{{Name: name, Reason: "r"}}
-		if code, raw := reconcileWith(t, &launcherStore{}, mainLauncher, "main", zap.NewNop(), body); code != http.StatusBadRequest {
-			t.Errorf("name %q: status = %d %s, want 400", name, code, raw)
+// A launcher creates one machine after another, so an answer asks for a bounded number of new
+// ones: its pass ends, and its machines are reported, well inside the boot limit.
+func TestAnAnswerAsksForABoundedNumberOfNewMachinesAndTheNextForTheRest(t *testing.T) {
+	var agents []db.LauncherAgent
+	for i := range 7 {
+		agents = append(agents, db.LauncherAgent{AgentSignup: hosted("pe-1", fmt.Sprintf("ag-%d", i))})
+	}
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": agents}, Coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")}}
+	cfg := testSettings
+	cfg.MaxNewPerAnswer = 3
+	var listed []ObservedInstance
+	sizes := []int{}
+	for range 4 {
+		// Each pass takes longer than the boot limit, which would spend a restart of every
+		// machine asked for and not yet created, were all eight asked for at once.
+		store.Advance(testBootLimit)
+		code, raw := reconcileUnder(t, store, cfg, observed(listed...))
+		if code != http.StatusOK {
+			t.Fatalf("status = %d %s", code, raw)
+		}
+		answer := decode(t, raw)
+		sizes = append(sizes, len(answer.Instances))
+		listed = nil
+		for _, instance := range answer.Instances {
+			listed = append(listed, ObservedInstance{Name: instance.Name, State: "running"})
+		}
+	}
+	if !reflect.DeepEqual(sizes, []int{3, 6, 8, 8}) {
+		t.Fatalf("instances per answer = %v, want three more each time", sizes)
+	}
+	for i := range 7 {
+		if recorded := store.Find("pe-1", fmt.Sprintf("ag-%d", i)); recorded.Restarts != 0 {
+			t.Fatalf("ag-%d: %+v, want no restart spent on waiting its turn", i, recorded)
+		}
+	}
+	if store.Find("pe-1", "").Restarts != 0 {
+		t.Fatal("the coordinator spent a restart waiting its turn")
+	}
+}
+
+func TestALauncherWhosePassCannotFitTheBootLimitIsRefusedWithTheArithmetic(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	cfg := testSettings
+	cfg.MaxNewPerAnswer, cfg.BootLimit = 10, 50*time.Second
+	fits := observed()
+	fits.ReconcileIntervalSeconds, fits.CreatePauseMilliseconds = 15, 1000
+	if code, raw := reconcileUnder(t, store, cfg, fits); code != http.StatusOK {
+		t.Fatalf("2 x (10 x 1s + 15s) = 50s against a limit of 50s: %d %s", code, raw)
+	}
+	for name, edit := range map[string]func(*Observed){
+		"a longer pause":    func(o *Observed) { o.CreatePauseMilliseconds = 1100 },
+		"a longer interval": func(o *Observed) { o.ReconcileIntervalSeconds = 16 },
+	} {
+		body := fits
+		edit(&body)
+		code, raw := reconcileUnder(t, store, cfg, body)
+		if code != http.StatusConflict {
+			t.Fatalf("%s: status = %d %s, want 409", name, code, raw)
+		}
+		for _, part := range []string{"10 new instances per answer", "agents.boot_limit_seconds 50s", "create_pause", "reconcile_interval"} {
+			if !strings.Contains(string(raw), part) {
+				t.Errorf("%s: the refusal does not say %q: %s", name, part, raw)
+			}
+		}
+	}
+	for name, edit := range map[string]func(*Observed){
+		"no interval":      func(o *Observed) { o.ReconcileIntervalSeconds = 0 },
+		"a negative pause": func(o *Observed) { o.CreatePauseMilliseconds = -1 },
+	} {
+		body := fits
+		edit(&body)
+		if code, raw := reconcileUnder(t, store, cfg, body); code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d %s, want 400", name, code, raw)
+		}
+	}
+}
+
+func TestTheTokenMintedForAMachineIsTakenOutOfItsExitLog(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	answer := mustReconcile(t, store, observed())
+	var exited []ObservedInstance
+	for _, instance := range answer.Instances {
+		exited = append(exited, ObservedInstance{Name: instance.Name, State: "exited", Log: "env dump: HL_TOKEN=" + instance.Env["HL_TOKEN"] + "\nTraceback"})
+	}
+	mustReconcile(t, store, observed(exited...))
+	for i, agent := range []string{"ag-1", ""} {
+		kept := store.Find("pe-1", agent).ExitLog
+		if strings.Contains(kept, answer.Instances[i].Env["HL_TOKEN"]) || strings.Contains(kept, "hls_") {
+			t.Fatalf("%q: the stored log holds the token: %s", agent, kept)
+		}
+		if !strings.Contains(kept, "HL_TOKEN=<HL_TOKEN>") || !strings.HasSuffix(kept, "Traceback") {
+			t.Fatalf("%q: stored %q, want the token named and the rest kept", agent, kept)
 		}
 	}
 }

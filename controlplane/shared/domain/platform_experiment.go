@@ -175,6 +175,10 @@ type PlatformExperiment struct {
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
 	// CodeRepoURL is the clone address of the repository attached to the project, as it stands
 	// when read. It is not stored with the platform experiment and is set on a single read only.
+	// MaxHosted is how many machines the platform may run for this platform experiment, its
+	// coordinator included. Fixed at creation.
+	MaxHosted int `json:"max_hosted"`
+
 	// CoordinatorHosted means the platform runs this platform experiment's coordinator. Fixed at
 	// creation. Coordinator says on which launcher and model and what became of its machine; it
 	// is carried by a read of one platform experiment and left out of a list.

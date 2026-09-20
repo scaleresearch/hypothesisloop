@@ -40,7 +40,6 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 	want := agentlaunch.Config{
 		Name:          "main",
 		APIURL:        "https://api.example.invalid",
-		Namespace:     "main",
 		Command:       []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
 		Size:          agentlaunch.Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 10 << 30},
 		ModelProvider: "anthropic",
@@ -83,8 +82,8 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"unknown key":             {"launcher_name: main", "launcher_name: main\nmetrics_url: http://x"},
 		"no launcher name":        {"launcher_name: main", `launcher_name: ""`},
 		"no api url":              {"api_url: https://api.example.invalid", `api_url: ""`},
-		"no namespace":            {"namespace: main\n", ""},
-		"namespace with dash":     {"namespace: main", "namespace: team-a"},
+		"a namespace":             {"launcher_name: main\n", "launcher_name: main\nnamespace: main\n"},
+		"launcher name with dash": {"launcher_name: main", "launcher_name: team-a"},
 		"no interval":             {"reconcile_interval_seconds: 15\n", ""},
 		"negative interval":       {"reconcile_interval_seconds: 15", "reconcile_interval_seconds: -1"},
 		"a boot limit of its own": {"create_pause_milliseconds: 1000", "create_pause_milliseconds: 1000\nboot_limit_seconds: 120"},

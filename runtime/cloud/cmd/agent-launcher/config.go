@@ -14,14 +14,12 @@ import (
 )
 
 type config struct {
-	// LauncherName is the name the control plane gives hosted agents to (its agents.launcher),
-	// and the name this process asks for its list under.
+	// LauncherName is the name this launcher is registered under with the control plane, the name
+	// it asks for its list under, and part of every instance name.
 	LauncherName string `yaml:"launcher_name"`
 	// APIURL is where this process reaches the control plane. The address agents reach it at is
 	// the control plane's own setting and arrives in each instance's environment.
 	APIURL string `yaml:"api_url"`
-	// Namespace is part of every instance name, so launchers sharing an account keep apart.
-	Namespace string `yaml:"namespace"`
 	// Each pass costs the provider one list call and the control plane one request.
 	ReconcileIntervalSeconds int `yaml:"reconcile_interval_seconds"`
 	// CreatePauseMilliseconds is waited between two creates of one pass. 0 is no pause, and the
@@ -112,7 +110,6 @@ func (cfg *config) launch() agentlaunch.Config {
 	return agentlaunch.Config{
 		Name:          cfg.LauncherName,
 		APIURL:        cfg.APIURL,
-		Namespace:     cfg.Namespace,
 		Command:       cfg.Instance.Command,
 		Size:          cfg.size,
 		ModelProvider: cfg.ModelProvider.Name,

@@ -47,7 +47,8 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 		// unset-policy case, which ResolveQuotaTier now resolves to guaranteed for everyone (no
 		// AgentKind involved at all) — the exact case these tests exist to pin down.
 	}
-	if err := pes.CreatePlatformExperiment(context.Background(), pe); err != nil {
+	pe.MaxHosted = 50
+	if err := pes.CreatePlatformExperimentWithAgents(context.Background(), pe, nil, nil); err != nil {
 		t.Fatalf("create platform experiment: got = %v, want = nil", err)
 	}
 }

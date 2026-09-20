@@ -36,26 +36,41 @@ auth:
 # more instance of the same launcher and image, at the same address, on default_model unless the
 # request names another.
 #
-#   launcher   the launcher a newly hosted agent is given to. It is written onto the agent when it
-#              joins, so changing this moves new agents only and running ones finish where they
-#              started. A launcher's token is accepted while this names it or its list still names
-#              an agent, running or in the two minutes after its run ended.
+#   launcher   the launcher a newly hosted agent is given to: 1 to 16 lowercase letters and
+#              digits, registered with `hl-admin launcher add`. It is written onto the agent when
+#              it joins, so changing this moves new agents only and running ones finish where they
+#              started. A launcher's token is accepted while the launcher is registered, whatever
+#              this names: one that no agent is given to any more is answered an empty list and
+#              takes down what it still holds. Hosting is refused while this names a launcher
+#              that is not registered.
 #   image      what every hosted agent's machine boots. The launcher's provider must be able to
 #              pull it. A change replaces every running agent's machine.
 #   api_url    the address a hosted agent reaches this API at, from wherever its launcher rents.
 #   default_model  the model an agent runs on when it joins without naming one. Written onto the
 #              agent when it joins, so a change moves new agents only.
-#   boot_limit_seconds  how long a hosted agent's machine may be reported as starting, counted
-#              from when the launcher was first asked for it, before it is replaced and one of
-#              the agent's three restarts is spent. A first boot pulls the agent image (about 11
-#              seconds on the slowest provider measured) and the count starts up to one launcher
-#              pass before the machine exists. Too low spends every restart on slow pulls.
+#   boot_limit_seconds  how long a hosted machine may go unreported by its launcher after it was
+#              asked for, or stay starting after it was first reported, before it is given up on
+#              and one of its three restarts is spent. A first boot pulls the agent image (about
+#              11 seconds on the slowest provider measured). Too low spends every restart on slow
+#              pulls. Restarts are spent under one image and one launcher config: a change of
+#              either gives every agent its restarts back and starts a stopped one again.
+#   max_new_instances_per_answer  how many machines one answer asks a launcher to create; the
+#              rest follow in the next. A launcher creates them one after another, so this bounds
+#              how long a pass takes. A launcher says how it paces itself with every question and
+#              is refused unless twice (this x its create pause + its interval) fits the boot
+#              limit: with 10 here, the 1 s pause and 15 s interval of the launcher's example
+#              settings, a pass is 25 s and the limit must be at least 50 s.
+#   max_hosted_per_platform_experiment  how many machines the platform runs for one platform
+#              experiment: its hosted agents of every role and its coordinator. Written onto the
+#              platform experiment when it is created, so a change bounds new ones only.
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
   api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   default_model: claude-sonnet-5
   boot_limit_seconds: 300
+  max_new_instances_per_answer: 10
+  max_hosted_per_platform_experiment: 25
 
 # Where a cluster's runtime reaches the platform. Registering a cluster returns both beside its
 # runtime token, so the command that starts the cluster's agents has one source. Both must be

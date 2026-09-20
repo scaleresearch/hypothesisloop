@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -153,6 +154,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
 			"hosted_agents: N joins N new agents the platform runs, as POST /platform-experiments/{id}/agents with hosted does, in the same write: the experiment and its agents exist together or not at all. " +
 			"Both need the project's repository (409 no_repository without one), neither is read from the file, and coordinator_hosted is fixed from then on. " +
+			"Together they are at most the platform's bound on machines per platform experiment (400 max_hosted_reached), which the answer shows as max_hosted. " +
 			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
@@ -191,6 +193,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		pe, err := peh.svc.Create(ctx, hosting)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, invalid(err.Error())
+		}
+		var refused *signupRefusal
+		if errors.As(err, &refused) {
+			return nil, peh.refusal("create platform experiment", err)
 		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -315,13 +321,27 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"the experiment and discarding every agent's hypotheses and baseline work. Once running, only " +
 			"`name` and `description` can be amended; budgets, `max_agents`, `metrics`, `report_interval_seconds` " +
 			"and the schedule are locked because admission and stage decisions have already been made against " +
-			"them. Rejected once the experiment is closed.",
+			"them. Rejected once the experiment is closed. A coordinator's token changes `description` only: " +
+			"a body that differs from the live experiment in any other field answers 403.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body UpdatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
+		}
+		// A coordinator's token is handed to a machine the platform rents, so it changes the
+		// brief and nothing a run's cost or length follows from.
+		if caller, _ := auth.FromContext(ctx); caller.Kind == auth.KindCoordinator {
+			pe, err := peh.svc.UpdateDescription(ctx, in.ID, in.Body.fields())
+			var refused *signupRefusal
+			if errors.As(err, &refused) {
+				return nil, peh.refusal("update platform experiment", err)
+			}
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 		}
 		pe, err := peh.svc.Update(ctx, in.ID, in.Body.fields())
 		if err != nil {
@@ -648,7 +668,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := access.PlatformExperiment(ctx, b.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		if err := access.Agent(ctx, b.AgentID); err != nil {
+		if err := access.ActAs(ctx, b.AgentID); err != nil {
 			return nil, err
 		}
 		if err := peh.svc.RequireActive(ctx, b.PlatformExperimentID, b.AgentID); err != nil {
@@ -712,7 +732,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := access.Donation(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if err := access.Agent(ctx, in.Body.DonorAgentID); err != nil {
+		if err := access.ActAs(ctx, in.Body.DonorAgentID); err != nil {
 			return nil, err
 		}
 		if err := peh.svc.FulfillDonation(ctx, in.ID, in.Body.DonorAgentID); err != nil {

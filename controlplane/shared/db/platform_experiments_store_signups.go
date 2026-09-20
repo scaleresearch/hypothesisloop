@@ -17,6 +17,10 @@ import (
 // ErrMaxAgentsReached is a competitor signup refused because the field is full.
 var ErrMaxAgentsReached = errors.New("max_agents reached")
 
+// ErrMaxHostedReached is returned when a platform experiment would have the platform run more
+// machines than its max_hosted.
+var ErrMaxHostedReached = errors.New("max_hosted reached")
+
 // ErrSignupClosed is a signup or a removal refused because the platform experiment is no longer
 // open, or does not exist: the roster is fixed when the experiment starts.
 var ErrSignupClosed = errors.New("platform experiment is not open")
@@ -72,7 +76,9 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 }
 
 // CreatePlatformExperimentWithAgents inserts a platform experiment and enrols new agents in it,
-// both or neither: an experiment asked for with agents never exists without them.
+// both or neither: an experiment asked for with agents never exists without them. With no agents
+// it is the plain create. ErrMaxHostedReached when its hosted agents and coordinator are more
+// machines than pe.MaxHosted.
 func (s *PlatformExperimentsStore) CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error {
 	if len(agents) != len(signups) {
 		return fmt.Errorf("platform_experiments_store.CreateWithAgents: %d agents for %d signups", len(agents), len(signups))
@@ -97,11 +103,12 @@ func (s *PlatformExperimentsStore) CreatePlatformExperimentWithAgents(ctx contex
 // enrolTx is enrol inside the caller's transaction.
 func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
 	var status, orgID string
-	var maxAgents int
+	var maxAgents, maxHosted int
+	var coordinatorHosted bool
 	if err := tx.QueryRow(ctx, `
-SELECT pe.status, pe.max_agents, p.org_id
+SELECT pe.status, pe.max_agents, pe.max_hosted, pe.coordinator_hosted, p.org_id
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &orgID); err != nil {
+WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxHosted, &coordinatorHosted, &orgID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrSignupClosed
 		}
@@ -122,7 +129,7 @@ VALUES ($1, $2, $3, $4, $5, $6)`, agent.ID, agent.Name, agent.OrgID, agent.Kind,
 	for _, agent := range create {
 		created[agent.ID] = true
 	}
-	inserted, competitors := 0, false
+	inserted, competitors, hosted := 0, false, false
 	for _, signup := range signups {
 		if !created[signup.AgentID] {
 			var agentOrg string
@@ -149,6 +156,21 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if tag.RowsAffected() == 1 {
 			inserted++
 			competitors = competitors || signup.Role == domain.SignupRoleCompetitor
+			hosted = hosted || signup.Hosted
+		}
+	}
+	// max_hosted bounds the machines the platform rents for the experiment, so it counts every
+	// hosted agent whatever its role, and the coordinator.
+	if hosted || (len(signups) == 0 && coordinatorHosted) {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND hosted`, platformExpID).Scan(&count); err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
+		}
+		if coordinatorHosted {
+			count++
+		}
+		if count > maxHosted {
+			return 0, ErrMaxHostedReached
 		}
 	}
 	if inserted == 0 {
@@ -212,7 +234,8 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 
 const agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
        s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
-       s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log`
+       s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
+       s.instance_seen_at, s.instance_launch`
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
@@ -221,7 +244,8 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var instance domain.AgentInstance
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
-		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog}, more...)...); err != nil {
+		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
+		&instance.SeenAt, &instance.Launch}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
 	if signup.Hosted {
@@ -280,19 +304,19 @@ type LauncherAgent struct {
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
 // of an open or running platform experiment that were not cut, and those whose experiment closed
-// or who were cut less than $2 seconds ago. An agent whose machine exited for the last time is
-// none of them. Both moments and the comparison are on the database's clock.
+// or who were cut less than $2 seconds ago. A stopped agent is among them: it is asked for again
+// once what it is started with changes. Both moments and the comparison are on the database's
+// clock.
 const launcherAgentsFrom = `
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 LEFT JOIN agents a ON a.id = s.agent_id
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
-WHERE s.hosted AND s.launcher = $1 AND NOT s.instance_stopped
+WHERE s.hosted AND s.launcher = $1
   AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))`
 
-// ListLauncherAgents returns the hosted agents whose machine the launcher keeps or leaves alone
-// right now.
+// ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT `+agentSignupColumns+`, (pe.status = 'closed' OR c.agent_id IS NOT NULL)`+launcherAgentsFrom+`
@@ -311,56 +335,6 @@ ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 		agents = append(agents, agent)
 	}
 	return agents, rows.Err()
-}
-
-// LauncherHasAgents reports whether ListLauncherAgents would return anything for the launcher.
-func (s *PlatformExperimentsStore) LauncherHasAgents(ctx context.Context, launcher string, windDown time.Duration) (bool, error) {
-	var has bool
-	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1`+launcherAgentsFrom+`)`, launcher, windDown.Seconds()).Scan(&has); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.LauncherHasAgents: %w", err)
-	}
-	return has, nil
-}
-
-// SetAgentInstanceName records the name a hosted agent's machine is asked for under.
-func (s *PlatformExperimentsStore) SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error {
-	if _, err := s.pool.pool.Exec(ctx, `
-UPDATE experiment_signups SET instance_name = $3, instance_asked_at = now()
-WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted`, platformExpID, agentID, name); err != nil {
-		return fmt.Errorf("platform_experiments_store.SetAgentInstanceName: %w", err)
-	}
-	return nil
-}
-
-// RecordAgentInstanceExit records that the machine a hosted agent was asked for under name has
-// exited, with the end of its output. It counts a restart while fewer than maxRestarts were
-// counted, and stops the agent otherwise. The name is cleared, so the same exit reported again
-// records nothing: recorded=false, as for a name the agent is not asked for under.
-func (s *PlatformExperimentsStore) RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (recorded bool, err error) {
-	return s.endAgentInstance(ctx, platformExpID, agentID, name, exitLog, maxRestarts, 0)
-}
-
-// RecordAgentInstanceStuck records, as an exit, that a hosted agent has had no started machine
-// for bootLimit since name was first asked for, on the database's clock: one that stayed
-// starting, or one that could not be created at all. why is kept as the exit's log. It reports
-// false, and changes nothing, while the limit has not passed.
-func (s *PlatformExperimentsStore) RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error) {
-	return s.endAgentInstance(ctx, platformExpID, agentID, name, why, maxRestarts, bootLimit)
-}
-
-func (s *PlatformExperimentsStore) endAgentInstance(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int, askedBefore time.Duration) (bool, error) {
-	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE experiment_signups
-SET instance_name = '', instance_exited_at = now(), instance_exit_log = $4,
-    instance_stopped = instance_restarts >= $5,
-    instance_restarts = CASE WHEN instance_restarts >= $5 THEN instance_restarts ELSE instance_restarts + 1 END
-WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted AND NOT instance_stopped
-  AND instance_name = $3 AND instance_name <> ''
-  AND instance_asked_at <= now() - make_interval(secs => $6)`, platformExpID, agentID, name, exitLog, maxRestarts, askedBefore.Seconds())
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store: end instance of %s: %w", agentID, err)
-	}
-	return tag.RowsAffected() == 1, nil
 }
 
 // ListSignups returns all agent IDs signed up for a platform experiment.

@@ -50,6 +50,11 @@ type AgentInstance struct {
 	ExitedAt *time.Time `json:"exited_at,omitempty"`
 	// ExitLog is the end of what the last exited machine's command wrote.
 	ExitLog string `json:"exit_log,omitempty"`
+	// SeenAt is when the launcher first reported the machine asked for under Name.
+	SeenAt *time.Time `json:"seen_at,omitempty"`
+	// Launch identifies what Restarts were spent under: the image and the launcher's own launch
+	// inputs. A machine asked for under another starts with none spent.
+	Launch string `json:"-"`
 }
 
 // HostedCoordinator is the coordinator the platform runs for one platform experiment: one more
@@ -60,6 +65,17 @@ type HostedCoordinator struct {
 	Model    string `json:"model"`
 	// Instance is what became of its machine.
 	Instance AgentInstance `json:"instance"`
+}
+
+var launcherNamePattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
+
+// ValidateLauncherName holds a launcher's name to what can start the name of every machine it
+// rents: with a dash in it, one launcher's names would start with another's.
+func ValidateLauncherName(name string) error {
+	if !launcherNamePattern.MatchString(name) {
+		return fmt.Errorf("launcher name %q must be 1 to 16 lowercase letters and digits", name)
+	}
+	return nil
 }
 
 // CoordinatorFlavor is what the harness is started as to coordinate. It is no flavor an agent

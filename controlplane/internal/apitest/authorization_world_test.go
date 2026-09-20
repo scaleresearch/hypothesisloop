@@ -192,31 +192,19 @@ func (noLauncherAgents) ListLauncherAgents(context.Context, string, time.Duratio
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) SetAgentInstanceName(context.Context, string, string, string) error {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) RecordAgentInstanceExit(context.Context, string, string, string, string, int) (bool, error) {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) RecordAgentInstanceStuck(context.Context, string, string, string, string, time.Duration, int) (bool, error) {
-	panic("the launcher handler reached its store")
-}
-
 func (noLauncherAgents) ListLauncherCoordinators(context.Context, string, time.Duration) ([]db.LauncherCoordinator, error) {
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) SetCoordinatorInstanceName(context.Context, string, string) error {
+func (noLauncherAgents) AskInstance(context.Context, string, string, string, string) error {
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) RecordCoordinatorInstanceExit(context.Context, string, string, string, int) (bool, error) {
+func (noLauncherAgents) SeeInstance(context.Context, string, string, string) error {
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) RecordCoordinatorInstanceStuck(context.Context, string, string, string, time.Duration, int) (bool, error) {
+func (noLauncherAgents) EndInstance(context.Context, string, string, string, db.InstanceEnd, string, time.Duration, int) (domain.AgentInstance, bool, error) {
 	panic("the launcher handler reached its store")
 }
 
@@ -271,12 +259,12 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	launchers := chi.NewRouter()
 	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, access, logger)
-	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, "image", "http://api", worldSecret, time.Minute, logger))
+	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, MaxNewPerAnswer: 1}, logger))
 	api.router.Mount("/internal/launchers", launchers)
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)
 	api.docs[""] = doc
-	peHandler := quota.NewPlatformExperimentsHandler(nil, noProjectRepos{}, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret})
+	peHandler := quota.NewPlatformExperimentsHandler(nil, noProjectRepos{}, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0))

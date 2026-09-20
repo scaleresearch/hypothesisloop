@@ -32,6 +32,15 @@ def token(scope: str) -> str:
     return _run("token", scope)
 
 
+def add_launcher(name: str) -> str:
+    """Registers an agent-launcher and returns its token. Registering one again changes nothing."""
+    return _run("launcher", "add", name)
+
+
+def remove_launcher(name: str) -> None:
+    _run("launcher", "remove", name)
+
+
 def add_user(subject: str, name: str) -> dict:
     """{user_id, org_id, project_id}: the user, their home org and its default project."""
     return json.loads(_run("user", "add", subject, name))

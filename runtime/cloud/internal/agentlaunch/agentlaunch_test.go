@@ -112,7 +112,6 @@ func (h *harness) config() Config {
 		Name:          "main",
 		APIURL:        h.cp.server.URL,
 		Token:         launcherToken,
-		Namespace:     "ns",
 		Command:       []string{"uv", "run", "agent"},
 		Size:          Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30},
 		ModelProvider: "example",
@@ -147,7 +146,7 @@ func (h *harness) names(want ...string) {
 	}
 }
 
-func full(name string) string { return "hl-agent-ns-" + name }
+func full(name string) string { return "hl-agent-main-" + name }
 
 func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing.T) {
 	h := newHarness(t)
@@ -436,9 +435,8 @@ func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.
 		}
 	}
 	for what, edit := range map[string]func(*Config){
-		"token":     func(c *Config) { c.Token = "hls_another" },
-		"interval":  func(c *Config) { c.Interval = time.Hour },
-		"namespace": func(c *Config) { c.Namespace = "other" },
+		"token":    func(c *Config) { c.Token = "hls_another" },
+		"interval": func(c *Config) { c.Interval = time.Hour },
 	} {
 		cfg := h.config()
 		edit(&cfg)
@@ -657,16 +655,16 @@ func TestAnUnreachableControlPlaneChangesNothing(t *testing.T) {
 	h.names(full("kept"))
 }
 
-func TestAnExplicitlyEmptyListDestroysEverythingOfTheNamespaceOnly(t *testing.T) {
+func TestAnExplicitlyEmptyListDestroysEverythingUnderTheLaunchersNameOnly(t *testing.T) {
 	h := newHarness(t)
 	h.cp.want([]entry{agent("a")}, nil)
 	h.mustPass()
 	rent(t, h.rented, "hl-agent-other-a")
-	rent(t, h.rented, "hl-job-ns-exp-a1-cpu-0")
-	rent(t, h.rented, "hl-agent-ns2-a")
+	rent(t, h.rented, "hl-job-main-exp-a1-cpu-0")
+	rent(t, h.rented, "hl-agent-main2-a")
 	h.cp.want(nil, nil)
 	h.mustPass()
-	h.names("hl-agent-ns2-a", "hl-agent-other-a", "hl-job-ns-exp-a1-cpu-0")
+	h.names("hl-agent-main2-a", "hl-agent-other-a", "hl-job-main-exp-a1-cpu-0")
 }
 
 func TestNothingIsKeptBetweenPasses(t *testing.T) {
@@ -684,6 +682,86 @@ func TestNothingIsKeptBetweenPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.names(full("b"), full("c"))
+}
+
+// A restarted process learns of a failed create the way a running one does: the name is asked
+// for again, since the control plane counts from when it asked and from what is listed.
+func TestAFailedCreateIsRetriedByWhicheverProcessIsAskedNext(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	failing := true
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Create" && failing {
+			return errors.New("vendor: no capacity")
+		}
+		return nil
+	}
+	if err := h.pass(); err == nil {
+		t.Fatal("the pass with a failed create returned no error")
+	}
+	failing = false
+	restarted, err := New(h.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.names(full("a"))
+	for i, question := range h.cp.asked {
+		if len(question.Instances) != 0 {
+			t.Fatalf("question %d reports %+v, want nothing: nothing was listed", i, question.Instances)
+		}
+	}
+}
+
+func TestEveryQuestionSaysHowTheLauncherPacesItsPasses(t *testing.T) {
+	h := newHarness(t)
+	cfg := h.config()
+	cfg.Interval, cfg.CreatePause = 15*time.Second, 250*time.Millisecond
+	launcher, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.cp.lastQuestion(); got.ReconcileIntervalSeconds != 15 || got.CreatePauseMilliseconds != 250 {
+		t.Fatalf("question = %+v, want interval 15s and pause 250ms", got)
+	}
+}
+
+func TestARefusalOfTheLaunchersConfigurationEndsRunWithTheControlPlanesWords(t *testing.T) {
+	h := newHarness(t)
+	rent(t, h.rented, full("kept"))
+	h.cp.answer(http.StatusConflict, `{"error":"2 x (10 new instances per answer x create_pause 30s + reconcile_interval 15s) = 10m30s is above agents.boot_limit_seconds 5m0s"}`)
+	done := make(chan error, 1)
+	go func() { done <- h.launcher.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "is above agents.boot_limit_seconds 5m0s") {
+			t.Fatalf("Run returned %v, want the refusal with its arithmetic", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run kept passing after the control plane refused the launcher's configuration")
+	}
+	h.names(full("kept"))
+}
+
+func TestAnExitedInstancesOutputIsSentWithoutTheLaunchersOwnCredential(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	h.rented.Start(full("a"))
+	h.rented.Exit(full("a"), "env: CLAUDE_CODE_OAUTH_TOKEN="+oauthToken, "SystemExit: the reason")
+	h.mustPass()
+	sent := h.cp.lastQuestion().Instances
+	if len(sent) != 1 || strings.Contains(sent[0].Log, oauthToken) {
+		t.Fatalf("sent %+v, which holds the model provider's credential", sent)
+	}
+	if sent[0].Log != "env: CLAUDE_CODE_OAUTH_TOKEN=<CLAUDE_CODE_OAUTH_TOKEN>\nSystemExit: the reason" {
+		t.Fatalf("sent log %q", sent[0].Log)
+	}
 }
 
 func TestNoSecretReachesTheLogOrAnInstanceName(t *testing.T) {
@@ -713,16 +791,15 @@ func TestNoSecretReachesTheLogOrAnInstanceName(t *testing.T) {
 
 func TestRunPassesUntilCancelledAndSurvivesAFailingPass(t *testing.T) {
 	h := newHarness(t)
-	cfg := h.config()
-	cfg.Interval = 5 * time.Millisecond
-	launcher, err := New(cfg)
+	launcher, err := New(h.config())
 	if err != nil {
 		t.Fatal(err)
 	}
+	launcher.cfg.Interval = 5 * time.Millisecond
 	h.cp.answer(http.StatusInternalServerError, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { launcher.Run(ctx); close(done) }()
+	go func() { _ = launcher.Run(ctx); close(done) }()
 
 	time.Sleep(30 * time.Millisecond)
 	h.cp.want([]entry{agent("a")}, nil)
@@ -740,23 +817,24 @@ func TestRunPassesUntilCancelledAndSurvivesAFailingPass(t *testing.T) {
 func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 	h := newHarness(t)
 	for name, edit := range map[string]func(*Config){
-		"no name":             func(c *Config) { c.Name = "" },
-		"no api url":          func(c *Config) { c.APIURL = "" },
-		"no token":            func(c *Config) { c.Token = "" },
-		"namespace with dash": func(c *Config) { c.Namespace = "team-a" },
-		"no namespace":        func(c *Config) { c.Namespace = "" },
-		"no command":          func(c *Config) { c.Command = nil },
-		"no cpu":              func(c *Config) { c.Size.CPUMillis = 0 },
-		"no memory":           func(c *Config) { c.Size.MemoryBytes = 0 },
-		"no disk":             func(c *Config) { c.Size.DiskBytes = 0 },
-		"no interval":         func(c *Config) { c.Interval = 0 },
-		"no model provider":   func(c *Config) { c.ModelProvider = "" },
-		"no provider env":     func(c *Config) { c.Env = nil },
-		"negative pause":      func(c *Config) { c.CreatePause = -time.Second },
-		"empty env value":     func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
-		"no provider":         func(c *Config) { c.Provider = nil },
-		"no http client":      func(c *Config) { c.HTTPClient = nil },
-		"no log":              func(c *Config) { c.Log = nil },
+		"no name":           func(c *Config) { c.Name = "" },
+		"no api url":        func(c *Config) { c.APIURL = "" },
+		"no token":          func(c *Config) { c.Token = "" },
+		"name with dash":    func(c *Config) { c.Name = "team-a" },
+		"interval of 1.5s":  func(c *Config) { c.Interval = 1500 * time.Millisecond },
+		"pause of 1.5us":    func(c *Config) { c.CreatePause = 1500 * time.Nanosecond },
+		"no command":        func(c *Config) { c.Command = nil },
+		"no cpu":            func(c *Config) { c.Size.CPUMillis = 0 },
+		"no memory":         func(c *Config) { c.Size.MemoryBytes = 0 },
+		"no disk":           func(c *Config) { c.Size.DiskBytes = 0 },
+		"no interval":       func(c *Config) { c.Interval = 0 },
+		"no model provider": func(c *Config) { c.ModelProvider = "" },
+		"no provider env":   func(c *Config) { c.Env = nil },
+		"negative pause":    func(c *Config) { c.CreatePause = -time.Second },
+		"empty env value":   func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
+		"no provider":       func(c *Config) { c.Provider = nil },
+		"no http client":    func(c *Config) { c.HTTPClient = nil },
+		"no log":            func(c *Config) { c.Log = nil },
 	} {
 		cfg := h.config()
 		edit(&cfg)
@@ -854,7 +932,7 @@ func TestCreatesOfOnePassAreSpacedByThePauseAndAFailedOneDoesNotEndThem(t *testi
 			t.Errorf("creates %d and %d are %s apart, want at least %s", i, i+1, gap, pause)
 		}
 	}
-	if h.logged("NO AGENT COULD BE STARTED") != 0 {
+	if h.logged("NO INSTANCE COULD BE CREATED") != 0 {
 		t.Errorf("a pass that started some agents says none could be: %q", h.log)
 	}
 }
@@ -894,7 +972,7 @@ func TestEveryCreateFailingIsLoudAndLeavesNothingRented(t *testing.T) {
 			}
 		}
 		h.names()
-		if got := h.logged("NO AGENT COULD BE STARTED: all 3 creates of this pass failed, the last with: the size asked for is above the plan"); got != pass {
+		if got := h.logged("NO INSTANCE COULD BE CREATED: all 3 creates of this pass failed, the last with: the size asked for is above the plan"); got != pass {
 			t.Fatalf("pass %d: the loud line was logged %d times: %q", pass, got, h.log)
 		}
 	}
@@ -960,77 +1038,7 @@ func TestAVendorErrorThatQuotesTheRequestBackReachesNoLogWithItsSecrets(t *testi
 	if !strings.Contains(said, "<HL_TOKEN>") || !strings.Contains(said, "<CLAUDE_CODE_OAUTH_TOKEN>") {
 		t.Fatalf("the error does not say what was taken out: %s", said)
 	}
-	if h.logged("NO AGENT COULD BE STARTED") != 1 {
+	if h.logged("NO INSTANCE COULD BE CREATED") != 1 {
 		t.Fatalf("log = %q", h.log)
-	}
-}
-
-func TestAFailedCreateIsReportedWithTheNextQuestionRedactedAndOnlyWhileTheNameIsNotListed(t *testing.T) {
-	h := newHarness(t)
-	h.cp.want([]entry{agent("a"), agent("b")}, nil)
-	refusal := fmt.Sprintf(`vendor: HTTP 422: {"error":"bad guest","env":{"HL_TOKEN":%q,"CLAUDE_CODE_OAUTH_TOKEN":%q}}`, agentToken, oauthToken)
-	failing := true
-	h.rented.Fail = func(method, name string) error {
-		if method == "Create" && failing && strings.HasSuffix(name, "-a") {
-			return errors.New(refusal)
-		}
-		return nil
-	}
-	if err := h.pass(); err == nil {
-		t.Fatal("the pass with a failed create returned no error")
-	}
-	if first := h.cp.lastQuestion(); len(first.CreateFailures) != 0 {
-		t.Fatalf("the first question reports %+v, want nothing: no create had been tried", first.CreateFailures)
-	}
-
-	_ = h.pass()
-	reported := h.cp.lastQuestion().CreateFailures
-	if len(reported) != 1 || reported[0].Name != "a" || !strings.Contains(reported[0].Reason, "bad guest") {
-		t.Fatalf("reported %+v, want the one failed create by the name it was asked for under", reported)
-	}
-	for _, secret := range []string{agentToken, oauthToken} {
-		if strings.Contains(reported[0].Reason, secret) {
-			t.Fatalf("the reason carries a secret of the instance's environment: %s", reported[0].Reason)
-		}
-	}
-	if len(reported[0].Reason) > exitLogBytes {
-		t.Fatalf("the reason is %d bytes, above the bound", len(reported[0].Reason))
-	}
-
-	// The create works on the third pass. Its failure in the second is not said of a machine
-	// the provider lists by the fourth.
-	failing = false
-	if err := h.pass(); err != nil {
-		t.Fatal(err)
-	}
-	if third := h.cp.lastQuestion().CreateFailures; len(third) != 1 {
-		t.Fatalf("the third question reports %+v, want the second pass's failure", third)
-	}
-	if err := h.pass(); err != nil {
-		t.Fatal(err)
-	}
-	if fourth := h.cp.lastQuestion(); len(fourth.CreateFailures) != 0 || len(fourth.Instances) != 2 {
-		t.Fatalf("the fourth question = %+v, want both listed and no failure", fourth)
-	}
-}
-
-func TestAPassThatNeverReachedItsCreatesKeepsTheFailuresItOwesTheControlPlane(t *testing.T) {
-	h := newHarness(t)
-	h.cp.want([]entry{agent("a")}, nil)
-	h.rented.Fail = func(method, _ string) error {
-		if method == "Create" {
-			return errors.New("vendor: no capacity")
-		}
-		return nil
-	}
-	_ = h.pass()
-	h.cp.answer(http.StatusServiceUnavailable, "")
-	if err := h.pass(); err == nil {
-		t.Fatal("a pass the control plane did not answer returned no error")
-	}
-	h.cp.want([]entry{agent("a")}, nil)
-	_ = h.pass()
-	if reported := h.cp.lastQuestion().CreateFailures; len(reported) != 1 || reported[0].Reason != "vendor: no capacity" {
-		t.Fatalf("reported %+v, want the failure the unanswered question carried", reported)
 	}
 }

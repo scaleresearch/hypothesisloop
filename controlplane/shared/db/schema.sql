@@ -458,6 +458,13 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_asked_at  TIMES
 -- A machine asked for before the column existed is timed from this migration: with no time its
 -- exit would never be recorded.
 UPDATE experiment_signups SET instance_asked_at = now() WHERE instance_name <> '' AND instance_asked_at IS NULL;
+-- instance_seen_at is when the launcher first reported the name: a machine asked for and never
+-- reported, one reported and gone, and one that stays starting are told apart by it.
+-- instance_launch identifies what the restarts were spent under (the image and the launcher's own
+-- launch inputs): a machine asked for under another gets a fresh budget, so that an agent stopped
+-- by a fault of the platform's is started again once the fault is fixed.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_seen_at TIMESTAMPTZ;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_launch  TEXT NOT NULL DEFAULT '';
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN
@@ -981,6 +988,18 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_r
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_stopped   BOOLEAN     NOT NULL DEFAULT false;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exited_at TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exit_log  TEXT        NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_seen_at   TIMESTAMPTZ;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_launch    TEXT        NOT NULL DEFAULT '';
+-- How many machines the platform may run for this platform experiment, its coordinator included.
+-- Fixed at creation from config agents.max_hosted_per_platform_experiment.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_hosted INTEGER NOT NULL DEFAULT 0;
+
+-- An agent-launcher the platform knows. Its token works while its row exists, as a runtime's
+-- does while its cluster is registered.
+CREATE TABLE IF NOT EXISTS launchers (
+    name       TEXT PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS idx_platform_experiments_coordinator_launcher ON platform_experiments(coordinator_launcher) WHERE coordinator_hosted;
 UPDATE platform_experiments SET closed_at = updated_at WHERE status = 'closed' AND closed_at IS NULL;
 

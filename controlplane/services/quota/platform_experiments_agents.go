@@ -38,6 +38,9 @@ type AgentLaunch struct {
 	DefaultModel string
 	// SigningSecret derives an agent's own token.
 	SigningSecret string
+	// MaxHosted is how many machines the platform runs for one platform experiment, written
+	// onto each when it is created.
+	MaxHosted int
 }
 
 // JoinedAgent is one agent's place in a platform experiment as the API answers with it. Token is
@@ -82,6 +85,9 @@ func (s *PlatformExperimentsService) AddAgents(ctx context.Context, platformExpI
 	}
 	if req.Hosted {
 		signup.Launcher = launch.Launcher
+		if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
+			return nil, err
+		}
 		if err := s.requireRepo(ctx, platformExpID, repos); err != nil {
 			return nil, err
 		}
@@ -106,6 +112,19 @@ func (s *PlatformExperimentsService) requireRepo(ctx context.Context, platformEx
 	return requireProjectRepo(ctx, pe.ProjectID, repos)
 }
 
+// requireLauncher refuses to host anything while the launcher config gives new machines to is
+// not registered: its token would be refused, and nothing would ever start.
+func (s *PlatformExperimentsService) requireLauncher(ctx context.Context, launcher string) error {
+	known, err := s.store.LauncherKnown(ctx, launcher)
+	if err != nil {
+		return fmt.Errorf("platform_experiments: launcher %s: %w", launcher, err)
+	}
+	if !known {
+		return refuseSignup(503, "launcher_not_registered", "the platform gives hosted machines to launcher %q (config agents.launcher), which is not registered: an operator registers it with `hl-admin launcher add %s`", launcher, launcher)
+	}
+	return nil
+}
+
 func requireProjectRepo(ctx context.Context, projectID string, repos ProjectRepos) error {
 	cloneURL, err := repos.CloneURL(ctx, projectID)
 	if err != nil {
@@ -123,11 +142,15 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if req.CoordinatorModel != "" && !req.CoordinatorHosted {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_hosted is not")
 	}
+	req.maxHosted = h.launch.MaxHosted
 	if !req.CoordinatorHosted && req.HostedAgents == 0 {
 		return req, nil
 	}
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
 		return req, errors.New("platform_experiments.Create: the handler has no agent launch settings")
+	}
+	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
+		return req, err
 	}
 	if err := requireProjectRepo(ctx, req.ProjectID, h.repos); err != nil {
 		return req, err
@@ -240,6 +263,8 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 		return nil, refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
 	case errors.Is(err, db.ErrMaxAgentsReached):
 		return nil, refuseSignup(400, "max_agents_reached", "limit is %d", pe.MaxAgents)
+	case errors.Is(err, db.ErrMaxHostedReached):
+		return nil, refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	case err != nil:
 		return nil, fmt.Errorf("platform_experiments.AddAgents: %w", err)
 	}
@@ -304,7 +329,7 @@ type joinedAgentsBody struct {
 
 // RegisterAgentsHuma registers how agents join and leave a platform experiment.
 func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.repos == nil {
+	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.launch.MaxHosted <= 0 || h.repos == nil {
 		panic("quota.RegisterAgentsHuma: the handler needs its project repositories and WithAgentLaunch with every field set")
 	}
 	access := doc.Access

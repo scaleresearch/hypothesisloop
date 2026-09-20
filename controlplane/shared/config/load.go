@@ -221,8 +221,8 @@ func (c *Config) build() error {
 	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
 		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
 	}
-	if err := domain.ValidateIdentifier("agents launcher", c.Agents.Launcher); err != nil {
-		return err
+	if err := domain.ValidateLauncherName(c.Agents.Launcher); err != nil {
+		return fmt.Errorf("agents launcher: %w", err)
 	}
 	if c.Agents.Image == "" {
 		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
@@ -235,6 +235,12 @@ func (c *Config) build() error {
 	}
 	if c.Agents.BootLimitSeconds <= 0 {
 		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a hosted agent's machine may stay starting")
+	}
+	if c.Agents.MaxNewInstancesPerAnswer <= 0 {
+		return fmt.Errorf("agents max_new_instances_per_answer is required and positive: how many machines one answer asks a launcher to create")
+	}
+	if c.Agents.MaxHostedPerPlatformExperiment <= 0 {
+		return fmt.Errorf("agents max_hosted_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
 	}
 	for key, address := range map[string]string{"api_url": c.Runtimes.APIURL, "metrics_url": c.Runtimes.MetricsURL} {
 		parsed, err := url.Parse(address)

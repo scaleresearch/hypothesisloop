@@ -83,7 +83,6 @@ agentLauncher:
   config: |
     launcher_name: main
     api_url: http://control-service:8081
-    namespace: main
     reconcile_interval_seconds: 15
     create_pause_milliseconds: 1000
     provider:

@@ -16,7 +16,9 @@ test_project_repo.py names, and are skipped without it:
     HL_E2E_GITHUB_INSTALLATION    the installation of the App that covers it
     HL_E2E_GITHUB_REPO_ID         its id on GitHub
 
-API-only, parallel-safe: every assertion is about this test's own platform experiments.
+Exclusive: every test here asks as the one launcher the local control plane gives hosted agents
+to, and a machine that launcher reported once and leaves out of a later report is an exit. Two
+tests asking at once would each end the machines the other reported.
 """
 from __future__ import annotations
 
@@ -31,7 +33,7 @@ from support import admin
 from support.api import API
 from support.wait import eventually
 
-pytestmark = pytest.mark.parallel
+pytestmark = pytest.mark.exclusive
 
 LAUNCHER = "main"
 MAX_RESTARTS = 3  # domain.MaxAgentInstanceRestarts
@@ -207,16 +209,16 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert r.status_code in (404, 405), f"the old signup path still answers: {r.status_code} {r.text}"
 
     # Who may read a launcher's list: that launcher and nobody it launched.
-    as_launcher = api.as_caller(admin.token(f"launcher:{LAUNCHER}"))
+    as_launcher = api.as_caller(admin.add_launcher(LAUNCHER))
     assert sorted(desired_for(as_launcher, pe_id)[0]) == sorted(hosted_ids)
-    question = {"launch_digest": API.LAUNCH_DIGEST, "instances": []}
+    question = api.launcher_question()
     r = as_launcher.post(f"/internal/launchers/other-{run_id}/reconcile", question)
     assert r.status_code == 403, f"a launcher asking for another's list: {r.status_code} {r.text}"
     r = as_launcher.get(f"/platform-experiments/{pe_id}")
     assert r.status_code == 403, f"a launcher token on the public API: {r.status_code} {r.text}"
     unknown = api.as_caller(admin.token(f"launcher:nobody-{run_id}"))
     r = unknown.post(f"/internal/launchers/nobody-{run_id}/reconcile", question)
-    assert r.status_code == 401, f"a launcher nothing names: {r.status_code} {r.text}"
+    assert r.status_code == 401, f"a launcher nobody registered: {r.status_code} {r.text}"
     for scope in (f"agent:{pe_id}/{hosted_ids[0]}", f"coordinator:{pe_id}"):
         r = api.as_caller(admin.token(scope)).post(f"/internal/launchers/{LAUNCHER}/reconcile", question)
         assert r.status_code == 403, f"{scope} reading the launcher's list: {r.status_code} {r.text}"
@@ -291,7 +293,8 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
     for _ in range(3):
         instances, _ = desired_for(api, pe_id, [{"name": steady_name, "state": "running"}])
         assert sorted(instances) == [steady]
-    assert roster(api, pe_id)[steady]["instance"] == {"name": steady_name, "restarts": 0, "stopped": False}
+    kept = roster(api, pe_id)[steady]["instance"]
+    assert (kept["name"], kept["restarts"], kept["stopped"]) == (steady_name, 0, False) and kept["seen_at"], kept
     # The agent itself is still in the platform experiment: its place, quota and token stand.
     assert api.signup_role(pe_id, crashing) == (200, "competitor")
 
@@ -319,7 +322,9 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     survivors = set(stages["active_agents"])
     assert cut | survivors == set(agents)
 
-    instances, ending = desired_for(api, pe_id)
+    # Reported as a launcher reports them, so that none is given up on as never started.
+    up = [{"name": before[agent]["name"], "state": "running"} for agent in agents]
+    instances, ending = desired_for(api, pe_id, up)
     assert set(instances) == survivors, f"running: {sorted(instances)}, survivors: {sorted(survivors)}"
     for agent in cut:
         assert before[agent]["name"] in ending, f"cut agent {agent} is not left to end"
@@ -327,7 +332,7 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
         assert instances[agent] == before[agent], f"the survivor {agent} would be replaced by the cut"
 
     api.close_platform_experiment(pe_id)
-    instances, ending = desired_for(api, pe_id)
+    instances, ending = desired_for(api, pe_id, up)
     assert not instances
     for agent in survivors:
         assert before[agent]["name"] in ending, f"{agent} is not left to end after the close"
@@ -461,20 +466,104 @@ def test_hosted_agents_that_do_not_fit_leave_no_platform_experiment(with_repo: A
         with_repo.close_platform_experiment(pe_id)
 
 
-def test_a_failed_create_is_taken_with_the_question_and_costs_nothing_inside_the_boot_limit(with_repo: API, hosted_pe, run_id: str):
-    """Past the boot limit (agents.boot_limit_seconds, minutes on the local stack) a create that
-    keeps failing spends a restart, which the handler's and the store's own tests follow."""
-    pe_id = hosted_pe("hosted-create-fails", 1.0, 5)
-    agent_id = with_repo.add_agents(pe_id, hosted=True)[0]["agent_id"]
-    name = desired_for(with_repo, pe_id)[0][agent_id]["name"]
-    question = {"launch_digest": API.LAUNCH_DIGEST, "instances": [],
-                "create_failures": [{"name": name, "reason": "vendor: HTTP 422: no such size"}]}
-    answer = with_repo.post_json(f"/internal/launchers/{LAUNCHER}/reconcile", question)
-    own = [i for i in answer["instances"] if i["env"].get("AGENT_ID") == agent_id]
-    assert len(own) == 1 and own[0]["name"] == name, f"inside the boot limit the agent is asked for as {own}"
-    instance = roster(with_repo, pe_id)[agent_id]["instance"]
-    assert instance["restarts"] == 0 and not instance["stopped"], instance
+def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_reported_and_gone_is_an_exit(with_repo: API, hosted_pe, run_id: str):
+    """Past the boot limit (agents.boot_limit_seconds, minutes on the local stack) a machine never
+    reported or still starting spends a restart, which the handler's and the store's own tests
+    follow with a clock of their own."""
+    api = with_repo
+    pe_id = hosted_pe("hosted-seen-gone", 1.0, 5)
+    agent_id = api.add_agents(pe_id, hosted=True)[0]["agent_id"]
+    name = desired_for(api, pe_id)[0][agent_id]["name"]
 
-    question["create_failures"] = [{"name": "", "reason": "r"}]
-    r = with_repo.post(f"/internal/launchers/{LAUNCHER}/reconcile", question)
-    assert r.status_code == 400, f"a create failure with no name: {r.status_code} {r.text}"
+    # A create that failed is said by nobody: the name is asked for again and nothing is spent.
+    for _ in range(2):
+        assert desired_for(api, pe_id)[0][agent_id]["name"] == name
+    instance = roster(api, pe_id)[agent_id]["instance"]
+    assert instance["restarts"] == 0 and not instance["stopped"] and "seen_at" not in instance, instance
+
+    # Reported, it is kept for as long as it is reported.
+    for state in ("starting", "running"):
+        assert desired_for(api, pe_id, [{"name": name, "state": state}])[0][agent_id]["name"] == name
+    instance = roster(api, pe_id)[agent_id]["instance"]
+    assert instance["seen_at"] and instance["restarts"] == 0, instance
+
+    # Reported before and in no report now: the provider took it, which is an exit.
+    again = desired_for(api, pe_id)[0][agent_id]["name"]
+    assert again != name, "a machine that was running and is gone is still asked for under its name"
+    instance = roster(api, pe_id)[agent_id]["instance"]
+    assert instance["restarts"] == 1 and "no longer lists it" in instance["exit_log"] and "seen_at" not in instance, instance
+
+
+def test_a_launcher_is_answered_while_it_is_registered_and_refused_when_its_pass_cannot_fit(api: API, run_id: str):
+    name = f"e2e{uuid.uuid4().hex[:10]}"
+    token = admin.token(f"launcher:{name}")
+    r = api.as_caller(token).post(f"/internal/launchers/{name}/reconcile", api.launcher_question())
+    assert r.status_code == 401, f"a launcher nobody registered: {r.status_code} {r.text}"
+
+    assert admin.add_launcher(name) == token, "the token printed for a launcher is not the one its scope derives"
+    try:
+        as_launcher = api.as_caller(token)
+        # No agent is given to it: an empty list, on which a launcher destroys what it holds.
+        assert as_launcher.post_json(f"/internal/launchers/{name}/reconcile", api.launcher_question()) == {"instances": [], "ending": []}
+
+        # Ten new machines an answer, a minute between two creates: no pass ends inside any boot
+        # limit a deployment would set, and the refusal says the arithmetic.
+        slow = {**api.launcher_question(), "create_pause_milliseconds": 3_600_000}
+        r = as_launcher.post(f"/internal/launchers/{name}/reconcile", slow)
+        assert r.status_code == 409 and "boot_limit_seconds" in r.text and "create_pause" in r.text, f"{r.status_code} {r.text}"
+        unpaced = {"launch_digest": API.LAUNCH_DIGEST, "instances": []}
+        r = as_launcher.post(f"/internal/launchers/{name}/reconcile", unpaced)
+        assert r.status_code in (400, 422), f"a question that does not say how the launcher paces itself: {r.status_code} {r.text}"
+    finally:
+        admin.remove_launcher(name)
+    r = api.as_caller(token).post(f"/internal/launchers/{name}/reconcile", api.launcher_question())
+    assert r.status_code == 401, f"a launcher that was removed: {r.status_code} {r.text}"
+
+
+def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role(with_repo: API, run_id: str):
+    r = _hosted_run(with_repo, f"hosted-bound-{run_id}", coordinator_hosted=True, max_agents=1)
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe_id, bound = r.json()["id"], r.json()["max_hosted"]
+    try:
+        assert bound >= 2, f"max_hosted = {bound}: the local settings leave room for no agent beside the coordinator"
+        # max_agents counts competitors, so reviewers are added until the machines run out.
+        for _ in range(bound - 1):
+            r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "reviewer"})
+            assert r.status_code == 201, f"a hosted reviewer below the bound: {r.status_code} {r.text}"
+        for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True, "role": "baseline", "count": 2}, {"hosted": True}):
+            r = with_repo.post(f"/platform-experiments/{pe_id}/agents", body)
+            assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"{body} at the bound: {r.status_code} {r.text}"
+        r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"role": "reviewer"})
+        assert r.status_code == 201, f"a self-run reviewer at the bound: {r.status_code} {r.text}"
+        assert len([a for a in roster(with_repo, pe_id).values() if a["hosted"]]) == bound - 1
+    finally:
+        with_repo.close_platform_experiment(pe_id)
+
+
+def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(with_repo: API, run_id: str):
+    r = _hosted_run(with_repo, f"coordinator-bounds-{run_id}", coordinator_hosted=True, hosted_agents=1)
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe = r.json()
+    pe_id = pe["id"]
+    try:
+        coordinator, _ = coordinator_for(with_repo, pe_id)
+        agent_id = next(iter(roster(with_repo, pe_id)))
+        as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        live = {key: pe[key] for key in ("name", "description", "budget_accelerator_hours", "max_agents", "metrics",
+                                         "report_interval_seconds", "starts_at", "ends_at")}
+        for field, value in (("budget_accelerator_hours", 1000.0), ("max_agents", 50), ("ends_at", "2199-01-01T00:00:00Z"),
+                             ("stages", [{"length_pct": 50, "evict_pct": 50}, {"length_pct": 50, "evict_pct": 0}])):
+            r = as_coordinator.put(f"/platform-experiments/{pe_id}", {**live, field: value})
+            assert r.status_code == 403 and field in r.text, f"a coordinator changing {field}: {r.status_code} {r.text}"
+        after = with_repo.get_json(f"/platform-experiments/{pe_id}")
+        assert all(after[key] == pe[key] for key in live) and after["stages"] == pe["stages"], after
+
+        # It acts as no agent, with or without one named.
+        r = as_coordinator.post(f"/platform-experiments/{pe_id}/data-key", {"agent_id": agent_id})
+        assert r.status_code == 403, f"a coordinator fetching an agent's data key: {r.status_code} {r.text}"
+        r = as_coordinator.post("/donations", {"agent_id": agent_id, "platform_experiment_id": pe_id, "credits_want": 1, "reason": "r"})
+        assert r.status_code == 403, f"a coordinator asking for quota as an agent: {r.status_code} {r.text}"
+        refused = as_coordinator.hl_expect("--agent", agent_id, "hypothesis", "comment", "hyp-any", "--text", "t")
+        assert refused.returncode == 1 and "coordinator" in refused.stderr, f"hl --agent under a coordinator's token: {refused.stderr}"
+    finally:
+        with_repo.close_platform_experiment(pe_id)

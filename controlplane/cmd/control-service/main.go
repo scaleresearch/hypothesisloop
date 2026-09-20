@@ -119,7 +119,6 @@ func main() {
 	defer runCancel()
 
 	directory := auth.NewStoreDirectory(pool)
-	directory.ConfiguredLauncher = pcfg.Agents.Launcher
 	authenticator, err := auth.NewAuthenticator(pcfg.Auth, directory)
 	if err != nil {
 		logger.Fatal("control-service: configure auth", zap.Error(err))
@@ -197,7 +196,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
 		WithAgentLaunch(quota.AgentLaunch{
 			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
-			SigningSecret: pcfg.Auth.SigningSecret,
+			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 		})
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
@@ -237,8 +236,11 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	// registration and docs, like the cluster-agents above.
 	launcherRouter := chi.NewRouter()
 	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.authenticator, gate.access, logger)
-	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, pcfg.Agents.Image, pcfg.Agents.APIURL, pcfg.Auth.SigningSecret,
-		time.Duration(pcfg.Agents.BootLimitSeconds)*time.Second, logger))
+	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, launcherapi.Settings{
+		Image: pcfg.Agents.Image, APIURL: pcfg.Agents.APIURL, SigningSecret: pcfg.Auth.SigningSecret,
+		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
+		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
+	}, logger))
 	launcherDoc.MountExplore(launcherRouter)
 	r.Mount("/internal/launchers", launcherRouter)
 

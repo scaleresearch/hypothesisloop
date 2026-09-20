@@ -29,6 +29,8 @@ type rosterStore struct {
 	signups []domain.AgentSignup
 	// cloneURL is the repository attached to the experiment's project, empty for none.
 	cloneURL string
+	// unregistered is a launcher config names and no operator registered.
+	unregistered bool
 }
 
 func (f *rosterStore) CloneURL(_ context.Context, projectID string) (string, error) {
@@ -40,9 +42,29 @@ func (f *rosterStore) CloneURL(_ context.Context, projectID string) (string, err
 
 func (f *rosterStore) ExperimentBase(context.Context, string) ([]byte, error) { return nil, nil }
 
+const rosterMaxHosted = 6
+
+func (f *rosterStore) LauncherKnown(context.Context, string) (bool, error) {
+	return !f.unregistered, nil
+}
+
+// machines is what the platform rents for the experiment, with more of them added.
+func (f *rosterStore) machines(more ...domain.AgentSignup) int {
+	n := 0
+	if f.pe.CoordinatorHosted {
+		n++
+	}
+	for _, s := range append(append([]domain.AgentSignup{}, f.signups...), more...) {
+		if s.Hosted {
+			n++
+		}
+	}
+	return n
+}
+
 func newRosterStore(status domain.PlatformExperimentStatus, maxAgents int) *rosterStore {
 	return &rosterStore{
-		pe:       &domain.PlatformExperiment{ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents},
+		pe:       &domain.PlatformExperiment{ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxHosted: rosterMaxHosted},
 		agents:   map[string]*domain.Agent{},
 		cloneURL: "https://git.example.invalid/org/repo.git",
 	}
@@ -84,6 +106,9 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
 	}
+	if f.machines(signup) > f.pe.MaxHosted {
+		return false, db.ErrMaxHostedReached
+	}
 	signup.PlatformExperimentID, signup.Name = f.pe.ID, f.agents[signup.AgentID].Name
 	f.signups = append(f.signups, signup)
 	return true, nil
@@ -101,6 +126,9 @@ func (f *rosterStore) SpawnAgents(_ context.Context, _ string, agents []*domain.
 	}
 	if f.competitors()+added > f.pe.MaxAgents {
 		return db.ErrMaxAgentsReached
+	}
+	if f.machines(signups...) > f.pe.MaxHosted {
+		return db.ErrMaxHostedReached
 	}
 	for i, agent := range agents {
 		agent.OrgID = "org-a"
@@ -154,7 +182,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 }
 
 func agentsTestLaunch() AgentLaunch {
-	return AgentLaunch{Launcher: "launcher-main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret}
+	return AgentLaunch{Launcher: "launcher-main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
 }
 
 func call(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {
@@ -363,6 +391,76 @@ func TestBaselinesAndReviewersJoinAFullField(t *testing.T) {
 	}
 }
 
+// max_agents bounds competitors only, so without a bound on machines a caller could add hosted
+// baselines or reviewers a few at a time for as long as it liked.
+func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 1)
+	store.pe.CoordinatorHosted = true
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	r := agentsRouter(t, store, staff)
+	for _, body := range []string{`{"hosted":true,"role":"baseline","count":2}`, `{"hosted":true,"role":"reviewer","count":2}`, `{"hosted":true,"role":"baseline"}`} {
+		if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body); code != http.StatusCreated {
+			t.Fatalf("%s: got = %d %v, want = 201", body, code, out)
+		}
+	}
+	for _, body := range []string{`{"hosted":true,"role":"baseline"}`, `{"hosted":true,"role":"reviewer","count":3}`, `{"hosted":true}`, `{"agent_id":"veteran","hosted":true,"role":"reviewer"}`} {
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+		if code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" {
+			t.Fatalf("%s with the coordinator and five agents hosted: got = %d %v, want = 400 max_hosted_reached", body, code, out)
+		}
+		if message, _ := out["message"].(string); !strings.Contains(message, "at most 6 machines") {
+			t.Errorf("%s: the refusal does not say the bound: %q", body, message)
+		}
+	}
+	if store.machines() != rosterMaxHosted {
+		t.Fatalf("machines = %d, want %d", store.machines(), rosterMaxHosted)
+	}
+	// An agent its owner runs is no machine of the platform's.
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"role":"reviewer","count":3}`); code != http.StatusCreated {
+		t.Fatalf("self-run reviewers: got = %d %v, want = 201", code, out)
+	}
+}
+
+func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	store.unregistered = true
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	r := agentsRouter(t, store, staff)
+	for _, body := range []string{`{"count":2,"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+		if code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" {
+			t.Fatalf("%s: got = %d %v, want = 503 launcher_not_registered", body, code, out)
+		}
+		if message, _ := out["message"].(string); !strings.Contains(message, "hl-admin launcher add launcher-main") {
+			t.Errorf("%s: the refusal does not say what registers it: %q", body, message)
+		}
+	}
+	if len(store.signups) != 0 {
+		t.Fatalf("a refused hosted join left %d signups behind", len(store.signups))
+	}
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2}`); code != http.StatusCreated {
+		t.Fatalf("self-run agents: got = %d %v, want = 201", code, out)
+	}
+}
+
+// A coordinator's token outlives the close by its wind-down, and adds nothing in it.
+func TestACoordinatorAddsNoAgentOnceItsExperimentHasStartedOrClosed(t *testing.T) {
+	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
+		store := newRosterStore(status, 5)
+		r := agentsRouter(t, store, coordinator)
+		for _, body := range []string{`{"hosted":true,"count":2}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
+			code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+			if code != http.StatusBadRequest || out["reason"] != "signup_closed" {
+				t.Fatalf("%s, %s: got = %d %v, want = 400 signup_closed", status, body, code, out)
+			}
+		}
+		if len(store.signups) != 0 || len(store.agents) != 0 {
+			t.Fatalf("%s: a coordinator added %d agents", status, len(store.signups))
+		}
+	}
+}
+
 func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
@@ -511,6 +609,7 @@ func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
 
 func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 200)
+	store.pe.MaxHosted = 100
 	r := agentsRouter(t, store, staff)
 	big := `{"count":100,"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", big)

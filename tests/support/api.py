@@ -288,8 +288,12 @@ class API:
     def launcher_desired(self, launcher: str, observed: list[dict] | None = None) -> dict:
         """One reconcile call as the agent-launcher of that name makes it: `observed` is what its
         provider lists ({name, state, log}), and the answer is what should exist right now."""
-        return self.post_json(f"/internal/launchers/{launcher}/reconcile",
-                              {"launch_digest": self.LAUNCH_DIGEST, "instances": observed or []})
+        return self.post_json(f"/internal/launchers/{launcher}/reconcile", self.launcher_question(observed))
+
+    def launcher_question(self, observed: list[dict] | None = None) -> dict:
+        """What a launcher sends: what it observed, its launch digest and how it paces its passes."""
+        return {"launch_digest": self.LAUNCH_DIGEST, "instances": observed or [],
+                "reconcile_interval_seconds": 2, "create_pause_milliseconds": 0}
 
     def signup_role(self, pe_id: str, agent_id: str) -> tuple[int, str | None]:
         r = self.get(f"/platform-experiments/{pe_id}/signups/{agent_id}")

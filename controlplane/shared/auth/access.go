@@ -219,6 +219,20 @@ func (a *Access) Agent(ctx context.Context, agentID string) error {
 	return nil
 }
 
+// ActAs is Agent for a request that spends as the agent it names: a job, quota asked for or
+// given away, the key to its data. A coordinator's token is refused all of them. It is handed to
+// a machine the platform rents and is there to keep a run's brief, so it holds no agent's hand.
+func (a *Access) ActAs(ctx context.Context, agentID string) error {
+	p, err := principal(ctx)
+	if err != nil {
+		return err
+	}
+	if p.Kind == KindCoordinator {
+		return forbidden("a coordinator's token acts as no agent: it submits no job, asks for and gives no quota, and fetches no agent's data key")
+	}
+	return a.Agent(ctx, agentID)
+}
+
 // Staff admits only the platform's own operators, for an operation that acts across every org.
 func (a *Access) Staff(ctx context.Context) error {
 	p, err := principal(ctx)

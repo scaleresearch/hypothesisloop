@@ -87,6 +87,18 @@ func owned(audience []string, admitted int) rule {
 	}
 }
 
+// spendsAs is a rule for a request that spends as the agent it names: a coordinator's token is
+// refused where it would otherwise be admitted, since it acts as no agent.
+func spendsAs(admits rule) rule {
+	return func(principal, owner string) int {
+		status := admits(principal, owner)
+		if principal == "coordinator" && status == reached {
+			return http.StatusForbidden
+		}
+		return status
+	}
+}
+
 // ownedOrTheJob is owned, and the job's own token reaches that one job.
 func ownedOrTheJob(admitted int) rule {
 	others := owned(jobAudience, admitted)
@@ -176,7 +188,7 @@ const (
 
 var routes = []route{
 	// ---- jobs ----
-	{method: "POST", path: "/experiments", body: job1, rule: owned(agentAudience, reached)},
+	{method: "POST", path: "/experiments", body: job1, rule: spendsAs(owned(agentAudience, reached))},
 	{method: "GET", path: "/experiments", request: "/experiments?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
 	{method: "GET", path: "/experiments/stats", request: "/experiments/stats?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
 	{method: "GET", path: "/experiments/{id}", request: "/experiments/<job>", rule: scoped(agentAudience, reached)},
@@ -232,16 +244,16 @@ var routes = []route{
 	{method: "GET", path: "/platform-experiments/{id}/stages", request: "/platform-experiments/<pe>/stages", rule: scoped(agentAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/metrics-timeseries", request: "/platform-experiments/<pe>/metrics-timeseries?metric_name=loss", rule: scoped(agentAudience, metricsUnreachable)},
 	{method: "GET", path: "/platform-experiments/{id}/data-usage", request: "/platform-experiments/<pe>/data-usage", rule: scoped(agentAudience, reached)},
-	{method: "POST", path: "/platform-experiments/{id}/data-key", request: "/platform-experiments/<pe>/data-key", body: `{"agent_id":"<agent>"}`, rule: owned(agentAudience, reached)},
+	{method: "POST", path: "/platform-experiments/{id}/data-key", request: "/platform-experiments/<pe>/data-key", body: `{"agent_id":"<agent>"}`, rule: spendsAs(owned(agentAudience, reached))},
 	{method: "POST", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", body: `{"agent_id":"<agent>"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", rule: scoped(coordinatorAudience, reached)},
 	{method: "DELETE", path: "/platform-experiments/{id}/agents/{agent_id}", request: "/platform-experiments/<pe>/agents/<agent>", rule: scoped(coordinatorAudience, reached)},
 
 	// ---- donations ----
 	{method: "GET", path: "/donations", request: "/donations?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
-	{method: "POST", path: "/donations", body: `{"agent_id":"<agent>","platform_experiment_id":"<pe>","credits_want":1,"reason":"r"}`, rule: owned(agentAudience, reached)},
+	{method: "POST", path: "/donations", body: `{"agent_id":"<agent>","platform_experiment_id":"<pe>","credits_want":1,"reason":"r"}`, rule: spendsAs(owned(agentAudience, reached))},
 	{method: "POST", path: "/donations/{id}/cancel", request: "/donations/<don>/cancel", rule: owned(agentAudience, reached)},
-	{method: "POST", path: "/donations/{id}/fulfill", request: "/donations/<don>/fulfill", body: `{"donor_agent_id":"agent-1"}`, rule: scoped(agentAudience, reached)},
+	{method: "POST", path: "/donations/{id}/fulfill", request: "/donations/<don>/fulfill", body: `{"donor_agent_id":"agent-1"}`, rule: spendsAs(scoped(agentAudience, reached))},
 
 	// ---- catalog ----
 	{method: "GET", path: "/resource-catalog", rule: listed(agentAudience, http.StatusOK)},
@@ -267,7 +279,7 @@ var routes = []route{
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},
 	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(metricsUnreachable)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
-	{method: "POST", path: "/internal/launchers/{name}/reconcile", request: "/internal/launchers/main/reconcile", body: `{"launch_digest":"0123456789abcdef0123456789abcdef","instances":[]}`, rule: only([]string{"launcher"}, reached)},
+	{method: "POST", path: "/internal/launchers/{name}/reconcile", request: "/internal/launchers/main/reconcile", body: `{"launch_digest":"0123456789abcdef0123456789abcdef","instances":[],"reconcile_interval_seconds":15,"create_pause_milliseconds":1000}`, rule: only([]string{"launcher"}, reached)},
 	{method: "GET", path: "/metrics", rule: staffOnly},
 }
 

@@ -56,16 +56,14 @@ def project_with_repo(api: API) -> API:
 class Launcher:
     """The process and what it has logged so far."""
 
-    def __init__(self, binary: Path, workdir: Path, api_url: str, namespace: str):
-        self.prefix = f"hl-agent-{namespace}-"
+    def __init__(self, binary: Path, workdir: Path, api_url: str):
+        self.prefix = f"hl-agent-{LAUNCHER}-"
         self.log_path = workdir / "launcher.log"
         config = workdir / "agent-launcher.yaml"
         config.write_text(f"""
 launcher_name: {LAUNCHER}
 api_url: {api_url}
-namespace: {namespace}
 reconcile_interval_seconds: 2
-boot_limit_seconds: 3600
 create_pause_milliseconds: 0
 provider:
   name: fake
@@ -81,7 +79,7 @@ model_provider:
     - name: MODEL_CREDENTIAL
       value_env: E2E_MODEL_CREDENTIAL
 """)
-        self.secrets = {"LAUNCHER_TOKEN": admin.token(f"launcher:{LAUNCHER}"), "E2E_MODEL_CREDENTIAL": f"credential-{uuid.uuid4().hex}"}
+        self.secrets = {"LAUNCHER_TOKEN": admin.add_launcher(LAUNCHER), "E2E_MODEL_CREDENTIAL": f"credential-{uuid.uuid4().hex}"}
         env = {"PATH": os.environ["PATH"], "AGENT_LAUNCHER_CONFIG": str(config), **self.secrets}
         self.log_file = self.log_path.open("w")
         self.process = subprocess.Popen([str(binary)], env=env, stdout=self.log_file, stderr=subprocess.STDOUT)
@@ -105,7 +103,7 @@ def test_a_launcher_process_follows_its_agents_from_joining_to_the_end_of_their_
         project_with_repo: API, launcher_binary: Path, tmp_path: Path, run_id: str, deadline):
     api = project_with_repo
     pe_id = api.create_platform_experiment(f"launcher-process-{run_id}", 1.0, 5)
-    launcher = Launcher(launcher_binary, tmp_path, api.base_url, f"e2e{uuid.uuid4().hex[:8]}")
+    launcher = Launcher(launcher_binary, tmp_path, api.base_url)
     try:
         first, second = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
 

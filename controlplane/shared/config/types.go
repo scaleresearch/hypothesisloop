@@ -234,9 +234,14 @@ type AgentsConfig struct {
 	// DefaultModel is the model an agent runs on when it joins without naming one. It is
 	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
 	DefaultModel string `yaml:"default_model"`
-	// BootLimitSeconds is how long a hosted agent's machine may be reported as starting,
-	// counted from when it was first asked for, before it is replaced as an exited one is.
+	// BootLimitSeconds is how long a hosted machine may go unreported after it was asked for, or
+	// stay starting after it was first reported, before it is given up on as an exited one is.
 	BootLimitSeconds int `yaml:"boot_limit_seconds"`
+	// MaxNewInstancesPerAnswer is how many machines one answer asks a launcher to create.
+	MaxNewInstancesPerAnswer int `yaml:"max_new_instances_per_answer"`
+	// MaxHostedPerPlatformExperiment is how many machines the platform runs for one platform
+	// experiment: its hosted agents of every role and its coordinator.
+	MaxHostedPerPlatformExperiment int `yaml:"max_hosted_per_platform_experiment"`
 }
 
 // RuntimesConfig is where a cluster's runtime reaches the platform. Both are handed out when a

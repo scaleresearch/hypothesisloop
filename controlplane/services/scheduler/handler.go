@@ -76,7 +76,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := access.PlatformExperiment(ctx, meta.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		if err := access.Agent(ctx, meta.AgentID); err != nil {
+		if err := access.ActAs(ctx, meta.AgentID); err != nil {
 			return nil, err
 		}
 		exp := domain.Experiment{

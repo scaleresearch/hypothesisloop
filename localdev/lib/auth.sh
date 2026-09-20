@@ -105,11 +105,13 @@ lib_runtime_token() {
   lib_hl_admin token "runtime:$1"
 }
 
-# The cluster names the local setups run under, registered for the org every schema starts with.
+# The cluster names the local setups run under, registered for the org every schema starts with,
+# and the launcher the committed settings give hosted agents to (agents.launcher).
 # Needs the control plane to have started once, since it creates the tables.
 lib_register_local_clusters() {
   local name
   for name in local box-a k3s-nvidia; do
     lib_hl_admin cluster add "${name}" default >/dev/null
   done
+  lib_hl_admin launcher add main >/dev/null
 }

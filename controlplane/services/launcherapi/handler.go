@@ -2,6 +2,8 @@ package launcherapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -18,47 +20,50 @@ import (
 
 type Store interface {
 	ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error)
-	SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error
-	RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (bool, error)
-	RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error)
 	ListLauncherCoordinators(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherCoordinator, error)
-	SetCoordinatorInstanceName(ctx context.Context, platformExpID, name string) error
-	RecordCoordinatorInstanceExit(ctx context.Context, platformExpID, name, exitLog string, maxRestarts int) (bool, error)
-	RecordCoordinatorInstanceStuck(ctx context.Context, platformExpID, name, why string, bootLimit time.Duration, maxRestarts int) (bool, error)
+	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
+	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
+	SeeInstance(ctx context.Context, platformExpID, agentID, name string) error
+	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, bootLimit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
+}
+
+// Settings is what the platform's config decides about hosted machines.
+type Settings struct {
+	// Image is what every hosted agent boots, and APIURL where it reaches this API.
+	Image  string
+	APIURL string
+	// SigningSecret derives each agent's own token, handed out inside its environment.
+	SigningSecret string
+	// BootLimit is how long a machine may go unreported after it was asked for, or stay starting
+	// after it was first reported, before that is recorded as an exit.
+	BootLimit time.Duration
+	// MaxNewPerAnswer is how many machines one answer asks a launcher to create. The rest wait
+	// for the next answer, so that a pass ends well inside BootLimit.
+	MaxNewPerAnswer int
 }
 
 type Handler struct {
-	store Store
-	// image is what every hosted agent boots, and apiURL where it reaches this API.
-	image  string
-	apiURL string
-	// signingSecret derives each agent's own token, handed out inside its environment.
-	signingSecret string
-	// bootLimit is how long a machine may be reported as starting, counted from when it was
-	// first asked for, before that is recorded as an exit.
-	bootLimit time.Duration
-	logger    *zap.Logger
+	store  Store
+	cfg    Settings
+	logger *zap.Logger
 }
 
-func NewHandler(store Store, image, apiURL, signingSecret string, bootLimit time.Duration, logger *zap.Logger) *Handler {
-	if store == nil || image == "" || apiURL == "" || signingSecret == "" || bootLimit <= 0 || logger == nil {
-		panic("launcherapi.NewHandler: store, image, apiURL, signingSecret, bootLimit and logger are required")
+func NewHandler(store Store, cfg Settings, logger *zap.Logger) *Handler {
+	if store == nil || cfg.Image == "" || cfg.APIURL == "" || cfg.SigningSecret == "" || cfg.BootLimit <= 0 || cfg.MaxNewPerAnswer <= 0 || logger == nil {
+		panic("launcherapi.NewHandler: store, logger and every setting are required")
 	}
-	return &Handler{store: store, image: image, apiURL: apiURL, signingSecret: signingSecret, bootLimit: bootLimit, logger: logger}
+	return &Handler{store: store, cfg: cfg, logger: logger}
 }
 
-// Observed is what a launcher found on its provider account before it asked: every instance of
-// its namespace, by the name this API gave it.
+// Observed is what a launcher found on its provider account before it asked: every instance
+// whose name starts with its own prefix, by the name this API gave it.
 type Observed struct {
-	LaunchDigest string             `json:"launch_digest" doc:"Lowercase hex digest of everything the launcher itself starts an instance with: command, size and the environment it adds. A change replaces every running instance."`
+	LaunchDigest string             `json:"launch_digest" doc:"Lowercase hex digest of everything the launcher itself starts an instance with: command, size and the environment it adds. A change replaces every running instance and gives each agent its restarts back."`
 	Instances    []ObservedInstance `json:"instances" doc:"Every instance the launcher's provider lists for it, an empty list when there is none."`
-	// CreateFailures are the instances of the last answer the launcher could not create.
-	CreateFailures []CreateFailure `json:"create_failures,omitempty" doc:"Each instance of the last answer that the provider refused to create, with what it said. A name the provider lists is in instances and not here."`
-}
-
-type CreateFailure struct {
-	Name   string `json:"name" doc:"The name from the answer, without the launcher's own prefix."`
-	Reason string `json:"reason" doc:"What the provider answered, with every value of the instance's environment taken out."`
+	// The two below say how long one pass of this launcher can take, which the boot limit has
+	// to cover.
+	ReconcileIntervalSeconds int `json:"reconcile_interval_seconds" doc:"How long the launcher waits between two questions."`
+	CreatePauseMilliseconds  int `json:"create_pause_milliseconds" doc:"How long the launcher waits between two creates of one pass."`
 }
 
 type ObservedInstance struct {
@@ -70,9 +75,6 @@ type ObservedInstance struct {
 const (
 	stateStarting = "starting"
 	stateExited   = "exited"
-	// stateNotCreated is no state a launcher reports of an instance: it is what a create failure
-	// reads as beside the listed instances.
-	stateNotCreated = "not created"
 )
 
 var launchDigestPattern = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
@@ -90,22 +92,25 @@ type Desired struct {
 }
 
 // kept is one thing a launcher keeps a machine for: an agent, or a platform experiment's
-// coordinator. Both are evaluated by the same steps and differ in where their outcome is kept.
+// coordinator, whose agentID is empty. Both are evaluated by the same steps.
 type kept struct {
-	platformExperimentID string
-	// agentID is empty for a coordinator.
-	agentID  string
-	instance domain.AgentInstance
-	ending   bool
-	describe func(restarts int) (Instance, error)
-	setName  func(ctx context.Context, name string) error
-	exited   func(ctx context.Context, name, exitLog string) (bool, error)
-	stuck    func(ctx context.Context, name, why string) (bool, error)
+	platformExperimentID, agentID string
+	instance                      domain.AgentInstance
+	ending                        bool
+	describe                      func(restarts int) (Instance, error)
+}
+
+// launchOf identifies what a machine is started with on the platform's and the launcher's side.
+// Restarts are spent under one launch: a machine that cannot run under an image or a launcher
+// config says nothing about the next.
+func launchOf(image, launchDigest string) string {
+	digest := sha256.Sum256([]byte(image + "\x00" + launchDigest))
+	return hex.EncodeToString(digest[:16])
 }
 
 // reconcile records what the launcher observed and evaluates everything else: which agents and
 // coordinators are the launcher's, which of them still run, which have domain.AgentWindDown
-// left, and which get another machine after theirs exited. One that cannot be evaluated is
+// left, and which get another machine after theirs ended. One that cannot be evaluated is
 // logged and left out and the rest of the list stands.
 func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed) (*Desired, error) {
 	agents, err := h.store.ListLauncherAgents(ctx, launcher, domain.AgentWindDown)
@@ -116,12 +121,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	if err != nil {
 		return nil, err
 	}
-	// What the launcher says of a name: its machine as the provider lists it, or that none could
-	// be created. A listed name is the machine's word, whatever an earlier create answered.
 	seen := map[string]ObservedInstance{}
-	for _, failure := range observed.CreateFailures {
-		seen[failure.Name] = ObservedInstance{Name: failure.Name, State: stateNotCreated, Log: failure.Reason}
-	}
 	for _, instance := range observed.Instances {
 		seen[instance.Name] = instance
 	}
@@ -132,18 +132,11 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			h.logger.Error("launcher list holds an agent that is not hosted", zap.String("launcher", launcher), zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
 			continue
 		}
-		pe, id, signup := agent.PlatformExperimentID, agent.AgentID, agent.AgentSignup
+		signup := agent.AgentSignup
 		all = append(all, kept{
-			platformExperimentID: pe, agentID: id, instance: *agent.Instance, ending: agent.Ending,
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ending,
 			describe: func(restarts int) (Instance, error) {
-				return instanceFor(signup, restarts, h.image, h.apiURL, h.signingSecret, observed.LaunchDigest)
-			},
-			setName: func(ctx context.Context, name string) error { return h.store.SetAgentInstanceName(ctx, pe, id, name) },
-			exited: func(ctx context.Context, name, exitLog string) (bool, error) {
-				return h.store.RecordAgentInstanceExit(ctx, pe, id, name, exitLog, domain.MaxAgentInstanceRestarts)
-			},
-			stuck: func(ctx context.Context, name, why string) (bool, error) {
-				return h.store.RecordAgentInstanceStuck(ctx, pe, id, name, why, h.bootLimit, domain.MaxAgentInstanceRestarts)
+				return instanceFor(signup, restarts, h.cfg.Image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
@@ -152,19 +145,14 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		all = append(all, kept{
 			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending,
 			describe: func(restarts int) (Instance, error) {
-				return coordinatorInstanceFor(pe, model, restarts, h.image, h.apiURL, h.signingSecret, observed.LaunchDigest)
-			},
-			setName: func(ctx context.Context, name string) error { return h.store.SetCoordinatorInstanceName(ctx, pe, name) },
-			exited: func(ctx context.Context, name, exitLog string) (bool, error) {
-				return h.store.RecordCoordinatorInstanceExit(ctx, pe, name, exitLog, domain.MaxAgentInstanceRestarts)
-			},
-			stuck: func(ctx context.Context, name, why string) (bool, error) {
-				return h.store.RecordCoordinatorInstanceStuck(ctx, pe, name, why, h.bootLimit, domain.MaxAgentInstanceRestarts)
+				return coordinatorInstanceFor(pe, model, restarts, h.cfg.Image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
 
+	launch := launchOf(h.cfg.Image, observed.LaunchDigest)
 	out := &Desired{Instances: []Instance{}, Ending: []string{}}
+	asked := 0
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
 		current := one.instance
@@ -176,42 +164,48 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			}
 			continue
 		}
-		if reported, listed := seen[current.Name]; listed && current.Name != "" {
-			// A machine that exited, one that never got past starting and one that could not be
-			// created end the same way: the outcome is recorded, and another machine is asked
-			// for while a restart is left. The last two are given the boot limit first.
-			var recorded bool
-			var err error
-			switch reported.State {
-			case stateExited:
-				recorded, err = one.exited(ctx, current.Name, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes))
-			case stateStarting:
-				recorded, err = one.stuck(ctx, current.Name, fmt.Sprintf("the machine was still starting %s after it was asked for, which is the boot limit", h.bootLimit))
-			case stateNotCreated:
-				recorded, err = one.stuck(ctx, current.Name, fmt.Sprintf("no machine could be created in the %s after it was asked for, which is the boot limit. The last attempt failed with: %s",
-					h.bootLimit, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes)))
-			}
-			if err != nil {
-				log.Error("record instance outcome failed", zap.Error(err))
-				continue
-			}
-			if recorded {
-				stopped := current.Restarts >= domain.MaxAgentInstanceRestarts
-				log.Warn("hosted instance ended", zap.String("instance", current.Name), zap.String("reported", reported.State), zap.Int("restartsBefore", current.Restarts), zap.Bool("stopped", stopped))
-				if stopped {
-					continue
-				}
-				current.Restarts++
-				current.Name = ""
-			}
+		// Restarts were spent under one launch. Under another none is, and one that was stopped
+		// is asked for again: what stopped it may have been the image or the launcher's config.
+		restarts := current.Restarts
+		if current.Launch != launch {
+			restarts = 0
+		} else if current.Stopped {
+			continue
 		}
-		instance, err := one.describe(current.Restarts)
+		instance, err := one.describe(restarts)
 		if err != nil {
 			log.Error("hosted instance cannot be described", zap.Error(err))
 			continue
 		}
+		// What the launcher reports counts only for the machine that is still the one wanted. A
+		// name that config has since changed is replaced and its end is nobody's fault.
+		if current.Name == instance.Name {
+			after, ended, err := h.observe(ctx, one, seen, instance.Env["HL_TOKEN"])
+			if err != nil {
+				log.Error("record instance outcome failed", zap.Error(err))
+				continue
+			}
+			if ended {
+				log.Warn("hosted instance ended", zap.String("instance", current.Name), zap.Int("restarts", after.Restarts), zap.Bool("stopped", after.Stopped), zap.String("why", after.ExitLog))
+				if after.Stopped {
+					continue
+				}
+				current.Name = ""
+				if instance, err = one.describe(after.Restarts); err != nil {
+					log.Error("hosted instance cannot be described", zap.Error(err))
+					continue
+				}
+			}
+		}
 		if instance.Name != current.Name {
-			if err := one.setName(ctx, instance.Name); err != nil {
+			// A launcher creates one machine after another, so an answer asks for a bounded
+			// number of new ones and the rest wait for the next: a pass must end, and its
+			// machines be reported, well inside the boot limit.
+			if asked == h.cfg.MaxNewPerAnswer {
+				continue
+			}
+			asked++
+			if err := h.store.AskInstance(ctx, one.platformExperimentID, one.agentID, instance.Name, launch); err != nil {
 				log.Error("record instance name failed", zap.Error(err))
 				continue
 			}
@@ -219,6 +213,41 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		out.Instances = append(out.Instances, instance)
 	}
 	return out, nil
+}
+
+// observe holds the machine asked for under one.instance.Name against what the launcher reports
+// of that name, and records its end when the report says so:
+//   - exited: at once, with the end of its output.
+//   - reported before and not now: at once. The provider took it away.
+//   - never reported: once the boot limit has passed since it was asked for. No machine could
+//     be created, and the launcher's own log says what its provider answered.
+//   - starting: once the boot limit has passed since it was first reported.
+//
+// Both limits are counted by the store on the database's clock. token is the one this API
+// minted for the machine, which its output must not carry into the database.
+func (h *Handler) observe(ctx context.Context, one kept, seen map[string]ObservedInstance, token string) (domain.AgentInstance, bool, error) {
+	name := one.instance.Name
+	end := func(how db.InstanceEnd, exitLog string) (domain.AgentInstance, bool, error) {
+		return h.store.EndInstance(ctx, one.platformExperimentID, one.agentID, name, how, exitLog, h.cfg.BootLimit, domain.MaxAgentInstanceRestarts)
+	}
+	reported, listed := seen[name]
+	switch {
+	case !listed && one.instance.SeenAt != nil:
+		return end(db.InstanceGone, "the machine was running and its provider no longer lists it")
+	case !listed:
+		return end(db.InstanceNeverSeen, fmt.Sprintf("no machine was listed %s after it was asked for, which is the boot limit: its launcher could not create it, and the launcher's log says what the provider answered", h.cfg.BootLimit))
+	case reported.State == stateExited:
+		exitLog := reported.Log
+		if token != "" {
+			exitLog = strings.ReplaceAll(exitLog, token, "<HL_TOKEN>")
+		}
+		return end(db.InstanceExited, lastBytes(exitLog, domain.MaxAgentInstanceLogBytes))
+	case one.instance.SeenAt == nil:
+		return domain.AgentInstance{}, false, h.store.SeeInstance(ctx, one.platformExperimentID, one.agentID, name)
+	case reported.State == stateStarting:
+		return end(db.InstanceStillStarting, fmt.Sprintf("the machine was still starting %s after it was first listed, which is the boot limit", h.cfg.BootLimit))
+	}
+	return domain.AgentInstance{}, false, nil
 }
 
 // lastBytes keeps the end of text, cut at a line where one starts inside the limit.
@@ -245,10 +274,23 @@ func (o Observed) validate() error {
 			return fmt.Errorf("an observed instance needs a name of at most %d characters", MaxInstanceNameLength)
 		}
 	}
-	for _, failure := range o.CreateFailures {
-		if failure.Name == "" || len(failure.Name) > MaxInstanceNameLength {
-			return fmt.Errorf("a create failure needs a name of at most %d characters", MaxInstanceNameLength)
-		}
+	if o.ReconcileIntervalSeconds <= 0 || o.CreatePauseMilliseconds < 0 {
+		return fmt.Errorf("reconcile_interval_seconds must be positive and create_pause_milliseconds must not be negative")
+	}
+	return nil
+}
+
+// fits refuses a launcher whose pass can outlast the boot limit. An answer asks for at most
+// MaxNewPerAnswer new machines, which the launcher creates one after another with its pause
+// between them and reports with its next question, one interval later. A machine not reported
+// within the boot limit of being asked for spends a restart, so the limit has to cover that.
+func (h *Handler) fits(o Observed) error {
+	pause := time.Duration(o.CreatePauseMilliseconds) * time.Millisecond
+	interval := time.Duration(o.ReconcileIntervalSeconds) * time.Second
+	pass := time.Duration(h.cfg.MaxNewPerAnswer)*pause + interval
+	if 2*pass > h.cfg.BootLimit {
+		return fmt.Errorf("this launcher's pass does not fit the platform's boot limit: %d new instances per answer x create_pause %s + reconcile_interval %s = %s, and twice that must be at most agents.boot_limit_seconds %s. Lower the launcher's create_pause_milliseconds or reconcile_interval_seconds, or change the platform's agents.max_new_instances_per_answer or agents.boot_limit_seconds",
+			h.cfg.MaxNewPerAnswer, pause, interval, pass, h.cfg.BootLimit)
 	}
 	return nil
 }
@@ -260,12 +302,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "launcher-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},
 		MaxBodyBytes: maxRequestBytes,
-		Description: "The launcher sends what its provider lists, and for an exited instance the end of its output. The answer is its complete desired state. " +
+		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, and how it paces its passes. The answer is its complete desired state. " +
 			"instances: each {name, image, env} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
-			"create_failures names what the provider refused to create since the last answer. " +
-			"Any other instance of the launcher should not exist. An exited instance, and one reported as starting or as not created for longer than the platform's boot limit, " +
-			"is recorded on its agent and is never replaced by the launcher on its own: " +
+			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +
+			"The platform gives up on an instance that exited, that the provider listed and no longer does, that was not listed within the platform's boot limit of being asked for, " +
+			"or that stayed starting for the boot limit. That is recorded on its agent, and the launcher never replaces one on its own: " +
 			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
@@ -273,6 +315,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct{ Body *Desired }, error) {
 		if err := in.Body.validate(); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
+		}
+		if err := h.fits(in.Body); err != nil {
+			return nil, huma.Error409Conflict(err.Error())
 		}
 		desired, err := h.reconcile(ctx, in.Name, in.Body)
 		if err != nil {

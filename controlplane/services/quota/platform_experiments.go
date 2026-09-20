@@ -14,7 +14,6 @@ import (
 
 // PlatformExperimentsStore is the persistence interface for platform experiments.
 type PlatformExperimentsStore interface {
-	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error
 	CreatePlatformExperimentWithAgents(ctx context.Context, pe *domain.PlatformExperiment, agents []*domain.Agent, signups []domain.AgentSignup) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
@@ -32,6 +31,7 @@ type PlatformExperimentsStore interface {
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
 	// SpawnAgents creates agents in the experiment's org and signs them all up, or none of them.
+	LauncherKnown(ctx context.Context, name string) (bool, error)
 	SpawnAgents(ctx context.Context, platformExpID string, agents []*domain.Agent, signups []domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
 	ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error)
@@ -156,6 +156,8 @@ type CreatePlatformExperimentRequest struct {
 	coordinator *domain.HostedCoordinator
 	// hostedAgent is the place each of HostedAgents gets, resolved by the handler.
 	hostedAgent *domain.AgentSignup
+	// maxHosted is how many machines the platform may run for the experiment, from config.
+	maxHosted int
 
 	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
 	// one stated as its zero value.

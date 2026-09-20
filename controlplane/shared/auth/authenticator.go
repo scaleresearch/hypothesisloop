@@ -53,22 +53,6 @@ type StoreDirectory struct {
 	*db.AccountsStore
 	*db.ClustersStore
 	*db.PlatformExperimentsStore
-	// ConfiguredLauncher is the launcher new hosted agents are given to (config agents.launcher).
-	ConfiguredLauncher string
-}
-
-// LauncherKnown reports whether a launcher of this name has anything to ask for: it is the one
-// config gives new hosted agents to, or its list still names an agent or a coordinator, running or in
-// its wind-down. The second half keeps a launcher that config no longer names working until its last
-// machine is gone, and no longer.
-func (d StoreDirectory) LauncherKnown(ctx context.Context, name string) (bool, error) {
-	if name == d.ConfiguredLauncher {
-		return true, nil
-	}
-	if has, err := d.LauncherHasAgents(ctx, name, domain.AgentWindDown); has || err != nil {
-		return has, err
-	}
-	return d.LauncherHasCoordinators(ctx, name, domain.AgentWindDown)
 }
 
 func NewStoreDirectory(pool *db.Pool) StoreDirectory {
@@ -146,7 +130,7 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, err
 		}
 		if !known {
-			return Principal{}, unauthenticated("launcher %s is not configured and runs no agent", p.LauncherName)
+			return Principal{}, unauthenticated("launcher %s is not registered", p.LauncherName)
 		}
 	case KindJob:
 		tenancy, ended, err := a.directory.ExperimentTenancy(ctx, p.ExperimentID)

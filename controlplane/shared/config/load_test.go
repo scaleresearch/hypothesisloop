@@ -241,6 +241,10 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"no default model":      {"  default_model: claude-sonnet-5\n", ""},
 		"no boot limit":         {"  boot_limit_seconds: 300\n", ""},
 		"negative boot limit":   {"  boot_limit_seconds: 300", "  boot_limit_seconds: -1"},
+		"no answer size":        {"  max_new_instances_per_answer: 10\n", ""},
+		"no hosted bound":       {"  max_hosted_per_platform_experiment: 25\n", ""},
+		"zero hosted bound":     {"  max_hosted_per_platform_experiment: 25", "  max_hosted_per_platform_experiment: 0"},
+		"launcher with a dash":  {"  launcher: main", "  launcher: main-2"},
 		"default model unsafe":  {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
 	} {
 		text := productionConfig(t)
