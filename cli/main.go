@@ -75,6 +75,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if args[0] == "exec" {
+		return cmdExec(args[1:], stdout, stderr)
+	}
+
 	apiURL := os.Getenv("API_URL")
 	client := apiclient.New(apiURL)
 
@@ -124,6 +128,7 @@ const usage = `usage: hl <command> ...
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
+  exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
 An ID is positional; --id ID works too. --agent and --platform-experiment default to $AGENT_ID
 and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. hl job --help and
