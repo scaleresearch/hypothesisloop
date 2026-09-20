@@ -281,3 +281,19 @@ func TestCapacityTierAcceptsOnlyItsOwnEnum(t *testing.T) {
 		mustReject(t, exp, "capacity_tier")
 	}
 }
+
+// The slot a job runs in is admission's to choose. A submitted selector naming it, or any other
+// label of the platform's, would let a submitter place the job, and on a cluster that has no
+// such node the row dropped out of the plan the claim proves.
+func TestASubmittedNodeSelectorMayNotNameAPlatformLabel(t *testing.T) {
+	for _, label := range []string{domain.NodeSlotLabel, domain.NodeSlotAcceleratorsLabel, domain.NodeLabelReservedPrefix + "anything"} {
+		exp := validSubmission()
+		exp.Job.NodeSelector = map[string]string{"zone": "a", label: "h100-0"}
+		mustReject(t, exp, label)
+	}
+	exp := validSubmission()
+	exp.Job.NodeSelector = map[string]string{"zone": "a", "kubernetes.io/hostname": "node-1"}
+	if err := validate(t, exp); err != nil {
+		t.Fatalf("an ordinary node selector was rejected: %v", err)
+	}
+}

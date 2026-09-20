@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -91,6 +92,13 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 	if exp.Job.Image == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.image is required"}
+	}
+	// Node labels under the platform's prefix are written by admission, the slot a job is
+	// admitted to among them. A submitter who could name one would place the job themselves.
+	for label := range exp.Job.NodeSelector {
+		if strings.HasPrefix(label, domain.NodeLabelReservedPrefix) {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
+		}
 	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.
