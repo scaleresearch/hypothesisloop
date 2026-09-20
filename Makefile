@@ -361,6 +361,21 @@ agent-test:
 e2e-py: render-settings
 	bash -c '$(E2E_ENV) cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"'
 
+# The repository tests against GitHub itself: an agent clones a project's repository and pushes a
+# branch with credentials the platform mints. Needs the local stack started with a GitHub App
+# (.env names one, localdev/lib/auth.sh) and the three HL_E2E_GITHUB_* keys of .env.example. The
+# repository's id is looked up from GitHub with gh.
+e2e-github: render-settings
+	bash -c '$(E2E_ENV) set -euo pipefail; \
+	  for key in INSTALLATION REPO DEFAULT_BRANCH; do \
+	    name="HL_E2E_GITHUB_$$key"; value="$$(lib_env_value "$$name")"; \
+	    test -n "$$value" || { echo "make e2e-github: .env does not set $$name" >&2; exit 1; }; \
+	    export "$$name=$$value"; \
+	  done; \
+	  test -n "$$HL_GITHUB_APP_ID" || { echo "make e2e-github: .env does not set GITHUB_APP_ID, so the local stack has no GitHub App" >&2; exit 1; }; \
+	  HL_E2E_GITHUB_REPO_ID="$$(gh api "repos/$$HL_E2E_GITHUB_REPO" --jq .id)"; export HL_E2E_GITHUB_REPO_ID; \
+	  cd tests && uv run pytest e2e/test_project_repo.py'
+
 lint:
 	golangci-lint run ./...
 
