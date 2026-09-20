@@ -353,11 +353,18 @@ def test_a_runtime_token_serves_its_own_registered_cluster_only(tenants, api):
     assert requests.post(f"{api.base_url}/internal/clusters/{a.cluster}/reconcile", json=report, timeout=30).status_code == 401
 
 
+def _default_orgs_clusters(api: API) -> list[dict]:
+    """The connected clusters registered for the default org. A name another test registered and
+    removed still heartbeats in the listing of everything that reports, and is no cluster."""
+    registered = {c["name"] for c in api.get_json("/orgs/default/clusters")["clusters"] if c["owned"]}
+    return [c for c in api.list_internal_clusters() if c["connected"] and c["cluster_name"] in registered]
+
+
 def test_cluster_settings_belong_to_the_clusters_org(tenants, api):
     """The connected clusters of the local stack belong to the default org, which neither tenant
     is in."""
     a, _ = tenants
-    connected = [c for c in api.list_internal_clusters() if c["cluster_id"]]
+    connected = [c for c in _default_orgs_clusters(api) if c["cluster_id"]]
     assert connected, "no connected cluster to check settings access against"
     for cluster in connected:
         path = f"/clusters/{cluster['cluster_id']}/settings"
@@ -423,7 +430,7 @@ def test_another_orgs_accounts_are_out_of_reach(tenants):
 def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
     """The connected clusters of the local stack belong to the default org and are not shared."""
     a, b = tenants
-    connected = {c["cluster_name"] for c in api.list_internal_clusters() if c["connected"]}
+    connected = {c["cluster_name"] for c in _default_orgs_clusters(api)}
     assert connected, "no connected cluster to check capacity against"
     assert connected <= {c["cluster_name"] for c in api.capacity()["clusters"]}, "staff do not read every cluster's capacity"
     shown = {c["cluster_name"] for c in a.api.capacity()["clusters"]}
