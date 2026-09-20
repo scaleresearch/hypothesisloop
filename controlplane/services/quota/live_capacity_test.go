@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -21,7 +20,7 @@ func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
 	h := NewPlatformExperimentsHandler(nil, nil)
 	// Deliberately never call WithLiveCapacity.
 
-	clusters, err := h.liveCapacity(context.Background())
+	clusters, err := h.liveCapacity(context.Background(), "org-a", false)
 	if err == nil {
 		t.Fatalf("liveCapacity() with no metrics DB configured returned nil error and clusters=%v, want ErrLiveCapacityUnconfigured", clusters)
 	}
@@ -44,7 +43,7 @@ func TestLiveCapacityConfiguredDoesNotFailFast(t *testing.T) {
 	// Not asserting on the outcome of an actual dial here — that's metricsdb's own concern and
 	// would require a live DB. This only pins that liveCapacity no longer takes the "unconfigured"
 	// branch once WithLiveCapacity has been called.
-	_, err := h.liveCapacity(auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindStaff}))
+	_, err := h.liveCapacity(context.Background(), "", true)
 	if errors.Is(err, ErrLiveCapacityUnconfigured) {
 		t.Fatalf("liveCapacity() still reports unconfigured after WithLiveCapacity was called")
 	}
@@ -66,31 +65,24 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 	}
 }
 
-// A caller reads the capacity of the clusters its jobs can land on and of no other: knowing what
-// another org runs on is knowing something of that org.
-func TestCapacityShowsOnlyClustersThatTakeTheCallersJobs(t *testing.T) {
+// Capacity is read for one org: the clusters that org's jobs can land on and no other. Knowing
+// what another org runs on is knowing something of that org, also for a person who is in both.
+func TestCapacityShowsOnlyTheClustersThatTakeTheOrgsJobs(t *testing.T) {
 	registered := map[string]domain.Cluster{
 		"of-a":   {Name: "of-a", OrgID: "org-a"},
 		"of-b":   {Name: "of-b", OrgID: "org-b"},
 		"shared": {Name: "shared", OrgID: "org-staff", Shared: true},
 	}
 	connected := []ClusterCapacity{{ClusterName: "of-a"}, {ClusterName: "of-b"}, {ClusterName: "phantom"}, {ClusterName: "shared"}}
-	for name, tc := range map[string]struct {
-		orgs []string
-		want []string
-	}{
-		"a caller of one org":                 {[]string{"org-a"}, []string{"of-a", "shared"}},
-		"a person in two orgs":                {[]string{"org-a", "org-b"}, []string{"of-a", "of-b", "shared"}},
-		"an org with no cluster":              {[]string{"org-c"}, []string{"shared"}},
-		"a caller of no org, who has no jobs": {nil, []string{}},
-		"the org that shares its own":         {[]string{"org-staff"}, []string{"shared"}},
+	for org, want := range map[string][]string{
+		"org-a": {"of-a", "shared"}, "org-b": {"of-b", "shared"}, "org-c": {"shared"}, "org-staff": {"shared"},
 	} {
 		got := []string{}
-		for _, c := range placeableBy(auth.Principal{Kind: auth.KindUser, OrgIDs: tc.orgs}, registered, connected) {
+		for _, c := range placeableBy(org, registered, connected) {
 			got = append(got, c.ClusterName)
 		}
-		if !slices.Equal(got, tc.want) {
-			t.Errorf("%s: got = %v, want = %v", name, got, tc.want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: got = %v, want = %v", org, got, want)
 		}
 	}
 }

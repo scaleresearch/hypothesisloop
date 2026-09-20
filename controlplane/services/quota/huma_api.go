@@ -706,16 +706,25 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
-		Description: "Live {accelerator_type, available, total} per cluster your jobs can be placed on: your org's own " +
-			"clusters and the ones the platform shares. accelerator_type is the exact " +
+		Description: "Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own " +
+			"clusters and the ones the platform shares. The org is the one your token is bound to: every API key, agent and " +
+			"coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, " +
+			"and is answered 400 without it. An org you do not reach is not found. Staff read one org with org_id and every " +
+			"cluster that reports without it. accelerator_type is the exact " +
 			"driver-published string a job spec takes, so what you read here is what you submit. Check before " +
 			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
-			"currently-schedulable nodes count — powered-off hardware never appears."}, func(ctx context.Context, _ *struct{}) (*struct {
+			"currently-schedulable nodes count — powered-off hardware never appears."}, func(ctx context.Context, in *struct {
+		OrgID string `query:"org_id" doc:"The org whose clusters to read. Required only when your token reaches more than one org."`
+	}) (*struct {
 		Body struct {
 			Clusters []ClusterCapacity `json:"clusters"`
 		}
 	}, error) {
-		clusters, err := peh.liveCapacity(ctx)
+		orgID, every, err := access.PlacementOrg(ctx, in.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		clusters, err := peh.liveCapacity(ctx, orgID, every)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}

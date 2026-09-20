@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -96,15 +95,12 @@ type AcceleratorCapacity struct {
 // (important.md: "no fallbacks - one path or error, fail fast").
 var ErrLiveCapacityUnconfigured = errors.New("resource-catalog/capacity: metrics DB URL not configured (WithLiveCapacity was never called)")
 
-// liveCapacity reads the live accelerator capacity of the clusters the caller's jobs can be
-// placed on, or fails fast if this handler was never wired to a metrics DB.
-func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context) ([]ClusterCapacity, error) {
+// liveCapacity reads the live accelerator capacity of the clusters jobs of orgID can be placed
+// on, or of every cluster that reports when every is set, which is staff's view. It fails fast
+// if this handler was never wired to a metrics DB.
+func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
 	if h.metricsDBURL == "" {
 		return nil, ErrLiveCapacityUnconfigured
-	}
-	caller, ok := auth.FromContext(ctx)
-	if !ok {
-		return nil, auth.Unauthenticated("the request carries no principal")
 	}
 	available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, h.metricsDBURL, h.capacityFreshness)
 	if err != nil {
@@ -113,22 +109,22 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context) ([]Cluste
 	clusters := buildClusterCapacity(available, total)
 	// Staff see every name that reports, registered or not: a runtime started under a name
 	// nobody registered is theirs to notice.
-	if caller.Kind == auth.KindStaff {
+	if every {
 		return clusters, nil
 	}
 	registered, err := h.clusters.RegisteredClusters(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return placeableBy(caller, registered, clusters), nil
+	return placeableBy(orgID, registered, clusters), nil
 }
 
-// placeableBy keeps the clusters the caller's jobs can be placed on, which is the rule of who
-// sees a cluster (auth.Principal.PlacedOn). A name nobody registered is no cluster.
-func placeableBy(caller auth.Principal, registered map[string]domain.Cluster, clusters []ClusterCapacity) []ClusterCapacity {
+// placeableBy keeps the clusters that take jobs of orgID: its own and the shared ones, the rule
+// admission places by (domain.Cluster.Hosts). A name nobody registered is no cluster.
+func placeableBy(orgID string, registered map[string]domain.Cluster, clusters []ClusterCapacity) []ClusterCapacity {
 	kept := make([]ClusterCapacity, 0, len(clusters))
 	for _, c := range clusters {
-		if cluster, ok := registered[c.ClusterName]; ok && caller.PlacedOn(cluster) {
+		if cluster, ok := registered[c.ClusterName]; ok && cluster.Hosts(orgID) {
 			kept = append(kept, c)
 		}
 	}

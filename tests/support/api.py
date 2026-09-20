@@ -555,8 +555,10 @@ class API:
 
     # ---- resource catalog ------------------------------------------------------------------------
 
-    def capacity(self) -> dict:
-        return self.get_json("/resource-catalog/capacity")
+    def capacity(self, org_id: str = "") -> dict:
+        """The clusters one org's jobs can be placed on: the named org, else the one org the token
+        is bound to. Staff naming none read every cluster."""
+        return self.get_json("/resource-catalog/capacity" + (f"?org_id={org_id}" if org_id else ""))
 
     def accelerators_free(self, accelerator_type: str) -> int:
         """How many of `accelerator_type` the platform currently reports unused -- the same

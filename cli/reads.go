@@ -90,11 +90,15 @@ value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, s
 }
 
 func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("capacity", `usage: hl capacity
+	fs := newFlags("capacity", `usage: hl capacity [--org ORG]
 
 Live accelerators per cluster, one line per type: available, total and acch_per_hour, what an
 hour on one of them costs in accelerator hours. accelerator_type is the exact string a job spec
-takes; a type with none available queues and never errors.`, stderr)
+takes; a type with none available queues and never errors.
+
+The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
+key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
+	org := fs.String("org", "", "org whose clusters to read (default $HL_ORG, then the one org this token is bound to)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -107,7 +111,11 @@ takes; a type with none available queues and never errors.`, stderr)
 			Accelerators []json.RawMessage `json:"accelerators"`
 		} `json:"clusters"`
 	}
-	if err := c.Do("GET", "/resource-catalog/capacity", nil, &out); err != nil {
+	path := "/resource-catalog/capacity"
+	if id := orEnv(*org, orgEnv); id != "" {
+		path += "?org_id=" + url.QueryEscape(id)
+	}
+	if err := c.Do("GET", path, nil, &out); err != nil {
 		return fail(stderr, err)
 	}
 	for _, cl := range out.Clusters {

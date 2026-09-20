@@ -79,22 +79,49 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 	}
 }
 
-func TestACallerSeesTheClustersItsJobsRunOnAndKnowsOnlyItsOwn(t *testing.T) {
+func TestACallerKnowsOnlyTheClustersOfItsOwnOrg(t *testing.T) {
 	own := domain.Cluster{Name: "own", OrgID: "org-a"}
 	shared := domain.Cluster{Name: "shared", OrgID: "org-b", Shared: true}
-	foreign := domain.Cluster{Name: "foreign", OrgID: "org-b"}
-	for caller, want := range map[string][6]bool{
-		//             own: placed, known   shared: placed, known   foreign: placed, known
-		"owner":    {true, true, true, false, false, false},
-		"org key":  {true, true, true, false, false, false},
-		"outsider": {false, false, true, true, true, true},
-		"launcher": {false, false, false, false, false, false},
-		"staff":    {true, true, true, true, true, true},
+	for caller, want := range map[string][2]bool{
+		"owner": {true, false}, "org key": {true, false}, "outsider": {false, true}, "launcher": {false, false}, "staff": {true, true},
 	} {
 		p := accountCallers[caller]
-		got := [6]bool{p.PlacedOn(own), p.KnowsCluster(own), p.PlacedOn(shared), p.KnowsCluster(shared), p.PlacedOn(foreign), p.KnowsCluster(foreign)}
-		if got != want {
-			t.Errorf("%s: placed on and knows (own, shared, another org's) = %v, want %v", caller, got, want)
+		if got := [2]bool{p.KnowsCluster(own), p.KnowsCluster(shared)}; got != want {
+			t.Errorf("%s knows (org a's cluster, org b's shared one) = %v, want %v", caller, got, want)
+		}
+	}
+}
+
+// Capacity is read for one org at a time, so a person in two orgs is never shown one org's
+// clusters while looking at the other.
+func TestCapacityIsReadForOneOrgTheCallerReaches(t *testing.T) {
+	access := auth.NewAccess(authtest.Placement{Clusters: map[string]string{"cluster-a": "org-a", "cluster-b": "org-b"}})
+	inBoth := auth.Principal{Kind: auth.KindUser, UserID: "u-both", OrgIDs: []string{"org-a", "org-b"}}
+	agent := auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1", OrgIDs: []string{"org-a"}, PlatformExperimentID: "pe-1"}
+	for name, tc := range map[string]struct {
+		caller    auth.Principal
+		requested string
+		org       string
+		every     bool
+		status    int
+	}{
+		"a person in one org, naming none":     {accountCallers["owner"], "", "org-a", false, 200},
+		"a person in one org, naming it":       {accountCallers["owner"], "org-a", "org-a", false, 200},
+		"a person in one org, naming another":  {accountCallers["owner"], "org-b", "", false, 404},
+		"a person in two orgs, naming none":    {inBoth, "", "", false, 400},
+		"a person in two orgs, naming one":     {inBoth, "org-b", "org-b", false, 200},
+		"a person in two orgs, naming a third": {inBoth, "org-c", "", false, 404},
+		"a key, naming none":                   {accountCallers["org key"], "", "org-a", false, 200},
+		"a key, naming another org":            {accountCallers["org key"], "org-b", "", false, 404},
+		"an agent, naming none":                {agent, "", "org-a", false, 200},
+		"an agent, naming another org":         {agent, "org-b", "", false, 404},
+		"staff, naming none":                   {accountCallers["staff"], "", "", true, 200},
+		"staff, naming an org":                 {accountCallers["staff"], "org-b", "org-b", false, 200},
+		"staff, naming an org that is not one": {accountCallers["staff"], "org-never", "", false, 404},
+	} {
+		org, every, err := access.PlacementOrg(auth.WithPrincipal(context.Background(), tc.caller), tc.requested)
+		if got := status(err); got != tc.status || org != tc.org || every != tc.every {
+			t.Errorf("%s: got = (%q, every %v, %d), want = (%q, every %v, %d)", name, org, every, got, tc.org, tc.every, tc.status)
 		}
 	}
 }

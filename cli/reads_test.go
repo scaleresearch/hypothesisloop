@@ -71,6 +71,32 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 	}
 }
 
+// An agent token cannot read /me, so capacity asks for the org it is told and otherwise leaves
+// the org to the platform, which knows the one a token is bound to.
+func TestCapacityNamesTheOrgItIsToldAndAsksNothingElse(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"clusters": []any{}} })
+	t.Setenv("HL_ORG", "")
+	for _, tc := range []struct {
+		env  string
+		args []string
+		want string
+	}{
+		{"", []string{"capacity"}, ""},
+		{"org-env", []string{"capacity"}, "org_id=org-env"},
+		{"org-env", []string{"capacity", "--org", "org flag"}, "org_id=org+flag"},
+	} {
+		t.Setenv("HL_ORG", tc.env)
+		before := len(*got)
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 0 {
+			t.Fatalf("hl %v: exit %d, stderr %s", tc.args, code, stderr.String())
+		}
+		if made := (*got)[before:]; len(made) != 1 || made[0].Path != "/resource-catalog/capacity" || made[0].Query != tc.want {
+			t.Fatalf("hl %v with HL_ORG=%q made %+v, want one GET of capacity with query %q", tc.args, tc.env, made, tc.want)
+		}
+	}
+}
+
 func TestJobStatsAndListDefaultToThePlatformExperiment(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
 		if r.Path == "/experiments" {

@@ -128,18 +128,34 @@ func (a *Access) ClusterOf(ctx context.Context, orgID, name string) (*domain.Clu
 	return cluster, nil
 }
 
-// PlacedOn reports whether the principal's jobs can be placed on the cluster, which is what
-// makes the cluster visible to it.
-func (p Principal) PlacedOn(cluster domain.Cluster) bool {
-	if p.Kind == KindStaff {
-		return true
+// PlacementOrg resolves the org whose clusters a caller reads the capacity of. What an org can
+// be placed on is that org's to know, so a caller who reaches several orgs reads one at a time.
+//
+//   - a caller bound to one org (every key, agent and coordinator, and a person in one org) reads
+//     that org, named or not.
+//   - a person in several orgs names the one they mean.
+//   - an org outside the caller's reach, and for staff one that does not exist, is not found.
+//   - staff who name no org read every cluster: every is true and orgID empty.
+func (a *Access) PlacementOrg(ctx context.Context, requested string) (orgID string, every bool, err error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return "", false, err
 	}
-	for _, orgID := range p.OrgIDs {
-		if cluster.Hosts(orgID) {
-			return true
-		}
+	if p.Kind != KindStaff {
+		orgID, err = a.Org(ctx, requested)
+		return orgID, false, err
 	}
-	return false
+	if requested == "" {
+		return "", true, nil
+	}
+	org, err := a.placement.GetOrg(ctx, requested)
+	if err != nil {
+		return "", false, err
+	}
+	if org == nil {
+		return "", false, NotFound("org")
+	}
+	return requested, false, nil
 }
 
 // KnowsCluster reports whether the principal is shown who owns the cluster and the identity its
