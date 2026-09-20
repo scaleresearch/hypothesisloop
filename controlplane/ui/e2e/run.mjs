@@ -195,7 +195,8 @@ async function scenarios(browser) {
   page.on('request', request => {
     if (request.url().startsWith(API) && request.method() !== 'OPTIONS') apiCalls.push(request)
   })
-  page.on('dialog', dialog => dialog.accept())
+  const acceptDialog = dialog => dialog.accept()
+  page.on('dialog', acceptDialog)
 
   section('a visitor without a session is sent to sign in, and returns to where they were going')
   await page.goto(`${UI}/jobs?status=RUNNING`)
@@ -431,110 +432,225 @@ async function scenarios(browser) {
   await page.getByText('Job Status Breakdown').waitFor()
   assert.equal(await page.getByText('staff only').count(), 0)
 
-  section('repository: a deployment without a GitHub App says so')
+  section('repository: what the real API says of a project with none')
   const repoPage = `${UI}/settings/repository?project=${secondProjectID}`
   const repoAPI = `${API}/projects/${secondProjectID}/repo`
   const appRead = page.waitForResponse(`${API}/github/app`)
   const repoRead = page.waitForResponse(r => r.url() === repoAPI && r.request().method() === 'GET')
   await page.goto(`${UI}/settings?project=${secondProjectID}`)
   await page.getByRole('link', { name: 'Repository of renamed' }).click()
-  assert.equal((await repoRead).status(), 404, 'the project has no repository')
-  assert.equal((await appRead).status(), 503, 'the local stack has no GitHub App')
-  await page.getByText('GitHub is not configured on this deployment').waitFor()
-  assert.equal(await page.getByRole('button', { name: 'Install the GitHub App' }).count(), 0)
-  await shot(page, 'repository-github-not-configured')
+  assert.equal((await repoRead).status(), 404)
+  assert.equal((await (await repoRead).json()).reason, 'no_repository')
+  const stackHasGitHub = (await appRead).status() === 200
+  if (stackHasGitHub) {
+    await page.getByLabel('Repository').waitFor()
+  } else {
+    const noApp = await (await appRead).json()
+    assert.equal((await appRead).status(), 503)
+    assert.equal(noApp.reason, 'github_not_configured')
+    await page.locator('.error-banner').waitFor()
+    assert.equal((await page.locator('.error-banner').innerText()).trim(), `No repository can be attached right now: ${noApp.message}`)
+    assert.equal(await page.getByLabel('Repository').count(), 0)
+    await shot(page, 'repository-github-not-configured')
+  }
 
-  section('repository: install, authorise and name the repository, with GitHub stood in for')
+  section('repository: the form, and installing the App in a tab of its own')
   const cors = { 'access-control-allow-origin': UI }
   await page.route(`${API}/github/app`, route => route.fulfill({
     headers: cors,
     json: { slug: 'hl-e2e', client_id: 'Iv1.e2e', install_url: `${IDP}/github/install`, authorize_url: `${IDP}/github/authorize?client_id=Iv1.e2e` },
   }))
+  const attaches = []
+  const returns = []
+  const authorizes = []
+  context.on('request', request => {
+    const url = new URL(request.url())
+    if (request.url().startsWith(`${API}/projects/`) && url.pathname.endsWith('/repo') && request.method() === 'POST') attaches.push(request)
+    if (request.url().startsWith(`${UI}/settings/repository`) && (url.searchParams.has('code') || url.searchParams.has('error'))) returns.push(request.url())
+    if (request.url().startsWith(`${IDP}/github/authorize`)) authorizes.push(url)
+  })
+  const stateOfTab = () => page.evaluate(() => sessionStorage.length)
+  const projectInNav = () => page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue()
+  // Types a name and leaves for GitHub, which returns at once.
+  const connect = async name => {
+    await page.getByLabel('Repository').fill(name)
+    await page.getByRole('button', { name: 'Connect on GitHub' }).click()
+  }
+
   await page.goto(repoPage)
   await page.getByText('No repository is attached to renamed.').waitFor()
-  await shot(page, 'repository-none-attached')
-  const leaves = []
-  const watchLeaves = request => { if (request.url().startsWith(`${IDP}/github/`)) leaves.push(new URL(request.url())) }
-  page.on('request', watchLeaves)
-  await page.getByRole('button', { name: 'Install the GitHub App' }).click()
-  await page.getByLabel('Repository').waitFor()
-  page.off('request', watchLeaves)
-  assert.deepEqual(leaves.map(u => u.pathname), ['/github/install', '/github/authorize'], 'the person went to install, then straight on to authorise')
-  const [installed, authorized] = leaves
-  assert.match(installed.searchParams.get('state'), /^[0-9a-f-]{36}$/)
-  assert.equal(authorized.searchParams.get('state'), `${installed.searchParams.get('state')}.4242`, 'the state carries the installation')
-  assert.equal(authorized.searchParams.get('redirect_uri'), `${UI}/settings/repository`, 'the way back is this UI\'s own origin')
-  assert.equal(authorized.searchParams.get('client_id'), 'Iv1.e2e')
-  const githubCode = (await idpState()).githubCodes.at(-1)
-  const returned = new URL(page.url())
-  assert.equal(returned.searchParams.get('code'), githubCode)
-  assert.equal(returned.searchParams.get('project'), secondProjectID, 'the return is back in the project the attach began in')
-  assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'renamed')
-  await shot(page, 'repository-name-it')
+  await shot(page, 'repository-form')
+  const installLink = page.getByRole('link', { name: 'Install the App on a repository' })
+  assert.equal(await installLink.getAttribute('href'), `${IDP}/github/install`)
+  const installTab = context.waitForEvent('page')
+  await installLink.click()
+  const installed = await installTab
+  // GitHub returns from installing with parameters the page has no use for, and names no project.
+  await installed.waitForURL(`${UI}/settings/repository?project=${adaMe.projects[0].id}`)
+  await installed.getByText('No repository is attached to default.').waitFor()
+  await installed.getByLabel('Repository').waitFor()
+  await installed.close()
+  assert.equal(attaches.length, 0, 'installing attaches nothing')
 
-  // The real API takes the request and refuses it, having no App: its words are shown as they are.
-  const refusedAttach = page.waitForResponse(r => r.url() === repoAPI && r.request().method() === 'POST')
-  await page.getByLabel('Repository').fill('acme/widgets')
-  await page.getByRole('button', { name: 'Attach repository' }).click()
-  const attachAnswer = await refusedAttach
-  assert.deepEqual(attachAnswer.request().postDataJSON(), { installation_id: 4242, repo: 'acme/widgets', code: githubCode, redirect_uri: `${UI}/settings/repository` })
-  assert.equal(attachAnswer.status(), 503)
-  const attachRefusal = await attachAnswer.json()
+  await connect('not a repository')
+  await page.getByText('The repository must be owner/name, as in its address on GitHub.').waitFor()
+  assert.equal(authorizes.length, 0, 'a name of the wrong shape goes nowhere')
+  assert.equal(await stateOfTab(), 0)
+
+  section('repository: connect with the App already installed, and the real API\'s answer')
+  await connect('acme/widgets')
   await page.locator('.error-banner').waitFor()
-  assert.equal((await page.locator('.error-banner').innerText()).trim(), attachRefusal.message ?? attachRefusal.error)
-  assert.equal(await page.getByLabel('Repository').inputValue(), 'acme/widgets')
+  assert.equal(authorizes.length, 1)
+  assert.match(authorizes[0].searchParams.get('state'), /^[0-9a-f-]{36}$/)
+  assert.equal(authorizes[0].searchParams.get('redirect_uri'), `${UI}/settings/repository`, 'the way back is this UI\'s own origin')
+  assert.equal(authorizes[0].searchParams.get('client_id'), 'Iv1.e2e')
+  assert.equal(attaches.length, 1, 'the return posted the attach once, with no second form')
+  const githubCode = (await idpState()).githubCodes.at(-1)
+  assert.equal(new URL(attaches[0].url()).pathname, `/projects/${secondProjectID}/repo`, 'in the project the attempt began in')
+  assert.deepEqual(attaches[0].postDataJSON(), { repo: 'acme/widgets', code: githubCode, redirect_uri: `${UI}/settings/repository` })
+  // No GitHub knows this code: a stack without an App answers 503, one with an App is refused the code.
+  const realRefusal = await (await attaches[0].response()).json()
+  assert.equal((await attaches[0].response()).status(), stackHasGitHub ? 400 : 503)
+  assert.equal((await page.locator('.error-banner').innerText()).trim(), realRefusal.message)
+  assert.equal(await page.getByLabel('Repository').inputValue(), 'acme/widgets', 'the name is kept')
+  assert.equal(page.url(), repoPage, 'the code and state are out of the URL, and the project is back')
+  assert.equal(await projectInNav(), 'renamed')
+  assert.equal(await stateOfTab(), 0, 'the attempt was used up')
   await shot(page, 'repository-attach-refused')
 
-  // With the API's repository calls stood in for as well, the same form attaches, shows and detaches.
-  let attachedRepo = null
-  const repoCalls = []
-  await page.route(repoAPI, route => {
-    const method = route.request().method()
-    if (method === 'OPTIONS') return route.fallback()
-    repoCalls.push(method)
-    if (method === 'POST') {
-      attachedRepo = {
-        project_id: secondProjectID, installation_id: 4242, repository_id: 9, repo: route.request().postDataJSON().repo,
-        attached_at: new Date().toISOString(), clone_url: 'https://github.com/acme/widgets.git',
-      }
-      return route.fulfill({ headers: cors, json: attachedRepo })
-    }
-    if (method === 'DELETE') {
-      attachedRepo = null
-      return route.fulfill({ status: 204, headers: cors })
-    }
-    return attachedRepo
-      ? route.fulfill({ headers: cors, json: attachedRepo })
-      : route.fulfill({ status: 404, headers: cors, json: { message: 'no repository is attached to this project' } })
-  })
-  await page.getByRole('button', { name: 'Attach repository' }).dblclick()
-  await page.getByRole('button', { name: 'Detach repository' }).waitFor()
-  assert.equal(repoCalls.filter(m => m === 'POST').length, 1, 'a double click attached once')
-  assert.equal(page.url(), repoPage, 'the code and state are out of the URL')
-  assert.equal(await page.evaluate(() => sessionStorage.length), 0, 'the attempt is over')
-  await page.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
-  await page.getByRole('cell', { name: 'https://github.com/acme/widgets.git' }).waitFor()
-  await shot(page, 'repository-attached')
-  await page.getByRole('button', { name: 'Detach repository' }).click()
-  await page.getByText('No repository is attached to renamed.').waitFor()
-  assert.equal(repoCalls.filter(m => m === 'DELETE').length, 1)
-  await page.unroute(repoAPI)
+  section('repository: the refusal belongs to its project, and a replayed return, a reload and Back do nothing')
+  await selectInNav(page, 'Project', 'default')
+  await page.getByText('No repository is attached to default.').waitFor()
+  assert.equal(await page.getByLabel('Repository').inputValue(), '')
+  assert.equal(await page.locator('.error-banner').count(), 0)
+  await selectInNav(page, 'Project', 'renamed')
+  await page.locator('.error-banner').waitFor()
+  assert.equal(await page.getByLabel('Repository').inputValue(), 'acme/widgets')
 
-  section('repository: a return from GitHub this tab did not start is refused')
-  await page.goto(`${repoPage}&code=stolen&state=forged.4242`)
+  assert.equal(returns.length, 1)
+  await page.goto(returns[0])
   await page.getByText('does not belong to an attach started in this tab').waitFor()
   assert.equal(await page.getByLabel('Repository').count(), 0)
   await shot(page, 'repository-return-refused')
-  await page.getByRole('button', { name: 'Install the GitHub App' }).waitFor({ state: 'detached' })
-  await page.getByRole('link', { name: 'Start again' }).click()
-  await page.getByRole('button', { name: 'Install the GitHub App' }).click()
+  await page.getByRole('button', { name: 'Start again' }).click()
   await page.getByLabel('Repository').waitFor()
-  const midway = new URL(page.url())
-  midway.searchParams.set('state', `11111111-1111-1111-1111-111111111111.${4242}`)
-  await page.goto(midway.toString())
+  await page.reload()
+  await page.getByText('No repository is attached to').waitFor()
+  assert.equal(await page.getByLabel('Repository').inputValue(), '')
+  await page.goto(`${repoPage}&code=stolen&state=forged`)
   await page.getByText('does not belong to an attach started in this tab').waitFor()
+  assert.equal(attaches.length, 1, 'none of them posted anything')
+
+  // Leaving for GitHub replaces the page, so Back from the return is the page before, and
+  // Forward is the clean page: neither is GitHub or a return with a code in it.
+  await page.goto(`${UI}/settings?project=${secondProjectID}`)
+  await page.getByRole('link', { name: 'Repository of renamed' }).click()
+  await connect('acme/widgets')
+  await page.locator('.error-banner').waitFor()
+  assert.equal(attaches.length, 2)
+  await page.goBack()
+  await page.waitForURL(`${UI}/settings?project=${secondProjectID}`)
+  await page.goForward()
+  await page.waitForURL(repoPage)
+  await page.getByLabel('Repository').waitFor()
+  assert.equal(attaches.length, 2, 'Back and Forward posted nothing')
+  assert.equal(authorizes.length, 2, 'and asked GitHub nothing')
+
+  section('repository: GitHub declined, and the App not installed on the repository')
+  await configure({ githubDeclines: true })
+  await connect('acme/declined')
+  await page.getByText('GitHub did not authorise the App: The user has denied your application access.').waitFor()
+  assert.equal(await page.getByLabel('Repository').inputValue(), 'acme/declined')
+  assert.equal(attaches.length, 2, 'nothing was posted')
+  assert.equal(page.url(), repoPage)
+  await shot(page, 'repository-declined')
+  await configure({ githubDeclines: false })
+
+  let attachedRepo = null
+  let attachAnswer = { status: 422, json: { reason: 'app_not_installed', message: 'the GitHub App is not installed on acme/elsewhere: install it there, then connect again' } }
+  const deletes = []
+  await page.route(repoAPI, route => {
+    const method = route.request().method()
+    if (method === 'POST') {
+      if (attachAnswer.status === 200) attachedRepo = attachAnswer.json
+      return route.fulfill({ ...attachAnswer, headers: cors })
+    }
+    if (method === 'DELETE') {
+      deletes.push(route.request())
+      attachedRepo = null
+      return route.fulfill({ status: 204, headers: cors })
+    }
+    if (method !== 'GET') return route.fallback()
+    return attachedRepo
+      ? route.fulfill({ headers: cors, json: attachedRepo })
+      : route.fulfill({ status: 404, headers: cors, json: { reason: 'no_repository', message: 'no repository is attached to this project' } })
+  })
+  await connect('acme/elsewhere')
+  await page.getByText('the GitHub App is not installed on acme/elsewhere: install it there, then connect again').waitFor()
+  await page.getByText('Install it, then connect again:').waitFor()
+  assert.equal(await installLink.getAttribute('href'), `${IDP}/github/install`)
+  assert.equal(await page.getByLabel('Repository').inputValue(), 'acme/elsewhere')
+  await shot(page, 'repository-app-not-installed')
+
+  section('repository: attach, show, decline the detach, detach')
+  attachAnswer = { status: 200, json: {
+    project_id: secondProjectID, installation_id: 4242, repository_id: 9, repo: 'acme/widgets',
+    attached_at: new Date().toISOString(), clone_url: 'https://github.com/acme/widgets.git',
+  } }
+  const attachesBefore = attaches.length
+  const authorizesBefore = authorizes.length
+  await page.getByLabel('Repository').fill('acme/widgets')
+  await page.getByRole('button', { name: 'Connect on GitHub' }).dblclick()
+  await page.getByRole('button', { name: 'Detach repository' }).waitFor()
+  assert.equal(authorizes.length, authorizesBefore + 1, 'a double click left for GitHub once')
+  assert.equal(attaches.length, attachesBefore + 1, 'and attached once')
+  assert.equal(page.url(), repoPage)
+  await page.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
+  await page.getByRole('cell', { name: 'https://github.com/acme/widgets.git' }).waitFor()
+  assert.equal(await page.getByLabel('Repository').count(), 0, 'with a repository attached there is no form: replacing it means detaching first')
+  await shot(page, 'repository-attached')
+  await page.reload()
+  await page.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
+  assert.equal(attaches.length, attachesBefore + 1)
+
+  page.off('dialog', acceptDialog)
+  const asked = []
+  page.once('dialog', dialog => { asked.push(dialog.message()); dialog.dismiss() })
+  await page.getByRole('button', { name: 'Detach repository' }).click()
+  await page.waitForTimeout(500)
+  assert.deepEqual(asked, ['Detach acme/widgets from renamed? Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.'])
+  assert.equal(deletes.length, 0, 'a declined confirmation detaches nothing')
+  await page.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Detach repository' }).click()
+  await page.getByText('No repository is attached to renamed.').waitFor()
+  assert.equal(deletes.length, 1)
+  page.on('dialog', acceptDialog)
+  await page.unroute(repoAPI)
+
+  section('repository: a row the real API holds, read and detached through the page')
+  if (stackHasGitHub) {
+    const env = name => execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_env_value "$1"', 'env', name], { cwd: repo }).toString().trim()
+    const installation = env('HL_E2E_GITHUB_INSTALLATION')
+    const realRepo = env('HL_E2E_GITHUB_REPO')
+    assert.ok(installation && realRepo, 'the stack has a GitHub App, so .env must name HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO')
+    const repositoryID = execFileSync('gh', ['api', `repos/${realRepo}`, '--jq', '.id']).toString().trim()
+    hlAdmin('repo', 'attach', secondProjectID, installation, repositoryID)
+    const realRead = page.waitForResponse(r => r.url() === repoAPI && r.request().method() === 'GET')
+    await page.reload()
+    assert.equal((await realRead).status(), 200)
+    await page.getByRole('cell', { name: realRepo, exact: true }).waitFor()
+    await shot(page, 'repository-real-row')
+    const realDelete = page.waitForResponse(r => r.url() === repoAPI && r.request().method() === 'DELETE')
+    await page.getByRole('button', { name: 'Detach repository' }).click()
+    assert.equal((await realDelete).status(), 204)
+    await page.getByText('No repository is attached to renamed.').waitFor()
+    assert.equal((await api(await tokenOf(ada), `/projects/${secondProjectID}/repo`)).status, 404)
+  } else {
+    console.log('  SKIPPED: the local stack has no GitHub App, so no real attached row was seeded with hl-admin repo attach.')
+    console.log('  The attached view, the reread and the detach above met a stood-in API; GET and DELETE on a real row were not exercised.')
+  }
   await page.unroute(`${API}/github/app`)
-  await page.evaluate(() => sessionStorage.clear())
 
   section('a person in two orgs switches between them, and each shows its own work')
   await page.goto(`${UI}/platform-experiments`)
@@ -653,6 +769,28 @@ async function scenarios(browser) {
     await shot(otherPage, 'member-cluster-page', memberRow)
     await otherPage.getByRole('link', { name: 'Platform Experiments' }).click()
     await otherPage.getByText(`${experimentName}-edited`).first().waitFor()
+
+    const appReads = []
+    otherPage.on('request', r => { if (r.url() === `${API}/github/app`) appReads.push(r.url()) })
+    const memberRepoAPI = `${API}/projects/${adaMe.projects[0].id}/repo`
+    await otherPage.goto(`${UI}/settings/repository?project=${adaMe.projects[0].id}`)
+    await otherPage.getByText(`No repository is attached to default. Only an owner of ${ada.name} Lab can attach one.`).waitFor()
+    assert.equal(await otherPage.getByLabel('Repository').count(), 0)
+    assert.equal(await otherPage.getByRole('link', { name: 'Install the App on a repository' }).count(), 0)
+    await shot(otherPage, 'member-repository-none')
+    await otherPage.route(memberRepoAPI, route => route.request().method() === 'GET'
+      ? route.fulfill({ headers: { 'access-control-allow-origin': UI }, json: {
+        project_id: adaMe.projects[0].id, installation_id: 4242, repository_id: 9, repo: 'acme/widgets',
+        attached_at: new Date().toISOString(), clone_url: 'https://github.com/acme/widgets.git',
+      } })
+      : route.fallback())
+    await otherPage.reload()
+    await otherPage.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
+    await otherPage.getByText('Only an owner of the organization can detach it.').waitFor()
+    assert.equal(await otherPage.getByRole('button', { name: 'Detach repository' }).count(), 0)
+    assert.deepEqual(appReads, [], 'a member\'s page asks nothing about the App')
+    await shot(otherPage, 'member-repository-attached')
+    await otherPage.unroute(memberRepoAPI)
   } finally {
     sql(`DELETE FROM org_members WHERE org_id = '${labID}' AND user_id = '${bobID}' AND role = 'member';`)
   }

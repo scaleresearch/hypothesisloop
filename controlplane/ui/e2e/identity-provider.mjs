@@ -20,6 +20,7 @@ export function startIdentityProvider({ port, keyPath, ui }) {
     refreshes: 0,
     authorizeRequests: [],
     githubCodes: [],
+    githubDeclines: false,
   }
 
   function accessToken(user) {
@@ -92,21 +93,25 @@ export function startIdentityProvider({ port, keyPath, ui }) {
 
     if (route === 'POST /auth/v1/logout') return res.writeHead(204).end()
 
-    // GitHub, stood in for: installing the App and authorising it both approve at once and
-    // return as GitHub does, to the App's setup address and to redirect_uri.
+    // GitHub, stood in for. Installing the App returns to the App's setup address, as GitHub
+    // does. Authorising returns to redirect_uri with a code, or with the person's refusal.
     if (route === 'GET /github/install') {
       const back = new URL('/settings/repository', ui)
       back.searchParams.set('installation_id', '4242')
       back.searchParams.set('setup_action', 'install')
-      back.searchParams.set('state', url.searchParams.get('state'))
       return res.writeHead(302, { Location: back.toString() }).end()
     }
     if (route === 'GET /github/authorize') {
-      const code = randomUUID()
-      state.githubCodes.push(code)
       const back = new URL(url.searchParams.get('redirect_uri'))
-      back.searchParams.set('code', code)
       back.searchParams.set('state', url.searchParams.get('state'))
+      if (state.githubDeclines) {
+        back.searchParams.set('error', 'access_denied')
+        back.searchParams.set('error_description', 'The user has denied your application access.')
+      } else {
+        const code = randomUUID()
+        state.githubCodes.push(code)
+        back.searchParams.set('code', code)
+      }
       return res.writeHead(302, { Location: back.toString() }).end()
     }
 
@@ -116,6 +121,7 @@ export function startIdentityProvider({ port, keyPath, ui }) {
       if (body.nextUser) state.nextUser = body.nextUser
       if (body.tokenLifetimeSeconds) state.tokenLifetimeSeconds = body.tokenLifetimeSeconds
       if (body.audience) state.audience = body.audience
+      if (body.githubDeclines !== undefined) state.githubDeclines = body.githubDeclines
       if (body.revoke) {
         for (const [token, user] of state.refreshTokens) if (user.id === body.revoke) state.refreshTokens.delete(token)
       }
