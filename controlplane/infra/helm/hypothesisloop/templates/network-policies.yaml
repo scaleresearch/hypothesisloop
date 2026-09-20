@@ -1,0 +1,46 @@
+{{/*
+A store run by this chart accepts connections from the pods listed for it and from nothing else.
+Memgraph and GreptimeDB have no authentication, so this is what keeps another pod of the cluster
+out of them.
+call as: include "hypothesisloop.storePolicy" (dict "store" "memgraph" "ports" (list 7687) "clients" (list "control-service") "root" $)
+*/}}
+{{- define "hypothesisloop.storePolicy" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hypothesisloop-{{ .store }}
+  namespace: {{ include "hypothesisloop.namespace" .root }}
+spec:
+  podSelector:
+    matchLabels:
+      app: hypothesisloop-{{ .store }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range .clients }}
+        - podSelector:
+            matchLabels:
+              app: hypothesisloop-{{ . }}
+        {{- end }}
+      ports:
+        {{- range .ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end -}}
+
+{{- if not .Values.memgraph.external.enabled }}
+{{ include "hypothesisloop.storePolicy" (dict "store" "memgraph" "ports" (list 7687) "clients" (list "control-service") "root" $) }}
+{{- end }}
+{{- if not .Values.greptimedb.external.enabled }}
+---
+{{ include "hypothesisloop.storePolicy" (dict "store" "greptimedb" "ports" (list 4000) "clients" (list "control-service" "metrics-service") "root" $) }}
+{{- end }}
+{{- if .Values.postgres.enabled }}
+---
+{{- /* The runtime processes reach Postgres from their init container, which registers them. */}}
+{{- $clients := list "control-service" "metrics-service" }}
+{{- if .Values.cloudAgent.enabled }}{{ $clients = append $clients "cloud-agent" }}{{ end }}
+{{- if .Values.agentLauncher.enabled }}{{ $clients = append $clients "agent-launcher" }}{{ end }}
+{{ include "hypothesisloop.storePolicy" (dict "store" "postgres" "ports" (list 5432) "clients" $clients "root" $) }}
+{{- end }}

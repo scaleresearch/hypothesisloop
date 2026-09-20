@@ -17,6 +17,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
@@ -51,6 +52,9 @@ type Release struct {
 	ConfigMaps  map[string]corev1.ConfigMap
 	Deployments map[string]appsv1.Deployment
 	Services    map[string]corev1.Service
+	// StatefulSets are the stores the chart runs, and NetworkPolicies what may connect to each.
+	StatefulSets    map[string]appsv1.StatefulSet
+	NetworkPolicies map[string]networkingv1.NetworkPolicy
 }
 
 func chartDir() string {
@@ -114,6 +118,9 @@ func Render(t testing.TB, values string, set ...string) *Release {
 		ConfigMaps:  map[string]corev1.ConfigMap{},
 		Deployments: map[string]appsv1.Deployment{},
 		Services:    map[string]corev1.Service{},
+
+		StatefulSets:    map[string]appsv1.StatefulSet{},
+		NetworkPolicies: map[string]networkingv1.NetworkPolicy{},
 	}
 	documents := yaml.NewYAMLReader(bufio.NewReader(strings.NewReader(stdout)))
 	for {
@@ -145,6 +152,14 @@ func Render(t testing.TB, values string, set ...string) *Release {
 			var service corev1.Service
 			decode(t, document, &service)
 			release.Services[service.Name] = service
+		case "StatefulSet":
+			var statefulSet appsv1.StatefulSet
+			decode(t, document, &statefulSet)
+			release.StatefulSets[statefulSet.Name] = statefulSet
+		case "NetworkPolicy":
+			var policy networkingv1.NetworkPolicy
+			decode(t, document, &policy)
+			release.NetworkPolicies[policy.Name] = policy
 		}
 	}
 	return release

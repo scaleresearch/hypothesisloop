@@ -272,3 +272,88 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		}
 	}
 }
+
+// Memgraph and GreptimeDB take no credentials, so who may connect is all that guards them.
+func TestEachStoreAcceptsOnlyThePodsThatUseIt(t *testing.T) {
+	type access struct {
+		port    int32
+		clients []string
+	}
+	const control, metrics = "hypothesisloop-control-service", "hypothesisloop-metrics-service"
+	memgraph := access{7687, []string{control}}
+	greptimedb := access{4000, []string{control, metrics}}
+	for name, rendered := range map[string]struct {
+		values string
+		set    []string
+		want   map[string]access
+	}{
+		"every store in the cluster": {charttest.InCluster, nil, map[string]access{
+			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
+			"hypothesisloop-postgres": {5432, []string{control, metrics}},
+		}},
+		"the database elsewhere": {charttest.External, nil, map[string]access{
+			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
+		}},
+		"runtime processes beside the chart's Postgres": {charttest.External, []string{`postgres.enabled=true`}, map[string]access{
+			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
+			"hypothesisloop-postgres": {5432, []string{control, metrics, "hypothesisloop-cloud-agent", "hypothesisloop-agent-launcher"}},
+		}},
+		"every store elsewhere": {charttest.External, []string{
+			`memgraph.external={"enabled":true,"url":"bolt://memgraph.example.invalid:7687"}`,
+			`greptimedb.external={"enabled":true,"url":"http://greptimedb.example.invalid:4000"}`,
+		}, map[string]access{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			release := charttest.Render(t, rendered.values, rendered.set...)
+			if len(release.StatefulSets) == 0 && len(rendered.want) != 0 {
+				t.Fatal("the chart rendered no store")
+			}
+			for store, statefulSet := range release.StatefulSets {
+				if _, guarded := rendered.want[store]; !guarded && store != "hypothesisloop-object-store" {
+					t.Errorf("store %s is rendered and this test does not say who reaches it", store)
+				}
+				if got := statefulSet.Spec.Template.Labels["app"]; got != store {
+					t.Errorf("the pods of %s are labelled app=%s, which no policy selects", store, got)
+				}
+			}
+			if len(release.NetworkPolicies) != len(rendered.want) {
+				t.Errorf("policies = %q, want one for each of %d stores", release.Kinds["NetworkPolicy"], len(rendered.want))
+			}
+			for store, want := range rendered.want {
+				policy, found := release.NetworkPolicies[store]
+				if !found {
+					t.Errorf("no policy for %s", store)
+					continue
+				}
+				if _, runs := release.StatefulSets[store]; !runs {
+					t.Errorf("a policy for %s, which the chart does not run", store)
+				}
+				spec := policy.Spec
+				if selected := spec.PodSelector; len(selected.MatchLabels) != 1 || selected.MatchLabels["app"] != store || len(selected.MatchExpressions) != 0 {
+					t.Errorf("%s: the policy selects %+v, want the store's pods", store, selected)
+				}
+				if len(spec.PolicyTypes) != 1 || spec.PolicyTypes[0] != "Ingress" || len(spec.Ingress) != 1 {
+					t.Fatalf("%s: policy types %v with %d ingress rules, want one rule that is all the store accepts", store, spec.PolicyTypes, len(spec.Ingress))
+				}
+				rule := spec.Ingress[0]
+				if len(rule.Ports) != 1 || rule.Ports[0].Port.IntVal != want.port || *rule.Ports[0].Protocol != "TCP" || rule.Ports[0].EndPort != nil {
+					t.Errorf("%s: ports = %+v, want TCP %d alone", store, rule.Ports, want.port)
+				}
+				var clients []string
+				for _, peer := range rule.From {
+					if peer.NamespaceSelector != nil || peer.IPBlock != nil || peer.PodSelector == nil || len(peer.PodSelector.MatchLabels) != 1 || len(peer.PodSelector.MatchExpressions) != 0 {
+						t.Fatalf("%s: accepts %+v, want one named app of this namespace", store, peer)
+					}
+					client := peer.PodSelector.MatchLabels["app"]
+					if got := release.Deployments[client].Spec.Template.Labels["app"]; got != client {
+						t.Errorf("%s: accepts app=%s, which is the label of no Deployment's pods", store, client)
+					}
+					clients = append(clients, client)
+				}
+				if !slices.Equal(clients, want.clients) {
+					t.Errorf("%s: accepts %q, want %q", store, clients, want.clients)
+				}
+			}
+		})
+	}
+}

@@ -69,6 +69,12 @@ control-service has made the tables the init container fails and the pod waits.
 - **Reaching it from outside.** The API (8081), metrics (8084), the object store (9000) and the
   UI (3000) are NodePort Services on 30081, 30084, 30900 and 30300. Set `service.type` to
   `ClusterIP` on any of them to keep it inside the cluster.
+- **Who reaches the stores.** Memgraph and GreptimeDB take no credentials. Each store the chart
+  runs has a NetworkPolicy that accepts its clients only: Memgraph control-service, GreptimeDB
+  control-service and metrics-service, Postgres those two and the init containers of the
+  cloud-agent and the agent-launcher. A policy does something only where the cluster enforces
+  NetworkPolicy. k3s does out of the box; a cluster whose network plugin does not leaves the
+  stores open to every pod. A pod on the host network is the node to a policy and is let through.
 - **The UI.** Next.js compiles the API address and the two Supabase values into the image when
   it is built (`NEXT_PUBLIC_*` build arguments of `controlplane/build/Dockerfile.ui`), so an
   image serves one deployment. `ui.supabaseURL` and `ui.supabasePublishableKey` repeat the two
