@@ -1,24 +1,32 @@
 package podexec
 
 import (
-	"context"
-	"runtime"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// GetClusterID is the bare-metal runtime's answer to autoscaler.md's "Cluster identity": the
-// host's /etc/machine-id, trimmed. Every Linux host running this agent has one, so a smoke read
-// (rather than mocking the filesystem) is the honest test here.
-func TestGetClusterIDReadsMachineID(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("the bare-metal runtime runs on Linux hosts only")
+func TestClusterIDIsTheTrimmedMachineID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "machine-id")
+	if err := os.WriteFile(path, []byte("0123abcd\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	e := &Executor{}
-	id, err := e.GetClusterID(context.Background())
-	if err != nil {
-		t.Fatalf("GetClusterID: %v", err)
+	id, err := readClusterID(path)
+	if err != nil || id != "0123abcd" {
+		t.Fatalf("readClusterID = %q, %v, want the trimmed id", id, err)
 	}
-	if id == "" {
-		t.Error("GetClusterID returned empty id — /etc/machine-id should be non-empty on any Linux host")
+}
+
+func TestAHostWithNoMachineIDFailsAtStartup(t *testing.T) {
+	absent := filepath.Join(t.TempDir(), "machine-id")
+	if _, err := readClusterID(absent); err == nil {
+		t.Error("an absent machine id was accepted")
+	}
+	empty := filepath.Join(t.TempDir(), "machine-id")
+	if err := os.WriteFile(empty, []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readClusterID(empty); err == nil {
+		t.Error("an empty machine id was accepted")
 	}
 }

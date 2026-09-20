@@ -59,6 +59,9 @@ type Executor struct {
 	// nodeName is this node's own identity, reported as the sole entry in every
 	// cluster->node->... map the Backend contract expects (a bare-node "cluster" is one node).
 	nodeName string
+	// clusterID is the host's machine id, read once at startup: set at OS install and stable
+	// for the machine's life.
+	clusterID string
 	// docker is the Engine API client connected to whichever engine resolveEngineClient found
 	// (podman's Docker-compatible socket, or dockerd's own) — every container operation this
 	// package makes goes through it; nothing here shells out.
@@ -98,6 +101,10 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.ScratchDir == "" {
 		return nil, fmt.Errorf("podexec: ScratchDir is required")
 	}
+	clusterID, err := readClusterID(machineIDPath)
+	if err != nil {
+		return nil, err
+	}
 	docker, engineName, err := resolveEngineClient(context.Background())
 	if err != nil {
 		return nil, err
@@ -122,6 +129,7 @@ func New(cfg Config) (*Executor, error) {
 		scratchDir:           cfg.ScratchDir,
 		nodeLabels:           labels,
 		nodeName:             nodeName,
+		clusterID:            clusterID,
 		docker:               docker,
 		engineName:           engineName,
 		storageQuotaEnforced: quotaSupported,
@@ -144,13 +152,25 @@ func (e *Executor) Engine() string { return e.engineName }
 // k8sexec.JobWorkloadClient.
 func (e *Executor) SetupCluster(_ context.Context) error { return nil }
 
+const machineIDPath = "/etc/machine-id"
+
 // GetClusterID returns the host's /etc/machine-id: set once at OS install, stable for the
 // machine's life, the bare-metal equivalent of the k8s runtime's kube-system namespace UID. See
 // autoscaler.md's "Cluster identity".
 func (e *Executor) GetClusterID(_ context.Context) (string, error) {
-	raw, err := os.ReadFile("/etc/machine-id")
+	return e.clusterID, nil
+}
+
+// readClusterID fails New on a host with no machine id. Read per pass instead, the same host
+// would start and then fail every reconcile pass for good.
+func readClusterID(path string) (string, error) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("podexec: read /etc/machine-id: %w", err)
+		return "", fmt.Errorf("podexec: cluster id is required: read %s: %w", path, err)
 	}
-	return strings.TrimSpace(string(raw)), nil
+	id := strings.TrimSpace(string(raw))
+	if id == "" {
+		return "", fmt.Errorf("podexec: cluster id is required: %s is empty", path)
+	}
+	return id, nil
 }
