@@ -10,19 +10,39 @@ services:
 # Who may call the API. Every request carries one token, and there is no setting that turns the
 # check off.
 #
-#   issuer, jwt_keys  verify a person's JWT from the identity provider. The public keys are listed
-#                     here, as the provider's JWKS document gives them (kid, kty, alg and crv/x/y
-#                     for ES256 or n/e for RS256), and are never fetched: rotating one is an edit
-#                     here and a restart. With none listed no JWT is accepted.
+#   issuer, audience, jwt_keys
+#                     verify a person's JWT from the identity provider: who issued it, that it
+#                     was issued for this API, and its signature. The public keys are listed here,
+#                     as the provider's JWKS document gives them (kid, kty, alg and crv/x/y for
+#                     ES256 or n/e for RS256), and are never fetched: rotating one is an edit here
+#                     and a restart. With none listed no JWT is accepted. Local development
+#                     renders its own key in (make render-settings).
 #   signing_secret    derives the hls_ tokens handed to what the platform launches (jobs, agents,
-#                     coordinators, runtimes) and the staff token local development uses. The
-#                     value below is for local development only; a deployment sets its own.
+#                     coordinators, runtimes) and the staff token. A secret of the deployment, so
+#                     this file names the environment variable and never holds the value: the
+#                     control plane does not start without it.
 #   ui_origin         the one browser origin allowed to call the API.
 auth:
   issuer: ""
+  audience: ""
   jwt_keys: []
-  signing_secret: local-development-signing-secret-do-not-deploy
+  signing_secret: ${HYPOTHESISLOOP_SIGNING_SECRET}
   ui_origin: http://localhost:3000
+
+# Agents the platform runs. An agent joins through POST /platform-experiments/{id}/agents; one
+# asked for with hosted: true is started by a launcher, a separate process that holds a provider
+# account and asks this API which instances should exist. Nothing here names a provider.
+#
+#   launcher   the launcher a newly hosted agent is given to. It is written onto the agent when it
+#              joins, so changing this moves new agents only and running ones finish where they
+#              started. A launcher's token is accepted while this names it or an agent is still
+#              assigned to it.
+#   image      what every hosted agent's machine boots.
+#   api_url    the address a hosted agent reaches this API at, from wherever its launcher rents.
+agents:
+  launcher: main
+  image: registry.example.invalid/hypothesisloop-experimentator-base:latest
+  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
 
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #

@@ -35,6 +35,9 @@ ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
 export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
+# The settings file names this variable and never holds the secret. Local development's value
+# lives in localdev/lib/auth.sh and reaches compose, the scripts and the tests from here.
+export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
 REGISTRY_TLS_VERIFY ?= false
 # Empty builds for this host. Set it (linux/amd64) to build for nodes of another architecture.
 IMAGE_PLATFORM ?=
@@ -50,7 +53,7 @@ check-tag:
 # HOST_ADDRESS_FILE hands the same address to the scripts and tests that run outside make.
 render-settings:
 	@test -n "$(HOST_ADDRESS)" || { echo "make: could not detect this host's address" >&2; exit 1; }
-	sed "s|REPLACE-WITH-HOST-ADDRESS|$(HOST_ADDRESS)|g" controlplane/settings/hypothesisloop.yaml > $(RENDERED_SETTINGS)
+	bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS)'
 	echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
 
 registry-up:

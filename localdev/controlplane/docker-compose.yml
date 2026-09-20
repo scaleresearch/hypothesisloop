@@ -119,6 +119,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
+      HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
     ports:
       - "${API_HOST_PORT:-8081}:8081"
     volumes:
@@ -138,6 +139,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
+      HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
     ports:
       - "8084:8084"
     volumes:

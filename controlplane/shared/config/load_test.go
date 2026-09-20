@@ -9,8 +9,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const signingSecretEnv = "HYPOTHESISLOOP_SIGNING_SECRET"
+
+// productionConfig is the committed settings file, with the deployment's secret in the
+// environment as every deployment supplies it.
 func productionConfig(t *testing.T) string {
 	t.Helper()
+	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
 	b, err := os.ReadFile(filepath.Join("..", "..", "settings", "hypothesisloop.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -117,12 +122,23 @@ func TestExpandEnvLeavesCommentsAndKeysAlone(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresASigningSecretOfUsableLength(t *testing.T) {
-	for _, secret := range []string{`""`, "too-short"} {
-		text := strings.Replace(productionConfig(t), "  signing_secret: local-development-signing-secret-do-not-deploy", "  signing_secret: "+secret, 1)
-		if err := loadText(t, text); err == nil {
-			t.Fatalf("Load accepted signing_secret %s", secret)
-		}
+// The committed file runs nothing by itself: the secret comes from the deployment's environment,
+// and a control plane started without one, or with a guessable one, does not start.
+func TestTheSigningSecretComesFromTheEnvironmentAndIsRequired(t *testing.T) {
+	text := productionConfig(t)
+	if !strings.Contains(text, "  signing_secret: ${"+signingSecretEnv+"}\n") {
+		t.Fatal("the committed settings hold a signing secret; they must name the environment variable instead")
+	}
+	if err := loadText(t, text); err != nil {
+		t.Fatalf("Load with the secret in the environment: %v", err)
+	}
+	t.Setenv(signingSecretEnv, "too-short")
+	if err := loadText(t, text); err == nil {
+		t.Fatal("Load accepted a signing secret shorter than its MAC")
+	}
+	os.Unsetenv(signingSecretEnv)
+	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), signingSecretEnv) {
+		t.Fatalf("Load without the variable: got = %v, want an error naming it", err)
 	}
 }
 
@@ -133,14 +149,38 @@ func TestLoadRequiresTheUIOrigin(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresAnIssuerOnceJWTKeysAreListed(t *testing.T) {
+func TestLoadRequiresAnIssuerAndAnAudienceOnceJWTKeysAreListed(t *testing.T) {
 	keys := "  jwt_keys:\n    - {kid: k1, kty: EC, alg: ES256, crv: P-256, x: AA, y: AA}"
-	text := strings.Replace(productionConfig(t), "  jwt_keys: []", keys, 1)
-	if err := loadText(t, text); err == nil {
-		t.Fatal("Load accepted jwt_keys with no issuer")
+	withKeys := strings.Replace(productionConfig(t), "  jwt_keys: []", keys, 1)
+	withIssuer := strings.Replace(withKeys, `  issuer: ""`, "  issuer: https://issuer.example/auth/v1", 1)
+	withAudience := strings.Replace(withKeys, `  audience: ""`, "  audience: authenticated", 1)
+	for name, text := range map[string]string{"neither": withKeys, "no audience": withIssuer, "no issuer": withAudience} {
+		if err := loadText(t, text); err == nil {
+			t.Errorf("Load accepted jwt_keys with %s", name)
+		}
 	}
-	text = strings.Replace(text, `  issuer: ""`, "  issuer: https://issuer.example/auth/v1", 1)
-	if err := loadText(t, text); err != nil {
-		t.Fatalf("Load rejected jwt_keys with an issuer: %v", err)
+	both := strings.Replace(withIssuer, `  audience: ""`, "  audience: authenticated", 1)
+	if err := loadText(t, both); err != nil {
+		t.Fatalf("Load rejected jwt_keys with an issuer and an audience: %v", err)
+	}
+}
+
+func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
+	for name, edit := range map[string][2]string{
+		"no launcher":           {"  launcher: main", `  launcher: ""`},
+		"launcher not an id":    {"  launcher: main", "  launcher: Main_1"},
+		"no image":              {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
+		"no api url":            {"  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081", `  api_url: ""`},
+		"api url with no host":  {"  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081", "  api_url: /api"},
+		"api url not http":      {"  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081", "  api_url: ftp://example.invalid"},
+		"misspelled agents key": {"  launcher: main", "  launcher: main\n  launchers: [main]"},
+	} {
+		text := productionConfig(t)
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the production config has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
