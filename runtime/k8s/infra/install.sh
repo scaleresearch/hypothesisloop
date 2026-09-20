@@ -6,7 +6,7 @@
 # cluster-agent itself on startup.
 #
 # Parameters (env vars; see chart/values.yaml for what each value means):
-#   CLUSTER_NAME       -> clusterName (default: local)
+#   CLUSTER_NAME       -> clusterName (required)
 #   API_URL            -> apiURL (default: http://host.containers.internal:8081)
 #   METRICS_URL        -> metricsURL (default: http://host.containers.internal:8084)
 #   AUTOSCALER_ENABLED -> autoscalerEnabled (default: false)
@@ -17,7 +17,7 @@
 #   KUBE_CONTEXT       kubectl context to target (default: current-context)
 set -euo pipefail
 
-CLUSTER_NAME="${CLUSTER_NAME:-local}"
+CLUSTER_NAME="${CLUSTER_NAME:?CLUSTER_NAME must name this cluster (make cluster-agent-up CLUSTER=<name>)}"
 API_URL="${API_URL:-http://host.containers.internal:8081}"
 METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
 AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"

@@ -128,32 +128,6 @@ lib_destroy_node() {
   kubectl --context "$context" -n kube-system delete secret "${name}.node-password.k3s" --ignore-not-found &>/dev/null
 }
 
-# lib_stop_node powers a node off: cordon, drain, stop the container, then remove the Node
-# object. dev-nodes-up.sh brings it back (it recreates a container whose Node object is gone).
-#
-# Removing the Node object is the point, not an afterthought. A stopped node otherwise lingers in
-# the API as NotReady while still advertising its full Allocatable, so anything reading capacity
-# keeps counting hardware that is switched off — the fake accelerator nodes here would go on
-# advertising GPUs that were never real to begin with.
-#
-# The container is stopped rather than restarted in place because a k3s agent cannot resume after
-# its address changes: it comes back up and immediately shuts down with "failed to find interface
-# with specified node ip". Recreating is the only reliable way back, so power-on is a rebuild.
-lib_stop_node() {
-  local context="$1" name="$2"
-  local podman_cmd="${NODE_PODMAN:-podman}"
-  if kubectl --context "$context" get node "$name" &>/dev/null; then
-    kubectl --context "$context" cordon "$name" &>/dev/null
-    kubectl --context "$context" drain "$name" --ignore-daemonsets --delete-emptydir-data \
-      --force --timeout=60s &>/dev/null || true
-  fi
-  if ${podman_cmd} container exists "$name"; then
-    ${podman_cmd} stop "$name" >/dev/null
-  fi
-  kubectl --context "$context" delete node "$name" --ignore-not-found &>/dev/null
-  kubectl --context "$context" -n kube-system delete secret "${name}.node-password.k3s" --ignore-not-found &>/dev/null
-}
-
 # lib_wait_node_ready polls until <name> registers and reaches Ready.
 lib_wait_node_ready() {
   local context="$1" name="$2" timeout="${3:-120}"

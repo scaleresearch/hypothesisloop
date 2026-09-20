@@ -1,6 +1,6 @@
 .PHONY: reset build test agent-test e2e-py lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag registry-up registry-prune \
-	helm-prepare helm-lint helm-template \
+	helm-prepare helm-lint \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down k3s-e2e \
@@ -274,9 +274,6 @@ helm-lint: helm-prepare
 	helm lint $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
 	helm lint runtime/k8s/infra/chart --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint \
 		--set-string images.registry=$(REGISTRY),images.tag=$(TAG)
-
-helm-template: helm-prepare
-	helm template hypothesisloop $(HELM_CHART) --set images.registry=$(REGISTRY) --set images.tag=$(TAG)
 
 build:
 	go build ./...
