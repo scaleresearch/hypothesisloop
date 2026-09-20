@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func withServer(t *testing.T, handler http.HandlerFunc) string {
@@ -268,7 +269,7 @@ func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	if want := "hl: job submit: " + notStarted + "\n"; code != 1 || stdout.Len() != 0 || stderr.String() != want {
+	if want := "hl: job submit: " + notStarted("") + "\n"; code != 1 || stdout.Len() != 0 || stderr.String() != want {
 		t.Fatalf("exit %d, stdout %q, stderr %q, want %q", code, stdout.String(), stderr.String(), want)
 	}
 }
@@ -718,22 +719,48 @@ func TestJobHeldForASummarySaysWhatReleasesIt(t *testing.T) {
 	}
 }
 
-func TestOpenPlatformExperimentSaysTheStartArrivesAsAnUpdate(t *testing.T) {
+func TestOpenPlatformExperimentSaysWhenItStartsAheadOfItsRecord(t *testing.T) {
 	status := "open"
-	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "pe-1", "status": status} })
-	note := notStarted
+	startsAt := time.Now().Add(90 * time.Second).UTC().Format(time.RFC3339)
+	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "pe-1", "status": status, "starts_at": startsAt} })
 	for _, tc := range []struct {
 		status string
 		want   bool
 	}{{"open", true}, {"running", false}, {"closed", false}} {
 		status = tc.status
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"platform-experiments", "get", "pe-1"}, &stdout, &stderr); code != 0 {
-			t.Fatalf("exit %d, stderr %s", code, stderr.String())
+		var out bytes.Buffer
+		if code := run([]string{"platform-experiments", "get", "pe-1"}, &out, &out); code != 0 {
+			t.Fatalf("exit %d, output %s", code, out.String())
 		}
-		if got := strings.Contains(stderr.String(), note); got != tc.want || strings.Contains(stdout.String(), note) {
-			t.Fatalf("%s: stdout %q, stderr %q, note wanted on stderr: %v", tc.status, stdout.String(), stderr.String(), tc.want)
+		first, _, _ := strings.Cut(out.String(), "\n")
+		note := regexp.MustCompile(`^hl: platform-experiments get: not started: starts in (89|90) s; .* the start arrives as an update$`)
+		if got := note.MatchString(first); got != tc.want || strings.Count(out.String(), "not started") > 1 {
+			t.Fatalf("%s: output %q, note wanted as its first line: %v", tc.status, out.String(), tc.want)
 		}
+	}
+}
+
+// Quota is granted at the start. Before it hl quota answers with the same line and no error.
+func TestQuotaBeforeTheStartSaysWhenItStarts(t *testing.T) {
+	status := "open"
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/quotas/") {
+			http.Error(w, `{"error":"agent jane has no quota in platform experiment pe-1"}`, http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"pe-1","status":"` + status + `","starts_at":"2000-01-01T00:00:00Z"}`))
+	})
+	setAPIURL(t, url)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr)
+	if want := "hl: quota: " + notStarted("2000-01-01T00:00:00Z") + "\n"; code != 0 || stdout.Len() != 0 || stderr.String() != want ||
+		!strings.Contains(want, "starts in 0 s;") {
+		t.Fatalf("open: exit %d, stdout %q, stderr %q, want %q", code, stdout.String(), stderr.String(), want)
+	}
+	status = "running"
+	stderr.Reset()
+	if code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 404") {
+		t.Fatalf("running: exit %d, stderr %q, want the 404", code, stderr.String())
 	}
 }
 

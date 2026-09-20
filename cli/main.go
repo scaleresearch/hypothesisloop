@@ -126,8 +126,15 @@ An ID is positional; --id ID works too. --agent and --platform-experiment defaul
 and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. hl <command> --help has its
 flags.`
 
-// notStarted is what an agent can do about an open platform experiment: nothing but wait.
-const notStarted = "not started: every job submit is refused until it runs; prepare, then end your turn and the start arrives as an update"
+// notStarted is what an agent can do about an open platform experiment: nothing but wait. It
+// says how long when startsAt is the experiment's start time.
+func notStarted(startsAt string) string {
+	in := ""
+	if at, err := time.Parse(time.RFC3339, startsAt); err == nil {
+		in = fmt.Sprintf(" starts in %d s;", max(0, int(time.Until(at).Seconds())))
+	}
+	return "not started:" + in + " every job submit is refused until it runs; prepare, then end your turn and the start arrives as an update"
+}
 
 // subcommand is one command of a group. The group's listing takes its synopsis from the command's
 // own --help, so the two cannot drift.
@@ -641,10 +648,12 @@ stages and current_stage.`, stderr)
 		return fail(stderr, err)
 	}
 	delete(out, "$schema")
-	printJSON(stdout, out)
+	// Ahead of the record, whose description is long: a reader of its first lines must not miss it.
 	if out["status"] == "open" {
-		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notStarted)
+		startsAt, _ := out["starts_at"].(string)
+		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notStarted(startsAt))
 	}
+	printJSON(stdout, out)
 	return 0
 }
 

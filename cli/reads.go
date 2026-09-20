@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -37,6 +38,17 @@ running jobs.`, stderr)
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
+		// Quota is granted at the start, so before it the agent has none: no error of its own.
+		var refused *apiclient.HTTPError
+		var exp struct {
+			Status   string `json:"status"`
+			StartsAt string `json:"starts_at"`
+		}
+		if errors.As(err, &refused) && refused.Status == 404 &&
+			c.Do("GET", "/platform-experiments/"+url.PathEscape(*pe), nil, &exp) == nil && exp.Status == "open" {
+			fmt.Fprintln(stderr, "hl: quota: "+notStarted(exp.StartsAt))
+			return 0
+		}
 		return fail(stderr, err)
 	}
 	if err := printLines(stdout, stderr, "quota: none granted yet, it is granted when the platform experiment starts to the agents signed up to it", out, "id", "platform_experiment_id", "created_at"); err != nil {
