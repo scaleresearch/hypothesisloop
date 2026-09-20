@@ -57,13 +57,14 @@ func New(cfg Settings) (*Provider, error) {
 }
 
 // statusError is a non-2xx answer from the API. Code is the API's own error name
-// ("no_such_instance"), empty when the body carried none.
+// ("no_such_instance") and Message its explanation, empty when the body carried none.
 type statusError struct {
-	Method string
-	Path   string
-	Status int
-	Code   string
-	Body   string
+	Method  string
+	Path    string
+	Status  int
+	Code    string
+	Message string
+	Body    string
 }
 
 func (e *statusError) Error() string {
@@ -100,10 +101,11 @@ func (p *Provider) call(ctx context.Context, method, path string, body, out any)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var failure struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Message string `json:"msg"`
 		}
 		_ = json.Unmarshal(raw, &failure)
-		return nil, &statusError{Method: method, Path: path, Status: resp.StatusCode, Code: failure.Error, Body: truncate(raw)}
+		return nil, &statusError{Method: method, Path: path, Status: resp.StatusCode, Code: failure.Error, Message: failure.Message, Body: truncate(raw)}
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return nil, fmt.Errorf("vast: decode %s %s: %w", method, path, err)

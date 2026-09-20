@@ -94,7 +94,7 @@ func TestCreateSearchesForTheSpecAndRentsTheCheapestOffer(t *testing.T) {
 		"geolocation":         map[string]any{"in": []any{"SE", "NL"}},
 		"verified":            map[string]any{"eq": true},
 		"order":               []any{[]any{"dph_total", "asc"}},
-		"limit":               1.0,
+		"limit":               5.0,
 	}
 	if !reflect.DeepEqual(search[0].Body, wantSearch) {
 		t.Errorf("search body\n got %v\nwant %v", search[0].Body, wantSearch)
@@ -246,24 +246,65 @@ func TestCreateFailsWhenNoOfferMatches(t *testing.T) {
 	}
 }
 
-func TestCreateFailsWhenTheOfferWasTakenBetweenSearchAndRent(t *testing.T) {
-	taken := `{"success":false,"error":"invalid_args","msg":"error 404/3603: no_such_ask  Instance type by id 7001 is not available.","ask_id":7001}`
-	for name, status := range map[string]int{"as an HTTP error": 404, "inside a 200": 200} {
+// taken is the vendor's answer for an offer its search still returned after it was rented. A real
+// account answered with HTTP 400; the same body inside a 200 is treated alike.
+const taken = `{"success":false,"error":"invalid_args","msg":"error 404/3603: no_such_ask  Instance type by id 7001 is not available.","ask_id":7001}`
+
+func TestCreatePassesOverAnOfferTakenBetweenSearchAndRent(t *testing.T) {
+	for name, status := range map[string]int{"as an HTTP error": 400, "inside a 200": 200} {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
-			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31}]}`))
+			rentable(api, "hl-exp1-a2")
+			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31},{"id":7002,"dph_total":0.32},{"id":7003,"dph_total":0.33}]}`))
 			api.on(http.MethodPut, rentPath, answer(status, taken))
+			api.on(http.MethodPut, "/api/v0/asks/7002/", answer(200, `{"success":true,"new_contract":9001}`))
 			p := newTestProvider(t, api, gpuSettings())
 
-			_, err := p.Create(context.Background(), gpuSpec())
-			if err == nil || !strings.Contains(err.Error(), "no_such_ask") {
-				t.Fatalf("err = %v, want the vendor's no_such_ask", err)
+			id, err := p.Create(context.Background(), gpuSpec())
+			if err != nil || id != "9001" {
+				t.Fatalf("Create = %q, %v, want the instance rented from the second offer", id, err)
 			}
-			if got := len(api.sent(http.MethodPut, rentPath)); got != 1 {
-				t.Errorf("rent attempts = %d, want 1: a second offer is the next pass's decision", got)
+			if got := len(api.sent(http.MethodPost, searchPath)); got != 1 {
+				t.Errorf("searches = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestCreateFailsWhenEveryOfferFoundWasTaken(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31},{"id":7002,"dph_total":0.32}]}`))
+	api.on(http.MethodPut, rentPath, answer(400, taken))
+	api.on(http.MethodPut, "/api/v0/asks/7002/", answer(400, taken))
+	p := newTestProvider(t, api, gpuSettings())
+
+	_, err := p.Create(context.Background(), gpuSpec())
+	if err == nil || !strings.Contains(err.Error(), "every one of the 2 cheapest offers") || !strings.Contains(err.Error(), "no_such_ask") {
+		t.Fatalf("err = %v, want every offer taken with the vendor's reason", err)
+	}
+	if api.total() != 3 {
+		t.Errorf("requests = %d, want the search and two refused rents: nothing was rented, nothing is left", api.total())
+	}
+}
+
+func TestCreateStopsAtARefusalThatIsNotATakenOffer(t *testing.T) {
+	refusals := map[string]http.HandlerFunc{
+		"no credit":        answer(400, `{"success":false,"error":"insufficient_credit","msg":"Your account lacks credit."}`),
+		"refusal in a 200": answer(200, `{"success":false,"msg":"image not allowed"}`),
+		"no contract id":   answer(200, `{"success":true}`),
+	}
+	for name, refusal := range refusals {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31},{"id":7002,"dph_total":0.32}]}`))
+			api.on(http.MethodPut, rentPath, refusal)
+			p := newTestProvider(t, api, gpuSettings())
+
+			if _, err := p.Create(context.Background(), gpuSpec()); err == nil {
+				t.Fatal("no error")
 			}
 			if api.total() != 2 {
-				t.Errorf("requests = %d, want the search and the refused rent: nothing was rented, nothing is left", api.total())
+				t.Errorf("requests = %d, want the search and the one refused rent", api.total())
 			}
 		})
 	}

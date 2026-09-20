@@ -2,10 +2,12 @@ package vast
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -34,27 +36,62 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	if err := validateSpec(spec); err != nil {
 		return "", err
 	}
-	chosen, err := p.cheapestOffer(ctx, spec)
+	offers, err := p.cheapestOffers(ctx, spec)
 	if err != nil {
 		return "", err
 	}
+	id, err := p.rentFirstAvailable(ctx, offers, newCreateRequest(spec))
+	if err != nil {
+		return "", err
+	}
+	if err := p.awaitListed(ctx, id, spec.Name); err != nil {
+		return "", p.giveBack(ctx, id, err)
+	}
+	return id, nil
+}
+
+// rentFirstAvailable rents the cheapest offer that still exists. An offer the search returned
+// after someone else took it is passed over, since nothing was rented and the next one fits the
+// spec as well; any other refusal ends the Create.
+func (p *Provider) rentFirstAvailable(ctx context.Context, offers []offer, req createRequest) (string, error) {
+	var taken error
+	for _, candidate := range offers {
+		id, err := p.rent(ctx, candidate, req)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, errOfferTaken) {
+			return "", err
+		}
+		taken = err
+	}
+	return "", fmt.Errorf("vast: every one of the %d cheapest offers for %q was taken: %w", len(offers), req.Label, taken)
+}
+
+var errOfferTaken = errors.New("offer is no longer available")
+
+const offerTakenMark = "no_such_ask"
+
+func (p *Provider) rent(ctx context.Context, chosen offer, req createRequest) (string, error) {
 	var created struct {
 		Success  bool   `json:"success"`
 		Contract int64  `json:"new_contract"`
 		Message  string `json:"msg"`
 	}
 	path := "/api/v0/asks/" + strconv.FormatInt(chosen.ID, 10) + "/"
-	if _, err := p.call(ctx, http.MethodPut, path, newCreateRequest(spec), &created); err != nil {
+	_, err := p.call(ctx, http.MethodPut, path, req, &created)
+	var failure *statusError
+	switch {
+	case errors.As(err, &failure) && strings.Contains(failure.Message, offerTakenMark):
+		return "", fmt.Errorf("%w: %w", errOfferTaken, err)
+	case err != nil:
 		return "", err
+	case !created.Success && strings.Contains(created.Message, offerTakenMark):
+		return "", fmt.Errorf("vast: renting offer %d: %w: %s", chosen.ID, errOfferTaken, created.Message)
+	case !created.Success || created.Contract == 0:
+		return "", fmt.Errorf("vast: renting offer %d for %q was refused: %s", chosen.ID, req.Label, created.Message)
 	}
-	if !created.Success || created.Contract == 0 {
-		return "", fmt.Errorf("vast: renting offer %d for %q was refused: %s", chosen.ID, spec.Name, created.Message)
-	}
-	id := strconv.FormatInt(created.Contract, 10)
-	if err := p.awaitListed(ctx, id, spec.Name); err != nil {
-		return "", p.giveBack(ctx, id, err)
-	}
-	return id, nil
+	return strconv.FormatInt(created.Contract, 10), nil
 }
 
 // giveBack destroys an instance Create rented and could not confirm, so that a failed Create

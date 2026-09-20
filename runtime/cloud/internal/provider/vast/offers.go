@@ -11,6 +11,10 @@ import (
 const (
 	bytesPerMB = 1 << 20
 	bytesPerGB = 1 << 30
+
+	// offerCandidates is how many of the cheapest offers one Create may try. The search index
+	// trails the market: it kept returning an offer for a while after that offer was rented.
+	offerCandidates = 5
 )
 
 type offer struct {
@@ -18,7 +22,7 @@ type offer struct {
 	PricePerHour float64 `json:"dph_total"`
 }
 
-// offerQuery builds the search for the cheapest on-demand offer that fits the spec. The vendor
+// offerQuery builds the search for the cheapest on-demand offers that fit the spec. The vendor
 // rents no machine without a GPU (a search for zero GPUs answers with storage offers that cannot
 // be rented as instances), so a CPU-only spec takes the cheapest offer of any GPU model.
 func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
@@ -34,7 +38,7 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 		"dph_total":         map[string]any{"lte": p.cfg.MaxPricePerHour},
 		"reliability2":      map[string]any{"gte": p.cfg.MinReliability},
 		"order":             [][]string{{"dph_total", "asc"}},
-		"limit":             1,
+		"limit":             offerCandidates,
 	}
 	if spec.AcceleratorCount == 0 {
 		query["num_gpus"] = map[string]any{"gte": 1}
@@ -58,21 +62,22 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 	return query, nil
 }
 
-func (p *Provider) cheapestOffer(ctx context.Context, spec provider.Spec) (offer, error) {
+// cheapestOffers returns the offers that fit the spec, cheapest first.
+func (p *Provider) cheapestOffers(ctx context.Context, spec provider.Spec) ([]offer, error) {
 	query, err := p.offerQuery(spec)
 	if err != nil {
-		return offer{}, err
+		return nil, err
 	}
 	var found struct {
 		Offers []offer `json:"offers"`
 	}
 	if _, err := p.call(ctx, http.MethodPost, "/api/v0/bundles/", query, &found); err != nil {
-		return offer{}, err
+		return nil, err
 	}
 	if len(found.Offers) == 0 {
-		return offer{}, fmt.Errorf("vast: no offer matches %q within the configured filters", spec.Name)
+		return nil, fmt.Errorf("vast: no offer matches %q within the configured filters", spec.Name)
 	}
-	return found.Offers[0], nil
+	return found.Offers, nil
 }
 
 func diskGB(spec provider.Spec) int64 {
