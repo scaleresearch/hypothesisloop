@@ -12,7 +12,7 @@ import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { PageHeader } from '@/components/ui/page-header'
 import { Badge, TierBadge } from '@/components/ui/badge'
-import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
+import { Callout, Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { Table } from '@/components/ui/table'
 import { semantic, agentPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
@@ -129,10 +129,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {/* Eviction alert */}
       {j.status === 'EVICTED' && evictionText && (
-        <div className="mb-3.5 rounded border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-sm text-accent">
+        <Callout tone="accent" className="text-accent">
           <strong>Evicted:</strong>{' '}
           <span>{evictionText}</span>
-        </div>
+        </Callout>
       )}
 
       {/* Why isn't it running / why did it stop. phase_detail is the runtime's own account —
@@ -140,7 +140,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           container that died. For a failed job this is the difference between "it broke" and
           knowing what broke. */}
       {j.phase_detail && (j.phase_detail.reason || j.phase_detail.message) && (
-        <div className="mb-3.5 rounded border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-sm">
+        <Callout tone="danger">
           <strong className="text-danger">Runtime:</strong>{' '}
           {j.phase_detail.reason && (
             <span className="font-mono text-danger">
@@ -157,15 +157,15 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               restarts: {j.phase_detail.restart_count}
             </span>
           ) : null}
-        </div>
+        </Callout>
       )}
 
       {/* A queued job never errors on its own; this is the scheduler's current reason. */}
       {j.status === 'QUEUED' && j.not_admitted_reason && (
-        <div className="mb-3.5 rounded border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-sm">
+        <Callout tone="accent">
           <strong className="text-accent">Not admitted:</strong>{' '}
           <span className="font-mono text-xs text-muted">{notAdmittedLabel(j.not_admitted_reason)}</span>
-        </div>
+        </Callout>
       )}
 
       {(j.metrics || j.summary || j.status === 'COMPLETED') && (

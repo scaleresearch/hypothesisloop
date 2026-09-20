@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
+import type { Tone } from '@/lib/colors'
+import { toneTint } from '@/components/ui/tone'
 
 /** Skeleton bars for a block whose data is in flight. */
 export function Loading({ text = 'Loading…', rows = 3 }: { text?: string; rows?: number }) {
@@ -36,6 +38,11 @@ export function ErrorMessage({ children, className }: { children: ReactNode; cla
       <span>{children}</span>
     </div>
   )
+}
+
+/** A tinted note in the flow of a page: why a job stopped, what the scheduler is waiting for. */
+export function Callout({ tone, className, children }: { tone: Tone; className?: string; children: ReactNode }) {
+  return <div className={clsx('mb-3.5 rounded border px-3.5 py-2.5 text-sm', toneTint[tone], className)}>{children}</div>
 }
 
 /** An error beside the control it is about. */

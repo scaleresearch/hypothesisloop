@@ -119,7 +119,7 @@ export function Nav() {
           )
         })}
       </ul>
-      <div className="mt-auto px-4 pb-5">
+      <div className="mt-auto px-2.5 pb-5">
         <SystemStatus />
         <Account />
         <div className="border-t pt-3">
