@@ -31,8 +31,9 @@ func runExec(args []string, stdout, stderr io.Writer, signals <-chan os.Signal) 
 	fs := newFlags("exec", `usage: hl exec --stop-grace SECONDS -- COMMAND [ARG...]
 
 Runs COMMAND as a job on a rented instance. SIGTERM is passed on to COMMAND and everything it
-started, which then have SECONDS to save their work before they are killed. When they have
-ended, COMMAND's exit code is written as the last line of output and returned.`, stderr)
+started, which then have SECONDS to save their work before they are killed. COMMAND's exit
+code is the job's: once COMMAND has ended and what it started has ended or been killed, the code
+is written as the last line of output and returned.`, stderr)
 	stopGrace := fs.Int("stop-grace", -1, "seconds COMMAND gets between SIGTERM and SIGKILL")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -56,31 +57,34 @@ ended, COMMAND's exit code is written as the last line of output and returned.`,
 
 	// A nil kill is a stop not yet asked for, and never fires.
 	var kill <-chan time.Time
+	stopping, killed := false, false
 	var waitErr error
 	for running := true; running; {
 		select {
 		case <-signals:
 			// The runtime repeats its stop for as long as the instance is running, and a second
 			// SIGTERM would interrupt the save the first one started.
-			if kill != nil {
+			if stopping {
 				continue
 			}
 			_ = syscall.Kill(group, syscall.SIGTERM)
-			kill = time.After(time.Duration(*stopGrace) * time.Second)
+			stopping, kill = true, time.After(time.Duration(*stopGrace)*time.Second)
 		case <-kill:
 			_ = syscall.Kill(group, syscall.SIGKILL)
+			killed, kill = true, nil
 		case waitErr = <-ended:
 			running = false
 		}
 	}
-	// COMMAND has ended, and what it started may not have: the process saving a checkpoint under
-	// a shell that died on the signal, or a helper left in the background. Those keep the rest of
-	// the stop grace while a stop is running, and are killed at once otherwise, so nothing writes
-	// after the exit line.
-	if kill == nil {
+	// COMMAND has ended, and its exit status is the job's result. What it started may still be
+	// running: the process saving a checkpoint under a shell that died on the signal, or a helper
+	// left in the background. Those keep the rest of the stop grace while a stop is running, and
+	// are killed at once otherwise, so nothing writes after the exit line.
+	if !stopping {
 		_ = syscall.Kill(group, syscall.SIGKILL)
+		killed = true
 	}
-	drain(group, kill)
+	drain(group, kill, killed)
 
 	code, err := exitCode(waitErr)
 	if err != nil {
@@ -91,10 +95,27 @@ ended, COMMAND's exit code is written as the last line of output and returned.`,
 
 const drainPoll = 20 * time.Millisecond
 
-// drain returns once no process is left in group, killing what remains when kill fires. It reaps
-// as it waits: as the first process of a container this wrapper inherits the group's orphans,
-// and an unreaped one would keep the group looking alive.
-func drain(group int, kill <-chan time.Time) {
+// leftoverWait is how long the group has to disappear once it has been sent SIGKILL. A process
+// that is killed is gone well within it. What is still there afterwards is a process that has
+// died and that its parent never collects, which this wrapper can only do for its own children
+// and for orphans when it is the first process of the container. Such a process holds its group
+// for good and can no longer write, so the exit line is written without it.
+var leftoverWait = 5 * time.Second
+
+// groupGone reports whether no process is left in group.
+var groupGone = func(group int) bool {
+	return errors.Is(syscall.Kill(group, 0), syscall.ESRCH)
+}
+
+// drain returns once no process is left in group. It kills what remains when kill fires, and
+// after the group has been killed, by then or before the call, waits no longer than
+// leftoverWait. It reaps as it waits: as the first process of a container this wrapper inherits
+// the group's orphans.
+func drain(group int, kill <-chan time.Time, killed bool) {
+	var giveUp <-chan time.Time
+	if killed {
+		giveUp = time.After(leftoverWait)
+	}
 	for {
 		for {
 			var status syscall.WaitStatus
@@ -102,12 +123,15 @@ func drain(group int, kill <-chan time.Time) {
 				break
 			}
 		}
-		if err := syscall.Kill(group, 0); errors.Is(err, syscall.ESRCH) {
+		if groupGone(group) {
 			return
 		}
 		select {
 		case <-kill:
 			_ = syscall.Kill(group, syscall.SIGKILL)
+			kill, giveUp = nil, time.After(leftoverWait)
+		case <-giveUp:
+			return
 		case <-time.After(drainPoll):
 		}
 	}

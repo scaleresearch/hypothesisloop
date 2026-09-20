@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -163,5 +164,129 @@ func TestExecRefusesToRunWithoutAStopGraceOrACommand(t *testing.T) {
 		if _, found := exitline.Find(lines); code != 2 || found {
 			t.Errorf("hl exec %v: code %d, output %q, want a usage error", args, code, lines)
 		}
+	}
+}
+
+// bounded runs the wrapper and fails the test when it has not returned in time, which is how a
+// wrapper that waits for ever shows.
+func bounded(t *testing.T, limit time.Duration, args ...string) (code int, lines []string) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		code, lines = execResult(t, false, args...)
+	}()
+	select {
+	case <-done:
+		return code, lines
+	case <-time.After(limit):
+		t.Fatalf("hl exec had not written its exit line after %v", limit)
+		return 0, nil
+	}
+}
+
+// The command's exit status is the job's result. A member of its group that never goes away,
+// which is what a process looks like that has died and that nobody collects, cannot hold the
+// exit line back: the group is killed, given leftoverWait, and the line is written.
+func TestExecDoesNotWaitForeverForAGroupThatNeverEmpties(t *testing.T) {
+	defer func(wait time.Duration, gone func(int) bool) { leftoverWait, groupGone = wait, gone }(leftoverWait, groupGone)
+	leftoverWait = 300 * time.Millisecond
+	groupGone = func(int) bool { return false }
+
+	started := time.Now()
+	code, lines := bounded(t, 10*time.Second, "--stop-grace", "30", "--", "sh", "-c", "echo working; exit 7")
+	if reported, found := exitline.Find(lines); code != 7 || !found || reported != 7 || last(lines) != exitline.Format(7) {
+		t.Fatalf("code %d, output %q, want the command's own exit code", code, lines)
+	}
+	if elapsed := time.Since(started); elapsed < leftoverWait {
+		t.Fatalf("returned after %v, before the group had its %v", elapsed, leftoverWait)
+	}
+}
+
+// The same when the group is killed at the end of a stop grace instead of at the command's exit.
+func TestExecDoesNotWaitForeverAfterTheStopGraceEither(t *testing.T) {
+	defer func(wait time.Duration, gone func(int) bool) { leftoverWait, groupGone = wait, gone }(leftoverWait, groupGone)
+	leftoverWait = 300 * time.Millisecond
+	groupGone = func(int) bool { return false }
+
+	for name, script := range map[string]string{
+		"the command outlives the grace":    `trap '' TERM; echo ready; exec sleep 30`,
+		"the command ends inside the grace": `trap 'exit 0' TERM; echo ready; while :; do sleep 0.05; done`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			done := make(chan []string, 1)
+			go func() {
+				_, lines := execResult(t, true, "--stop-grace", "1", "--", "sh", "-c", script)
+				done <- lines
+			}()
+			select {
+			case lines := <-done:
+				if _, found := exitline.Find(lines); !found {
+					t.Fatalf("output %q", lines)
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("hl exec had not written its exit line 14 s after a 1 s stop grace")
+			}
+		})
+	}
+}
+
+// With real processes, and the wrapper not the first process of a container: the command leaves
+// in its group a process that has exited and whose parent, alive in another group, never
+// collects it. The wrapper cannot collect it either, since it is not its child and no orphan.
+// Where such a process counts as a member of its group (Linux), the group never empties.
+func TestExecReportsWhenAnUncollectedProcessHoldsTheGroup(t *testing.T) {
+	defer func(wait time.Duration) { leftoverWait = wait }(leftoverWait)
+	leftoverWait = 500 * time.Millisecond
+
+	t.Setenv("HL_EXEC_HELPER", "leader")
+	code, lines := bounded(t, 20*time.Second, "--stop-grace", "30", "--", os.Args[0], "-test.run=TestExecHelperProcess")
+	for _, line := range lines {
+		var holder int
+		if _, err := fmt.Sscanf(line, "holder %d", &holder); err == nil {
+			defer syscall.Kill(holder, syscall.SIGKILL) //nolint:errcheck
+		}
+	}
+	if reported, found := exitline.Find(lines); code != 7 || !found || reported != 7 {
+		t.Fatalf("code %d, output %q, want the leader's exit code 7", code, lines)
+	}
+}
+
+// TestExecHelperProcess is the processes of the test above, and nothing when run as a test.
+//
+// The leader is the wrapper's command. It starts the holder in a group of its own, which the
+// wrapper's kill of the leader's group does not reach, and exits 7 once the holder says it is
+// ready. The holder starts a process into the leader's group that exits at once, and then sleeps
+// without ever waiting for it.
+func TestExecHelperProcess(t *testing.T) {
+	switch os.Getenv("HL_EXEC_HELPER") {
+	case "leader":
+		holder := exec.Command(os.Args[0], "-test.run=TestExecHelperProcess")
+		holder.Env = append(os.Environ(), "HL_EXEC_HELPER=holder", fmt.Sprintf("HL_EXEC_GROUP=%d", os.Getpid()))
+		holder.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		ready, err := holder.StdoutPipe()
+		if err != nil || holder.Start() != nil {
+			os.Exit(90)
+		}
+		buf := make([]byte, 16)
+		if n, _ := ready.Read(buf); !strings.HasPrefix(string(buf[:n]), "ready") {
+			os.Exit(91)
+		}
+		fmt.Printf("holder %d\n", holder.Process.Pid)
+		os.Exit(7)
+	case "holder":
+		var group int
+		if _, err := fmt.Sscanf(os.Getenv("HL_EXEC_GROUP"), "%d", &group); err != nil {
+			os.Exit(92)
+		}
+		uncollected := exec.Command("/bin/sh", "-c", "exit 0")
+		uncollected.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: group}
+		if err := uncollected.Start(); err != nil {
+			os.Exit(93)
+		}
+		time.Sleep(300 * time.Millisecond)
+		fmt.Println("ready")
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
 	}
 }
