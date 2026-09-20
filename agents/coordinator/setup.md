@@ -216,7 +216,8 @@ are added (step 4):
 - `AGENT_FLAVOR` picks which specialization the harness inlines into the agent's prompt from
   `agents/experimentator/src/hypothesisloop_agent/prompts/flavors/<flavor>.md` — what kind of
   trial it runs and what it varies (`generalist`, `hyperparameter-search`, `architecture-search`,
-  `data-search`; add a new file for a new specialization). Decide the flavor mix before spawning
+  `data-search`; a new specialization is a new file there and its name in `AgentFlavors` in
+  `controlplane/shared/domain/agent_signup.go`, which is the set the platform accepts). Decide the flavor mix before spawning
   and write the reason into the run's notes, since it's what the results mean.
 - **The mix is a per-stage decision, not a one-time one.** Pick it deliberately for where the
   research actually is, not once at launch and then forgotten:
@@ -254,30 +255,40 @@ it as `generalist` with that config as its hyperparameters (or none at all, and 
 `NUM_AGENTS = floor(available_devices / CHIPS_PER_AGENT)`. An agent joins a platform experiment
 in exactly one way: `hl platform-experiments agents add` (`POST /platform-experiments/{id}/agents`),
 while the experiment is open. It creates the agents with ids of the platform's choosing and
-records each one's flavor (`--flavor`; omit it and the agent runs `generalist`), hyperparameters
-(`--hyperparameters`, a JSON object; omit it and the agent gets `{}`) and model (`--model`, default
-`claude-sonnet-5`). One call per group that shares those values:
+records each one's flavor (`--flavor`, one of `generalist`, `hyperparameter-search`,
+`architecture-search`, `data-search`; omit it and the agent runs `generalist`), hyperparameters
+(`--hyperparameters`, a JSON object of at most 4 KiB; omit it and the agent gets `{}`) and model
+(`--model`; omit it and the platform's default applies). What the command prints is what each
+agent runs: flavor and model are resolved at that moment and never again. One call per group
+that shares those values:
 
     hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --count 2 --flavor generalist
     hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}'
 
 Add `--hosted` and the platform runs them: its launcher starts one machine per agent from the
-platform's own agent image, restarts one whose harness crashed, and takes it down two minutes
-after the experiment closes or the agent is cut. There is nothing more to do for a hosted agent.
+platform's own agent image, tells the agent to take its last turn when the experiment closes or
+the agent is cut, and takes the machine down two minutes after. It is refused (`no_repository`)
+while the project has no repository attached, since a hosted agent works in the project's
+repository. A machine whose harness exits is started again up to three times; after that the
+agent is stopped, and `hl platform-experiments agents list` shows it with `instance.stopped`,
+`instance.exited_at` and `instance.exit_log`, the end of what the harness wrote. A stopped agent
+keeps its place and its quota and takes no further turn. There is nothing more to do for a
+hosted agent than to read that list.
 
 Without `--hosted` you run each agent yourself, which is how an experiment with its own agent
 image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
 one agent with its `agent_id` and its `token`, which acts as that agent in that platform
-experiment and nowhere else. The harness starts only with both: it registers nothing and exits
-if the platform does not know the agent. Write them to one env file per agent, readable by you
+experiment and nowhere else. The harness starts only with both, and with the flavor and the model
+the same line shows (`AGENT_FLAVOR`, `AGENT_MODEL`): it registers nothing, defaults nothing, and
+exits if the platform does not know the agent. Write them to one env file per agent, readable by you
 alone, instead of putting a token on a command line, where it would sit in the process list and
 in the shell's history:
 
     umask 077
     hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}' |
-      jq -r '"AGENT_ID=\(.agent_id)\nHL_TOKEN=\(.token)\nAGENT_FLAVOR=\(.flavor // "generalist")\nAGENT_HYPERPARAMETERS=\(.hyperparameters | tojson)"' \
+      jq -r '"AGENT_ID=\(.agent_id)\nHL_TOKEN=\(.token)\nAGENT_FLAVOR=\(.flavor)\nAGENT_MODEL=\(.model)\nAGENT_HYPERPARAMETERS=\(.hyperparameters | tojson)"' \
       > /tmp/hlrun/<run>/agent-1.env
 
     podman run -d --name agent-1 --network host --env-file /tmp/hlrun/<run>/agent-1.env \
