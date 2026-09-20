@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,60 +19,72 @@ type ProjectRepos interface {
 	ExperimentBase(ctx context.Context, projectID string) ([]byte, error)
 }
 
-// WithProjectRepos attaches the repositories platform experiments are created from and cloned.
-func (h *PlatformExperimentsHandler) WithProjectRepos(repos ProjectRepos) *PlatformExperimentsHandler {
-	h.repos = repos
-	return h
+// statedByTheRequest are the fields a create without from_repo must carry, though the schema
+// leaves them to the experiment file.
+var statedByTheRequest = []string{"name", "description", "metrics", "report_interval_seconds", "starts_at"}
+
+// neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
+// the branch the file is read from, so these come from the request and from nowhere else.
+var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "ends_at"}
+
+// missing lists the fields of statedByTheRequest the body did not carry.
+func (r CreatePlatformExperimentRequest) missing() []string {
+	var carried map[string]json.RawMessage
+	_ = json.Unmarshal(r.raw, &carried)
+	var out []string
+	for _, key := range statedByTheRequest {
+		if _, ok := carried[key]; !ok {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
-// fromRepo returns req with every field it leaves out taken from the experiment file of its
-// project's repository. What the request sets wins: the file is the base a repository carries,
-// and the dates and the budget of one run are the caller's to state.
+// fromRepo returns req laid over the experiment file of its project's repository: every field
+// the body carried is the request's, every other one the file's.
 func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	data, err := h.repos.ExperimentBase(ctx, req.ProjectID)
 	if err != nil {
 		return req, err
 	}
-	base, err := decodeExperimentBase(data)
+	merged, err := decodeExperimentBase(data)
 	if err != nil {
 		return req, invalidPlatformExperiment(err)
 	}
-	return overlay(base, req), nil
+	if err := json.Unmarshal(req.raw, (*createFields)(&merged)); err != nil {
+		return req, fmt.Errorf("lay the request over the experiment file: %w", err)
+	}
+	return merged, nil
 }
 
 // decodeExperimentBase reads the experiment file: YAML shaped like the create body. It cannot
-// choose its project, and a key the body does not have is an error, since a mistyped one would
-// otherwise be dropped in silence.
+// choose its project, what neverFromTheFile names is left out of it, and a key the body does not
+// have is an error, since a mistyped one would otherwise be dropped in silence.
 func decodeExperimentBase(data []byte) (CreatePlatformExperimentRequest, error) {
 	var base CreatePlatformExperimentRequest
 	var document map[string]any
 	if err := yaml.Unmarshal(data, &document); err != nil {
-		return base, fmt.Errorf("the repository's experiment file is not a YAML mapping: %w", err)
+		return base, fmt.Errorf("it is not a YAML mapping: %w", err)
+	}
+	if len(document) == 0 {
+		return base, fmt.Errorf("it is empty")
 	}
 	for _, key := range []string{"project_id", "from_repo"} {
 		if _, set := document[key]; set {
-			return base, fmt.Errorf("the repository's experiment file must not set %s: the request does", key)
+			return base, fmt.Errorf("it must not set %s: the request does", key)
 		}
+	}
+	for _, key := range neverFromTheFile {
+		delete(document, key)
 	}
 	encoded, err := json.Marshal(document)
 	if err != nil {
-		return base, fmt.Errorf("the repository's experiment file holds a value the create body cannot: %w", err)
+		return base, fmt.Errorf("it holds a value the create body cannot, such as a key that is not a string: %w", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&base); err != nil {
-		return base, fmt.Errorf("the repository's experiment file is not shaped like the create body: %w", err)
+	if err := decoder.Decode((*createFields)(&base)); err != nil {
+		return base, fmt.Errorf("it is not shaped like the create body: %s", strings.TrimPrefix(err.Error(), "json: "))
 	}
 	return base, nil
-}
-
-// overlay returns base with every field request sets laid over it.
-func overlay(base, request CreatePlatformExperimentRequest) CreatePlatformExperimentRequest {
-	out, over := reflect.ValueOf(&base).Elem(), reflect.ValueOf(request)
-	for i := 0; i < over.NumField(); i++ {
-		if !over.Field(i).IsZero() {
-			out.Field(i).Set(over.Field(i))
-		}
-	}
-	return base
 }

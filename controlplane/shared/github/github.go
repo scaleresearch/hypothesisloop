@@ -1,7 +1,3 @@
-// Package github is the only code that talks to GitHub. The platform acts as a GitHub App: it
-// signs a short JWT with the App's private key, and trades it for an installation token limited
-// to one repository and to the access asked for. No token is kept: each is minted for the call
-// that needs it and handed on or dropped.
 package github
 
 import (
@@ -40,6 +36,9 @@ const (
 	maxResponseBytes = 1 << 20
 	// MaxFileBytes bounds a file read from a repository.
 	MaxFileBytes = 1 << 20
+	// A file travels as base64 in lines of sixty characters inside a JSON object that also
+	// carries its addresses, so the answer holding a file of MaxFileBytes is this much larger.
+	maxFileResponseBytes = MaxFileBytes*4/3 + MaxFileBytes/40 + 64<<10
 )
 
 var (
@@ -55,6 +54,8 @@ var (
 	ErrRateLimited = errors.New("github is rate limiting the platform")
 	// ErrFileNotFound reports a path the repository does not hold at the ref asked for.
 	ErrFileNotFound = errors.New("the repository has no such file")
+	// ErrNotAFile reports a path that holds a directory, a symlink or a submodule.
+	ErrNotAFile = errors.New("the path in the repository is not a file")
 	// ErrFileTooLarge reports a file over MaxFileBytes.
 	ErrFileTooLarge = errors.New("the file is larger than the platform reads from a repository")
 	// ErrCodeRejected reports a user authorisation code GitHub did not accept: used, expired or
@@ -63,6 +64,13 @@ var (
 	// ErrUserCannotPush reports that the person behind the authorisation code cannot push to the
 	// repository, so they cannot hand that access to agents.
 	ErrUserCannotPush = errors.New("the GitHub user cannot push to that repository")
+	// ErrUserBlocked reports that GitHub let the person's token see nothing of the repository
+	// though the person may: an organisation that enforces SAML single sign-on has not
+	// authorised the App for them.
+	ErrUserBlocked = errors.New("github blocked the user's token from the repository")
+	// ErrPermissionNotGranted reports an installation that has not granted the access the App
+	// asks for: its owner has yet to accept the App's permissions.
+	ErrPermissionNotGranted = errors.New("the installation has not granted the App the access it asks for")
 	// ErrInvalidRepository reports a name that is not owner/name.
 	ErrInvalidRepository = errors.New("a repository is named owner/name")
 )
@@ -78,15 +86,16 @@ const (
 // Repository is a repository as GitHub states it. ID survives a rename; FullName is owner/name
 // in GitHub's own casing.
 type Repository struct {
-	ID            int64
-	FullName      string
-	DefaultBranch string
+	ID       int64
+	FullName string
 }
 
-// Token is an installation token. It works for about an hour and on one repository.
+// Token is an installation token. It works for about an hour and on one repository, which
+// Repository names as owner/name the way GitHub does at the moment of minting.
 type Token struct {
-	Value     string
-	ExpiresAt time.Time
+	Value      string
+	ExpiresAt  time.Time
+	Repository string
 }
 
 // App is what a browser needs to send a person to GitHub.
@@ -97,6 +106,8 @@ type App struct {
 	AuthorizeURL string `json:"authorize_url" doc:"Where a person proves who they are on GitHub. Add redirect_uri and state. GitHub sends them back with code."`
 }
 
+// Client is the only code that talks to GitHub. It acts as the platform's GitHub App and keeps
+// no token: each is minted for the call that needs it and handed on or dropped.
 type Client struct {
 	appID        int64
 	slug         string
@@ -154,38 +165,28 @@ func CloneURL(fullName string) string {
 }
 
 // Repository checks everything an attach rests on and returns the repository as GitHub states
-// it. Three things must hold, and each is GitHub's own answer:
+// it. Each of these must hold, and each is GitHub's own answer:
 //
+//   - the person behind userCode can push to the repository. Agents will push to it, and nobody
+//     may hand out access they do not hold. redirectURI is the one the code was issued to. The
+//     person's token answers this one question and is revoked before anything is returned.
 //   - the App is installed on the repository, through the installation named. An installation
 //     id is a small number anyone can guess, so the id alone proves nothing.
-//   - the person behind userCode can push to the repository. Agents will push to it, and nobody
-//     may hand out access they do not hold. The user's token is used for this one question and
-//     dropped.
-//   - an installation token limited to the repository can be minted and reads it.
-func (c *Client) Repository(ctx context.Context, installationID int64, fullName, userCode string) (*Repository, error) {
+//   - an installation token limited to the repository can be minted.
+func (c *Client) Repository(ctx context.Context, installationID int64, fullName, userCode, redirectURI string) (*Repository, error) {
 	if err := ValidRepository(fullName); err != nil {
 		return nil, err
 	}
-	userToken, err := c.exchangeCode(ctx, userCode)
+	userToken, err := c.exchangeCode(ctx, userCode, redirectURI)
 	if err != nil {
 		return nil, err
 	}
-	var seen struct {
-		ID          int64 `json:"id"`
-		Permissions struct {
-			Push bool `json:"push"`
-		} `json:"permissions"`
+	repositoryID, err := c.pushableBy(ctx, userToken, fullName)
+	if revokeErr := c.revoke(ctx, userToken); revokeErr != nil && err == nil {
+		err = revokeErr
 	}
-	switch err := c.call(ctx, http.MethodGet, "/repos/"+fullName, userToken, nil, &seen); {
-	case errors.Is(err, errNotFound):
-		return nil, ErrRepositoryNotInstalled
-	case errors.Is(err, errUnauthorized):
-		return nil, ErrCodeRejected
-	case err != nil:
+	if err != nil {
 		return nil, err
-	}
-	if !seen.Permissions.Push {
-		return nil, ErrUserCannotPush
 	}
 
 	jwt, err := c.appJWT()
@@ -210,26 +211,47 @@ func (c *Client) Repository(ctx context.Context, installationID int64, fullName,
 	if installation.SuspendedAt != nil {
 		return nil, ErrInstallationGone
 	}
-
-	token, err := c.Token(ctx, installationID, seen.ID, Read)
+	token, err := c.Token(ctx, installationID, repositoryID, Read)
 	if err != nil {
 		return nil, err
 	}
-	var repo struct {
-		ID            int64  `json:"id"`
-		FullName      string `json:"full_name"`
-		DefaultBranch string `json:"default_branch"`
+	return &Repository{ID: repositoryID, FullName: token.Repository}, nil
+}
+
+// pushableBy returns the id of a repository the holder of userToken can push to.
+func (c *Client) pushableBy(ctx context.Context, userToken, fullName string) (int64, error) {
+	var seen struct {
+		ID          int64 `json:"id"`
+		Permissions struct {
+			Push bool `json:"push"`
+		} `json:"permissions"`
 	}
-	switch err := c.call(ctx, http.MethodGet, "/repos/"+fullName, token.Value, nil, &repo); {
+	switch err := c.call(ctx, http.MethodGet, "/repos/"+fullName, userToken, nil, &seen); {
 	case errors.Is(err, errNotFound):
-		return nil, ErrRepositoryNotInstalled
+		return 0, ErrRepositoryNotInstalled
+	case errors.Is(err, errUnauthorized):
+		return 0, ErrCodeRejected
+	case errors.Is(err, errForbidden):
+		return 0, ErrUserBlocked
 	case err != nil:
-		return nil, err
+		return 0, err
 	}
-	if repo.ID != seen.ID || repo.FullName == "" || repo.DefaultBranch == "" {
-		return nil, fmt.Errorf("github: GET /repos/%s answered a repository without the id, name or default branch expected", fullName)
+	if !seen.Permissions.Push {
+		return 0, ErrUserCannotPush
 	}
-	return &Repository{ID: repo.ID, FullName: repo.FullName, DefaultBranch: repo.DefaultBranch}, nil
+	return seen.ID, nil
+}
+
+// revoke ends a person's token at GitHub, so that nothing of theirs outlives the question it
+// was issued to answer.
+func (c *Client) revoke(ctx context.Context, userToken string) error {
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.clientID+":"+c.clientSecret))
+	path := "/applications/" + url.PathEscape(c.clientID) + "/token"
+	err := c.request(ctx, http.MethodDelete, path, basic, maxResponseBytes, map[string]string{"access_token": userToken}, nil)
+	if errors.Is(err, errUnauthorized) {
+		return ErrAppCredentials
+	}
+	return err
 }
 
 // Token mints an installation token for one repository with the access asked for and nothing
@@ -250,13 +272,19 @@ func (c *Client) Token(ctx context.Context, installationID, repositoryID int64, 
 		Token        string    `json:"token"`
 		ExpiresAt    time.Time `json:"expires_at"`
 		Repositories []struct {
-			ID int64 `json:"id"`
+			ID       int64  `json:"id"`
+			FullName string `json:"full_name"`
 		} `json:"repositories"`
 	}
 	path := "/app/installations/" + strconv.FormatInt(installationID, 10) + "/access_tokens"
+	var refused *refusal
 	switch err := c.call(ctx, http.MethodPost, path, jwt, body, &out); {
 	case errors.Is(err, errNotFound), errors.Is(err, errForbidden):
 		return nil, ErrInstallationGone
+	// GitHub answers 422 both for a repository outside the installation and for a permission the
+	// installation has not granted, and only its message tells them apart.
+	case errors.Is(err, errUnprocessable) && errors.As(err, &refused) && strings.Contains(strings.ToLower(refused.message), "permission"):
+		return nil, ErrPermissionNotGranted
 	case errors.Is(err, errUnprocessable):
 		return nil, ErrRepositoryNotInstalled
 	case errors.Is(err, errUnauthorized):
@@ -272,16 +300,15 @@ func (c *Client) Token(ctx context.Context, installationID, repositoryID int64, 
 	if len(out.Repositories) != 1 || out.Repositories[0].ID != repositoryID {
 		return nil, fmt.Errorf("github: POST %s answered a token that is not limited to repository %d", path, repositoryID)
 	}
-	return &Token{Value: out.Token, ExpiresAt: out.ExpiresAt}, nil
+	if ValidRepository(out.Repositories[0].FullName) != nil {
+		return nil, fmt.Errorf("github: POST %s answered without the name of repository %d", path, repositoryID)
+	}
+	return &Token{Value: out.Token, ExpiresAt: out.ExpiresAt, Repository: out.Repositories[0].FullName}, nil
 }
 
-// File reads one file of the repository at ref, a branch name or a commit. An empty ref is the
-// head of the repository's default branch as it stands now.
-func (c *Client) File(ctx context.Context, installationID, repositoryID int64, ref, path string) ([]byte, error) {
-	token, err := c.Token(ctx, installationID, repositoryID, Read)
-	if err != nil {
-		return nil, err
-	}
+// File reads one file of a repository with a token minted for it, at ref, a branch name or a
+// commit. An empty ref is the head of the repository's default branch as it stands now.
+func (c *Client) File(ctx context.Context, token *Token, repositoryID int64, ref, path string) ([]byte, error) {
 	segments := strings.Split(path, "/")
 	for i, segment := range segments {
 		if segment == "" || segment == "." || segment == ".." {
@@ -294,7 +321,7 @@ func (c *Client) File(ctx context.Context, installationID, repositoryID int64, r
 		target += "?ref=" + url.QueryEscape(ref)
 	}
 	var raw json.RawMessage
-	switch err := c.call(ctx, http.MethodGet, target, token.Value, nil, &raw); {
+	switch err := c.request(ctx, http.MethodGet, target, "Bearer "+token.Value, maxFileResponseBytes, nil, &raw); {
 	case errors.Is(err, errNotFound):
 		return nil, ErrFileNotFound
 	case err != nil:
@@ -306,9 +333,10 @@ func (c *Client) File(ctx context.Context, installationID, repositoryID int64, r
 		Encoding string `json:"encoding"`
 		Content  string `json:"content"`
 	}
-	// A directory is answered as a list of its entries.
+	// A directory is answered as a list of its entries, a symlink and a submodule under their
+	// own type.
 	if json.Unmarshal(raw, &file) != nil || file.Type != "file" {
-		return nil, ErrFileNotFound
+		return nil, ErrNotAFile
 	}
 	if file.Size > MaxFileBytes {
 		return nil, ErrFileTooLarge
@@ -324,11 +352,11 @@ func (c *Client) File(ctx context.Context, installationID, repositoryID int64, r
 }
 
 // exchangeCode trades the code GitHub handed a person's browser for that person's token.
-func (c *Client) exchangeCode(ctx context.Context, code string) (string, error) {
+func (c *Client) exchangeCode(ctx context.Context, code, redirectURI string) (string, error) {
 	if code == "" {
 		return "", ErrCodeRejected
 	}
-	form := url.Values{"client_id": {c.clientID}, "client_secret": {c.clientSecret}, "code": {code}}
+	form := url.Values{"client_id": {c.clientID}, "client_secret": {c.clientSecret}, "code": {code}, "redirect_uri": {redirectURI}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.webURL+"/login/oauth/access_token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", errors.New("github: build the code exchange request")
@@ -355,7 +383,7 @@ func (c *Client) exchangeCode(ctx context.Context, code string) (string, error) 
 		return "", errors.New("github: the code exchange answer is not JSON")
 	}
 	switch {
-	case out.Error == "bad_verification_code":
+	case out.Error == "bad_verification_code", out.Error == "redirect_uri_mismatch":
 		return "", ErrCodeRejected
 	case out.Error == "incorrect_client_credentials":
 		return "", ErrAppCredentials
@@ -387,8 +415,7 @@ func (c *Client) appJWT() (string, error) {
 
 var encoding = base64.RawURLEncoding
 
-// The statuses a caller reads differently depending on what it asked. Every other refusal is
-// returned as it is, with GitHub's own message.
+// The statuses a caller reads differently depending on what it asked.
 var (
 	errNotFound      = errors.New("not found")
 	errUnauthorized  = errors.New("unauthorized")
@@ -396,9 +423,31 @@ var (
 	errUnprocessable = errors.New("unprocessable")
 )
 
-// call makes one API request as bearer and decodes a 2xx answer into out. No error it returns
-// holds the bearer or anything GitHub sent besides its status and its message.
+// refusal is an answer of GitHub that is not a success: one of the kinds above, or nil for any
+// other status, with GitHub's own message.
+type refusal struct {
+	kind    error
+	message string
+	detail  string
+}
+
+func (r *refusal) Error() string {
+	if r.kind == nil {
+		return r.detail
+	}
+	return r.kind.Error() + " (" + r.detail + ")"
+}
+
+func (r *refusal) Unwrap() error { return r.kind }
+
+// call makes one API request with a bearer token.
 func (c *Client) call(ctx context.Context, method, path, bearer string, body, out any) error {
+	return c.request(ctx, method, path, "Bearer "+bearer, maxResponseBytes, body, out)
+}
+
+// request makes one API request and decodes a 2xx answer into out, when out is set. No error it
+// returns holds the authorization or anything GitHub sent besides its status and its message.
+func (c *Client) request(ctx context.Context, method, path, authorization string, limit int, body, out any) error {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -411,7 +460,7 @@ func (c *Client) call(ctx context.Context, method, path, bearer string, body, ou
 	if err != nil {
 		return fmt.Errorf("github: build %s %s", method, routeOf(path))
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("Authorization", authorization)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if reader != nil {
@@ -422,39 +471,43 @@ func (c *Client) call(ctx context.Context, method, path, bearer string, body, ou
 		return fmt.Errorf("github: %s %s did not complete: %w", method, routeOf(path), transportError(err))
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
 		return fmt.Errorf("github: %s %s: the answer could not be read", method, routeOf(path))
 	}
-	if len(data) > maxResponseBytes {
+	if len(data) > limit {
 		return fmt.Errorf("github: %s %s: %w", method, routeOf(path), ErrFileTooLarge)
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if out == nil {
+			return nil
+		}
 		if err := json.Unmarshal(data, out); err != nil {
 			return fmt.Errorf("github: %s %s answered %d with a body that is not the JSON expected", method, routeOf(path), resp.StatusCode)
 		}
 		return nil
 	}
-	var refusal struct {
+	var answer struct {
 		Message string `json:"message"`
 	}
-	_ = json.Unmarshal(data, &refusal)
-	detail := fmt.Sprintf("github: %s %s answered %d: %s", method, routeOf(path), resp.StatusCode, bounded(refusal.Message))
-	if rateLimited(resp) {
-		return fmt.Errorf("%w (%s)", ErrRateLimited, detail)
+	_ = json.Unmarshal(data, &answer)
+	refused := &refusal{
+		message: bounded(answer.Message),
+		detail:  fmt.Sprintf("github: %s %s answered %d: %s", method, routeOf(path), resp.StatusCode, bounded(answer.Message)),
 	}
-	switch resp.StatusCode {
-	case http.StatusNotFound:
-		return fmt.Errorf("%w (%s)", errNotFound, detail)
-	case http.StatusUnauthorized:
-		return fmt.Errorf("%w (%s)", errUnauthorized, detail)
-	case http.StatusForbidden:
-		return fmt.Errorf("%w (%s)", errForbidden, detail)
-	case http.StatusUnprocessableEntity:
-		return fmt.Errorf("%w (%s)", errUnprocessable, detail)
-	default:
-		return errors.New(detail)
+	switch {
+	case rateLimited(resp):
+		refused.kind = ErrRateLimited
+	case resp.StatusCode == http.StatusNotFound:
+		refused.kind = errNotFound
+	case resp.StatusCode == http.StatusUnauthorized:
+		refused.kind = errUnauthorized
+	case resp.StatusCode == http.StatusForbidden:
+		refused.kind = errForbidden
+	case resp.StatusCode == http.StatusUnprocessableEntity:
+		refused.kind = errUnprocessable
 	}
+	return refused
 }
 
 // rateLimited tells GitHub's two rate limits from an ordinary refusal: the primary one answers

@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	testRedirect     = "http://localhost:3000/settings/repository"
 	testAppID        = 4242
 	testClientSecret = "client-secret-only-this-test-knows"
 )
@@ -69,6 +70,15 @@ type fakeGitHub struct {
 	rateLimit int
 	// widen makes a minted token claim a second repository.
 	widen bool
+	// ungranted makes the installation refuse the permissions asked for, saml blocks user tokens
+	// from repositories, and revokeStatus, when set, answers a revocation with that status.
+	ungranted    bool
+	saml         bool
+	revokeStatus int
+	revoked      []string
+	redirects    []string
+	// kinds holds what a path is when it is not a file: dir, symlink or submodule.
+	kinds map[string]string
 	calls []string
 }
 
@@ -94,6 +104,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 		pushers: map[string]map[int64]bool{"alice": {1: true, 2: true, 4: true}},
 		readers: map[string]map[int64]bool{"reader": {1: true}},
 		tokens:  map[string]mintedToken{}, userTokens: map[string]string{},
+		kinds: map[string]string{"link": "symlink", "vendored": "submodule"},
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
@@ -182,6 +193,11 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.answer(w, http.StatusOK, map[string]string{"error": "incorrect_client_credentials"})
 			return
 		}
+		f.redirects = append(f.redirects, r.PostForm.Get("redirect_uri"))
+		if r.PostForm.Get("redirect_uri") != testRedirect {
+			f.answer(w, http.StatusOK, map[string]string{"error": "redirect_uri_mismatch"})
+			return
+		}
 		user, ok := f.codes[r.PostForm.Get("code")]
 		if !ok {
 			f.answer(w, http.StatusOK, map[string]string{"error": "bad_verification_code"})
@@ -204,6 +220,26 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	segments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	switch {
+	case len(segments) == 3 && segments[0] == "applications" && segments[2] == "token" && r.Method == http.MethodDelete:
+		id, secret, _ := r.BasicAuth()
+		var body struct {
+			AccessToken string `json:"access_token"`
+		}
+		json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+		switch {
+		case id != "Iv23test" || secret != testClientSecret || segments[1] != "Iv23test":
+			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
+		case f.revokeStatus != 0:
+			f.refuse(w, f.revokeStatus, "revocation failed")
+		default:
+			if _, known := f.userTokens[body.AccessToken]; !known {
+				f.refuse(w, http.StatusUnprocessableEntity, "Validation Failed")
+				return
+			}
+			delete(f.userTokens, body.AccessToken)
+			f.revoked = append(f.revoked, body.AccessToken)
+			w.WriteHeader(http.StatusNoContent)
+		}
 	case len(segments) == 4 && segments[0] == "app" && segments[1] == "installations" && segments[3] == "access_tokens" && r.Method == http.MethodPost:
 		f.mint(w, r, bearer, segments[2])
 	case len(segments) == 4 && segments[0] == "repos" && segments[3] == "installation":
@@ -235,6 +271,10 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.refuse(w, http.StatusNotFound, "Not Found")
 			return
 		}
+		if _, isUser := f.userTokens[bearer]; isUser && f.saml {
+			f.refuse(w, http.StatusForbidden, "Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization.")
+			return
+		}
 		read, push := f.visible(bearer, repo)
 		if !read {
 			f.refuse(w, http.StatusNotFound, "Not Found")
@@ -260,6 +300,10 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.answer(w, http.StatusOK, []map[string]string{{"type": "file", "name": "experiment.yaml"}})
 			return
 		}
+		if kind, ok := f.kinds[path]; ok {
+			f.answer(w, http.StatusOK, map[string]any{"type": kind, "size": 12, "target": "elsewhere"})
+			return
+		}
 		content, ok := repo.files[path]
 		if ref := r.URL.Query().Get("ref"); !ok || (ref != "" && ref != repo.defaultBranch) {
 			f.refuse(w, http.StatusNotFound, "Not Found")
@@ -267,7 +311,7 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		f.answer(w, http.StatusOK, map[string]any{
 			"type": "file", "size": len(content), "encoding": "base64",
-			"content": base64.StdEncoding.EncodeToString([]byte(content))[:4] + "\n" + base64.StdEncoding.EncodeToString([]byte(content))[4:] + "\n",
+			"content": wrapped(base64.StdEncoding.EncodeToString([]byte(content))),
 		})
 	default:
 		f.refuse(w, http.StatusNotFound, "Not Found")
@@ -298,13 +342,17 @@ func (f *fakeGitHub) mint(w http.ResponseWriter, r *http.Request, bearer, instal
 		f.refuse(w, http.StatusBadRequest, "bad body")
 		return
 	}
+	if f.ungranted {
+		f.refuse(w, http.StatusUnprocessableEntity, "The permissions requested are not granted to this installation.")
+		return
+	}
 	repositories := []map[string]any{}
 	for _, repoID := range body.RepositoryIDs {
 		if !installation.repos[repoID] {
 			f.refuse(w, http.StatusUnprocessableEntity, "There is at least one repository that does not exist or is not accessible to the parent installation.")
 			return
 		}
-		repositories = append(repositories, map[string]any{"id": repoID})
+		repositories = append(repositories, map[string]any{"id": repoID, "full_name": f.repoByID(repoID).fullName})
 	}
 	if f.widen {
 		repositories = append(repositories, map[string]any{"id": 999})
@@ -325,12 +373,15 @@ var ctx = context.Background()
 
 func TestRepositoryIsVerifiedThreeWaysAndReturnedAsGitHubStatesIt(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	repo, err := client.Repository(ctx, 100, "acme/model", "code-alice")
+	repo, err := client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect)
 	if err != nil {
 		t.Fatalf("Repository: %v", err)
 	}
-	if repo.ID != 1 || repo.FullName != "Acme/Model" || repo.DefaultBranch != "main" {
-		t.Fatalf("repository = %+v, want id 1, GitHub's own casing and its default branch", repo)
+	if repo.ID != 1 || repo.FullName != "Acme/Model" {
+		t.Fatalf("repository = %+v, want id 1 in GitHub's own casing", repo)
+	}
+	if len(f.revoked) != 1 || len(f.userTokens) != 0 || len(f.redirects) != 1 || f.redirects[0] != testRedirect {
+		t.Fatalf("revoked %v with %d user tokens left, redirects %v: want the person's token revoked and the redirect sent", f.revoked, len(f.userTokens), f.redirects)
 	}
 	minted := f.lastToken()
 	if len(minted.repos) != 1 || minted.repos[0] != 1 || minted.permissions["contents"] != "read" || minted.permissions["metadata"] != "read" || len(minted.permissions) != 2 {
@@ -362,12 +413,15 @@ func TestRepositoryRefusesWhatTheCallerCannotProve(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f, client := newFakeGitHub(t)
-			repo, err := client.Repository(ctx, tc.installation, tc.repo, tc.code)
+			repo, err := client.Repository(ctx, tc.installation, tc.repo, tc.code, testRedirect)
 			if !errors.Is(err, tc.want) || repo != nil {
 				t.Fatalf("Repository = %+v, %v, want %v", repo, err, tc.want)
 			}
 			if len(f.tokens) != 0 {
 				t.Fatalf("an installation token was minted for a refused attach: %+v", f.tokens)
+			}
+			if len(f.userTokens) != 0 {
+				t.Fatalf("a refused attach left the person's token alive: %v", f.userTokens)
 			}
 		})
 	}
@@ -375,10 +429,10 @@ func TestRepositoryRefusesWhatTheCallerCannotProve(t *testing.T) {
 
 func TestACodeWorksOnce(t *testing.T) {
 	_, client := newFakeGitHub(t)
-	if _, err := client.Repository(ctx, 100, "acme/model", "code-alice"); err != nil {
+	if _, err := client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Repository(ctx, 100, "acme/other", "code-alice"); !errors.Is(err, ErrCodeRejected) {
+	if _, err := client.Repository(ctx, 100, "acme/other", "code-alice", testRedirect); !errors.Is(err, ErrCodeRejected) {
 		t.Fatalf("a second attach on one code: got = %v, want %v", err, ErrCodeRejected)
 	}
 }
@@ -472,14 +526,18 @@ func TestATokenThatReachesFurtherThanAskedIsNotHandedOn(t *testing.T) {
 
 func TestFile(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	data, err := client.File(ctx, 100, 1, "main", ".hypothesisloop/experiment.yaml")
+	readToken, err := client.Token(ctx, 100, 1, Read)
+	if err != nil || readToken.Repository != "Acme/Model" {
+		t.Fatalf("Token = %+v, %v, want it to name the repository as GitHub does", readToken, err)
+	}
+	data, err := client.File(ctx, readToken, 1, "main", ".hypothesisloop/experiment.yaml")
 	if err != nil || string(data) != "name: from the repo\n" {
 		t.Fatalf("File = %q, %v", data, err)
 	}
 	if minted := f.lastToken(); minted.permissions["contents"] != "read" || len(minted.repos) != 1 || minted.repos[0] != 1 {
 		t.Fatalf("the file was read with %+v, want read on repository 1", minted)
 	}
-	if data, err := client.File(ctx, 100, 1, "", ".hypothesisloop/experiment.yaml"); err != nil || string(data) != "name: from the repo\n" {
+	if data, err := client.File(ctx, readToken, 1, "", ".hypothesisloop/experiment.yaml"); err != nil || string(data) != "name: from the repo\n" {
 		t.Fatalf("File at the default branch = %q, %v", data, err)
 	}
 	for name, tc := range map[string]struct {
@@ -488,15 +546,17 @@ func TestFile(t *testing.T) {
 	}{
 		"a path the repository does not hold":   {"main", ".hypothesisloop/job.yaml", ErrFileNotFound},
 		"a branch the repository does not have": {"gone", ".hypothesisloop/experiment.yaml", ErrFileNotFound},
-		"a directory":                           {"main", ".hypothesisloop", ErrFileNotFound},
+		"a directory":                           {"main", ".hypothesisloop", ErrNotAFile},
+		"a symlink":                             {"main", "link", ErrNotAFile},
+		"a submodule":                           {"main", "vendored", ErrNotAFile},
 	} {
-		if _, err := client.File(ctx, 100, 1, tc.ref, tc.path); !errors.Is(err, tc.want) {
+		if _, err := client.File(ctx, readToken, 1, tc.ref, tc.path); !errors.Is(err, tc.want) {
 			t.Errorf("%s: got = %v, want %v", name, err, tc.want)
 		}
 	}
 	for _, path := range []string{"../other", "a//b", "/etc/passwd", "a/./b", ""} {
 		before := len(f.calls)
-		if _, err := client.File(ctx, 100, 1, "main", path); err == nil {
+		if _, err := client.File(ctx, readToken, 1, "main", path); err == nil {
 			t.Errorf("File(%q) was read", path)
 		}
 		for _, call := range f.calls[before:] {
@@ -505,8 +565,15 @@ func TestFile(t *testing.T) {
 			}
 		}
 	}
+	// A file up to the limit is read whole, though base64 makes its answer a third larger.
+	for _, size := range []int{0, 750 << 10, 900 << 10, MaxFileBytes} {
+		f.repos["acme/model"].files["sized"] = strings.Repeat("y", size)
+		if data, err := client.File(ctx, readToken, 1, "main", "sized"); err != nil || len(data) != size {
+			t.Errorf("a file of %d bytes: read %d, %v", size, len(data), err)
+		}
+	}
 	f.repos["acme/model"].files["big"] = strings.Repeat("x", MaxFileBytes+1)
-	if _, err := client.File(ctx, 100, 1, "main", "big"); !errors.Is(err, ErrFileTooLarge) {
+	if _, err := client.File(ctx, readToken, 1, "main", "big"); !errors.Is(err, ErrFileTooLarge) {
 		t.Errorf("a file over the limit: got = %v, want %v", err, ErrFileTooLarge)
 	}
 }
@@ -535,15 +602,19 @@ func TestNoErrorHoldsASecret(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			readToken, err := client.Token(ctx, 100, 1, Read)
+			if err != nil {
+				t.Fatal(err)
+			}
 			arrange(f, client)
 			var failures []error
-			_, err = client.Repository(ctx, 100, "acme/model", "code-alice")
+			_, err = client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect)
 			failures = append(failures, err)
 			_, err = client.Token(ctx, 100, 1, Write)
 			failures = append(failures, err)
-			_, err = client.File(ctx, 100, 1, "main", ".hypothesisloop/experiment.yaml")
+			_, err = client.File(ctx, readToken, 1, "main", ".hypothesisloop/experiment.yaml")
 			failures = append(failures, err)
-			secrets := []string{testClientSecret, "code-alice", "ghs_", "ghu_", jwt[:40], "PRIVATE KEY", "Bearer"}
+			secrets := []string{testClientSecret, "code-alice", "ghs_", "ghu_", jwt[:40], "PRIVATE KEY", "Bearer", "Basic"}
 			for _, failure := range failures {
 				if failure == nil {
 					continue
@@ -598,4 +669,74 @@ func TestAppAddresses(t *testing.T) {
 	if CloneURL("Acme/Model") != "https://github.com/Acme/Model.git" {
 		t.Fatalf("clone url = %s", CloneURL("Acme/Model"))
 	}
+}
+
+func TestAttachProofRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		arrange  func(*fakeGitHub)
+		redirect string
+		want     error
+	}{
+		"an organisation whose single sign-on blocks the token": {func(f *fakeGitHub) { f.saml = true }, testRedirect, ErrUserBlocked},
+		"a redirect the code was not issued to":                 {func(*fakeGitHub) {}, "https://evil.example/callback", ErrCodeRejected},
+		"an installation that has not granted the access":       {func(f *fakeGitHub) { f.ungranted = true }, testRedirect, ErrPermissionNotGranted},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, client := newFakeGitHub(t)
+			tc.arrange(f)
+			if repo, err := client.Repository(ctx, 100, "acme/model", "code-alice", tc.redirect); !errors.Is(err, tc.want) || repo != nil {
+				t.Fatalf("Repository = %+v, %v, want %v", repo, err, tc.want)
+			}
+			if len(f.userTokens) != 0 {
+				t.Fatalf("the person's token outlived the refusal: %v", f.userTokens)
+			}
+		})
+	}
+}
+
+// A person's token that cannot be revoked would outlive the one question it was issued for.
+func TestAnAttachFailsWhenThePersonsTokenCannotBeRevoked(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		f, client := newFakeGitHub(t)
+		f.revokeStatus = status
+		repo, err := client.Repository(ctx, 100, "acme/model", "code-alice", testRedirect)
+		if err == nil || repo != nil || len(f.tokens) != 0 {
+			t.Errorf("revocation answered %d: Repository = %+v, %v with %d installation tokens, want a failure and none", status, repo, err, len(f.tokens))
+		}
+	}
+	// The refusal of the check itself is what the caller hears when both fail.
+	f, client := newFakeGitHub(t)
+	f.revokeStatus = http.StatusInternalServerError
+	if _, err := client.Repository(ctx, 100, "acme/model", "code-reader", testRedirect); !errors.Is(err, ErrUserCannotPush) {
+		t.Errorf("a reader whose token could not be revoked: got = %v, want %v", err, ErrUserCannotPush)
+	}
+}
+
+func TestTokenNamesTheRepositoryAsItStandsNow(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	f.repos["acme/model"].fullName = "acme/renamed"
+	token, err := client.Token(ctx, 100, 1, Read)
+	if err != nil || token.Repository != "acme/renamed" {
+		t.Fatalf("Token = %+v, %v, want the name after the rename", token, err)
+	}
+	f.repos["acme/model"].fullName = ""
+	if token, err := client.Token(ctx, 100, 1, Read); err == nil {
+		t.Fatalf("a token whose answer does not name its repository was handed on: %+v", token)
+	}
+	f.repos["acme/model"].fullName = "Acme/Model"
+	f.ungranted = true
+	if _, err := client.Token(ctx, 100, 1, Write); !errors.Is(err, ErrPermissionNotGranted) {
+		t.Fatalf("a permission the installation has not granted: got = %v, want %v", err, ErrPermissionNotGranted)
+	}
+}
+
+// wrapped breaks base64 into lines of sixty characters, as GitHub sends a file.
+func wrapped(encoded string) string {
+	var b strings.Builder
+	for len(encoded) > 60 {
+		b.WriteString(encoded[:60] + "\n")
+		encoded = encoded[60:]
+	}
+	b.WriteString(encoded + "\n")
+	return b.String()
 }

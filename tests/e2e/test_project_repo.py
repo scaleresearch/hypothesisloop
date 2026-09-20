@@ -3,12 +3,12 @@
 Most of this holds whether or not the deployment has a GitHub App: every boundary around a
 repository, and that nothing is handed out for a project that has none. A real attach needs a
 person to authorise the App in a browser, so the one test that clones and pushes has hl-admin
-record the repository instead, and runs only when the environment names a sandbox repository:
+record the repository instead, which asks GitHub as the App that the installation covers it. It
+runs only when the environment names a sandbox repository:
 
     HL_E2E_GITHUB_INSTALLATION    the installation of the App that covers it
     HL_E2E_GITHUB_REPO            owner/name, a repository tests may push branches to
     HL_E2E_GITHUB_REPO_ID         its id on GitHub
-    HL_E2E_GITHUB_DEFAULT_BRANCH  its default branch
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import os
 import subprocess
 import uuid
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 import pytest
 import requests
@@ -53,11 +54,26 @@ def run(orgs, run_id: str):
     a.api.close_platform_experiment(pe_id)
 
 
+# What every create states itself, whatever the repository's experiment file says.
+RUN = {"budget_accelerator_hours": 1, "max_agents": 2, "ends_at": "2099-01-01T00:00:00Z"}
+
+
 def _call(api: API, method: str, path: str, body: dict | None = None) -> requests.Response:
     return api.session.request(method, api._url(path), json=body, timeout=30)
 
 
-ATTACH = {"installation_id": 1, "repo": "acme/model", "code": "a-code-github-never-issued"}
+ATTACH = {
+    "installation_id": 1, "repo": "acme/model", "code": "a-code-github-never-issued",
+    "redirect_uri": "http://localhost:3000/settings/repository",
+}
+
+
+def _credential(path: str, host: str = "github.com", protocol: str = "https") -> str:
+    """The call git's helper makes for an address."""
+    return "/git-credential?" + urlencode({"protocol": protocol, "host": host, "path": path})
+
+
+ANY_REPO = _credential("acme/model.git")
 
 
 @pytest.mark.parallel
@@ -90,7 +106,8 @@ def test_attach_is_refused_without_proof_from_github(orgs):
     else:
         assert app.status_code == 200 and set(app.json()) >= {"slug", "client_id", "install_url", "authorize_url"}, app.text
         assert attach.status_code == 400 and "code" in attach.json()["error"], attach.text
-        for bad in ({**ATTACH, "repo": "https://github.com/acme/model"}, {**ATTACH, "installation_id": 0}, {**ATTACH, "code": ""}):
+        for bad in ({**ATTACH, "repo": "https://github.com/acme/model"}, {**ATTACH, "installation_id": 0}, {**ATTACH, "code": ""},
+                    {**ATTACH, "redirect_uri": ""}):
             assert _call(a.api, "POST", f"/projects/{a.project_id}/repo", bad).status_code == 400, bad
     assert _call(a.api, "GET", f"/projects/{a.project_id}/repo").status_code == 404
 
@@ -111,11 +128,13 @@ def test_a_git_credential_goes_only_to_what_the_platform_launched(api: API, orgs
     a, _ = orgs
     _, agent = run
     for caller in (a.api, api):
-        refused = _call(caller, "GET", "/git-credential")
+        refused = _call(caller, "GET", ANY_REPO)
         assert refused.status_code == 403 and "password" not in refused.text, refused.text
-    assert requests.get(a.api._url("/git-credential"), timeout=30).status_code == 401
-    nothing = _call(agent, "GET", "/git-credential")
+    assert requests.get(a.api._url(ANY_REPO), timeout=30).status_code == 401
+    nothing = _call(agent, "GET", ANY_REPO)
     assert nothing.status_code == 404 and "no repository is attached" in nothing.json()["error"], nothing.text
+    # The address git asks about is part of the question.
+    assert _call(agent, "GET", "/git-credential").status_code == 422
 
 
 @pytest.mark.parallel
@@ -134,20 +153,37 @@ def test_a_platform_experiment_without_a_repository_has_no_clone_address_and_no_
     a, _ = orgs
     pe_id, agent = run
     assert "code_repo_url" not in agent.get_json(f"/platform-experiments/{pe_id}")
-    created = _call(a.api, "POST", "/platform-experiments", {"project_id": a.project_id, "from_repo": True})
+    created = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "from_repo": True})
     assert created.status_code == 422 and "repository" in created.json()["error"], created.text
-    updated = _call(a.api, "PUT", f"/platform-experiments/{pe_id}", {"from_repo": True, "name": "x"})
-    assert updated.status_code == 400 and "from_repo" in updated.json()["error"], updated.text
+
+
+@pytest.mark.parallel
+def test_a_run_states_its_own_cost_and_an_update_is_whole(orgs, run):
+    """What a run costs and how long it lasts is never read from the repository, a create without
+    from_repo states everything, and a partial update is refused and clears nothing."""
+    a, _ = orgs
+    pe_id, agent = run
+    for field in RUN:
+        body = {**RUN, "project_id": a.project_id, "from_repo": True}
+        del body[field]
+        assert _call(a.api, "POST", "/platform-experiments", body).status_code == 422, field
+    partial = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "name": "only a name"})
+    assert partial.status_code == 422 and "description" in partial.json()["error"], partial.text
+    before = agent.get_json(f"/platform-experiments/{pe_id}")
+    for body in ({"name": "x"}, {"from_repo": True, "name": "x"}):
+        assert _call(a.api, "PUT", f"/platform-experiments/{pe_id}", body).status_code == 422, body
+    after = agent.get_json(f"/platform-experiments/{pe_id}")
+    assert (after["name"], after["description"]) == (before["name"], before["description"])
 
 
 @pytest.mark.parallel
 def test_from_repo_checks_the_project_before_its_repository(orgs):
     a, b = orgs
-    foreign = _call(a.api, "POST", "/platform-experiments", {"project_id": b.project_id, "from_repo": True})
+    foreign = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": b.project_id, "from_repo": True})
     assert foreign.status_code == 404 and foreign.json() == {"error": "project not found"}, foreign.text
 
 
-SANDBOX_ENV = ("HL_E2E_GITHUB_INSTALLATION", "HL_E2E_GITHUB_REPO", "HL_E2E_GITHUB_REPO_ID", "HL_E2E_GITHUB_DEFAULT_BRANCH")
+SANDBOX_ENV = ("HL_E2E_GITHUB_INSTALLATION", "HL_E2E_GITHUB_REPO", "HL_E2E_GITHUB_REPO_ID")
 
 
 def _git(agent: API, cwd, *args: str) -> subprocess.CompletedProcess:
@@ -167,13 +203,13 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_on_detach(api: A
     sandbox = {name: os.environ.get(name, "") for name in SANDBOX_ENV}
     if not all(sandbox.values()):
         pytest.skip("no sandbox repository: set " + ", ".join(SANDBOX_ENV))
-    installation, repo, repo_id, default_branch = (sandbox[name] for name in SANDBOX_ENV)
+    installation, repo, repo_id = (sandbox[name] for name in SANDBOX_ENV)
     org = _org(api, run_id, "live")
     if _call(org.api, "GET", "/github/app").status_code == 503:
         pytest.skip("this deployment has no GitHub App configured")
     other = _org(api, run_id, "bystander")
 
-    admin.attach_repo(org.project_id, installation, repo_id, repo, default_branch)
+    admin.attach_repo(org.project_id, installation, repo_id)
     pe_id = org.api.create_platform_experiment(f"repo-live-{run_id}", 1, 2)
     other_pe = other.api.create_platform_experiment(f"repo-bystander-{run_id}", 1, 2)
     branch = ""
@@ -188,11 +224,16 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_on_detach(api: A
         bystander = other.api.as_caller(other.api.add_agents(other_pe, count=1)[0]["token"], other.org_id, other.project_id)
         assert agent.get_json(f"/platform-experiments/{pe_id}")["code_repo_url"] == clone_url
 
-        credential = agent.get_json("/git-credential")
+        mine = _credential(f"{repo}.git")
+        credential = agent.get_json(mine)
         assert credential["host"] == "github.com" and credential["path"] == f"{repo}.git", {k: v for k, v in credential.items() if k != "password"}
-        assert agent.get_json("/git-credential")["password"] != credential["password"], "the same token was handed out twice"
+        assert agent.get_json(mine)["password"] != credential["password"], "the same token was handed out twice"
+        assert "password" in agent.get_json(_credential(f"{repo}.git/info/lfs"))
+        # Nothing is minted for an address that is not the repository's.
+        for elsewhere in (_credential(f"{repo}-other.git"), _credential(f"{repo}.git", host="example.com"), _credential(f"{repo}.git", protocol="http")):
+            assert _call(agent, "GET", elsewhere).status_code == 404, elsewhere
         # An agent of an org with nothing attached is handed nothing, and cannot clone.
-        assert _call(bystander, "GET", "/git-credential").status_code == 404
+        assert _call(bystander, "GET", mine).status_code == 404
         refused = _git(bystander, tmp_path, "clone", "--depth", "1", clone_url, "bystander")
         assert refused.returncode != 0, "an agent of another org cloned the repository"
 
@@ -211,7 +252,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_on_detach(api: A
 
         # A coordinator reads and does not push.
         coordinator = org.api.as_caller(admin.token(f"coordinator:{pe_id}"), org.org_id, org.project_id)
-        assert _git(coordinator, work, "fetch", "origin", default_branch).returncode == 0
+        assert _git(coordinator, work, "fetch", "origin").returncode == 0
         denied = _git(coordinator, work, "push", "origin", f"{branch}:{branch}-coordinator")
         assert denied.returncode != 0, "a coordinator's read credential pushed a branch"
 
@@ -220,12 +261,12 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_on_detach(api: A
         branch = ""
 
         assert _call(org.api, "DELETE", f"/projects/{org.project_id}/repo").status_code == 204
-        assert _call(agent, "GET", "/git-credential").status_code == 404
-        after = _git(agent, work, "fetch", "origin", default_branch)
+        assert _call(agent, "GET", mine).status_code == 404
+        after = _git(agent, work, "fetch", "origin")
         assert after.returncode != 0, "git still fetched after the repository was detached"
     finally:
         if branch:
-            admin.attach_repo(org.project_id, installation, repo_id, repo, default_branch)
+            admin.attach_repo(org.project_id, installation, repo_id)
             _git(agent, tmp_path / "work", "push", "origin", "--delete", branch)
         _call(org.api, "DELETE", f"/projects/{org.project_id}/repo")
         org.api.close_platform_experiment(pe_id)

@@ -965,8 +965,9 @@ CREATE TABLE IF NOT EXISTS project_repos (
     installation_id BIGINT      NOT NULL,
     repository_id   BIGINT      NOT NULL,
     repo            TEXT        NOT NULL,
-    default_branch  TEXT        NOT NULL,
     attached_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- The default branch is GitHub's to state and is read there when it is needed.
+ALTER TABLE project_repos DROP COLUMN IF EXISTS default_branch;
 
 COMMIT;

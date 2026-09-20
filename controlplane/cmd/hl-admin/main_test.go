@@ -11,6 +11,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 )
 
 func settingsPath(t *testing.T) string {
@@ -99,5 +100,98 @@ func TestUserAddSaysSoWhenTheUserHasNoOrgOrTheOrgNoProject(t *testing.T) {
 	home := fakeHomes{orgIDs: []string{"org_1", "org_2"}, projects: []*domain.Project{{ID: "prj_1"}}}
 	if err := addUser(context.Background(), home, "user-1", "Ada", &out); err != nil || !strings.Contains(out.String(), `"org_id":"org_1"`) || !strings.Contains(out.String(), `"project_id":"prj_1"`) {
 		t.Errorf("a user with a home: got = %q, %v", out.String(), err)
+	}
+}
+
+type fakeRepoProjects struct {
+	projects map[string]bool
+	attached []*domain.ProjectRepo
+}
+
+func (f *fakeRepoProjects) GetProject(_ context.Context, id string) (*domain.Project, error) {
+	if !f.projects[id] {
+		return nil, nil
+	}
+	return &domain.Project{ID: id}, nil
+}
+
+func (f *fakeRepoProjects) AttachProjectRepo(_ context.Context, repo *domain.ProjectRepo) error {
+	f.attached = append(f.attached, repo)
+	return nil
+}
+
+type fakeInstallations struct {
+	covered map[int64]map[int64]string
+	asked   []github.Access
+}
+
+func (f *fakeInstallations) Token(_ context.Context, installation, repository int64, access github.Access) (*github.Token, error) {
+	f.asked = append(f.asked, access)
+	repos, ok := f.covered[installation]
+	if !ok {
+		return nil, github.ErrInstallationGone
+	}
+	name, ok := repos[repository]
+	if !ok {
+		return nil, github.ErrRepositoryNotInstalled
+	}
+	return &github.Token{Value: "ghs_a_token_the_command_must_not_print", Repository: name}, nil
+}
+
+func TestRepoAttachRecordsOnlyWhatGitHubConfirms(t *testing.T) {
+	ctx := context.Background()
+	app := &fakeInstallations{covered: map[int64]map[int64]string{100: {7: "Acme/Model"}}}
+	projects := &fakeRepoProjects{projects: map[string]bool{"prj_1": true}}
+	var out bytes.Buffer
+	if err := attachRepo(ctx, projects, app, "prj_1", 100, 7, &out); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	want := domain.ProjectRepo{ProjectID: "prj_1", InstallationID: 100, RepositoryID: 7, Repo: "Acme/Model"}
+	if len(projects.attached) != 1 || *projects.attached[0] != want {
+		t.Fatalf("attached = %+v, want %+v with the name GitHub stated", projects.attached, want)
+	}
+	if len(app.asked) != 1 || app.asked[0] != github.Read {
+		t.Fatalf("GitHub was asked for %v, want one read token", app.asked)
+	}
+	if !strings.Contains(out.String(), `"repo":"Acme/Model"`) || strings.Contains(out.String(), "ghs_") {
+		t.Fatalf("output = %q, want the repository and no token", out.String())
+	}
+
+	for name, tc := range map[string]struct {
+		project                  string
+		installation, repository int64
+		want                     string
+	}{
+		"a project that does not exist":               {"prj_missing", 100, 7, "project prj_missing does not exist"},
+		"an installation that is not the App's":       {"prj_1", 999, 7, github.ErrInstallationGone.Error()},
+		"a repository the installation does not hold": {"prj_1", 100, 8, github.ErrRepositoryNotInstalled.Error()},
+	} {
+		projects.attached, out = nil, bytes.Buffer{}
+		err := attachRepo(ctx, projects, app, tc.project, tc.installation, tc.repository, &out)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || len(projects.attached) != 0 || out.Len() != 0 {
+			t.Errorf("%s: got = %v, attached %+v, want an error holding %q and nothing recorded", name, err, projects.attached, tc.want)
+		}
+	}
+	asked := len(app.asked)
+	if err := attachRepo(ctx, projects, app, "prj_missing", 100, 7, &out); err == nil || len(app.asked) != asked {
+		t.Errorf("an unknown project reached GitHub: %v", err)
+	}
+}
+
+func TestRepoAttachNeedsItsNumbersAndAnApp(t *testing.T) {
+	settingsPath(t)
+	var stdout bytes.Buffer
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"the old five-argument form":      {[]string{"repo", "attach", "prj_1", "100", "7", "acme/model", "main"}, "usage: hl-admin"},
+		"an installation that is a name":  {[]string{"repo", "attach", "prj_1", "acme", "7"}, "INSTALLATION"},
+		"a repository that is a name":     {[]string{"repo", "attach", "prj_1", "100", "acme/model"}, "REPOSITORY_ID"},
+		"a deployment with no GitHub App": {[]string{"repo", "attach", "prj_1", "100", "7"}, "no github section"},
+	} {
+		if err := run(tc.args, &stdout); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got = %v, want an error holding %q", name, err, tc.want)
+		}
 	}
 }

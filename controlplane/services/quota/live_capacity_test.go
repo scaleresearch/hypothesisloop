@@ -17,7 +17,7 @@ import (
 // starvation nobody can diagnose from the API. Fail fast instead (important.md: "no fallbacks -
 // one path or error, fail fast").
 func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
-	h := NewPlatformExperimentsHandler(nil, nil)
+	h := NewPlatformExperimentsHandler(nil, &fakeProjectRepos{}, nil)
 	// Deliberately never call WithLiveCapacity.
 
 	clusters, err := h.liveCapacity(context.Background(), "org-a", false)
@@ -36,7 +36,7 @@ func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
 // reachable but simply has no fresh reports) — this test just pins that WithLiveCapacity flips the
 // handler out of the unconfigured error path; the live-read behavior itself is metricsdb's own.
 func TestLiveCapacityConfiguredDoesNotFailFast(t *testing.T) {
-	h := NewPlatformExperimentsHandler(nil, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute, nil)
+	h := NewPlatformExperimentsHandler(nil, &fakeProjectRepos{}, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute, nil)
 	if h.metricsDBURL == "" {
 		t.Fatalf("WithLiveCapacity did not set metricsDBURL")
 	}

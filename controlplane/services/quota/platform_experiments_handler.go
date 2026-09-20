@@ -29,13 +29,13 @@ type PlatformExperimentsHandler struct {
 	launcher      string
 	signingSecret string
 
-	// Set via WithProjectRepos.
+	// repos reaches the repository attached to a project.
 	repos ProjectRepos
 }
 
 // NewPlatformExperimentsHandler constructs the handler.
-func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, logger *zap.Logger) *PlatformExperimentsHandler {
-	return &PlatformExperimentsHandler{svc: svc, logger: logger}
+func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos ProjectRepos, logger *zap.Logger) *PlatformExperimentsHandler {
+	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger}
 }
 
 // WithCatalog attaches the resource catalog served by GET /resource-catalog.

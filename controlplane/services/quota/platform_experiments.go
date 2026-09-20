@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -108,19 +109,23 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 	}
 }
 
-// CreatePlatformExperimentRequest is the input for Create.
+// CreatePlatformExperimentRequest is the body of POST /platform-experiments, and the input of
+// Create and Update.
+//
+// name, description, metrics, report_interval_seconds and starts_at are not required by the
+// schema, because with from_repo the repository's experiment file may state them. A create
+// without from_repo must still state each of them, which the handler checks against the keys the
+// body carried: a zero starts_at means "start now" and is stated like any other value.
 type CreatePlatformExperimentRequest struct {
 	// ProjectID places the platform experiment. Required on create, and fixed from then on.
 	ProjectID string `json:"project_id,omitempty"`
 	// FromRepo takes every field the request leaves out from .hypothesisloop/experiment.yaml at
-	// the head of the default branch of the project's repository. Create only. It is why the
-	// fields below are not required of the body: what must be set is checked after the file is
-	// laid under the request.
+	// the head of the default branch of the project's repository.
 	FromRepo               bool    `json:"from_repo,omitempty"`
 	Name                   string  `json:"name" required:"false"`
 	Description            string  `json:"description" required:"false"`
-	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours" required:"false"`
-	MaxAgents              int     `json:"max_agents" required:"false"`
+	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
+	MaxAgents              int     `json:"max_agents"`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
 	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
 	// change" on update; a present zero is rejected by domain validation, not treated as unset.
@@ -128,7 +133,7 @@ type CreatePlatformExperimentRequest struct {
 	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"`                 // metric keys jobs must emit
 	ReportIntervalSeconds     int                       `json:"report_interval_seconds" required:"false"` // expected reporting cadence
 	StartsAt                  time.Time                 `json:"starts_at" required:"false"`
-	EndsAt                    time.Time                 `json:"ends_at" required:"false"`
+	EndsAt                    time.Time                 `json:"ends_at"`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
@@ -139,6 +144,52 @@ type CreatePlatformExperimentRequest struct {
 	// DefaultQuotaTier controls signups that omit quota_tier. Empty defaults to "guaranteed" on
 	// create; accepted values are "guaranteed" and "burst_only".
 	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
+
+	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
+	// one stated as its zero value.
+	raw json.RawMessage
+}
+
+// createFields is the request without its own decoding.
+type createFields CreatePlatformExperimentRequest
+
+func (r *CreatePlatformExperimentRequest) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, (*createFields)(r)); err != nil {
+		return err
+	}
+	r.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
+// UpdatePlatformExperimentRequest is the body of PUT /platform-experiments/{id}. The form sends
+// every field back, so each one a platform experiment always has is required: a body that left
+// description out would otherwise read as clearing it.
+type UpdatePlatformExperimentRequest struct {
+	// ProjectID is accepted so that the file a platform experiment was created from can be sent
+	// back as it is. The project is fixed at creation and this changes nothing.
+	ProjectID                 string                    `json:"project_id,omitempty"`
+	Name                      string                    `json:"name"`
+	Description               string                    `json:"description"`
+	BudgetAcceleratorHours    float64                   `json:"budget_accelerator_hours"`
+	MaxAgents                 int                       `json:"max_agents"`
+	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
+	Metrics                   []domain.MetricDefinition `json:"metrics"`
+	ReportIntervalSeconds     int                       `json:"report_interval_seconds"`
+	StartsAt                  time.Time                 `json:"starts_at"`
+	EndsAt                    time.Time                 `json:"ends_at"`
+	Stages                    []domain.Stage            `json:"stages,omitempty"`
+	HypothesisSubmitPolicy    string                    `json:"hypothesis_submit_policy,omitempty"`
+	JobSubmitPolicy           string                    `json:"job_submit_policy,omitempty"`
+	DefaultQuotaTier          string                    `json:"default_quota_tier,omitempty"`
+}
+
+func (r UpdatePlatformExperimentRequest) fields() CreatePlatformExperimentRequest {
+	return CreatePlatformExperimentRequest{
+		Name: r.Name, Description: r.Description, BudgetAcceleratorHours: r.BudgetAcceleratorHours, MaxAgents: r.MaxAgents,
+		MaxConcurrentAccelerators: r.MaxConcurrentAccelerators, Metrics: r.Metrics, ReportIntervalSeconds: r.ReportIntervalSeconds,
+		StartsAt: r.StartsAt, EndsAt: r.EndsAt, Stages: r.Stages, HypothesisSubmitPolicy: r.HypothesisSubmitPolicy,
+		JobSubmitPolicy: r.JobSubmitPolicy, DefaultQuotaTier: r.DefaultQuotaTier,
+	}
 }
 
 // AgentResult is (agentID, finalMetric) used when closing an experiment.

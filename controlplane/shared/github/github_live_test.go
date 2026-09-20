@@ -167,11 +167,27 @@ func TestLiveInstallationTokenIsLimitedToOneRepository(t *testing.T) {
 	if _, err := client.Token(ctx, installation, 1, Read); !errors.Is(err, ErrRepositoryNotInstalled) {
 		t.Errorf("a token for a repository outside the installation: got = %v, want %v", err, ErrRepositoryNotInstalled)
 	}
-	if _, err := client.File(ctx, installation, repository, "", "a-path-no-repository-holds.yaml"); !errors.Is(err, ErrFileNotFound) {
+	if !strings.EqualFold(token.Repository, name) {
+		t.Errorf("the token names its repository %q, want %q", token.Repository, name)
+	}
+	if _, err := client.File(ctx, token, repository, "", "a-path-no-repository-holds.yaml"); !errors.Is(err, ErrFileNotFound) {
 		t.Errorf("a file the repository does not hold: got = %v, want %v", err, ErrFileNotFound)
 	}
-	if _, err := client.File(ctx, installation, repository, "", "README.md"); err != nil && !errors.Is(err, ErrFileNotFound) {
+	if _, err := client.File(ctx, token, repository, "", "README.md"); err != nil && !errors.Is(err, ErrFileNotFound) {
 		t.Errorf("reading README.md at the default branch: %v", err)
+	}
+	// A permission the App does not hold is refused with the message Token reads.
+	var out map[string]any
+	body := map[string]any{"repository_ids": []int64{repository}, "permissions": map[string]string{"issues": "write"}}
+	err = client.call(ctx, http.MethodPost, path, jwt, body, &out)
+	var refused *refusal
+	if !errors.Is(err, errUnprocessable) || !errors.As(err, &refused) || !strings.Contains(strings.ToLower(refused.message), "permission") {
+		t.Errorf("a permission the App lacks: got = %v, want a 422 whose message names permissions", err)
+	}
+	body = map[string]any{"repository_ids": []int64{1}, "permissions": map[string]string{"metadata": "read"}}
+	err = client.call(ctx, http.MethodPost, path, jwt, body, &out)
+	if !errors.Is(err, errUnprocessable) || !errors.As(err, &refused) || strings.Contains(strings.ToLower(refused.message), "permission") {
+		t.Errorf("a repository outside the installation: got = %v, want a 422 whose message does not name permissions", err)
 	}
 }
 

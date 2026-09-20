@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -59,14 +60,22 @@ type minted struct {
 }
 
 type lookup struct {
-	installation int64
-	repo, code   string
+	installation         int64
+	repo, code, redirect string
 }
+
+const (
+	testRedirect    = "http://localhost:3000/settings/repository"
+	modelCredential = "/git-credential?protocol=https&host=github.com&path=Acme%2FModel.git"
+	otherCredential = "/git-credential?protocol=https&host=github.com&path=acme%2Fother.git"
+)
 
 // fakeApp is the GitHub App as the handler sees it. It knows two repositories on installation
 // 100 and accepts one code, and fails with whatever error a test arranges.
 type fakeApp struct {
-	known         map[string]github.Repository
+	known map[string]github.Repository
+	// names is what GitHub calls each repository now, by id.
+	names         map[int64]string
 	lookups       []lookup
 	mints         []minted
 	files         []minted
@@ -78,17 +87,17 @@ type fakeApp struct {
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{known: map[string]github.Repository{
-		"acme/model": {ID: 1, FullName: "Acme/Model", DefaultBranch: "main"},
-		"acme/other": {ID: 2, FullName: "acme/other", DefaultBranch: "trunk"},
-	}}
+		"acme/model": {ID: 1, FullName: "Acme/Model"},
+		"acme/other": {ID: 2, FullName: "acme/other"},
+	}, names: map[int64]string{1: "Acme/Model", 2: "acme/other"}}
 }
 
 func (a *fakeApp) App() github.App {
 	return github.App{Slug: "hypothesisloop", ClientID: "Iv23test", InstallURL: "https://github.test/install", AuthorizeURL: "https://github.test/authorize"}
 }
 
-func (a *fakeApp) Repository(_ context.Context, installationID int64, fullName, userCode string) (*github.Repository, error) {
-	a.lookups = append(a.lookups, lookup{installationID, fullName, userCode})
+func (a *fakeApp) Repository(_ context.Context, installationID int64, fullName, userCode, redirectURI string) (*github.Repository, error) {
+	a.lookups = append(a.lookups, lookup{installationID, fullName, userCode, redirectURI})
 	if a.repositoryErr != nil {
 		return nil, a.repositoryErr
 	}
@@ -104,43 +113,23 @@ func (a *fakeApp) Token(_ context.Context, installationID, repositoryID int64, a
 		return nil, a.tokenErr
 	}
 	a.mints = append(a.mints, minted{installationID, repositoryID, access})
-	return &github.Token{Value: fmt.Sprintf("ghs_minted_%d", len(a.mints)), ExpiresAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)}, nil
+	return &github.Token{
+		Value: fmt.Sprintf("ghs_minted_%d", len(a.mints)), ExpiresAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC), Repository: a.names[repositoryID],
+	}, nil
 }
 
-func (a *fakeApp) File(_ context.Context, installationID, repositoryID int64, ref, path string) ([]byte, error) {
-	a.files = append(a.files, minted{installationID, repositoryID, github.Access(ref + ":" + path)})
+func (a *fakeApp) File(_ context.Context, token *github.Token, repositoryID int64, ref, path string) ([]byte, error) {
+	a.files = append(a.files, minted{0, repositoryID, github.Access(token.Value + "@" + ref + ":" + path)})
 	if a.fileErr != nil {
 		return nil, a.fileErr
 	}
 	return []byte(a.file), nil
 }
 
-type fakeRuns struct {
-	closed map[string]bool
-	cut    map[string]bool
-}
-
-func (r *fakeRuns) PlatformExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, *time.Time, error) {
-	if r.closed[id] {
-		at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-		return &domain.Tenancy{PlatformExperimentID: id}, &at, nil
-	}
-	return &domain.Tenancy{PlatformExperimentID: id}, nil, nil
-}
-
-func (r *fakeRuns) AgentCutAt(_ context.Context, _, agentID string) (*time.Time, error) {
-	if r.cut[agentID] {
-		at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-		return &at, nil
-	}
-	return nil, nil
-}
-
 type repoWorld struct {
 	*world
 	repos *memRepos
 	app   *fakeApp
-	runs  *fakeRuns
 	svc   *Repos
 }
 
@@ -148,21 +137,24 @@ type repoWorld struct {
 // deployment that has no GitHub App.
 func newRepoWorld(t *testing.T, withApp bool) *repoWorld {
 	t.Helper()
-	w := &repoWorld{world: newWorld(t), app: newFakeApp(), runs: &fakeRuns{closed: map[string]bool{}, cut: map[string]bool{}}}
+	w := &repoWorld{world: newWorld(t), app: newFakeApp()}
 	w.repos = &memRepos{memStore: w.store, repos: map[string]*domain.ProjectRepo{}}
 	var app GitHub
 	if withApp {
 		app = w.app
 	}
-	w.svc = NewRepos(w.repos, w.runs, app, zap.NewNop())
+	access := auth.NewAccess(placement{memStore: w.store})
+	w.svc = NewRepos(w.repos, app, access, zap.NewNop())
 	inA2 := auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgA}, ProjectID: w.projectA2, PlatformExperimentID: "pe-a2", AgentID: "agent-2"}
 	w.callers["agent-second-project"] = inA2
 	w.callers["agent-other-org"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgB}, ProjectID: w.projectB, PlatformExperimentID: "pe-b", AgentID: "agent-b"}
-	closed := w.callers["coordinator"]
-	closed.PlatformExperimentClosed = true
-	w.callers["coordinator-after-close"] = closed
+	for _, kind := range []string{"agent", "coordinator", "job"} {
+		over := w.callers[kind]
+		over.RunOver = true
+		w.callers[kind+"-run-over"] = over
+	}
 	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w.world}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
+	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w.world}, access, zap.NewNop())
 	RegisterReposHuma(doc, w.svc)
 	w.router = router
 	return w
@@ -171,14 +163,14 @@ func newRepoWorld(t *testing.T, withApp bool) *repoWorld {
 func (w *repoWorld) seed(projectID string, repositoryID int64, repo string) {
 	w.t.Helper()
 	if err := w.repos.AttachProjectRepo(context.Background(), &domain.ProjectRepo{
-		ProjectID: projectID, InstallationID: 100, RepositoryID: repositoryID, Repo: repo, DefaultBranch: "main",
+		ProjectID: projectID, InstallationID: 100, RepositoryID: repositoryID, Repo: repo,
 	}); err != nil {
 		w.t.Fatal(err)
 	}
 }
 
 func attachBody(installation int64, repo, code string) map[string]any {
-	return map[string]any{"installation_id": installation, "repo": repo, "code": code}
+	return map[string]any{"installation_id": installation, "repo": repo, "code": code, "redirect_uri": testRedirect}
 }
 
 func TestWhoMayReachAProjectsRepository(t *testing.T) {
@@ -263,12 +255,12 @@ func TestAttachRecordsWhatGitHubStates(t *testing.T) {
 	w := newRepoWorld(t, true)
 	var view RepoView
 	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(100, "acme/model", "the-code"), http.StatusOK, &view)
-	want := lookup{100, "acme/model", "the-code"}
+	want := lookup{100, "acme/model", "the-code", testRedirect}
 	if len(w.app.lookups) != 1 || w.app.lookups[0] != want {
 		t.Fatalf("GitHub was asked %+v, want %+v", w.app.lookups, want)
 	}
 	if view.ProjectID != w.projectA || view.InstallationID != 100 || view.RepositoryID != 1 || view.Repo != "Acme/Model" ||
-		view.DefaultBranch != "main" || view.CloneURL != "https://github.com/Acme/Model.git" || view.AttachedAt.IsZero() {
+		view.CloneURL != "https://github.com/Acme/Model.git" || view.AttachedAt.IsZero() {
 		t.Fatalf("view = %+v", view)
 	}
 	var read RepoView
@@ -305,6 +297,7 @@ func TestAttachRefusesARequestItCannotCheck(t *testing.T) {
 		"a url for a name":      attachBody(100, "https://github.com/acme/model", "code"),
 		"a path out of the api": attachBody(100, "acme/../../app/installations", "code"),
 		"no code":               attachBody(100, "acme/model", ""),
+		"no redirect":           map[string]any{"installation_id": 100, "repo": "acme/model", "code": "code", "redirect_uri": ""},
 	} {
 		w := newRepoWorld(t, true)
 		rec := w.call("owner", "POST", "/projects/"+w.projectA+"/repo", body)
@@ -321,14 +314,16 @@ func TestWhatGitHubRefusesOnAttach(t *testing.T) {
 		err  error
 		want int
 	}{
-		"the person cannot push":            {github.ErrUserCannotPush, http.StatusForbidden},
-		"the app is not on that repository": {github.ErrRepositoryNotInstalled, http.StatusUnprocessableEntity},
-		"a guessed installation":            {nil, http.StatusUnprocessableEntity},
-		"the code was used":                 {github.ErrCodeRejected, http.StatusBadRequest},
-		"the installation was suspended":    {github.ErrInstallationGone, http.StatusConflict},
-		"github rate limits":                {fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), http.StatusServiceUnavailable},
-		"the app key expired":               {fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), http.StatusBadGateway},
-		"something else":                    {errors.New("dial tcp: " + leak), http.StatusInternalServerError},
+		"the person cannot push":                   {github.ErrUserCannotPush, http.StatusForbidden},
+		"single sign-on blocks the person's token": {github.ErrUserBlocked, http.StatusForbidden},
+		"the installation withholds the access":    {github.ErrPermissionNotGranted, http.StatusConflict},
+		"the app is not on that repository":        {github.ErrRepositoryNotInstalled, http.StatusUnprocessableEntity},
+		"a guessed installation":                   {nil, http.StatusUnprocessableEntity},
+		"the code was used":                        {github.ErrCodeRejected, http.StatusBadRequest},
+		"the installation was suspended":           {github.ErrInstallationGone, http.StatusConflict},
+		"github rate limits":                       {fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), http.StatusServiceUnavailable},
+		"the app key expired":                      {fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), http.StatusBadGateway},
+		"something else":                           {errors.New("dial tcp: " + leak), http.StatusInternalServerError},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newRepoWorld(t, true)
@@ -364,9 +359,9 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		{"attach", "owner", "POST", "/projects/" + w.projectA + "/repo", attachBody(100, "acme/model", "code"), unavailable},
 		{"attach to another org's project", "owner", "POST", "/projects/" + w.projectB + "/repo", attachBody(100, "acme/model", "code"), http.StatusNotFound},
 		{"attach as a member", "member", "POST", "/projects/" + w.projectA + "/repo", attachBody(100, "acme/model", "code"), http.StatusForbidden},
-		{"a credential", "agent", "GET", "/git-credential", nil, unavailable},
-		{"a credential for a person", "owner", "GET", "/git-credential", nil, http.StatusForbidden},
-		{"a credential with nothing to it", "agent-second-project", "GET", "/git-credential", nil, http.StatusNotFound},
+		{"a credential", "agent", "GET", modelCredential, nil, unavailable},
+		{"a credential for a person", "owner", "GET", modelCredential, nil, http.StatusForbidden},
+		{"a credential with nothing to it", "agent-second-project", "GET", otherCredential, nil, http.StatusNotFound},
 		{"reading what is attached", "owner", "GET", "/projects/" + w.projectA + "/repo", nil, http.StatusOK},
 		{"detaching it", "owner", "DELETE", "/projects/" + w.projectA + "/repo", nil, http.StatusNoContent},
 	} {
@@ -381,23 +376,23 @@ func TestAGitCredentialGoesToWhatThePlatformLaunchedAndIsLimitedToItsProject(t *
 	w.seed(w.projectA, 1, "Acme/Model")
 	w.seed(w.projectA2, 2, "acme/other")
 	for _, tc := range []struct {
-		caller string
-		want   minted
-		path   string
+		caller, call string
+		want         minted
+		path         string
 	}{
-		{"agent", minted{100, 1, github.Write}, "Acme/Model.git"},
-		{"coordinator", minted{100, 1, github.Read}, "Acme/Model.git"},
-		{"job", minted{100, 1, github.Read}, "Acme/Model.git"},
+		{"agent", modelCredential, minted{100, 1, github.Write}, "Acme/Model.git"},
+		{"coordinator", modelCredential, minted{100, 1, github.Read}, "Acme/Model.git"},
+		{"job", modelCredential, minted{100, 1, github.Read}, "Acme/Model.git"},
 		// The second project shares the installation and gets its own repository alone.
-		{"agent-second-project", minted{100, 2, github.Write}, "acme/other.git"},
+		{"agent-second-project", otherCredential, minted{100, 2, github.Write}, "acme/other.git"},
 	} {
 		before := len(w.app.mints)
-		rec := w.call(tc.caller, "GET", "/git-credential", nil)
+		rec := w.call(tc.caller, "GET", tc.call, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: got = %d %s", tc.caller, rec.Code, rec.Body)
 		}
 		var credential GitCredential
-		w.ok(tc.caller, "GET", "/git-credential", nil, http.StatusOK, &credential)
+		w.ok(tc.caller, "GET", tc.call, nil, http.StatusOK, &credential)
 		if len(w.app.mints) != before+2 || w.app.mints[before] != tc.want || w.app.mints[before+1] != tc.want {
 			t.Fatalf("%s: minted %+v, want %+v on each of the two calls", tc.caller, w.app.mints[before:], tc.want)
 		}
@@ -411,6 +406,55 @@ func TestAGitCredentialGoesToWhatThePlatformLaunchedAndIsLimitedToItsProject(t *
 	}
 }
 
+// Nothing is minted until the address git asked about is known to be the project's repository.
+func TestAGitCredentialIsMintedOnlyForTheAddressOfTheProjectsRepository(t *testing.T) {
+	w := newRepoWorld(t, true)
+	w.seed(w.projectA, 1, "Acme/Model")
+	w.seed(w.projectA2, 2, "acme/other")
+	ask := func(protocol, host, path string) string {
+		return "/git-credential?" + url.Values{"protocol": {protocol}, "host": {host}, "path": {path}}.Encode()
+	}
+	for _, path := range []string{"Acme/Model.git", "Acme/Model", "acme/model.git", "/Acme/Model.git/", "Acme/Model.git/info/lfs"} {
+		var credential GitCredential
+		w.ok("agent", "GET", ask("https", "github.com", path), nil, http.StatusOK, &credential)
+		if credential.Path != strings.Trim(path, "/") || credential.Password == "" {
+			t.Errorf("path %q: credential path = %q", path, credential.Path)
+		}
+	}
+	w.ok("agent", "GET", ask("https", "GitHub.com", "Acme/Model.git"), nil, http.StatusOK, nil)
+	served := len(w.app.mints)
+	for name, call := range map[string]string{
+		"a sibling project's repository": ask("https", "github.com", "acme/other.git"),
+		"a repository under it":          ask("https", "github.com", "Acme/Model.git/extra"),
+		"a repository that starts so":    ask("https", "github.com", "Acme/Model.github"),
+		"the lfs path of another":        ask("https", "github.com", "acme/other.git/info/lfs"),
+		"another host":                   ask("https", "evil.example", "Acme/Model.git"),
+		"a host that starts so":          ask("https", "github.com.evil.example", "Acme/Model.git"),
+		"plain http":                     ask("http", "github.com", "Acme/Model.git"),
+		"no protocol":                    ask("", "github.com", "Acme/Model.git"),
+		"no path":                        ask("https", "github.com", ""),
+	} {
+		rec := w.call("agent", "GET", call, nil)
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: got = %d %s, want a refusal", name, rec.Code, rec.Body)
+		}
+		if strings.Contains(rec.Body.String(), "ghs_") {
+			t.Errorf("%s: the refusal holds a token: %s", name, rec.Body)
+		}
+	}
+	for name, call := range map[string]string{
+		"no parameters": "/git-credential", "no path parameter": "/git-credential?protocol=https&host=github.com",
+		"a parameter it does not know": modelCredential + "&username=x",
+	} {
+		if rec := w.call("agent", "GET", call, nil); rec.Code < 400 || rec.Code >= 500 {
+			t.Errorf("%s: got = %d %s, want the request refused", name, rec.Code, rec.Body)
+		}
+	}
+	if len(w.app.mints) != served {
+		t.Fatalf("%d tokens were minted for addresses that are not the repository's", len(w.app.mints)-served)
+	}
+}
+
 func TestNoGitCredentialForAnyoneElse(t *testing.T) {
 	w := newRepoWorld(t, true)
 	w.seed(w.projectA, 1, "Acme/Model")
@@ -421,7 +465,7 @@ func TestNoGitCredentialForAnyoneElse(t *testing.T) {
 		// An agent of another org has a project of its own, with nothing attached.
 		"agent-other-org": http.StatusNotFound,
 	} {
-		if rec := w.call(caller, "GET", "/git-credential", nil); rec.Code != want {
+		if rec := w.call(caller, "GET", modelCredential, nil); rec.Code != want {
 			t.Errorf("%s: got = %d %s, want = %d", caller, rec.Code, rec.Body, want)
 		}
 	}
@@ -430,39 +474,29 @@ func TestNoGitCredentialForAnyoneElse(t *testing.T) {
 	}
 }
 
+// The token of a run that is over still works for its wind-down. A credential would outlive it
+// by an hour, so none is minted: for an agent, a coordinator and a job alike.
 func TestNoGitCredentialOnceTheRunIsOver(t *testing.T) {
-	for name, tc := range map[string]struct {
-		arrange func(w *repoWorld)
-		caller  string
-	}{
-		"an agent after its platform experiment closed": {func(w *repoWorld) { w.runs.closed["pe-a"] = true }, "agent"},
-		"an agent that was cut":                         {func(w *repoWorld) { w.runs.cut["agent-1"] = true }, "agent"},
-		"a coordinator after the close":                 {func(*repoWorld) {}, "coordinator-after-close"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			w := newRepoWorld(t, true)
-			w.seed(w.projectA, 1, "Acme/Model")
-			tc.arrange(w)
-			rec := w.call(tc.caller, "GET", "/git-credential", nil)
-			if rec.Code != http.StatusForbidden || len(w.app.mints) != 0 {
-				t.Fatalf("got = %d %s with %d tokens minted, want 403 and none", rec.Code, rec.Body, len(w.app.mints))
-			}
-		})
-	}
-	// Another agent of the same platform experiment is untouched by one agent's cut.
 	w := newRepoWorld(t, true)
 	w.seed(w.projectA, 1, "Acme/Model")
-	w.runs.cut["agent-9"] = true
-	w.ok("agent", "GET", "/git-credential", nil, http.StatusOK, nil)
+	for _, caller := range []string{"agent-run-over", "coordinator-run-over", "job-run-over"} {
+		rec := w.call(caller, "GET", modelCredential, nil)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "is over") || len(w.app.mints) != 0 {
+			t.Errorf("%s: got = %d %s with %d tokens minted, want 403 and none", caller, rec.Code, rec.Body, len(w.app.mints))
+		}
+	}
+	for _, caller := range []string{"agent", "coordinator", "job"} {
+		w.ok(caller, "GET", modelCredential, nil, http.StatusOK, nil)
+	}
 }
 
 func TestARepositoryDetachedMidRunStopsCredentialsAtOnce(t *testing.T) {
 	w := newRepoWorld(t, true)
 	w.seed(w.projectA, 1, "Acme/Model")
-	w.ok("agent", "GET", "/git-credential", nil, http.StatusOK, nil)
+	w.ok("agent", "GET", modelCredential, nil, http.StatusOK, nil)
 	w.ok("owner", "DELETE", "/projects/"+w.projectA+"/repo", nil, http.StatusNoContent, nil)
 	for _, caller := range []string{"agent", "job", "coordinator"} {
-		rec := w.call(caller, "GET", "/git-credential", nil)
+		rec := w.call(caller, "GET", modelCredential, nil)
 		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no repository is attached") {
 			t.Errorf("%s after the detach: got = %d %s, want 404", caller, rec.Code, rec.Body)
 		}
@@ -470,12 +504,38 @@ func TestARepositoryDetachedMidRunStopsCredentialsAtOnce(t *testing.T) {
 	if len(w.app.mints) != 1 {
 		t.Fatalf("tokens minted = %d, want only the one from before the detach", len(w.app.mints))
 	}
-	// Attached again, to another repository, the same agent gets that one.
+	// Attached again, to another repository, the same agent gets that one and no longer the first.
 	w.ok("owner", "POST", "/projects/"+w.projectA+"/repo", attachBody(100, "acme/other", "code"), http.StatusOK, nil)
+	attachMints := len(w.app.mints)
 	var credential GitCredential
-	w.ok("agent", "GET", "/git-credential", nil, http.StatusOK, &credential)
-	if credential.Path != "acme/other.git" || w.app.mints[1].repository != 2 {
-		t.Fatalf("after re-attaching: credential = %+v, minted %+v", credential, w.app.mints[1])
+	w.ok("agent", "GET", otherCredential, nil, http.StatusOK, &credential)
+	if credential.Path != "acme/other.git" || w.app.mints[attachMints].repository != 2 {
+		t.Fatalf("after re-attaching: credential = %+v, minted %+v", credential, w.app.mints[attachMints])
+	}
+	if rec := w.call("agent", "GET", modelCredential, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("the repository attached before: got = %d %s, want 404", rec.Code, rec.Body)
+	}
+}
+
+// The repository is held by its id, so a rename leaves tokens working while every address the
+// agents hold is stale. That is refused, and names where the repository went.
+func TestARenamedRepositoryIsRefusedUntilItIsAttachedAgain(t *testing.T) {
+	w := newRepoWorld(t, true)
+	w.seed(w.projectA, 1, "Acme/Model")
+	w.app.names[1] = "newowner/model"
+	for _, caller := range []string{"agent", "job", "coordinator"} {
+		rec := w.call(caller, "GET", modelCredential, nil)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "newowner/model") || strings.Contains(rec.Body.String(), "ghs_") {
+			t.Errorf("%s: got = %d %s, want 409 naming the new address and no token", caller, rec.Code, rec.Body)
+		}
+	}
+	if _, err := w.svc.ExperimentBase(context.Background(), w.projectA); err == nil || len(w.app.files) != 0 {
+		t.Fatalf("the experiment file of a renamed repository was read: %v", err)
+	}
+	// A change of case alone is a rename too: the stored name is the address handed out.
+	w.app.names[1] = "acme/model"
+	if rec := w.call("agent", "GET", modelCredential, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("a case-only rename: got = %d %s, want 409", rec.Code, rec.Body)
 	}
 }
 
@@ -486,6 +546,7 @@ func TestWhatGitHubRefusesOnACredential(t *testing.T) {
 	}{
 		"the installation was revoked":                  {github.ErrInstallationGone, http.StatusConflict},
 		"the repository was taken out of the selection": {github.ErrRepositoryNotInstalled, http.StatusConflict},
+		"the installation withholds the access":         {github.ErrPermissionNotGranted, http.StatusConflict},
 		"github rate limits":                            {github.ErrRateLimited, http.StatusServiceUnavailable},
 		"the app key expired":                           {fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), http.StatusBadGateway},
 		"something else":                                {errors.New("unexpected " + leak), http.StatusInternalServerError},
@@ -494,7 +555,7 @@ func TestWhatGitHubRefusesOnACredential(t *testing.T) {
 			w := newRepoWorld(t, true)
 			w.seed(w.projectA, 1, "Acme/Model")
 			w.app.tokenErr = tc.err
-			rec := w.call("agent", "GET", "/git-credential", nil)
+			rec := w.call("agent", "GET", modelCredential, nil)
 			if rec.Code != tc.want {
 				t.Fatalf("got = %d %s, want = %d", rec.Code, rec.Body, tc.want)
 			}
@@ -506,7 +567,7 @@ func TestWhatGitHubRefusesOnACredential(t *testing.T) {
 				t.Fatal("a failed mint detached the repository")
 			}
 			w.app.tokenErr = nil
-			w.ok("agent", "GET", "/git-credential", nil, http.StatusOK, nil)
+			w.ok("agent", "GET", modelCredential, nil, http.StatusOK, nil)
 		})
 	}
 }
@@ -533,7 +594,7 @@ func TestExperimentBaseAndCloneURL(t *testing.T) {
 	}
 	w.app.file = "name: from the repo\n"
 	data, err := w.svc.ExperimentBase(ctx, w.projectA)
-	want := minted{100, 1, github.Access(":" + ExperimentBasePath)}
+	want := minted{0, 1, github.Access("ghs_minted_1@:" + domain.ExperimentFile)}
 	if err != nil || string(data) != w.app.file || len(w.app.files) != 1 || w.app.files[0] != want {
 		t.Fatalf("base = %q, %v, read as %+v, want the file at the default branch head", data, err, w.app.files)
 	}
@@ -542,6 +603,7 @@ func TestExperimentBaseAndCloneURL(t *testing.T) {
 		want int
 	}{
 		"no such file":         {github.ErrFileNotFound, http.StatusUnprocessableEntity},
+		"a directory":          {github.ErrNotAFile, http.StatusUnprocessableEntity},
 		"installation gone":    {github.ErrInstallationGone, http.StatusConflict},
 		"repository taken out": {github.ErrRepositoryNotInstalled, http.StatusConflict},
 		"rate limited":         {github.ErrRateLimited, http.StatusServiceUnavailable},

@@ -133,7 +133,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), zap.NewNop()).WithAgentLaunch("launcher-main", agentsTestSecret)
+	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), &fakeProjectRepos{}, zap.NewNop()).WithAgentLaunch("launcher-main", agentsTestSecret)
 	RegisterAgentsHuma(doc, handler)
 	return r
 }
@@ -437,5 +437,5 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 	}()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, newRosterStore(domain.PlatformExpOpen, 1)), zap.NewNop()))
+	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, newRosterStore(domain.PlatformExpOpen, 1)), &fakeProjectRepos{}, zap.NewNop()))
 }

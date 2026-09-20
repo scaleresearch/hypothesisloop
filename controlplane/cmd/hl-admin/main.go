@@ -31,12 +31,14 @@ const usage = `usage: hl-admin <command>
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
-  repo attach PROJECT INSTALLATION REPOSITORY_ID OWNER/NAME DEFAULT_BRANCH
-                                   record a GitHub repository as the project's, as an operator who
-                                   vouches for it: the API's own attach asks the person to prove on
-                                   GitHub that they can push to it, and this does not
+  repo attach PROJECT INSTALLATION REPOSITORY_ID
+                                   make a GitHub repository the project's, as an operator who
+                                   vouches for it. GitHub is asked, as the App, that the installation
+                                   covers the repository, and names it. The API's own attach also asks
+                                   the person to prove they can push to it, and this does not
 
-token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL.`
+token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL, and repo attach needs the
+github section of the config.`
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -46,13 +48,13 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
-	cfg, err := loadAuthConfig()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
 	switch {
 	case len(args) == 2 && args[0] == "token":
-		token, err := auth.Mint(cfg.SigningSecret, args[1])
+		token, err := auth.Mint(cfg.Auth.SigningSecret, args[1])
 		if err != nil {
 			return err
 		}
@@ -97,14 +99,14 @@ func run(args []string, stdout io.Writer) error {
 			if _, err := db.NewClustersStore(pool).RegisterCluster(ctx, args[2], args[3]); err != nil {
 				return err
 			}
-			token, err := auth.Mint(cfg.SigningSecret, auth.RuntimeScope(args[2]))
+			token, err := auth.Mint(cfg.Auth.SigningSecret, auth.RuntimeScope(args[2]))
 			if err != nil {
 				return err
 			}
 			fmt.Fprintln(stdout, token)
 			return nil
 		})
-	case len(args) == 7 && args[0] == "repo" && args[1] == "attach":
+	case len(args) == 5 && args[0] == "repo" && args[1] == "attach":
 		installation, err := strconv.ParseInt(args[3], 10, 64)
 		if err != nil || installation <= 0 {
 			return fmt.Errorf("INSTALLATION must be the installation's number, got %q", args[3])
@@ -113,16 +115,15 @@ func run(args []string, stdout io.Writer) error {
 		if err != nil || repository <= 0 {
 			return fmt.Errorf("REPOSITORY_ID must be the repository's number on GitHub, got %q", args[4])
 		}
-		if err := github.ValidRepository(args[5]); err != nil {
+		if !cfg.GitHub.Configured() {
+			return errors.New("the config has no github section, so there is no App to ask about the repository")
+		}
+		app, err := github.New(cfg.GitHub)
+		if err != nil {
 			return err
 		}
-		if args[6] == "" {
-			return errors.New("DEFAULT_BRANCH is required")
-		}
 		return withPool(func(ctx context.Context, pool *db.Pool) error {
-			return db.NewAccountsStore(pool).AttachProjectRepo(ctx, &domain.ProjectRepo{
-				ProjectID: args[2], InstallationID: installation, RepositoryID: repository, Repo: args[5], DefaultBranch: args[6],
-			})
+			return attachRepo(ctx, db.NewAccountsStore(pool), app, args[2], installation, repository, stdout)
 		})
 	default:
 		return errors.New(usage)
@@ -140,16 +141,43 @@ func onOff(arg string) (bool, error) {
 	}
 }
 
-func loadAuthConfig() (config.AuthConfig, error) {
+func loadConfig() (*config.Config, error) {
 	path := os.Getenv("HYPOTHESISLOOP_CONFIG")
 	if path == "" {
-		return config.AuthConfig{}, errors.New("HYPOTHESISLOOP_CONFIG environment variable is required")
+		return nil, errors.New("HYPOTHESISLOOP_CONFIG environment variable is required")
 	}
-	cfg, err := config.Load(path)
+	return config.Load(path)
+}
+
+type repoProjects interface {
+	GetProject(ctx context.Context, id string) (*domain.Project, error)
+	AttachProjectRepo(ctx context.Context, repo *domain.ProjectRepo) error
+}
+
+type installations interface {
+	Token(ctx context.Context, installationID, repositoryID int64, access github.Access) (*github.Token, error)
+}
+
+// attachRepo records a repository as a project's. Nothing typed is recorded unchecked: GitHub
+// mints a token for the repository only when the installation covers it, and its answer is where
+// the name comes from.
+func attachRepo(ctx context.Context, projects repoProjects, app installations, projectID string, installation, repository int64, stdout io.Writer) error {
+	project, err := projects.GetProject(ctx, projectID)
 	if err != nil {
-		return config.AuthConfig{}, err
+		return err
 	}
-	return cfg.Auth, nil
+	if project == nil {
+		return fmt.Errorf("project %s does not exist", projectID)
+	}
+	token, err := app.Token(ctx, installation, repository, github.Read)
+	if err != nil {
+		return fmt.Errorf("installation %d and repository %d: %w", installation, repository, err)
+	}
+	repo := &domain.ProjectRepo{ProjectID: projectID, InstallationID: installation, RepositoryID: repository, Repo: token.Repository}
+	if err := projects.AttachProjectRepo(ctx, repo); err != nil {
+		return err
+	}
+	return json.NewEncoder(stdout).Encode(repo)
 }
 
 func withPool(do func(context.Context, *db.Pool) error) error {

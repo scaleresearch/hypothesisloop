@@ -26,7 +26,7 @@ func TestAProjectHoldsOneRepositoryAndSharesAnInstallationWithOthers(t *testing.
 		t.Fatalf("detach with none attached: got = %v, want = %v", err, ErrProjectRepoNotFound)
 	}
 
-	attached := &domain.ProjectRepo{ProjectID: first.ID, InstallationID: 7, RepositoryID: 11, Repo: "acme/model", DefaultBranch: "main"}
+	attached := &domain.ProjectRepo{ProjectID: first.ID, InstallationID: 7, RepositoryID: 11, Repo: "acme/model"}
 	if err := accounts.AttachProjectRepo(ctx, attached); err != nil {
 		t.Fatalf("attach: got = %v, want = nil", err)
 	}
@@ -34,7 +34,7 @@ func TestAProjectHoldsOneRepositoryAndSharesAnInstallationWithOthers(t *testing.
 		t.Fatal("attach did not report when it happened")
 	}
 	// Two projects on one installation, each with its own repository.
-	if err := accounts.AttachProjectRepo(ctx, &domain.ProjectRepo{ProjectID: second.ID, InstallationID: 7, RepositoryID: 12, Repo: "acme/other", DefaultBranch: "trunk"}); err != nil {
+	if err := accounts.AttachProjectRepo(ctx, &domain.ProjectRepo{ProjectID: second.ID, InstallationID: 7, RepositoryID: 12, Repo: "acme/other"}); err != nil {
 		t.Fatalf("attach on the same installation: got = %v, want = nil", err)
 	}
 	got, err := accounts.GetProjectRepo(ctx, first.ID)
@@ -42,12 +42,12 @@ func TestAProjectHoldsOneRepositoryAndSharesAnInstallationWithOthers(t *testing.
 		t.Fatalf("read back: got = %+v, %v, want = %+v", got, err, attached)
 	}
 
-	replaced := &domain.ProjectRepo{ProjectID: first.ID, InstallationID: 8, RepositoryID: 13, Repo: "acme/renamed", DefaultBranch: "dev"}
+	replaced := &domain.ProjectRepo{ProjectID: first.ID, InstallationID: 8, RepositoryID: 13, Repo: "acme/renamed"}
 	if err := accounts.AttachProjectRepo(ctx, replaced); err != nil {
 		t.Fatalf("attach over an attached repo: got = %v, want = nil", err)
 	}
 	got, err = accounts.GetProjectRepo(ctx, first.ID)
-	if err != nil || got == nil || got.RepositoryID != 13 || got.InstallationID != 8 || got.Repo != "acme/renamed" || got.DefaultBranch != "dev" {
+	if err != nil || got == nil || got.RepositoryID != 13 || got.InstallationID != 8 || got.Repo != "acme/renamed" {
 		t.Fatalf("after a second attach: got = %+v, %v, want the new repository alone", got, err)
 	}
 
@@ -61,7 +61,7 @@ func TestAProjectHoldsOneRepositoryAndSharesAnInstallationWithOthers(t *testing.
 		t.Fatalf("the other project after a detach: got = %+v, %v, want its repository untouched", other, err)
 	}
 
-	if err := accounts.AttachProjectRepo(ctx, &domain.ProjectRepo{ProjectID: "prj_missing", InstallationID: 7, RepositoryID: 11, Repo: "acme/model", DefaultBranch: "main"}); !errors.Is(err, ErrProjectNotFound) {
+	if err := accounts.AttachProjectRepo(ctx, &domain.ProjectRepo{ProjectID: "prj_missing", InstallationID: 7, RepositoryID: 11, Repo: "acme/model"}); !errors.Is(err, ErrProjectNotFound) {
 		t.Fatalf("attach to a project that does not exist: got = %v, want = %v", err, ErrProjectNotFound)
 	}
 }

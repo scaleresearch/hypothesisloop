@@ -136,7 +136,7 @@ func main() {
 		}
 		githubApp = client
 	}
-	repos := accounts.NewRepos(db.NewAccountsStore(pool), directory, githubApp, logger)
+	repos := accounts.NewRepos(db.NewAccountsStore(pool), githubApp, gate.access, logger)
 
 	apiServer := newAPIServer(runCtx, gate, repos, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
@@ -192,11 +192,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	resourceCatalog := quota.ResourceCatalog{
 		AcceleratorTypes: acceleratorTypeInfos,
 	}
-	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).
+	peHandler := quota.NewPlatformExperimentsHandler(peSvc, repos, logger).
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
-		WithAgentLaunch(pcfg.Agents.Launcher, pcfg.Auth.SigningSecret).
-		WithProjectRepos(repos)
+		WithAgentLaunch(pcfg.Agents.Launcher, pcfg.Auth.SigningSecret)
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch

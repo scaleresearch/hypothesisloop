@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -143,9 +144,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		DefaultStatus: 201,
 		Description: "Operator/dashboard endpoint. project_id, name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
 			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\". " +
-			"With from_repo: true every field the request leaves out is read from .hypothesisloop/experiment.yaml at the head of the default branch " +
-			"of the project's repository, a YAML file shaped like this body without project_id. What the request sets wins, so a run states its own " +
-			"dates and budget over the base its repository carries.",
+			"description, metrics and starts_at are required as well, and a zero starts_at starts it now. " +
+			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of the " +
+			"project's repository, a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and ends_at " +
+			"are never read from the file and stay required of the body: any agent's token can push to that branch, so what a run costs and how " +
+			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file.",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -155,22 +158,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
 			return nil, err
 		}
+		// What is wrong with a body laid over the experiment file may be the file's doing, so every
+		// such refusal has one status and names the file.
+		invalid := func(reason string) error { return huma.Error400BadRequest(reason) }
 		if in.Body.FromRepo {
+			invalid = func(reason string) error {
+				return huma.Error422UnprocessableEntity("with " + domain.ExperimentFile + " of the project's repository under the request: " + reason)
+			}
 			body, err := peh.fromRepo(ctx, in.Body)
 			if errors.Is(err, ErrInvalidPlatformExperiment) {
-				return nil, huma.Error422UnprocessableEntity(err.Error())
+				return nil, invalid(err.Error())
 			}
 			if err != nil {
 				return nil, err
 			}
 			in.Body = body
+		} else if missing := in.Body.missing(); len(missing) > 0 {
+			return nil, huma.Error422UnprocessableEntity(strings.Join(missing, ", ") + " must be stated: only with from_repo may the repository's experiment file state them")
 		}
 		if in.Body.Name == "" || in.Body.BudgetAcceleratorHours <= 0 {
-			return nil, huma.Error400BadRequest("name and budget_accelerator_hours are required")
+			return nil, invalid("name and budget_accelerator_hours are required")
 		}
 		pe, err := peh.svc.Create(ctx, in.Body)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
-			return nil, huma.Error400BadRequest(err.Error())
+			return nil, invalid(err.Error())
 		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -281,6 +292,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
 		if pe.CodeRepoURL, err = peh.repos.CloneURL(ctx, pe.ProjectID); err != nil {
+			peh.logger.Error("read the repository of a platform experiment's project", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
 			return nil, huma.Error500InternalServerError("failed to read the project's repository")
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
@@ -297,15 +309,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"them. Rejected once the experiment is closed.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
-		Body CreatePlatformExperimentRequest
+		Body UpdatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if in.Body.FromRepo {
-			return nil, huma.Error400BadRequest("from_repo is read when a platform experiment is created, and cannot be set on an update")
-		}
-		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
+		pe, err := peh.svc.Update(ctx, in.ID, in.Body.fields())
 		if err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}

@@ -56,8 +56,8 @@ def share_cluster(name: str, shared: bool) -> None:
     _run("cluster", "share", name, "on" if shared else "off")
 
 
-def attach_repo(project_id: str, installation_id: str, repository_id: str, repo: str, default_branch: str) -> None:
+def attach_repo(project_id: str, installation_id: str, repository_id: str) -> None:
     """Records a GitHub repository as the project's, standing in for the person who proves in a
-    browser that they can push to it."""
-    _run("repo", "attach", project_id, installation_id, repository_id, repo, default_branch)
+    browser that they can push to it. GitHub is asked that the installation covers it."""
+    _run("repo", "attach", project_id, installation_id, repository_id)
 

@@ -133,6 +133,10 @@ func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
 	return reflect.DeepEqual(a, b)
 }
 
+// ExperimentFile is where a project's repository keeps the base of its platform experiments,
+// read at the head of its default branch when one is created with from_repo.
+const ExperimentFile = ".hypothesisloop/experiment.yaml"
+
 // PlatformExperiment is the operator-defined compute envelope agents compete within.
 type PlatformExperiment struct {
 	ID                     string  `json:"id"`

@@ -45,7 +45,6 @@ type ProjectRepo struct {
 	InstallationID int64     `json:"installation_id"`
 	RepositoryID   int64     `json:"repository_id"`
 	Repo           string    `json:"repo"`
-	DefaultBranch  string    `json:"default_branch"`
 	AttachedAt     time.Time `json:"attached_at"`
 }
 

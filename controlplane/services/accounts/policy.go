@@ -53,6 +53,16 @@ func (pol policy) visibleProjects(ctx context.Context, orgID string, projects []
 // changeProject admits the caller to change one project. A project the caller does not see,
 // whether it is another org's, a sibling of the one its key is bound to, or absent, is not found.
 func (pol policy) changeProject(ctx context.Context, project *domain.Project) error {
+	if err := pol.readProject(ctx, project); err != nil {
+		return err
+	}
+	_, err := pol.access.OrgAdmin(ctx, project.OrgID)
+	return err
+}
+
+// readProject admits an account holder to a project it sees, under the same rule of what reads
+// as not found.
+func (pol policy) readProject(ctx context.Context, project *domain.Project) error {
 	p, err := pol.access.Account(ctx)
 	if err != nil {
 		return err
@@ -60,8 +70,7 @@ func (pol policy) changeProject(ctx context.Context, project *domain.Project) er
 	if project == nil || !p.Scope().Admits(domain.Tenancy{OrgID: project.OrgID, ProjectID: project.ID}) {
 		return auth.NotFound("project")
 	}
-	_, err = pol.access.OrgAdmin(ctx, project.OrgID)
-	return err
+	return nil
 }
 
 // createOrg admits the caller to create an org and names its owner. A person owns what they
