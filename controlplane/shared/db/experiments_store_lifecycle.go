@@ -221,7 +221,6 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 // Unlike RequeuePreempted this does NOT rescale the estimate. A preempted job is assumed to
 // resume where it stopped, so only its remaining hours are re-reserved; a retried gang starts
 // from step zero, so the full original estimate is exactly what the next attempt needs.
-//
 func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',

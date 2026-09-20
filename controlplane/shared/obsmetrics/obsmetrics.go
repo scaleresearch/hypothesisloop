@@ -35,11 +35,11 @@ var (
 	}, []string{"tier", "result"})
 
 	// StaleDesiredStateExperiments is a point-in-time count from the last GC sweep pass — an
-	// orphaned SUBMITTED/ADMITTED/RUNNING experiment with no recent actual-state phase metric.
+	// orphaned SUBMITTED/RUNNING experiment with no recent actual-state phase metric.
 	// Alert-only: this never triggers a state change, just visibility for operator review.
 	StaleDesiredStateExperiments = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hypothesisloop_stale_desired_state_experiments",
-		Help: "Count of SUBMITTED/ADMITTED/RUNNING experiments with no recent cluster job report, from the last GC sweep pass.",
+		Help: "Count of SUBMITTED/RUNNING experiments with no recent cluster job report, from the last GC sweep pass.",
 	})
 
 	// SpeculativeSubmitsTotal counts every SUBMITTED row created against a cluster with no live

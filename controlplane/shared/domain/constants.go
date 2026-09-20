@@ -11,7 +11,6 @@ type ExperimentStatus string
 const (
 	StatusSubmitted ExperimentStatus = "SUBMITTED"
 	StatusQueued    ExperimentStatus = "QUEUED"
-	StatusAdmitted  ExperimentStatus = "ADMITTED"
 	StatusRunning   ExperimentStatus = "RUNNING"
 	StatusCompleted ExperimentStatus = "COMPLETED"
 	StatusFailed    ExperimentStatus = "FAILED"
@@ -24,7 +23,7 @@ const (
 // surfaces as a driver error and a 500 rather than the client mistake it is.
 func ValidExperimentStatus(s ExperimentStatus) bool {
 	switch s {
-	case StatusSubmitted, StatusQueued, StatusAdmitted, StatusRunning,
+	case StatusSubmitted, StatusQueued, StatusRunning,
 		StatusCompleted, StatusFailed, StatusEvicted, StatusRejected:
 		return true
 	default:
@@ -42,6 +41,9 @@ const (
 	NotAdmittedStageCut            = "stage_cut"
 	NotAdmittedJobTooLong          = "job_too_long"
 	NotAdmittedWorkloadCreation    = "workload_creation_failed"
+	// NotAdmittedInsufficientQuota is the reason of a queued job whose reservation its agent's
+	// quota no longer covers at claim time.
+	NotAdmittedInsufficientQuota = "insufficient_quota"
 	// NotAdmittedNoMultiNodeCluster means the job spans more than one node and no connected
 	// cluster reports being able to run multi-node work. Distinct from capacity_unavailable
 	// because waiting will not fix it: this is not a busy platform, it is a platform with no
@@ -164,7 +166,7 @@ const (
 	// EvictionJobTooLong terminates a job that has run longer than the current stage's
 	// max_job_hours.
 	EvictionJobTooLong EvictionReason = "job_too_long"
-	// EvictionStuckPending marks a job that was admitted (SUBMITTED/ADMITTED) but never
+	// EvictionStuckPending marks a job that was admitted (SUBMITTED) but never
 	// reported RUNNING within StuckPendingTimeoutSeconds — e.g. unschedulable due to
 	// fragmentation or a bad image. See job_watcher.go.
 	EvictionStuckPending EvictionReason = "stuck_pending"
@@ -265,7 +267,7 @@ const (
 )
 
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on
-// their own, however long a job is left SUBMITTED/ADMITTED — a scheduler retry or the runtime's
+// their own, however long a job is left SUBMITTED — a scheduler retry or the runtime's
 // own reconcile loop cannot fix a bad image or a malformed config. A job reporting one of these
 // is evicted EvictionUnschedulable well before StuckPendingTimeout, instead of occupying a
 // reservation until the generic timeout catches it.

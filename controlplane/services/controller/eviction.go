@@ -76,7 +76,7 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 			continue
 		}
 		for _, exp := range active {
-			if exp.Status == domain.StatusRunning || exp.Status == domain.StatusAdmitted {
+			if exp.Status == domain.StatusRunning {
 				if err := c.evict(ctx, exp, domain.EvictionExperimentClosed, now); err != nil {
 					c.logger.Error("reconcileClosedExperiments: evict running job",
 						zap.String("exp", exp.ID), zap.Error(err))

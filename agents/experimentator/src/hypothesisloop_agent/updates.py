@@ -65,7 +65,7 @@ def _events(stdout: str) -> list[dict]:
     return [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
 
 
-_UNFINISHED = ("QUEUED", "SUBMITTED", "ADMITTED", "RUNNING")
+_UNFINISHED = ("QUEUED", "SUBMITTED", "RUNNING")
 
 
 async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:

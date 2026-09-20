@@ -56,7 +56,7 @@ PE_BUDGET = 0.2
 
 pytestmark = pytest.mark.parallel
 
-RANK = {"QUEUED": 0, "SUBMITTED": 1, "ADMITTED": 2, "RUNNING": 3, "COMPLETED": 4}
+RANK = {"QUEUED": 0, "SUBMITTED": 1, "RUNNING": 2, "COMPLETED": 3}
 
 
 # --- holding a websocket from Python -----------------------------------------------------------
@@ -166,9 +166,7 @@ def order_problems(watcher: Watcher, job_id: str) -> list[str]:
     """Mirrors watch-stream.sh's embedded ORDER_VERDICT python 1:1, just native now that the whole
     scenario is Python: every status the job passed through must be present exactly once, in
     ascending order of the transition it names, each from its own transaction with a cursor at or
-    below its position (positions are transaction ids, not commit ordered). ADMITTED is
-    accepted between SUBMITTED and RUNNING because some placement paths use it; it is ranked, not
-    ignored."""
+    below its position (positions are transaction ids, not commit ordered)."""
     events = [e for e in watcher.events() if e.get("kind") == "experiment.status" and e.get("subject") == job_id]
     values = [e["value"] for e in events]
     problems = []

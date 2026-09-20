@@ -5,7 +5,7 @@
 //	POST /internal/clusters/{name}/reconcile — actual capacity in, desired workloads out
 //	POST /internal/clusters/{name}/status        — push job phase observations
 //
-// There is no command/ack protocol: an experiment's own status (SUBMITTED/ADMITTED/RUNNING)
+// There is no command/ack protocol: an experiment's own status (SUBMITTED/RUNNING)
 // is the single source of truth for "should a Job exist" — the agent fetches that view and
 // reconciles its local Jobs to match, the same way a kubelet reconciles pods to a desired
 // spec. This means desired-state is naturally idempotent and safe to poll from any number of

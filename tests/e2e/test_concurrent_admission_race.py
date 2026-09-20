@@ -37,7 +37,7 @@ from conftest import make_agent
 from support.cluster import L40, H100, job_resource_absent, node_allocatable_gpu_total
 from support.wait import eventually
 
-ADMITTED_STATUSES = ("SUBMITTED", "ADMITTED", "RUNNING")
+ADMITTED_STATUSES = ("SUBMITTED", "RUNNING")
 TERMINAL_STATUSES = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
 
 

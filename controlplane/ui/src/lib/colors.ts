@@ -22,7 +22,6 @@ export const statusColors: Record<string, string> = {
   COMPLETED: semantic.accent,
   QUEUED: semantic.warning,
   SUBMITTED: semantic.neutral,
-  ADMITTED: semantic.info,
   FAILED: semantic.danger,
   EVICTED: semantic.pink,
   REJECTED: semantic.danger,

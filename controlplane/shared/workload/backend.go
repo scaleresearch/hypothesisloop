@@ -17,7 +17,7 @@ type Backend interface {
 
 	// There is deliberately no DeleteWorkload: the source of truth for "should exp's job exist"
 	// is exp's own status. A caller that needs a job gone (preemption, eviction) moves it out of
-	// SUBMITTED/ADMITTED/RUNNING and the cluster agent reconciles it away.
+	// SUBMITTED/RUNNING and the cluster agent reconciles it away.
 	//
 	// CreateWorkload places exp's job onto its target cluster. Called only after the control
 	// plane's own admission decision (services/scheduler) — implementations are not expected
@@ -37,12 +37,12 @@ type Backend interface {
 	// substitute a different flavor than requested should read that back here.
 	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error)
 
-	// GetFlavorCapacity reports available capacity per cluster as a canonical domain.Footprint
-	// (CPU millicores + per-accelerator-flavor counts, see domain.CapacityFootprint) —
-	// guaranteed[cluster] and burst[cluster] — used by the scheduler's admission math
-	// (domain.Fits) to place each job on a cluster with room across every requested dimension
-	// jointly, rather than a pooled total that hides which cluster is overloaded.
-	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
+	// GetFlavorCapacity reports free capacity per connected cluster as a domain.Footprint (see
+	// domain.CapacityFootprint): available[cluster] is what can be claimed now, desiredFree[cluster]
+	// what is free once the cluster has converged on desired state. The scheduler's admission
+	// math (domain.Fits) places each job on a cluster with room across every requested dimension
+	// jointly.
+	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 
 	// GetAcceleratorCapacityByNode reports fresh actual free devices as
 	// cluster -> node -> flavor -> count for hard distributed-placement checks.

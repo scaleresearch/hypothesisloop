@@ -194,7 +194,7 @@ func TestUnknownStatusIsClientError(t *testing.T) {
 	if code, body := get(t, r, "/experiments?status=bogus"); code != http.StatusBadRequest {
 		t.Fatalf("status=bogus returned %d, want 400; body=%s", code, body)
 	}
-	for _, s := range []string{"QUEUED", "RUNNING", "COMPLETED", "EVICTED", "REJECTED", "FAILED", "SUBMITTED", "ADMITTED"} {
+	for _, s := range []string{"QUEUED", "RUNNING", "COMPLETED", "EVICTED", "REJECTED", "FAILED", "SUBMITTED"} {
 		if code, body := get(t, r, "/experiments?status="+s); code != 200 {
 			t.Errorf("status=%s returned %d, want 200; body=%s", s, code, body)
 		}

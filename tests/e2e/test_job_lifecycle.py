@@ -7,7 +7,7 @@
      cancel-while-RUNNING are genuinely different terminal outcomes of the same endpoint.
   3. Closing a platform experiment is not just a status flip: controller.reconcileClosedExperiments
      (a self-healing sweep, not a synchronous side effect of the close call itself) evicts every
-     still-RUNNING/ADMITTED job under it with reason "experiment_closed" on its next reconcile
+     still-RUNNING job under it with reason "experiment_closed" on its next reconcile
      tick, and rejects any further submission.
 API-only, parallel-safe.
 """

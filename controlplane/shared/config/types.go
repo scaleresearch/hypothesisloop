@@ -74,7 +74,7 @@ type SchedulerConfig struct {
 	// pod that's mid-reschedule (not hung, just briefly quiet while k8s recreates it elsewhere)
 	// gets permanently EVICTED before it ever gets a chance to resume reporting.
 	MinSilenceWindowSeconds int `yaml:"min_silence_window_seconds"`
-	// StuckPendingTimeoutSeconds bounds how long a job may stay SUBMITTED/ADMITTED without ever
+	// StuckPendingTimeoutSeconds bounds how long a job may stay SUBMITTED without ever
 	// reporting RUNNING before job_watcher evicts it (reason stuck_pending) and fully refunds
 	// its reservation.
 	StuckPendingTimeoutSeconds int `yaml:"stuck_pending_timeout_seconds"`

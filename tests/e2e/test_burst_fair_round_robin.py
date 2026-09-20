@@ -34,12 +34,12 @@ pytestmark = pytest.mark.exclusive("a100")
 ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe"
 HOURS = 0.02
 
-ADMITTED = ("RUNNING", "ADMITTED")
+STARTED = ("RUNNING",)
 TERMINAL = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
 
 
 def _is_admitted(api, job_id: str) -> bool:
-    return api.experiment(job_id)["status"] in ADMITTED
+    return api.experiment(job_id)["status"] in STARTED
 
 
 @pytest.mark.timeout(300)
@@ -65,11 +65,11 @@ def test_burst_fair_round_robin(api, run_id, deadline):
     filler_running = eventually(
         f"{filler} (filler) to claim the node",
         lambda: api.experiment(filler),
-        accept=lambda e: e["status"] in ADMITTED,
+        accept=lambda e: e["status"] in STARTED,
         reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
         deadline=deadline,
     )
-    assert filler_running["status"] in ADMITTED, (
+    assert filler_running["status"] in STARTED, (
         f"filler never admitted (status={filler_running['status']}); round-robin setup failed"
     )
 

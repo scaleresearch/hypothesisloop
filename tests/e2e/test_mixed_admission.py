@@ -49,10 +49,10 @@ def test_impossible_cpu_request_is_not_admitted(api, mixed_pe, deadline):
     status = eventually(
         f"{job_id} to settle",
         lambda: api.experiment(job_id)["status"],
-        accept=lambda s: s in ("RUNNING", "ADMITTED", "QUEUED", "SUBMITTED", "REJECTED", "FAILED", "EVICTED"),
+        accept=lambda s: s in ("RUNNING", "QUEUED", "SUBMITTED", "REJECTED", "FAILED", "EVICTED"),
         deadline=deadline,
     )
-    assert status not in ("RUNNING", "ADMITTED"), (
+    assert status != "RUNNING", (
         "job with an impossible CPU request (999999 cores) was admitted -- mixed CPU+accelerator fit not jointly checked"
     )
 
@@ -134,7 +134,7 @@ def test_unset_required_resource_is_rejected_not_defaulted(api, mixed_pe, deadli
     final = eventually(
         f"{job_id} to settle",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("RUNNING", "ADMITTED", "REJECTED", "FAILED"),
+        accept=lambda e: e["status"] in ("RUNNING", "REJECTED", "FAILED"),
         deadline=deadline,
     )
     assert final["status"] == "REJECTED", (

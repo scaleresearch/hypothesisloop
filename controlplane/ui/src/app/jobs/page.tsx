@@ -22,7 +22,7 @@ import { notAdmittedLabel } from '@/lib/eviction'
 import { useQueryParam } from '@/lib/query-state'
 import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 
-const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'ADMITTED', 'RUNNING'])
+const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
 const ELLIPSIS: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
@@ -128,7 +128,7 @@ function JobsPageContent() {
 
   const byStatus = stats?.by_status ?? {}
   const running   = byStatus.RUNNING ?? 0
-  const queued    = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0) + (byStatus.ADMITTED ?? 0)
+  const queued    = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0)
   const evicted   = byStatus.EVICTED ?? 0
   const completed = byStatus.COMPLETED ?? 0
 

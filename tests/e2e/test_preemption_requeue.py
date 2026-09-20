@@ -53,7 +53,7 @@ pytestmark = pytest.mark.exclusive("a100")
 ACCELERATOR_TYPE = A100
 A100_ACCH_RATE = 0.375
 
-ADMITTED = ("RUNNING", "ADMITTED")
+STARTED = ("RUNNING",)
 TERMINAL = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
 
 PREEMPT_METRICS = [
@@ -105,7 +105,7 @@ def test_single_node_burst_job_preempted_and_readmitted(api, run_id, deadline):
     ]
 
     def burst_admitted_count() -> int:
-        return sum(1 for j in burst_jobs if api.experiment(j)["status"] in ADMITTED)
+        return sum(1 for j in burst_jobs if api.experiment(j)["status"] in STARTED)
 
     eventually(
         f"both burst jobs admitted onto {ACCELERATOR_TYPE}",
@@ -206,7 +206,7 @@ def test_concurrent_burst_saturation_and_guaranteed_arrival(api, run_id, deadlin
         total = 0
         for j in (burst_a, burst_b, guaranteed):
             e = api.experiment(j)
-            if e["status"] in ADMITTED:
+            if e["status"] in STARTED:
                 total += int(e.get("accelerator_count") or 0)
         return total
 
@@ -219,7 +219,7 @@ def test_concurrent_burst_saturation_and_guaranteed_arrival(api, run_id, deadlin
         if gs in ("RUNNING", "COMPLETED", "FAILED", "REJECTED"):
             break
         time.sleep(1)
-    assert not over_capacity_seen, "over-capacity admission observed during concurrent burst+guaranteed arrival: more than 8 accelerators concurrently RUNNING/ADMITTED"
+    assert not over_capacity_seen, "over-capacity admission observed during concurrent burst+guaranteed arrival: more than 8 accelerators concurrently RUNNING"
 
     # Guaranteed-tier non-starvation: even arriving at the exact same instant as burst jobs racing
     # for the same capacity, the guaranteed job must still win eventually.

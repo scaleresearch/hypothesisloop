@@ -2,13 +2,10 @@
 // Enumerations
 // ---------------------------------------------------------------------------
 
-// Exactly domain.ValidExperimentStatus's set (shared/domain/constants.go). It used to omit
-// SUBMITTED/ADMITTED/REJECTED -- which every page then had to reach with a string cast -- and
-// carry PROMOTED, which the backend cannot produce.
+// Exactly domain.ValidExperimentStatus's set (shared/domain/constants.go).
 export enum ExperimentStatus {
   SUBMITTED = 'SUBMITTED',
   QUEUED = 'QUEUED',
-  ADMITTED = 'ADMITTED',
   RUNNING = 'RUNNING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',

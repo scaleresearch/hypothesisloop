@@ -27,7 +27,7 @@ type Store interface {
 	// prevent double-refunds when eviction and natural completion race.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
 	// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED,
-	// ADMITTED, RUNNING) for a platform experiment. Used by close-eviction reconciliation.
+	// RUNNING) for a platform experiment. Used by close-eviction reconciliation.
 	ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
 	// ResolveTermination atomically transitions status and records the reason in one DB
 	// transaction — see db.Store.ResolveTermination. Does not write usage; the caller settles

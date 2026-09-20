@@ -116,14 +116,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		return fmt.Errorf("get queued: %w", err)
 	}
 	for _, exp := range preRun {
-		// ADMITTED already has a workload being created for it, so it must go to EVICTED (the
-		// desired-state pull's deletion signal) — REJECTED is only correct for QUEUED/SUBMITTED,
-		// which never had a workload to tear down. See CancelExperiment for the same split.
-		to := domain.StatusRejected
-		if exp.Status == domain.StatusAdmitted {
-			to = domain.StatusEvicted
-		}
-		outcome, err := c.stagesStore.ResolveTermination(ctx, exp.ID, exp.Status, to,
+		outcome, err := c.stagesStore.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusRejected,
 			string(domain.EvictionStageCut), "")
 		if err != nil {
 			c.logger.Error("stage cut: reject queued", zap.String("id", exp.ID), zap.Error(err))
@@ -134,7 +127,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		}
 		obsmetrics.CountEviction(domain.EvictionStageCut)
 		// Never reached RUNNING; settlement derives zero usage from absent metrics.
-		exp.Status = to
+		exp.Status = domain.StatusRejected
 		exp.EvictionReason = string(domain.EvictionStageCut)
 		c.settleAndMark(ctx, exp)
 		c.logger.Info("stage cut: cancelled pre-run job", zap.String("exp", exp.ID), zap.String("agent", agentID))

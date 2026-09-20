@@ -26,10 +26,6 @@ type insufficientQuota interface {
 	InsufficientQuota() bool
 }
 
-// notAdmittedInsufficientQuota is the reason of a queued job whose reservation its agent's quota
-// no longer covers at claim time.
-const notAdmittedInsufficientQuota = "insufficient_quota"
-
 // notAdmittedReasonForSubmitError maps a submitJob/submitJobTo error to the not_admitted_reason
 // the row should carry. Order matters: check the most specific error first.
 func notAdmittedReasonForSubmitError(err error) string {
@@ -39,7 +35,7 @@ func notAdmittedReasonForSubmitError(err error) string {
 	case errors.As(err, &capErr):
 		return domain.NotAdmittedConcurrencyCap
 	case errors.As(err, &quotaErr):
-		return notAdmittedInsufficientQuota + ": " + quotaErr.Error()
+		return domain.NotAdmittedInsufficientQuota + ": " + quotaErr.Error()
 	case errors.Is(err, errAdmissionCapacityChanged):
 		return domain.NotAdmittedCapacityUnavailable
 	default:

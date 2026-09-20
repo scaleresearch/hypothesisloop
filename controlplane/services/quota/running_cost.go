@@ -11,7 +11,7 @@ import (
 
 // AddDesiredQuotaUsage (see db.PlatformExperimentsStore) debits every non-terminal experiment's
 // static, admission-time EstimatedCostAccH into "used". That's the right number for a QUEUED or
-// ADMITTED job — nothing has run yet, so the estimate is the only number there is. But once a job
+// SUBMITTED job — nothing has run yet, so the estimate is the only number there is. But once a job
 // is RUNNING, the estimate stops tracking reality: a job that overruns its estimate (this
 // platform experiment's own stage 2 is uncapped — max_job_hours absent — precisely so a
 // confirmation run can run long) keeps debiting only its original guess while it silently
@@ -104,7 +104,7 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe
 			if !rc.found {
 				// No observation has ever been posted for this job yet (e.g. it just started
 				// and hasn't reported its first heartbeat). Leave its admission-time estimate
-				// in place, exactly as a QUEUED/ADMITTED job's usage is computed — reporting
+				// in place, exactly as a QUEUED/SUBMITTED job's usage is computed — reporting
 				// zero here would silently undercount actual consumption, which is worse than
 				// the original over-estimate this fix exists to correct.
 				continue

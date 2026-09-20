@@ -69,7 +69,7 @@ export default function DashboardPage() {
   const completed = byStatus.COMPLETED ?? 0
   const failed = byStatus.FAILED ?? 0
   const evicted = byStatus.EVICTED ?? 0
-  const pending = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0) + (byStatus.ADMITTED ?? 0)
+  const pending = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0)
 
   // Eviction reasons arrive already grouped by code — a reason may carry a ': detail'
   // explanation, and every distinct one would otherwise become its own category.

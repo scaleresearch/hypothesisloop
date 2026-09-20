@@ -288,7 +288,7 @@ reasons, theory, cost and env, the settings that differ between the listed jobs.
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
-	status := fs.String("status", "", "QUEUED, SUBMITTED, ADMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED")
+	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED")
 	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds your queued jobs back")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
 	offset := fs.Int("offset", 0, "jobs to skip")
