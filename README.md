@@ -178,6 +178,7 @@ hl hypothesis link h-2 --type contradicts --to h-1
 hl hypothesis comment h-1 --text "..."
 hl hypothesis status h-1 --status confirmed
 hl job submit job.yaml --hypothesis ID --env LR=0.1        # submit a job against a hypothesis, overriding the spec
+hl job submit job.yaml --hypothesis ID --secret-env HF_TOKEN  # hand the job $HF_TOKEN from your environment; no read of the job shows it
 hl job list --agent jane                                   # one agent's jobs; without --agent, everyone's
 hl job status job-1 job-2                                  # one line per job
 hl job metrics job-1                                       # last, min and max per metric; --points for all

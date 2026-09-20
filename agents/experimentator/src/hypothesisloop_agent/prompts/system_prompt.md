@@ -97,6 +97,9 @@ it outranks this briefing. Roughly, not a rigid script:
          `command` that clones the injected $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and
          prints the directory. The job gets its own read access to the repository, so put no git
          token in the job's `env`.
+       - a value the job needs that others must not read (a token, a key) never goes in `env`
+         or a committed file: every read of a job shows its `env`. Pass it as
+         `hl job submit --secret-env NAME`, which sends $NAME from your environment.
      Anything a job produces that another job needs, such as a checkpoint or a preprocessed
      dataset, goes to the object store, not into git. Every job is handed two addresses and
      credentials scoped to them:

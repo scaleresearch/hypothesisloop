@@ -113,14 +113,14 @@ class API:
 
     # ---- hl CLI -----------------------------------------------------------------------------
 
-    def hl(self, *args: str, input: str | None = None) -> str:
+    def hl(self, *args: str, input: str | None = None, env: dict[str, str] | None = None) -> str:
         cmd = [str(self.hl_bin), *args]
         proc = subprocess.run(
             cmd,
             input=input,
             capture_output=True,
             text=True,
-            env=self.hl_env(),
+            env={**self.hl_env(), **(env or {})},
             timeout=60,
         )
         if proc.returncode != 0:
@@ -412,9 +412,11 @@ class API:
         hyp_text: str = "",
         hyp_id: str | None = None,
         job_id: str | None = None,
+        secret_env: dict[str, str] | None = None,
     ) -> str:
         """Registers a hypothesis for the agent (unless hyp_id names an existing row) and submits
-        the job through the `hl` CLI -- the real submission path an agent uses."""
+        the job through the `hl` CLI -- the real submission path an agent uses. secret_env reaches
+        `hl` the only way it takes one: in its environment, named by --secret-env."""
         if hyp_id is None:
             hyp_id = self.register_hypothesis(pe_id, agent_id, hyp_text)["id"]
         jid = job_id or self._job_id()
@@ -428,7 +430,8 @@ class API:
             job_overrides=job_overrides or {},
             metadata_overrides=metadata_overrides or {},
         )
-        self.hl("job", "submit", "--agent", agent_id, "-", input=req.to_yaml())
+        secret_flags = [arg for name in (secret_env or {}) for arg in ("--secret-env", name)]
+        self.hl("job", "submit", "--agent", agent_id, *secret_flags, "-", input=req.to_yaml(), env=secret_env)
         return jid
 
     def submit_job_expect(

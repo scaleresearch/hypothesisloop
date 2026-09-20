@@ -150,3 +150,41 @@ func TestJobSubmitRejectsMalformedEnv(t *testing.T) {
 		t.Fatalf("exit code = %d, want 2, stderr = %s", code, stderr.String())
 	}
 }
+
+func TestJobSubmitSendsSecretEnvFromTheEnvironmentByName(t *testing.T) {
+	pushedClone(t)
+	var sent map[string]any
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-1"})
+	}))
+	t.Setenv("HF_TOKEN", "the-secret-value")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--secret-env", "HF_TOKEN"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	secret, _ := sent["job"].(map[string]any)["secret_env"].(map[string]any)
+	if len(secret) != 1 || secret["HF_TOKEN"] != "the-secret-value" {
+		t.Fatalf("job.secret_env = %+v, want HF_TOKEN from the environment", secret)
+	}
+	if printed := stdout.String() + stderr.String(); strings.Contains(printed, "the-secret-value") {
+		t.Fatalf("submit printed the secret: %s", printed)
+	}
+
+	stderr.Reset()
+	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--secret-env", "HL_NOT_SET_ANYWHERE"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "$HL_NOT_SET_ANYWHERE is not set") {
+		t.Fatalf("an unset variable: exit code = %d, want 2, stderr = %s", code, stderr.String())
+	}
+}
+
+func TestJobSubmitRefusesSecretEnvInTheSpecFile(t *testing.T) {
+	clone, _ := pushedClone(t)
+	asked := false
+	setAPIURL(t, withServer(t, func(http.ResponseWriter, *http.Request) { asked = true }))
+	writeJob(t, filepath.Join(clone, "secret.yaml"), "metadata:\n  hypothesis_id: h1\njob:\n  image: foo\n  secret_env:\n    HF_TOKEN: the-secret-value\n")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"job", "submit", "secret.yaml", "--agent", "jane"}, &stdout, &stderr)
+	if code != 2 || asked || !strings.Contains(stderr.String(), "FILE carries job.secret_env") || strings.Contains(stderr.String(), "the-secret-value") {
+		t.Fatalf("exit code = %d, sent = %v, stderr = %s, want it refused before anything is sent", code, asked, stderr.String())
+	}
+}

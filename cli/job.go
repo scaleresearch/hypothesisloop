@@ -35,7 +35,7 @@ var jobCommands = []subcommand{
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--objective T] [--theory T]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--secret-env NAME ...] [--objective T] [--theory T]
 
 FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis and env, with
@@ -43,6 +43,9 @@ nothing to edit and nothing to commit. Prints the accepted job's id, status, cod
 capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
+--secret-env NAME sends the value of $NAME from this command's environment as job.secret_env:
+the job gets it as an environment variable and no read of the job shows it. FILE may not carry
+job.secret_env, since a job spec is a committed file.
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
 --platform-experiment. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
@@ -68,6 +71,8 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	}
 	var env stringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
+	var secretEnv stringList
+	fs.Var(&secretEnv, "secret-env", "job.secret_env entry by `NAME`, its value read from $NAME here; repeat per variable")
 	path, err := parseOne(fs, args, "FILE", "-")
 	if err != nil {
 		return parseExit(err)
@@ -96,6 +101,9 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		}
 	}
 	if err := setJobEnv(body, env); err != nil {
+		return parseExit(misuse(fs, "%s", err))
+	}
+	if err := setJobSecretEnv(body, secretEnv); err != nil {
 		return parseExit(misuse(fs, "%s", err))
 	}
 	metadata["agent_id"] = *agent
@@ -191,6 +199,32 @@ func setJobEnv(body map[string]any, pairs []string) error {
 		}
 		env[key] = value
 	}
+	return nil
+}
+
+// setJobSecretEnv sets body's job.secret_env to the named variables of this process's environment.
+// A value comes from nowhere else: not from the command line, which other users of the machine
+// can read, and not from the spec file, which is committed.
+func setJobSecretEnv(body map[string]any, names []string) error {
+	job, _ := body["job"].(map[string]any)
+	if _, inFile := job["secret_env"]; inFile {
+		return errors.New("FILE carries job.secret_env: a job spec is a committed file, pass each secret as --secret-env NAME with $NAME set")
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	if job == nil {
+		return errors.New("--secret-env needs a job mapping in FILE")
+	}
+	secret := map[string]any{}
+	for _, name := range names {
+		value := os.Getenv(name)
+		if value == "" {
+			return fmt.Errorf("--secret-env %s: $%s is not set in this environment", name, name)
+		}
+		secret[name] = value
+	}
+	job["secret_env"] = secret
 	return nil
 }
 
