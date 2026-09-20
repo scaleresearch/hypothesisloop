@@ -49,6 +49,9 @@ type Instance struct {
 // Provider rents and returns instances. Offer search, bidding, region choice and every other
 // vendor concept stay inside the adapter.
 type Provider interface {
+	// Create rents an instance for spec and returns once List shows it under spec.Name: a caller
+	// that finds no instance of a name creates one, so an instance missing from List for a moment
+	// after Create is rented twice. The command need not have started; that is StateStarting.
 	Create(ctx context.Context, spec Spec) (id string, err error)
 	// List returns every instance whose name starts with namePrefix, and no others on the account.
 	List(ctx context.Context, namePrefix string) ([]Instance, error)

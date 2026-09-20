@@ -26,8 +26,10 @@ type Provider struct {
 	created   int
 	instances map[string]*instance
 
-	// CreateErr, ListErr, LogsErr, StopErr and DestroyErr, when set, fail that method.
-	CreateErr, ListErr, LogsErr, StopErr, DestroyErr error
+	// Fail, when set, is asked before every call and its error returned in place of the call.
+	// method is "Create", "List", "Logs", "Stop" or "Destroy"; name is the instance's, empty for
+	// List.
+	Fail func(method, name string) error
 }
 
 func New() *Provider {
@@ -39,8 +41,8 @@ var _ provider.Provider = (*Provider)(nil)
 func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.CreateErr != nil {
-		return "", p.CreateErr
+	if err := p.fail("Create", spec.Name); err != nil {
+		return "", err
 	}
 	if spec.Name == "" {
 		return "", fmt.Errorf("fake: instance has no name")
@@ -62,8 +64,8 @@ func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error)
 func (p *Provider) List(_ context.Context, namePrefix string) ([]provider.Instance, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.ListErr != nil {
-		return nil, p.ListErr
+	if err := p.fail("List", ""); err != nil {
+		return nil, err
 	}
 	var out []provider.Instance
 	for _, i := range p.instances {
@@ -78,12 +80,12 @@ func (p *Provider) List(_ context.Context, namePrefix string) ([]provider.Instan
 func (p *Provider) Logs(_ context.Context, id string, tail int) ([]string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.LogsErr != nil {
-		return nil, p.LogsErr
-	}
 	i, ok := p.instances[id]
 	if !ok {
 		return nil, fmt.Errorf("fake: no instance %q", id)
+	}
+	if err := p.fail("Logs", i.Name); err != nil {
+		return nil, err
 	}
 	lines := i.logs
 	if tail < len(lines) {
@@ -95,20 +97,26 @@ func (p *Provider) Logs(_ context.Context, id string, tail int) ([]string, error
 func (p *Provider) Stop(_ context.Context, id string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.StopErr != nil {
-		return p.StopErr
+	i, ok := p.instances[id]
+	if !ok {
+		return nil
 	}
-	if i, ok := p.instances[id]; ok {
-		i.stops++
+	if err := p.fail("Stop", i.Name); err != nil {
+		return err
 	}
+	i.stops++
 	return nil
 }
 
 func (p *Provider) Destroy(_ context.Context, id string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.DestroyErr != nil {
-		return p.DestroyErr
+	i, ok := p.instances[id]
+	if !ok {
+		return nil
+	}
+	if err := p.fail("Destroy", i.Name); err != nil {
+		return err
 	}
 	delete(p.instances, id)
 	return nil
@@ -164,6 +172,13 @@ func (p *Provider) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func (p *Provider) fail(method, name string) error {
+	if p.Fail == nil {
+		return nil
+	}
+	return p.Fail(method, name)
 }
 
 func (p *Provider) named(name string) *instance {
