@@ -56,9 +56,11 @@ func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id stri
 }
 
 // MarkQueued sets the QUEUED lifecycle and its current scheduler decision together. Also resets
-// resolved_job_spec to NULL: a requeued job is re-admitted from scratch and may land on a
-// different cluster with a different fair share, so any previous "max" resolution is stale and
-// must not be read as though it were the resolution for wherever it lands next.
+// resolved_job_spec to NULL, as every transition to QUEUED does: a requeued job is re-admitted
+// from scratch and may land on a different cluster with a different fair share, or on another
+// slot, so the previous resolution (a "max", a slot's size, the slot pin in its node selector) is
+// stale and must not be read as though it were the resolution for wherever it lands next. A
+// QUEUED row therefore never carries one, and EffectiveJob on it is the submitted job.
 func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("experiments_store.MarkQueued: reason is required")
@@ -193,6 +195,7 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 		submitted_at = NULL,
 		-- clear cluster_name: job holds no capacity, so next admission tick can place it anywhere.
 		cluster_name = '',
+		resolved_job_spec = NULL,
 		not_admitted_reason = 'awaiting_admission',
 		updated_at = NOW()
 	WHERE id = $1 AND status = 'RUNNING'`
@@ -229,6 +232,7 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 		-- clear cluster_name: the failed attempt holds no capacity, so the next admission tick
 		-- can place this anywhere, exactly as a preemption requeue does.
 		cluster_name = '',
+		resolved_job_spec = NULL,
 		not_admitted_reason = 'awaiting_admission',
 		updated_at = NOW()
 	WHERE id = $1 AND status IN ('SUBMITTED', 'RUNNING') AND attempt_count - infra_requeue_count < $2`
@@ -280,6 +284,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 			-- clear cluster_name: the failed attempt holds no capacity, and the next admission tick
 			-- must be free to place this somewhere other than the cluster that just failed it.
 			cluster_name = '',
+			resolved_job_spec = NULL,
 			queued_at = COALESCE(queued_at, NOW()),
 			not_admitted_reason = 'awaiting_admission',
 			quota_settled_at = NULL,
@@ -303,6 +308,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 		-- infrastructure-requeue budget, it spends one entry in tried_clusters instead.
 		submitted_at = NULL,
 		cluster_name = '',
+		resolved_job_spec = NULL,
 		queued_at = COALESCE(queued_at, NOW()),
 		not_admitted_reason = 'awaiting_admission',
 		quota_settled_at = NULL,

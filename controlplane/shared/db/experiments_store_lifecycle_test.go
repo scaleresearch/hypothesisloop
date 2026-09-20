@@ -249,3 +249,52 @@ func TestAGangRetryGoesFromRunningToQueuedAndATerminalRowStays(t *testing.T) {
 		t.Fatalf("RequeueForRetry of a FAILED row = %v, %v, want false", got, err)
 	}
 }
+
+// Every way back to QUEUED drops what the last admission resolved. A requeue that kept it left
+// the job pinned to the slot it had held, so the next admission could plan it only there: stuck
+// behind its own old slot with another one free, and unable to move to an acceptable type.
+func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 8)
+	exps := NewExperimentsStore(pool)
+	ctx := context.Background()
+	for name, requeue := range map[string]struct {
+		from domain.ExperimentStatus
+		do   func(id string) (bool, error)
+	}{
+		"preempted": {domain.StatusRunning, func(id string) (bool, error) { return exps.RequeuePreempted(ctx, id, 1, 1) }},
+		"retry":     {domain.StatusRunning, func(id string) (bool, error) { return exps.RequeueForRetry(ctx, id, 1) }},
+		"infrastructure-fault": {domain.StatusSubmitted, func(id string) (bool, error) {
+			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionStuckPending), 3, "")
+		}},
+		"failover": {domain.StatusSubmitted, func(id string) (bool, error) {
+			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionStuckPending), 3, "cluster-id-1")
+		}},
+		"rollback": {domain.StatusSubmitted, func(id string) (bool, error) {
+			return true, exps.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation)
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			id := "requeue-" + name + "-" + peID
+			seedExperimentForCapTest(t, pool, id, agentID, peID, 1, requeue.from)
+			pinned := `{"cpu":"8","node_selector":{"` + domain.NodeSlotLabel + `":"h100-0"}}`
+			if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET resolved_job_spec = $2::jsonb, cluster_name = 'rented', submitted_at = NOW() WHERE id = $1`, id, pinned); err != nil {
+				t.Fatal(err)
+			}
+			before, err := exps.GetExperiment(ctx, id)
+			if err != nil || before.EffectiveJob().NodeSelector[domain.NodeSlotLabel] != "h100-0" {
+				t.Fatalf("seeded row: %+v, %v", before.ResolvedJob, err)
+			}
+
+			if ok, err := requeue.do(id); err != nil || !ok {
+				t.Fatalf("requeue = %v, %v", ok, err)
+			}
+			after, err := exps.GetExperiment(ctx, id)
+			if err != nil || after.Status != domain.StatusQueued {
+				t.Fatalf("after the requeue: %v, %v", after.Status, err)
+			}
+			if after.ResolvedJob != nil || after.EffectiveJob().NodeSelector != nil {
+				t.Fatalf("the requeued row still carries %+v", after.ResolvedJob)
+			}
+		})
+	}
+}
