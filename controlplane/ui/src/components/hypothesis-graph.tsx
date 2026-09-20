@@ -126,6 +126,8 @@ interface HypothesisGraphCanvasProps {
   selected: string
   hits: Set<string>
   filters: GraphFilters
+  /** Off while the side panel narrows the canvas: the map would lie over the cards around the focus. */
+  minimap: boolean
   onSelect: (id: string) => void
 }
 
@@ -137,7 +139,7 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
   )
 }
 
-function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, filters, onSelect }: HypothesisGraphCanvasProps) {
+function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, filters, minimap, onSelect }: HypothesisGraphCanvasProps) {
   const { setCenter, setViewport, getZoom } = useReactFlow()
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
@@ -252,14 +254,16 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
       >
         <Background gap={24} color="rgba(255, 255, 255, 0.05)" />
         <Controls showInteractive={false} position="top-left" />
-        <MiniMap
-          position="top-right"
-          pannable
-          zoomable
-          nodeColor={n => n.type === 'objective' ? '#7c6cf0' : hypothesisStatusColors[(n.data as HypothesisNodeData).item.status]}
-          maskColor="rgba(8, 9, 12, 0.7)"
-          style={{ background: 'var(--surface-2)', width: 150, height: 100 }}
-        />
+        {minimap && (
+          <MiniMap
+            position="top-right"
+            pannable
+            zoomable
+            nodeColor={n => n.type === 'objective' ? '#7c6cf0' : hypothesisStatusColors[(n.data as HypothesisNodeData).item.status]}
+            maskColor="rgba(8, 9, 12, 0.7)"
+            style={{ background: 'var(--surface-2)', width: 150, height: 100 }}
+          />
+        )}
       </ReactFlow>
     </Highlight.Provider>
   )

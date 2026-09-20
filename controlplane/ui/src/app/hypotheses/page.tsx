@@ -178,6 +178,7 @@ function HypothesesPageContent() {
                 selected={selected}
                 hits={hits}
                 filters={filters}
+                minimap={!showSide}
                 onSelect={setFocus}
               />
             )}
