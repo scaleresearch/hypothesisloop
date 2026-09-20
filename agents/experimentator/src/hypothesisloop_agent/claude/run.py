@@ -226,11 +226,12 @@ def _context_tokens(usage: dict | None) -> int:
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
                             started_at: float, stop_flag: list,
                             initial_prompt: str | None = None,
-                            ) -> tuple[str | None, float | None, str | None]:
+                            on_good_turn=lambda: None,
+                            ) -> tuple[float | None, bool]:
     """Runs one ClaudeSDKClient connection until it ends (real stop, error, or rate limit).
 
-    Returns (updated resume_id, rate-limit reset time, compaction handoff). A non-None handoff
-    means the caller must start a fresh session without resume=.
+    Returns (rate-limit reset time, rotated). Rotated means a handoff was written and the next
+    session starts fresh from it. The session id and the handoff live on disk, see _restart_state.
     """
     cfg = setup.cfg
     watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
@@ -286,19 +287,21 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                         session_id = getattr(message, "session_id", None) or resume_id
                         _save_resume_id(setup, session_id)
                         resume_id = session_id or resume_id
-                        if initial_prompt and not message.is_error:
-                            _remove_file(_handoff_file(setup))
+                        if not message.is_error:
+                            on_good_turn()
+                            if initial_prompt:
+                                _remove_file(_handoff_file(setup))
             finally:
                 interrupter.cancel()
 
             if stopped() and got_result and not rate_limited_resets_at:
                 log.info("stopping: turn interrupted, one last turn to file what is owed")
                 await _last_turn(client, cfg.agent_id, watch_env, [])
-                return resume_id, None, None
+                return None, False
 
             if rate_limited_resets_at:
                 log.info("stopping session: rate-limited, resets_at=%s", rate_limited_resets_at)
-                return resume_id, rate_limited_resets_at, None
+                return rate_limited_resets_at, False
 
             if not got_result:
                 # The stream ended without a ResultMessage — typically the CLI process itself
@@ -307,7 +310,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # reason to stop the whole agent: a quota outage must not end the run, it must
                 # pause it.
                 log.warning("stream ended without a ResultMessage — treating as transient")
-                return resume_id, None, None
+                return None, False
 
             if turn_is_error:
                 # is_error=True with subtype="success" is the CLI's signal for an underlying
@@ -317,12 +320,12 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # broken session as an idle agent. Route it through the same backoff as a
                 # transient error instead.
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
-                return resume_id, None, None
+                return None, False
 
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
-                return resume_id, None, None
+                return None, False
 
             if context_tokens >= _CONTEXT_COMPACTION_THRESHOLD_TOKENS:
                 log.info("context reached ~%d tokens — creating handoff before fresh session", context_tokens)
@@ -340,18 +343,18 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                         handoff_result = message
                 if not handoff_result or handoff_result.is_error:
                     log.warning("context handoff failed — preserving old session for retry")
-                    return resume_id, None, None
+                    return None, False
                 handoff = (handoff_result.result or "\n".join(handoff_parts)).strip()
                 if not handoff:
                     log.warning("context handoff was empty — preserving old session for retry")
-                    return resume_id, None, None
+                    return None, False
                 # Persist the bridge before removing the old id. If the worker dies before the
                 # fresh session returns its first ResultMessage, startup retries this handoff;
                 # only that successful result removes the file.
                 with open(_handoff_file(setup), "w") as f:
                     f.write(handoff)
                 _remove_file(_session_file(setup))
-                return None, None, handoff
+                return None, True
 
             # The agent ended its turn: wait for the next batch of updates about its own jobs and
             # hypotheses and hand it over on the same connection.
@@ -359,7 +362,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if stopped():
                 log.info("stopping: one last turn to file what is owed")
                 await _last_turn(client, cfg.agent_id, watch_env, events)
-                return resume_id, None, None
+                return None, False
             if events:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
@@ -368,26 +371,32 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
-                return resume_id, None, None
+                return None, False
             log.info("no platform updates for %ds, nudging", updates.IDLE_NUDGE_S)
             await client.query(updates.IDLE_PROMPT)
 
 
-async def _run(setup: core.RunSetup, model: str) -> None:
+def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
+    """The session to resume and the prompt that opens the next connection, as persisted.
+
+    A session id beside a handoff means the replacement session already produced a result, so it
+    is resumed and the bridge is not injected twice.
+    """
     resume_id = _load_resume_id(setup)
+    handoff = _load_handoff(setup)
+    if resume_id or not handoff:
+        return resume_id, None
+    return None, "Continue this experiment from the following handoff:\n\n" + handoff
+
+
+async def _run(setup: core.RunSetup, model: str) -> None:
     started_at = time.time()
     stop_flag = core.install_signal_handler()
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
-    pending_handoff = _load_handoff(setup)
-    # A resume id alongside a handoff means the replacement session already produced a result
-    # and persisted its id before a crash; resuming it is safer than injecting the bridge twice.
-    if resume_id and pending_handoff:
-        _remove_file(_handoff_file(setup))
-        pending_handoff = None
-    initial_prompt = (
-        "Continue this experiment from the following handoff:\n\n" + pending_handoff
-        if pending_handoff else None
-    )
+
+    def reset_backoff() -> None:
+        nonlocal backoff_s
+        backoff_s = _RECONNECT_BACKOFF_INITIAL_S
 
     # Outer loop: keeps the agent alive across quota exhaustion, transient errors, and dropped
     # connections for the whole platform-experiment lifetime — a "no budget right now" condition
@@ -399,44 +408,24 @@ async def _run(setup: core.RunSetup, model: str) -> None:
             log.info("stopping: %s", reason)
             return
 
+        resume_id, initial_prompt = _restart_state(setup)
         try:
-            resume_id, resets_at, handoff = await _run_one_session(
-                setup, model, resume_id, started_at, stop_flag, initial_prompt,
+            resets_at, rotated = await _run_one_session(
+                setup, model, resume_id, started_at, stop_flag, initial_prompt, reset_backoff,
             )
         except Exception:
             log.exception("session ended with an unexpected error — will retry after backoff")
-            resets_at = None
-        else:
-            if handoff is not None:
-                # Rotation is deliberate, not an outage: reconnect immediately and give the new
-                # session the compacted state as its first user message. Idle-nudge and transient
-                # reconnect backoffs remain local to their original cases.
-                initial_prompt = "Continue this experiment from the following handoff:\n\n" + handoff
-                backoff_s = _RECONNECT_BACKOFF_INITIAL_S
-                continue
-            pending_handoff = _load_handoff(setup)
-            if pending_handoff and not resume_id:
-                # No ResultMessage/session id was produced after sending the bridge; retain it
-                # across the ordinary transient reconnect backoff and try another fresh session.
-                initial_prompt = (
-                    "Continue this experiment from the following handoff:\n\n" + pending_handoff
-                )
-            else:
-                initial_prompt = None
-            if resets_at is None:
-                # Clean stop (real stop condition, or a transient stream-ended-early case already
-                # logged inside _run_one_session) — re-check stop_reason at the top of the loop.
-                if core.stop_reason(setup, started_at, stop_flag):
-                    return
-                # Fall through to a short backoff before reconnecting (transient case).
+            resets_at, rotated = None, False
+        if rotated or core.stop_reason(setup, started_at, stop_flag):
+            continue
 
         if resets_at:
             sleep_s = max(1.0, min(resets_at - time.time(), _MAX_SINGLE_SLEEP_S))
-            log.info("quota/rate limit hit — sleeping %.0fs before resuming session %s", sleep_s, resume_id)
+            log.info("quota/rate limit hit — sleeping %.0fs before resuming", sleep_s)
             await asyncio.sleep(sleep_s)
-            backoff_s = _RECONNECT_BACKOFF_INITIAL_S  # a real rate-limit wait resets the backoff
+            reset_backoff()
         else:
-            log.info("reconnecting in %ss (session %s)", backoff_s, resume_id)
+            log.info("reconnecting in %ss", backoff_s)
             await asyncio.sleep(backoff_s)
             backoff_s = min(backoff_s * 2, _RECONNECT_BACKOFF_MAX_S)
 

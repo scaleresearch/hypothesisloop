@@ -143,5 +143,45 @@ class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent-a say   pulling metrics", out.getvalue())
 
 
+class ReconnectTest(unittest.IsolatedAsyncioTestCase):
+    async def test_a_raised_session_is_followed_by_what_it_left_on_disk_and_a_good_turn_resets_the_backoff(self):
+        setup = _setup()
+        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"})
+        stop_flag = [False]
+        resumed, sleeps = [], []
+
+        async def session(setup, model, resume_id, started_at, stop_flag_, initial_prompt, on_good_turn):
+            resumed.append(resume_id)
+            if len(resumed) == 1:
+                run._save_resume_id(setup, "s-2")
+                raise ConnectionError("dropped")
+            if len(resumed) == 2:
+                raise ConnectionError("dropped")
+            on_good_turn()
+            if len(resumed) == 4:
+                stop_flag[0] = True
+            return None, False
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+
+        with mock.patch.object(run, "_run_one_session", session), \
+                mock.patch.object(run.core, "install_signal_handler", lambda: stop_flag), \
+                mock.patch.object(run.asyncio, "sleep", sleep), \
+                self.assertLogs("llm_agent"):
+            await asyncio.wait_for(run._run(setup, "m"), timeout=5)
+        self.assertEqual(resumed, [None, "s-2", "s-2", "s-2"])
+        self.assertEqual(sleeps, [30, 60, 30])
+
+    def test_a_handoff_opens_the_next_session_only_while_no_session_id_is_saved(self):
+        setup = _setup()
+        with open(run._handoff_file(setup), "w") as f:
+            f.write("state so far")
+        self.assertEqual(run._restart_state(setup),
+                         (None, "Continue this experiment from the following handoff:\n\nstate so far"))
+        run._save_resume_id(setup, "s-3")
+        self.assertEqual(run._restart_state(setup), ("s-3", None))
+
+
 if __name__ == "__main__":
     unittest.main()
