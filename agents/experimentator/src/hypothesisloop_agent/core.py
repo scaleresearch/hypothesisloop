@@ -58,7 +58,6 @@ class RunSetup:
     cfg: config.Config
     client: api_client.PlatformClient
     system_prompt: str
-    max_turns: int
     workdir: str
 
 
@@ -69,7 +68,6 @@ def prepare() -> RunSetup:
 
     cfg = config.Config()
     cfg.validate()
-    max_turns = int(os.environ.get("MAX_LLM_TURNS", "0") or 0)  # 0 = unlimited
 
     # Per-agent by default: two agents launched from the same cwd (the natural way to run a
     # multi-agent competition on one box) must not resolve to the same repo checkout. agent_id is
@@ -81,8 +79,7 @@ def prepare() -> RunSetup:
     client.join(cfg.agent_id, cfg.platform_experiment_id)
 
     system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands())
-    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text,
-                    max_turns=max_turns, workdir=workdir)
+    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
 
 
 def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:

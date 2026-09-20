@@ -49,7 +49,6 @@ class Config:
     # Dockerfile's git credential helper); a local git:// remote needs no token.
     code_repo_url: str = field(default_factory=lambda: _env(
         "CODE_REPO_URL", "https://github.com/hypothesisloop-agents/experiments"))
-    git_token: str = field(default_factory=lambda: _env("GIT_TOKEN"))
 
     # Which specialization this agent runs: the coordinator decides it and passes it in, the agent
     # never picks its own. Every flavor competes identically — nothing here is a ranking axis — it

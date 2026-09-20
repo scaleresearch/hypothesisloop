@@ -5,6 +5,7 @@ package apiclient
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,12 +19,7 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-// New builds a Client, defaulting BaseURL from the given value (falling back to
-// http://localhost:8081 when empty, mirroring API_URL's default in the rest of this repo).
 func New(baseURL string) *Client {
-	if baseURL == "" {
-		baseURL = "http://localhost:8081"
-	}
 	return &Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 30 * time.Second}}
 }
 
@@ -48,6 +44,9 @@ func (c *Client) Do(method, path string, body any, out any) error {
 
 // DoHeader is Do, also returning the response headers: a list's X-Total-Count.
 func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, error) {
+	if c.BaseURL == "" {
+		return nil, errors.New("no API URL given (set API_URL)")
+	}
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
