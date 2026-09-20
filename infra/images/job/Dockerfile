@@ -7,6 +7,7 @@ ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cli/ cli/
+COPY runtime/shared/exitline/ runtime/shared/exitline/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
 FROM python:3.13-slim
