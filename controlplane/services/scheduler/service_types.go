@@ -44,9 +44,6 @@ type Store interface {
 	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
 	// FindingSummary returns the summary filed for a job, empty when none was.
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
-	// TransitionStatus atomically updates status only when current status matches from.
-	// Returns true if updated, false if already changed by a concurrent request.
-	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
 	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
@@ -63,7 +60,6 @@ type QuotaService interface {
 	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error)
-	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
 }
 
 // WorkloadClient manages backend-executed workloads, potentially across multiple target
@@ -79,11 +75,6 @@ type WorkloadClient interface {
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — admission must prove a
 	// job fits one node in every dimension, not just in accelerators.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
-	// GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
-	// allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
-	// permanently resident; platform job pods themselves are not subtracted), as
-	// LoopWorkloadClient.GetNodeTotalCapacity.
-	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 }
 
@@ -116,7 +107,7 @@ type Service struct {
 	novelty      NoveltyDetector
 	hypotheses   HypothesisStore
 	weights      domain.SchedulingWeights
-	credits      domain.CreditConfig
+	credits      domain.QuotaConfig
 	loop         Triggerable
 	settler      QuotaSettler
 	grace        domain.GraceLimits
@@ -130,8 +121,7 @@ type Service struct {
 	maxDataBytesPerAgent int64
 }
 
-// NewService constructs a Scheduler Service with the provided dependencies and
-// default weights/credit config.
+// NewService constructs a Scheduler Service with the provided dependencies.
 func NewService(
 	store Store,
 	quota QuotaService,
@@ -160,11 +150,10 @@ func NewService(
 		metricsDBURL: metricsDBURL,
 		logger:       logger,
 		weights:      domain.DefaultSchedulingWeights(),
-		credits:      domain.DefaultCreditConfig(),
 	}
 }
 
-// WithQuotaConfig overrides the quota constants (rates, limits) used by the scheduler.
+// WithQuotaConfig sets the quota constants (rates, limits) used by the scheduler.
 func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 	s.credits = cfg
 	return s

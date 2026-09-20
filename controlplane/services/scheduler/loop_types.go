@@ -223,16 +223,14 @@ const DefaultEvictionTTL = 60 * time.Second
 // NewLoop constructs a Loop.
 func NewLoop(store LoopStore, quota LoopQuotaStore, workloadClient LoopWorkloadClient, grace domain.GraceLimits, logger *zap.Logger) *Loop {
 	return &Loop{
-		store:                    store,
-		quota:                    quota,
-		workload:                 workloadClient,
-		grace:                    grace,
-		trigger:                  make(chan struct{}, 1),
-		logger:                   logger,
-		heartbeat:                10 * time.Second,
-		guaranteedFairnessWindow: 60 * time.Second,
-		pendingEvictions:         map[string]pendingEviction{},
-		evictionTTL:              DefaultEvictionTTL,
+		store:            store,
+		quota:            quota,
+		workload:         workloadClient,
+		grace:            grace,
+		trigger:          make(chan struct{}, 1),
+		logger:           logger,
+		pendingEvictions: map[string]pendingEviction{},
+		evictionTTL:      DefaultEvictionTTL,
 	}
 }
 
@@ -314,6 +312,9 @@ func (l *Loop) Start(ctx context.Context) {
 	}
 	if l.observed == nil {
 		panic("scheduler: Loop started without WithObservedTimeConfig — preemption and disbalance eviction both read observed state")
+	}
+	if l.heartbeat <= 0 || l.guaranteedFairnessWindow <= 0 {
+		panic("scheduler: Loop started without WithHeartbeat and WithGuaranteedFairnessWindow")
 	}
 	go func() {
 		ticker := time.NewTicker(l.heartbeat)

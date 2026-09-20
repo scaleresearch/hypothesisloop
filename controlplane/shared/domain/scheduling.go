@@ -43,21 +43,3 @@ type QuotaConfig struct {
 	// config.QuotaConfig for the operator-facing doc.
 	DefaultMaxConcurrentAccelerators int `json:"default_max_concurrent_accelerators,omitempty"`
 }
-
-// DefaultQuotaConfig returns fallback quota constants used in tests and local runs
-// without a config file. Production services load these from settings/hypothesisloop.yaml.
-func DefaultQuotaConfig() QuotaConfig {
-	return QuotaConfig{
-		Top3BonusFraction:     0.25,
-		BurstFraction:         2.0,
-		DefaultStages:         DefaultStages,
-		MaxSubmissionsPerHour: 100,
-		MetricDeclineFraction: 0.3,
-	}
-}
-
-// CreditConfig is an alias kept for backward compatibility.
-type CreditConfig = QuotaConfig
-
-// DefaultCreditConfig returns DefaultQuotaConfig.
-func DefaultCreditConfig() QuotaConfig { return DefaultQuotaConfig() }
