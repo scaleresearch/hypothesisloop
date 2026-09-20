@@ -204,9 +204,10 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 	return tag.RowsAffected() > 0, nil
 }
 
-// RequeueForRetry returns a failed gang to QUEUED for a fresh whole-gang attempt, incrementing
-// attempt_count in the same statement so the budget is spent exactly once even if two watchers
-// observe the same failure.
+// RequeueForRetry returns a gang whose attempt failed to QUEUED for a fresh whole-gang attempt,
+// incrementing attempt_count in the same statement so the budget is spent exactly once even if
+// two watchers observe the same failure. The row goes from SUBMITTED or RUNNING straight to
+// QUEUED: it never reads FAILED, so no terminal status is announced for a job that runs again.
 //
 // maxAttemptsBefore is the number of the agent's OWN failed attempts after which the job stays
 // FAILED — i.e. job.max_retries. Attempts the environment ended are excluded by comparing
@@ -221,10 +222,6 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 // resume where it stopped, so only its remaining hours are re-reserved; a retried gang starts
 // from step zero, so the full original estimate is exactly what the next attempt needs.
 //
-// quota_settled_at is cleared because the row is no longer terminal and the next attempt owes a
-// settlement of its own. Nothing is lost by that: settlement.Settle recomputes cumulative
-// observed hours over the whole experiment and writes an absolute value, so the final settle
-// bills every attempt.
 func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',
@@ -234,9 +231,8 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 		-- can place this anywhere, exactly as a preemption requeue does.
 		cluster_name = '',
 		not_admitted_reason = 'awaiting_admission',
-		quota_settled_at = NULL,
 		updated_at = NOW()
-	WHERE id = $1 AND status = 'FAILED' AND attempt_count - infra_requeue_count < $2`
+	WHERE id = $1 AND status IN ('SUBMITTED', 'RUNNING') AND attempt_count - infra_requeue_count < $2`
 	tag, err := s.pool.pool.Exec(ctx, q, id, maxAttemptsBefore)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueForRetry: %w", err)

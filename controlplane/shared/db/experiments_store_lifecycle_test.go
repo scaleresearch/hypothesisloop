@@ -174,3 +174,26 @@ func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t 
 		t.Errorf("last_finding_at: got = %v, want %v", busyEntry["last_finding_at"], finding.CreatedAt)
 	}
 }
+
+func TestAGangRetryGoesFromRunningToQueuedAndATerminalRowStays(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	exps := NewExperimentsStore(pool)
+	ctx := context.Background()
+	running, failed := "retry-running-"+peID, "retry-failed-"+peID
+	seedExperimentForCapTest(t, pool, running, agentID, peID, 1, domain.StatusRunning)
+	seedExperimentForCapTest(t, pool, failed, agentID, peID, 1, domain.StatusFailed)
+
+	for i, want := range []bool{true, false} {
+		got, err := exps.RequeueForRetry(ctx, running, 1)
+		if err != nil || got != want {
+			t.Fatalf("call %d on a RUNNING gang: RequeueForRetry = %v, %v, want %v", i+1, got, err, want)
+		}
+	}
+	exp, err := exps.GetExperiment(ctx, running)
+	if err != nil || exp.Status != domain.StatusQueued || exp.AttemptCount != 1 {
+		t.Fatalf("after the retry: status %s, attempt %d, err %v, want QUEUED and 1", exp.Status, exp.AttemptCount, err)
+	}
+	if got, err := exps.RequeueForRetry(ctx, failed, 1); err != nil || got {
+		t.Fatalf("RequeueForRetry of a FAILED row = %v, %v, want false", got, err)
+	}
+}

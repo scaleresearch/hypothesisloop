@@ -318,6 +318,12 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 		}
 	}
 
+	// A gang with retry budget goes straight back to QUEUED. Writing FAILED first would announce
+	// a terminal status for a job that runs again.
+	if !succeeded && w.retryGang(ctx, exp) {
+		return nil
+	}
+
 	// If seen as RUNNING, use a conditional transition so a concurrent controller eviction can
 	// only win once; if we lose the race, skip the refund — the controller already issued it.
 	if exp.Status == domain.StatusRunning {
@@ -344,10 +350,6 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 			// Already terminal (e.g. controller evicted it concurrently) — nothing to do.
 			return nil
 		}
-	}
-
-	if !succeeded && w.retryGang(ctx, exp) {
-		return nil
 	}
 
 	// Durably settle each resource dimension's observed cost. See settleQuota's doc comment for
@@ -381,9 +383,8 @@ func (w *JobWatcher) retryGang(ctx context.Context, exp *domain.Experiment) bool
 		return false
 	}
 	if !requeued {
-		// Budget exhausted, or another watcher requeued it first. Either way this call has
-		// nothing left to do; when the budget is what ran out, the row stays FAILED and the
-		// caller settles it.
+		// Budget exhausted, or the row already left SUBMITTED/RUNNING. The caller writes the
+		// terminal status if it still can.
 		return false
 	}
 	w.logger.Info("job_watcher: gang failed, requeued for a fresh attempt",

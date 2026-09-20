@@ -124,6 +124,9 @@ func TestFailedGangIsRequeuedWhileRetryBudgetRemains(t *testing.T) {
 	if store.requeueCalls[0] != 1 {
 		t.Errorf("RequeueForRetry got maxAttemptsBefore=%d, want 1 (job.max_retries)", store.requeueCalls[0])
 	}
+	if store.transitioned {
+		t.Fatal("a gang that runs again was written FAILED first, which announces a terminal status to its agent")
+	}
 }
 
 // The budget is the store's to enforce, in the same UPDATE that spends it. When it reports the
