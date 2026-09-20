@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -214,6 +215,60 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 	}
 	if g, b := quotas[cutAgent].guaranteed, quotas[cutAgent].burst; g != 0 || b != 0 {
 		t.Errorf("cut agent quota = (%v, %v), want (0, 0) — cut zeroes both columns", g, b)
+	}
+}
+
+// A burst-only agent's allocation and spend both live in the burst column, so that is where its
+// unspent hours are read from when it is cut.
+func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
+	pool := quotaTierTestDB(t)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	survivorA, survivorB, cutAgent, pe := "a-"+suffix, "b-"+suffix, "cut-"+suffix, "pe-"+suffix
+	ids := []string{survivorA, survivorB, cutAgent}
+	createTestPE(t, pool, pe, 10)
+	pes := NewPlatformExperimentsStore(pool)
+	for _, id := range ids {
+		createTestAgent(t, pool, id, domain.AgentKindAgent)
+		if _, err := pes.Signup(ctx, pe, id, domain.SignupRoleCompetitor, domain.QuotaTierBurstOnly); err != nil {
+			t.Fatalf("signup %s: got = %v, want = nil", id, err)
+		}
+	}
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+		return allocateStartQuotas(pe, 4, participants), nil
+	})
+	if err != nil || !started {
+		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
+	}
+	lookup := &AgentsQuotaLookup{pool: pool}
+	before, err := lookup.byAgent(ctx, pe, ids)
+	if err != nil {
+		t.Fatalf("lookup quotas: got = %v, want = nil", err)
+	}
+
+	const usedBurst = 0.5
+	dims := []StageRedistribution{{
+		ResourceType: domain.ResourceAcceleratorHours, Budget: 10, ReleaseFrac: 0.6,
+		UsedByAgent:      map[string]float64{cutAgent: 0},
+		UsedBurstByAgent: map[string]float64{cutAgent: usedBurst},
+	}}
+	advanced, err := pes.AdvanceStage(ctx, pe, 1, []string{cutAgent}, []string{survivorA, survivorB}, dims)
+	if err != nil || !advanced {
+		t.Fatalf("advance stage: got = (%v, %v), want = (true, nil)", advanced, err)
+	}
+	after, err := lookup.byAgent(ctx, pe, ids)
+	if err != nil {
+		t.Fatalf("lookup quotas: got = %v, want = nil", err)
+	}
+
+	wantCredit := (10*0.6 + before[cutAgent].burst - usedBurst) / 2
+	for _, id := range []string{survivorA, survivorB} {
+		if got := after[id].burst - before[id].burst; math.Abs(got-wantCredit) > 1e-9 {
+			t.Errorf("%s burst credit = %v, want %v (stage share plus the cut agent's unspent burst)", id, got, wantCredit)
+		}
+		if g := after[id].guaranteed; g != 0 {
+			t.Errorf("%s guaranteed = %v, want 0 for a burst-only survivor", id, g)
+		}
 	}
 }
 

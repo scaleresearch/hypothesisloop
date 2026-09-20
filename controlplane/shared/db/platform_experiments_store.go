@@ -391,6 +391,9 @@ type StageRedistribution struct {
 	Budget       float64
 	ReleaseFrac  float64
 	UsedByAgent  map[string]float64
+	// UsedBurstByAgent is the same observed figure for burst-tier work, which is where a
+	// burst-only agent's whole allocation and consumption live.
+	UsedBurstByAgent map[string]float64
 }
 
 // StartParticipant is one signed-up agent and everything the allocation needs to know about it,
@@ -545,27 +548,44 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 		// Lock every cut agent's row and read its allocation here, not from a snapshot taken
 		// before the transaction: a donation committing in between would make "unspent" wrong in
 		// either direction, minting or destroying hours against the platform budget.
+		tiers, err := participantTiers(ctx, tx, platformExpID, cutAgentIDs)
+		if err != nil {
+			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: cut agent tiers: %w", err)
+		}
 		allocated := make(map[string]float64, len(cutAgentIDs))
+		used := make(map[string]float64, len(cutAgentIDs))
 		lockQ := fmt.Sprintf(
-			`SELECT agent_id, %s FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id = ANY($2) ORDER BY agent_id FOR UPDATE`,
-			guaranteed)
+			`SELECT agent_id, %s, %s FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id = ANY($2) ORDER BY agent_id FOR UPDATE`,
+			guaranteed, burst)
 		rows, err := tx.Query(ctx, lockQ, platformExpID, cutAgentIDs)
 		if err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
 		}
 		for rows.Next() {
 			var agentID string
-			var value float64
-			if err := rows.Scan(&agentID, &value); err != nil {
+			var g, b float64
+			if err := rows.Scan(&agentID, &g, &b); err != nil {
 				rows.Close()
 				return false, fmt.Errorf("platform_experiments_store.AdvanceStage: scan cut allocation: %w", err)
 			}
-			allocated[agentID] = value
+			tier, ok := tiers[agentID]
+			if !ok {
+				rows.Close()
+				return false, fmt.Errorf("platform_experiments_store.AdvanceStage: cut agent %s has no signup in %s", agentID, platformExpID)
+			}
+			// A burst-only agent holds its whole entitlement in the burst column (see
+			// domain.ApplyQuotaTier), so that is the column its unspent hours are measured in.
+			if tier == domain.QuotaTierGuaranteed {
+				allocated[agentID], used[agentID] = g, dim.UsedByAgent[agentID]
+			} else {
+				allocated[agentID], used[agentID] = b, dim.UsedBurstByAgent[agentID]
+			}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
 		}
+		dim.UsedByAgent = used
 		release := StageReleaseTotal(dim, allocated)
 
 		zeroQ := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed, burst)

@@ -55,7 +55,8 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	// under lock.
 	dims := []db.StageRedistribution{
 		{ResourceType: domain.ResourceAcceleratorHours, Budget: pe.BudgetAcceleratorHours, ReleaseFrac: releaseFrac,
-			UsedByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH })},
+			UsedByAgent:      usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH }),
+			UsedBurstByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedBurstAccH })},
 	}
 
 	advanced, err := c.stagesStore.AdvanceStage(ctx, pe.ID, stageIndex, cut, survivors, dims)
