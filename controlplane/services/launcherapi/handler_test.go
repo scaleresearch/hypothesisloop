@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,8 +45,59 @@ type launcherStore struct {
 	windDown   time.Duration
 	exitLogs   map[string]string
 	// askedAgo is how long ago each agent's current instance name was first asked for.
-	askedAgo map[string]time.Duration
+	askedAgo     map[string]time.Duration
+	coordinators []db.LauncherCoordinator
 }
+
+func (s *launcherStore) coordinator(pe string) *db.LauncherCoordinator {
+	for i := range s.coordinators {
+		if s.coordinators[i].PlatformExperimentID == pe {
+			return &s.coordinators[i]
+		}
+	}
+	panic("no coordinator of " + pe)
+}
+
+func (s *launcherStore) ListLauncherCoordinators(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherCoordinator, error) {
+	listed := []db.LauncherCoordinator{}
+	for _, coordinator := range s.coordinators {
+		if coordinator.Launcher == launcher && !coordinator.Instance.Stopped {
+			listed = append(listed, coordinator)
+		}
+	}
+	return listed, nil
+}
+
+func (s *launcherStore) SetCoordinatorInstanceName(_ context.Context, pe, name string) error {
+	s.coordinator(pe).Instance.Name = name
+	delete(s.askedAgo, coordinatorKey+pe)
+	return nil
+}
+
+func (s *launcherStore) RecordCoordinatorInstanceExit(_ context.Context, pe, name, exitLog string, maxRestarts int) (bool, error) {
+	instance := &s.coordinator(pe).Instance
+	if instance.Stopped || name == "" || instance.Name != name {
+		return false, nil
+	}
+	now := time.Now()
+	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
+	if instance.Restarts >= maxRestarts {
+		instance.Stopped = true
+	} else {
+		instance.Restarts++
+	}
+	return true, nil
+}
+
+func (s *launcherStore) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+	if s.askedAgo[coordinatorKey+pe] <= bootLimit {
+		return false, nil
+	}
+	return s.RecordCoordinatorInstanceExit(ctx, pe, name, "still starting past the boot limit", maxRestarts)
+}
+
+// coordinatorKey prefixes a platform experiment's id where askedAgo keeps its coordinator.
+const coordinatorKey = "coordinator of "
 
 const testBootLimit = 5 * time.Minute
 
@@ -258,7 +311,7 @@ func TestALauncherWithNothingToRunIsAnsweredWithTwoEmptyLists(t *testing.T) {
 func TestEveryInstanceIsToldItsFlavorAndModelAndASignupWithoutThemIsLeftOutAndLogged(t *testing.T) {
 	agent := hosted("pe-1", "ag-1")
 	agent.Hyperparameters = nil
-	instance, err := instanceFor(agent, testImage, testAPIURL, testSecret, testDigest)
+	instance, err := instanceFor(agent, agent.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,14 +593,14 @@ func TestAnInstanceNameIsStableReadableAndWithinEveryProvidersRules(t *testing.T
 		{"пример", "代理"},
 		{"", ""},
 	} {
-		name, err := instanceName(ids[0], ids[1], testImage, env, testDigest, 0)
+		name, err := instanceName(ids[0], ids[1], "", testImage, env, testDigest, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !providerNamePattern.MatchString(name) || len(name) > MaxInstanceNameLength || len(strings.Split(name, "-")) != 3 {
 			t.Errorf("name %q of %q: not three parts of a-z, 0-9 within %d characters", name, ids, MaxInstanceNameLength)
 		}
-		again, _ := instanceName(ids[0], ids[1], testImage, map[string]string{"AGENT_ID": "x"}, testDigest, 0)
+		again, _ := instanceName(ids[0], ids[1], "", testImage, map[string]string{"AGENT_ID": "x"}, testDigest, 0)
 		if again != name {
 			t.Errorf("name of %q changed between two calls: %q, %q", ids, name, again)
 		}
@@ -566,7 +619,7 @@ func TestTwoAgentsNeverShareANameHoweverAlikeTheirIDsRead(t *testing.T) {
 		{"pe-1", "agent-a"}, {"pe-1", "agenta"}, {"pe-1", "agent_a"}, {"pe1", "agent-a"}, {"pe-1a", "gent-a"},
 		{"pe-1", long + "1"}, {"pe-1", long + "2"}, {"pe", "1-agent-a"},
 	} {
-		name, err := instanceName(ids[0], ids[1], testImage, nil, testDigest, 0)
+		name, err := instanceName(ids[0], ids[1], "", testImage, nil, testDigest, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -581,7 +634,7 @@ func TestANameChangesWithWhatTheInstanceRunsAndNotWithTheSecret(t *testing.T) {
 	base := hosted("pe-1", "ag-1")
 	name := func(agent domain.AgentSignup, image, apiURL, secret string) string {
 		t.Helper()
-		instance, err := instanceFor(agent, image, apiURL, secret, testDigest)
+		instance, err := instanceFor(agent, agent.Instance.Restarts, image, apiURL, secret, testDigest)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -603,7 +656,7 @@ func TestANameChangesWithWhatTheInstanceRunsAndNotWithTheSecret(t *testing.T) {
 	restarted := hosted("pe-1", "ag-1")
 	restarted.Instance.Restarts = 1
 	changed["restart count"] = name(restarted, testImage, testAPIURL, testSecret)
-	otherLauncherInputs, err := instanceFor(base, testImage, testAPIURL, testSecret, "ffffffffffffffffffffffffffffffff")
+	otherLauncherInputs, err := instanceFor(base, 0, testImage, testAPIURL, testSecret, "ffffffffffffffffffffffffffffffff")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,11 +670,11 @@ func TestANameChangesWithWhatTheInstanceRunsAndNotWithTheSecret(t *testing.T) {
 	// A rotated secret changes the token inside the environment. The name is derived from no
 	// secret, so it stays, and the agent whose old token stops working is replaced as any
 	// crashed one is.
-	rotated, err := instanceFor(base, testImage, testAPIURL, "another-secret-of-the-same-length-xx", testDigest)
+	rotated, err := instanceFor(base, 0, testImage, testAPIURL, "another-secret-of-the-same-length-xx", testDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _ := instanceFor(base, testImage, testAPIURL, testSecret, testDigest)
+	first, _ := instanceFor(base, 0, testImage, testAPIURL, testSecret, testDigest)
 	if rotated.Name != original || rotated.Env["HL_TOKEN"] == first.Env["HL_TOKEN"] {
 		t.Errorf("after a secret rotation: name %q (was %q), token changed = %v", rotated.Name, original, rotated.Env["HL_TOKEN"] != first.Env["HL_TOKEN"])
 	}
@@ -686,5 +739,84 @@ func TestAMachineReportedAsStartingPastTheBootLimitIsGivenUpOnLikeAnExit(t *test
 	up := mustReconcile(t, store, observed(ObservedInstance{Name: again.Instances[0].Name, State: "running"}))
 	if up.Instances[0].Name != again.Instances[0].Name || store.find("pe-1", "ag-slow").Restarts != 1 {
 		t.Fatal("a running machine was held to the boot limit")
+	}
+}
+
+func hostedCoordinator(pe string) db.LauncherCoordinator {
+	return db.LauncherCoordinator{PlatformExperimentID: pe, HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "claude-sonnet-5"}}
+}
+
+func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t *testing.T) {
+	store := &launcherStore{
+		byLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}},
+		coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1"), {PlatformExperimentID: "pe-2", HostedCoordinator: domain.HostedCoordinator{Launcher: "other", Model: "m"}}},
+	}
+	answer := mustReconcile(t, store, observed())
+	if len(answer.Instances) != 2 {
+		t.Fatalf("instances = %+v, want the agent and the coordinator of this launcher", answer.Instances)
+	}
+	coordinator := answer.Instances[1]
+	token, err := auth.Mint(testSecret, auth.CoordinatorScope("pe-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"API_URL": testAPIURL, "PLATFORM_EXPERIMENT_ID": "pe-1", "AGENT_FLAVOR": "coordinator", "AGENT_MODEL": "claude-sonnet-5", "HL_TOKEN": token,
+	}
+	if !maps.Equal(coordinator.Env, want) || coordinator.Image != testImage {
+		t.Errorf("coordinator = %+v, want env %v", coordinator, want)
+	}
+	if !strings.HasPrefix(coordinator.Name, "pe1-coordinator-") || len(coordinator.Name) > MaxInstanceNameLength || strings.Contains(coordinator.Name, token) {
+		t.Errorf("name = %q", coordinator.Name)
+	}
+	if store.coordinator("pe-1").Instance.Name != coordinator.Name {
+		t.Error("the name asked for was not recorded")
+	}
+	if again := mustReconcile(t, store, observed(ObservedInstance{Name: coordinator.Name, State: "running"})); again.Instances[1].Name != coordinator.Name {
+		t.Errorf("a second ask renamed the coordinator: %q then %q", coordinator.Name, again.Instances[1].Name)
+	}
+}
+
+func TestAnAgentWhoseIDIsTheCoordinatorsNameGetsAnotherInstanceName(t *testing.T) {
+	store := &launcherStore{
+		byLauncher:   map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "coordinator")}}},
+		coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")},
+	}
+	answer := mustReconcile(t, store, observed())
+	if len(answer.Instances) != 2 || answer.Instances[0].Name == answer.Instances[1].Name {
+		t.Fatalf("instances = %+v, want two names", answer.Instances)
+	}
+}
+
+func TestACoordinatorsMachineIsRestartedBoundedTimedAndLeftToEndLikeAnAgents(t *testing.T) {
+	store := &launcherStore{coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")}, askedAgo: map[string]time.Duration{}}
+	name := mustReconcile(t, store, observed()).Instances[0].Name
+
+	store.askedAgo[coordinatorKey+"pe-1"] = testBootLimit + time.Second
+	stuck := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "starting"}))
+	if len(stuck.Instances) != 1 || stuck.Instances[0].Name == name || store.coordinator("pe-1").Instance.Restarts != 1 {
+		t.Fatalf("after a boot past the limit: %+v, recorded %+v", stuck.Instances, store.coordinator("pe-1").Instance)
+	}
+	name = stuck.Instances[0].Name
+
+	for restarts := 2; restarts <= domain.MaxAgentInstanceRestarts; restarts++ {
+		answer := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: "boom"}))
+		if len(answer.Instances) != 1 || answer.Instances[0].Name == name {
+			t.Fatalf("exit %d: %+v, want a new name", restarts, answer.Instances)
+		}
+		name = answer.Instances[0].Name
+	}
+	last := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: "boom"}))
+	recorded := store.coordinator("pe-1").Instance
+	if len(last.Instances) != 0 || !recorded.Stopped || recorded.ExitLog != "boom" {
+		t.Fatalf("after the last restart: %+v, recorded %+v", last.Instances, recorded)
+	}
+
+	ending := hostedCoordinator("pe-9")
+	ending.Ending, ending.Instance.Name = true, "pe9-coordinator-0123456789ab"
+	store = &launcherStore{coordinators: []db.LauncherCoordinator{ending}}
+	answer := mustReconcile(t, store, observed(ObservedInstance{Name: ending.Instance.Name, State: "exited"}))
+	if len(answer.Instances) != 0 || !slices.Equal(answer.Ending, []string{ending.Instance.Name}) {
+		t.Fatalf("answer = %+v, want the coordinator only as ending", answer)
 	}
 }

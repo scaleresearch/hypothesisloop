@@ -52,6 +52,20 @@ type AgentInstance struct {
 	ExitLog string `json:"exit_log,omitempty"`
 }
 
+// HostedCoordinator is the coordinator the platform runs for one platform experiment: one more
+// machine of its launcher, started as the agents are and holding a coordinator token. It is not
+// signed up, so it holds no quota and is not ranked.
+type HostedCoordinator struct {
+	Launcher string `json:"launcher"`
+	Model    string `json:"model"`
+	// Instance is what became of its machine.
+	Instance AgentInstance `json:"instance"`
+}
+
+// CoordinatorFlavor is what the harness is started as to coordinate. It is no flavor an agent
+// can join with.
+const CoordinatorFlavor = "coordinator"
+
 // MaxAgentInstanceRestarts is how many times an exited machine of one hosted agent is asked for
 // again. The next exit stops the agent.
 const MaxAgentInstanceRestarts = 3

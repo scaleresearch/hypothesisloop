@@ -313,8 +313,11 @@ func (s *PlatformExperimentsStore) RecordAgentInstanceExit(ctx context.Context, 
 // under name is still starting more than bootLimit after it was asked for, on the database's
 // clock. recorded=false while it is inside the limit.
 func (s *PlatformExperimentsStore) RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name string, bootLimit time.Duration, maxRestarts int) (recorded bool, err error) {
-	why := fmt.Sprintf("the machine was still starting %s after it was asked for, which is the boot limit", bootLimit)
-	return s.endAgentInstance(ctx, platformExpID, agentID, name, why, maxRestarts, bootLimit)
+	return s.endAgentInstance(ctx, platformExpID, agentID, name, stuckStartingLog(bootLimit), maxRestarts, bootLimit)
+}
+
+func stuckStartingLog(bootLimit time.Duration) string {
+	return fmt.Sprintf("the machine was still starting %s after it was asked for, which is the boot limit", bootLimit)
 }
 
 func (s *PlatformExperimentsStore) endAgentInstance(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int, askedBefore time.Duration) (bool, error) {

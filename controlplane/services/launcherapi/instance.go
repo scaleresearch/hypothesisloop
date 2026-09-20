@@ -34,7 +34,7 @@ const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength
 // signup, the platform's config and what the launcher says it starts machines with, so every
 // reconcile answers with the same one until one of them changes. This is the one place the
 // agent's environment is put together: a value an agent needs at startup is added here.
-func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
+func instanceFor(agent domain.AgentSignup, restarts int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
 	if agent.Flavor == "" || agent.Model == "" {
 		return Instance{}, fmt.Errorf("signup of %s has no flavor or no model", agent.AgentID)
 	}
@@ -54,11 +54,7 @@ func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret, launchD
 		"AGENT_MODEL":            agent.Model,
 		"AGENT_HYPERPARAMETERS":  string(hyperparameters),
 	}
-	restarts := 0
-	if agent.Instance != nil {
-		restarts = agent.Instance.Restarts
-	}
-	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, image, env, launchDigest, restarts)
+	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, "", image, env, launchDigest, restarts)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -70,22 +66,52 @@ func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret, launchD
 	return Instance{Name: name, Image: image, Env: env}, nil
 }
 
-// instanceName names one machine of one agent. The digest covers everything the machine is
+// coordinatorName stands where an agent's id does in the name of a coordinator's machine.
+const coordinatorName = "coordinator"
+
+// coordinatorInstanceFor is the machine a platform experiment's hosted coordinator runs in: the
+// agents' image started as domain.CoordinatorFlavor, with the platform experiment's coordinator
+// token and no agent id, since a coordinator is no agent of the experiment.
+func coordinatorInstanceFor(platformExperimentID, model string, restarts int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
+	if model == "" {
+		return Instance{}, fmt.Errorf("coordinator of %s has no model", platformExperimentID)
+	}
+	env := map[string]string{
+		"API_URL":                apiURL,
+		"PLATFORM_EXPERIMENT_ID": platformExperimentID,
+		"AGENT_FLAVOR":           domain.CoordinatorFlavor,
+		"AGENT_MODEL":            model,
+	}
+	name, err := instanceName(platformExperimentID, coordinatorName, coordinatorName, image, env, launchDigest, restarts)
+	if err != nil {
+		return Instance{}, err
+	}
+	token, err := auth.Mint(signingSecret, auth.CoordinatorScope(platformExperimentID))
+	if err != nil {
+		return Instance{}, err
+	}
+	env["HL_TOKEN"] = token
+	return Instance{Name: name, Image: image, Env: env}, nil
+}
+
+// instanceName names one machine of one agent, or of a coordinator when role says so: an agent
+// whose id is the coordinator's name gets another digest. The digest covers everything the machine is
 // started with: the image, the environment, the launcher's own launch inputs (its digest of
 // them) and how many machines of this agent exited before it. An agent for whom any of that
 // changes is asked for under a new name: the launcher sees a machine that is no longer wanted
 // and one that is missing, and replaces it without being told to. env must not hold the agent's
 // token, which has no place in a name. The result is lowercase letters, digits and dashes, at
 // most MaxInstanceNameLength long.
-func instanceName(platformExperimentID, agentID, image string, env map[string]string, launchDigest string, restarts int) (string, error) {
+func instanceName(platformExperimentID, agentID, role, image string, env map[string]string, launchDigest string, restarts int) (string, error) {
 	identity, err := json.Marshal(struct {
 		PlatformExperimentID string            `json:"platform_experiment_id"`
 		AgentID              string            `json:"agent_id"`
+		Role                 string            `json:"role,omitempty"`
 		Image                string            `json:"image"`
 		Env                  map[string]string `json:"env"`
 		LaunchDigest         string            `json:"launch_digest"`
 		Restarts             int               `json:"restarts"`
-	}{platformExperimentID, agentID, image, env, launchDigest, restarts})
+	}{platformExperimentID, agentID, role, image, env, launchDigest, restarts})
 	if err != nil {
 		return "", fmt.Errorf("name instance of %s: %w", agentID, err)
 	}

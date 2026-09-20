@@ -148,7 +148,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of the " +
 			"project's repository, a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and ends_at " +
 			"are never read from the file and stay required of the body: any agent's token can push to that branch, so what a run costs and how " +
-			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file.",
+			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
+			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
+			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
+			"hosted_agents: N joins N new agents the platform runs, as POST /platform-experiments/{id}/agents with hosted does. " +
+			"Both need the project's repository (409 no_repository without one), neither is read from the file, and coordinator_hosted is fixed from then on. " +
+			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -179,12 +184,24 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Body.Name == "" || in.Body.BudgetAcceleratorHours <= 0 {
 			return nil, invalid("name and budget_accelerator_hours are required")
 		}
-		pe, err := peh.svc.Create(ctx, in.Body)
+		hosting, err := peh.withHosting(ctx, in.Body)
+		if err != nil {
+			return nil, peh.refusal("create platform experiment", err)
+		}
+		pe, err := peh.svc.Create(ctx, hosting)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, invalid(err.Error())
 		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if hosting.HostedAgents > 0 {
+			signups, err := peh.svc.AddAgents(ctx, pe.ID, AddAgentsRequest{Count: hosting.HostedAgents, Hosted: true}, peh.launch, peh.repos)
+			if err != nil {
+				peh.logger.Error("platform experiment created without its hosted agents", zap.String("id", pe.ID), zap.Error(err))
+				return nil, huma.Error500InternalServerError("platform experiment " + pe.ID + " was created and its hosted agents were not: add them with POST /platform-experiments/" + pe.ID + "/agents")
+			}
+			pe.SignupCount = len(signups)
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})

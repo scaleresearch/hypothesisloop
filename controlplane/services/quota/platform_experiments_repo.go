@@ -25,7 +25,7 @@ var statedByTheRequest = []string{"name", "description", "metrics", "report_inte
 
 // neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
 // the branch the file is read from, so these come from the request and from nowhere else.
-var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "ends_at"}
+var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "ends_at", "coordinator_hosted", "coordinator_model", "hosted_agents"}
 
 // missing lists the fields of statedByTheRequest the body did not carry.
 func (r CreatePlatformExperimentRequest) missing() []string {

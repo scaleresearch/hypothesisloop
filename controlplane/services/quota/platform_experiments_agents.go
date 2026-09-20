@@ -103,14 +103,46 @@ func (s *PlatformExperimentsService) requireRepo(ctx context.Context, platformEx
 	if pe == nil {
 		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
-	cloneURL, err := repos.CloneURL(ctx, pe.ProjectID)
+	return requireProjectRepo(ctx, pe.ProjectID, repos)
+}
+
+func requireProjectRepo(ctx context.Context, projectID string, repos ProjectRepos) error {
+	cloneURL, err := repos.CloneURL(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("platform_experiments.AddAgents: %w", err)
+		return fmt.Errorf("platform_experiments: repository of project %s: %w", projectID, err)
 	}
 	if cloneURL == "" {
-		return refuseSignup(409, "no_repository", "project %s has no repository attached, and a hosted agent works in the project's repository: attach one to the project, then add the agents again", pe.ProjectID)
+		return refuseSignup(409, "no_repository", "project %s has no repository attached, and a hosted agent or coordinator works in the project's repository: attach one to the project, then ask again", projectID)
 	}
 	return nil
+}
+
+// withHosting resolves what a create asks the platform to run: the coordinator's launcher and
+// model, and that the project has the repository hosted agents and a coordinator work in.
+func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+	if req.CoordinatorModel != "" && !req.CoordinatorHosted {
+		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_hosted is not")
+	}
+	if req.HostedAgents < 0 || req.HostedAgents > domain.MaxAgentsPerSpawn || req.HostedAgents > req.MaxAgents {
+		return req, refuseSignup(400, "invalid_request", "hosted_agents must be between 0 and max_agents, and at most %d", domain.MaxAgentsPerSpawn)
+	}
+	if !req.CoordinatorHosted && req.HostedAgents == 0 {
+		return req, nil
+	}
+	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
+		return req, errors.New("platform_experiments.Create: the handler has no agent launch settings")
+	}
+	if err := requireProjectRepo(ctx, req.ProjectID, h.repos); err != nil {
+		return req, err
+	}
+	if req.CoordinatorHosted {
+		_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.DefaultModel, nil)
+		if err != nil {
+			return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+		}
+		req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: model}
+	}
+	return req, nil
 }
 
 func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platformExpID string, req AddAgentsRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {

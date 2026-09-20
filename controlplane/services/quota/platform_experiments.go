@@ -144,6 +144,15 @@ type CreatePlatformExperimentRequest struct {
 	// DefaultQuotaTier controls signups that omit quota_tier. Empty defaults to "guaranteed" on
 	// create; accepted values are "guaranteed" and "burst_only".
 	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
+	// CoordinatorHosted has the platform run this platform experiment's coordinator, on
+	// CoordinatorModel or the platform's default model. HostedAgents joins that many new agents
+	// the platform runs. All three rent machines, so none is read from the experiment file.
+	CoordinatorHosted bool   `json:"coordinator_hosted,omitempty"`
+	CoordinatorModel  string `json:"coordinator_model,omitempty"`
+	HostedAgents      int    `json:"hosted_agents,omitempty"`
+
+	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
+	coordinator *domain.HostedCoordinator
 
 	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
 	// one stated as its zero value.

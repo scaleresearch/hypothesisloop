@@ -21,6 +21,10 @@ type Store interface {
 	SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error
 	RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (bool, error)
 	RecordAgentInstanceStuck(ctx context.Context, platformExpID, agentID, name string, bootLimit time.Duration, maxRestarts int) (bool, error)
+	ListLauncherCoordinators(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherCoordinator, error)
+	SetCoordinatorInstanceName(ctx context.Context, platformExpID, name string) error
+	RecordCoordinatorInstanceExit(ctx context.Context, platformExpID, name, exitLog string, maxRestarts int) (bool, error)
+	RecordCoordinatorInstanceStuck(ctx context.Context, platformExpID, name string, bootLimit time.Duration, maxRestarts int) (bool, error)
 }
 
 type Handler struct {
@@ -67,20 +71,38 @@ var launchDigestPattern = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
 const maxRequestBytes = 16 << 20
 
 // Desired is one launcher's complete desired state. Instances should exist and be running.
-// Ending names instances whose agent's run is over: they are told to stop and are otherwise left
-// alone while the agent takes its last turn, neither created nor replaced nor destroyed. An
+// Ending names instances whose run is over: they are told to stop and are otherwise left
+// alone for a last turn, neither created nor replaced nor destroyed. An
 // instance in neither list should not exist.
 type Desired struct {
 	Instances []Instance `json:"instances"`
 	Ending    []string   `json:"ending"`
 }
 
-// reconcile records what the launcher observed and evaluates everything else: which agents are
-// the launcher's, which of them still run, which have domain.AgentWindDown left, and which get
-// another machine after theirs exited. One agent that cannot be evaluated is logged and left out
-// and the rest of the list stands.
+// kept is one thing a launcher keeps a machine for: an agent, or a platform experiment's
+// coordinator. Both are evaluated by the same steps and differ in where their outcome is kept.
+type kept struct {
+	platformExperimentID string
+	// agentID is empty for a coordinator.
+	agentID  string
+	instance domain.AgentInstance
+	ending   bool
+	describe func(restarts int) (Instance, error)
+	setName  func(ctx context.Context, name string) error
+	exited   func(ctx context.Context, name, exitLog string) (bool, error)
+	stuck    func(ctx context.Context, name string) (bool, error)
+}
+
+// reconcile records what the launcher observed and evaluates everything else: which agents and
+// coordinators are the launcher's, which of them still run, which have domain.AgentWindDown
+// left, and which get another machine after theirs exited. One that cannot be evaluated is
+// logged and left out and the rest of the list stands.
 func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed) (*Desired, error) {
 	agents, err := h.store.ListLauncherAgents(ctx, launcher, domain.AgentWindDown)
+	if err != nil {
+		return nil, err
+	}
+	coordinators, err := h.store.ListLauncherCoordinators(ctx, launcher, domain.AgentWindDown)
 	if err != nil {
 		return nil, err
 	}
@@ -89,53 +111,88 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		seen[instance.Name] = instance
 	}
 
-	out := &Desired{Instances: []Instance{}, Ending: []string{}}
+	var all []kept
 	for _, agent := range agents {
-		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
 		if agent.Instance == nil {
-			log.Error("launcher list holds an agent that is not hosted")
+			h.logger.Error("launcher list holds an agent that is not hosted", zap.String("launcher", launcher), zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
 			continue
 		}
-		if agent.Ending {
+		pe, id, signup := agent.PlatformExperimentID, agent.AgentID, agent.AgentSignup
+		all = append(all, kept{
+			platformExperimentID: pe, agentID: id, instance: *agent.Instance, ending: agent.Ending,
+			describe: func(restarts int) (Instance, error) {
+				return instanceFor(signup, restarts, h.image, h.apiURL, h.signingSecret, observed.LaunchDigest)
+			},
+			setName: func(ctx context.Context, name string) error { return h.store.SetAgentInstanceName(ctx, pe, id, name) },
+			exited: func(ctx context.Context, name, exitLog string) (bool, error) {
+				return h.store.RecordAgentInstanceExit(ctx, pe, id, name, exitLog, domain.MaxAgentInstanceRestarts)
+			},
+			stuck: func(ctx context.Context, name string) (bool, error) {
+				return h.store.RecordAgentInstanceStuck(ctx, pe, id, name, h.bootLimit, domain.MaxAgentInstanceRestarts)
+			},
+		})
+	}
+	for _, coordinator := range coordinators {
+		pe, model := coordinator.PlatformExperimentID, coordinator.Model
+		all = append(all, kept{
+			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending,
+			describe: func(restarts int) (Instance, error) {
+				return coordinatorInstanceFor(pe, model, restarts, h.image, h.apiURL, h.signingSecret, observed.LaunchDigest)
+			},
+			setName: func(ctx context.Context, name string) error { return h.store.SetCoordinatorInstanceName(ctx, pe, name) },
+			exited: func(ctx context.Context, name, exitLog string) (bool, error) {
+				return h.store.RecordCoordinatorInstanceExit(ctx, pe, name, exitLog, domain.MaxAgentInstanceRestarts)
+			},
+			stuck: func(ctx context.Context, name string) (bool, error) {
+				return h.store.RecordCoordinatorInstanceStuck(ctx, pe, name, h.bootLimit, domain.MaxAgentInstanceRestarts)
+			},
+		})
+	}
+
+	out := &Desired{Instances: []Instance{}, Ending: []string{}}
+	for _, one := range all {
+		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
+		current := one.instance
+		if one.ending {
 			// Named as it was created, whatever config says now: a new name would have its
-			// machine destroyed in the middle of the agent's last turn.
-			if agent.Instance.Name != "" {
-				out.Ending = append(out.Ending, agent.Instance.Name)
+			// machine destroyed in the middle of its last turn.
+			if current.Name != "" {
+				out.Ending = append(out.Ending, current.Name)
 			}
 			continue
 		}
-		if reported, listed := seen[agent.Instance.Name]; listed && agent.Instance.Name != "" {
+		if reported, listed := seen[current.Name]; listed && current.Name != "" {
 			// A machine that exited and one that never got past starting end the same way: the
-			// outcome is recorded, and the agent gets another machine while it has a restart left.
+			// outcome is recorded, and another machine is asked for while a restart is left.
 			var recorded bool
 			var err error
 			switch reported.State {
 			case stateExited:
-				recorded, err = h.store.RecordAgentInstanceExit(ctx, agent.PlatformExperimentID, agent.AgentID, agent.Instance.Name, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes), domain.MaxAgentInstanceRestarts)
+				recorded, err = one.exited(ctx, current.Name, lastBytes(reported.Log, domain.MaxAgentInstanceLogBytes))
 			case stateStarting:
-				recorded, err = h.store.RecordAgentInstanceStuck(ctx, agent.PlatformExperimentID, agent.AgentID, agent.Instance.Name, h.bootLimit, domain.MaxAgentInstanceRestarts)
+				recorded, err = one.stuck(ctx, current.Name)
 			}
 			if err != nil {
 				log.Error("record instance outcome failed", zap.Error(err))
 				continue
 			}
 			if recorded {
-				stopped := agent.Instance.Restarts >= domain.MaxAgentInstanceRestarts
-				log.Warn("hosted agent's instance ended", zap.String("instance", agent.Instance.Name), zap.String("reported", reported.State), zap.Int("restartsBefore", agent.Instance.Restarts), zap.Bool("stopped", stopped))
+				stopped := current.Restarts >= domain.MaxAgentInstanceRestarts
+				log.Warn("hosted instance ended", zap.String("instance", current.Name), zap.String("reported", reported.State), zap.Int("restartsBefore", current.Restarts), zap.Bool("stopped", stopped))
 				if stopped {
 					continue
 				}
-				agent.Instance.Restarts++
-				agent.Instance.Name = ""
+				current.Restarts++
+				current.Name = ""
 			}
 		}
-		instance, err := instanceFor(agent.AgentSignup, h.image, h.apiURL, h.signingSecret, observed.LaunchDigest)
+		instance, err := one.describe(current.Restarts)
 		if err != nil {
-			log.Error("hosted agent's instance cannot be described", zap.Error(err))
+			log.Error("hosted instance cannot be described", zap.Error(err))
 			continue
 		}
-		if instance.Name != agent.Instance.Name {
-			if err := h.store.SetAgentInstanceName(ctx, agent.PlatformExperimentID, agent.AgentID, instance.Name); err != nil {
+		if instance.Name != current.Name {
+			if err := one.setName(ctx, instance.Name); err != nil {
 				log.Error("record instance name failed", zap.Error(err))
 				continue
 			}
@@ -180,7 +237,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},
 		MaxBodyBytes: maxRequestBytes,
 		Description: "The launcher sends what its provider lists, and for an exited instance the end of its output. The answer is its complete desired state. " +
-			"instances: each {name, image, env} should exist and be running. " +
+			"instances: each {name, image, env} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
 			"Any other instance of the launcher should not exist. An exited instance, and one reported as starting for longer than the platform's boot limit, " +
 			"is recorded on its agent and is never replaced by the launcher on its own: " +

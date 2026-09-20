@@ -204,6 +204,22 @@ func (noLauncherAgents) RecordAgentInstanceStuck(context.Context, string, string
 	panic("the launcher handler reached its store")
 }
 
+func (noLauncherAgents) ListLauncherCoordinators(context.Context, string, time.Duration) ([]db.LauncherCoordinator, error) {
+	panic("the launcher handler reached its store")
+}
+
+func (noLauncherAgents) SetCoordinatorInstanceName(context.Context, string, string) error {
+	panic("the launcher handler reached its store")
+}
+
+func (noLauncherAgents) RecordCoordinatorInstanceExit(context.Context, string, string, string, int) (bool, error) {
+	panic("the launcher handler reached its store")
+}
+
+func (noLauncherAgents) RecordCoordinatorInstanceStuck(context.Context, string, string, time.Duration, int) (bool, error) {
+	panic("the launcher handler reached its store")
+}
+
 // reached is what a request answers once every check let it through and the handler asked a
 // service for something: the services here hold no store, so that first ask panics.
 const reached = 599

@@ -455,6 +455,9 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exited_at TIMES
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exit_log  TEXT        NOT NULL DEFAULT '';
 -- When instance_name was set: the moment a machine still starting is timed from.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_asked_at  TIMESTAMPTZ;
+-- A machine asked for before the column existed is timed from this migration: with no time its
+-- exit would never be recorded.
+UPDATE experiment_signups SET instance_asked_at = now() WHERE instance_name <> '' AND instance_asked_at IS NULL;
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN
@@ -966,6 +969,19 @@ CREATE INDEX IF NOT EXISTS idx_human_writes_subject ON human_writes(subject);
 -- When the platform experiment closed. An agent's token outlives the close by a fixed grace, and
 -- updated_at moves again when the summary is filed.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+-- A coordinator the platform runs: one more machine of coordinator_launcher beside the agents',
+-- on coordinator_model. Fixed at creation. The coordinator_instance_* columns say what became
+-- of its machine, exactly as the instance_* columns of experiment_signups do for an agent's.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_hosted             BOOLEAN     NOT NULL DEFAULT false;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_launcher           TEXT        NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_model              TEXT        NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_name      TEXT        NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_asked_at  TIMESTAMPTZ;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_restarts  INTEGER     NOT NULL DEFAULT 0;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_stopped   BOOLEAN     NOT NULL DEFAULT false;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exited_at TIMESTAMPTZ;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exit_log  TEXT        NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_platform_experiments_coordinator_launcher ON platform_experiments(coordinator_launcher) WHERE coordinator_hosted;
 UPDATE platform_experiments SET closed_at = updated_at WHERE status = 'closed' AND closed_at IS NULL;
 
 -- The GitHub repository a project's agents and jobs clone, reached through an installation of

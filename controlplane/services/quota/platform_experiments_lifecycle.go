@@ -71,6 +71,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if req.EndsAt.IsZero() {
 		return nil, invalidPlatformExperiment(errors.New("ends_at is required"))
 	}
+	if req.CoordinatorHosted != (req.coordinator != nil) {
+		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
+	}
 	pe := &domain.PlatformExperiment{
 		ID:                        "pe-" + uuid.New().String()[:8],
 		ProjectID:                 req.ProjectID,
@@ -91,6 +94,8 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
+		CoordinatorHosted:         req.CoordinatorHosted,
+		Coordinator:               req.coordinator,
 	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)

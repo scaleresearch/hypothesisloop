@@ -32,8 +32,59 @@ const contractSecret = "a-signing-secret-only-this-test-knows"
 type signups struct {
 	agents []db.LauncherAgent
 	// askedAgo is how long ago each agent's current instance name was first asked for.
-	askedAgo map[string]time.Duration
+	askedAgo     map[string]time.Duration
+	coordinators []db.LauncherCoordinator
 }
+
+func (s *signups) coordinator(pe string) *db.LauncherCoordinator {
+	for i := range s.coordinators {
+		if s.coordinators[i].PlatformExperimentID == pe {
+			return &s.coordinators[i]
+		}
+	}
+	panic("no coordinator of " + pe)
+}
+
+func (s *signups) ListLauncherCoordinators(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherCoordinator, error) {
+	listed := []db.LauncherCoordinator{}
+	for _, coordinator := range s.coordinators {
+		if coordinator.Launcher == launcher && !coordinator.Instance.Stopped {
+			listed = append(listed, coordinator)
+		}
+	}
+	return listed, nil
+}
+
+func (s *signups) SetCoordinatorInstanceName(_ context.Context, pe, name string) error {
+	s.coordinator(pe).Instance.Name = name
+	delete(s.askedAgo, coordinatorKey+pe)
+	return nil
+}
+
+func (s *signups) RecordCoordinatorInstanceExit(_ context.Context, pe, name, exitLog string, maxRestarts int) (bool, error) {
+	instance := &s.coordinator(pe).Instance
+	if instance.Stopped || name == "" || instance.Name != name {
+		return false, nil
+	}
+	now := time.Now()
+	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
+	if instance.Restarts >= maxRestarts {
+		instance.Stopped = true
+	} else {
+		instance.Restarts++
+	}
+	return true, nil
+}
+
+func (s *signups) RecordCoordinatorInstanceStuck(ctx context.Context, pe, name string, bootLimit time.Duration, maxRestarts int) (bool, error) {
+	if s.askedAgo[coordinatorKey+pe] <= bootLimit {
+		return false, nil
+	}
+	return s.RecordCoordinatorInstanceExit(ctx, pe, name, "still starting past the boot limit", maxRestarts)
+}
+
+// coordinatorKey prefixes a platform experiment's id where askedAgo keeps its coordinator.
+const coordinatorKey = "coordinator of "
 
 const contractBootLimit = 5 * time.Minute
 
@@ -320,5 +371,64 @@ func TestAMachineThatNeverStartsIsReplacedByTheControlPlanesDecisionAndCountedAs
 	running.pass()
 	if running.store.instance("ag-up").Restarts != 0 || running.rented.Calls("Create") != 1 {
 		t.Fatal("a running machine was held to the boot limit")
+	}
+}
+
+func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.store.coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
+	c.pass()
+	names := c.rented.Names()
+	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-ns-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-ns-pe1-coordinator-") {
+		t.Fatalf("rented %v, want the agent and the coordinator", names)
+	}
+	agent, coordinator := names[0], names[1]
+	token, err := auth.Mint(contractSecret, auth.CoordinatorScope("pe-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEnv := map[string]string{
+		"API_URL": "https://api.example.invalid", "PLATFORM_EXPERIMENT_ID": "pe-1", "AGENT_FLAVOR": "coordinator", "AGENT_MODEL": "model-2",
+		"HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken,
+	}
+	if spec := c.rented.Spec(coordinator); !reflect.DeepEqual(spec.Env, wantEnv) || strings.Contains(spec.Name, token) {
+		t.Fatalf("coordinator's env = %v, want %v", spec.Env, wantEnv)
+	}
+	c.rented.Start(agent)
+	agentIDs := c.rented.IDs(agent)
+
+	// Its harness exits: the control plane asks for it again under a new name, and the agent's
+	// machine is not touched.
+	c.rented.Start(coordinator)
+	c.rented.Exit(coordinator, "SystemExit: the reason")
+	c.pass()
+	recorded := c.store.coordinator("pe-1").Instance
+	replacement := c.rented.Names()[1]
+	if recorded.Restarts != 1 || recorded.ExitLog != "SystemExit: the reason" || replacement == coordinator || !strings.HasPrefix(replacement, "hl-agent-ns-pe1-coordinator-") {
+		t.Fatalf("after an exit: recorded %+v, rented %v", recorded, c.rented.Names())
+	}
+	if !reflect.DeepEqual(c.rented.IDs(agent), agentIDs) {
+		t.Fatal("the agent was replaced with the coordinator")
+	}
+
+	// The platform experiment closes: both are told to stop and left to finish.
+	c.rented.Start(replacement)
+	ids := c.rented.IDs(replacement)
+	c.store.agents[0].Ending = true
+	c.store.coordinators[0].Ending = true
+	c.pass()
+	if c.rented.Stops(replacement) != 1 || c.rented.Stops(agent) != 1 || !reflect.DeepEqual(c.rented.IDs(replacement), ids) {
+		t.Fatalf("stops: coordinator %d, agent %d", c.rented.Stops(replacement), c.rented.Stops(agent))
+	}
+	c.rented.Exit(replacement, "last turn done")
+	c.pass()
+	if after := c.store.coordinator("pe-1").Instance; after.Restarts != 1 || c.rented.Calls("Create") != 3 {
+		t.Fatalf("an ending coordinator's exit was counted or its machine rented again: %+v, %d creates", after, c.rented.Calls("Create"))
+	}
+
+	c.store.agents, c.store.coordinators = nil, nil
+	c.pass()
+	if len(c.rented.Names()) != 0 {
+		t.Fatalf("still rented: %v", c.rented.Names())
 	}
 }

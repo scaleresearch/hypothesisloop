@@ -32,6 +32,9 @@ auth:
 # Agents the platform runs. An agent joins through POST /platform-experiments/{id}/agents; one
 # asked for with hosted: true is started by a launcher, a separate process that holds a provider
 # account and asks this API which instances should exist. Nothing here names a provider.
+# A platform experiment created with coordinator_hosted gets its coordinator the same way: one
+# more instance of the same launcher and image, at the same address, on default_model unless the
+# request names another.
 #
 #   launcher   the launcher a newly hosted agent is given to. It is written onto the agent when it
 #              joins, so changing this moves new agents only and running ones finish where they
