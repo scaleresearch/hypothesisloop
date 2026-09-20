@@ -42,8 +42,9 @@ func (e *reasonError) Error() string  { return e.Message }
 func (e *reasonError) GetStatus() int { return e.status }
 
 type summaryReply struct {
-	Status           string `json:"status"`
-	OpenHypothesisID string `json:"open_hypothesis_id,omitempty"`
+	Status       string                  `json:"status"`
+	HypothesisID string                  `json:"hypothesis_id,omitempty"`
+	Verdict      domain.HypothesisStatus `json:"verdict,omitempty"`
 }
 
 // submitRequest is the wire shape for POST /experiments.
@@ -316,7 +317,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
 		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}. " +
-			"open_hypothesis_id names the job's hypothesis while its verdict is open and yours to set.",
+			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -326,14 +327,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Body.Summary == "" {
 			return nil, huma.Error400BadRequest("summary is required")
 		}
-		open, err := h.svc.WriteExperimentSummary(ctx, in.ID, in.Body.Summary)
+		hypothesis, err := h.svc.WriteExperimentSummary(ctx, in.ID, in.Body.Summary)
 		if err != nil {
 			if e := admissionStatusError(err); e != nil {
 				return nil, e
 			}
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body summaryReply }{Body: summaryReply{Status: "ok", OpenHypothesisID: open}}, nil
+		reply := summaryReply{Status: "ok"}
+		if hypothesis != nil {
+			reply.HypothesisID, reply.Verdict = hypothesis.ID, hypothesis.Status
+		}
+		return &struct{ Body summaryReply }{Body: reply}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{

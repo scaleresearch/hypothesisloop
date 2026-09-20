@@ -245,16 +245,23 @@ func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	}
 }
 
-func TestJobSummaryPointsAtTheOpenVerdict(t *testing.T) {
-	open := "hyp-1"
-	recordingServer(t, func(int, recorded) any { return map[string]any{"status": "ok", "open_hypothesis_id": open} })
-	for _, want := range []string{"hl: job summary: the verdict of hyp-1 is open and yours to set: hl hypothesis status hyp-1 confirmed|refuted|inconclusive\n", ""} {
+func TestJobSummaryPointsAtTheVerdictThatIsTheAgentsToSet(t *testing.T) {
+	var reply map[string]any
+	recordingServer(t, func(int, recorded) any { return reply })
+	for verdict, want := range map[string]string{
+		"open":      "hl: job summary: the verdict of hyp-1 is open and yours to set: hl hypothesis status hyp-1 confirmed|refuted|inconclusive\n",
+		"confirmed": "hl: job summary: the verdict of hyp-1 is confirmed and yours to change if this finding does not fit it\n",
+		"":          "",
+	} {
+		reply = map[string]any{"status": "ok"}
+		if verdict != "" {
+			reply["hypothesis_id"], reply["verdict"] = "hyp-1", verdict
+		}
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"job", "summary", "job-1", "--text", "it held"}, &stdout, &stderr)
 		if code != 0 || stdout.String() != `{"status":"ok"}`+"\n" || stderr.String() != want {
-			t.Fatalf("open %q: exit %d, stdout %q, stderr %q", open, code, stdout.String(), stderr.String())
+			t.Fatalf("verdict %q: exit %d, stdout %q, stderr %q", verdict, code, stdout.String(), stderr.String())
 		}
-		open = ""
 	}
 }
 

@@ -455,15 +455,20 @@ COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 		return parseExit(misuse(fs, "--text is required"))
 	}
 	var out struct {
-		Status string `json:"status"`
-		Open   string `json:"open_hypothesis_id"`
+		Status     string `json:"status"`
+		Hypothesis string `json:"hypothesis_id"`
+		Verdict    string `json:"verdict"`
 	}
 	if err := c.Do("POST", "/experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": text}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "{\"status\":%q}\n", out.Status)
-	if out.Open != "" {
-		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s confirmed|refuted|inconclusive\n", out.Open, out.Open)
+	switch out.Verdict {
+	case "":
+	case "open":
+		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s confirmed|refuted|inconclusive\n", out.Hypothesis, out.Hypothesis)
+	default:
+		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is %s and yours to change if this finding does not fit it\n", out.Hypothesis, out.Verdict)
 	}
 	return 0
 }

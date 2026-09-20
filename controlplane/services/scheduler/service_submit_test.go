@@ -223,22 +223,23 @@ func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _
 }
 
 // The summary is where an agent has the evidence in hand, so its reply names the hypothesis
-// whose verdict that agent may set and has not: its own or a human's, never another agent's.
-func TestASummaryNamesTheHypothesisWhoseVerdictIsStillOpen(t *testing.T) {
+// whose verdict that agent may set, open or already given: its own or a human's, never another
+// agent's.
+func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 	for _, tc := range []struct {
 		h    domain.Hypothesis
-		want string
+		want bool
 	}{
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, "hyp-1"},
-		{domain.Hypothesis{ID: "hyp-1", Author: "jane", Source: domain.HypothesisSourceHuman, Status: domain.HypothesisOpen}, "hyp-1"},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, ""},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisConfirmed}, ""},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, true},
+		{domain.Hypothesis{ID: "hyp-1", Author: "jane", Source: domain.HypothesisSourceHuman, Status: domain.HypothesisOpen}, true},
+		{domain.Hypothesis{ID: "hyp-1", Author: "jane", Source: domain.HypothesisSourceHuman, Status: domain.HypothesisConfirmed}, true},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, false},
 	} {
 		store := &finishedJobStore{}
 		s := &Service{store: store, hypotheses: oneHypothesis{h: &tc.h}}
 		got, err := s.WriteExperimentSummary(context.Background(), "job-1", "it held")
-		if err != nil || got != tc.want || store.filed != 1 {
-			t.Fatalf("%+v: got = (%q, %v), filed %d, want (%q, nil), filed 1", tc.h, got, err, store.filed, tc.want)
+		if err != nil || (got != nil) != tc.want || tc.want && *got != tc.h || store.filed != 1 {
+			t.Fatalf("%+v: got = (%+v, %v), filed %d, want it named: %v, filed 1", tc.h, got, err, store.filed, tc.want)
 		}
 	}
 }
