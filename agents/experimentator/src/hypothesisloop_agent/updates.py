@@ -39,7 +39,8 @@ def watch_env(api_url: str, agent_id: str, platform_experiment_id: str, workdir:
             "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
 
 
-async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[], bool]) -> tuple[int | None, str]:
+async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[], bool],
+                  warn: bool = True) -> tuple[int | None, str]:
     proc = await asyncio.create_subprocess_exec(*command, env=env, stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE)
     communicate = asyncio.ensure_future(proc.communicate())
@@ -55,7 +56,7 @@ async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[],
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
-    if proc.returncode != 0:
+    if proc.returncode != 0 and warn:
         log.warning("%s exited %s: %s", " ".join(command[:3]), proc.returncode, stderr.decode(errors="replace").strip()[-500:])
     return proc.returncode, stdout.decode(errors="replace")
 
@@ -99,9 +100,16 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     return events
 
 
+# A drain runs after every tool call, so an outage is logged by the first that fails, not by each.
+_drain_failing = False
+
+
 async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict]:
     """The events already waiting on the cursor, without waiting for more."""
-    _, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False)
+    global _drain_failing
+    code, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False,
+                                 warn=not _drain_failing)
+    _drain_failing = code != 0
     return await _with_job_state(_events(stdout), env, command[0])
 
 

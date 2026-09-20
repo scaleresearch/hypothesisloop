@@ -122,6 +122,14 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
         command, _ = fake_hl("echo refused >&2; exit 2\n")
         self.assertEqual(await updates.drain(ENV, command=command), [])
 
+    async def test_an_outage_is_logged_by_the_first_failed_drain_only(self):
+        command, _ = fake_hl("echo never connected >&2; exit 1\n")
+        updates._drain_failing = False
+        with self.assertLogs("llm_agent", "WARNING") as logged:
+            for _ in range(3):
+                await updates.drain(ENV, command=command)
+        self.assertEqual(len(logged.records), 1)
+
 
 class HookTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

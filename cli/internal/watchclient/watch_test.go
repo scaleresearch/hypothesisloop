@@ -6,9 +6,11 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -159,6 +161,47 @@ func TestRunRefused(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown kind") {
 		t.Fatalf("refusal message not surfaced: %s", stderr.String())
+	}
+}
+
+func TestAWatchThatNeverConnectedFails(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	code := Run(Options{URL: "ws://" + addr, Experiment: "exp-1", Timeout: 300 * time.Millisecond, Stdout: &stdout, Stderr: &stderr})
+	if code != 1 || !strings.Contains(stderr.String(), "never connected") {
+		t.Fatalf("got = exit %d, stderr %q, want = exit 1 naming the outage", code, stderr.String())
+	}
+	if waited := time.Since(start); waited < 250*time.Millisecond {
+		t.Fatalf("returned after %s, want the whole window", waited)
+	}
+	if attempts := strings.Count(stderr.String(), "connect:"); attempts > 3 {
+		t.Fatalf("got = %d connect attempts in 300ms, want = no spinning", attempts)
+	}
+}
+
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, errors.New("closed pipe") }
+
+func TestAnEventThatCouldNotBeWrittenDoesNotMoveTheCursor(t *testing.T) {
+	url := serveOneFrame(t, `{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","position":7,"cursor":7}`, 0, "")
+	cursorFile := filepath.Join(t.TempDir(), "cursor.json")
+
+	var stderr bytes.Buffer
+	code := Run(Options{URL: url, PlatformExperiment: "pe-1", Agent: "agent-a", Timeout: 5 * time.Second,
+		CursorFile: cursorFile, Stdout: brokenWriter{}, Stderr: &stderr})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1, stderr = %s", code, stderr.String())
+	}
+	if _, err := os.Stat(cursorFile); !os.IsNotExist(err) {
+		t.Fatalf("cursor file: got = %v, want = not written", err)
 	}
 }
 

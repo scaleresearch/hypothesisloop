@@ -76,8 +76,8 @@ type Options struct {
 
 // Run executes the watch and returns the process exit code: 0 once a batch of events was printed
 // (no --until), --until became true, or the window elapsed (no --until); 124 on timeout with
-// --until still unmet; 2 on a usage error or a refused subscription; 1 when the cursor could not be
-// saved.
+// --until still unmet; 2 on a usage error or a refused subscription; 1 when a watch without --until
+// never connected, an event could not be written to Stdout, or the cursor could not be saved.
 func Run(opts Options) int {
 	if opts.URL == "" {
 		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL or pass --url)")
@@ -128,6 +128,7 @@ type watch struct {
 	resumed  bool
 	printed  bool
 	settleBy time.Time
+	writeErr error
 }
 
 func (w *watch) run() int {
@@ -150,6 +151,8 @@ func (w *watch) run() int {
 	}
 
 	deadline := time.Now().Add(timeout)
+	connected := false
+	var connectErr error
 	for time.Now().Before(w.until(deadline)) {
 		if w.cursor != 0 {
 			query.Set("since", strconv.FormatInt(w.cursor, 10))
@@ -169,13 +172,19 @@ func (w *watch) run() int {
 				return UsageExitCode
 			}
 			fmt.Fprintf(w.opts.Stderr, "hl watch: connect: %s\n", err)
+			connectErr = err
 			sleepUntil(w.until(deadline), reconnectDelay)
 			continue
 		}
 
 		fmt.Fprintln(w.opts.Stderr, "hl watch: connected")
+		connected = true
 		done := w.stream(ws, deadline)
 		ws.close()
+		if w.writeErr != nil {
+			fmt.Fprintf(w.opts.Stderr, "hl watch: write event: %s\n", w.writeErr)
+			return 1
+		}
 		if done {
 			return 0
 		}
@@ -184,6 +193,10 @@ func (w *watch) run() int {
 	if w.satisfied != nil {
 		fmt.Fprintf(w.opts.Stderr, "hl watch: timed out after %gs without: %s\n", timeout.Seconds(), w.opts.Until)
 		return TimeoutExitCode
+	}
+	if !connected {
+		fmt.Fprintf(w.opts.Stderr, "hl watch: never connected to %s in %gs: %v\n", w.opts.URL, timeout.Seconds(), connectErr)
+		return 1
 	}
 	return 0
 }
@@ -224,12 +237,20 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 		if _, caughtUp := event["subscription"]; caughtUp && w.opts.NoWait {
 			return true
 		}
+		var identity []byte
 		if isEvent {
 			delete(event, "cursor")
-			identity, _ := json.Marshal(event)
+			identity, _ = json.Marshal(event)
 			if _, repeat := w.seen[string(identity)]; repeat {
 				continue
 			}
+		}
+		// The cursor moves past an event only once it is written, so one that was not is replayed.
+		if _, err := fmt.Fprintln(w.opts.Stdout, line); err != nil {
+			w.writeErr = err
+			return true
+		}
+		if isEvent {
 			position, _ := event["position"].(float64)
 			w.seen[string(identity)] = int64(position)
 			if int64(c) > w.cursor {
@@ -240,7 +261,6 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 				w.settleBy = time.Now().Add(settleWindow)
 			}
 		}
-		fmt.Fprintln(w.opts.Stdout, line)
 		if w.satisfied != nil && w.satisfied(event) {
 			return true
 		}
@@ -315,10 +335,7 @@ func minTime(a, b time.Time) time.Time {
 }
 
 func sleepUntil(deadline time.Time, d time.Duration) {
-	if time.Now().Add(d).After(deadline) {
-		return
-	}
-	time.Sleep(d)
+	time.Sleep(min(d, time.Until(deadline)))
 }
 
 // parseUntil turns "status in A,B,C" into a predicate over one job or platform experiment status
