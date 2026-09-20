@@ -38,6 +38,10 @@ provider:
     regions: [SE, NL, DE]
     # Only hosts the vendor has verified.
     verified_only: true
+    # Machines never rented. The agent's log names the machine of every instance it rents and of
+    # every instance that is slow to start, with what the host says; a machine that keeps
+    # failing to start instances goes here.
+    excluded_machines: []
     # Every GPU model a shape below names, under both of its names: product as the NVIDIA driver
     # reports it, which is what the catalog string is made from, and gpu_name as vast.ai's offer
     # search returns it. min_gpu_ram_mb tells apart models vast.ai sells under one name.

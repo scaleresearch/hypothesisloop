@@ -19,6 +19,9 @@ type Settings struct {
 	// Regions are two-letter country codes. Empty allows any.
 	Regions      []string `yaml:"regions"`
 	VerifiedOnly bool     `yaml:"verified_only"`
+	// ExcludedMachines are vendor machine ids never rented, for a host seen failing to start
+	// instances. The log names the machine of every instance rented and of every one stuck.
+	ExcludedMachines []int64 `yaml:"excluded_machines"`
 
 	// Accelerators are the GPU models this account may rent, each under both of its names.
 	Accelerators []Accelerator `yaml:"accelerators"`

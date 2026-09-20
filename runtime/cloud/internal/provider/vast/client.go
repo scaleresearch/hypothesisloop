@@ -40,6 +40,7 @@ type Provider struct {
 	http    *http.Client
 	poll    time.Duration
 	logWait time.Duration
+	shuffle func([]offer)
 }
 
 // New refuses settings that cannot rent one of acceleratorTypes, the catalog strings the caller
@@ -64,6 +65,7 @@ func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 		http:    &http.Client{Timeout: requestTimeout},
 		poll:    pollInterval,
 		logWait: logDeliveryTimeout,
+		shuffle: shuffleOffers,
 	}, nil
 }
 

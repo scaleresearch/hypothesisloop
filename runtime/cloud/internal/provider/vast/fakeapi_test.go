@@ -122,7 +122,7 @@ func instanceJSON(id int, label, status string) string {
 		encoded, _ := json.Marshal(s)
 		return string(encoded)
 	}
-	return `{"id":` + jsonInt(id) + `,"label":` + quote(label) + `,"actual_status":` + quote(status) + `,"start_date":1791145633.5}`
+	return `{"id":` + jsonInt(id) + `,"label":` + quote(label) + `,"actual_status":` + quote(status) + `,"start_date":` + fixtureStart + `}`
 }
 
 func jsonInt(n int) string {
@@ -151,5 +151,10 @@ func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 	}
 	p.baseURL = api.server.URL
 	p.poll = 5 * time.Millisecond
+	p.shuffle = func([]offer) {}
 	return p
 }
+
+// fixtureStart is when every instance of instanceJSON started: far enough in the future of any
+// test run that none of them counts as slow to start.
+const fixtureStart = "4102444800"

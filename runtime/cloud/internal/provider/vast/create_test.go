@@ -1,9 +1,14 @@
 package vast
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +59,7 @@ func gpuSettings() Settings {
 // accepted and the instance is listed straight after.
 func rentable(api *fakeAPI, name string) {
 	api.on(http.MethodGet, listPath, answer(200, instancesPage("", instanceJSON(9001, name, ""))))
-	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31}]}`))
+	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"machine_id":1,"dph_total":0.31}]}`))
 	api.on(http.MethodPut, rentPath, answer(200, `{"success":true,"new_contract":9001,"instance_api_key":"never-read"}`))
 }
 
@@ -94,7 +99,7 @@ func TestCreateSearchesForTheSpecAndRentsTheCheapestOffer(t *testing.T) {
 		"geolocation":         map[string]any{"in": []any{"SE", "NL"}},
 		"verified":            map[string]any{"eq": true},
 		"order":               []any{[]any{"dph_total", "asc"}},
-		"limit":               5.0,
+		"limit":               25.0,
 	}
 	if !reflect.DeepEqual(search[0].Body, wantSearch) {
 		t.Errorf("search body\n got %v\nwant %v", search[0].Body, wantSearch)
@@ -255,7 +260,7 @@ func TestCreatePassesOverAnOfferTakenBetweenSearchAndRent(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
 			rentable(api, "hl-exp1-a2")
-			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31},{"id":7002,"dph_total":0.32},{"id":7003,"dph_total":0.33}]}`))
+			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"machine_id":1,"dph_total":0.31},{"id":7002,"machine_id":2,"dph_total":0.32},{"id":7003,"machine_id":3,"dph_total":0.33}]}`))
 			api.on(http.MethodPut, rentPath, answer(status, taken))
 			api.on(http.MethodPut, "/api/v0/asks/7002/", answer(200, `{"success":true,"new_contract":9001}`))
 			p := newTestProvider(t, api, gpuSettings())
@@ -273,13 +278,13 @@ func TestCreatePassesOverAnOfferTakenBetweenSearchAndRent(t *testing.T) {
 
 func TestCreateFailsWhenEveryOfferFoundWasTaken(t *testing.T) {
 	api := newFakeAPI(t)
-	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31},{"id":7002,"dph_total":0.32}]}`))
+	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"machine_id":1,"dph_total":0.31},{"id":7002,"machine_id":2,"dph_total":0.32}]}`))
 	api.on(http.MethodPut, rentPath, answer(400, taken))
 	api.on(http.MethodPut, "/api/v0/asks/7002/", answer(400, taken))
 	p := newTestProvider(t, api, gpuSettings())
 
 	_, err := p.Create(context.Background(), gpuSpec())
-	if err == nil || !strings.Contains(err.Error(), "every one of the 2 cheapest offers") || !strings.Contains(err.Error(), "no_such_ask") {
+	if err == nil || !strings.Contains(err.Error(), "every one of the 2 offers tried") || !strings.Contains(err.Error(), "no_such_ask") {
 		t.Fatalf("err = %v, want every offer taken with the vendor's reason", err)
 	}
 	if api.total() != 3 {
@@ -296,7 +301,7 @@ func TestCreateStopsAtARefusalThatIsNotATakenOffer(t *testing.T) {
 	for name, refusal := range refusals {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
-			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"dph_total":0.31},{"id":7002,"dph_total":0.32}]}`))
+			api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"machine_id":1,"dph_total":0.31},{"id":7002,"machine_id":2,"dph_total":0.32}]}`))
 			api.on(http.MethodPut, rentPath, refusal)
 			p := newTestProvider(t, api, gpuSettings())
 
@@ -392,5 +397,108 @@ func TestCreateDoesNotRetryARateLimitOrAServerError(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// offersOn answers a search with one offer per entry, cheapest first: offer 7001 on the first
+// machine named, 7002 on the second, and so on.
+func offersOn(machines ...int) http.HandlerFunc {
+	var offers []string
+	for i, machine := range machines {
+		offers = append(offers, fmt.Sprintf(`{"id":%d,"machine_id":%d,"dph_total":%.2f}`, 7001+i, machine, 0.30+float64(i)/100))
+	}
+	return answer(200, `{"offers":[`+strings.Join(offers, ",")+`]}`)
+}
+
+func rentedOffer(t *testing.T, api *fakeAPI) string {
+	t.Helper()
+	for _, sent := range api.requests {
+		if sent.Method == http.MethodPut && strings.HasPrefix(sent.Path, "/api/v0/asks/") {
+			return strings.Trim(strings.TrimPrefix(sent.Path, "/api/v0/asks/"), "/")
+		}
+	}
+	t.Fatal("nothing was rented")
+	return ""
+}
+
+// A machine that cannot start a container stays the cheapest offer, so a Create that always took
+// the cheapest sent every retry of a job back to it.
+func TestCreateSpreadsItsChoiceOverTheCheapestMachines(t *testing.T) {
+	rentedFrom := map[string]int{}
+	for range 200 {
+		api := newFakeAPI(t)
+		api.on(http.MethodGet, listPath, answer(200, instancesPage("", instanceJSON(9001, "hl-exp1-a2", ""))))
+		api.on(http.MethodPost, searchPath, offersOn(11, 12, 13, 14, 15, 16, 17))
+		for offer := 7001; offer <= 7007; offer++ {
+			api.on(http.MethodPut, fmt.Sprintf("/api/v0/asks/%d/", offer), answer(200, `{"success":true,"new_contract":9001}`))
+		}
+		p := newTestProvider(t, api, gpuSettings())
+		p.shuffle = shuffleOffers
+
+		if _, err := p.Create(context.Background(), gpuSpec()); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		rentedFrom[rentedOffer(t, api)]++
+	}
+	for _, offer := range []string{"7001", "7002", "7003", "7004", "7005"} {
+		if rentedFrom[offer] == 0 {
+			t.Errorf("200 rentals never took offer %s, one of the five cheapest machines: %v", offer, rentedFrom)
+		}
+	}
+	if rentedFrom["7006"]+rentedFrom["7007"] != 0 {
+		t.Errorf("rentals reached past the five cheapest machines: %v", rentedFrom)
+	}
+	if rentedFrom["7001"] > 120 {
+		t.Errorf("the cheapest machine was taken %d times of 200, which a broken one would be", rentedFrom["7001"])
+	}
+}
+
+func TestCreateCountsAMachineOnceHoweverManyOffersItHas(t *testing.T) {
+	api := newFakeAPI(t)
+	rentable(api, "hl-exp1-a2")
+	api.on(http.MethodPost, searchPath, offersOn(11, 11, 11, 12, 11, 13, 14, 15, 16))
+	api.on(http.MethodPut, "/api/v0/asks/7008/", answer(200, `{"success":true,"new_contract":9001}`))
+	p := newTestProvider(t, api, gpuSettings())
+	// The last candidate first: the fifth machine, which is the eighth offer.
+	p.shuffle = func(offers []offer) { slices.Reverse(offers) }
+
+	if _, err := p.Create(context.Background(), gpuSpec()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got := rentedOffer(t, api); got != "7008" {
+		t.Errorf("rented offer %s, want 7008: machine 11 fills four of the nine offers and counts once", got)
+	}
+}
+
+func TestCreateNeverSearchesAnExcludedMachine(t *testing.T) {
+	api := newFakeAPI(t)
+	rentable(api, "hl-exp1-a2")
+	settings := gpuSettings()
+	settings.ExcludedMachines = []int64{124592, 31}
+	p := newTestProvider(t, api, settings)
+
+	if _, err := p.Create(context.Background(), gpuSpec()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	body := api.sent(http.MethodPost, searchPath)[0].Body
+	if got := body["machine_id"]; !reflect.DeepEqual(got, map[string]any{"notin": []any{124592.0, 31.0}}) {
+		t.Errorf("machine_id filter = %v, want both machines excluded", got)
+	}
+}
+
+func TestCreateLogsTheMachineItRented(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	api := newFakeAPI(t)
+	rentable(api, "hl-exp1-a2")
+	api.on(http.MethodPost, searchPath, offersOn(124592))
+	p := newTestProvider(t, api, gpuSettings())
+
+	if _, err := p.Create(context.Background(), gpuSpec()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if line := logged.String(); !strings.Contains(line, "hl-exp1-a2") || !strings.Contains(line, "machine 124592") || !strings.Contains(line, "9001") {
+		t.Errorf("log = %q, want the instance, its name and its machine", line)
 	}
 }

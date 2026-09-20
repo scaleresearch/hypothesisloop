@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	if err := validateSpec(spec); err != nil {
 		return "", err
 	}
-	offers, err := p.cheapestOffers(ctx, spec)
+	offers, err := p.candidates(ctx, spec)
 	if err != nil {
 		return "", err
 	}
@@ -47,14 +48,16 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	return id, nil
 }
 
-// rentFirstAvailable rents the cheapest offer that still exists. An offer the search returned
-// after someone else took it is passed over, since nothing was rented and the next one fits the
-// spec as well; any other refusal ends the Create.
+// rentFirstAvailable rents the first of offers that still exists. The search index trails the
+// market, so an offer it returned after someone else took it is passed over: nothing was rented
+// and the next one fits the spec as well. Any other refusal ends the Create. The machine rented
+// is logged, which is how an operator learns the id of one worth excluding.
 func (p *Provider) rentFirstAvailable(ctx context.Context, offers []offer, req createRequest) (string, error) {
 	var taken error
 	for _, candidate := range offers {
 		id, err := p.rent(ctx, candidate, req)
 		if err == nil {
+			log.Printf("vast: rented instance %s for %s on machine %d at $%.4f/h", id, req.Label, candidate.MachineID, candidate.PricePerHour)
 			return id, nil
 		}
 		if !errors.Is(err, errOfferTaken) {
@@ -62,7 +65,7 @@ func (p *Provider) rentFirstAvailable(ctx context.Context, offers []offer, req c
 		}
 		taken = err
 	}
-	return "", fmt.Errorf("vast: every one of the %d cheapest offers for %q was taken: %w", len(offers), req.Label, taken)
+	return "", fmt.Errorf("vast: every one of the %d offers tried for %q was taken: %w", len(offers), req.Label, taken)
 }
 
 var errOfferTaken = errors.New("offer is no longer available")
