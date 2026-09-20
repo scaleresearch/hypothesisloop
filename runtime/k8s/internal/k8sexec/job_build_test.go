@@ -2,6 +2,7 @@ package k8sexec
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -37,6 +38,27 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 	}
 	if got := resources.Limits["hugepages-1Gi"]; got.Cmp(want) != 0 {
 		t.Fatalf("hugepages limit = %s, want %s", got.String(), want.String())
+	}
+}
+
+func TestBuildJobReturnsAnErrorForAnUnparseableQuantity(t *testing.T) {
+	for field, spoil := range map[string]func(*domain.JobSpec){
+		"shm_size": func(j *domain.JobSpec) { j.ShmSize = "4GB" },
+		"memory":   func(j *domain.JobSpec) { j.Memory = "8GB" },
+	} {
+		c := &JobWorkloadClient{apiURL: APIURLDefault}
+		exp := &domain.Experiment{
+			Data: testDataAccess(),
+			ID:   "bad-quantity", AgentID: "agent", ProjectID: "project",
+			EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
+			Job: domain.JobSpec{
+				Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
+			},
+		}
+		spoil(&exp.Job)
+		if _, err := c.BuildJob(exp, AcceleratorPlacement{}); err == nil || !strings.Contains(err.Error(), field) {
+			t.Fatalf("%s: err = %v, want an error naming the field", field, err)
+		}
 	}
 }
 

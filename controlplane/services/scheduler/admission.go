@@ -249,6 +249,15 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.extra_resources[%q]: %s", name, err.Error())}
 		}
 	}
+	if exp.Job.ShmSize != "" {
+		q, err := resource.ParseQuantity(exp.Job.ShmSize)
+		if err != nil {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.shm_size %q: %s", exp.Job.ShmSize, err.Error())}
+		}
+		if q.Sign() <= 0 {
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.shm_size must be positive (%q)", exp.Job.ShmSize)}
+		}
+	}
 	for name, qty := range exp.Job.AcceleratorPodResources {
 		if _, err := resource.ParseQuantity(qty); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_pod_resources[%q]: %s", name, err.Error())}

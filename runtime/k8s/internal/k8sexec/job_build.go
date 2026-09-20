@@ -216,33 +216,27 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		Requests: corev1.ResourceList{},
 		Limits:   corev1.ResourceList{},
 	}
-	// A "max" sentinel is always resolved to a plain literal once an experiment is admitted (see
-	// scheduler.Loop.resolveClusterLocalResources; EffectiveJob above reads exp.ResolvedJob), so it should
-	// never reach here — but resource.MustParse("max") panics with a cryptic k8s parser error
-	// rather than naming the actual problem, so guard explicitly and fail clearly instead.
-	for name, qty := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
-		if qty == domain.MaxResourceSentinel {
-			return nil, fmt.Errorf("workload: job.%s is still %q — it should have been resolved to a literal quantity at submission", name, domain.MaxResourceSentinel)
+	for name, dimension := range map[corev1.ResourceName]struct{ field, qty string }{
+		corev1.ResourceCPU:              {"cpu", group.CPU},
+		corev1.ResourceMemory:           {"memory", group.Memory},
+		corev1.ResourceEphemeralStorage: {"storage", group.Storage},
+	} {
+		if dimension.qty == "" {
+			continue
 		}
-	}
-	if group.CPU != "" {
-		resources.Requests[corev1.ResourceCPU] = resource.MustParse(group.CPU)
-		resources.Limits[corev1.ResourceCPU] = resource.MustParse(group.CPU)
-	}
-	if group.Memory != "" {
-		resources.Requests[corev1.ResourceMemory] = resource.MustParse(group.Memory)
-		resources.Limits[corev1.ResourceMemory] = resource.MustParse(group.Memory)
-	}
-	if group.Storage != "" {
-		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(group.Storage)
-		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse(group.Storage)
+		q, err := resource.ParseQuantity(dimension.qty)
+		if err != nil {
+			return nil, fmt.Errorf("workload: job.%s %q: %w", dimension.field, dimension.qty, err)
+		}
+		resources.Requests[name] = q
+		resources.Limits[name] = q
 	}
 	// jobUsesDRA tracks whether this job needs a ResourceClaimTemplate/PodResourceClaim instead
 	// of a plain extended-resource request. CreateWorkload reads this back off the returned
 	// Job (non-empty Spec.ResourceClaims) to know whether to also create the ResourceClaimTemplate.
 	jobUsesDRA := group.AcceleratorCount > 0 && placement.UsesDRA()
 	if group.AcceleratorCount > 0 && !jobUsesDRA {
-		acceleratorQty := resource.MustParse(fmt.Sprintf("%d", group.AcceleratorCount))
+		acceleratorQty := *resource.NewQuantity(int64(group.AcceleratorCount), resource.DecimalSI)
 		acceleratorResource := corev1.ResourceName(placement.ResourceName)
 		resources.Requests[acceleratorResource] = acceleratorQty
 		resources.Limits[acceleratorResource] = acceleratorQty
@@ -367,7 +361,10 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	if spec.ShmSize != "" {
 		// PyTorch's DataLoader and NCCL's shared-memory IPC both need real /dev/shm — k8s
 		// defaults it to a tiny tmpfs that silently breaks both under load.
-		shmQty := resource.MustParse(spec.ShmSize)
+		shmQty, err := resource.ParseQuantity(spec.ShmSize)
+		if err != nil {
+			return nil, fmt.Errorf("workload: shm_size %q: %w", spec.ShmSize, err)
+		}
 		volumes = append(volumes, corev1.Volume{
 			Name: "dshm",
 			VolumeSource: corev1.VolumeSource{

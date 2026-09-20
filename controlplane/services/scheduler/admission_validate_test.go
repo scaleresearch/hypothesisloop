@@ -91,6 +91,14 @@ func TestANegativeResourceRequestIsRejected(t *testing.T) {
 	}
 }
 
+func TestAnUnusableShmSizeIsRejected(t *testing.T) {
+	for _, size := range []string{"4GB", "-1Gi", "0"} {
+		exp := validSubmission()
+		exp.Job.ShmSize = size
+		mustReject(t, exp, "job.shm_size")
+	}
+}
+
 // Per group, not on the total. The cap checks sum a dimension across groups, so a negative in one
 // group cancels a real request in another — a job asking for 100Gi in one group and -100Gi in
 // another sums to zero and passes every bound there is.
