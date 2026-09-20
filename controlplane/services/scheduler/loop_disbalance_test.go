@@ -9,6 +9,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
+const testDisbalanceTolerance = 1.0
+
 // The shape that produced this pass: a 16-core node carrying 4 accelerators, where a job holding
 // one accelerator requests 14 cores and strands the other three.
 const (
@@ -64,7 +66,7 @@ func TestSelectDisbalanceVictimsEvictsHogStrandingIdleAccelerators(t *testing.T)
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the disproportionate job stranding the idle accelerators", victimIDs(got))
@@ -79,7 +81,7 @@ func TestSelectDisbalanceVictimsSparesProportionateJob(t *testing.T) {
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: fair, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: fair, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: the job's CPU is proportionate to the accelerators it holds", victimIDs(got))
@@ -94,7 +96,7 @@ func TestSelectDisbalanceVictimsSparesHogWhenNoAcceleratorsAreIdle(t *testing.T)
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 0}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(0), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(0), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: no accelerator is idle, so nothing is blocked", victimIDs(got))
@@ -110,7 +112,7 @@ func TestSelectDisbalanceVictimsSparesHogWhenAcceleratorsAreThemselvesShort(t *t
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 1}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(1), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(1), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: the accelerator dimension is short too", victimIDs(got))
@@ -125,7 +127,7 @@ func TestSelectDisbalanceVictimsFailsSafeOnMissingNodeAttribution(t *testing.T) 
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, nil, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, nil, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: no running job has a proven node placement", victimIDs(got))
@@ -140,7 +142,7 @@ func TestSelectDisbalanceVictimsFailsSafeOnMissingNodeAttributionForTheHogItself
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-b"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-b"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: the candidate is not on the node with idle accelerators", victimIDs(got))
@@ -155,7 +157,7 @@ func TestSelectDisbalanceVictimsFailsSafeOnMissingClusterTotals(t *testing.T) {
 
 	// No fresh total-capacity report for this cluster at all: no denominator, no verdict.
 	if got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, domain.NewFootprint(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, placed, DefaultDisbalanceTolerance); got != nil {
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, placed, testDisbalanceTolerance); got != nil {
 		t.Fatalf("victims = %v, want none when the cluster reports no totals", victimIDs(got))
 	}
 
@@ -164,7 +166,7 @@ func TestSelectDisbalanceVictimsFailsSafeOnMissingClusterTotals(t *testing.T) {
 	// average). No node-local totals, no verdict; a missing report must not fall back to the
 	// average and invent a number.
 	if got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		nil, disbalanceNodes(3), nil, nil, placed, DefaultDisbalanceTolerance); got != nil {
+		nil, disbalanceNodes(3), nil, nil, placed, testDisbalanceTolerance); got != nil {
 		t.Fatalf("victims = %v, want none when the victim's node reports no totals", victimIDs(got))
 	}
 }
@@ -178,7 +180,7 @@ func TestSelectDisbalanceVictimsRefusesPartialPlans(t *testing.T) {
 	avail[cpuKey] = -2000 // 6 cores wanted, 8 short after the running jobs' claims
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: evicting them would not cover the shortage", victimIDs(got))
@@ -194,7 +196,7 @@ func TestSelectDisbalanceVictimsEvictsOnlyAsManyAsNeeded(t *testing.T) {
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(), disbalanceNodesTotal(), disbalanceNodes(3), nil, nil,
-		[]placedExperiment{{experiment: milder, node: "node-a"}, {experiment: worse, node: "node-a"}}, DefaultDisbalanceTolerance)
+		[]placedExperiment{{experiment: milder, node: "node-a"}, {experiment: worse, node: "node-a"}}, testDisbalanceTolerance)
 
 	if len(got) != 1 || got[0].experiment.ID != "worse" {
 		t.Fatalf("victims = %v, want only the most disproportionate job", victimIDs(got))
@@ -211,7 +213,7 @@ func TestSelectDisbalanceVictimsHonorsNodeSelector(t *testing.T) {
 	labels := map[string]map[string]string{"node-a": {"vendor.example/zone": "other"}}
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, labels, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, labels, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: the idle accelerators fail the job's node selector", victimIDs(got))
@@ -227,7 +229,7 @@ func TestSelectDisbalanceVictimsSparesCPUOnlyNeighbour(t *testing.T) {
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: cpuOnly, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: cpuOnly, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: an accelerator-free job has no share to exceed", victimIDs(got))
@@ -244,7 +246,7 @@ func TestSelectDisbalanceVictimsDetectsMemoryDisbalance(t *testing.T) {
 	avail := domain.CapacityFootprint(8, map[string]int64{disbalanceFlavor: 3}, 1<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the memory-disproportionate job", victimIDs(got))
@@ -264,7 +266,7 @@ func TestSelectDisbalanceVictimsSparesJobAtExactlyItsFairShare(t *testing.T) {
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: exact, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: exact, node: "node-a"}}, testDisbalanceTolerance)
 
 	if got != nil {
 		t.Fatalf("victims = %v, want none: exactly the proportionate share must never be flagged (strict > at the boundary)", victimIDs(got))
@@ -281,7 +283,7 @@ func TestSelectDisbalanceVictimsEvictsJobOneCanonicalUnitOverFairShare(t *testin
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if len(got) != 1 || got[0].experiment.ID != "over" {
 		t.Fatalf("victims = %v, want the job that is 1 millicore over its fair share flagged", victimIDs(got))
@@ -312,7 +314,7 @@ func TestSelectDisbalanceVictimsUsesNodeLocalShareNotClusterWideAverage(t *testi
 	nodeAvail := map[string]map[string]int64{"node-b": {disbalanceFlavor: 7}}
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, clusterTotal,
-		nodesTotal, nodeAvail, nil, nil, []placedExperiment{{experiment: hog, node: "node-b"}}, DefaultDisbalanceTolerance)
+		nodesTotal, nodeAvail, nil, nil, []placedExperiment{{experiment: hog, node: "node-b"}}, testDisbalanceTolerance)
 
 	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the hog flagged against node-b's own 2-core/chip share (3x), which a cluster-wide 3.2-core/chip average would have missed", victimIDs(got))
@@ -339,7 +341,7 @@ func TestEvictDisbalancedFailsSafeOnMissingClusterTotals(t *testing.T) {
 		store:               store,
 		logger:              zap.NewNop(),
 		evictor:             nopEvictor{},
-		disbalanceTolerance: DefaultDisbalanceTolerance,
+		disbalanceTolerance: testDisbalanceTolerance,
 		observed:            fakeObserved{},
 	}
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
@@ -362,7 +364,7 @@ func TestEvictDisbalancedSkipsNodeAttributionWhenNothingIsStranded(t *testing.T)
 		store:               store,
 		logger:              zap.NewNop(),
 		evictor:             nopEvictor{},
-		disbalanceTolerance: DefaultDisbalanceTolerance,
+		disbalanceTolerance: testDisbalanceTolerance,
 		observed:            fakeObserved{},
 	}
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 0}, 32<<30, 0)
@@ -420,7 +422,7 @@ func TestAGroupedJobBlockedByAHogIsStillSeenByTheDisbalancePass(t *testing.T) {
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
-		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, DefaultDisbalanceTolerance)
+		disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, []placedExperiment{{experiment: hog, node: "node-a"}}, testDisbalanceTolerance)
 
 	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the hog stranding the accelerators a grouped job is waiting for", victimIDs(got))

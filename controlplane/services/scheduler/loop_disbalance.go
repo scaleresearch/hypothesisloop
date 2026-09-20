@@ -25,16 +25,6 @@ import (
 // blocks a neighbour — and they can never be missing, which removes any chance of reading absent
 // telemetry as a violation.
 
-// DefaultDisbalanceTolerance is the multiple of a node's per-accelerator CPU/memory/storage share
-// a job may request before it counts as disbalanced. A job holding A of its node's N accelerators
-// is entitled to A/N of that node's CPU; once the share is measured against the node the job
-// actually sits on (rather than a cluster-wide average that a heterogeneous cluster can get wrong
-// in either direction), a small margin over exactly proportionate is already implausible for any
-// legitimate data-loader or host-side need — so the tolerance is tightened from the old cluster-
-// wide-average default of 3.0x down to 1.0x (no margin at all beyond an exact proportionate
-// share).
-const DefaultDisbalanceTolerance = 1.0
-
 // nodeResourceName maps a fungible domain.ResourceKind to the domain.NodeResource* string key
 // the per-node capacity maps (nodeResources, nodeResourcesTotal) are keyed by — the reverse of
 // loop_tick.go's nodeResourceKind. Only CPU/memory/storage have a node-resource key; accelerators

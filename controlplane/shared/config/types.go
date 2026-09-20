@@ -101,8 +101,7 @@ type SchedulerConfig struct {
 	// ResourceDisbalanceTolerance is the multiple of a cluster's per-accelerator CPU/memory/
 	// storage share a running job may request before the scheduler evicts it for stranding idle
 	// accelerators on its own node (see services/scheduler/loop_disbalance.go). Required and
-	// positive, like every other setting here — scheduler.DefaultDisbalanceTolerance is the
-	// suggested value. There is no "off": a disabled pass is a second scheduling behaviour to
+	// positive, like every other setting here. There is no "off": a disabled pass is a second scheduling behaviour to
 	// reason about, and a cluster whose accelerators are stranded by one job's shape is broken
 	// whether or not an operator remembered to switch the fix on.
 	ResourceDisbalanceTolerance float64 `yaml:"resource_disbalance_tolerance"`

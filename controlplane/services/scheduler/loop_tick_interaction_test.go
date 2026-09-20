@@ -296,7 +296,7 @@ func TestTickSkipsPreemptionWhenClusterIsAlreadyWaitingForScaleUp(t *testing.T) 
 	store := &scaleUpWaitingStore{noRunningListStore{t: t, queued: []*domain.Experiment{exp}}}
 	l := NewLoop(store, tickQuota{}, scaleUpWaitingWorkload{}, testGraceLimits, zap.NewNop())
 	l.evictor = noopEvictor{}
-	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.disbalanceTolerance = testDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}
 	l.WithSpeculation(15 * time.Minute)
 
@@ -322,7 +322,7 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 	store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
 	l := NewLoop(store, tickQuota{}, layoutShortWorkload{}, testGraceLimits, zap.NewNop())
 	l.evictor = noopEvictor{}
-	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.disbalanceTolerance = testDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}
 
 	if err := l.tick(context.Background()); err != nil {
@@ -386,7 +386,7 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 			store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
 			l := NewLoop(store, tickQuota{}, shareWorkload{}, testGraceLimits, zap.NewNop())
 			l.evictor = noopEvictor{}
-			l.disbalanceTolerance = DefaultDisbalanceTolerance
+			l.disbalanceTolerance = testDisbalanceTolerance
 			l.reprioritizer = noopReprioritizer{}
 
 			if err := l.tick(context.Background()); err != nil {
@@ -419,7 +419,7 @@ func TestTickHoldsEveryQueuedJobOfAnAgentThatOwesASummary(t *testing.T) {
 	}}}
 	l := NewLoop(store, tickQuota{}, shareWorkload{}, testGraceLimits, zap.NewNop())
 	l.evictor = noopEvictor{}
-	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.disbalanceTolerance = testDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}
 
 	if err := l.tick(context.Background()); err != nil {
@@ -465,7 +465,7 @@ func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
 				store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
 				l := NewLoop(store, tickQuota{}, fullWorkload{}, testGraceLimits, zap.NewNop())
 				l.evictor = noopEvictor{}
-				l.disbalanceTolerance = DefaultDisbalanceTolerance
+				l.disbalanceTolerance = testDisbalanceTolerance
 				l.reprioritizer = noopReprioritizer{}
 
 				if err := l.tick(context.Background()); err != nil {
@@ -585,7 +585,7 @@ func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType,
 func holdLoop(store LoopStore, workload LoopWorkloadClient, evictor ExperimentEvictor) *Loop {
 	l := NewLoop(store, holdQuota{}, workload, testGraceLimits, zap.NewNop())
 	l.evictor = evictor
-	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.disbalanceTolerance = testDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}
 	return l
 }

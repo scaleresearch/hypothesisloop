@@ -271,9 +271,8 @@ func (l *Loop) WithGuaranteedFairnessWindow(d time.Duration) *Loop {
 // WithDisbalanceEvictor enables the resource-disbalance evictor (loop_disbalance.go), which
 // terminates running jobs whose CPU/memory/storage request is more than tolerance times their
 // proportionate per-accelerator share while that request is provably stranding idle accelerators
-// on their node. tolerance must be positive (config validation enforces it);
-// DefaultDisbalanceTolerance is the suggested value. Requires WithObservedTimeConfig, since victim
-// selection needs the metrics store's job->node attribution.
+// on their node. tolerance must be positive (config validation enforces it). Requires
+// WithObservedTimeConfig, since victim selection needs the metrics store's job->node attribution.
 func (l *Loop) WithDisbalanceEvictor(evictor ExperimentEvictor, tolerance float64) *Loop {
 	l.evictor = evictor
 	l.disbalanceTolerance = tolerance
