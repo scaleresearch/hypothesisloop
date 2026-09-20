@@ -51,7 +51,10 @@ func TestClusterSettingsAreReachedThroughTheClusterTheIDIsBoundTo(t *testing.T) 
 		"cluster-c": {Name: "cluster-c", OrgID: "org-a"},
 	}}
 	handler := NewHandler(NewService(store, nil, &reportingAnyIDWorkload{}, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{}))
-	access := auth.NewAccess(authtest.Placement{Clusters: map[string]string{"cluster-a": "org-a", "cluster-b": "org-b", "cluster-c": "org-a"}})
+	access := auth.NewAccess(authtest.Placement{
+		Clusters:   map[string]string{"cluster-a": "org-a", "cluster-b": "org-b", "cluster-c": "org-a"},
+		ClusterIDs: map[string]string{"uid-a": "cluster-a", "uid-b": "cluster-b"},
+	})
 
 	inA := []string{"org-a"}
 	userOfA := auth.Principal{Kind: auth.KindUser, OrgIDs: inA}
@@ -71,7 +74,8 @@ func TestClusterSettingsAreReachedThroughTheClusterTheIDIsBoundTo(t *testing.T) 
 		{"a key bound to one project of the owner", auth.Principal{Kind: auth.KindKey, OrgIDs: inA, ProjectID: "prj-a"}, "uid-a", false},
 		{"a coordinator of the owner's platform experiment", auth.Principal{Kind: auth.KindCoordinator, OrgIDs: inA, ProjectID: "prj-a", PlatformExperimentID: "pe-a"}, "uid-a", false},
 		{"staff, any cluster", staff, "uid-b", true},
-		{"staff, an id bound to no cluster", staff, "uid-gone", true},
+		{"staff, an id bound to no cluster", staff, "uid-gone", false},
+		{"staff, an id that is a path", staff, "uid-a/../uid-b", false},
 	} {
 		err := handler.clusterAccess(auth.WithPrincipal(context.Background(), tc.caller), access, tc.clusterID)
 		var refusal *auth.Error

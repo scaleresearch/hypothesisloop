@@ -320,14 +320,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body nameBody
 	}) (*struct{ Body domain.Project }, error) {
-		if _, err := h.access.Account(ctx); err != nil {
-			return nil, err
-		}
-		project, err := h.accounts.GetProject(ctx, in.ID)
+		project, err := h.access.ProjectAdmin(ctx, in.ID)
 		if err != nil {
-			return nil, err
-		}
-		if err := h.policy.changeProject(ctx, project); err != nil {
 			return nil, err
 		}
 		name, err := validName("project", in.Body.Name)
@@ -636,17 +630,11 @@ func (h *Handler) reachableKeys(ctx context.Context, orgID string) ([]*domain.AP
 
 // revokeAPIKey answers for a key the caller cannot reach exactly as for one that does not exist.
 func (h *Handler) revokeAPIKey(ctx context.Context, id string) (*domain.APIKey, error) {
-	if _, err := h.access.Account(ctx); err != nil {
-		return nil, err
-	}
-	notFound := huma.Error404NotFound("api key not found")
-	key, err := h.accounts.GetAPIKey(ctx, id)
+	key, err := h.access.APIKey(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if key == nil {
-		return nil, notFound
-	}
+	notFound := huma.Error404NotFound("api key not found")
 	reachable, err := h.reachableKeys(ctx, key.OrgID)
 	if err != nil {
 		var refusal huma.StatusError

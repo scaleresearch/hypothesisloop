@@ -13,8 +13,15 @@ import (
 func orgsWithAMember() *auth.Access {
 	return auth.NewAccess(authtest.Placement{
 		Clusters: map[string]string{"cluster-a": "org-a", "cluster-b": "org-b"},
-		Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
-		Members:  map[string]bool{"org-a/u-member": true},
+		Projects: map[string]domain.Project{
+			"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-a2": {ID: "prj-a2", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"},
+		},
+		ClusterIDs: map[string]string{"uid-a": "cluster-a", "uid-b": "cluster-b"},
+		Keys: map[string]domain.APIKey{
+			"key-a": {ID: "key-a", OrgID: "org-a"}, "key-a-prj": {ID: "key-a-prj", OrgID: "org-a", ProjectID: "prj-a"},
+			"key-a-prj2": {ID: "key-a-prj2", OrgID: "org-a", ProjectID: "prj-a2"}, "key-b": {ID: "key-b", OrgID: "org-b"},
+		},
+		Members: map[string]bool{"org-a/u-member": true},
 	})
 }
 
@@ -36,31 +43,51 @@ var accountCallers = map[string]auth.Principal{
 func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 	access := orgsWithAMember()
 	rules := map[string]func(context.Context) error{
-		"hold an account":                    func(ctx context.Context) error { _, err := access.Account(ctx); return err },
-		"read org a":                         func(ctx context.Context) error { _, err := access.OrgMember(ctx, "org-a"); return err },
-		"read an org that does not exist":    func(ctx context.Context) error { _, err := access.OrgMember(ctx, "org-missing"); return err },
-		"administer org a":                   func(ctx context.Context) error { _, err := access.OrgAdmin(ctx, "org-a"); return err },
-		"administer an org that is missing":  func(ctx context.Context) error { _, err := access.OrgAdmin(ctx, "org-missing"); return err },
-		"administer cluster-a by name":       func(ctx context.Context) error { return access.Cluster(ctx, "cluster-a") },
-		"administer cluster-a under org a":   func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-a", "cluster-a"); return err },
-		"administer cluster-b under org a":   func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-a", "cluster-b"); return err },
-		"administer no cluster under org a":  func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-a", "cluster-none"); return err },
-		"administer cluster-a under org b":   func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-b", "cluster-a"); return err },
-		"administer an unregistered cluster": func(ctx context.Context) error { return access.Cluster(ctx, "cluster-none") },
+		"hold an account":                        func(ctx context.Context) error { _, err := access.Account(ctx); return err },
+		"read org a":                             func(ctx context.Context) error { _, err := access.OrgMember(ctx, "org-a"); return err },
+		"read an org that does not exist":        func(ctx context.Context) error { _, err := access.OrgMember(ctx, "org-missing"); return err },
+		"administer org a":                       func(ctx context.Context) error { _, err := access.OrgAdmin(ctx, "org-a"); return err },
+		"administer an org that is missing":      func(ctx context.Context) error { _, err := access.OrgAdmin(ctx, "org-missing"); return err },
+		"administer cluster-a by name":           func(ctx context.Context) error { return access.Cluster(ctx, "cluster-a") },
+		"administer cluster-a under org a":       func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-a", "cluster-a"); return err },
+		"administer cluster-b under org a":       func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-a", "cluster-b"); return err },
+		"administer no cluster under org a":      func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-a", "cluster-none"); return err },
+		"administer cluster-a under org b":       func(ctx context.Context) error { _, err := access.ClusterOf(ctx, "org-b", "cluster-a"); return err },
+		"administer an unregistered cluster":     func(ctx context.Context) error { return access.Cluster(ctx, "cluster-none") },
+		"settings of the cluster bound to uid-a": func(ctx context.Context) error { _, err := access.ClusterByID(ctx, "uid-a"); return err },
+		"settings under an id bound to nothing":  func(ctx context.Context) error { _, err := access.ClusterByID(ctx, "uid-none"); return err },
+		"settings under an id that is a path":    func(ctx context.Context) error { _, err := access.ClusterByID(ctx, "uid-a/../uid-b"); return err },
+		"change project prj-a":                   func(ctx context.Context) error { _, err := access.ProjectAdmin(ctx, "prj-a"); return err },
+		"change project prj-a2":                  func(ctx context.Context) error { _, err := access.ProjectAdmin(ctx, "prj-a2"); return err },
+		"change a project that does not exist":   func(ctx context.Context) error { _, err := access.ProjectAdmin(ctx, "prj-none"); return err },
+		"place the org-wide key of org a":        func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-a"); return err },
+		"place a key of project prj-a":           func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-a-prj"); return err },
+		"place a key of project prj-a2":          func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-a-prj2"); return err },
+		"place a key that does not exist":        func(ctx context.Context) error { _, err := access.APIKey(ctx, "key-none"); return err },
 	}
 	//                                            owner member outsider org-key prj-key agent coord job runtime launcher staff
 	want := map[string][]int{
-		"hold an account":                    {200, 200, 200, 200, 200, 403, 403, 403, 403, 403, 200},
-		"read org a":                         {200, 200, 404, 200, 200, 403, 403, 403, 403, 403, 200},
-		"read an org that does not exist":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"administer org a":                   {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"administer an org that is missing":  {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"administer cluster-a by name":       {200, 403, 404, 200, 404, 404, 404, 404, 403, 404, 200},
-		"administer cluster-a under org a":   {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"administer cluster-b under org a":   {404, 403, 404, 404, 403, 403, 403, 403, 403, 403, 404},
-		"administer no cluster under org a":  {404, 403, 404, 404, 403, 403, 403, 403, 403, 403, 404},
-		"administer cluster-a under org b":   {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"administer an unregistered cluster": {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 200},
+		"hold an account":                        {200, 200, 200, 200, 200, 403, 403, 403, 403, 403, 200},
+		"read org a":                             {200, 200, 404, 200, 200, 403, 403, 403, 403, 403, 200},
+		"read an org that does not exist":        {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"administer org a":                       {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"administer an org that is missing":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"administer cluster-a by name":           {200, 403, 404, 200, 404, 404, 404, 404, 403, 404, 200},
+		"administer cluster-a under org a":       {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"administer cluster-b under org a":       {404, 403, 404, 404, 403, 403, 403, 403, 403, 403, 404},
+		"administer no cluster under org a":      {404, 403, 404, 404, 403, 403, 403, 403, 403, 403, 404},
+		"administer cluster-a under org b":       {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"administer an unregistered cluster":     {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 200},
+		"settings of the cluster bound to uid-a": {200, 403, 404, 200, 404, 404, 404, 404, 403, 404, 200},
+		"settings under an id bound to nothing":  {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404},
+		"settings under an id that is a path":    {404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404},
+		"change project prj-a":                   {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"change project prj-a2":                  {200, 403, 404, 200, 404, 403, 403, 403, 403, 403, 200},
+		"change a project that does not exist":   {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"place the org-wide key of org a":        {200, 200, 404, 200, 404, 403, 403, 403, 403, 403, 200},
+		"place a key of project prj-a":           {200, 200, 404, 200, 200, 403, 403, 403, 403, 403, 200},
+		"place a key of project prj-a2":          {200, 200, 404, 200, 404, 403, 403, 403, 403, 403, 200},
+		"place a key that does not exist":        {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
 	}
 	order := []string{"owner", "member", "outsider", "org key", "project key", "agent", "coordinator", "job", "runtime", "launcher", "staff"}
 	if len(want) != len(rules) {

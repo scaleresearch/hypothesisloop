@@ -56,6 +56,10 @@ func (p placement) GetCluster(ctx context.Context, name string) (*domain.Cluster
 	return p.memStore.GetCluster(ctx, name)
 }
 
+func (p placement) GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error) {
+	return p.memStore.GetAPIKey(ctx, id)
+}
+
 func (p placement) GetOrg(ctx context.Context, id string) (*domain.Org, error) {
 	return p.memStore.GetOrg(ctx, id)
 }

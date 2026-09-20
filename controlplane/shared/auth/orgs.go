@@ -112,6 +112,77 @@ func (a *Access) Cluster(ctx context.Context, name string) error {
 	return a.administers(ctx, p, cluster.OrgID)
 }
 
+// ClusterByID admits the principal to administer the registered cluster bound to the id its
+// runtime reported, which is the key its settings are kept under. An id that could not be one,
+// an id bound to no cluster and a cluster outside the caller's reach are all not found, for staff
+// too: settings exist only under an id the platform bound, never under one a request states.
+func (a *Access) ClusterByID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if domain.ValidateClusterID(reportedID) != nil {
+		return nil, NotFound("cluster")
+	}
+	cluster, err := a.placement.ClusterByReportedID(ctx, reportedID)
+	if err != nil {
+		return nil, err
+	}
+	if cluster == nil {
+		return nil, NotFound("cluster")
+	}
+	if p.Kind == KindStaff {
+		return cluster, nil
+	}
+	scope := p.Scope()
+	if !scope.AdmitsOrg(cluster.OrgID) || scope.ProjectID != "" || scope.PlatformExperimentID != "" {
+		return nil, NotFound("cluster")
+	}
+	return cluster, a.administers(ctx, p, cluster.OrgID)
+}
+
+// ProjectAdmin admits the caller to change one project, and returns it. A project the caller
+// does not see, whether it is another org's, a sibling of the one its key is bound to, or
+// absent, is not found before anything else is read.
+func (a *Access) ProjectAdmin(ctx context.Context, projectID string) (*domain.Project, error) {
+	p, err := a.Account(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validID("project", projectID); err != nil {
+		return nil, err
+	}
+	project, err := a.placement.GetProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if project == nil || !p.Scope().Admits(domain.Tenancy{OrgID: project.OrgID, ProjectID: project.ID}) {
+		return nil, NotFound("project")
+	}
+	return project, a.administers(ctx, p, project.OrgID)
+}
+
+// APIKey places one API key for an account holder, and returns it. A key with no row and a key
+// of an org or project outside the caller's reach are not found. Which keys of its org a caller
+// may end is the accounts policy's.
+func (a *Access) APIKey(ctx context.Context, keyID string) (*domain.APIKey, error) {
+	p, err := a.Account(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validID("api key", keyID); err != nil {
+		return nil, err
+	}
+	key, err := a.placement.GetAPIKey(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	if key == nil || !p.Scope().AdmitsOrg(key.OrgID) || (p.ProjectID != "" && p.ProjectID != key.ProjectID) {
+		return nil, NotFound("api key")
+	}
+	return key, nil
+}
+
 // ClusterOf admits the principal to administer a cluster named under its org, and returns it.
 // A cluster of another org is not found under this one.
 func (a *Access) ClusterOf(ctx context.Context, orgID, name string) (*domain.Cluster, error) {

@@ -128,6 +128,23 @@ func inOrg(admitted int) rule {
 	}
 }
 
+// ofProject is a change to one project: one outside the caller's sight is not found, and of
+// the ones it sees an org-wide caller changes it.
+func ofProject(admitted int) rule {
+	return func(principal, owner string) int {
+		if status, refused := gate(people, principal); refused {
+			return status
+		}
+		if owner == "foreign" || owner == "absent" || (principal == "project key" && owner == "sibling") {
+			return http.StatusNotFound
+		}
+		if !among(orgWide, principal) {
+			return http.StatusForbidden
+		}
+		return admitted
+	}
+}
+
 // only admits the listed callers whatever the object: the handler has to read a row to learn
 // whose it is, and its own tests hold that decision.
 func only(callers []string, admitted int) rule { return listed(callers, admitted) }
@@ -175,8 +192,8 @@ var routes = []route{
 	{method: "GET", path: "/experiments/{id}/cost", request: "/experiments/<job>/cost", rule: scoped(agentAudience, reached)},
 
 	// ---- cluster settings ----
-	{method: "GET", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", rule: only(coordinatorAudience, reached)},
-	{method: "PUT", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", body: `{}`, rule: only(coordinatorAudience, reached)},
+	{method: "GET", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", rule: orgLevel(coordinatorAudience, http.StatusNotFound, reached)},
+	{method: "PUT", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", body: `{}`, rule: orgLevel(coordinatorAudience, http.StatusNotFound, reached)},
 
 	// ---- hypotheses ----
 	{method: "POST", path: "/hypotheses", body: `{"agent_id":"<agent>","platform_experiment_id":"<pe>","text":"t","links":[{"type":"builds_on","to":"<pe>"}]}`, rule: owned(agentAudience, reached)},
@@ -236,10 +253,10 @@ var routes = []route{
 	{method: "PATCH", path: "/orgs/{id}", request: "/orgs/<org>", body: `{"name":"n"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/projects", request: "/orgs/<org>/projects", rule: inOrg(reached)},
 	{method: "POST", path: "/orgs/{id}/projects", request: "/orgs/<org>/projects", body: `{"name":"n"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
-	{method: "PATCH", path: "/projects/{id}", request: "/projects/<prj>", body: `{"name":"n"}`, rule: only(people, reached)},
+	{method: "PATCH", path: "/projects/{id}", request: "/projects/<prj>", body: `{"name":"n"}`, rule: ofProject(reached)},
 	{method: "POST", path: "/orgs/{id}/api-keys", request: "/orgs/<org>/api-keys", body: `{"name":"n"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/api-keys", request: "/orgs/<org>/api-keys", rule: inOrg(reached)},
-	{method: "DELETE", path: "/api-keys/{id}", request: "/api-keys/key-of-<org>", rule: only(people, reached)},
+	{method: "DELETE", path: "/api-keys/{id}", request: "/api-keys/key-of-<org>", rule: orgLevel(people, http.StatusNotFound, reached)},
 	{method: "POST", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", body: `{"name":"cluster-new"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "PATCH", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", body: `{"shared":true}`, rule: staffOnly},

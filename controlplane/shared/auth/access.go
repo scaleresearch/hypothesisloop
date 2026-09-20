@@ -16,6 +16,8 @@ type Placement interface {
 	DonationTenancy(ctx context.Context, donationID string) (*domain.Tenancy, error)
 	AgentOrg(ctx context.Context, agentID string) (orgID string, found bool, err error)
 	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
+	ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error)
+	GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error)
 	GetOrg(ctx context.Context, id string) (*domain.Org, error)
 	OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error)
 	GetProject(ctx context.Context, id string) (*domain.Project, error)

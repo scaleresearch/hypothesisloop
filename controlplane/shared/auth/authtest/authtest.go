@@ -34,6 +34,9 @@ type Placement struct {
 	Agents              map[string]string
 	Clusters            map[string]string
 	Projects            map[string]domain.Project
+	// ClusterIDs holds the id each cluster's runtime reported, by id, naming the cluster.
+	ClusterIDs map[string]string
+	Keys       map[string]domain.APIKey
 	// Members holds the users of an org who are not its owners, as "org/user". Every other user
 	// asked about owns the org, which is the only kind of person production has.
 	Members map[string]bool
@@ -54,6 +57,26 @@ func (p Placement) DonationTenancy(_ context.Context, id string) (*domain.Tenanc
 func (p Placement) AgentOrg(_ context.Context, id string) (string, bool, error) {
 	org, ok := p.Agents[id]
 	return org, ok, nil
+}
+
+func (p Placement) ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
+	name, ok := p.ClusterIDs[reportedID]
+	if !ok {
+		return nil, nil
+	}
+	cluster, err := p.GetCluster(ctx, name)
+	if cluster != nil {
+		cluster.ReportedID = reportedID
+	}
+	return cluster, err
+}
+
+func (p Placement) GetAPIKey(_ context.Context, id string) (*domain.APIKey, error) {
+	key, ok := p.Keys[id]
+	if !ok {
+		return nil, nil
+	}
+	return &key, nil
 }
 
 func (p Placement) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {

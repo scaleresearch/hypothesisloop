@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +118,20 @@ func (w *world) GetCluster(_ context.Context, name string) (*domain.Cluster, err
 		return nil, nil
 	}
 	return &domain.Cluster{Name: name, OrgID: org}, nil
+}
+
+// A cluster's reported id is its name in this world.
+func (w *world) ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
+	return w.GetCluster(ctx, reportedID)
+}
+
+// GetAPIKey knows one key of each org, key-of-<org>, made by a person.
+func (w *world) GetAPIKey(_ context.Context, id string) (*domain.APIKey, error) {
+	org, ok := strings.CutPrefix(id, "key-of-")
+	if !ok || (org != "org-a" && org != "org-b") {
+		return nil, nil
+	}
+	return &domain.APIKey{ID: id, OrgID: org}, nil
 }
 
 func (w *world) GetOrg(_ context.Context, id string) (*domain.Org, error) {
