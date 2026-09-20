@@ -52,7 +52,6 @@ beforeEach(() => {
     stored = stored.map(k => (k.id === id ? { ...k, revoked_at: at } : k))
     return stored.find(k => k.id === id)!
   })
-  vi.stubGlobal('confirm', vi.fn(() => true))
 })
 
 describe('creating an API key', () => {
@@ -132,16 +131,19 @@ describe('creating an API key', () => {
 
 describe('revoking an API key', () => {
   it('asks first, and does nothing when the answer is no', async () => {
-    vi.mocked(confirm).mockReturnValue(false)
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
-    expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Revoke "ci"?'))
+    const question = within(screen.getByRole('dialog'))
+    expect(question.getByText('Revoke "ci"?')).toBeTruthy()
+    await userEvent.click(question.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(revokeAPIKey).not.toHaveBeenCalled()
   })
 
   it('revokes on yes and shows the key as revoked, with nothing left to revoke', async () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Revoke' }))
     expect(revokeAPIKey).toHaveBeenCalledExactlyOnceWith('k1')
     await waitFor(() => expect(screen.getByText(/^revoked /)).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Revoke' })).toBeNull()
@@ -151,6 +153,7 @@ describe('revoking an API key', () => {
     vi.mocked(revokeAPIKey).mockRejectedValue(new Error('api key not found'))
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Revoke' }))
     expect(await screen.findByText('api key not found')).toBeTruthy()
   })
 })

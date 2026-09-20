@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StrictMode } from 'react'
 import { SWRConfig } from 'swr'
@@ -89,7 +89,6 @@ beforeEach(() => {
   vi.mocked(fetchGitHubApp).mockResolvedValue(app)
   vi.mocked(attachProjectRepo).mockImplementation(async id => (repos[id] = attached))
   vi.mocked(detachProjectRepo).mockImplementation(async id => { repos[id] = null })
-  vi.stubGlobal('confirm', vi.fn(() => true))
 })
 
 describe('a project with no repository', () => {
@@ -280,15 +279,19 @@ describe('a project with a repository', () => {
   it('detaches after the owner confirms, and then offers the form', async () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Detach repository' }))
-    expect(confirm).toHaveBeenCalledExactlyOnceWith('Detach acme/widgets from vision? Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.')
+    const question = within(screen.getByRole('dialog'))
+    expect(question.getByText('Detach acme/widgets from vision?')).toBeTruthy()
+    expect(question.getByText('Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.')).toBeTruthy()
+    await userEvent.click(question.getByRole('button', { name: 'Detach' }))
     expect(detachProjectRepo).toHaveBeenCalledExactlyOnceWith('prj_2')
     expect(await screen.findByLabelText('Repository')).toBeTruthy()
   })
 
   it('detaches nothing when the owner does not confirm', async () => {
-    vi.mocked(confirm).mockReturnValue(false)
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Detach repository' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(detachProjectRepo).not.toHaveBeenCalled()
     expect(screen.getByText('acme/widgets')).toBeTruthy()
   })
@@ -297,6 +300,7 @@ describe('a project with a repository', () => {
     vi.mocked(detachProjectRepo).mockRejectedValue(new Error('Failed to fetch'))
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Detach repository' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Detach' }))
     expect(await screen.findByText('Failed to fetch')).toBeTruthy()
     expect(screen.getByText('acme/widgets')).toBeTruthy()
   })

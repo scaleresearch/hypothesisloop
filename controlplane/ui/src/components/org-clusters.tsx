@@ -4,10 +4,12 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { fetchOrgClusters, registerCluster } from '@/lib/api'
 import type { RegisteredCluster } from '@/types'
-import { semantic } from '@/lib/colors'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
+import { StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
@@ -20,16 +22,6 @@ function shellQuote(text: string): string {
 function startCommand(orgID: string, cluster: RegisteredCluster): string {
   const name = shellQuote(cluster.name)
   return `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})" make cluster-agent-up CLUSTER=${name} API_URL=${shellQuote(cluster.api_url)} METRICS_URL=${shellQuote(cluster.metrics_url)}`
-}
-
-function Status({ connected }: { connected: boolean }) {
-  const color = connected ? semantic.success : semantic.danger
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color, fontSize: 12, fontWeight: 600 }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
-      {connected ? 'Connected' : 'Disconnected'}
-    </span>
-  )
 }
 
 /**
@@ -69,12 +61,13 @@ export function OrgClusters({ manage }: { manage: boolean }) {
   }
 
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
+    <div className="grid gap-3.5">
       {manages && (
-        <form className="settings-row" onSubmit={add}>
-          <input
-            className="field-sm mono"
-            style={{ width: 240 }}
+        <form className="flex flex-wrap items-center gap-2" onSubmit={add}>
+          <Input
+            fieldSize="sm"
+            mono
+            className="w-60"
             aria-label="Cluster name"
             placeholder="cluster name, e.g. lab-k8s"
             value={name}
@@ -91,12 +84,12 @@ export function OrgClusters({ manage }: { manage: boolean }) {
           label={`Start the agent of ${registered.name}`}
           value={startCommand(org.id, registered)}
           note={<>
-            Run it from a checkout of the repository, with <span className="mono">kubectl</span> pointed
-            at the cluster and <span className="mono">hl</span> signed in as an owner of {org.name}.
-            It reads the cluster&apos;s runtime token with <span className="mono">hl cluster token</span>{' '}
+            Run it from a checkout of the repository, with <span className="font-mono">kubectl</span> pointed
+            at the cluster and <span className="font-mono">hl</span> signed in as an owner of {org.name}.
+            It reads the cluster&apos;s runtime token with <span className="font-mono">hl cluster token</span>{' '}
             when it runs, so the token is not on this page.{' '}
-            <span className="mono">Show start command</span> in the cluster&apos;s row brings the
-            same command back, as does <span className="mono">hl cluster add {registered.name}</span>.
+            <span className="font-mono">Show start command</span> in the cluster&apos;s row brings the
+            same command back, as does <span className="font-mono">hl cluster add {registered.name}</span>.
           </>}
           dismiss="Hide"
           onDismiss={() => setRegistered(null)}
@@ -112,7 +105,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
         </EmptyState>
       )}
       {data && data.length > 0 && (
-        <table className="wa-table">
+        <Table>
           <thead>
             <tr>
               <th>Cluster</th>
@@ -125,23 +118,23 @@ export function OrgClusters({ manage }: { manage: boolean }) {
           <tbody>
             {data.map(c => (
               <tr key={c.name}>
-                <td className="mono" style={{ fontWeight: 600 }}>
+                <td className="font-mono text-xs font-semibold">
                   {c.name}
-                  {c.cluster_id && <div className="text-muted" style={{ fontSize: 11 }}>{c.cluster_id}</div>}
+                  {c.cluster_id && <div className="text-2xs font-normal text-muted">{c.cluster_id}</div>}
                 </td>
-                <td><Status connected={c.connected} /></td>
-                <td style={{ fontSize: 12 }}>
+                <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
+                <td className="text-xs">
                   {c.owned ? org.name : 'the platform'}
-                  {c.shared && <div className="text-muted" style={{ fontSize: 11 }}>shared with every org</div>}
+                  {c.shared && <div className="text-2xs text-muted">shared with every org</div>}
                 </td>
                 <td>
                   {!c.owned
-                    ? <span className="text-muted" style={{ fontSize: 12 }}>set by the platform</span>
+                    ? <span className="text-xs text-muted">set by the platform</span>
                     : !administers
-                      ? <span className="text-muted" style={{ fontSize: 12 }}>set by an owner of {org.name}</span>
+                      ? <span className="text-xs text-muted">set by an owner of {org.name}</span>
                       : c.cluster_id
                         ? <ClusterSettingsEditor clusterID={c.cluster_id} />
-                        : <span className="text-muted" style={{ fontSize: 12 }}>available once its agent has connected</span>}
+                        : <span className="text-xs text-muted">available once its agent has connected</span>}
                 </td>
                 {manages && (
                   <td>
@@ -151,7 +144,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
     </div>
   )

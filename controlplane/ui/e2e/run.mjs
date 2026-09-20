@@ -98,6 +98,13 @@ function section(title) {
 }
 
 // Clicks the one sign-in button and follows the redirects back into the app.
+// A confirmation is a dialog on the page; `button` is the one that goes ahead.
+async function confirmWith(page, button) {
+  const question = page.getByRole('dialog')
+  await question.getByRole('button', { name: button, exact: true }).click()
+  await question.waitFor({ state: 'detached' })
+}
+
 async function signIn(page, user, landing = '**/') {
   await configure({ nextUser: user })
   await page.getByRole('button', { name: 'Continue with GitHub' }).click()
@@ -195,8 +202,6 @@ async function scenarios(browser) {
   page.on('request', request => {
     if (request.url().startsWith(API) && request.method() !== 'OPTIONS') apiCalls.push(request)
   })
-  const acceptDialog = dialog => dialog.accept()
-  page.on('dialog', acceptDialog)
 
   section('a visitor without a session is sent to sign in, and returns to where they were going')
   await page.goto(`${UI}/jobs?status=RUNNING`)
@@ -292,6 +297,7 @@ async function scenarios(browser) {
   assert.equal(await agentRows.count(), 3)
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 200, 'the agent token still works before its agent is removed')
   await agentRows.filter({ hasText: agentID }).getByRole('button', { name: 'Remove' }).click()
+  await confirmWith(page, 'Remove')
   await agentRows.filter({ hasText: agentID }).waitFor({ state: 'detached' })
   assert.equal(await agentRows.count(), 2)
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 401, 'the same request is refused once the agent is removed')
@@ -363,6 +369,7 @@ async function scenarios(browser) {
   assert.equal(await page.getByRole('cell', { name: 'laptop' }).count(), 1, 'a double click created one key')
   assert.ok(!(await page.content()).includes(keyToken), 'the token is not on the page after a reload')
   await page.getByRole('button', { name: 'Revoke' }).click()
+  await confirmWith(page, 'Revoke')
   await page.getByText(/^revoked /).waitFor()
   assert.equal((await api(keyToken, '/me')).status, 401, 'a revoked key is refused')
   await shot(page, 'api-key-revoked', page.getByText(/^revoked /))
@@ -613,19 +620,18 @@ async function scenarios(browser) {
   await page.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
   assert.equal(attaches.length, attachesBefore + 1)
 
-  page.off('dialog', acceptDialog)
-  const asked = []
-  page.once('dialog', dialog => { asked.push(dialog.message()); dialog.dismiss() })
   await page.getByRole('button', { name: 'Detach repository' }).click()
-  await page.waitForTimeout(500)
-  assert.deepEqual(asked, ['Detach acme/widgets from renamed? Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.'])
+  const question = page.getByRole('dialog')
+  await question.getByText('Detach acme/widgets from renamed?').waitFor()
+  await question.getByText('Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.').waitFor()
+  await question.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await question.waitFor({ state: 'detached' })
   assert.equal(deletes.length, 0, 'a declined confirmation detaches nothing')
   await page.getByRole('cell', { name: 'acme/widgets', exact: true }).waitFor()
-  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: 'Detach repository' }).click()
+  await confirmWith(page, 'Detach')
   await page.getByText('No repository is attached to renamed.').waitFor()
   assert.equal(deletes.length, 1)
-  page.on('dialog', acceptDialog)
   await page.unroute(repoAPI)
 
   section('repository: a row the real API holds, read and detached through the page')
@@ -643,6 +649,7 @@ async function scenarios(browser) {
     await shot(page, 'repository-real-row')
     const realDelete = page.waitForResponse(r => r.url() === repoAPI && r.request().method() === 'DELETE')
     await page.getByRole('button', { name: 'Detach repository' }).click()
+    await confirmWith(page, 'Detach')
     assert.equal((await realDelete).status(), 204)
     await page.getByText('No repository is attached to renamed.').waitFor()
     assert.equal((await api(await tokenOf(ada), `/projects/${secondProjectID}/repo`)).status, 404)

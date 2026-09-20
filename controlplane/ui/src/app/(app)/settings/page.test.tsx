@@ -123,8 +123,7 @@ describe('a member of the org', () => {
 describe('the repository section', () => {
   it('leads to the repository of the selected project', () => {
     show()
-    const section = screen.getByText('Repository').closest('.wa-pod')!
-    expect(section.querySelector('a')!.textContent).toBe('Repository of default')
-    expect(section.querySelector('a')!.getAttribute('href')).toBe('/settings/repository?project=prj_1')
+    const link = screen.getByRole('link', { name: 'Repository of default' })
+    expect(link.getAttribute('href')).toBe('/settings/repository?project=prj_1')
   })
 })

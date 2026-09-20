@@ -11,13 +11,16 @@ import type { Attach } from '@/lib/repo-attach'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, ProjectRepo } from '@/types'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Table } from '@/components/ui/table'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
 function InstallLink({ app }: { app: GitHubApp }) {
   return (
-    <a href={app.install_url} target="_blank" rel="noreferrer" className="text-link">
+    <a href={app.install_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
       Install the App on a repository
     </a>
   )
@@ -27,9 +30,10 @@ function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => v
   const { project, administers } = useTenant()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [confirming, setConfirming] = useState(false)
 
   async function detach() {
-    if (!confirm(`Detach ${repo.repo} from ${project.name}? Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.`)) return
+    setConfirming(false)
     setBusy(true)
     setError('')
     try {
@@ -43,27 +47,36 @@ function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => v
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <table className="wa-table">
+    <div className="grid gap-3">
+      <Table>
         <tbody>
-          <tr><th>Repository</th><td className="mono" style={{ fontWeight: 600 }}>{repo.repo}</td></tr>
-          <tr><th>Cloned from</th><td className="mono">{repo.clone_url}</td></tr>
-          <tr><th>Attached</th><td className="mono text-muted">{new Date(repo.attached_at).toLocaleString()}</td></tr>
+          <tr><th>Repository</th><td className="font-mono text-xs font-semibold">{repo.repo}</td></tr>
+          <tr><th>Cloned from</th><td className="font-mono text-xs">{repo.clone_url}</td></tr>
+          <tr><th>Attached</th><td className="font-mono text-xs text-muted">{new Date(repo.attached_at).toLocaleString()}</td></tr>
         </tbody>
-      </table>
-      <p className="text-muted" style={{ fontSize: 13 }}>
-        Agents push branches named <span className="mono">hl/&lt;platform experiment&gt;/&lt;agent&gt;</span>.
+      </Table>
+      <p className="text-sm text-muted">
+        Agents push branches named <span className="font-mono text-xs">hl/&lt;platform experiment&gt;/&lt;agent&gt;</span>.
         Protecting other branches is the repository&apos;s own setting on GitHub.
       </p>
       {administers
         ? (
           <>
-            <div><Button variant="danger" size="sm" disabled={busy} onClick={detach}>{busy ? 'Detaching…' : 'Detach repository'}</Button></div>
-            <p className="text-muted" style={{ fontSize: 13 }}>To attach another repository, detach this one first.</p>
+            <div><Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirming(true)}>{busy ? 'Detaching…' : 'Detach repository'}</Button></div>
+            <p className="text-sm text-muted">To attach another repository, detach this one first.</p>
           </>
         )
-        : <p className="text-muted" style={{ fontSize: 13 }}>Only an owner of the organization can detach it.</p>}
+        : <p className="text-sm text-muted">Only an owner of the organization can detach it.</p>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
+      <ConfirmDialog
+        open={confirming}
+        title={`Detach ${repo.repo} from ${project.name}?`}
+        confirmLabel="Detach"
+        onConfirm={detach}
+        onCancel={() => setConfirming(false)}
+      >
+        Agents and jobs of its running platform experiments can no longer clone, fetch or push within the hour.
+      </ConfirmDialog>
     </div>
   )
 }
@@ -88,15 +101,16 @@ function Connect({ app, failed }: { app: GitHubApp; failed: Extract<Attach, { st
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <p className="text-muted" style={{ fontSize: 13 }}>
+    <div className="grid gap-3">
+      <p className="text-sm text-muted">
         No repository is attached to {project.name}. Name one the platform&apos;s GitHub App is installed
         on, then confirm on GitHub who you are. You must be able to push to it, since agents will.
       </p>
-      <form className="settings-row" onSubmit={connect}>
-        <input
-          className="field-sm mono"
-          style={{ width: 320 }}
+      <form className="flex flex-wrap items-center gap-2" onSubmit={connect}>
+        <Input
+          fieldSize="sm"
+          mono
+          className="w-80"
           aria-label="Repository"
           placeholder="owner/name"
           value={repo}
@@ -108,7 +122,7 @@ function Connect({ app, failed }: { app: GitHubApp; failed: Extract<Attach, { st
       </form>
       {invalid && <ErrorMessage>The repository must be owner/name, as in its address on GitHub.</ErrorMessage>}
       {failed && !invalid && <ErrorMessage>{failed.message}</ErrorMessage>}
-      <p className="text-muted" style={{ fontSize: 13 }}>
+      <p className="text-sm text-muted">
         {failed?.reason === APP_NOT_INSTALLED ? 'Install it, then connect again: ' : 'Not installed there yet? '}
         <InstallLink app={app} />
       </p>
@@ -164,7 +178,7 @@ function Repository() {
   if (repo.data) return <Attached repo={repo.data} onDetached={detached} />
   if (!administers) {
     return (
-      <p className="text-muted" style={{ fontSize: 13 }}>
+      <p className="text-sm text-muted">
         No repository is attached to {project.name}. Only an owner of {org.name} can attach one.
       </p>
     )

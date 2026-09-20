@@ -6,6 +6,8 @@ import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
 import { OrgClusters } from '@/components/org-clusters'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { InlineError } from '@/components/ui/status-message'
 import { Link } from '@/components/ui/link'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
@@ -37,10 +39,10 @@ function NameForm({ label, initial, action, placeholder, save }: {
   }
 
   return (
-    <form className="settings-row" onSubmit={submit}>
-      <input
-        className="field-sm"
-        style={{ width: 260 }}
+    <form className="flex flex-wrap items-center gap-2" onSubmit={submit}>
+      <Input
+        fieldSize="sm"
+        className="w-64"
         aria-label={label}
         placeholder={placeholder}
         value={name}
@@ -49,7 +51,7 @@ function NameForm({ label, initial, action, placeholder, save }: {
       <Button size="sm" type="submit" disabled={busy || name.trim() === '' || name.trim() === initial}>
         {busy ? 'Saving…' : action}
       </Button>
-      {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
+      {error && <InlineError>{error}</InlineError>}
     </form>
   )
 }
@@ -69,7 +71,7 @@ function Organization() {
           action="Rename"
           save={async name => { await renameOrg(org.id, name); await refreshMe() }}
         />
-        <p className="text-dim mono" style={{ fontSize: 11, marginTop: 8 }}>{org.id}</p>
+        <p className="mt-2 font-mono text-2xs text-subtle">{org.id}</p>
       </CardContent>
     </Card>
   )
@@ -82,9 +84,9 @@ function Projects() {
     <Card>
       <CardHeader>Projects</CardHeader>
       <CardContent>
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div className="grid gap-2.5">
           {me.projects.filter(p => p.org_id === org.id).map(p => (
-            <div key={p.id} style={{ display: 'grid', gap: 3 }}>
+            <div key={p.id} className="grid gap-1">
               <NameForm
                 key={p.name}
                 label={`Name of project ${p.name}`}
@@ -92,12 +94,12 @@ function Projects() {
                 action="Rename"
                 save={async name => { await renameProject(p.id, name); await refreshMe() }}
               />
-              <span className="text-dim mono" style={{ fontSize: 11 }}>
+              <span className="font-mono text-2xs text-subtle">
                 {p.id}{p.id === project.id && ' · selected'}
               </span>
             </div>
           ))}
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+          <div className="border-t pt-2.5">
             <NameForm
               label="New project name"
               initial=""
@@ -119,7 +121,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description={`${org.name}: its name, projects, API keys and clusters.`} />
 
       {!administers && (
-        <p className="text-muted" style={{ fontSize: 13, marginBottom: 16 }}>
+        <p className="mb-4 text-sm text-muted">
           You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and clusters.
         </p>
       )}
@@ -147,9 +149,9 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>Repository</CardHeader>
         <CardContent>
-          <p className="text-muted" style={{ fontSize: 13 }}>
+          <p className="text-sm text-muted">
             The GitHub repository the agents and jobs of {project.name} clone, and its agents push their branches to.{' '}
-            <Link href="/settings/repository" className="text-link">Repository of {project.name}</Link>
+            <Link href="/settings/repository" className="text-accent hover:underline">Repository of {project.name}</Link>
           </p>
         </CardContent>
       </Card>

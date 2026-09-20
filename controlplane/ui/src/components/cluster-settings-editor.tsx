@@ -5,7 +5,9 @@ import useSWR from 'swr'
 import { fetchClusterSettings, putClusterSettings } from '@/lib/api'
 import type { ClusterSettings } from '@/types'
 import { Button } from '@/components/ui/button'
-import { Loading } from '@/components/ui/status-message'
+import { FormField } from '@/components/ui/form-field'
+import { Input } from '@/components/ui/input'
+import { InlineError, Loading } from '@/components/ui/status-message'
 
 type Field = Exclude<keyof ClusterSettings, 'cluster_id'>
 
@@ -40,12 +42,12 @@ export function ClusterSettingsEditor({ clusterID }: { clusterID: string }) {
   const [error, setError] = useState('')
 
   if (isLoading) return <Loading rows={1} />
-  if (loadError || !data) return <span className="text-error" style={{ fontSize: 12 }}>Could not load settings: {loadError?.message}</span>
+  if (loadError || !data) return <InlineError>Could not load settings: {loadError?.message}</InlineError>
 
   if (!draft) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span className="mono text-muted" style={{ fontSize: 12 }}>
+      <div className="flex items-center gap-2.5">
+        <span className="font-mono text-xs text-muted">
           {FIELDS.map(f => `${f.label}: ${data[f.key] != null ? `${data[f.key]}${f.unit}` : 'default'}`).join(' · ')}
         </span>
         <Button size="sm" onClick={() => {
@@ -71,26 +73,25 @@ export function ClusterSettingsEditor({ clusterID }: { clusterID: string }) {
   }
 
   return (
-    <div style={{ display: 'grid', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+    <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-end gap-2">
         {FIELDS.map(f => (
-          <label key={f.key} style={{ display: 'grid', gap: 2 }}>
-            <span className="uppercase-label">{f.label}</span>
-            <input
-              className="field-sm"
-              style={{ width: 150 }}
+          <FormField key={f.key} label={f.label}>
+            <Input
+              fieldSize="sm"
+              className="w-36"
               inputMode="numeric"
               placeholder={f.placeholder}
               value={draft[f.key]}
               onChange={e => setDraft({ ...draft, [f.key]: e.target.value })}
             />
-          </label>
+          </FormField>
         ))}
         <Button size="sm" variant="primary" disabled={saving} onClick={() => save(draft)}>{saving ? 'Saving…' : 'Save'}</Button>
         <Button size="sm" disabled={saving} onClick={() => setDraft(null)}>Cancel</Button>
       </div>
-      <span className="text-dim" style={{ fontSize: 11 }}>Leave a field empty to use the scheduler default.</span>
-      {error && <span className="text-error" style={{ fontSize: 12 }}>{error}</span>}
+      <span className="text-xs text-subtle">Leave a field empty to use the scheduler default.</span>
+      {error && <InlineError>{error}</InlineError>}
     </div>
   )
 }

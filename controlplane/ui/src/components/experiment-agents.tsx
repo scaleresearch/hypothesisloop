@@ -9,6 +9,11 @@ import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 import { Button, Chip } from '@/components/ui/button'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/dialog'
+import { FormField } from '@/components/ui/form-field'
+import { Input } from '@/components/ui/input'
+import { Table } from '@/components/ui/table'
+import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
@@ -50,33 +55,33 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <form className="settings-row" style={{ alignItems: 'flex-end' }} onSubmit={submit}>
-        <label style={{ display: 'grid', gap: 2 }}>
-          <span className="uppercase-label">Flavor</span>
-          <input
-            className="field-sm mono"
-            style={{ width: 200 }}
+    <div className="grid gap-2.5">
+      <form className="flex flex-wrap items-end gap-2" onSubmit={submit}>
+        <FormField label="Flavor">
+          <Input
+            fieldSize="sm"
+            mono
+            className="w-52"
             list="agent-flavors"
             placeholder="agent's default"
             value={flavor}
             onChange={e => setFlavor(e.target.value)}
           />
           <datalist id="agent-flavors">{FLAVORS.map(f => <option key={f} value={f} />)}</datalist>
-        </label>
-        <label style={{ display: 'grid', gap: 2 }}>
-          <span className="uppercase-label">Model</span>
-          <input
-            className="field-sm mono"
-            style={{ width: 220 }}
+        </FormField>
+        <FormField label="Model">
+          <Input
+            fieldSize="sm"
+            mono
+            className="w-56"
             placeholder="agent's default"
             value={model}
             onChange={e => setModel(e.target.value)}
           />
-        </label>
-        <div style={{ display: 'grid', gap: 2 }}>
-          <span className="uppercase-label">Run by</span>
-          <div style={{ display: 'flex', gap: 6 }}>
+        </FormField>
+        <div className="grid gap-1" role="group" aria-label="Run by">
+          <Eyebrow>Run by</Eyebrow>
+          <div className="flex gap-1.5">
             <Chip type="button" active={hosted} onClick={() => setHosted(true)}>The platform</Chip>
             <Chip type="button" active={!hosted} onClick={() => setHosted(false)}>Me</Chip>
           </div>
@@ -85,7 +90,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
           {busy ? 'Adding…' : 'Add agent'}
         </Button>
       </form>
-      <span className="text-dim" style={{ fontSize: 11 }}>
+      <span className="text-xs text-subtle">
         {hosted
           ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent is cut.'
           : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
@@ -105,11 +110,12 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [rowError, setRowError] = useState('')
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])
+  const [removing, setRemoving] = useState<AgentSignup | null>(null)
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
 
   async function remove(agent: AgentSignup) {
-    if (!confirm(`Remove ${agent.name} from this platform experiment? Its token stops working${agent.hosted ? ' and its machine is taken down' : ''}.`)) return
+    setRemoving(null)
     setRowError('')
     try {
       await removePlatformExperimentAgent(pe.id, agent.agent_id)
@@ -142,9 +148,9 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
     <Card>
       <CardHeader>Agents{agents ? ` (${agents.length})` : ''}</CardHeader>
       <CardContent scrollX>
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div className="grid gap-3.5">
           {started
-            ? <span className="text-dim" style={{ fontSize: 12 }}>The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
+            ? <span className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {shown.map(agent => (
             <Secret
@@ -154,9 +160,9 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               note={<>
                 Save it as an env file readable by you alone and start the agent with it. The token
                 acts as this agent in this platform experiment and nowhere else. It is derived from
-                the agent&apos;s place here, so <span className="mono">Show token</span> in the
+                the agent&apos;s place here, so <span className="font-mono">Show token</span> in the
                 agent&apos;s row brings the same one back, as does{' '}
-                <span className="mono">hl platform-experiments agents add {pe.id} --agent {agent.agent_id}</span>.
+                <span className="font-mono">hl platform-experiments agents add {pe.id} --agent {agent.agent_id}</span>.
                 Removing the agent is what stops it working.
               </>}
               dismiss="Hide"
@@ -170,34 +176,45 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             <EmptyState>No agents yet. Nothing runs in this experiment until at least one joins.</EmptyState>
           )}
           {agents && agents.length > 0 && (
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Flavor</th><th>Model</th><th>Joined</th><th /></tr>
               </thead>
               <tbody>
                 {agents.map(agent => (
                   <tr key={agent.agent_id}>
-                    <td className="mono" style={{ fontWeight: 600 }}>
+                    <td className="font-mono text-xs font-semibold">
                       {agent.name}
-                      {agent.name !== agent.agent_id && <div className="text-muted" style={{ fontSize: 11 }}>{agent.agent_id}</div>}
+                      {agent.name !== agent.agent_id && <div className="text-2xs font-normal text-muted">{agent.agent_id}</div>}
                     </td>
-                    <td style={{ fontSize: 12 }}>{agent.role}</td>
-                    <td style={{ fontSize: 12 }}>{agent.hosted ? 'the platform' : 'its operator'}</td>
-                    <td className="mono" style={{ fontSize: 12 }}>{agent.flavor ?? 'default'}</td>
-                    <td className="mono" style={{ fontSize: 12 }}>{agent.model ?? 'default'}</td>
-                    <td className="mono text-muted" style={{ fontSize: 12 }}>{new Date(agent.signed_up_at).toLocaleString()}</td>
+                    <td className="text-xs">{agent.role}</td>
+                    <td className="text-xs">{agent.hosted ? 'the platform' : 'its operator'}</td>
+                    <td className="font-mono text-xs">{agent.flavor ?? 'default'}</td>
+                    <td className="font-mono text-xs">{agent.model ?? 'default'}</td>
+                    <td className="font-mono text-xs text-muted">{new Date(agent.signed_up_at).toLocaleString()}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <div className="flex justify-end gap-1.5">
                         {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
-                        {!started && <Button size="sm" variant="danger" onClick={() => remove(agent)}>Remove</Button>}
+                        {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
         </div>
+        {removing && (
+          <ConfirmDialog
+            open
+            title={`Remove ${removing.name} from this platform experiment?`}
+            confirmLabel="Remove"
+            onConfirm={() => remove(removing)}
+            onCancel={() => setRemoving(null)}
+          >
+            Its token stops working{removing.hosted ? ' and its machine is taken down' : ''}.
+          </ConfirmDialog>
+        )}
       </CardContent>
     </Card>
   )

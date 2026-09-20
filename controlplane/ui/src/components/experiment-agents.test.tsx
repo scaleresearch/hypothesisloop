@@ -42,7 +42,6 @@ beforeEach(() => {
   vi.mocked(removePlatformExperimentAgent).mockImplementation(async (_pe, id) => {
     roster = roster.filter(a => a.agent_id !== id)
   })
-  vi.stubGlobal('confirm', vi.fn(() => true))
 })
 
 describe('adding agents', () => {
@@ -121,15 +120,18 @@ describe('removing an agent', () => {
   it('asks first, then removes it from the roster', async () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
-    expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Remove ag-old'))
+    const question = within(screen.getByRole('dialog'))
+    expect(question.getByText('Remove ag-old from this platform experiment?')).toBeTruthy()
+    await userEvent.click(question.getByRole('button', { name: 'Remove' }))
     expect(removePlatformExperimentAgent).toHaveBeenCalledExactlyOnceWith('pe-1', 'ag-old')
     await waitFor(() => expect(screen.queryByRole('cell', { name: 'ag-old' })).toBeNull())
   })
 
   it('does nothing when the answer is no', async () => {
-    vi.mocked(confirm).mockReturnValue(false)
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(removePlatformExperimentAgent).not.toHaveBeenCalled()
   })
 
@@ -137,6 +139,7 @@ describe('removing an agent', () => {
     vi.mocked(removePlatformExperimentAgent).mockRejectedValue(new Error('experiment_started: experiment is running'))
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }))
     expect(await screen.findByText('experiment_started: experiment is running')).toBeTruthy()
   })
 })

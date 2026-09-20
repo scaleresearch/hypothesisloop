@@ -6,6 +6,10 @@ import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api'
 import type { APIKey, CreatedAPIKey } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
@@ -21,6 +25,7 @@ export function APIKeys() {
   const [error, setError] = useState('')
   // The token exists here and nowhere else: no read of the API returns it again.
   const [created, setCreated] = useState<CreatedAPIKey | null>(null)
+  const [revoking, setRevoking] = useState<APIKey | null>(null)
 
   const projects = me.projects.filter(p => p.org_id === org.id)
   const scopeLabel = (key: APIKey) =>
@@ -42,7 +47,7 @@ export function APIKeys() {
   }
 
   async function revoke(key: APIKey) {
-    if (!confirm(`Revoke "${key.name}"? It stops working at once, with every key minted from it. This cannot be undone.`)) return
+    setRevoking(null)
     setError('')
     try {
       await revokeAPIKey(key.id)
@@ -53,20 +58,20 @@ export function APIKeys() {
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <form className="settings-row" onSubmit={create}>
-        <input
-          className="field-sm"
-          style={{ width: 220 }}
+    <div className="grid gap-3">
+      <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
+        <Input
+          fieldSize="sm"
+          className="w-56"
           aria-label="Key name"
           placeholder="key name, e.g. laptop"
           value={name}
           onChange={e => setName(e.target.value)}
         />
-        <select className="field-sm" aria-label="Key reach" value={scope} onChange={e => setScope(e.target.value)}>
+        <Select fieldSize="sm" aria-label="Key reach" value={scope} onChange={e => setScope(e.target.value)}>
           <option value={WHOLE_ORG}>Whole organization</option>
           {projects.map(p => <option key={p.id} value={p.id}>Project {p.name} only</option>)}
-        </select>
+        </Select>
         <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
           {busy ? 'Creating…' : 'Create API key'}
         </Button>
@@ -78,7 +83,7 @@ export function APIKeys() {
           label={`Token of "${created.name}"`}
           value={created.token}
           note={<>
-            Set it as <span className="mono">HL_TOKEN</span> for the <span className="mono">hl</span> command
+            Set it as <span className="font-mono">HL_TOKEN</span> for the <span className="font-mono">hl</span> command
             line or an outside agent. This is the only time it is shown: the platform keeps its
             hash. If you lose it, revoke the key and create another.
           </>}
@@ -91,30 +96,41 @@ export function APIKeys() {
       {!keys && !listError && <Loading />}
       {keys && keys.length === 0 && <EmptyState>No API keys yet.</EmptyState>}
       {keys && keys.length > 0 && (
-        <table className="wa-table">
+        <Table>
           <thead>
             <tr><th>Name</th><th>Id</th><th>Reaches</th><th>Created</th><th>Status</th><th /></tr>
           </thead>
           <tbody>
             {keys.map(key => (
               <tr key={key.id}>
-                <td style={{ fontWeight: 600 }}>{key.name}</td>
-                <td className="mono text-muted" style={{ fontSize: 12 }}>
+                <td className="font-semibold">{key.name}</td>
+                <td className="font-mono text-xs text-muted">
                   {key.id}
-                  {key.minted_by && <div style={{ fontSize: 11 }}>minted from {key.minted_by}</div>}
+                  {key.minted_by && <div className="text-2xs">minted from {key.minted_by}</div>}
                 </td>
-                <td style={{ fontSize: 12 }}>{scopeLabel(key)}</td>
-                <td className="mono text-muted" style={{ fontSize: 12 }}>{new Date(key.created_at).toLocaleString()}</td>
-                <td style={{ fontSize: 12 }}>
+                <td className="text-xs">{scopeLabel(key)}</td>
+                <td className="font-mono text-xs text-muted">{new Date(key.created_at).toLocaleString()}</td>
+                <td className="text-xs">
                   {key.revoked_at ? `revoked ${new Date(key.revoked_at).toLocaleString()}` : 'active'}
                 </td>
                 <td>
-                  {!key.revoked_at && <Button size="sm" variant="danger" onClick={() => revoke(key)}>Revoke</Button>}
+                  {!key.revoked_at && <Button size="sm" variant="danger" onClick={() => setRevoking(key)}>Revoke</Button>}
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
+      )}
+      {revoking && (
+        <ConfirmDialog
+          open
+          title={`Revoke "${revoking.name}"?`}
+          confirmLabel="Revoke"
+          onConfirm={() => revoke(revoking)}
+          onCancel={() => setRevoking(null)}
+        >
+          It stops working at once, with every key minted from it. This cannot be undone.
+        </ConfirmDialog>
       )}
     </div>
   )

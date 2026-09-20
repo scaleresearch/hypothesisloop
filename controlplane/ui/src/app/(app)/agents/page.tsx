@@ -2,6 +2,7 @@
 
 import { Fragment, Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
+import { clsx } from 'clsx'
 import { Link } from '@/components/ui/link'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import {
@@ -15,10 +16,10 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge, AgentKindBadge, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
+import { ColumnTh, Table } from '@/components/ui/table'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pagination } from '@/components/ui/pagination'
-import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 import { useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
@@ -35,10 +36,10 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
   if (!q) return null
   const totalRem = quotaRemainingAccH(q)
   return (
-    <tr style={{ background: 'var(--muted)' }}>
-      <td colSpan={colSpan} className="mono" style={{ paddingLeft: 28, fontSize: 11 }}>
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Link href={`/platform-experiments/${pe.id}`} className="text-link" style={{ fontSize: 12 }}>{pe.name}</Link>
+    <tr className="bg-foreground/5">
+      <td colSpan={colSpan} className="pl-7 font-mono text-2xs">
+        <div className="flex flex-wrap items-center gap-6">
+          <Link href={`/platform-experiments/${pe.id}`} className="text-xs text-accent hover:underline">{pe.name}</Link>
           <span>
             <Badge status="guaranteed" className="mr-1">G</Badge>
             {formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH used
@@ -47,7 +48,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
             <Badge status="burst" className="mr-1">B</Badge>
             {formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH used
           </span>
-          <span style={{ color: totalRem > 0 ? semantic.success : semantic.danger }}>{formatAccH(totalRem)} AccH left</span>
+          <span className={totalRem > 0 ? 'text-success' : 'text-danger'}>{formatAccH(totalRem)} AccH left</span>
         </div>
       </td>
     </tr>
@@ -56,7 +57,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
 
 function AgentQuotaRows({ agentId, experiments, colSpan }: { agentId: string; experiments: PlatformExperiment[]; colSpan: number }) {
   if (experiments.length === 0) return (
-    <tr><td colSpan={colSpan} className="text-dim" style={{ fontSize: 12, paddingLeft: 20 }}>No running platform experiments</td></tr>
+    <tr><td colSpan={colSpan} className="pl-5 text-xs text-subtle">No running platform experiments</td></tr>
   )
   return <>{experiments.map(pe => <AgentExperimentQuota key={pe.id} agentId={agentId} pe={pe} colSpan={colSpan} />)}</>
 }
@@ -156,19 +157,19 @@ function AgentsPageContent() {
       />
 
       {/* KPI row: every agent the filter matches. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+      <div className="mb-4 grid grid-cols-4 gap-2.5">
         <StatTile label="Registered Agents" value={total || '—'} />
-        <StatTile label="Top-3 Eligible" value={stats?.top3_eligible ?? '—'} color={semantic.success} sub="+25% quota bonus" />
+        <StatTile label="Top-3 Eligible" value={stats?.top3_eligible ?? '—'} tone="success" sub="+25% quota bonus" />
         <StatTile label="Avg Perf Bonus" value={stats?.total ? stats.avg_performance_score.toFixed(3) : '—'} />
-        <StatTile label="Open Donation Requests" value={donationTotal} color={donationTotal > 0 ? semantic.warning : undefined} />
+        <StatTile label="Open Donation Requests" value={donationTotal} tone={donationTotal > 0 ? 'warning' : undefined} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+      <div className="grid grid-cols-2 items-start gap-3">
         {/* Experiment filter */}
         <Card>
           <CardHeader>Filter</CardHeader>
-          <CardContent style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span className="text-muted">By experiment:</span>
+          <CardContent className="flex flex-wrap items-center gap-2.5">
+            <span className="text-xs text-muted">By experiment:</span>
             <PlatformExperimentSelect
               value={experimentFilter}
               onChange={v => { setExperimentFilter(v); setPage(0) }}
@@ -188,28 +189,28 @@ function AgentsPageContent() {
           <Card>
             <CardHeader>Quota Formula — {selectedPE.name}</CardHeader>
             <CardContent>
-              <table className="wa-table">
+              <Table>
                 <tbody>
-                  <tr><td>Base share</td><td className="mono" style={{ fontSize: 11.5 }}>{formatAccH(selectedPE.budget_accelerator_hours)} ÷ {selectedPE.signup_count} = {formatAccH(baseShare)} AccH</td></tr>
-                  <tr><td>Top-3 bonus <span className="badge badge-running" style={{ marginLeft: 4 }}>+25%</span></td><td className="mono text-muted" style={{ fontSize: 11.5 }}>any top-3 placement in prior experiments</td></tr>
-                  <tr><td>Guaranteed quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>{formatAccH(baseShare)} × (1 + bonus)</td></tr>
-                  <tr><td>Burst quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>guaranteed × 2.0 — preemptable</td></tr>
+                  <tr><td>Base share</td><td className="font-mono text-xs">{formatAccH(selectedPE.budget_accelerator_hours)} ÷ {selectedPE.signup_count} = {formatAccH(baseShare)} AccH</td></tr>
+                  <tr><td>Top-3 bonus <Badge tone="success" className="ml-1">+25%</Badge></td><td className="font-mono text-xs text-muted">any top-3 placement in prior experiments</td></tr>
+                  <tr><td>Guaranteed quota</td><td className="font-mono text-xs text-muted">{formatAccH(baseShare)} × (1 + bonus)</td></tr>
+                  <tr><td>Burst quota</td><td className="font-mono text-xs text-muted">guaranteed × 2.0 — preemptable</td></tr>
                 </tbody>
-              </table>
+              </Table>
             </CardContent>
           </Card>
         ) : (
           <Card>
-            <CardHeader>Quota Bonus Formula <span className="text-dim" style={{ fontWeight: 400, fontSize: 11 }}>(reference — select an experiment for real numbers)</span></CardHeader>
+            <CardHeader>Quota Bonus Formula <span className="text-2xs font-normal text-subtle">(reference — select an experiment for real numbers)</span></CardHeader>
             <CardContent>
-              <table className="wa-table">
+              <Table>
                 <tbody>
-                  <tr><td>Base share</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>total_budget_AccH ÷ signed_up_agent_count</td></tr>
-                  <tr><td>Top-3 bonus <span className="badge badge-running" style={{ marginLeft: 4 }}>+25%</span></td><td className="mono text-muted" style={{ fontSize: 11.5 }}>any top-3 placement in prior experiments</td></tr>
-                  <tr><td>Guaranteed quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>base_share × (1 + bonus)</td></tr>
-                  <tr><td>Burst quota</td><td className="mono text-muted" style={{ fontSize: 11.5 }}>guaranteed × 2.0 — preemptable</td></tr>
+                  <tr><td>Base share</td><td className="font-mono text-xs text-muted">total_budget_AccH ÷ signed_up_agent_count</td></tr>
+                  <tr><td>Top-3 bonus <Badge tone="success" className="ml-1">+25%</Badge></td><td className="font-mono text-xs text-muted">any top-3 placement in prior experiments</td></tr>
+                  <tr><td>Guaranteed quota</td><td className="font-mono text-xs text-muted">base_share × (1 + bonus)</td></tr>
+                  <tr><td>Burst quota</td><td className="font-mono text-xs text-muted">guaranteed × 2.0 — preemptable</td></tr>
                 </tbody>
-              </table>
+              </Table>
             </CardContent>
           </Card>
         )}
@@ -222,28 +223,22 @@ function AgentsPageContent() {
       <Card>
         <CardHeader>
           Registered Agents
-          {agents && <span className="text-dim" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
+          {agents && <span className="text-xs font-normal text-subtle">({total})</span>}
         </CardHeader>
         <CardContent scrollX>
-          <table className="wa-table">
+          <Table>
             <thead>
               <tr>
                 {agentTable.getFlatHeaders().map(h => (
-                  <th
+                  <ColumnTh
                     key={h.id}
-                    style={{
-                      textAlign: h.id === 'top3_count' ? 'center' : h.id === 'performance_score' ? 'right' : undefined,
-                      cursor: 'pointer', userSelect: 'none',
-                    }}
-                    onClick={h.column.getToggleSortingHandler()}
-                  >
-                    {String(h.column.columnDef.header)}
-                    {h.column.getIsSorted() === 'desc' ? ' ▼' : h.column.getIsSorted() === 'asc' ? ' ▲' : ''}
-                  </th>
+                    header={h}
+                    className={clsx(h.id === 'top3_count' && 'text-center', h.id === 'performance_score' && 'text-right')}
+                  />
                 ))}
                 {experimentFilter && (
                   <>
-                    <th style={{ textAlign: 'right' }}>Best {ranking?.metric ?? 'metric'}</th>
+                    <th className="text-right">Best {ranking?.metric ?? 'metric'}</th>
                     <th>Jobs</th>
                     <th>Summaries filed</th>
                   </>
@@ -254,7 +249,7 @@ function AgentsPageContent() {
             <tbody>
               {!agents || agents.length === 0 ? (
                 <tr>
-                  <td colSpan={colSpan} style={{ padding: 0 }}>
+                  <td colSpan={colSpan} className="p-0">
                     <EmptyState>
                       {experimentFilter ? 'No agents signed up for this experiment.' : 'No agents registered.'}
                     </EmptyState>
@@ -268,43 +263,36 @@ function AgentsPageContent() {
                 const missing = (unsummarized ?? []).filter(j => j.agent_id === a.id)
                 return (
                   <Fragment key={a.id}>
-                    <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedAgent(isExpanded ? null : a.id)}>
-                      <td className="mono" style={{ fontWeight: 700 }}>
+                    <tr className="cursor-pointer" onClick={() => setExpandedAgent(isExpanded ? null : a.id)}>
+                      <td className="font-mono text-xs font-bold">
                         {a.id}
                         <AgentKindBadge kind={a.kind} className="ml-2" />
                       </td>
-                      <td style={{ textAlign: 'center' }}>
-                        {a.top3_count > 0 ? (
-                          <span
-                            className="wa-chip"
-                            style={{ cursor: 'default', color: semantic.success, borderColor: 'rgba(74, 222, 128, 0.35)', background: 'rgba(74, 222, 128, 0.1)' }}
-                          >
-                            +25% Top-3
-                          </span>
-                        ) : <span className="text-dim">—</span>}
+                      <td className="text-center">
+                        {a.top3_count > 0 ? <Badge tone="success">+25% Top-3</Badge> : <span className="text-xs text-subtle">—</span>}
                       </td>
-                      <td className="mono" style={{ textAlign: 'right' }}>{a.performance_score.toFixed(3)}</td>
+                      <td className="text-right font-mono text-xs">{a.performance_score.toFixed(3)}</td>
                       {experimentFilter && (
                         <>
-                          <td className="mono" style={{ textAlign: 'right' }}>
+                          <td className="text-right font-mono text-xs">
                             {standing?.experiment_id ? (
-                              <Link href={`/jobs/${standing.experiment_id}`} className="text-link" onClick={e => e.stopPropagation()}>
+                              <Link href={`/jobs/${standing.experiment_id}`} className="text-accent hover:underline" onClick={e => e.stopPropagation()}>
                                 #{standing.rank} · {standing.best.toFixed(4)}
                               </Link>
-                            ) : <span className="text-dim">—</span>}
+                            ) : <span className="text-xs text-subtle">—</span>}
                             {missing.some(j => j.id === standing?.experiment_id) && <div><NoSummary /></div>}
                           </td>
-                          <td className="mono" style={{ fontSize: 11 }}>
+                          <td className="font-mono text-2xs">
                             {jobs
                               ? Object.entries(jobs.by_status).map(([status, n]) => `${n} ${status.toLowerCase()}`).join(' · ')
-                              : <span className="text-dim">none</span>}
+                              : <span className="text-xs text-subtle">none</span>}
                           </td>
-                          <td className="mono" style={{ fontSize: 11, color: missing.length > 0 ? semantic.warning : undefined }}>
+                          <td className={clsx('font-mono text-2xs', missing.length > 0 && 'text-warning')}>
                             {completed - missing.length} of {completed} completed
                           </td>
                         </>
                       )}
-                      <td className="text-dim" style={{ fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</td>
+                      <td className="text-xs text-subtle">{isExpanded ? '▲' : '▼'}</td>
                     </tr>
                     {isExpanded && (selectedPE ? [selectedPE] : running) && (
                       <AgentQuotaRows agentId={a.id} experiments={(selectedPE ? [selectedPE] : running)!} colSpan={colSpan} />
@@ -313,7 +301,7 @@ function AgentsPageContent() {
                 )
               })}
             </tbody>
-          </table>
+          </Table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </CardContent>
       </Card>
@@ -322,17 +310,17 @@ function AgentsPageContent() {
       <Card>
         <CardHeader>
           Compute Donation Requests
-          {donationTotal > 0 && <span className="text-link" style={{ fontWeight: 400, marginLeft: 8 }}>({donationTotal} open)</span>}
+          {donationTotal > 0 && <span className="font-normal text-accent">({donationTotal} open)</span>}
         </CardHeader>
         <CardContent>
           {donationItems.length === 0 ? (
             <EmptyState>No open donation requests. Agents can request extra compute via POST /donations.</EmptyState>
           ) : (
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
                   <th>Agent</th>
-                  <th style={{ textAlign: 'right' }}>Wants (AccH)</th>
+                  <th className="text-right">Wants (AccH)</th>
                   <th>Reason</th>
                   <th>Status</th>
                   <th>Requested</th>
@@ -341,15 +329,15 @@ function AgentsPageContent() {
               <tbody>
                 {donationItems.map(d => (
                   <tr key={d.id}>
-                    <td className="mono" style={{ fontWeight: 600 }}>{d.agent_name || d.agent_id}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{d.credits_want}</td>
-                    <td className="text-muted" style={{ fontSize: 12, maxWidth: 300 }}>{d.reason}</td>
+                    <td className="font-mono text-xs font-semibold">{d.agent_name || d.agent_id}</td>
+                    <td className="text-right font-mono text-xs">{d.credits_want}</td>
+                    <td className="max-w-[300px] text-xs text-muted">{d.reason}</td>
                     <td><Badge status={d.status}>{d.status}</Badge></td>
-                    <td className="text-dim" style={{ fontSize: 11 }}>{new Date(d.created_at).toLocaleString()}</td>
+                    <td className="text-2xs text-subtle">{new Date(d.created_at).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
           <Pagination page={donationPage} pageSize={PAGE_SIZE} total={donationTotal} onPageChange={setDonationPage} />
         </CardContent>
