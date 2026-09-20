@@ -71,11 +71,31 @@ func preemptLoop(store LoopStore, observed ObservedState) (*Loop, *recordingSett
 	return l, settler
 }
 
-func needAccelerators(flavor domain.AcceleratorType, n int64) domain.Footprint {
-	fp := domain.NewFootprint()
-	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(flavor)}, n)
-	return fp
+// preemptorNeeding is a queued one-node job asking for n accelerators of flavor.
+func preemptorNeeding(flavor domain.AcceleratorType, n int) *domain.Experiment {
+	exp := burstVictim("preemptor", flavor)
+	exp.AcceleratorCount, exp.Job.AcceleratorCount = n, n
+	return exp
 }
+
+// preemptFor runs preempt for preemptor against a cluster whose nodes report free accelerators
+// of the preemptor's flavor.
+func preemptFor(l *Loop, free map[string]int64, candidates []*domain.Experiment, preemptor *domain.Experiment) (bool, error) {
+	avail := domain.NewFootprint()
+	nodeAvail := map[string]map[string]int64{}
+	for node, n := range free {
+		avail.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(preemptor.AcceleratorType)}, n)
+		nodeAvail[node] = map[string]int64{string(preemptor.AcceleratorType): n}
+	}
+	return l.preempt(context.Background(), avail, nodeAvail, nil, nil, candidates, preemptor)
+}
+
+func onNodeA(observed fakeObserved, ids ...string) fakeObserved {
+	observed.node = observedOnNode(ids, "node-a").node
+	return observed
+}
+
+var fullNodeA = map[string]int64{"node-a": 0}
 
 // TestPreemptEvictsTheLeastProgressedVictim pins the ranking rule: whoever has done the least
 // observed work loses, because that is the least work destroyed. Every candidate here is identical
@@ -87,15 +107,15 @@ func TestPreemptEvictsTheLeastProgressedVictim(t *testing.T) {
 		burstVictim("just-started", flavor),
 		burstVictim("halfway", flavor),
 	}
-	observed := fakeObserved{elapsed: map[string]float64{
+	observed := onNodeA(fakeObserved{elapsed: map[string]float64{
 		"nearly-done":  9,
 		"just-started": 0.1,
 		"halfway":      5,
-	}}
+	}}, "nearly-done", "just-started", "halfway")
 	store := &preemptStore{}
 	l, settler := preemptLoop(store, observed)
 
-	committed, err := l.preempt(context.Background(), needAccelerators(flavor, 1), candidates, burstVictim("preemptor", flavor))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -125,13 +145,13 @@ func TestPreemptSkipsUnrankableCandidatesRatherThanEvictingThemFirst(t *testing.
 	// unmeasurable is absent from elapsed AND fails its query; measurable reports real progress.
 	// Ranked as zero, unmeasurable would be evicted first — the exact bug being guarded.
 	observed := failingFor{
-		inner:  fakeObserved{elapsed: map[string]float64{"measurable": 4}},
+		inner:  onNodeA(fakeObserved{elapsed: map[string]float64{"measurable": 4}}, "unmeasurable", "measurable"),
 		failed: map[string]bool{"unmeasurable": true},
 	}
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, observed)
 
-	committed, err := l.preempt(context.Background(), needAccelerators(flavor, 1), candidates, burstVictim("preemptor", flavor))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -156,8 +176,8 @@ func TestPreemptDoesNothingWhenNoCandidateCanBeRanked(t *testing.T) {
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, fakeObserved{err: errors.New("metrics store unreachable")})
 
-	committed, err := l.preempt(context.Background(), needAccelerators(flavor, 1),
-		[]*domain.Experiment{burstVictim("a", flavor)}, burstVictim("preemptor", flavor))
+	committed, err := preemptFor(l, fullNodeA,
+		[]*domain.Experiment{burstVictim("a", flavor)}, preemptorNeeding(flavor, 1))
 	if err != nil {
 		t.Fatalf("preempt returned an error for an unreachable metrics store, which aborts the caller's tick: %v", err)
 	}
@@ -176,9 +196,9 @@ func TestPreemptNeverExecutesAPartialPlan(t *testing.T) {
 	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	candidates := []*domain.Experiment{burstVictim("a", flavor), burstVictim("b", flavor)}
 	store := &preemptStore{}
-	l, settler := preemptLoop(store, fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}})
+	l, settler := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}}, "a", "b"))
 
-	committed, err := l.preempt(context.Background(), needAccelerators(flavor, 3), candidates, burstVictim("preemptor", flavor))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 3))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -202,9 +222,9 @@ func TestPreemptEvictsNoMoreThanTheShortageNeeds(t *testing.T) {
 		burstVictim("a", flavor), burstVictim("b", flavor), burstVictim("c", flavor),
 	}
 	store := &preemptStore{}
-	l, _ := preemptLoop(store, fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2, "c": 3}})
+	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2, "c": 3}}, "a", "b", "c"))
 
-	committed, err := l.preempt(context.Background(), needAccelerators(flavor, 1), candidates, burstVictim("preemptor", flavor))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -216,8 +236,7 @@ func TestPreemptEvictsNoMoreThanTheShortageNeeds(t *testing.T) {
 	}
 }
 
-// TestPreemptIgnoresVictimsHoldingADifferentFlavor is preemptionContribution's rule seen from the
-// outside: evicting an L40 job frees nothing for a job that needs an H100, so it must never be
+// TestPreemptIgnoresVictimsHoldingADifferentFlavor: evicting an L40 job frees nothing for a job that needs an H100, so it must never be
 // chosen to cover an H100 shortage — however little progress it has made.
 func TestPreemptIgnoresVictimsHoldingADifferentFlavor(t *testing.T) {
 	const wanted = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
@@ -227,9 +246,9 @@ func TestPreemptIgnoresVictimsHoldingADifferentFlavor(t *testing.T) {
 		burstVictim("right-flavor", wanted),
 	}
 	store := &preemptStore{}
-	l, _ := preemptLoop(store, fakeObserved{elapsed: map[string]float64{"wrong-flavor": 0.1, "right-flavor": 8}})
+	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"wrong-flavor": 0.1, "right-flavor": 8}}, "wrong-flavor", "right-flavor"))
 
-	committed, err := l.preempt(context.Background(), needAccelerators(wanted, 1), candidates, burstVictim("preemptor", wanted))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(wanted, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -253,12 +272,12 @@ func TestPreemptRescalesTheVictimAgainstItsOwnStint(t *testing.T) {
 	victim := burstVictim("victim", flavor)
 	store := &preemptStore{}
 	// Lifetime elapsed (9) is deliberately far from this stint's (4): only the stint may be used.
-	l, _ := preemptLoop(store, fakeObserved{
+	l, _ := preemptLoop(store, onNodeA(fakeObserved{
 		elapsed: map[string]float64{"victim": 9},
 		stint:   map[string]float64{"victim": 4},
-	})
+	}, "victim"))
 
-	if _, err := l.preempt(context.Background(), needAccelerators(flavor, 1), []*domain.Experiment{victim}, burstVictim("preemptor", flavor)); err != nil {
+	if _, err := preemptFor(l, fullNodeA, []*domain.Experiment{victim}, preemptorNeeding(flavor, 1)); err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
 	if got := store.remaining["victim"]; got != 6 {
@@ -275,9 +294,9 @@ func TestPreemptReportsAPartiallyExecutedPlanAsAnError(t *testing.T) {
 	candidates := []*domain.Experiment{burstVictim("a", flavor), burstVictim("b", flavor)}
 	// "b" reaches a terminal status between selection and requeue, so its requeue is refused.
 	store := &preemptStore{refuse: map[string]bool{"b": true}}
-	l, _ := preemptLoop(store, fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}})
+	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}}, "a", "b"))
 
-	committed, err := l.preempt(context.Background(), needAccelerators(flavor, 2), candidates, burstVictim("preemptor", flavor))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 2))
 	if err == nil {
 		t.Fatal("a partially executed plan must be reported as an error so the caller stands down")
 	}
@@ -290,12 +309,12 @@ func TestPreemptReportsAPartiallyExecutedPlanAsAnError(t *testing.T) {
 func TestPreemptDoesNothingWithoutCandidatesOrShortage(t *testing.T) {
 	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	store := &preemptStore{}
-	l, _ := preemptLoop(store, fakeObserved{})
+	l, _ := preemptLoop(store, onNodeA(fakeObserved{}, "a"))
 
-	if committed, err := l.preempt(context.Background(), needAccelerators(flavor, 1), nil, burstVictim("p", flavor)); committed || err != nil {
+	if committed, err := preemptFor(l, fullNodeA, nil, preemptorNeeding(flavor, 1)); committed || err != nil {
 		t.Fatalf("preempt with no candidates = (%v, %v), want (false, nil)", committed, err)
 	}
-	if committed, err := l.preempt(context.Background(), domain.NewFootprint(), []*domain.Experiment{burstVictim("a", flavor)}, burstVictim("p", flavor)); committed || err != nil {
+	if committed, err := preemptFor(l, map[string]int64{"node-a": 1}, []*domain.Experiment{burstVictim("a", flavor)}, preemptorNeeding(flavor, 1)); committed || err != nil {
 		t.Fatalf("preempt with no shortage = (%v, %v), want (false, nil)", committed, err)
 	}
 	if len(store.requeued) != 0 {
@@ -351,9 +370,9 @@ func TestPreemptNeverReservesMoreThanTheStintLeft(t *testing.T) {
 			victim := burstVictim("victim", flavor)
 			victim.EstimatedDurationHours = tc.estimate
 			store := &preemptStore{}
-			l, _ := preemptLoop(store, fakeObserved{stint: map[string]float64{"victim": tc.stint}})
+			l, _ := preemptLoop(store, onNodeA(fakeObserved{stint: map[string]float64{"victim": tc.stint}}, "victim"))
 
-			if _, err := l.preempt(context.Background(), needAccelerators(flavor, 1), []*domain.Experiment{victim}, burstVictim("preemptor", flavor)); err != nil {
+			if _, err := preemptFor(l, fullNodeA, []*domain.Experiment{victim}, preemptorNeeding(flavor, 1)); err != nil {
 				t.Fatalf("preempt: %v", err)
 			}
 			if got := store.remaining["victim"]; got < tc.want-1e-9 || got > tc.want+1e-9 {
@@ -376,4 +395,51 @@ func TestAQuotaRefusalAtClaimHasItsOwnReason(t *testing.T) {
 	if got := submitErrorLevel(err); got != zapcore.InfoLevel {
 		t.Fatalf("level = %v, want info", got)
 	}
+}
+
+// The job needs four accelerators on one node. node-a has two free and node-b none, so only a
+// victim on node-a makes a node able to host it, whatever the ranking says.
+func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
+	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	twoOn := func(id string) *domain.Experiment {
+		v := burstVictim(id, flavor)
+		v.AcceleratorCount, v.Job.AcceleratorCount = 2, 2
+		return v
+	}
+	free := map[string]int64{"node-a": 2, "node-b": 0}
+
+	t.Run("the victim on the hosting node is taken", func(t *testing.T) {
+		store := &preemptStore{}
+		l, _ := preemptLoop(store, fakeObserved{
+			elapsed: map[string]float64{"on-b": 0.1, "on-a": 8},
+			node:    map[string]string{"on-b": "node-b", "on-a": "node-a"},
+		})
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("on-b"), twoOn("on-a")}, preemptorNeeding(flavor, 4))
+		if err != nil || !committed {
+			t.Fatalf("preempt = (%v, %v), want a committed plan", committed, err)
+		}
+		if len(store.requeued) != 1 || store.requeued[0] != "on-a" {
+			t.Fatalf("requeued = %v, want [on-a]", store.requeued)
+		}
+	})
+
+	t.Run("no victim is taken when no node could then host the job", func(t *testing.T) {
+		store := &preemptStore{}
+		l, _ := preemptLoop(store, fakeObserved{node: map[string]string{"on-b": "node-b"}})
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("on-b")}, preemptorNeeding(flavor, 4))
+		if err != nil || committed || len(store.requeued) != 0 {
+			t.Fatalf("preempt = (%v, %v), requeued %v: the cluster total would cover the job and no node would", committed, err, store.requeued)
+		}
+	})
+
+	t.Run("a victim whose node is unknown is spared", func(t *testing.T) {
+		gang := twoOn("gang")
+		gang.Job.NumNodes = 2
+		store := &preemptStore{}
+		l, _ := preemptLoop(store, fakeObserved{node: map[string]string{"gang": "node-a"}})
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("unattributed"), gang}, preemptorNeeding(flavor, 4))
+		if err != nil || committed || len(store.requeued) != 0 {
+			t.Fatalf("preempt = (%v, %v), requeued %v, want nothing taken", committed, err, store.requeued)
+		}
+	})
 }

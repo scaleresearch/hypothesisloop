@@ -27,10 +27,8 @@ func filterTier(exps []*domain.Experiment, tier domain.CapacityTier) []*domain.E
 	return out
 }
 
-// filterTierCluster returns experiments of the given tier and cluster — candidates preempt()
-// can evict to cover a shortage that may span multiple dimensions (preempt() itself decides
-// which victims' combined footprint covers it). Scoped to one cluster since freeing capacity
-// elsewhere wouldn't help a job being admitted onto this one.
+// filterTierCluster returns experiments of the given tier and cluster: the candidates preempt()
+// may evict. Scoped to one cluster since freeing capacity elsewhere does not help the job.
 func filterTierCluster(exps []*domain.Experiment, tier domain.CapacityTier, clusterName string) []*domain.Experiment {
 	var out []*domain.Experiment
 	for _, e := range exps {

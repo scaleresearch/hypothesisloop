@@ -713,7 +713,7 @@ func TestTickPreemptsOnceWhileTheVictimTerminates(t *testing.T) {
 		store.running = append(store.running, b)
 	}
 	l := holdLoop(store, terminatingWorkload{holdWorkload: holdWorkload{cpuCores: 16}, store: store}, noopEvictor{})
-	l.observed = fakeObserved{}
+	l.observed = observedOnNode([]string{"b1", "b2", "b3"}, "node-a")
 	l.settler = &recordingSettler{}
 
 	for tick := 1; tick <= 4; tick++ {

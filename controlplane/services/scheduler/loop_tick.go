@@ -421,18 +421,6 @@ func (l *Loop) tick(ctx context.Context) error {
 				zap.String("avail", footprintStr(gAvail[cluster])), zap.String("need", footprintStr(fp)),
 				zap.String("shortage", footprintStr(shortage)),
 				zap.Int("burst_candidates", len(burstRunning)))
-			// Preemption picks victims to cover a cluster-wide scalar shortage. When the cluster
-			// already has the capacity in total and only the layout does not work -- distinct
-			// hosts, labels, per-node distribution -- covering that scalar proves nothing: the
-			// victims are chosen without knowing which node each one holds, so evicting them can
-			// free devices on a node the job could already use and leave it just as unplaceable.
-			// It would then do the same again next tick, destroying burst work every time.
-			//
-			// Targeting the right node needs per-job node attribution, which today is one
-			// metrics-store query per candidate per tick -- the exact pattern the query-volume
-			// work exists to remove, so it lands with the batched per-tick node read, not before
-			// it. Until then this refuses to guess: no plan is better than a destructive one.
-			// The disbalance pass below is node-aware and still runs.
 			// The job fits once the platform jobs already told to stop are gone: earlier requeues
 			// freed its capacity, and taking more victims while their pods terminate takes one
 			// per tick.
@@ -441,6 +429,9 @@ func (l *Loop) tick(ctx context.Context) error {
 			var err error
 			switch {
 			case scalarFits:
+				// A preemption here would repeat every tick while its victim's pod terminates:
+				// the total already covers the job, so nothing below reads the capacity as
+				// promised.
 				l.logger.Info("skipping preemption: cluster has the capacity, the layout does not fit",
 					zap.String("exp", exp.ID), zap.String("cluster", cluster))
 			case waitingForScaleUp:
@@ -450,7 +441,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				l.logger.Info("skipping preemption: the capacity is already being freed",
 					zap.String("exp", exp.ID), zap.String("cluster", cluster))
 			default:
-				committed, err = l.preempt(ctx, shortage, burstRunning, exp)
+				committed, err = l.preempt(ctx, gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], burstRunning, exp)
 				if err != nil {
 					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 				}

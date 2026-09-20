@@ -53,54 +53,62 @@ func submitErrorLevel(err error) zapcore.Level {
 	return zapcore.ErrorLevel
 }
 
-// preempt selects and requeues burst victims sufficient to cover needed, a shortage Footprint
-// that may span multiple dimensions (e.g. CPU+accelerator both short). The whole victim set is
-// planned and verified before anything is evicted (see the fill-back pass below) — vector
-// preemption, not a scalar count.
-// Returns committed=true when it requeued a victim set that covers the whole shortage. The
-// caller uses that to stand the disbalance evictor down: capacity for this job is already on its
-// way back, and a second destructive pass against the same unchanged availability would kill live
-// work for a deficit that is no longer outstanding.
-func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunning []*domain.Experiment, preemptor *domain.Experiment) (committed bool, err error) {
-	if len(burstRunning) == 0 || len(needed) == 0 {
-		return false, nil
-	}
-
+// preempt requeues the burst victims whose eviction lets the preemptor be placed: the cluster
+// total covers its footprint and its ranks fit the nodes the victims sit on, by the same placement
+// check admission uses. A victim set chosen on the cluster total alone can free devices on a node
+// that still cannot host the job, which is then preempted for again on a later tick.
+//
+// A victim whose node is unknown is never taken. That includes every multi-node job, because the
+// metrics store attributes an experiment to one node only.
+//
+// Returns committed=true when it requeued the whole planned set. The caller uses that to stand the
+// disbalance evictor down: capacity for this job is already on its way back, and a second
+// destructive pass against the same unchanged availability would kill live work for a deficit that
+// is no longer outstanding.
+func (l *Loop) preempt(ctx context.Context, avail domain.Footprint, nodeAvail, nodeResources map[string]map[string]int64, nodeLabels map[string]map[string]string, burstRunning []*domain.Experiment, preemptor *domain.Experiment) (committed bool, err error) {
 	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job stuck in a
 	// reschedule/node-death gap hasn't made more progress than one admitted more recently.
-	// One GreptimeDB query per candidate.
 	//
 	// A candidate whose query fails is dropped from consideration rather than failing the pass:
 	// it cannot be ranked, and ranking it as zero progress would make an unmeasurable job the
 	// first thing preempted. Aborting instead meant one broken series blocked every
 	// guaranteed-tier preemption on the platform (important.md #19).
+	now := time.Now().UTC()
 	elapsed := make(map[string]float64, len(burstRunning))
-	rankable := burstRunning[:0]
+	nodeOf := make(map[string]string, len(burstRunning))
+	candidates := burstRunning[:0]
 	for _, exp := range burstRunning {
-		hours, err := l.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, time.Now().UTC())
+		if exp.Job.Nodes() > 1 {
+			continue
+		}
+		hours, err := l.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now)
 		if err != nil {
 			l.logger.Warn("preempt: cannot rank candidate, skipping it",
 				zap.String("candidate", exp.ID), zap.Error(err))
 			continue
 		}
+		node, found, err := l.observed.LatestExperimentNode(ctx, exp.ID, exp.CreatedAt, now)
+		if err != nil {
+			l.logger.Warn("preempt: cannot attribute candidate to a node, skipping it",
+				zap.String("candidate", exp.ID), zap.Error(err))
+			continue
+		}
+		if !found {
+			continue
+		}
 		elapsed[exp.ID] = hours
-		rankable = append(rankable, exp)
+		nodeOf[exp.ID] = node
+		candidates = append(candidates, exp)
 	}
-	burstRunning = rankable
-	if len(burstRunning) == 0 {
+	if len(candidates) == 0 {
 		return false, nil
-	}
-
-	contributions := make(map[string]domain.Footprint, len(burstRunning))
-	for _, exp := range burstRunning {
-		contributions[exp.ID] = preemptionContribution(exp, preemptor)
 	}
 
 	// footprintSize collapses a multi-dimension footprint into one scalar, purely for the
 	// "largest footprint first" tiebreak below — never used for actual accounting.
 	footprintSize := func(exp *domain.Experiment) int64 {
 		var n int64
-		for _, v := range contributions[exp.ID] {
+		for _, v := range exp.Footprint() {
 			n += v
 		}
 		return n
@@ -108,51 +116,47 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 
 	// Least observed runtime first (minimizes wasted work), largest footprint as tiebreak
 	// (minimizes eviction count). No preemption history retained between ticks.
-	sort.Slice(burstRunning, func(i, j int) bool {
-		ei, ej := elapsed[burstRunning[i].ID], elapsed[burstRunning[j].ID]
+	sort.Slice(candidates, func(i, j int) bool {
+		ei, ej := elapsed[candidates[i].ID], elapsed[candidates[j].ID]
 		if ei != ej {
 			return ei < ej
 		}
-		return footprintSize(burstRunning[i]) > footprintSize(burstRunning[j])
+		return footprintSize(candidates[i]) > footprintSize(candidates[j])
 	})
 
-	// Select victims until their combined footprint covers every dimension of needed.
-	var selected []*domain.Experiment
-	freed := domain.NewFootprint()
-	for _, victim := range burstRunning {
-		if domain.Fits(freed, needed) {
-			break
+	fp := preemptor.Footprint()
+	placeableWithout := func(victims []*domain.Experiment) bool {
+		free := domain.NewFootprint()
+		free.AddFootprint(avail)
+		accelerators, resources := cloneNodeCapacity(nodeAvail), cloneNodeCapacity(nodeResources)
+		for _, victim := range victims {
+			vfp := victim.Footprint()
+			free.AddFootprint(vfp)
+			node := nodeOf[victim.ID]
+			creditNode(accelerators[node], resources[node], victim, vfp)
 		}
-		contribution := contributions[victim.ID]
-		useful := false
-		for key, want := range needed {
-			if freed[key] < want && contribution[key] > 0 {
-				useful = true
-				break
-			}
-		}
-		if !useful {
-			continue
-		}
-		selected = append(selected, victim)
-		freed.AddFootprint(contribution)
+		return domain.Fits(free, fp) && topologyFits(accelerators, resources, nodeLabels, preemptor)
 	}
 
-	// Never disrupt jobs for a partial plan. If the complete candidate set cannot free every
-	// deficient dimension, leave all victims running and retry from fresh actual state later.
-	if len(selected) == 0 || !domain.Fits(freed, needed) {
+	// Never disrupt jobs for a partial plan. If evicting every candidate still leaves the job
+	// unplaceable, leave all of them running.
+	var selected []*domain.Experiment
+	for _, victim := range candidates {
+		if placeableWithout(selected) {
+			break
+		}
+		selected = append(selected, victim)
+	}
+	if len(selected) == 0 || !placeableWithout(selected) {
 		return false, nil
 	}
 
-	// Fill-back pass: heterogeneous footprints can make the loop above overshoot (e.g. victim
-	// N-1 alone already covers needed but N still got selected). Walk backward and reprieve any
-	// victim whose removal still leaves freed covering needed — minimizes total evictions.
+	// Fill-back pass: the walk above takes victims in rank order whatever node they hold. Walk
+	// backward and reprieve any victim the job is still placeable without.
 	for i := len(selected) - 1; i >= 0; i-- {
-		vfp := contributions[selected[i].ID]
-		trial := freed.Sub(vfp)
-		if domain.Fits(trial, needed) {
-			freed = trial
-			selected = append(selected[:i], selected[i+1:]...)
+		trial := append(append([]*domain.Experiment{}, selected[:i]...), selected[i+1:]...)
+		if placeableWithout(trial) {
+			selected = trial
 		}
 	}
 
@@ -234,25 +238,20 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 	return false, fmt.Errorf("preempt: requeued %d of %d planned victims for %s", requeued, len(selected), preemptor.ID)
 }
 
-// preemptionContribution is the capacity a victim can actually return to the preemptor's
-// placement domain. Extended resources such as nvidia.com/gpu are shared by multiple hardware
-// models; equal resource names alone do not mean evicting one model makes another available.
-func preemptionContribution(victim, preemptor *domain.Experiment) domain.Footprint {
-	contribution := victim.Footprint()
-	// Whether the preemptor wants accelerators at all is a question about the whole job, and a
-	// grouped one carries its counts on its groups — the top-level field is empty there, which
-	// read literally credited a grouped preemptor with a victim's accelerators even when the
-	// victim held a different flavor entirely, over-counting what the eviction would free.
-	if preemptor.Job.TotalAccelerators() <= 0 {
-		return contribution
+// creditNode returns an evicted job's accelerators and CPU, memory and storage to the free
+// capacity of the node it ran on. A nil map is a node the cluster did not report and is left alone.
+func creditNode(accelerators, resources map[string]int64, exp *domain.Experiment, fp domain.Footprint) {
+	if accelerators != nil && exp.AcceleratorCount > 0 {
+		accelerators[foldMatchingKey(accelerators, strings.ToLower(string(exp.AcceleratorType)))] += int64(exp.AcceleratorCount)
 	}
-	// Accelerator capacity is keyed by the driver-published type, so "does evicting this victim
-	// free the hardware the preemptor needs" is now just string equality — no comparing resource
-	// names and node selectors to guess whether two jobs sit on the same hardware.
-	if !strings.EqualFold(string(victim.AcceleratorType), string(preemptor.AcceleratorType)) {
-		delete(contribution, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(string(preemptor.AcceleratorType))})
+	if resources == nil {
+		return
 	}
-	return contribution
+	for key, amount := range fp {
+		if name, ok := nodeResourceName(key.Kind); ok {
+			resources[name] += amount
+		}
+	}
 }
 
 // completionFractions derives queue ordering progress from metrics on each tick. The returned
