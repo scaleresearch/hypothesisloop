@@ -39,22 +39,32 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 		domain.StatusSubmitted,
 		domain.StatusRunning,
 	}
+	// Which connected cluster reports which id, read once for the pass: every stuck-pending
+	// decision in it needs the id to find its cluster's timeout, and reading it per job cost one
+	// cluster-wide metrics query for every job still waiting to start.
+	clusterIDs, idsErr := w.backend.GetClusterIDs(ctx)
 	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
 	// WithScaleUpTimeout — mirrors Loop.tick's own opt-in gate for the same reason: a backend
-	// that has not implemented these two methods must not be asked to. A fetch failure ends the
-	// pass: judging a placement deadline without them would apply the wrong timeout.
+	// that has not implemented the capability read must not be asked to. With the opt-in a fetch
+	// failure ends the pass: judging a placement deadline without them would apply the wrong
+	// timeout.
 	var autoscalerEnabled map[string]bool
-	var clusterIDs map[string]string
 	if w.scaleUpTimeout > 0 {
 		var err error
 		autoscalerEnabled, err = w.backend.GetAutoscalerCapability(ctx)
 		if err != nil {
 			return fmt.Errorf("autoscaler capability: %w", err)
 		}
-		clusterIDs, err = w.backend.GetClusterIDs(ctx)
-		if err != nil {
-			return fmt.Errorf("cluster ids: %w", err)
+		if idsErr != nil {
+			return fmt.Errorf("cluster ids: %w", idsErr)
 		}
+	}
+	// Without it the pass goes on with no ids: no stuck-pending decision is made in it, and
+	// everything else a job's reconcile does, reading a finished job as finished above all,
+	// still is.
+	if idsErr != nil {
+		w.logger.Warn("job_watcher: cluster ids unreadable, no stuck-pending deadline is judged this pass", zap.Error(idsErr))
+		clusterIDs = nil
 	}
 	for _, status := range statuses {
 		exps, err := w.store.ListExperimentsWithStatus(ctx, status)

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,25 +52,24 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 	return nil
 }
 
+// errClusterNotReporting is why a stuck-pending decision is not made this pass: the job's cluster
+// has no id among the ones the pass read, so its timeout cannot be known.
+var errClusterNotReporting = errors.New("the job's cluster reports no id this pass")
+
 // stuckPendingTimeoutFor is the stuck-pending deadline of the cluster exp was admitted to: the
-// value its operator set in cluster_settings, and the global one where none is set. It is read
-// at the moment a stuck-pending decision is made and nowhere else, so a job with no such decision
-// pending is never held up by a read that fails.
+// value its operator set in cluster_settings, and the global one where none is set. The settings
+// row is read at the moment a stuck-pending decision is made and nowhere else, so a job with no
+// such decision pending is never held up by a read that fails.
 //
-// clusterIDs is the pass's own read when the scale-up deadline is enabled. A deployment without
-// it reads none for the pass, so they are read here.
+// clusterIDs is the pass's one read of which connected cluster reports which id. Settings are
+// keyed by that id, so for a cluster without one, because it has no fresh heartbeat or because
+// the read failed, the timeout is unknown and the answer is errClusterNotReporting. The global
+// value is not a substitute: it would evict a job its cluster gives longer to. A cluster that
+// stays unreachable is the controller's to act on.
 func (w *JobWatcher) stuckPendingTimeoutFor(ctx context.Context, exp *domain.Experiment, clusterIDs map[string]string) (time.Duration, error) {
-	if w.scaleUpTimeout <= 0 {
-		var err error
-		clusterIDs, err = w.backend.GetClusterIDs(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("cluster ids: %w", err)
-		}
-	}
-	// Settings are keyed by cluster id, so a cluster that has reported none has no row to read.
 	clusterID := clusterIDs[exp.ClusterName]
 	if clusterID == "" {
-		return w.stuckPendingTimeout, nil
+		return 0, errClusterNotReporting
 	}
 	cs, err := w.store.GetClusterSettings(ctx, clusterID)
 	if err != nil {
@@ -83,9 +83,13 @@ func (w *JobWatcher) stuckPendingTimeoutFor(ctx context.Context, exp *domain.Exp
 
 // evictIfStuckPending evicts exp once it has stayed pre-RUNNING past its cluster's stuck-pending
 // timeout. A timeout that cannot be read is an error and no eviction: the global value might
-// evict a job its cluster gives longer to.
+// evict a job its cluster gives longer to. A cluster that reports no id this pass is no error,
+// the decision waits for a pass in which it does.
 func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experiment, clusterIDs map[string]string, reason domain.EvictionReason) error {
 	timeout, err := w.stuckPendingTimeoutFor(ctx, exp, clusterIDs)
+	if errors.Is(err, errClusterNotReporting) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("stuck-pending timeout: %w", err)
 	}
@@ -146,6 +150,9 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	} else {
 		var err error
 		timeout, err = w.stuckPendingTimeoutFor(ctx, exp, clusterIDs)
+		if errors.Is(err, errClusterNotReporting) {
+			return false, nil
+		}
 		if err != nil {
 			// This decision is skipped and the rest of the job's reconcile goes on: a job that
 			// has in fact finished must still be read as finished.

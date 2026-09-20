@@ -330,7 +330,7 @@ func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testi
 			exp := scaleUpExperiment(1, tc.submittedAgo)
 			exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: &window}
 
-			if err := w.reconcileOne(context.Background(), exp, nil, nil); err != nil {
+			if err := w.reconcileOne(context.Background(), exp, nil, clusterA); err != nil {
 				t.Fatal(err)
 			}
 			if evicted := len(store.requeuedReasons)+len(store.terminalReasons) > 0; evicted != tc.wantEvicted {
@@ -372,7 +372,7 @@ func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 		exp.Status = tc.status
 		exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: tc.checkpoint}
 
-		err := w.reconcileOne(context.Background(), exp, nil, nil)
+		err := w.reconcileOne(context.Background(), exp, nil, clusterA)
 		if (err != nil) != (tc.phaseErr != nil) {
 			t.Errorf("%s: reconcile error = %v", tc.name, err)
 		}

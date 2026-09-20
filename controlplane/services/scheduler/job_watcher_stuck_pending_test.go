@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -40,13 +41,17 @@ func (unobservableBackend) GetAdmittedAcceleratorType(context.Context, *domain.E
 	return "", errors.New("no observation yet")
 }
 
-// idsBackend is scaleUpBackend with a cluster id read that can fail.
+// idsBackend is scaleUpBackend with a cluster id read that can fail and is counted.
 type idsBackend struct {
 	*scaleUpBackend
 	idsErr error
+	reads  *int
 }
 
 func (b idsBackend) GetClusterIDs(context.Context) (map[string]string, error) {
+	if b.reads != nil {
+		*b.reads++
+	}
 	return b.clusterIDs, b.idsErr
 }
 
@@ -87,7 +92,7 @@ func TestAClustersOwnStuckPendingTimeoutReplacesTheGlobalOne(t *testing.T) {
 				exp := scaleUpExperiment(1, tc.waited)
 				exp.AcceleratorCount = 1
 
-				err := w.reconcileOne(context.Background(), exp, nil, nil)
+				err := w.reconcileOne(context.Background(), exp, nil, clusterA)
 				if err != nil && !errors.Is(err, errPhase) {
 					t.Fatal(err)
 				}
@@ -120,18 +125,81 @@ func TestAStuckPendingOverrideLeavesTheScaleUpDeadlineAlone(t *testing.T) {
 	}
 }
 
-// Settings are keyed by cluster id. A cluster that has reported none has no row to read, so its
-// jobs are judged by the global timeout and the store is not asked.
-func TestAClusterWithNoReportedIDIsJudgedByTheGlobalTimeout(t *testing.T) {
-	store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: errors.New("must not be read")}
-	backend := &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: map[string]string{"cluster-b": "cid-b"}}
-	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+// A cluster with no fresh heartbeat reports no id, and its settings are keyed by that id. Its
+// jobs are not judged by the global timeout meanwhile: the cluster may give them longer, which is
+// the whole point of the setting. The decision waits for a pass in which the cluster reports, and
+// a cluster that stays away is the controller's to act on.
+func TestAJobOnAClusterReportingNoIDIsNotJudgedThisPass(t *testing.T) {
+	for way, backend := range map[string]*scaleUpBackend{
+		"never placed":      {phase: workload.JobPhasePending, scheduledNodes: 0},
+		"placed, then gone": {phase: workload.JobPhaseGone, scheduledNodes: 1},
+	} {
+		for _, waited := range []time.Duration{6 * time.Minute, time.Hour} {
+			t.Run(way+"/"+waited.String(), func(t *testing.T) {
+				store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: errors.New("must not be read")}
+				w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+				// Another cluster reports; the job's own does not.
+				ids := map[string]string{"cluster-b": "cid-b"}
 
-	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 6*time.Minute), nil, nil); err != nil {
-		t.Fatal(err)
+				if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, waited), nil, ids); err != nil {
+					t.Fatal(err)
+				}
+				if store.transitioned {
+					t.Fatalf("evicted by the global timeout: %v", store.terminalReasons)
+				}
+			})
+		}
 	}
-	if len(store.terminalReasons) != 1 || store.terminalReasons[0] != string(domain.EvictionStuckPending) {
-		t.Fatalf("terminalReasons = %v", store.terminalReasons)
+}
+
+// The whole pass: a cluster that set 900 seconds and has gone quiet. Its job, waiting past the
+// global 300, is left alone, and is evicted by its own timeout once the cluster reports again.
+func TestADisconnectedClustersOverrideIsNotReplacedByTheGlobalTimeout(t *testing.T) {
+	store := &settingsStore{
+		lifecycleStore: &lifecycleStore{}, settings: stuckPendingOverride(900),
+		submitted: []*domain.Experiment{scaleUpExperiment(1, 6*time.Minute)},
+	}
+	backend := &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: map[string]string{}}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+	if err := w.scanAndWatch(context.Background()); err != nil || store.transitioned {
+		t.Fatalf("disconnected: err %v, evicted %v", err, store.terminalReasons)
+	}
+
+	backend.clusterIDs = clusterA
+	if err := w.scanAndWatch(context.Background()); err != nil || store.transitioned {
+		t.Fatalf("reconnected, inside its own 900 s: err %v, evicted %v", err, store.terminalReasons)
+	}
+	store.submitted = []*domain.Experiment{scaleUpExperiment(1, 16*time.Minute)}
+	if err := w.scanAndWatch(context.Background()); err != nil || len(store.terminalReasons) != 1 {
+		t.Fatalf("reconnected, past its own 900 s: err %v, evicted %v", err, store.terminalReasons)
+	}
+}
+
+// One pass reads the cluster ids once, however many jobs are waiting to start. Read where each
+// decision is made, every booting job cost a cluster-wide metrics query per pass.
+func TestAPassReadsTheClusterIDsOnce(t *testing.T) {
+	for name, optIn := range map[string]bool{"without the scale-up opt-in": false, "with it": true} {
+		t.Run(name, func(t *testing.T) {
+			store := &settingsStore{lifecycleStore: &lifecycleStore{}}
+			for i := 0; i < 7; i++ {
+				exp := scaleUpExperiment(1, time.Minute)
+				exp.ID = fmt.Sprintf("exp-%d", i)
+				store.submitted = append(store.submitted, exp)
+			}
+			reads := 0
+			backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA}, reads: &reads}
+			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+			if optIn {
+				w = w.WithScaleUpTimeout(time.Minute)
+			}
+
+			if err := w.scanAndWatch(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if reads != 1 || store.transitioned {
+				t.Fatalf("cluster ids read %d times in one pass over 7 waiting jobs (evicted %v)", reads, store.terminalReasons)
+			}
+		})
 	}
 }
 
@@ -144,27 +212,28 @@ func TestAnUnreadableTimeoutEvictsNothing(t *testing.T) {
 		"never placed":      {phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA},
 		"placed, then gone": {phase: workload.JobPhaseGone, scheduledNodes: 1, clusterIDs: clusterA},
 	} {
-		for name, tc := range map[string]struct {
-			settingsErr, idsErr error
-		}{
-			"cluster settings": {settingsErr: unreadable},
-			"cluster ids":      {idsErr: unreadable},
-		} {
-			t.Run(way+"/"+name, func(t *testing.T) {
-				store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: tc.settingsErr}
-				w := NewJobWatcher(store, idsBackend{phase, tc.idsErr}, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+		t.Run(way+"/cluster settings", func(t *testing.T) {
+			store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: unreadable}
+			w := NewJobWatcher(store, phase, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 
-				err := w.reconcileOne(context.Background(), scaleUpExperiment(1, time.Hour), nil, nil)
-				if store.transitioned {
-					t.Fatalf("evicted on an unreadable timeout (err = %v)", err)
-				}
-				// A placed job has nothing left to check, so the failed read is its result. An
-				// unplaced one goes on to its phase, which here has nothing to add.
-				if placed := phase.scheduledNodes > 0; placed != (err != nil) {
-					t.Fatalf("err = %v for a job with scheduledNodes %d", err, phase.scheduledNodes)
-				}
-			})
-		}
+			err := w.reconcileOne(context.Background(), scaleUpExperiment(1, time.Hour), nil, clusterA)
+			if store.transitioned {
+				t.Fatalf("evicted on an unreadable timeout (err = %v)", err)
+			}
+			// A placed job has nothing left to check, so the failed read is its result. An
+			// unplaced one goes on to its phase, which here has nothing to add.
+			if placed := phase.scheduledNodes > 0; placed != (err != nil) {
+				t.Fatalf("err = %v for a job with scheduledNodes %d", err, phase.scheduledNodes)
+			}
+		})
+		t.Run(way+"/cluster ids", func(t *testing.T) {
+			store := &settingsStore{lifecycleStore: &lifecycleStore{}, submitted: []*domain.Experiment{scaleUpExperiment(1, time.Hour)}}
+			w := NewJobWatcher(store, idsBackend{scaleUpBackend: phase, idsErr: unreadable}, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
+
+			if err := w.scanAndWatch(context.Background()); err != nil || store.transitioned {
+				t.Fatalf("err = %v, evicted %v", err, store.terminalReasons)
+			}
+		})
 	}
 }
 
@@ -184,7 +253,7 @@ func TestAFinishedJobIsTerminalisedWithUnreadableSettings(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: unreadable}
-			backend := idsBackend{&scaleUpBackend{phase: workload.JobPhaseSucceeded, scheduledNodes: tc.scheduledNodes, clusterIDs: clusterA}, unreadable}
+			backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: workload.JobPhaseSucceeded, scheduledNodes: tc.scheduledNodes, clusterIDs: clusterA}, idsErr: unreadable}
 			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 			exp := scaleUpExperiment(1, time.Minute)
 			exp.Status = tc.status
@@ -206,7 +275,7 @@ func TestAFinishedJobIsTerminalisedWithUnreadableSettings(t *testing.T) {
 // A RUNNING job is past every stuck-pending check, so its cluster's settings are not read for it.
 func TestARunningJobDoesNotReadItsClustersSettings(t *testing.T) {
 	store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: errors.New("must not be read")}
-	backend := idsBackend{&scaleUpBackend{phase: workload.JobPhaseRunning, scheduledNodes: 1}, errors.New("must not be read")}
+	backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: workload.JobPhaseRunning, scheduledNodes: 1}, idsErr: errors.New("must not be read")}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 	exp := scaleUpExperiment(1, time.Hour)
 	exp.Status = domain.StatusRunning
@@ -217,7 +286,7 @@ func TestARunningJobDoesNotReadItsClustersSettings(t *testing.T) {
 }
 
 // The whole pass, on a deployment that never opted into the scale-up deadline: the override is
-// still applied, with the cluster ids read where the decision is made.
+// still applied.
 func TestAPassAppliesTheOverrideWithoutTheScaleUpOptIn(t *testing.T) {
 	for name, tc := range map[string]struct {
 		settings map[string]*domain.ClusterSettings
@@ -256,7 +325,7 @@ func TestUnreadableClusterIDsDoNotEndAPassWithoutTheScaleUpOptIn(t *testing.T) {
 		running:        []*domain.Experiment{finished},
 	}
 	backend := &phaseByJobBackend{
-		idsBackend: idsBackend{&scaleUpBackend{scheduledNodes: 1}, errors.New("metrics store unavailable")},
+		idsBackend: idsBackend{scaleUpBackend: &scaleUpBackend{scheduledNodes: 1}, idsErr: errors.New("metrics store unavailable")},
 		phases:     map[string]workload.JobPhase{"exp-su": workload.JobPhaseGone, "exp-finished": workload.JobPhaseSucceeded},
 	}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
