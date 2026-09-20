@@ -258,7 +258,9 @@ GROUPS_WORKER_ACC = 1
 GROUPS_WORKER_REPLICAS = 2
 GROUPS_ACCELERATORS = GROUPS_TRAINER_ACC + GROUPS_WORKER_ACC * GROUPS_WORKER_REPLICAS  # 4
 GROUPS_NODES = 1 + GROUPS_WORKER_REPLICAS  # 3
-GROUPS_PREEMPTOR_ACC = 6  # > the 4 free while the grouped gang runs
+# More than the 4 free while the grouped job runs, and within the 5 its node has once preemption
+# credits the one rank it can prove is there: the smallest, a worker's 1.
+GROUPS_PREEMPTOR_ACC = 5
 
 CKPT_STEPS_TOTAL = 14
 CKPT_STEP_SECONDS = 5
