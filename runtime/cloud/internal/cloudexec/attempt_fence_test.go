@@ -16,7 +16,7 @@ func TestARequeuedJobReplacesTheRunningInstanceOfItsPreviousAttempt(t *testing.T
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
-	p.Start("hl-exp-1-a1-h100-0")
+	p.Start("hl-job-t1-exp-1-a1-h100-0")
 	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhaseRunning || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
@@ -32,7 +32,7 @@ func TestARequeuedJobReplacesTheRunningInstanceOfItsPreviousAttempt(t *testing.T
 	}
 	mustCreate(t, e, requeued)
 
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a2-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 	if matches, err := e.WorkloadMatchesDesired(ctx, requeued); err != nil || !matches {
@@ -49,18 +49,20 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
-	p.Start("hl-exp-1-a1-h100-0")
-	p.Exit("hl-exp-1-a1-h100-0", exitline.Format(1))
+	p.Start("hl-job-t1-exp-1-a1-h100-0")
+	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitline.Format(1))
 	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhaseFailed || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
 
-	requeued := job(t, "exp-1", 2, 1)
+	// The exited instance still holds h100-0, so admission could only have placed the new attempt
+	// on the other slot.
+	requeued := on(job(t, "exp-1", 2, 1), "h100-1")
 	if ids, _ := e.ListManagedJobs(ctx); len(ids) != 0 {
 		t.Fatalf("the exited instance is actual: %v", ids)
 	}
 	mustCreate(t, e, requeued)
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a1-h100-0", "hl-exp-1-a2-h100-1"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a1-h100-0", "hl-job-t1-exp-1-a2-h100-1"}) {
 		t.Fatalf("rented %v", names)
 	}
 	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhasePending || attempt != 2 {
@@ -78,7 +80,7 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": requeued}); err != nil {
 		t.Fatal(err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a2-h100-1"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-h100-1"}) {
 		t.Fatalf("after reaping: %v", names)
 	}
 }

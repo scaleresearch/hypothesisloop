@@ -17,14 +17,19 @@ func wrapperCommand(stopGrace int64, command []string) []string {
 	return append([]string{"hl", "exec", "--stop-grace", strconv.FormatInt(stopGrace, 10), "--"}, command...)
 }
 
-// buildSpec compiles exp into the instance to rent, without its name: the name needs a slot,
-// which is chosen against what is rented right now.
+// buildSpec compiles exp into the instance to rent, without its name.
 func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	// EffectiveJob, never exp.Job: an admitted experiment's literal quantities and graces are in
 	// exp.ResolvedJob.
 	spec := exp.EffectiveJob()
 	if spec.Nodes() > 1 {
 		return provider.Spec{}, fmt.Errorf("cloudexec: num_nodes=%d requested but a job here is one instance", spec.Nodes())
+	}
+	// Every instance boots the platform's job image, which carries the wrapper. Running a job
+	// that asked for its own image in another one would be a different job from the one submitted.
+	// No image named is the platform's.
+	if spec.Image != "" && spec.Image != e.jobImage {
+		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s names image %q, and jobs on this cluster run in %q", exp.ID, spec.Image, e.jobImage)
 	}
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
@@ -51,8 +56,7 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	}
 
 	command, args := workloadenv.Command(spec, group)
-	// The instance runs the command under hl exec, so there has to be one: the image's own
-	// entrypoint cannot be wrapped from outside.
+	// The image's own entrypoint cannot be wrapped from outside, so there has to be a command.
 	if len(command) == 0 {
 		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s has no command, and a job on a rented instance needs one", exp.ID)
 	}
@@ -63,15 +67,16 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 
 	// The wrapper is only sent SIGTERM for a termination the control plane granted the checkpoint
 	// window, so the window is the one grace compiled into it. A granted window only ever
-	// lengthens the ordinary grace. Every other stop destroys the instance, see DeleteWorkload.
+	// lengthens the ordinary grace.
 	grace, checkpointGrace, err := spec.ResolvedGrace()
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
 	}
 
+	argv := append(append([]string(nil), command...), args...)
 	return provider.Spec{
 		Image:            e.jobImage,
-		Command:          wrapperCommand(max(grace, checkpointGrace), append(append([]string(nil), command...), args...)),
+		Command:          wrapperCommand(max(grace, checkpointGrace), argv),
 		Env:              env,
 		AcceleratorType:  string(exp.AcceleratorType),
 		AcceleratorCount: group.AcceleratorCount,

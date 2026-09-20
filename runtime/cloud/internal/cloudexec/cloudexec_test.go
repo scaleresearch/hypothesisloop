@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -16,9 +17,10 @@ import (
 )
 
 const (
-	gib     = int64(1) << 30
-	h100    = "nvidia.com/gpu.product=NVIDIA-H100"
-	testAPI = "https://api.example.invalid"
+	gib       = int64(1) << 30
+	h100      = "nvidia.com/gpu.product=NVIDIA-H100"
+	testAPI   = "https://api.example.invalid"
+	testImage = "registry.example.invalid/job:1"
 )
 
 var testShapes = []Shape{
@@ -29,11 +31,15 @@ var testShapes = []Shape{
 func newTestExecutor(t *testing.T) (*Executor, *fake.Provider) {
 	t.Helper()
 	p := fake.New()
-	e, err := New(Config{ClusterID: "fake-account-1", APIURL: testAPI, JobImage: "registry.example.invalid/job:1", Shapes: testShapes, Provider: p})
+	e, err := New(testConfig(p))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return e, p
+}
+
+func testConfig(p provider.Provider) Config {
+	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, LogTailLines: 100, Shapes: testShapes, Provider: p}
 }
 
 type goldenAnswer struct {
@@ -56,19 +62,29 @@ func readGolden(t *testing.T) goldenAnswer {
 }
 
 // job is the shared reconcile answer's experiment under another id and attempt, with the command
-// a rented instance needs. accelerators 0 makes it a CPU job.
+// a rented instance needs, admitted to the first slot of the shape it asks for: h100-0 with
+// accelerators, cpu-0 without.
 func job(t *testing.T, id string, attempt, accelerators int) *domain.Experiment {
 	t.Helper()
 	exp := readGolden(t).Experiment
 	exp.ID, exp.AttemptCount = id, attempt
 	resolved := *exp.ResolvedJob
 	resolved.Command, resolved.Args = []string{"python", "train.py"}, []string{"--epochs", "3"}
+	resolved.Image = testImage
+	resolved.NodeSelector = map[string]string{domain.NodeSlotLabel: "cpu-0"}
 	if accelerators > 0 {
+		resolved.NodeSelector = map[string]string{domain.NodeSlotLabel: "h100-0"}
 		exp.AcceleratorType, exp.AcceleratorCount = h100, accelerators
 		resolved.AcceleratorType, resolved.AcceleratorCount = h100, accelerators
 	}
 	exp.ResolvedJob = &resolved
 	return &exp
+}
+
+// on moves exp to another slot, as admission would have placed it.
+func on(exp *domain.Experiment, slot string) *domain.Experiment {
+	exp.ResolvedJob.NodeSelector = map[string]string{domain.NodeSlotLabel: slot}
+	return exp
 }
 
 func mustCreate(t *testing.T, e *Executor, exp *domain.Experiment) {
@@ -88,17 +104,21 @@ func status(t *testing.T, e *Executor, id string) (workload.JobPhase, int) {
 }
 
 func TestAnInstanceNameIsReadBackAsWhatItWasBuiltFrom(t *testing.T) {
-	name := instanceName("exp-with-dashes-a2", 7, "h100", 1)
-	if name != "hl-exp-with-dashes-a2-a7-h100-1" {
+	e, _ := newTestExecutor(t)
+	name := e.instanceName("exp-with-dashes-a2", 7, "h100", 1)
+	if name != "hl-job-t1-exp-with-dashes-a2-a7-h100-1" {
 		t.Fatalf("name = %q", name)
 	}
-	parsed, ok := parseInstanceName(name)
-	if !ok || parsed.experimentID != "exp-with-dashes-a2" || parsed.attempt != 7 || parsed.shape != "h100" || parsed.slot != 1 {
+	parsed, ok := e.parseInstanceName(name)
+	if !ok || parsed.experimentID != "exp-with-dashes-a2" || parsed.attempt != 7 || parsed.slot() != "h100-1" {
 		t.Fatalf("parsed = %+v, %v", parsed, ok)
 	}
-	for _, foreign := range []string{"hl-agent-pe-bot", "hl-exp-a1-h100", "hl--a1-h100-0", "hl-exp-a01-h100-0", "other-exp-a1-h100-0"} {
-		if _, ok := parseInstanceName(foreign); ok {
-			t.Errorf("%q was read as a job's instance", foreign)
+	for _, foreign := range []string{
+		"hl-agent-t1-pe-bot", "hl-job-t1-exp-a1-h100", "hl-job-t1--a1-h100-0", "hl-job-t1-exp-a01-h100-0",
+		"hl-job-t2-exp-a1-h100-0", "hl-job-t10-exp-a1-h100-0", "hl-exp-a1-h100-0",
+	} {
+		if _, ok := e.parseInstanceName(foreign); ok {
+			t.Errorf("%q was read as a job's instance of namespace t1", foreign)
 		}
 	}
 }
@@ -107,12 +127,12 @@ func TestAJobIsRentedAsOneInstanceRunningItsCommandUnderTheWrapper(t *testing.T)
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 
-	spec := p.Spec("hl-exp-1-a0-h100-0")
+	spec := p.Spec("hl-job-t1-exp-1-a0-h100-0")
 	wantCommand := []string{"hl", "exec", "--stop-grace", "600", "--", "python", "train.py", "--epochs", "3"}
 	if !reflect.DeepEqual(spec.Command, wantCommand) {
 		t.Errorf("command = %q", spec.Command)
 	}
-	if spec.Image != "registry.example.invalid/job:1" || spec.AcceleratorType != h100 || spec.AcceleratorCount != 1 ||
+	if spec.Image != testImage || spec.AcceleratorType != h100 || spec.AcceleratorCount != 1 ||
 		spec.CPUMillis != 1000 || spec.MemoryBytes != gib || spec.DiskBytes != gib {
 		t.Errorf("spec = %+v", spec)
 	}
@@ -134,7 +154,9 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	twoNodes.ResolvedJob.NumNodes = 2
 	hostMount := job(t, "exp-3", 0, 0)
 	hostMount.ResolvedJob.HostMounts = map[string]string{"/data": "/mnt/data"}
-	for _, exp := range []*domain.Experiment{noCommand, twoNodes, hostMount} {
+	ownImage := job(t, "exp-4", 0, 0)
+	ownImage.ResolvedJob.Image = "docker.io/library/python:3.12"
+	for _, exp := range []*domain.Experiment{noCommand, twoNodes, hostMount, ownImage} {
 		if err := e.CreateWorkload(context.Background(), exp); err == nil {
 			t.Errorf("%s was rented", exp.ID)
 		}
@@ -144,26 +166,95 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	}
 }
 
-func TestAJobWithoutAcceleratorsLeavesTheAcceleratorShapesFree(t *testing.T) {
+// The platform image is the only one a job here runs in, so a job may name it or name none.
+func TestAJobNamingThePlatformImageOrNoneRunsInIt(t *testing.T) {
 	e, p := newTestExecutor(t)
-	mustCreate(t, e, job(t, "exp-cpu", 0, 0))
-	mustCreate(t, e, job(t, "exp-gpu", 0, 1))
-	mustCreate(t, e, job(t, "exp-cpu-2", 0, 0))
-	want := []string{"hl-exp-cpu-2-a0-h100-1", "hl-exp-cpu-a0-cpu-0", "hl-exp-gpu-a0-h100-0"}
-	if names := p.Names(); !reflect.DeepEqual(names, want) {
-		t.Fatalf("rented %v, want %v", names, want)
+	named := job(t, "exp-1", 0, 0)
+	named.ResolvedJob.Image = testImage
+	unnamed := on(job(t, "exp-2", 0, 0), "h100-0")
+	unnamed.ResolvedJob.Image = ""
+	mustCreate(t, e, named)
+	mustCreate(t, e, unnamed)
+	for _, name := range p.Names() {
+		if p.Spec(name).Image != testImage {
+			t.Errorf("%s boots %q", name, p.Spec(name).Image)
+		}
+	}
+	other := on(job(t, "exp-3", 0, 0), "h100-1")
+	other.ResolvedJob.Image = "docker.io/library/python:3.12"
+	err := e.CreateWorkload(context.Background(), other)
+	if err == nil || !strings.Contains(err.Error(), "docker.io/library/python:3.12") || !strings.Contains(err.Error(), testImage) {
+		t.Fatalf("err = %v, want both images named", err)
 	}
 }
 
-func TestMaxInstancesBoundsWhatIsRented(t *testing.T) {
+// Admission chose the slot. The runtime rents that one or reports why it cannot, and never
+// picks another, even with one free.
+func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, on(job(t, "exp-cpu", 0, 0), "h100-1"))
+	mustCreate(t, e, job(t, "exp-gpu", 0, 1))
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-cpu-a0-h100-1", "hl-job-t1-exp-gpu-a0-h100-0"}) {
+		t.Fatalf("rented %v", names)
+	}
+
+	unpinned := job(t, "exp-unpinned", 0, 0)
+	unpinned.ResolvedJob.NodeSelector = nil
+	tooLarge := job(t, "exp-large", 0, 0)
+	tooLarge.ResolvedJob.CPU = "6"
+	otherType := on(job(t, "exp-type", 0, 1), "cpu-0")
+	otherCasing := on(job(t, "exp-casing", 0, 1), "cpu-0")
+	otherCasing.AcceleratorType = "nvidia.com/gpu.product=nvidia-h100"
+	for want, exp := range map[string]*domain.Experiment{
+		"without a slot":         unpinned,
+		"not configured":         on(job(t, "exp-nowhere", 0, 0), "h100-2"),
+		"still holds":            on(job(t, "exp-second", 0, 0), "h100-0"),
+		"exceed the slot":        tooLarge,
+		"is not the slot's \"\"": otherType,
+	} {
+		if err := e.CreateWorkload(ctx, exp); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want one saying %q", exp.ID, err, want)
+		}
+	}
+	// The control plane compares the reported type with the requested one exactly.
+	if err := e.destroyAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.CreateWorkload(ctx, on(otherCasing, "h100-0")); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
+		t.Errorf("a type in another casing: err = %v", err)
+	}
+	if names := p.Names(); len(names) != 0 {
+		t.Fatalf("a refused job was rented: %v", names)
+	}
+}
+
+func (e *Executor) destroyAll(ctx context.Context) error {
+	ids, err := e.ListManagedJobsForStatus(ctx)
+	for _, id := range ids {
+		if err := e.DeleteWorkload(ctx, id, false); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func TestAnInstanceNameThatTheProviderCannotHoldIsRefused(t *testing.T) {
+	e, p := newTestExecutor(t)
+	for _, id := range []string{strings.Repeat("x", 120), "Exp_1"} {
+		if err := e.CreateWorkload(context.Background(), job(t, id, 0, 0)); err == nil || len(p.Names()) != 0 {
+			t.Errorf("%q: err = %v, rented %v", id, err, p.Names())
+		}
+	}
+	mustCreate(t, e, job(t, strings.Repeat("x", experimentIDBudget), attemptBudget, 0))
+}
+
+func TestASlotIsHeldUntilItsInstanceIsDestroyed(t *testing.T) {
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
-	mustCreate(t, e, job(t, "exp-2", 0, 1))
-	if err := e.CreateWorkload(context.Background(), job(t, "exp-3", 0, 1)); err == nil {
-		t.Fatal("a third instance of a shape capped at two was rented")
-	}
+	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
 	// An exited instance is still rented, so it still holds its slot.
-	p.Exit("hl-exp-1-a0-h100-0", exitline.Format(0))
+	p.Exit("hl-job-t1-exp-1-a0-h100-0", exitline.Format(0))
 	if err := e.CreateWorkload(context.Background(), job(t, "exp-3", 0, 1)); err == nil {
 		t.Fatal("a slot held by an exited instance was rented again")
 	}
@@ -171,7 +262,7 @@ func TestMaxInstancesBoundsWhatIsRented(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustCreate(t, e, job(t, "exp-3", 0, 1))
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-2-a0-h100-1", "hl-exp-3-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-2-a0-h100-1", "hl-job-t1-exp-3-a0-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 }
@@ -187,7 +278,8 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 			t.Fatalf("cpu total = %v, %v", cpuTotal, err)
 		}
 		available, total, byNode, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
-		if err != nil || total[h100] != 2 || len(labels) != 3 || labels["h100-1"]["nvidia.com/gpu.product"] != "NVIDIA-H100" || len(labels["cpu-0"]) != 0 {
+		if err != nil || total[h100] != 2 || len(labels) != 3 || labels["h100-1"]["nvidia.com/gpu.product"] != "NVIDIA-H100" ||
+			labels["h100-1"][domain.NodeSlotLabel] != "h100-1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{domain.NodeSlotLabel: "cpu-0"}) {
 			t.Fatalf("accelerator snapshot = %v %v %v, %v", total, byNode, labels, err)
 		}
 		nodes, err = e.GetLiveNodeResourceCapacity(ctx)
@@ -205,6 +297,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 		t.Fatal("the cpu shape was reported as an accelerator node")
 	}
 
+	// A slot is one instance however small the job: a 1-cpu job leaves none of its 8.
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	cpu, accelerators, nodes, byNode = read()
 	if cpu != 12 || accelerators != 1 || nodes["h100-0"][domain.NodeResourceCPUMillicores] != 0 || byNode["h100-0"][h100] != 0 || byNode["h100-1"][h100] != 1 {
@@ -236,7 +329,7 @@ func TestARunningJobReportsTheSlotItOccupies(t *testing.T) {
 		t.Fatalf("starting instance: phase %v, scheduled %d, %v", phase, scheduled, err)
 	}
 
-	p.Start("hl-exp-1-a0-h100-0")
+	p.Start("hl-job-t1-exp-1-a0-h100-0")
 	_, _, _, scheduled, _, err = e.PollPhaseDetail(ctx, "exp-1", 0)
 	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseRunning || scheduled != 1 || err != nil {
 		t.Fatalf("running instance: phase %v, scheduled %d, %v", phase, scheduled, err)
@@ -254,15 +347,19 @@ func TestTheExitLineDecidesHowAnExitedInstanceEnded(t *testing.T) {
 		reason      string
 		messagePart string
 	}{
-		"zero":         {[]string{"done", exitline.Format(0)}, workload.JobPhaseSucceeded, "", ""},
-		"non-zero":     {[]string{"Traceback", exitline.Format(3), "late stderr"}, workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "code 3"},
-		"no exit line": {[]string{"epoch 4", "Killed"}, workload.JobPhaseFailed, "", "without an exit line"},
+		"zero":     {[]string{"done", exitline.Format(0)}, workload.JobPhaseSucceeded, "", ""},
+		"non-zero": {[]string{"Traceback", exitline.Format(3), "late stderr"}, workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "code 3"},
+		// The wrapper died with its machine: an infrastructure outcome, never the job's failure.
+		"no exit line": {[]string{"epoch 4", "Killed"}, workload.JobPhaseGone, "", ""},
+		"no output":    {nil, workload.JobPhaseGone, "", ""},
+		// A job that prints the line itself and goes on is judged by the wrapper's, the last.
+		"last line wins": {[]string{exitline.Format(0), "more", exitline.Format(7)}, workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "code 7"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, p := newTestExecutor(t)
 			mustCreate(t, e, job(t, "exp-1", 0, 0))
-			p.Start("hl-exp-1-a0-cpu-0")
-			p.Exit("hl-exp-1-a0-cpu-0", tc.lines...)
+			p.Start("hl-job-t1-exp-1-a0-cpu-0")
+			p.Exit("hl-job-t1-exp-1-a0-cpu-0", tc.lines...)
 
 			phase, _ := status(t, e, "exp-1")
 			reason, message, _, _, _, err := e.PollPhaseDetail(context.Background(), "exp-1", 0)
@@ -276,7 +373,7 @@ func TestTheExitLineDecidesHowAnExitedInstanceEnded(t *testing.T) {
 func TestAGrantedTerminationStopsARunningInstanceAndLeavesItToExit(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-exp-1-a0-cpu-0"
+	const name = "hl-job-t1-exp-1-a0-cpu-0"
 	mustCreate(t, e, job(t, "exp-1", 0, 0))
 	p.Start(name)
 
@@ -309,7 +406,7 @@ func TestATerminationWithoutAGrantDestroysTheInstanceAtOnce(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-running", 0, 0))
-	p.Start("hl-exp-running-a0-cpu-0")
+	p.Start("hl-job-t1-exp-running-a0-cpu-0")
 	mustCreate(t, e, job(t, "exp-starting", 0, 1))
 
 	// A grant that has expired control-plane-side arrives as no grant, which is what ends an
@@ -329,39 +426,91 @@ func TestATerminationWithoutAGrantDestroysTheInstanceAtOnce(t *testing.T) {
 	}
 }
 
-func TestAnInstanceThatIsNotAJobsIsLeftAlone(t *testing.T) {
+// The account is shared: with other agents, each under its own namespace, with the instances
+// agents themselves run in, and with whatever else is rented on it. None of that is this
+// executor's to list, count against a slot, stop or destroy.
+func TestInstancesOutsideTheNamespaceAreNeverListedCountedOrDestroyed(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	if _, err := p.Create(ctx, provider.Spec{Name: "hl-agent-pe-bot"}); err != nil {
-		t.Fatal(err)
+	foreign := []string{
+		"hl-agent-t1-pe-bot",          // the launcher's, same namespace
+		"hl-job-t2-exp-1-a0-cpu-0",    // another namespace's job of the same id in the same slot
+		"hl-job-t10-exp-1-a0-h100-0",  // a namespace this one is a prefix of
+		"hl-exp-1-a0-h100-1",          // not the platform's naming at all
+		"hl-job-t1-something-unknown", // under the prefix and not a job's name
 	}
-	mustCreate(t, e, job(t, "exp-1", 0, 0))
-	ids, err := e.ListManagedJobsForStatus(ctx)
-	if err != nil || !reflect.DeepEqual(ids, []string{"exp-1"}) {
+	for _, name := range foreign {
+		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+		p.Start(name)
+	}
+
+	if ids, err := e.ListManagedJobsForStatus(ctx); err != nil || len(ids) != 0 {
 		t.Fatalf("managed = %v, %v", ids, err)
 	}
-	if err := e.ReapTerminal(ctx, nil); err != nil || len(p.Names()) != 2 {
-		t.Fatalf("reap: %v, rented %v", err, p.Names())
+	cpu, cpuTotal, err := e.GetLiveCPUCapacity(ctx)
+	available, total, _, _, acceleratorErr := e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || acceleratorErr != nil || cpu != cpuTotal || available[h100] != total[h100] {
+		t.Fatalf("capacity %v/%v, %v/%v: a foreign instance took a slot", cpu, cpuTotal, available, total)
+	}
+	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseGone {
+		t.Fatalf("another namespace's exp-1 was reported as %v", phase)
+	}
+
+	exp := job(t, "exp-1", 0, 0)
+	mustCreate(t, e, exp)
+	if matches, err := e.WorkloadMatchesDesired(ctx, exp); err != nil || !matches {
+		t.Fatalf("matches = %v, %v", matches, err)
+	}
+	if err := e.DeleteWorkload(ctx, "exp-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReapTerminal(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if names := p.Names(); !reflect.DeepEqual(names, append([]string(nil), sorted(foreign)...)) {
+		t.Fatalf("rented %v, want every foreign instance and nothing else", names)
+	}
+	for _, name := range foreign {
+		if p.Stops(name) != 0 {
+			t.Errorf("%s was stopped", name)
+		}
 	}
 }
 
-func TestShapesAreValidatedAtStartup(t *testing.T) {
-	valid := testShapes[0]
-	for name, mutate := range map[string]func(*Shape){
-		"dash in name":       func(s *Shape) { s.Name = "h100-x1" },
-		"no max instances":   func(s *Shape) { s.MaxInstances = 0 },
-		"type without count": func(s *Shape) { s.Accelerators = 0 },
-		"count without type": func(s *Shape) { s.AcceleratorType = "" },
-		"type not a label":   func(s *Shape) { s.AcceleratorType = "H100" },
-		"no memory":          func(s *Shape) { s.MemoryBytes = 0 },
+func sorted(names []string) []string {
+	out := append([]string(nil), names...)
+	sort.Strings(out)
+	return out
+}
+
+func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
+	for name, mutate := range map[string]func(*Config){
+		"dash in shape name":     func(c *Config) { c.Shapes[0].Name = "h100-x1" },
+		"uppercase shape name":   func(c *Config) { c.Shapes[0].Name = "H100" },
+		"shape name too long":    func(c *Config) { c.Shapes[0].Name = "a1234567890123456" },
+		"no max instances":       func(c *Config) { c.Shapes[0].MaxInstances = 0 },
+		"type without count":     func(c *Config) { c.Shapes[0].Accelerators = 0 },
+		"count without type":     func(c *Config) { c.Shapes[0].AcceleratorType = "" },
+		"type not a label":       func(c *Config) { c.Shapes[0].AcceleratorType = "H100" },
+		"type in another casing": func(c *Config) { c.Shapes[0].AcceleratorType = "nvidia.com/gpu.product=nvidia-h100" },
+		"no memory":              func(c *Config) { c.Shapes[0].MemoryBytes = 0 },
+		"two shapes of one name": func(c *Config) { c.Shapes = append(c.Shapes, c.Shapes[0]) },
+		"no namespace":           func(c *Config) { c.Namespace = "" },
+		"dash in namespace":      func(c *Config) { c.Namespace = "team-a" },
+		"namespace too long":     func(c *Config) { c.Namespace = "a1234567890123456" },
+		"no log tail":            func(c *Config) { c.LogTailLines = 0 },
+		"no job image":           func(c *Config) { c.JobImage = "" },
+		"name beyond the provider": func(c *Config) {
+			c.Namespace, c.Shapes[0].Name, c.Shapes[0].MaxInstances = "a123456789012345", "b123456789012345", 1<<62
+		},
 	} {
-		shape := valid
-		mutate(&shape)
-		if _, err := New(Config{ClusterID: "c", APIURL: testAPI, JobImage: "i", Shapes: []Shape{shape}, Provider: fake.New()}); err == nil {
+		cfg := testConfig(fake.New())
+		cfg.Shapes = []Shape{testShapes[0]}
+		mutate(&cfg)
+		if _, err := New(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
-	}
-	if _, err := New(Config{ClusterID: "c", APIURL: testAPI, JobImage: "i", Shapes: []Shape{valid, valid}, Provider: fake.New()}); err == nil {
-		t.Error("two shapes of one name were accepted")
 	}
 }

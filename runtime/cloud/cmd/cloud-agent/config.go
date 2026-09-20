@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/cloudexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
 type config struct {
@@ -16,10 +17,17 @@ type config struct {
 	ClusterName string `yaml:"cluster_name"`
 	// APIURL is polled by this process and handed to every job, so a rented instance must be
 	// able to reach it.
-	APIURL   string         `yaml:"api_url"`
-	JobImage string         `yaml:"job_image"`
-	Provider providerConfig `yaml:"provider"`
-	Shapes   []shapeConfig  `yaml:"shapes"`
+	APIURL   string `yaml:"api_url"`
+	JobImage string `yaml:"job_image"`
+	// Namespace is part of every instance name, so agents sharing an account keep apart.
+	Namespace string `yaml:"namespace"`
+	// The loop intervals and how much of a job's output a status push relays. Each pass costs
+	// calls to the vendor's API, so these are the operator's to set against its rate limit.
+	ReconcileIntervalSeconds int            `yaml:"reconcile_interval_seconds"`
+	StatusIntervalSeconds    int            `yaml:"status_interval_seconds"`
+	LogTailLines             int            `yaml:"log_tail_lines"`
+	Provider                 providerConfig `yaml:"provider"`
+	Shapes                   []shapeConfig  `yaml:"shapes"`
 
 	shapes []cloudexec.Shape
 }
@@ -51,8 +59,11 @@ func loadConfig(path string) (*config, error) {
 	if err := decodeStrict(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
-	if cfg.ClusterName == "" || cfg.APIURL == "" || cfg.JobImage == "" || cfg.Provider.Name == "" || cfg.Provider.AccountID == "" {
-		return nil, fmt.Errorf("config: cluster_name, api_url, job_image, provider.name and provider.account_id are required")
+	if cfg.ClusterName == "" || cfg.Provider.Name == "" || cfg.Provider.AccountID == "" {
+		return nil, fmt.Errorf("config: cluster_name, provider.name and provider.account_id are required")
+	}
+	if cfg.ReconcileIntervalSeconds <= 0 || cfg.StatusIntervalSeconds <= 0 {
+		return nil, fmt.Errorf("config: reconcile_interval_seconds and status_interval_seconds must be positive")
 	}
 	for _, s := range cfg.Shapes {
 		shape, err := s.shape()
@@ -61,7 +72,23 @@ func loadConfig(path string) (*config, error) {
 		}
 		cfg.shapes = append(cfg.shapes, shape)
 	}
+	if err := cfg.executor(nil).Validate(); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
 	return &cfg, nil
+}
+
+// executor is the executor's configuration over rented.
+func (cfg *config) executor(rented provider.Provider) cloudexec.Config {
+	return cloudexec.Config{
+		ClusterID:    cfg.Provider.Name + "-" + cfg.Provider.AccountID,
+		Namespace:    cfg.Namespace,
+		APIURL:       cfg.APIURL,
+		JobImage:     cfg.JobImage,
+		LogTailLines: cfg.LogTailLines,
+		Shapes:       cfg.shapes,
+		Provider:     rented,
+	}
 }
 
 // shape parses the quantities, written as a job writes its own ("8", "32Gi"). Whether the shape

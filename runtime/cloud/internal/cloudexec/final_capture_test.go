@@ -32,8 +32,8 @@ func TestAnExitedInstanceKeepsItsOutcomeAndOutputUntilTheControlPlaneLetsGo(t *t
 	ctx := context.Background()
 	exp := job(t, "exp-1", 0, 0)
 	mustCreate(t, e, exp)
-	p.Start("hl-exp-1-a0-cpu-0")
-	p.Exit("hl-exp-1-a0-cpu-0", "RuntimeError: device crashed", exitline.Format(1))
+	p.Start("hl-job-t1-exp-1-a0-cpu-0")
+	p.Exit("hl-job-t1-exp-1-a0-cpu-0", "RuntimeError: device crashed", exitline.Format(1))
 
 	desired := map[string]*domain.Experiment{"exp-1": exp}
 	for pass := 0; pass < 2; pass++ {
@@ -42,7 +42,7 @@ func TestAnExitedInstanceKeepsItsOutcomeAndOutputUntilTheControlPlaneLetsGo(t *t
 			t.Fatal(err)
 		}
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a0-cpu-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0"}) {
 		t.Fatalf("rented %v, want the exited instance kept and no second one", names)
 	}
 	ids, err := e.ListManagedJobsForStatus(ctx)
@@ -65,8 +65,8 @@ func TestAnExitedInstanceKeepsItsOutcomeAndOutputUntilTheControlPlaneLetsGo(t *t
 func TestTheSharedLoopCapturesARunningInstancesOutputBeforeDestroyingIt(t *testing.T) {
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-gone", 3, 0))
-	p.Start("hl-exp-gone-a3-cpu-0")
-	p.Print("hl-exp-gone-a3-cpu-0", "epoch 7 loss 0.31")
+	p.Start("hl-job-t1-exp-gone-a3-cpu-0")
+	p.Print("hl-job-t1-exp-gone-a3-cpu-0", "epoch 7 loss 0.31")
 
 	var mu sync.Mutex
 	var captured []pushedReport

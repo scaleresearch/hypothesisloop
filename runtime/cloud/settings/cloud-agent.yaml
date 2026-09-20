@@ -9,6 +9,18 @@ api_url: https://api.example.invalid
 # What every instance boots. It carries hl, which each job's command runs under.
 job_image: registry.example.invalid/hypothesisloop-job:latest
 
+# Part of every instance name: hl-job-<namespace>-... for a job. The agent lists, counts and
+# destroys the instances of its namespace only, so agents sharing an account each take their own.
+# 1 to 16 lowercase letters and digits.
+namespace: main
+
+# A reconcile pass costs the provider one list call. A status push costs one list call and one
+# log read per job whose command has started. Set these against the provider's rate limit.
+reconcile_interval_seconds: 10
+status_interval_seconds: 10
+# How much of a job's output a status push relays.
+log_tail_lines: 100
+
 provider:
   # One of the adapters the binary was built with.
   name: example
@@ -18,12 +30,15 @@ provider:
   # The adapter's own section. Nothing else reads it.
   settings: {}
 
-# What this account may rent. Each of a shape's max_instances is reported as a node, so the
-# control plane needs no provider settings of its own, and max_instances bounds what can be billed
-# at once. A job is rented at the size it asked for; the shape is the most one may ask for.
+# What this account may rent. Each of a shape's max_instances is reported as a node that holds
+# one job, so the control plane needs no provider settings of its own, and max_instances bounds
+# what can be billed at once. A job is rented at the size it asked for; the shape is the most one
+# may ask for.
 shapes:
-  # accelerator_type is the resource catalog string, written exactly as jobs request it. It must
-  # be priced in the control plane's accelerator_types for a job to be admitted.
+  # name is 1 to 16 lowercase letters and digits. accelerator_type is the resource catalog
+  # string, written exactly as jobs request it and as it is priced in the control plane's
+  # accelerator_types: a job is only admitted to, and only runs on, a type that matches to the
+  # letter.
   - name: h100
     accelerator_type: nvidia.com/gpu.product=NVIDIA-H100
     accelerators: 1

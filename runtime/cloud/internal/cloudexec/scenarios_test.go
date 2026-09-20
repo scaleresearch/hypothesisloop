@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -39,7 +40,7 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, %v %v", pass, matches, phase, attempt, scheduled, err, detailErr)
 		}
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 	if available, _, _, _, _ := e.GetLiveAcceleratorCapacitySnapshot(ctx); available[h100] != 1 {
@@ -62,7 +63,7 @@ func TestAnInstanceThatVanishesMidRunReadsAsGoneAndIsRentedAgain(t *testing.T) {
 	ctx := context.Background()
 	exp := job(t, "exp-1", 4, 0)
 	mustCreate(t, e, exp)
-	p.Start("hl-exp-1-a4-cpu-0")
+	p.Start("hl-job-t1-exp-1-a4-cpu-0")
 
 	if err := p.Destroy(ctx, "fake-0001"); err != nil {
 		t.Fatal(err)
@@ -123,7 +124,7 @@ func TestAnUnreadableProviderFailsEveryReadInsteadOfAnsweringEmpty(t *testing.T)
 	}
 
 	p.Fail = nil
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
 		t.Fatalf("a failed pass changed what is rented: %v", names)
 	}
 }
@@ -141,28 +142,27 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	}
 	p.Fail = nil
 	mustCreate(t, e, exp)
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 }
 
-// One instance the provider will not destroy must not keep the others rented (important.md #19).
+// One instance the provider will not destroy must not keep the others rented.
 func TestOneFailedDestroyStillDestroysTheRest(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	for _, id := range []string{"exp-1", "exp-2"} {
-		mustCreate(t, e, job(t, id, 0, 1))
-	}
+	mustCreate(t, e, job(t, "exp-1", 0, 1))
+	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
 	mustCreate(t, e, job(t, "exp-3", 0, 0))
 	for _, name := range p.Names() {
 		p.Exit(name, exitline.Format(0))
 	}
-	p.Fail = failing("Destroy", "hl-exp-1-a0-h100-0")
+	p.Fail = failing("Destroy", "hl-job-t1-exp-1-a0-h100-0")
 
 	if err := e.ReapTerminal(ctx, nil); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v, want the failed destroy reported", err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
 		t.Fatalf("rented %v, want only the one that failed", names)
 	}
 	p.Fail = nil
@@ -176,7 +176,7 @@ func TestOneFailedDestroyStillDestroysTheRest(t *testing.T) {
 func TestAFailedStopLeavesTheInstanceRunningForTheNextPass(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-exp-1-a0-cpu-0"
+	const name = "hl-job-t1-exp-1-a0-cpu-0"
 	mustCreate(t, e, job(t, "exp-1", 0, 0))
 	p.Start(name)
 	p.Fail = failing("Stop", name)
@@ -193,25 +193,105 @@ func TestAFailedStopLeavesTheInstanceRunningForTheNextPass(t *testing.T) {
 }
 
 // An exited instance whose output cannot be read has no known outcome. Reporting one would
-// finish the job on a guess, so the poll fails and the status push is withheld.
-func TestAnExitedInstanceWithUnreadableOutputHasNoPhaseToReport(t *testing.T) {
+// finish the job on a guess, and failing the poll would withhold every other job's status with
+// it, so it is reported as still running, with why, until the output can be read.
+func TestAnExitedInstanceWithUnreadableOutputIsReportedRunningWithTheReadError(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-exp-1-a0-cpu-0"
+	const name = "hl-job-t1-exp-1-a0-cpu-0"
 	mustCreate(t, e, job(t, "exp-1", 0, 0))
 	p.Start(name)
 	p.Exit(name, exitline.Format(0))
 	p.Fail = failing("Logs", name)
 
-	if _, err := e.PollJobStatus(ctx, "exp-1"); !errors.Is(err, errVendor) {
-		t.Fatalf("poll err = %v", err)
+	observed, err := e.PollJobStatus(ctx, "exp-1")
+	if err != nil || observed.Phase != workload.JobPhaseRunning || observed.Attempt != 0 {
+		t.Fatalf("poll = %+v, %v", observed, err)
 	}
-	if _, _, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 0); !errors.Is(err, errVendor) {
-		t.Fatalf("detail err = %v", err)
+	reason, message, _, scheduled, _, err := e.PollPhaseDetail(ctx, "exp-1", 0)
+	if err != nil || reason != "" || scheduled != 1 || !strings.Contains(message, "cannot be read") || !strings.Contains(message, errVendor.Error()) {
+		t.Fatalf("detail = %q %q scheduled %d, %v", reason, message, scheduled, err)
 	}
+	if _, node, _, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-1"); err != nil || node != "cpu-0" {
+		t.Fatalf("node = %q, %v", node, err)
+	}
+	// It is not live, so no pass stops it or compares it, and it is kept while desired.
+	if ids, _ := e.ListManagedJobs(ctx); len(ids) != 0 {
+		t.Fatalf("actual = %v", ids)
+	}
+
 	p.Fail = nil
 	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseSucceeded {
 		t.Fatalf("phase = %v once the output is readable", phase)
+	}
+}
+
+// An instance that ended without an exit line is reported gone and kept: renting the attempt
+// again is the control plane's decision, made by requeueing it under a new attempt.
+func TestAnInstanceThatEndedWithoutAnExitLineIsGoneAndNotRentedAgain(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	const name = "hl-job-t1-exp-1-a0-cpu-0"
+	exp := job(t, "exp-1", 0, 0)
+	desired := map[string]*domain.Experiment{"exp-1": exp}
+	mustCreate(t, e, exp)
+	p.Start(name)
+	p.Exit(name, "epoch 4", "Killed")
+
+	for pass := 0; pass < 2; pass++ {
+		observed, err := e.PollJobStatus(ctx, "exp-1")
+		if err != nil || observed.Phase != workload.JobPhaseGone || observed.Attempt != 0 {
+			t.Fatalf("pass %d: poll = %+v, %v", pass, observed, err)
+		}
+		mustCreate(t, e, exp)
+		if err := e.ReapTerminal(ctx, desired); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ids := p.IDs(name); len(ids) != 1 || len(p.Names()) != 1 {
+		t.Fatalf("rented %v", p.Names())
+	}
+	// The requeue the control plane answers with leaves the dead attempt behind.
+	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": on(job(t, "exp-1", 1, 0), "cpu-0")}); err != nil || len(p.Names()) != 0 {
+		t.Fatalf("after the requeue: %v, rented %v", err, p.Names())
+	}
+}
+
+// Two instances of one attempt: a create the vendor carried out and reported failed, followed by
+// the retry. One is kept, the same one whichever pass finds them, and it is the one reported.
+func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
+	for name, exited := range map[string]bool{"running": false, "exited": true} {
+		t.Run(name, func(t *testing.T) {
+			e, p := newTestExecutor(t)
+			ctx := context.Background()
+			exp := job(t, "exp-1", 0, 0)
+			const instance = "hl-job-t1-exp-1-a0-cpu-0"
+			for n := 0; n < 3; n++ {
+				if _, err := p.Create(ctx, provider.Spec{Name: instance}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p.Start(instance)
+			if exited {
+				p.Exit(instance, exitline.Format(0))
+			}
+			other := on(job(t, "exp-2", 0, 1), "h100-0")
+			mustCreate(t, e, other)
+
+			desired := map[string]*domain.Experiment{"exp-1": exp, "exp-2": other}
+			if err := e.ReapTerminal(ctx, desired); err != nil {
+				t.Fatal(err)
+			}
+			if ids := p.IDs(instance); !reflect.DeepEqual(ids, []string{"fake-0001"}) {
+				t.Fatalf("kept %v, want the lowest id alone", ids)
+			}
+			if len(p.Names()) != 2 {
+				t.Fatalf("rented %v", p.Names())
+			}
+			if observed, err := e.PollJobStatus(ctx, "exp-1"); err != nil || observed.Attempt != 0 || observed.Phase == workload.JobPhaseGone {
+				t.Fatalf("poll = %+v, %v", observed, err)
+			}
+		})
 	}
 }
 
@@ -221,7 +301,7 @@ func TestAnExitedInstanceWithUnreadableOutputHasNoPhaseToReport(t *testing.T) {
 func TestInstancesInNoConfiguredSlotAreManagedAndCountedNowhere(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	for _, name := range []string{"hl-exp-old-a0-a100-0", "hl-exp-over-a2-h100-5"} {
+	for _, name := range []string{"hl-job-t1-exp-old-a0-a100-0", "hl-job-t1-exp-over-a2-h100-5"} {
 		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
 			t.Fatal(err)
 		}
@@ -262,16 +342,16 @@ func TestInstancesInNoConfiguredSlotAreManagedAndCountedNowhere(t *testing.T) {
 func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	before, p := newTestExecutor(t)
 	ctx := context.Background()
-	running, finished, booting := job(t, "exp-running", 1, 1), job(t, "exp-finished", 0, 0), job(t, "exp-booting", 0, 1)
+	running, finished, booting := job(t, "exp-running", 1, 1), job(t, "exp-finished", 0, 0), on(job(t, "exp-booting", 0, 1), "h100-1")
 	for _, exp := range []*domain.Experiment{running, finished, booting} {
 		mustCreate(t, before, exp)
 	}
-	p.Start("hl-exp-running-a1-h100-0")
-	p.Start("hl-exp-finished-a0-cpu-0")
-	p.Exit("hl-exp-finished-a0-cpu-0", exitline.Format(0))
+	p.Start("hl-job-t1-exp-running-a1-h100-0")
+	p.Start("hl-job-t1-exp-finished-a0-cpu-0")
+	p.Exit("hl-job-t1-exp-finished-a0-cpu-0", exitline.Format(0))
 	rented := p.Names()
 
-	after, err := New(Config{ClusterID: "fake-account-1", APIURL: testAPI, JobImage: "registry.example.invalid/job:1", Shapes: testShapes, Provider: p})
+	after, err := New(testConfig(p))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,15 +379,15 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	if err := before.DeleteWorkload(ctx, "exp-running", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := after.DeleteWorkload(ctx, "exp-running", true); err != nil || p.Stops("hl-exp-running-a1-h100-0") != 2 {
-		t.Fatalf("stop after restart: %v, %d stops", err, p.Stops("hl-exp-running-a1-h100-0"))
+	if err := after.DeleteWorkload(ctx, "exp-running", true); err != nil || p.Stops("hl-job-t1-exp-running-a1-h100-0") != 2 {
+		t.Fatalf("stop after restart: %v, %d stops", err, p.Stops("hl-job-t1-exp-running-a1-h100-0"))
 	}
-	p.Exit("hl-exp-running-a1-h100-0", exitline.Format(0))
+	p.Exit("hl-job-t1-exp-running-a1-h100-0", exitline.Format(0))
 	delete(desired, "exp-running")
 	if err := after.ReapTerminal(ctx, desired); err != nil {
 		t.Fatal(err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-exp-booting-a0-h100-1", "hl-exp-finished-a0-cpu-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-booting-a0-h100-1", "hl-job-t1-exp-finished-a0-cpu-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 }

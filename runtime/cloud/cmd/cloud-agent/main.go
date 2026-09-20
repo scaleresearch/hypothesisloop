@@ -13,13 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
 
-// Every pass reads the provider's API several times, so the loops run slower than a runtime
-// reading a local engine, and still several times inside the control plane's unreachable window.
-const (
-	binaryName        = "cloud-agent"
-	reconcileInterval = 5 * time.Second
-	statusInterval    = 5 * time.Second
-)
+const binaryName = "cloud-agent"
 
 func main() {
 	cfg, err := loadConfig(agentloop.RequiredEnv(binaryName, "CLOUD_AGENT_CONFIG"))
@@ -33,13 +27,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
 		os.Exit(1)
 	}
-	exec, err := cloudexec.New(cloudexec.Config{
-		ClusterID: cfg.Provider.Name + "-" + cfg.Provider.AccountID,
-		APIURL:    cfg.APIURL,
-		JobImage:  cfg.JobImage,
-		Shapes:    cfg.shapes,
-		Provider:  rented,
-	})
+	exec, err := cloudexec.New(cfg.executor(rented))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
 		os.Exit(1)
@@ -51,7 +39,7 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
-	log("starting: cluster=%s provider=%s account=%s control_plane=%s shapes=%d", cfg.ClusterName, cfg.Provider.Name, cfg.Provider.AccountID, cfg.APIURL, len(cfg.shapes))
+	log("starting: cluster=%s provider=%s account=%s namespace=%s control_plane=%s shapes=%d", cfg.ClusterName, cfg.Provider.Name, cfg.Provider.AccountID, cfg.Namespace, cfg.APIURL, len(cfg.shapes))
 
 	a := &agentloop.Agent{
 		ClusterName:       cfg.ClusterName,
@@ -59,8 +47,9 @@ func main() {
 		Token:             token,
 		Executor:          exec,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
-		ReconcileInterval: reconcileInterval,
-		StatusInterval:    statusInterval,
+		ReconcileInterval: time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
+		StatusInterval:    time.Duration(cfg.StatusIntervalSeconds) * time.Second,
+		LogTailLines:      cfg.LogTailLines,
 		Log:               log,
 	}
 	a.Run(ctx)

@@ -42,26 +42,40 @@ func TestTheShippedConfigLoadsIntoShapesTheExecutorAccepts(t *testing.T) {
 	if len(cfg.shapes) != 2 || cfg.shapes[0].CPUMillis != 16000 || cfg.shapes[0].MemoryBytes != 64<<30 || cfg.shapes[1].Accelerators != 0 {
 		t.Fatalf("shapes = %+v", cfg.shapes)
 	}
-	exec, err := cloudexec.New(cloudexec.Config{
-		ClusterID: cfg.Provider.Name + "-" + cfg.Provider.AccountID,
-		APIURL:    cfg.APIURL, JobImage: cfg.JobImage, Shapes: cfg.shapes, Provider: fake.New(),
-	})
+	if cfg.ReconcileIntervalSeconds != 10 || cfg.StatusIntervalSeconds != 10 || cfg.LogTailLines != 100 || cfg.Namespace != "main" {
+		t.Fatalf("config = %+v", cfg)
+	}
+	rented := fake.New()
+	exec, err := cloudexec.New(cfg.executor(rented))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if id, _ := exec.GetClusterID(context.Background()); id != "example-1" {
 		t.Fatalf("cluster id = %q", id)
 	}
+	// The namespace reaches the instance names the executor reads.
+	if _, err := exec.ListManagedJobs(context.Background()); err != nil || rented.Calls("List") != 1 {
+		t.Fatal(err)
+	}
 }
 
 func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"unknown key":         {"cluster_name: rented", "cluster_name: rented\nmetrics_url: http://x"},
-		"no cluster name":     {"cluster_name: rented", "cluster_name: \"\""},
-		"no account id":       {`account_id: "1"`, `account_id: ""`},
-		"no job image":        {"job_image: registry.example.invalid/hypothesisloop-job:latest", "job_image: \"\""},
-		"bad quantity":        {"memory: 64Gi", "memory: lots"},
-		"misspelled in shape": {"max_instances: 2", "max_instance: 2"},
+		"unknown key":            {"cluster_name: rented", "cluster_name: rented\nmetrics_url: http://x"},
+		"no cluster name":        {"cluster_name: rented", "cluster_name: \"\""},
+		"no account id":          {`account_id: "1"`, `account_id: ""`},
+		"no job image":           {"job_image: registry.example.invalid/hypothesisloop-job:latest", "job_image: \"\""},
+		"bad quantity":           {"memory: 64Gi", "memory: lots"},
+		"misspelled in shape":    {"max_instances: 2", "max_instance: 2"},
+		"no api url":             {"api_url: https://api.example.invalid", "api_url: \"\""},
+		"no namespace":           {"namespace: main\n", ""},
+		"namespace with dash":    {"namespace: main", "namespace: team-a"},
+		"no reconcile interval":  {"reconcile_interval_seconds: 10\n", ""},
+		"zero status interval":   {"status_interval_seconds: 10", "status_interval_seconds: 0"},
+		"no log tail":            {"log_tail_lines: 100\n", ""},
+		"shape name with dash":   {"name: h100", "name: h100-big"},
+		"type in another casing": {"nvidia.com/gpu.product=NVIDIA-H100", "nvidia.com/gpu.product=nvidia-h100"},
+		"type not a label":       {"nvidia.com/gpu.product=NVIDIA-H100", "H100"},
 	} {
 		text := shipped(t)
 		if !strings.Contains(text, edit[0]) {

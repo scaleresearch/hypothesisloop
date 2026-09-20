@@ -3,94 +3,81 @@ package cloudexec
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
-// slot is one synthetic node: room for one instance of one shape. It is taken while any instance
+// slot is room for one instance of one shape, reported as a node. It is taken while any instance
 // carries its name, whatever that instance's state, since an instance is billed until it is
 // destroyed.
 type slot struct {
 	shape Shape
-	node  string
+	name  string
 	taken bool
 }
 
-// slots reads the account once and lays every shape's slots against what is rented. Nothing is
-// remembered from the previous read.
+// slots lays every shape's slots against what the account holds. An instance of a shape or an
+// index that is no longer configured is in no slot: it is still managed, and counted nowhere.
 func (e *Executor) slots(ctx context.Context) ([]slot, error) {
-	instances, err := e.list(ctx)
+	v, err := e.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return e.slotsAgainst(instances), nil
+	return e.slotsAgainst(v), nil
 }
 
-func (e *Executor) slotsAgainst(instances []instance) []slot {
-	taken := make(map[string]bool, len(instances))
-	for _, i := range instances {
-		taken[i.node()] = true
+func (e *Executor) slotsAgainst(v *view) []slot {
+	taken := make(map[string]bool, len(v.instances))
+	for _, i := range v.instances {
+		taken[i.slot()] = true
 	}
 	var slots []slot
 	for _, shape := range e.shapes {
 		for n := 0; n < shape.MaxInstances; n++ {
-			node := nodeName(shape.Name, n)
-			slots = append(slots, slot{shape: shape, node: node, taken: taken[node]})
+			name := slotName(shape.Name, n)
+			slots = append(slots, slot{shape: shape, name: name, taken: taken[name]})
 		}
 	}
 	return slots
 }
 
-// labels is the node label a shape's accelerator type stands for, as a device plugin would
-// publish it. Admission matches a job's type against these.
-func (s Shape) labels() map[string]string {
-	key, value, ok := strings.Cut(s.AcceleratorType, "=")
-	if !ok {
-		return map[string]string{}
-	}
-	return map[string]string{key: value}
-}
-
-func (s Shape) fits(want provider.Spec) bool {
-	if want.AcceleratorCount > 0 {
-		if !domain.AcceleratorType(want.AcceleratorType).MatchesLabels(s.labels()) || want.AcceleratorCount > s.Accelerators {
-			return false
-		}
-	}
-	return want.CPUMillis <= s.CPUMillis && want.MemoryBytes <= s.MemoryBytes && want.DiskBytes <= s.StorageBytes
-}
-
-// freeSlot picks the slot a job with these requests is rented into: a free one of the shape with
-// the fewest accelerators that fits, so a job that needs none leaves the accelerator shapes to
-// the jobs that do. Admission already found a node with room; this is the same answer read from
-// the account as it is now.
-func (e *Executor) freeSlot(instances []instance, want provider.Spec) (shape string, index int, err error) {
-	var fitting []Shape
+// configured returns the shape of the slot called name, if the configuration has such a slot.
+func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 	for _, s := range e.shapes {
-		if s.fits(want) {
-			fitting = append(fitting, s)
-		}
-	}
-	if len(fitting) == 0 {
-		return "", 0, fmt.Errorf("cloudexec: no shape fits accelerator %q x%d, cpu %dm, memory %d, storage %d",
-			want.AcceleratorType, want.AcceleratorCount, want.CPUMillis, want.MemoryBytes, want.DiskBytes)
-	}
-	sort.SliceStable(fitting, func(a, b int) bool { return fitting[a].Accelerators < fitting[b].Accelerators })
-	taken := make(map[string]bool, len(instances))
-	for _, i := range instances {
-		taken[i.node()] = true
-	}
-	for _, s := range fitting {
 		for n := 0; n < s.MaxInstances; n++ {
-			if !taken[nodeName(s.Name, n)] {
-				return s.Name, n, nil
+			if slotName(s.Name, n) == name {
+				return s, n, true
 			}
 		}
 	}
-	return "", 0, fmt.Errorf("cloudexec: every instance of a shape that fits is already rented")
+	return Shape{}, 0, false
+}
+
+// labels are the node labels of a slot: the one that makes it a slot and names it, so admission
+// puts one job on it and says which, and the one its accelerator type stands for, as a device
+// plugin would publish it.
+func (s slot) labels() map[string]string {
+	labels := map[string]string{domain.NodeSlotLabel: s.name}
+	if key, value, ok := strings.Cut(s.shape.AcceleratorType, "="); ok {
+		labels[key] = value
+	}
+	return labels
+}
+
+// holds says whether a slot of this shape may be asked for want. Admission chose the slot; this
+// keeps a job from renting more than the shape allows, whatever desired state says. The type is
+// compared exactly because the control plane compares the reported one exactly: a job that wrote
+// its type in another casing would be rented, run, and then evicted for a type mismatch.
+func (s Shape) holds(want provider.Spec) error {
+	if want.AcceleratorCount > 0 && want.AcceleratorType != s.AcceleratorType {
+		return fmt.Errorf("accelerator type %q is not the slot's %q", want.AcceleratorType, s.AcceleratorType)
+	}
+	if want.AcceleratorCount > s.Accelerators || want.CPUMillis > s.CPUMillis || want.MemoryBytes > s.MemoryBytes || want.DiskBytes > s.StorageBytes {
+		return fmt.Errorf("accelerators %d, cpu %dm, memory %d, storage %d exceed the slot's shape", want.AcceleratorCount, want.CPUMillis, want.MemoryBytes, want.DiskBytes)
+	}
+	return nil
 }
 
 func (e *Executor) GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error) {
@@ -146,10 +133,10 @@ func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]
 	byNode := make(map[string]map[string]int64, len(slots))
 	for _, s := range slots {
 		if s.taken {
-			byNode[s.node] = nodeResources(Shape{})
+			byNode[s.name] = nodeResources(Shape{})
 			continue
 		}
-		byNode[s.node] = nodeResources(s.shape)
+		byNode[s.name] = nodeResources(s.shape)
 	}
 	return byNode, nil
 }
@@ -157,8 +144,8 @@ func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]
 // GetNodeTotalCapacity is configuration alone. Nothing but our own instances is ever in a slot.
 func (e *Executor) GetNodeTotalCapacity(context.Context) (map[string]map[string]int64, error) {
 	byNode := map[string]map[string]int64{}
-	for _, s := range e.slotsAgainst(nil) {
-		byNode[s.node] = nodeResources(s.shape)
+	for _, s := range e.slotsAgainst(&view{}) {
+		byNode[s.name] = nodeResources(s.shape)
 	}
 	return byNode, nil
 }
@@ -180,7 +167,7 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	byNode = map[string]map[string]int64{}
 	nodeLabels = make(map[string]map[string]string, len(slots))
 	for _, s := range slots {
-		nodeLabels[s.node] = s.shape.labels()
+		nodeLabels[s.name] = s.labels()
 		if s.shape.Accelerators == 0 {
 			continue
 		}
@@ -190,7 +177,7 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 		}
 		total[s.shape.AcceleratorType] += int64(s.shape.Accelerators)
 		available[s.shape.AcceleratorType] += free
-		byNode[s.node] = map[string]int64{s.shape.AcceleratorType: free}
+		byNode[s.name] = map[string]int64{s.shape.AcceleratorType: free}
 	}
 	return available, total, byNode, nodeLabels, nil
 }
