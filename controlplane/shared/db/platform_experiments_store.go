@@ -669,8 +669,8 @@ func (s *PlatformExperimentsStore) IsAgentCut(ctx context.Context, platformExpID
 
 // FulfillDonationTx performs a donation transfer as a single atomic, idempotent operation: it
 // locks the donation row, verifies it is still "open", locks both quota rows, checks the donor's
-// headroom (guaranteed allocation minus donorUsedGuaranteed, its metrics-store reservation total
-// passed in by the caller), moves the amount, and flips the donation to "fulfilled" — all in one
+// headroom (guaranteed allocation minus its observed and reserved guaranteed hours), moves the
+// amount, and flips the donation to "fulfilled" — all in one
 // transaction under the same cross-replica advisory lock admission uses. Gating the transfer on
 // the donation still being "open" inside the tx is what makes a retry safe: a second call after a
 // crash sees "fulfilled" and returns (false, nil) instead of transferring again.
@@ -678,11 +678,13 @@ func (s *PlatformExperimentsStore) IsAgentCut(ctx context.Context, platformExpID
 // Returns fulfilled=true when the transfer was applied, false when the donation was not open
 // (already fulfilled/cancelled — a no-op, not an error). ErrDonorInsufficientQuota is returned if
 // the donor cannot cover the amount.
-// observe reads the donor's observed+reserved usage. It is called *inside* the transaction, once
-// both quota rows are locked, for the same reason AdmitExperimentTx takes one: usage read before
-// the lock is a snapshot a concurrent admission can invalidate, and the headroom check would then
-// pass against hours already spoken for — over-committing the donor into exhaustion evictions
-// that cannot be undone, since the transfer itself is irreversible.
+// observe reads the donor's observed usage from the metrics store and must make no pool read: the
+// transaction already holds this request's connection. It is called *inside* the transaction,
+// once both quota rows are locked, for the same reason AdmitExperimentTx takes one: usage read
+// before the lock is a snapshot a concurrent admission can invalidate, and the headroom check
+// would then pass against hours already spoken for — over-committing the donor into exhaustion
+// evictions that cannot be undone, since the transfer itself is irreversible. The donor's
+// reservations are summed on the transaction, as admission sums them.
 func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, burstAmount float64, observe func(context.Context) (*domain.AgentQuota, error)) (fulfilled bool, err error) {
 	guaranteed, burst := resourceQuotaColumns(resourceType)
 
@@ -755,7 +757,17 @@ func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donati
 	if observed == nil {
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: no observed usage for donor %s", donorAgentID)
 	}
-	if donorGuaranteed-observed.UsedGuaranteedAccH < amount {
+	var desiredGuaranteed float64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(estimated_cost_acch), 0)
+		FROM experiments
+		WHERE agent_id=$1 AND platform_experiment_id=$2 AND capacity_tier='guaranteed'
+		  AND (status IN ('QUEUED','SUBMITTED','RUNNING')
+		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
+		donorAgentID, platformExpID).Scan(&desiredGuaranteed); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: desired usage: %w", err)
+	}
+	if donorGuaranteed-observed.UsedGuaranteedAccH-desiredGuaranteed < amount {
 		return false, ErrDonorInsufficientQuota
 	}
 

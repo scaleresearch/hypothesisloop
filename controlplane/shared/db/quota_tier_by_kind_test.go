@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -414,5 +415,53 @@ func TestDonationToABurstOnlyRecipientLandsEntirelyInBurstRegardlessOfKind(t *te
 	}
 	if recipient.burst != 7.5 {
 		t.Errorf("burst_only recipient burst after donation = %v, want 7.5 (6.0 pre-donation + 1.5 donated, fully folded)", recipient.burst)
+	}
+}
+
+// The donor's reservations are read on the donation's own transaction: hours a queued job already
+// holds are not there to give away.
+func TestDonationCountsTheDonorsReservedHours(t *testing.T) {
+	pool := quotaTierTestDB(t)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	donor, recipient, pe := "donor-"+suffix, "recipient-"+suffix, "pe-"+suffix
+	createTestAgent(t, pool, donor, domain.AgentKindHuman)
+	createTestAgent(t, pool, recipient, domain.AgentKindAgent)
+	createTestPE(t, pool, pe, 10)
+
+	pes := NewPlatformExperimentsStore(pool)
+	for _, id := range []string{donor, recipient} {
+		if _, err := pes.Signup(ctx, pe, id, domain.SignupRoleCompetitor, ""); err != nil {
+			t.Fatalf("signup %s: got = %v, want = nil", id, err)
+		}
+	}
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+		return allocateStartQuotas(pe, 8, participants), nil
+	})
+	if err != nil || !started {
+		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
+	}
+	// The donor holds 4 guaranteed hours; this queued job reserves 1 of them.
+	seedExperimentForCapTest(t, pool, "exp-"+suffix, donor, pe, 1, domain.StatusQueued)
+
+	donationID := uuid.New().String()
+	if _, err := pool.pool.Exec(ctx,
+		`INSERT INTO donation_requests (id, agent_id, platform_experiment_id, credits_want, reason, status, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, 'test', 'open', now(), now())`,
+		donationID, recipient, pe, 3.5,
+	); err != nil {
+		t.Fatalf("insert donation request: got = %v, want = nil", err)
+	}
+	noObservedUsage := func(context.Context) (*domain.AgentQuota, error) {
+		return &domain.AgentQuota{AgentID: donor, PlatformExperimentID: pe}, nil
+	}
+
+	fulfilled, err := pes.FulfillDonationTx(ctx, donationID, donor, recipient, pe, domain.ResourceAcceleratorHours, 3.5, 0, noObservedUsage)
+	if !errors.Is(err, ErrDonorInsufficientQuota) || fulfilled {
+		t.Fatalf("donating 3.5 of 3 free hours: got = (%v, %v), want = (false, %v)", fulfilled, err, ErrDonorInsufficientQuota)
+	}
+	fulfilled, err = pes.FulfillDonationTx(ctx, donationID, donor, recipient, pe, domain.ResourceAcceleratorHours, 3, 0, noObservedUsage)
+	if err != nil || !fulfilled {
+		t.Fatalf("donating 3 of 3 free hours: got = (%v, %v), want = (true, nil)", fulfilled, err)
 	}
 }

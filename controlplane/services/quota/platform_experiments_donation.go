@@ -7,6 +7,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"go.uber.org/zap"
 )
 
@@ -52,11 +53,21 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 		return &DonationError{Reason: DonationReasonInvalidState, Message: "donation has no platform_experiment_id"}
 	}
 
+	// Read before the transaction opens, as AdmitExperiment does: a pool read made while the
+	// transaction holds its own connection needs a second one.
+	pe, err := s.store.GetPlatformExperiment(ctx, req.PlatformExperimentID)
+	if err != nil {
+		return fmt.Errorf("FulfillDonation: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return fmt.Errorf("FulfillDonation: platform experiment %s not found", req.PlatformExperimentID)
+	}
+
 	// One atomic, idempotent transaction locks the donation + both quota rows, verifies the
 	// donation is open and the donor has headroom, moves the amount and marks it fulfilled.
 	// Gating on "open" inside the tx makes a retry after a partial failure a safe no-op instead of
-	// a double transfer. Headroom is checked against the donor's usage as read inside the tx,
-	// merged from the metrics store on top of the Postgres allocation. Donations are
+	// a double transfer. Headroom is checked against the donor's usage as read inside the tx:
+	// observed hours from the metrics store plus the reservations Postgres holds. Donations are
 	// accelerator-hours only today.
 	// The matching burst headroom moves with the guaranteed hours, since burst is derived from
 	// guaranteed (domain.AllocateQuota) — moving one without the other leaves the donor with burst
@@ -64,7 +75,11 @@ func (s *PlatformExperimentsService) FulfillDonation(ctx context.Context, donati
 	fulfilled, err := s.store.FulfillDonationTx(ctx, donationID, donorAgentID, req.AgentID, req.PlatformExperimentID,
 		domain.ResourceAcceleratorHours, req.CreditsWant, req.CreditsWant*s.cfg.BurstFraction,
 		func(ctx context.Context) (*domain.AgentQuota, error) {
-			return s.GetAgentQuota(ctx, donorAgentID, req.PlatformExperimentID)
+			aq := &domain.AgentQuota{AgentID: donorAgentID, PlatformExperimentID: req.PlatformExperimentID}
+			if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+				return nil, err
+			}
+			return aq, nil
 		})
 	if errors.Is(err, db.ErrDonorInsufficientQuota) {
 		return &DonationError{Reason: DonationReasonInsufficientQuota, Message: fmt.Sprintf("donor has less than %.2f AccH available", req.CreditsWant)}
