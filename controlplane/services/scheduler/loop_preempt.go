@@ -58,8 +58,9 @@ func submitErrorLevel(err error) zapcore.Level {
 // check admission uses. A victim set chosen on the cluster total alone can free devices on a node
 // that still cannot host the job, which is then preempted for again on a later tick.
 //
-// A victim whose node is unknown is never taken. That includes every multi-node job, because the
-// metrics store attributes an experiment to one node only.
+// A victim whose node is unknown is never taken. The metrics store records one node per
+// experiment, so a multi-node victim frees its whole footprint in the cluster total and, on that
+// one node, the single rank proven to be there.
 //
 // Returns committed=true when it requeued the whole planned set. The caller uses that to stand the
 // disbalance evictor down: capacity for this job is already on its way back, and a second
@@ -78,9 +79,6 @@ func (l *Loop) preempt(ctx context.Context, avail domain.Footprint, nodeAvail, n
 	nodeOf := make(map[string]string, len(burstRunning))
 	candidates := burstRunning[:0]
 	for _, exp := range burstRunning {
-		if exp.Job.Nodes() > 1 {
-			continue
-		}
 		hours, err := l.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now)
 		if err != nil {
 			l.logger.Warn("preempt: cannot rank candidate, skipping it",
@@ -130,10 +128,9 @@ func (l *Loop) preempt(ctx context.Context, avail domain.Footprint, nodeAvail, n
 		free.AddFootprint(avail)
 		accelerators, resources := cloneNodeCapacity(nodeAvail), cloneNodeCapacity(nodeResources)
 		for _, victim := range victims {
-			vfp := victim.Footprint()
-			free.AddFootprint(vfp)
+			free.AddFootprint(victim.Footprint())
 			node := nodeOf[victim.ID]
-			creditNode(accelerators[node], resources[node], victim, vfp)
+			creditNode(accelerators[node], resources[node], victim)
 		}
 		return domain.Fits(free, fp) && topologyFits(accelerators, resources, nodeLabels, preemptor)
 	}
@@ -238,19 +235,30 @@ func (l *Loop) preempt(ctx context.Context, avail domain.Footprint, nodeAvail, n
 	return false, fmt.Errorf("preempt: requeued %d of %d planned victims for %s", requeued, len(selected), preemptor.ID)
 }
 
-// creditNode returns an evicted job's accelerators and CPU, memory and storage to the free
-// capacity of the node it ran on. A nil map is a node the cluster did not report and is left alone.
-func creditNode(accelerators, resources map[string]int64, exp *domain.Experiment, fp domain.Footprint) {
-	if accelerators != nil && exp.AcceleratorCount > 0 {
-		accelerators[foldMatchingKey(accelerators, strings.ToLower(string(exp.AcceleratorType)))] += int64(exp.AcceleratorCount)
-	}
-	if resources == nil {
+// creditNode returns to a node's free capacity what evicting exp is proven to free there: one
+// rank, and for a job whose ranks differ the least of them in every dimension. A nil map is a node
+// the cluster did not report and is left alone.
+func creditNode(accelerators, resources map[string]int64, exp *domain.Experiment) {
+	shapes := exp.NodeShapes()
+	if len(shapes) == 0 {
 		return
 	}
-	for key, amount := range fp {
-		if name, ok := nodeResourceName(key.Kind); ok {
-			resources[name] += amount
+	count := shapes[0].AcceleratorCount
+	least := map[string]int64{}
+	for name, amount := range shapes[0].Resources {
+		least[name] = amount
+	}
+	for _, shape := range shapes[1:] {
+		count = min(count, shape.AcceleratorCount)
+		for name := range least {
+			least[name] = min(least[name], shape.Resources[name])
 		}
+	}
+	if accelerators != nil && count > 0 {
+		accelerators[foldMatchingKey(accelerators, strings.ToLower(string(exp.AcceleratorType)))] += count
+	}
+	if resources != nil {
+		addNodeResources(resources, least)
 	}
 }
 

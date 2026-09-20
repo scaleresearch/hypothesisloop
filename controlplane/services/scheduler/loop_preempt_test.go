@@ -433,13 +433,40 @@ func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
 	})
 
 	t.Run("a victim whose node is unknown is spared", func(t *testing.T) {
-		gang := twoOn("gang")
-		gang.Job.NumNodes = 2
 		store := &preemptStore{}
-		l, _ := preemptLoop(store, fakeObserved{node: map[string]string{"gang": "node-a"}})
-		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("unattributed"), gang}, preemptorNeeding(flavor, 4))
+		l, _ := preemptLoop(store, fakeObserved{})
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("unattributed")}, preemptorNeeding(flavor, 4))
 		if err != nil || committed || len(store.requeued) != 0 {
 			t.Fatalf("preempt = (%v, %v), requeued %v, want nothing taken", committed, err, store.requeued)
 		}
 	})
+}
+
+// One node is recorded per experiment, so a gang is proven to hold one rank on it and nothing is
+// known about where its other ranks are.
+func TestPreemptCreditsAGangOneRankOnItsRecordedNode(t *testing.T) {
+	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	gang := func() *domain.Experiment {
+		g := burstVictim("gang", flavor)
+		g.AcceleratorCount = 4
+		g.Job.AcceleratorCount, g.Job.NumNodes = 2, 2
+		return g
+	}
+	full := map[string]int64{"node-a": 0, "node-b": 0}
+	for name, tc := range map[string]struct {
+		need      int
+		committed bool
+	}{
+		"a job the proven rank makes room for preempts the gang": {2, true},
+		"a job needing both ranks on one node does not":          {4, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &preemptStore{}
+			l, _ := preemptLoop(store, onNodeA(fakeObserved{}, "gang"))
+			committed, err := preemptFor(l, full, []*domain.Experiment{gang()}, preemptorNeeding(flavor, tc.need))
+			if err != nil || committed != tc.committed || (len(store.requeued) == 1) != tc.committed {
+				t.Fatalf("preempt = (%v, %v), requeued %v, want committed %v", committed, err, store.requeued, tc.committed)
+			}
+		})
+	}
 }
