@@ -454,11 +454,13 @@ func (l *Loop) tick(ctx context.Context) error {
 					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 				}
 			}
-			// A guaranteed job waiting for capacity it can get holds what is free against the burst
-			// pass, or burst refills the room a preemption is freeing and the job never fits.
-			aboveInstalled := exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, exp)
-			if cluster != "" && !scalarFits && !aboveInstalled {
+			// A guaranteed job whose capacity is being freed holds what is free against the burst
+			// pass, or burst refills the room and the job never fits.
+			if promised || committed {
 				subtractFootprint(bAvail[cluster], fp)
+			}
+			if promised {
+				subtractFootprint(desiredFree[cluster], fp)
 			}
 			// Only a preempt that actually requeued victims makes the running set stale. Marking
 			// it stale unconditionally cost a full re-read for every blocked job behind it on a
@@ -492,7 +494,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedNoScalableCapacity
 			case misfit != "":
 				reason = misfit
-			case aboveInstalled:
+			case exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, exp):
 				reason = exceedsClusterCapacityReason(exp)
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&

@@ -488,20 +488,22 @@ func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
 const l40 = "nvidia.com/gpu.product=NVIDIA-L40"
 
 // holdWorkload is cluster-a with four h100 installed and three free, two free l40, and cluster-b
-// with one free h100. cpuCores is what cluster-a has free.
+// with one free h100. cpuCores is what cluster-a has free, terminating the h100 on cluster-a that
+// desired state has released and a terminating pod still holds.
 type holdWorkload struct {
 	LoopWorkloadClient
-	cpuCores float64
+	cpuCores    float64
+	terminating int64
 }
 
 func (w holdWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
-	free := func() map[string]domain.Footprint {
+	free := func(terminating int64) map[string]domain.Footprint {
 		return map[string]domain.Footprint{
-			"cluster-a": domain.CapacityFootprint(w.cpuCores, map[string]int64{h100: 3, l40: 2}, 64<<30, 64<<30),
+			"cluster-a": domain.CapacityFootprint(w.cpuCores, map[string]int64{h100: 3 + terminating, l40: 2}, 64<<30, 64<<30),
 			"cluster-b": domain.CapacityFootprint(16, map[string]int64{h100: 1}, 64<<30, 64<<30),
 		}
 	}
-	return free(), free(), nil
+	return free(0), free(w.terminating), nil
 }
 func (w holdWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
 	return map[string]map[string]map[string]int64{
@@ -592,14 +594,16 @@ func TestTickHoldsFreeCapacityForAWaitingGuaranteedJob(t *testing.T) {
 	// The guaranteed job is pinned to cluster-a, which has three h100 free of four installed.
 	for name, tc := range map[string]struct {
 		guaranteedCount int
+		terminating     int64
 		burstFlavor     domain.AcceleratorType
 		burstCluster    string
 		admitted        bool
 	}{
-		"short by one holds the same flavor":     {4, h100, "cluster-a", false},
-		"above installed capacity holds nothing": {5, h100, "cluster-a", true},
-		"another flavor is admitted":             {4, l40, "cluster-a", true},
-		"another cluster is admitted":            {4, h100, "cluster-b", true},
+		"capacity being freed holds the same flavor": {4, 1, h100, "cluster-a", false},
+		"nothing being freed holds nothing":          {4, 0, h100, "cluster-a", true},
+		"above installed capacity holds nothing":     {5, 1, h100, "cluster-a", true},
+		"another flavor is admitted":                 {4, 1, l40, "cluster-a", true},
+		"another cluster is admitted":                {4, 1, h100, "cluster-b", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, tc.guaranteedCount, "")
@@ -607,7 +611,7 @@ func TestTickHoldsFreeCapacityForAWaitingGuaranteedJob(t *testing.T) {
 			burst := holdJob("burst", domain.CapacityBurst, tc.burstFlavor, 1, "")
 			burst.ClusterName = tc.burstCluster
 			store := &holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{burst, guaranteed}}}
-			l := holdLoop(store, holdWorkload{cpuCores: 16}, noopEvictor{})
+			l := holdLoop(store, holdWorkload{cpuCores: 16, terminating: tc.terminating}, noopEvictor{})
 
 			if err := l.tick(context.Background()); err != nil {
 				t.Fatalf("tick() = %v, want nil", err)
