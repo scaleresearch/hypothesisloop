@@ -6,9 +6,7 @@ package cloudexec
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
@@ -72,10 +70,6 @@ var (
 	_ agentexec.PassScoped = (*Executor)(nil)
 )
 
-// segmentPattern is what a namespace and a shape name may be. Neither holds a dash: an instance
-// name is read back from the right, and a namespace with one could be the prefix of another's.
-var segmentPattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
-
 // The longest experiment id and attempt number an instance name is sized for at startup. Ids are
 // the submitter's to choose; one as long as a DNS label fits, and CreateWorkload refuses a job
 // whose name would not.
@@ -98,11 +92,11 @@ func New(cfg Config) (*Executor, error) {
 		jobImage:     cfg.JobImage,
 		logTailLines: cfg.LogTailLines,
 		shapes:       append([]Shape(nil), cfg.Shapes...),
-		provider:     bounded{cfg.Provider},
+		provider:     provider.Bounded(cfg.Provider),
 	}, nil
 }
 
-func (cfg Config) prefix() string { return jobPrefix + cfg.Namespace + "-" }
+func (cfg Config) prefix() string { return provider.JobPrefix(cfg.Namespace) }
 
 // Validate checks everything but the provider, so a config file is refused when it is loaded,
 // before any vendor is contacted.
@@ -110,8 +104,8 @@ func (cfg Config) Validate() error {
 	if cfg.ClusterID == "" || cfg.APIURL == "" || cfg.JobImage == "" {
 		return fmt.Errorf("cloudexec: ClusterID, APIURL and JobImage are required")
 	}
-	if !segmentPattern.MatchString(cfg.Namespace) {
-		return fmt.Errorf("cloudexec: namespace %q must be 1 to 16 lowercase letters and digits", cfg.Namespace)
+	if err := provider.ValidateSegment("namespace", cfg.Namespace); err != nil {
+		return fmt.Errorf("cloudexec: %w", err)
 	}
 	if cfg.LogTailLines <= 0 {
 		return fmt.Errorf("cloudexec: LogTailLines must be positive")
@@ -122,8 +116,8 @@ func (cfg Config) Validate() error {
 	longest := (&Executor{prefix: cfg.prefix()}).instanceName
 	seen := map[string]bool{}
 	for _, s := range cfg.Shapes {
-		if !segmentPattern.MatchString(s.Name) {
-			return fmt.Errorf("cloudexec: shape name %q must be 1 to 16 lowercase letters and digits", s.Name)
+		if err := provider.ValidateSegment("shape name", s.Name); err != nil {
+			return fmt.Errorf("cloudexec: %w", err)
 		}
 		if seen[s.Name] {
 			return fmt.Errorf("cloudexec: shape name %q is used twice", s.Name)
@@ -164,39 +158,3 @@ func (e *Executor) GetClusterID(context.Context) (string, error) { return e.clus
 // SupportsMultiNodeJobs is false: a job is one instance, and instances of one account share no
 // network a distributed job could rendezvous over.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
-
-// providerCallTimeout bounds every call to the vendor, so an API that stops answering fails the
-// pass instead of stalling the reconcile and status loops.
-const providerCallTimeout = time.Minute
-
-type bounded struct{ provider.Provider }
-
-func (b bounded) Create(ctx context.Context, spec provider.Spec) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
-	defer cancel()
-	return b.Provider.Create(ctx, spec)
-}
-
-func (b bounded) List(ctx context.Context, namePrefix string) ([]provider.Instance, error) {
-	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
-	defer cancel()
-	return b.Provider.List(ctx, namePrefix)
-}
-
-func (b bounded) Logs(ctx context.Context, id string, tail int) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
-	defer cancel()
-	return b.Provider.Logs(ctx, id, tail)
-}
-
-func (b bounded) Stop(ctx context.Context, id string) error {
-	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
-	defer cancel()
-	return b.Provider.Stop(ctx, id)
-}
-
-func (b bounded) Destroy(ctx context.Context, id string) error {
-	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
-	defer cancel()
-	return b.Provider.Destroy(ctx, id)
-}

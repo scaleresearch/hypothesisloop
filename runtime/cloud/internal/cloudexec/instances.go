@@ -12,11 +12,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
-// jobPrefix starts the name of every job's instance. What follows is the namespace, so the full
-// prefix of one executor's instances is never the prefix of another's or of anything else rented
-// on the account. "hl-agent-<namespace>-" is kept for the instances agents themselves run in.
-const jobPrefix = "hl-job-"
-
 // instance is a rented instance read back through its name. The name is the only thing a
 // provider stores for us, so it carries everything a later pass has to know: which job and which
 // attempt of it the instance runs, and which slot it occupies.
