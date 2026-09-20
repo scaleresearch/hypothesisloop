@@ -145,7 +145,7 @@ func TestLogsWaitsNoLongerThanAPushCanAfford(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.logWait <= 0 || p.logWait > 10*time.Second {
+	if p.logWait <= 0 || p.logWait > 30*time.Second {
 		t.Errorf("a Logs call waits up to %s for one host", p.logWait)
 	}
 }

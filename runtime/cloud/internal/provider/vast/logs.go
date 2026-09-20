@@ -12,10 +12,12 @@ import (
 	"time"
 )
 
-// logDeliveryTimeout is how long one Logs call waits for the host's upload. Uploads arrived 1.3
-// to 2.5 seconds after the request on every healthy instance measured, and a caller reads its
-// instances one after another, so one host that does not deliver must not hold up the rest.
-const logDeliveryTimeout = 10 * time.Second
+// logDeliveryTimeout is how long one Logs call waits for the host's upload. A caller reads its
+// instances one after another, so one host that does not deliver must not hold up the rest for
+// long. Uploads arrived within 2.5 seconds on nearly every read measured; the first read of a
+// freshly started instance took 21.8 seconds on one host, and a wait of ten seconds failed a
+// conformance run there.
+const logDeliveryTimeout = 30 * time.Second
 
 var errLogNotDelivered = errors.New("not delivered yet")
 
