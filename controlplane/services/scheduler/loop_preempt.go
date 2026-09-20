@@ -385,13 +385,9 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		}
 	} else {
 		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-			guaranteed, burst, err := l.workload.GetFlavorCapacity(ctx)
+			available, _, err := l.workload.GetFlavorCapacity(ctx)
 			if err != nil {
 				return false, err
-			}
-			available := guaranteed
-			if exp.CapacityTier == domain.CapacityBurst {
-				available = burst
 			}
 			if !domain.Fits(available[clusterName], fp) {
 				return false, nil

@@ -65,7 +65,7 @@ func TestValidateCapacitySnapshotRejectsMissingAuthoritativeMetric(t *testing.T)
 	b := &Backend{}
 	err := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
-		map[string]float64{"cluster-a": 4}, map[string]float64{"cluster-a": 8},
+		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
 		map[string]map[string]int64{"cluster-a": {"flavor-h100": 1}},
 		map[string]map[string]int64{"cluster-a": {"flavor-h100": 2}},
 		map[string]int64{"cluster-a": 8}, map[string]int64{"cluster-a": 16},
@@ -80,7 +80,7 @@ func TestValidateCapacitySnapshotAllowsClusterSpecificAcceleratorTypes(t *testin
 	b := &Backend{}
 	err := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
-		map[string]float64{"cluster-a": 4}, map[string]float64{"cluster-a": 8},
+		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
 		map[string]map[string]int64{"cluster-a": {"flavor-h100": 1}},
 		map[string]map[string]int64{"cluster-a": {"flavor-h100": 2}},
 		map[string]int64{"cluster-a": 8}, map[string]int64{"cluster-a": 16},

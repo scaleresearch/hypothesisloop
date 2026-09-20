@@ -661,3 +661,66 @@ func TestTickEvictsNothingForABurstJobHeldByAWaitingGuaranteedJob(t *testing.T) 
 		t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedOutranked)
 	}
 }
+
+// --- Tick-level: one shortage is preempted for once, however long the victim takes to go ---
+
+// terminatingStore requeues a preempted job out of the running set at once.
+type terminatingStore struct {
+	holdStore
+	requeued []string
+}
+
+func (s *terminatingStore) RequeuePreempted(_ context.Context, id string, _, _ float64) (bool, error) {
+	for i, exp := range s.running {
+		if exp.ID == id {
+			s.running = append(s.running[:i], s.running[i+1:]...)
+			s.requeued = append(s.requeued, id)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// terminatingWorkload is cluster-a with four h100 installed and one reported free on every read:
+// the pods of requeued jobs never go away. Desired-free follows the store.
+type terminatingWorkload struct {
+	holdWorkload
+	store *terminatingStore
+}
+
+func (w terminatingWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	free := func(h100Free int64) map[string]domain.Footprint {
+		return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, map[string]int64{h100: h100Free}, 64<<30, 64<<30)}
+	}
+	return free(1), free(4 - int64(len(w.store.running))), nil
+}
+func (terminatingWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 1}}}, nil
+}
+
+func TestTickPreemptsOnceWhileTheVictimTerminates(t *testing.T) {
+	guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, 2, "")
+	guaranteed.ClusterName = "cluster-a"
+	store := &terminatingStore{holdStore: holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{guaranteed}}}}
+	for _, id := range []string{"b1", "b2", "b3"} {
+		b := holdJob(id, domain.CapacityBurst, h100, 1, "")
+		b.ClusterName = "cluster-a"
+		b.Status = domain.StatusRunning
+		store.running = append(store.running, b)
+	}
+	l := holdLoop(store, terminatingWorkload{holdWorkload: holdWorkload{cpuCores: 16}, store: store}, noopEvictor{})
+	l.observed = fakeObserved{}
+	l.settler = &recordingSettler{}
+
+	for tick := 1; tick <= 4; tick++ {
+		if err := l.tick(context.Background()); err != nil {
+			t.Fatalf("tick %d = %v, want nil", tick, err)
+		}
+		if len(store.requeued) != 1 {
+			t.Fatalf("after tick %d preempted %v, want one victim for a shortage of one", tick, store.requeued)
+		}
+	}
+	if _, ok := store.submitted["guaranteed"]; ok {
+		t.Fatal("the guaranteed job was admitted while its capacity was still held")
+	}
+}

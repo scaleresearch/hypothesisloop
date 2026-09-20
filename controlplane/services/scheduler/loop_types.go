@@ -105,10 +105,10 @@ func (o metricsDBObserver) LatestExperimentNode(ctx context.Context, experimentI
 // tells the cluster-agent the Job should go away; the loop never waits for it.
 type LoopWorkloadClient interface {
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
-	// GetFlavorCapacity returns available capacity as a domain.Footprint per cluster —
-	// guaranteed[cluster] and burst[cluster] — every configured cluster has an entry, even at
-	// zero, so the loop can enumerate clusters from these maps alone.
-	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
+	// GetFlavorCapacity returns per connected cluster what can be claimed now (available) and
+	// what is free once every job already told to stop is gone (desiredFree). The loop
+	// enumerates clusters from these maps.
+	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — see
 	// reservePlacement, which must prove a job fits one node in every dimension.

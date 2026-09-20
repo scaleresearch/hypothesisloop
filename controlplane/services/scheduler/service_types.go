@@ -74,7 +74,7 @@ type WorkloadClient interface {
 	// GetFlavorCapacity returns available physical capacity per cluster (see
 	// LoopWorkloadClient.GetFlavorCapacity). Used by the operator admit endpoint to verify the
 	// target cluster has room, across every dimension, before admitting onto it.
-	GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error)
+	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — admission must prove a
 	// job fits one node in every dimension, not just in accelerators.

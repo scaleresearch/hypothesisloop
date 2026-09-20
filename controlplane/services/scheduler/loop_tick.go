@@ -54,10 +54,13 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 1. Get available physical capacity as a domain.Footprint per cluster — a pooled total
 	// would hide which cluster has room, admitting against a combined number while the actual
 	// target cluster is full.
-	gAvail, bAvail, err := l.workload.GetFlavorCapacity(ctx)
+	gAvail, desiredFree, err := l.workload.GetFlavorCapacity(ctx)
 	if err != nil {
 		return err
 	}
+	// Guaranteed and burst share one physical pool per cluster; preemption enforces the tier
+	// boundary.
+	bAvail := cloneAvail(gAvail)
 	nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
 	if err != nil {
 		return fmt.Errorf("per-node accelerator capacity: %w", err)
@@ -429,6 +432,10 @@ func (l *Loop) tick(ctx context.Context) error {
 			// work exists to remove, so it lands with the batched per-tick node read, not before
 			// it. Until then this refuses to guess: no plan is better than a destructive one.
 			// The disbalance pass below is node-aware and still runs.
+			// The job fits once the platform jobs already told to stop are gone: earlier requeues
+			// freed its capacity, and taking more victims while their pods terminate takes one
+			// per tick.
+			promised := !scalarFits && domain.Fits(desiredFree[cluster], fp)
 			var committed bool
 			var err error
 			switch {
@@ -437,6 +444,9 @@ func (l *Loop) tick(ctx context.Context) error {
 					zap.String("exp", exp.ID), zap.String("cluster", cluster))
 			case waitingForScaleUp:
 				l.logger.Info("skipping preemption: cluster is autoscaler-enabled and already waiting for scale-up",
+					zap.String("exp", exp.ID), zap.String("cluster", cluster))
+			case promised:
+				l.logger.Info("skipping preemption: the capacity is already being freed",
 					zap.String("exp", exp.ID), zap.String("cluster", cluster))
 			default:
 				committed, err = l.preempt(ctx, shortage, burstRunning, exp)
@@ -466,7 +476,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			//   - the pass already ran for this cluster this tick: it is a cluster-level verdict
 			//     about stranded accelerators, not a per-queued-job one. Running it once per
 			//     blocked job against unchanged availability evicts a fresh victim each time.
-			if err == nil && !committed && !disbalanceRan[cluster] {
+			if err == nil && !committed && !promised && !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
 				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
@@ -507,6 +517,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// bAvail is the same shared pool's other view — without this, the burst pass later in
 		// this tick could still see this unit as free and double-book it.
 		subtractFootprint(bAvail[cluster], fp)
+		subtractFootprint(desiredFree[cluster], fp)
 		reservePlacement(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "admitted").Inc()
 	}

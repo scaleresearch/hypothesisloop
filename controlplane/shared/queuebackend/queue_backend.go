@@ -114,24 +114,27 @@ func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Ex
 	return t, nil
 }
 
-// GetFlavorCapacity returns available capacity per cluster per flavor: guaranteed[cluster][flavor]
-// and burst[cluster][flavor]. Every configured cluster always gets an entry.
-//
-// Available is the dimension-wise minimum of two views:
-//   - desired-free = latest reported total minus every PostgreSQL SUBMITTED/ADMITTED/RUNNING footprint;
-//   - actual-free = the cluster agent's fresh allocatable-minus-requested observation.
+// GetFlavorCapacity returns two views of each connected cluster's free capacity:
+//   - desiredFree = capacity left to platform jobs minus every PostgreSQL SUBMITTED/RUNNING
+//     footprint: what is free once the cluster has converged on desired state;
+//   - available = the dimension-wise minimum of desiredFree and the cluster agent's fresh
+//     allocatable-minus-requested observation: what can be claimed now.
 //
 // Desired-free closes the creation-delay race right after MarkSubmitted; actual-free closes
 // the deletion-delay race after preemption/eviction. Taking the minimum prevents overcommit.
 // Missing/stale metrics abort the pass instead of being replaced with zero.
-func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[string]domain.Footprint, err error) {
+//
+// CPU, memory and storage totals are the per-node figures net of non-platform pods, so a
+// desiredFree above available there is always a platform job still terminating. Accelerator
+// totals are raw allocatable: the runtime does not report them net of non-platform pods.
+func (b *Backend) GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error) {
 	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: live clusters: %w", err)
 	}
-	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	nodeTotals, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: total CPU capacity: %w", err)
+		return nil, nil, fmt.Errorf("queuebackend: total node capacity: %w", err)
 	}
 	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
@@ -141,18 +144,9 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: accelerator capacity: %w", err)
 	}
-	// RAM/ephemeral-storage are hard physical-fit dimensions (not billing dimensions).
-	ramTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
-	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: total RAM capacity: %w", err)
-	}
 	ramAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: available RAM capacity: %w", err)
-	}
-	storageTotal, err := metricsdb.LiveClusterStorageTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
-	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: total storage capacity: %w", err)
 	}
 	storageAvailable, err := metricsdb.LiveClusterStorageCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
@@ -162,37 +156,43 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (guaranteed, burst map[
 	if err != nil {
 		return nil, nil, fmt.Errorf("queuebackend: desired footprint: %w", err)
 	}
+	cpuTotal, ramTotal, storageTotal := sumNodeTotals(nodeTotals)
 	if err := b.validateCapacitySnapshot(heartbeats, cpuAvailable, cpuTotal, acceleratorAvailable, acceleratorTotal, ramAvailable, ramTotal, storageAvailable, storageTotal); err != nil {
 		return nil, nil, err
 	}
 
-	guaranteed = make(map[string]domain.Footprint, len(heartbeats))
-	burst = make(map[string]domain.Footprint, len(heartbeats))
+	available = make(map[string]domain.Footprint, len(heartbeats))
+	desiredFree = make(map[string]domain.Footprint, len(heartbeats))
 	for cluster, connected := range heartbeats {
 		if !connected {
 			continue
 		}
-		totalAccelerators := acceleratorTotal[cluster]
-		availableAccelerators := acceleratorAvailable[cluster]
-		total := domain.CapacityFootprint(cpuTotal[cluster], totalAccelerators, ramTotal[cluster], storageTotal[cluster])
-		desiredFree := total.Sub(desiredByCluster[cluster])
-		actualFree := domain.CapacityFootprint(cpuAvailable[cluster], availableAccelerators, ramAvailable[cluster], storageAvailable[cluster])
-		fp := minimumFootprint(desiredFree, actualFree)
-		guaranteed[cluster] = fp
-		// Guaranteed and burst share the same physical pool per cluster; preemption enforces
-		// the tier boundary, not a capacity split. Copy so tick()'s mutations don't alias.
-		burstCopy := make(domain.Footprint, len(fp))
-		for k, v := range fp {
-			burstCopy[k] = v
-		}
-		burst[cluster] = burstCopy
+		total := domain.CapacityFootprint(0, acceleratorTotal[cluster], ramTotal[cluster], storageTotal[cluster])
+		total[domain.ResourceKey{Kind: domain.ResourceKindCPU}] = cpuTotal[cluster]
+		actualFree := domain.CapacityFootprint(cpuAvailable[cluster], acceleratorAvailable[cluster], ramAvailable[cluster], storageAvailable[cluster])
+		desiredFree[cluster] = total.Sub(desiredByCluster[cluster])
+		available[cluster] = minimumFootprint(desiredFree[cluster], actualFree)
 	}
-	return guaranteed, burst, nil
+	return available, desiredFree, nil
+}
+
+// sumNodeTotals adds up each cluster's per-node capacity left to platform jobs: CPU in
+// millicores, memory and storage in bytes.
+func sumNodeTotals(byNode map[string]map[string]map[string]int64) (cpuMillicores, ramBytes, storageBytes map[string]int64) {
+	cpuMillicores, ramBytes, storageBytes = map[string]int64{}, map[string]int64{}, map[string]int64{}
+	for cluster, nodes := range byNode {
+		for _, total := range nodes {
+			cpuMillicores[cluster] += total[domain.NodeResourceCPUMillicores]
+			ramBytes[cluster] += total[domain.NodeResourceMemoryBytes]
+			storageBytes[cluster] += total[domain.NodeResourceStorageBytes]
+		}
+	}
+	return cpuMillicores, ramBytes, storageBytes
 }
 
 func (b *Backend) validateCapacitySnapshot(
 	heartbeats map[string]bool,
-	cpuAvailable, cpuTotal map[string]float64,
+	cpuAvailable map[string]float64, cpuTotalMillicores map[string]int64,
 	acceleratorAvailable, acceleratorTotal map[string]map[string]int64,
 	ramAvailable, ramTotal, storageAvailable, storageTotal map[string]int64,
 ) error {
@@ -201,7 +201,7 @@ func (b *Backend) validateCapacitySnapshot(
 			continue
 		}
 		cpuAvail, cpuAvailOK := cpuAvailable[cluster]
-		cpuTot, cpuTotalOK := cpuTotal[cluster]
+		cpuTot, cpuTotalOK := cpuTotalMillicores[cluster]
 		ramAvail, ramAvailOK := ramAvailable[cluster]
 		ramTot, ramTotalOK := ramTotal[cluster]
 		storageAvail, storageAvailOK := storageAvailable[cluster]
@@ -217,7 +217,7 @@ func (b *Backend) validateCapacitySnapshot(
 		if !accelAvailOK {
 			accelAvail, accelTotal = map[string]int64{}, map[string]int64{}
 		}
-		if cpuAvail > cpuTot || ramAvail > ramTot || storageAvail > storageTot {
+		if int64(cpuAvail*1000) > cpuTot || ramAvail > ramTot || storageAvail > storageTot {
 			return fmt.Errorf("queuebackend: available capacity exceeds total for active cluster %q", cluster)
 		}
 		if len(accelAvail) != len(accelTotal) {
@@ -256,9 +256,8 @@ func (b *Backend) GetNodeTotalCapacity(ctx context.Context) (map[string]map[stri
 	return metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
-// GetTotalCapacity returns each connected cluster's installed capacity — the same `total`
-// GetFlavorCapacity derives desired-free from, exposed on its own for consumers that need the
-// cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are
+// GetTotalCapacity returns each connected cluster's installed capacity, for consumers that need
+// the cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are
 // returned; a cluster whose totals are missing or stale is omitted entirely, never zero-filled.
 func (b *Backend) GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error) {
 	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
