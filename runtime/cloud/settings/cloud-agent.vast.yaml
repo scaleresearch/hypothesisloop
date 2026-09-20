@@ -9,6 +9,8 @@ api_url: https://api.example.invalid
 # own instance when the job ends, and refuses to start the job without curl.
 job_image: registry.example.invalid/hypothesisloop-job:latest
 
+# Do not change it while instances of this agent exist: the agent would no longer see them, they
+# would run and bill unmanaged, and every job still desired would be rented a second time.
 namespace: main
 
 # One list call per pass. The account's list answered two calls a second without a refusal and

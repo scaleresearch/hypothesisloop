@@ -14,10 +14,9 @@ import (
 )
 
 // Shape is one kind of instance this account may rent, and how many of them at once. Each of its
-// MaxInstances is reported to the control plane as a slot, a node that holds one job, so
-// admission places a job on rented compute the way it places one on any cluster and says which
-// slot it placed it on. An instance is sized by the job it runs; the shape is the most one slot
-// may be asked for.
+// MaxInstances is reported to the control plane as a slot, a node that holds one job. Admission
+// sizes a job to the slot it places it on and says which slot that is, so an instance is rented
+// at its shape's size.
 type Shape struct {
 	// Name is part of every instance name and slot name of this shape.
 	Name string
@@ -38,7 +37,7 @@ type Config struct {
 	ClusterID string
 	// Namespace is part of every instance name. This executor lists, counts and destroys the
 	// instances of its namespace and no others, so several agents, and whatever else is rented
-	// on the account, can share it.
+	// on the account, can share it. Changed while instances exist, it orphans them.
 	Namespace string
 	// APIURL is handed to every job as HYPOTHESISLOOP_API_URL, so it must be reachable from a
 	// rented instance.

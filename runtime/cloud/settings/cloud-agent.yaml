@@ -12,6 +12,8 @@ job_image: registry.example.invalid/hypothesisloop-job:latest
 # Part of every instance name: hl-job-<namespace>-... for a job. The agent lists, counts and
 # destroys the instances of its namespace only, so agents sharing an account each take their own.
 # 1 to 16 lowercase letters and digits.
+# Do not change it while instances of this agent exist: the agent would no longer see them, they
+# would run and bill unmanaged, and every job still desired would be rented a second time.
 namespace: main
 
 # A reconcile pass costs the provider one list call. A status push costs one list call and one
@@ -32,8 +34,9 @@ provider:
 
 # What this account may rent. Each of a shape's max_instances is reported as a node that holds
 # one job, so the control plane needs no provider settings of its own, and max_instances bounds
-# what can be billed at once. A job is rented at the size it asked for; the shape is the most one
-# may ask for.
+# what can be billed at once. A job is admitted to a shape with exactly the accelerators it asks
+# for and at least the cpu, memory and storage, the smallest such shape first, and is rented and
+# counted at the shape's whole size.
 shapes:
   # name is 1 to 16 lowercase letters and digits. accelerator_type is the resource catalog
   # string, written exactly as jobs request it and as it is priced in the control plane's
