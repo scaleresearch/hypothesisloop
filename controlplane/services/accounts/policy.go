@@ -9,68 +9,22 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// policy is the one place that says who may do what to orgs, projects, API keys and clusters.
+// policy says who may do what to projects and API keys. Who reads and who administers an org and
+// its clusters is auth.Access's (shared/auth/orgs.go), which every rule here starts from.
 //
-//   - staff may do everything.
-//   - a signed-in person reads the orgs they belong to and administers the ones they own.
-//   - an API key of a whole org administers that org as an owner would, with two limits: it
-//     cannot create another org, and of the org's keys it reaches only its own lineage.
 //   - an API key bound to one project reads that project and nothing else of the org.
+//   - an API key cannot create an org: it belongs to one.
 //   - a key mints keys no wider than itself, and reaches itself and the keys minted from it.
-//   - every token the platform derives for something it launched is refused.
 //
 // An org or project outside the caller's reach is answered as not found; one inside it that the
 // caller may not change is answered as forbidden.
 type policy struct {
-	roles RoleReader
-}
-
-// RoleReader reads an org and a person's role in it. *db.AccountsStore satisfies it.
-type RoleReader interface {
-	GetOrg(ctx context.Context, id string) (*domain.Org, error)
-	OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error)
-}
-
-// caller returns the request's principal when it is a person, an API key or staff.
-func (policy) caller(ctx context.Context) (auth.Principal, error) {
-	p, ok := auth.FromContext(ctx)
-	if !ok {
-		return auth.Principal{}, auth.Unauthenticated("the request carries no principal")
-	}
-	switch p.Kind {
-	case auth.KindUser, auth.KindKey, auth.KindStaff:
-		return p, nil
-	default:
-		return auth.Principal{}, auth.Forbidden("forbidden: a " + string(p.Kind) + " token does not reach accounts")
-	}
-}
-
-// inOrg admits a caller whose reach includes the org at all.
-func (pol policy) inOrg(ctx context.Context, orgID string) (auth.Principal, error) {
-	p, err := pol.caller(ctx)
-	if err != nil {
-		return p, err
-	}
-	if !p.Scope().AdmitsOrg(orgID) {
-		return p, huma.Error404NotFound("org not found")
-	}
-	// A person and a key reach an org through a row that names it. Staff reach every id, so
-	// for them the org's existence is checked here.
-	if p.Kind == auth.KindStaff {
-		org, err := pol.roles.GetOrg(ctx, orgID)
-		if err != nil {
-			return p, huma.Error500InternalServerError(err.Error())
-		}
-		if org == nil {
-			return p, huma.Error404NotFound("org not found")
-		}
-	}
-	return p, nil
+	access *auth.Access
 }
 
 // readOrg admits the caller to see what belongs to the org as a whole: the clusters it runs on.
 func (pol policy) readOrg(ctx context.Context, orgID string) (auth.Principal, error) {
-	p, err := pol.inOrg(ctx, orgID)
+	p, err := pol.access.OrgMember(ctx, orgID)
 	if err != nil {
 		return p, err
 	}
@@ -80,36 +34,10 @@ func (pol policy) readOrg(ctx context.Context, orgID string) (auth.Principal, er
 	return p, nil
 }
 
-// administerOrg admits the caller to change an org: rename it, add projects and clusters.
-func (pol policy) administerOrg(ctx context.Context, orgID string) (auth.Principal, error) {
-	p, err := pol.inOrg(ctx, orgID)
-	if err != nil {
-		return p, err
-	}
-	switch p.Kind {
-	case auth.KindStaff:
-		return p, nil
-	case auth.KindKey:
-		if p.ProjectID != "" {
-			return p, auth.Forbidden("forbidden: an API key bound to one project cannot change its org")
-		}
-		return p, nil
-	default:
-		role, _, err := pol.roles.OrgRole(ctx, orgID, p.UserID)
-		if err != nil {
-			return p, huma.Error500InternalServerError(err.Error())
-		}
-		if role != domain.OrgRoleOwner {
-			return p, auth.Forbidden("forbidden: only an owner of the org may change it")
-		}
-		return p, nil
-	}
-}
-
 // visibleProjects narrows an org's projects to the ones the caller may see: all of them, or for
 // a key bound to one project that project.
 func (pol policy) visibleProjects(ctx context.Context, orgID string, projects []*domain.Project) ([]*domain.Project, error) {
-	p, err := pol.inOrg(ctx, orgID)
+	p, err := pol.access.OrgMember(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -122,11 +50,25 @@ func (pol policy) visibleProjects(ctx context.Context, orgID string, projects []
 	return out, nil
 }
 
+// changeProject admits the caller to change one project. A project the caller does not see,
+// whether it is another org's, a sibling of the one its key is bound to, or absent, is not found.
+func (pol policy) changeProject(ctx context.Context, project *domain.Project) error {
+	p, err := pol.access.Account(ctx)
+	if err != nil {
+		return err
+	}
+	if project == nil || !p.Scope().Admits(domain.Tenancy{OrgID: project.OrgID, ProjectID: project.ID}) {
+		return auth.NotFound("project")
+	}
+	_, err = pol.access.OrgAdmin(ctx, project.OrgID)
+	return err
+}
+
 // createOrg admits the caller to create an org and names its owner. A person owns what they
 // create. Staff name the owner, and a staff member who is signed in may leave it to be
 // themselves. A key belongs to one org and cannot make another.
 func (pol policy) createOrg(ctx context.Context, requestedOwner string) (ownerUserID string, err error) {
-	p, err := pol.caller(ctx)
+	p, err := pol.access.Account(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +89,7 @@ func (pol policy) createOrg(ctx context.Context, requestedOwner string) (ownerUs
 // mintKey admits the caller to create an API key of orgID, bound to projectID when set, and
 // returns the principal that mints it.
 func (pol policy) mintKey(ctx context.Context, orgID, projectID string) (auth.Principal, error) {
-	p, err := pol.inOrg(ctx, orgID)
+	p, err := pol.access.OrgMember(ctx, orgID)
 	if err != nil {
 		return p, err
 	}
@@ -157,7 +99,7 @@ func (pol policy) mintKey(ctx context.Context, orgID, projectID string) (auth.Pr
 		}
 		return p, nil
 	}
-	if p, err = pol.administerOrg(ctx, orgID); err != nil {
+	if p, err = pol.access.OrgAdmin(ctx, orgID); err != nil {
 		return p, err
 	}
 	if p.UserID == "" {
@@ -169,14 +111,14 @@ func (pol policy) mintKey(ctx context.Context, orgID, projectID string) (auth.Pr
 // reachableKeys narrows an org's keys to the ones the caller may see and revoke: all of them for
 // an owner and for staff, and for a key itself and its lineage.
 func (pol policy) reachableKeys(ctx context.Context, orgID string, keys []*domain.APIKey) ([]*domain.APIKey, error) {
-	p, err := pol.inOrg(ctx, orgID)
+	p, err := pol.access.OrgMember(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
 	if p.Kind == auth.KindKey {
 		return lineage(keys, p.KeyID), nil
 	}
-	if _, err := pol.administerOrg(ctx, orgID); err != nil {
+	if _, err := pol.access.OrgAdmin(ctx, orgID); err != nil {
 		return nil, err
 	}
 	return keys, nil
@@ -200,16 +142,4 @@ func lineage(keys []*domain.APIKey, root string) []*domain.APIKey {
 		}
 	}
 	return out
-}
-
-// staff admits only the platform's own operators.
-func (pol policy) staff(ctx context.Context) error {
-	p, err := pol.caller(ctx)
-	if err != nil {
-		return err
-	}
-	if p.Kind != auth.KindStaff {
-		return auth.Forbidden("forbidden: only staff may do this")
-	}
-	return nil
 }

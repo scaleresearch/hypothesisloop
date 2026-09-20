@@ -226,6 +226,11 @@ const (
 	// recorded as a tried_clusters failover rather than spending infra_requeue_count — see
 	// ResolveTermination's triedClusterID and autoscaler.md.
 	EvictionScaleUpTimeout EvictionReason = "scale_up_timeout"
+
+	// EvictionClusterWithdrawn is a job requeued because the cluster it was placed on stopped
+	// taking it: the platform ended the sharing, or the cluster's org removed it. The job did
+	// nothing wrong and spends no retry.
+	EvictionClusterWithdrawn EvictionReason = "cluster_withdrawn"
 )
 
 // PhaseDetail is what a runtime observed about why a job's container hasn't started (or

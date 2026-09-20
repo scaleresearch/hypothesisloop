@@ -1,15 +1,17 @@
 // Package accounts serves who exists and what they own: orgs, projects, API keys and clusters.
-// Who may call what is decided in policy.go and nowhere else.
+// Who may call what is decided in shared/auth/orgs.go for orgs and clusters and in policy.go for
+// projects and keys, and nowhere else.
 package accounts
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -20,9 +22,9 @@ import (
 // Accounts is the persistence the handler needs for orgs, projects and API keys.
 // *db.AccountsStore satisfies it.
 type Accounts interface {
-	RoleReader
 	CreateOrg(ctx context.Context, name, ownerUserID string) (*domain.Org, error)
 	RenameOrg(ctx context.Context, id, name string) error
+	GetOrg(ctx context.Context, id string) (*domain.Org, error)
 	ListOrgs(ctx context.Context, orgIDs []string) ([]*domain.Org, error)
 	ListAllOrgs(ctx context.Context) ([]*domain.Org, error)
 	ListUserOrgs(ctx context.Context, userID string) ([]*domain.Org, error)
@@ -36,20 +38,17 @@ type Accounts interface {
 	RevokeAPIKey(ctx context.Context, id string) error
 }
 
-// Clusters is the persistence the handler needs for cluster registration. *db.ClustersStore
-// satisfies it.
+// Clusters is the persistence the handler needs for clusters. *db.ClustersStore satisfies it.
 type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
-	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
-	SetClusterShared(ctx context.Context, name string, shared bool) (*domain.Cluster, error)
+	SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error)
+	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
+	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
 }
 
 // Connectivity reports which clusters have an agent connected right now, by name.
 type Connectivity func(ctx context.Context) (map[string]bool, error)
-
-// maxNameLength bounds the display name of an org, a project and an API key.
-const maxNameLength = 100
 
 // RuntimeAddresses is where a cluster's agents reach the platform from inside their cluster.
 type RuntimeAddresses struct {
@@ -63,11 +62,17 @@ type Handler struct {
 	connected     Connectivity
 	signingSecret string
 	runtimes      RuntimeAddresses
-	policy        policy
+	logger        *zap.Logger
+	// access and policy are the document's own access check, set when the routes are registered.
+	access *auth.Access
+	policy policy
 }
 
-func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses) *Handler {
-	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, runtimes: runtimes, policy: policy{roles: accounts}}
+func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses, logger *zap.Logger) *Handler {
+	if logger == nil {
+		panic("accounts.NewHandler: a logger is required")
+	}
+	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, runtimes: runtimes, logger: logger}
 }
 
 // Me is the caller and what it reaches.
@@ -118,14 +123,21 @@ type ListedCluster struct {
 	Connected bool `json:"connected"`
 }
 
-// listedFor shows a cluster to a caller listing the clusters of orgID. Another org's shared
-// cluster keeps its owner and its settings key to itself, except from staff.
-func listedFor(c *domain.Cluster, orgID string, staff, connected bool) ListedCluster {
-	listed := ListedCluster{ClusterView: viewOf(c), Owned: c.OrgID == orgID, Connected: connected}
-	if !listed.Owned && !staff {
-		listed.OrgID, listed.ClusterID = "", ""
+// listed shows a cluster to a caller listing the clusters of orgID. A cluster the caller does not
+// know keeps its owner and the identity its settings are kept under to itself.
+func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected bool) ListedCluster {
+	out := ListedCluster{ClusterView: viewOf(c), Owned: c.OrgID == orgID, Connected: connected}
+	if !caller.KnowsCluster(*c) {
+		out.OrgID, out.ClusterID = "", ""
 	}
-	return listed
+	return out
+}
+
+// WithdrawnCluster is a cluster after it stopped taking jobs it held, with the jobs that went
+// back to the queue for it.
+type WithdrawnCluster struct {
+	ClusterView
+	Requeued []string `json:"requeued" doc:"The jobs that were placed on the cluster and are queued again for another one. Each keeps its retries."`
 }
 
 type nameBody struct {
@@ -133,19 +145,21 @@ type nameBody struct {
 }
 
 func validName(what, name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", huma.Error400BadRequest(what + " name is required")
-	}
-	if len(name) > maxNameLength {
-		return "", huma.Error400BadRequest(what + " name is longer than 100 bytes")
+	name, err := domain.ValidateName(what, name)
+	if err != nil {
+		return "", huma.Error400BadRequest(err.Error())
 	}
 	return name, nil
 }
 
-// storeError answers for what the stores refuse; anything else is the platform failing.
-func storeError(err error) error {
+// answer turns what a route returns into what the caller is told. A refusal goes out as it is.
+// What the stores refuse gets its status. Anything else is the platform failing: it is logged
+// and answered without its text, which can hold a query or a value of another org.
+func (h *Handler) answer(op string, err error) error {
+	var refusal huma.StatusError
 	switch {
+	case errors.As(err, &refusal):
+		return err
 	case errors.Is(err, db.ErrOrgNotFound):
 		return huma.Error404NotFound("org not found")
 	case errors.Is(err, db.ErrProjectNotFound):
@@ -158,18 +172,29 @@ func storeError(err error) error {
 		return huma.Error404NotFound("cluster not found")
 	case errors.Is(err, db.ErrAPIKeyCreatorLacksOrg):
 		return auth.Forbidden("forbidden: " + err.Error())
-	case errors.Is(err, db.ErrProjectNameTaken):
-		return huma.Error409Conflict(err.Error())
-	case errors.Is(err, db.ErrClusterNameTaken):
+	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
 		return huma.Error409Conflict(err.Error())
 	default:
-		return huma.Error500InternalServerError(err.Error())
+		h.logger.Error("accounts request failed", zap.String("operation", op), zap.Error(err))
+		return huma.Error500InternalServerError(auth.InternalError)
 	}
+}
+
+// route registers one accounts operation and passes every error it returns through answer.
+func route[I, O any](doc *apidocs.Doc, h *Handler, op huma.Operation, handle func(context.Context, *I) (*O, error)) {
+	apidocs.Register(doc, apidocs.AudienceCoordinator, op, func(ctx context.Context, in *I) (*O, error) {
+		out, err := handle(ctx, in)
+		if err != nil {
+			return nil, h.answer(op.OperationID, err)
+		}
+		return out, nil
+	})
 }
 
 // RegisterHuma registers the accounts operations on the shared API document.
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	h.access, h.policy = doc.Access, policy{access: doc.Access}
+	route(doc, h, huma.Operation{
 		OperationID: "get-me", Method: "GET", Path: "/me",
 		Summary: "Who this token is and what it reaches", Tags: []string{"accounts"},
 		Description: "The caller with the orgs and projects it reaches. A person sees the orgs they belong to with their role, " +
@@ -182,7 +207,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body Me }{Body: *me}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "create-org", Method: "POST", Path: "/orgs", DefaultStatus: http.StatusCreated,
 		Summary: "Create an org", Tags: []string{"accounts"},
 		Description: "The org starts with its creator as owner and a project named default. A person creates an org for " +
@@ -203,12 +228,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		org, err := h.accounts.CreateOrg(ctx, name, owner)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		return &struct{ Body domain.Org }{Body: *org}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "rename-org", Method: "PATCH", Path: "/orgs/{id}",
 		Summary: "Rename an org", Tags: []string{"accounts"},
 		Description: "The id stays. Two orgs may carry the same name.",
@@ -216,7 +241,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body nameBody
 	}) (*struct{ Body domain.Org }, error) {
-		if _, err := h.policy.administerOrg(ctx, in.ID); err != nil {
+		if _, err := h.access.OrgAdmin(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		name, err := validName("org", in.Body.Name)
@@ -224,11 +249,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		if err := h.accounts.RenameOrg(ctx, in.ID, name); err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		org, err := h.accounts.GetOrg(ctx, in.ID)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		if org == nil {
 			return nil, huma.Error404NotFound("org not found")
@@ -236,7 +261,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body domain.Org }{Body: *org}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "list-projects", Method: "GET", Path: "/orgs/{id}/projects",
 		Summary: "List an org's projects", Tags: []string{"accounts"},
 		Description: "Oldest first. An API key bound to one project sees that project only.",
@@ -247,12 +272,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Projects []*domain.Project `json:"projects"`
 		}
 	}, error) {
-		if _, err := h.policy.inOrg(ctx, in.ID); err != nil {
+		if _, err := h.access.OrgMember(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		projects, err := h.accounts.ListProjects(ctx, []string{in.ID})
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		out := &struct {
 			Body struct {
@@ -265,7 +290,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return out, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "create-project", Method: "POST", Path: "/orgs/{id}/projects", DefaultStatus: http.StatusCreated,
 		Summary: "Create a project in an org", Tags: []string{"accounts"},
 		Description: "A project groups platform experiments. Its name is unique within the org: a taken name answers 409.",
@@ -273,7 +298,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body nameBody
 	}) (*struct{ Body domain.Project }, error) {
-		if _, err := h.policy.administerOrg(ctx, in.ID); err != nil {
+		if _, err := h.access.OrgAdmin(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		name, err := validName("project", in.Body.Name)
@@ -282,12 +307,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		project, err := h.accounts.CreateProject(ctx, in.ID, name)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		return &struct{ Body domain.Project }{Body: *project}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "rename-project", Method: "PATCH", Path: "/projects/{id}",
 		Summary: "Rename a project", Tags: []string{"accounts"},
 		Description: "The id stays, so platform experiments and API keys of the project are untouched. A name another project of the org carries answers 409.",
@@ -295,21 +320,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body nameBody
 	}) (*struct{ Body domain.Project }, error) {
-		if _, err := h.policy.caller(ctx); err != nil {
+		if _, err := h.access.Account(ctx); err != nil {
 			return nil, err
 		}
 		project, err := h.accounts.GetProject(ctx, in.ID)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
-		// A project of an org the caller is outside of answers as one that does not exist.
-		if project == nil {
-			return nil, huma.Error404NotFound("project not found")
-		}
-		if _, err := h.policy.inOrg(ctx, project.OrgID); err != nil {
-			return nil, huma.Error404NotFound("project not found")
-		}
-		if _, err := h.policy.administerOrg(ctx, project.OrgID); err != nil {
+		if err := h.policy.changeProject(ctx, project); err != nil {
 			return nil, err
 		}
 		name, err := validName("project", in.Body.Name)
@@ -317,13 +335,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		if err := h.accounts.RenameProject(ctx, in.ID, name); err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		project.Name = name
 		return &struct{ Body domain.Project }{Body: *project}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "create-api-key", Method: "POST", Path: "/orgs/{id}/api-keys", DefaultStatus: http.StatusCreated,
 		Summary: "Create an API key", Tags: []string{"accounts"},
 		Description: "Returns the token once: the platform keeps its hash only, so a lost token is replaced by a new key. " +
@@ -344,7 +362,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body CreatedAPIKey }{Body: *created}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "list-api-keys", Method: "GET", Path: "/orgs/{id}/api-keys",
 		Summary: "List an org's API keys", Tags: []string{"accounts"},
 		Description: "Newest first, revoked ones included. No token is ever listed. An API key sees itself and the keys minted from it.",
@@ -368,7 +386,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return out, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "revoke-api-key", Method: "DELETE", Path: "/api-keys/{id}",
 		Summary: "Revoke an API key", Tags: []string{"accounts"},
 		Description: "The key and every key minted from it stop working at once. Revoking a revoked key changes nothing.",
@@ -382,7 +400,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body domain.APIKey }{Body: *revoked}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "register-cluster", Method: "POST", Path: "/orgs/{id}/clusters",
 		Summary: "Register a cluster for an org", Tags: []string{"clusters"},
 		Description: "A cluster exists for the platform once its name is registered, and takes the jobs of its org only. " +
@@ -393,7 +411,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ID   string `path:"id"`
 		Body nameBody
 	}) (*struct{ Body RegisteredCluster }, error) {
-		if _, err := h.policy.administerOrg(ctx, in.ID); err != nil {
+		if _, err := h.access.OrgAdmin(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if err := domain.ValidateIdentifier("cluster name", in.Body.Name); err != nil {
@@ -401,18 +419,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		cluster, err := h.clusters.RegisterCluster(ctx, in.Body.Name, in.ID)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		token, err := auth.Mint(h.signingSecret, auth.RuntimeScope(cluster.Name))
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, err
 		}
 		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{
 			ClusterView: viewOf(cluster), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
 		}}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/orgs/{id}/clusters",
 		Summary: "List the clusters an org's jobs run on", Tags: []string{"clusters"},
 		Description: "The clusters the org registered and the ones the platform shares with every org, by name, with whether an agent is connected right now. " +
@@ -430,11 +448,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		clusters, err := h.clusters.ClustersHosting(ctx, in.ID)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		connected, err := h.connected(ctx)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, err
 		}
 		out := &struct {
 			Body struct {
@@ -443,41 +461,88 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{}
 		out.Body.Clusters = make([]ListedCluster, len(clusters))
 		for i, c := range clusters {
-			out.Body.Clusters[i] = listedFor(c, in.ID, caller.Kind == auth.KindStaff, connected[c.Name])
+			out.Body.Clusters[i] = listed(c, in.ID, caller, connected[c.Name])
 		}
 		return out, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	route(doc, h, huma.Operation{
 		OperationID: "share-cluster", Method: "PATCH", Path: "/orgs/{id}/clusters/{name}",
 		Summary: "Share a cluster with every org, or stop sharing it", Tags: []string{"clusters"},
-		Description: "Staff only. A shared cluster takes jobs of every org. Jobs already placed on a cluster stay where they are when it stops being shared.",
+		Description: "Staff only. A shared cluster takes jobs of every org. When the sharing ends, the jobs of other orgs placed on the cluster " +
+			"go back to the queue in the same step and are placed elsewhere: the cluster's runtime stops them, giving each its checkpoint window, " +
+			"and none of them spends a retry. requeued names them.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Name string `path:"name"`
 		Body struct {
 			Shared bool `json:"shared"`
 		}
-	}) (*struct{ Body ClusterView }, error) {
-		if err := h.policy.staff(ctx); err != nil {
+	}) (*struct{ Body WithdrawnCluster }, error) {
+		if err := h.access.Staff(ctx); err != nil {
 			return nil, err
 		}
-		cluster, err := h.clusters.GetCluster(ctx, in.Name)
+		if _, err := h.access.ClusterOf(ctx, in.ID, in.Name); err != nil {
+			return nil, err
+		}
+		cluster, requeued, err := h.clusters.SetClusterShared(ctx, in.Name, in.Body.Shared)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
-		if cluster == nil || cluster.OrgID != in.ID {
-			return nil, huma.Error404NotFound("cluster not found")
+		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster), Requeued: orEmpty(requeued)}}, nil
+	})
+
+	route(doc, h, huma.Operation{
+		OperationID: "remove-cluster", Method: "DELETE", Path: "/orgs/{id}/clusters/{name}",
+		Summary: "Remove a cluster from an org", Tags: []string{"clusters"},
+		Description: "Ends the cluster for the platform. Every job placed on it goes back to the queue in the same step, keeping its retries, and is placed " +
+			"on another cluster that takes its org. The cluster's settings and the identity bound to it are deleted, and its runtime token is refused from " +
+			"then on, so stop its agents. The name is free to register again, by any org. requeued names the jobs.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Name string `path:"name"`
+	}) (*struct{ Body WithdrawnCluster }, error) {
+		cluster, err := h.access.ClusterOf(ctx, in.ID, in.Name)
+		if err != nil {
+			return nil, err
 		}
-		if cluster, err = h.clusters.SetClusterShared(ctx, in.Name, in.Body.Shared); err != nil {
-			return nil, storeError(err)
+		requeued, err := h.clusters.RemoveCluster(ctx, in.Name)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster), Requeued: orEmpty(requeued)}}, nil
+	})
+
+	route(doc, h, huma.Operation{
+		OperationID: "forget-cluster-identity", Method: "DELETE", Path: "/orgs/{id}/clusters/{name}/identity",
+		Summary: "Forget the identity a cluster's runtime reported", Tags: []string{"clusters"},
+		Description: "A cluster is bound to the first cluster_id its runtime reports, and a runtime reporting any other is refused. After the machines " +
+			"behind a name are rebuilt they report a new one: forget the old identity here and the cluster binds to what its runtime reports next. " +
+			"The settings kept under the old identity are deleted with it.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Name string `path:"name"`
+	}) (*struct{ Body ClusterView }, error) {
+		if _, err := h.access.ClusterOf(ctx, in.ID, in.Name); err != nil {
+			return nil, err
+		}
+		cluster, err := h.clusters.ClearReportedID(ctx, in.Name)
+		if err != nil {
+			return nil, err
 		}
 		return &struct{ Body ClusterView }{Body: viewOf(cluster)}, nil
 	})
 }
 
+func orEmpty(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
 func (h *Handler) me(ctx context.Context) (*Me, error) {
-	p, err := h.policy.caller(ctx)
+	p, err := h.access.Account(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -485,12 +550,12 @@ func (h *Handler) me(ctx context.Context) (*Me, error) {
 	switch p.Kind {
 	case auth.KindStaff:
 		if me.Orgs, err = h.accounts.ListAllOrgs(ctx); err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		if p.UserID != "" {
 			own, err := h.accounts.ListUserOrgs(ctx, p.UserID)
 			if err != nil {
-				return nil, storeError(err)
+				return nil, err
 			}
 			roles := make(map[string]domain.OrgRole, len(own))
 			for _, org := range own {
@@ -503,11 +568,11 @@ func (h *Handler) me(ctx context.Context) (*Me, error) {
 	case auth.KindKey:
 		me.ProjectID = p.ProjectID
 		if me.Orgs, err = h.accounts.ListOrgs(ctx, p.OrgIDs); err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 	default:
 		if me.Orgs, err = h.accounts.ListUserOrgs(ctx, p.UserID); err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 	}
 	orgIDs := make([]string, len(me.Orgs))
@@ -516,7 +581,7 @@ func (h *Handler) me(ctx context.Context) (*Me, error) {
 	}
 	projects, err := h.accounts.ListProjects(ctx, orgIDs)
 	if err != nil {
-		return nil, storeError(err)
+		return nil, err
 	}
 	me.Projects = []*domain.Project{}
 	for _, project := range projects {
@@ -540,44 +605,44 @@ func (h *Handler) createAPIKey(ctx context.Context, orgID, projectID, name strin
 		// The person answerable for a minted key is the one answerable for the key that minted it.
 		minter, err := h.accounts.GetAPIKey(ctx, p.KeyID)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		if minter == nil {
-			return nil, huma.Error500InternalServerError("the calling api key " + p.KeyID + " has no row")
+			return nil, fmt.Errorf("the calling api key %s has no row", p.KeyID)
 		}
 		key.CreatedBy, key.MintedBy = minter.CreatedBy, minter.ID
 	}
 	id, token, err := auth.NewAPIKey()
 	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, err
 	}
 	key.ID = id
 	if err := h.accounts.CreateAPIKey(ctx, key, auth.HashAPIKey(token)); err != nil {
-		return nil, storeError(err)
+		return nil, err
 	}
 	return &CreatedAPIKey{APIKey: *key, Token: token}, nil
 }
 
 func (h *Handler) reachableKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error) {
-	if _, err := h.policy.inOrg(ctx, orgID); err != nil {
+	if _, err := h.access.OrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 	keys, err := h.accounts.ListAPIKeys(ctx, orgID)
 	if err != nil {
-		return nil, storeError(err)
+		return nil, err
 	}
 	return h.policy.reachableKeys(ctx, orgID, keys)
 }
 
 // revokeAPIKey answers for a key the caller cannot reach exactly as for one that does not exist.
 func (h *Handler) revokeAPIKey(ctx context.Context, id string) (*domain.APIKey, error) {
-	if _, err := h.policy.caller(ctx); err != nil {
+	if _, err := h.access.Account(ctx); err != nil {
 		return nil, err
 	}
 	notFound := huma.Error404NotFound("api key not found")
 	key, err := h.accounts.GetAPIKey(ctx, id)
 	if err != nil {
-		return nil, storeError(err)
+		return nil, err
 	}
 	if key == nil {
 		return nil, notFound
@@ -595,11 +660,11 @@ func (h *Handler) revokeAPIKey(ctx context.Context, id string) (*domain.APIKey, 
 			continue
 		}
 		if err := h.accounts.RevokeAPIKey(ctx, id); err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		revoked, err := h.accounts.GetAPIKey(ctx, id)
 		if err != nil {
-			return nil, storeError(err)
+			return nil, err
 		}
 		if revoked == nil {
 			return nil, notFound

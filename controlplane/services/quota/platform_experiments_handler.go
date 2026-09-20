@@ -3,7 +3,6 @@ package quota
 import (
 	"context"
 	"errors"
-	"slices"
 	"sort"
 	"time"
 
@@ -112,6 +111,8 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context) ([]Cluste
 		return nil, err
 	}
 	clusters := buildClusterCapacity(available, total)
+	// Staff see every name that reports, registered or not: a runtime started under a name
+	// nobody registered is theirs to notice.
 	if caller.Kind == auth.KindStaff {
 		return clusters, nil
 	}
@@ -119,17 +120,15 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context) ([]Cluste
 	if err != nil {
 		return nil, err
 	}
-	return placeableBy(caller.OrgIDs, registered, clusters), nil
+	return placeableBy(caller, registered, clusters), nil
 }
 
-// placeableBy keeps the clusters that take jobs of one of orgIDs: the orgs' own and the shared
-// ones. It is the view of the rule admission places by (domain.Cluster.Hosts), so what a caller
-// reads here is where their jobs can land. A name nobody registered is no cluster.
-func placeableBy(orgIDs []string, registered map[string]domain.Cluster, clusters []ClusterCapacity) []ClusterCapacity {
+// placeableBy keeps the clusters the caller's jobs can be placed on, which is the rule of who
+// sees a cluster (auth.Principal.PlacedOn). A name nobody registered is no cluster.
+func placeableBy(caller auth.Principal, registered map[string]domain.Cluster, clusters []ClusterCapacity) []ClusterCapacity {
 	kept := make([]ClusterCapacity, 0, len(clusters))
 	for _, c := range clusters {
-		cluster, ok := registered[c.ClusterName]
-		if ok && (cluster.Shared || slices.ContainsFunc(orgIDs, cluster.Hosts)) {
+		if cluster, ok := registered[c.ClusterName]; ok && caller.PlacedOn(cluster) {
 			kept = append(kept, c)
 		}
 	}

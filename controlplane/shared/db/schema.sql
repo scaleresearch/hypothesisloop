@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS experiments (
     id                       TEXT              PRIMARY KEY,
     parent_id                TEXT              REFERENCES experiments(id),
     agent_id                 TEXT              NOT NULL REFERENCES agents(id),
-    cluster_name             TEXT              NOT NULL DEFAULT 'default',
+    cluster_name             TEXT              NOT NULL DEFAULT '',
     -- Every job must belong to exactly one platform experiment — there is no such thing as
     -- an unscoped job. Required so quota, the summary gate, and the hypothesis pool below
     -- all have an unambiguous platform experiment to key off.
@@ -279,6 +279,18 @@ END $$;
 -- The ranking metric the job's owner was told it trails its cohort on, written once.
 ALTER TABLE experiments DROP COLUMN IF EXISTS underperforming_notified_at;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS underperforming_metric TEXT;
+
+-- A job holds a cluster only while it is placed. The column once defaulted to the name
+-- 'default', which is no cluster: a queued row carrying it is cleared.
+ALTER TABLE experiments ALTER COLUMN cluster_name SET DEFAULT '';
+UPDATE experiments SET cluster_name = '' WHERE cluster_name = 'default' AND status = 'QUEUED';
+
+-- last_cluster is the cluster the job was last placed on, written by the claim and kept when a
+-- requeue or a termination clears cluster_name. It is what lets a cluster be told of the jobs
+-- that just stopped being its own, and of no other cluster's.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS last_cluster TEXT NOT NULL DEFAULT '';
+UPDATE experiments SET last_cluster = cluster_name
+WHERE last_cluster = '' AND cluster_name <> '' AND submitted_at IS NOT NULL;
 
 -- A row from before per-job keys has no store key and would run with empty AWS_* credentials, so
 -- an active one is cancelled the way CancelExperiment would, and no active row may lack a key.
@@ -889,8 +901,8 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT fa
 -- its first report. cluster_settings are keyed by it, so the binding is what says whose they are.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
 
--- minted_by is the key an API key was created with, NULL when a person created it. Revoking a
--- key revokes every key minted from it.
+-- minted_by is the key an API key was created with, NULL when a person created it. A key is
+-- read as revoked while any key it descends from is.
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS minted_by TEXT REFERENCES api_keys(id);
 
 -- Everything that predates tenancy belongs to org 'default' and its project 'default'. Org is
@@ -916,7 +928,9 @@ ALTER TABLE experiments DROP COLUMN IF EXISTS project_id;
 
 -- The clusters that ran jobs before clusters were registered belong to org 'default', or their
 -- runtimes would be refused from the first boot on. An empty table is that first boot: later a
--- cluster comes into being only by an org registering it.
+-- cluster comes into being only by an org registering it, and one its org removed must not come
+-- back from the rows of the jobs it once ran, so this never runs against a table with a row.
+-- Only a row that was placed names a cluster (submitted_at).
 INSERT INTO clusters (name, org_id)
 SELECT DISTINCT e.cluster_name, 'default' FROM experiments e
 WHERE e.submitted_at IS NOT NULL AND e.cluster_name <> '' AND NOT EXISTS (SELECT 1 FROM clusters)

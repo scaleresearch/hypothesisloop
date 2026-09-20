@@ -34,6 +34,9 @@ type Placement struct {
 	Agents              map[string]string
 	Clusters            map[string]string
 	Projects            map[string]domain.Project
+	// Members holds the users of an org who are not its owners, as "org/user". Every other user
+	// asked about owns the org, which is the only kind of person production has.
+	Members map[string]bool
 }
 
 func (p Placement) PlatformExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, *time.Time, error) {
@@ -53,9 +56,34 @@ func (p Placement) AgentOrg(_ context.Context, id string) (string, bool, error) 
 	return org, ok, nil
 }
 
-func (p Placement) ClusterOrg(_ context.Context, name string) (string, bool, error) {
+func (p Placement) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
 	org, ok := p.Clusters[name]
-	return org, ok, nil
+	if !ok {
+		return nil, nil
+	}
+	return &domain.Cluster{Name: name, OrgID: org}, nil
+}
+
+// GetOrg knows every org a cluster or a project of the placement names.
+func (p Placement) GetOrg(_ context.Context, id string) (*domain.Org, error) {
+	for _, org := range p.Clusters {
+		if org == id {
+			return &domain.Org{ID: id}, nil
+		}
+	}
+	for _, project := range p.Projects {
+		if project.OrgID == id {
+			return &domain.Org{ID: id}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (p Placement) OrgRole(_ context.Context, orgID, userID string) (domain.OrgRole, bool, error) {
+	if p.Members[orgID+"/"+userID] {
+		return domain.OrgRoleMember, true, nil
+	}
+	return domain.OrgRoleOwner, true, nil
 }
 
 func (p Placement) GetProject(_ context.Context, id string) (*domain.Project, error) {

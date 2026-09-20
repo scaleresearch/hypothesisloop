@@ -53,33 +53,28 @@ ORDER BY id`
 }
 
 // recentlyUndesiredWorkloadsQuery is a package-level constant so its shape can be asserted on
-// without a database: the one thing it must never do is narrow by a column the very write it is
-// looking for has just cleared.
+// without a database. It narrows by last_cluster, which the claim writes and nothing clears, and
+// never by cluster_name, which the very write it is looking for has just cleared.
 const recentlyUndesiredWorkloadsQuery = `SELECT` + experimentColumns + `FROM experiments
-WHERE status <> ALL($1) AND eviction_reason IS NOT NULL AND updated_at > now() - $2::interval
+WHERE last_cluster = $1 AND status <> ALL($2) AND eviction_reason IS NOT NULL AND updated_at > now() - $3::interval
 ORDER BY id`
 
-// ListRecentlyUndesiredWorkloads returns every experiment a termination decision moved out of
-// the desired set within the last `within`. updated_at is the time of that move: only status
-// transitions write it.
+// ListRecentlyUndesiredWorkloads returns every experiment last placed on clusterName that a
+// termination decision moved out of the desired set within the last `within`. updated_at is the
+// time of that move: only status transitions write it.
 // It exists so the reconcile feed can say which of the workloads about to be deleted earned a
-// checkpoint window, without any new table, column or lifecycle state to hold that fact: the
-// termination is already recorded on the experiment (its status and its eviction reason), and
-// `within` is what makes the answer expire on its own instead of needing to be cleared.
+// checkpoint window, without a lifecycle state to hold that fact: the termination is already
+// recorded on the experiment (its status and its eviction reason), and `within` is what makes
+// the answer expire on its own instead of needing to be cleared.
 //
 // Bounded rather than unbounded deliberately. Every experiment ever finished is "not desired";
 // only the ones that stopped being desired moments ago are still being torn down.
 //
-// Deliberately NOT narrowed to one cluster, and this is the whole point of the query. A
-// termination writes the row's new status and clears its cluster_name in the same statement —
-// the job holds no capacity any more, so the next admission tick may place it anywhere — which
-// means that by the time a termination is recorded the row no longer names the cluster whose
-// pods are still running it. Asking "which of MY workloads just became undesired" of a row that
-// has forgotten its cluster returns nothing, every time. The reconcile feed therefore asks the
-// question the data can answer, and scoping happens where the facts are: the agent looks each
-// id up among the workloads it actually holds and ignores every one it does not.
-func (s *ClusterQueueStore) ListRecentlyUndesiredWorkloads(ctx context.Context, within time.Duration) ([]*domain.Experiment, error) {
-	rows, err := s.pool.pool.Query(ctx, recentlyUndesiredWorkloadsQuery, desiredStatuses, within.String())
+// A termination clears the row's cluster_name in the statement that records it, since the job
+// holds no capacity any more. last_cluster is where it ran, so a cluster is told of its own
+// terminations and learns nothing of jobs that ran anywhere else.
+func (s *ClusterQueueStore) ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error) {
+	rows, err := s.pool.pool.Query(ctx, recentlyUndesiredWorkloadsQuery, clusterName, desiredStatuses, within.String())
 	if err != nil {
 		return nil, fmt.Errorf("db.ListRecentlyUndesiredWorkloads: %w", err)
 	}

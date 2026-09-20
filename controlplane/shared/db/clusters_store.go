@@ -17,7 +17,38 @@ var (
 	ErrClusterNotFound  = errors.New("cluster is not registered")
 	// ErrClusterIDBound reports a runtime stating an identity another registered cluster holds.
 	ErrClusterIDBound = errors.New("cluster id is bound to another registered cluster")
+	// ErrClusterIDChanged reports a runtime stating an identity other than the one its cluster
+	// is bound to.
+	ErrClusterIDChanged = errors.New("cluster is bound to another cluster id")
 )
+
+// clusterAdmissionLock is taken by everything that places a job on a cluster or withdraws the
+// cluster from jobs, so the two never interleave.
+const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('cluster-admission/' || $1, 0))`
+
+// requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it:
+// all of them, or with keepOrg set every one of another org. It is the requeue an infrastructure
+// fault gets (RequeueInfrastructureFault): the attempt advances so the next placement is a new
+// desired state, and it is counted as not the job's own, so no retry is spent. The allowance for
+// such requeues is not checked. It bounds a broken environment, and this is one decision.
+const requeueWithdrawn = `
+UPDATE experiments e SET
+	status = 'QUEUED',
+	eviction_reason = '` + string(domain.EvictionClusterWithdrawn) + `',
+	attempt_count = attempt_count + 1,
+	infra_requeue_count = infra_requeue_count + 1,
+	submitted_at = NULL,
+	cluster_name = '',
+	resolved_job_spec = NULL,
+	queued_at = COALESCE(queued_at, NOW()),
+	not_admitted_reason = 'awaiting_admission',
+	quota_settled_at = NULL,
+	updated_at = NOW()
+WHERE e.cluster_name = $1 AND e.status IN ('SUBMITTED', 'RUNNING')
+  AND ($2 = '' OR $2 <> (
+	SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
+	WHERE pe.id = e.platform_experiment_id))
+RETURNING e.id`
 
 // ClustersStore holds which cluster names exist, the org each belongs to, whether the platform
 // shares it, and the identity its runtime reported.
@@ -132,22 +163,89 @@ func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*d
 	return out, rows.Err()
 }
 
-// SetClusterShared records whether the platform shares a cluster with every org.
-func (s *ClustersStore) SetClusterShared(ctx context.Context, name string, shared bool) (*domain.Cluster, error) {
-	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `UPDATE clusters SET shared = $2 WHERE name = $1 RETURNING `+clusterColumns, name, shared))
+// SetClusterShared records whether the platform shares a cluster with every org. Ending the
+// sharing is a decision about the jobs of other orgs placed there too, so it is written with
+// them: in the same transaction they return to the queue, which is what makes the cluster's
+// runtime stop them and admission place them elsewhere. requeued names those jobs.
+func (s *ClustersStore) SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error) {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: lock: %w", err)
+	}
+	cluster, err = scanCluster(tx.QueryRow(ctx, `UPDATE clusters SET shared = $2 WHERE name = $1 RETURNING `+clusterColumns, name, shared))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrClusterNotFound
+		return nil, nil, ErrClusterNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterShared: %w", err)
+		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: %w", err)
 	}
-	return c, nil
+	if !shared {
+		if requeued, err = withdraw(ctx, tx, name, cluster.OrgID); err != nil {
+			return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: commit: %w", err)
+	}
+	return cluster, requeued, nil
 }
 
-// BindReportedID records the identity a registered cluster's runtime states about itself. A
-// cluster rebuilt under its name reports a new identity and is bound to that one. An identity
-// another registered cluster holds is refused with ErrClusterIDBound.
+func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, error) {
+	rows, err := tx.Query(ctx, requeueWithdrawn, name, keepOrg)
+	if err != nil {
+		return nil, fmt.Errorf("requeue the jobs placed on %s: %w", name, err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("requeue the jobs placed on %s: %w", name, err)
+	}
+	return ids, nil
+}
+
+// RemoveCluster ends a cluster: every job placed on it returns to the queue, its settings and
+// the identity bound to it go, and the name is registered to nobody, so its runtime token is
+// refused from here on. requeued names the jobs.
+func (s *ClustersStore) RemoveCluster(ctx context.Context, name string) (requeued []string, err error) {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.RemoveCluster: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+		return nil, fmt.Errorf("clusters_store.RemoveCluster: lock: %w", err)
+	}
+	if requeued, err = withdraw(ctx, tx, name, ""); err != nil {
+		return nil, fmt.Errorf("clusters_store.RemoveCluster: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+WITH removed AS (DELETE FROM clusters WHERE name = $1 RETURNING reported_id),
+     settings AS (DELETE FROM cluster_settings WHERE cluster_id IN (SELECT reported_id FROM removed))
+SELECT 1 FROM removed`, name)
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.RemoveCluster: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrClusterNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("clusters_store.RemoveCluster: commit: %w", err)
+	}
+	return requeued, nil
+}
+
+// BindReportedID records the identity a registered cluster's runtime states about itself, once.
+// The settings of a cluster are kept under that identity, so it is one cluster's and stays its:
+// an identity another cluster holds is refused with ErrClusterIDBound, and a cluster stating
+// another identity than its own with ErrClusterIDChanged until its owner clears the binding
+// (ClearReportedID).
 func (s *ClustersStore) BindReportedID(ctx context.Context, name, reportedID string) error {
+	if err := domain.ValidateClusterID(reportedID); err != nil {
+		return err
+	}
 	var bound string
 	err := s.pool.pool.QueryRow(ctx, `SELECT COALESCE(reported_id, '') FROM clusters WHERE name = $1`, name).Scan(&bound)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -159,12 +257,45 @@ func (s *ClustersStore) BindReportedID(ctx context.Context, name, reportedID str
 	if bound == reportedID {
 		return nil
 	}
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET reported_id = $2 WHERE name = $1`, name, reportedID); err != nil {
+	if bound != "" {
+		return ErrClusterIDChanged
+	}
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET reported_id = $2 WHERE name = $1 AND reported_id IS NULL`, name, reportedID)
+	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			return ErrClusterIDBound
 		}
 		return fmt.Errorf("clusters_store.BindReportedID: %w", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return ErrClusterIDChanged
+	}
 	return nil
+}
+
+// ClearReportedID forgets the identity bound to a cluster and deletes the settings kept under
+// it, so nobody who later states that identity inherits them. The cluster binds again on its
+// runtime's next report.
+func (s *ClustersStore) ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error) {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.ClearReportedID: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `
+DELETE FROM cluster_settings WHERE cluster_id = (SELECT reported_id FROM clusters WHERE name = $1 FOR UPDATE)`, name); err != nil {
+		return nil, fmt.Errorf("clusters_store.ClearReportedID: settings: %w", err)
+	}
+	c, err := scanCluster(tx.QueryRow(ctx, `UPDATE clusters SET reported_id = NULL WHERE name = $1 RETURNING `+clusterColumns, name))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClusterNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.ClearReportedID: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("clusters_store.ClearReportedID: commit: %w", err)
+	}
+	return c, nil
 }

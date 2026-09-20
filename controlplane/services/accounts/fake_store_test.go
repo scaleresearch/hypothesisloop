@@ -16,18 +16,21 @@ type memStore struct {
 	sequence int
 	users    map[string]bool
 	staff    map[string]bool
-	orgs     map[string]*domain.Org
-	roles    map[string]map[string]domain.OrgRole // org -> user -> role
-	projects map[string]*domain.Project
-	keys     map[string]*domain.APIKey
-	hashes   map[string]string // key id -> hash
-	clusters map[string]*domain.Cluster
+	// placed is the jobs on each cluster, job id -> org; clearedIDs the identities forgotten.
+	placed     map[string]map[string]string
+	clearedIDs []string
+	orgs       map[string]*domain.Org
+	roles      map[string]map[string]domain.OrgRole // org -> user -> role
+	projects   map[string]*domain.Project
+	keys       map[string]*domain.APIKey
+	hashes     map[string]string // key id -> hash
+	clusters   map[string]*domain.Cluster
 }
 
 func newMemStore() *memStore {
 	return &memStore{
 		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		users: map[string]bool{}, staff: map[string]bool{"u-staff": true}, orgs: map[string]*domain.Org{}, roles: map[string]map[string]domain.OrgRole{},
+		users: map[string]bool{}, staff: map[string]bool{"u-staff": true}, placed: map[string]map[string]string{}, orgs: map[string]*domain.Org{}, roles: map[string]map[string]domain.OrgRole{},
 		projects: map[string]*domain.Project{}, keys: map[string]*domain.APIKey{}, hashes: map[string]string{},
 		clusters: map[string]*domain.Cluster{},
 	}
@@ -260,12 +263,50 @@ func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.C
 	return out, nil
 }
 
-func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool) (*domain.Cluster, error) {
+// placed is what the store finds on a cluster: job id -> org. Withdrawing a cluster requeues
+// them as db.ClustersStore does, which the fake records in requeued.
+func (s *memStore) withdraw(name, keepOrg string) []string {
+	ids := []string{}
+	for id, org := range s.placed[name] {
+		if org != keepOrg {
+			ids = append(ids, id)
+			delete(s.placed[name], id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool) (*domain.Cluster, []string, error) {
+	c, ok := s.clusters[name]
+	if !ok {
+		return nil, nil, db.ErrClusterNotFound
+	}
+	c.Shared = shared
+	var requeued []string
+	if !shared {
+		requeued = s.withdraw(name, c.OrgID)
+	}
+	out := *c
+	return &out, requeued, nil
+}
+
+func (s *memStore) RemoveCluster(_ context.Context, name string) ([]string, error) {
+	if _, ok := s.clusters[name]; !ok {
+		return nil, db.ErrClusterNotFound
+	}
+	requeued := s.withdraw(name, "")
+	delete(s.clusters, name)
+	return requeued, nil
+}
+
+func (s *memStore) ClearReportedID(_ context.Context, name string) (*domain.Cluster, error) {
 	c, ok := s.clusters[name]
 	if !ok {
 		return nil, db.ErrClusterNotFound
 	}
-	c.Shared = shared
+	s.clearedIDs = append(s.clearedIDs, c.ReportedID)
+	c.ReportedID = ""
 	out := *c
 	return &out, nil
 }

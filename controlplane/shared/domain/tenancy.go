@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // User is a person known to the identity provider. ID is the provider's subject.
 type User struct {
@@ -56,7 +59,6 @@ type APIKey struct {
 	Orphaned bool `json:"orphaned,omitempty"`
 }
 
-
 // Cluster is a runtime's registered name and the org that added it. Shared is the platform's
 // decision that the cluster takes every org's jobs. ReportedID is the identity its runtime
 // states about itself, empty until its first report.
@@ -66,6 +68,24 @@ type Cluster struct {
 	Shared     bool      `json:"shared"`
 	ReportedID string    `json:"cluster_id,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// MaxClusterIDLength bounds the identity a runtime states: a kube-system namespace UID or a
+// machine id, with room to spare.
+const MaxClusterIDLength = 128
+
+// ValidateClusterID refuses an identity that could not be one. It is stored, compared and used
+// as a path segment, so its characters are held to the ones those identities are made of.
+func ValidateClusterID(id string) error {
+	if id == "" || len(id) > MaxClusterIDLength {
+		return fmt.Errorf("cluster_id must be 1 to %d characters", MaxClusterIDLength)
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return fmt.Errorf("cluster_id may hold only letters, digits, '-', '_' and '.'")
+		}
+	}
+	return nil
 }
 
 // Hosts reports whether a job of orgID may be placed on the cluster: one of its own org, or one

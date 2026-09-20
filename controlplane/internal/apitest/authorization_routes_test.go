@@ -240,6 +240,8 @@ var routes = []route{
 	{method: "POST", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", body: `{"name":"cluster-new"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "PATCH", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", body: `{"shared":true}`, rule: staffOnly},
+	{method: "DELETE", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "DELETE", path: "/orgs/{id}/clusters/{name}/identity", request: "/orgs/<org>/clusters/<cluster>/identity", rule: orgLevel(people, http.StatusForbidden, reached)},
 
 	// ---- runtimes and launchers ----
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},

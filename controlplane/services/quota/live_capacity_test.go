@@ -79,14 +79,14 @@ func TestCapacityShowsOnlyClustersThatTakeTheCallersJobs(t *testing.T) {
 		orgs []string
 		want []string
 	}{
-		"a caller of one org":         {[]string{"org-a"}, []string{"of-a", "shared"}},
-		"a person in two orgs":        {[]string{"org-a", "org-b"}, []string{"of-a", "of-b", "shared"}},
-		"an org with no cluster":      {[]string{"org-c"}, []string{"shared"}},
-		"a person who is in no org":   {nil, []string{"shared"}},
-		"the org that shares its own": {[]string{"org-staff"}, []string{"shared"}},
+		"a caller of one org":                 {[]string{"org-a"}, []string{"of-a", "shared"}},
+		"a person in two orgs":                {[]string{"org-a", "org-b"}, []string{"of-a", "of-b", "shared"}},
+		"an org with no cluster":              {[]string{"org-c"}, []string{"shared"}},
+		"a caller of no org, who has no jobs": {nil, []string{}},
+		"the org that shares its own":         {[]string{"org-staff"}, []string{"shared"}},
 	} {
 		got := []string{}
-		for _, c := range placeableBy(tc.orgs, registered, connected) {
+		for _, c := range placeableBy(auth.Principal{Kind: auth.KindUser, OrgIDs: tc.orgs}, registered, connected) {
 			got = append(got, c.ClusterName)
 		}
 		if !slices.Equal(got, tc.want) {

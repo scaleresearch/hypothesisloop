@@ -39,21 +39,17 @@ import (
 // Store is the desired-state persistence interface the handler needs.
 type Store interface {
 	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
-	// ListRecentlyUndesiredWorkloads returns the experiments that have just stopped being
-	// desired — the ones an agent is about to delete — so the reconcile response can name which
-	// of them earned a checkpoint window. Not per-cluster: a termination clears the row's
-	// cluster_name in the same statement that records it, so the cluster is no longer on the row
-	// to filter by (see db.ListRecentlyUndesiredWorkloads). hostedBy narrows it to the orgs the
-	// cluster runs jobs for.
-	ListRecentlyUndesiredWorkloads(ctx context.Context, within time.Duration) ([]*domain.Experiment, error)
+	// ListRecentlyUndesiredWorkloads returns the experiments last placed on the cluster that have
+	// just stopped being desired, the ones its agent is about to delete, so the reconcile
+	// response can name which of them earned a checkpoint window.
+	ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error)
 	// PlacementByID resolves many experiments' assigned cluster and current attempt at once — a
 	// status push is a whole-cluster snapshot, so this is asked once per push rather than once
 	// per job.
 	PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error)
-	// GetCluster returns a registered cluster, nil when the name is not registered.
-	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
-	// BindReportedID records the identity a registered cluster's runtime states about itself,
-	// and refuses one another registered cluster holds (db.ErrClusterIDBound).
+	// BindReportedID records, once, the identity a registered cluster's runtime states about
+	// itself. It refuses one another cluster holds (db.ErrClusterIDBound) and one other than
+	// the cluster's own (db.ErrClusterIDChanged).
 	BindReportedID(ctx context.Context, name, reportedID string) error
 }
 
@@ -94,19 +90,6 @@ func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string,
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
 		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, logger: logger}
-}
-
-// hostedBy keeps the jobs the cluster could have been running. A terminated job no longer names
-// its cluster, so the org the cluster runs jobs for is the narrowest fact left: an org's own
-// cluster is told of that org's terminations only, a shared one of every org's.
-func hostedBy(cluster domain.Cluster, exps []*domain.Experiment) []*domain.Experiment {
-	kept := make([]*domain.Experiment, 0, len(exps))
-	for _, exp := range exps {
-		if cluster.Hosts(exp.OrgID) {
-			kept = append(kept, exp)
-		}
-	}
-	return kept
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
@@ -327,14 +310,21 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("invalid memory or storage capacity values")
 		}
 
-		// cluster_settings are keyed by the id a runtime reports, so an id is one cluster's. A
-		// runtime stating another cluster's id is refused before anything it reports is recorded.
+		// cluster_settings are kept under the id a runtime reports, so an id is one cluster's and
+		// a cluster has one. A runtime stating another is refused before anything it reports is
+		// recorded.
 		if report.ClusterID != "" {
+			if err := domain.ValidateClusterID(report.ClusterID); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
 			switch err := h.store.BindReportedID(ctx, clusterName, report.ClusterID); {
 			case errors.Is(err, db.ErrClusterNotFound):
 				return nil, auth.NotFound("cluster")
 			case errors.Is(err, db.ErrClusterIDBound):
 				return nil, huma.Error409Conflict("cluster_id " + report.ClusterID + " is the identity of another registered cluster")
+			case errors.Is(err, db.ErrClusterIDChanged):
+				return nil, huma.Error409Conflict("cluster " + clusterName + " is bound to another cluster_id than the " + report.ClusterID +
+					" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity " + clusterName + ")")
 			case err != nil:
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -369,18 +359,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		//
 		// Derived from the termination that is already recorded on the experiment, and expiring
 		// with maxCheckpointGrace, so there is no terminating state to write, advance or clear.
-		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, h.maxCheckpointGrace)
+		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, clusterName, h.maxCheckpointGrace)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		cluster, err := h.store.GetCluster(ctx, clusterName)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		if cluster == nil {
-			return nil, auth.NotFound("cluster")
-		}
-		undesired = hostedBy(*cluster, undesired)
 		resp := &struct {
 			Body reconcileBody
 		}{}
@@ -388,7 +370,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := h.attachTokens(exps); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		resp.Body.Experiments = exps
+		// A runtime may belong to another org than the job, so it is handed what it builds a
+		// workload from and nothing else of the job.
+		resp.Body.Experiments = make([]*domain.Experiment, len(exps))
+		for i, exp := range exps {
+			resp.Body.Experiments[i] = exp.ForRuntime()
+		}
 		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
 		return resp, nil
 	})

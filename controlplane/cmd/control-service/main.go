@@ -234,7 +234,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
 	}
-	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL}))
+	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL}, logger))
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so

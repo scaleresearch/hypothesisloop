@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +41,29 @@ type world struct {
 
 // tokens resolves a token to the principal of that name, and refuses a revoked API key as the
 // authenticator does.
+// placement is what the access check reads: orgs, roles and clusters from the store the handler
+// writes to, so a rule is tested against the rows a request just changed.
+type placement struct {
+	authtest.Placement
+	*memStore
+}
+
+func (p placement) GetProject(ctx context.Context, id string) (*domain.Project, error) {
+	return p.memStore.GetProject(ctx, id)
+}
+
+func (p placement) GetCluster(ctx context.Context, name string) (*domain.Cluster, error) {
+	return p.memStore.GetCluster(ctx, name)
+}
+
+func (p placement) GetOrg(ctx context.Context, id string) (*domain.Org, error) {
+	return p.memStore.GetOrg(ctx, id)
+}
+
+func (p placement) OrgRole(ctx context.Context, orgID, userID string) (domain.OrgRole, bool, error) {
+	return p.memStore.OrgRole(ctx, orgID, userID)
+}
+
 type tokens struct{ w *world }
 
 func (a tokens) Authenticate(_ context.Context, token string) (auth.Principal, error) {
@@ -105,9 +129,9 @@ func newWorld(t *testing.T) *world {
 		"staff-user":  {Kind: auth.KindStaff, UserID: "u-staff", Name: "Staff", OrgIDs: []string{}},
 	}
 	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
-	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret, testRuntimeAddresses))
+	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret, testRuntimeAddresses, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -149,6 +173,11 @@ func (w *world) ok(caller, method, path string, body any, want int, out any) {
 
 type name map[string]any
 
+type request struct {
+	method, path string
+	body         any
+}
+
 // Every operation against org A's resources, by every kind of caller. The gate in front of the
 // handlers refuses the tokens the platform derives for agents, jobs, runtimes and launchers; the
 // policy refuses the rest.
@@ -161,10 +190,6 @@ func TestWhoMayCallWhat(t *testing.T) {
 		forbidden = http.StatusForbidden
 		notFound  = http.StatusNotFound
 	)
-	type request struct {
-		method, path string
-		body         any
-	}
 	derived := map[string]int{"agent": forbidden, "coordinator": forbidden, "job": forbidden, "runtime": forbidden, "launcher": forbidden, "": noToken}
 	for _, op := range []struct {
 		name    string
@@ -181,8 +206,12 @@ func TestWhoMayCallWhat(t *testing.T) {
 			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"create a project", func(w *world) request { return request{"POST", "/orgs/" + w.orgA + "/projects", name{"name": "third"}} },
 			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": created, "staff-user": created}},
-		{"rename a project", func(w *world) request { return request{"PATCH", "/projects/" + w.projectA2, name{"name": "renamed"}} },
+		{"rename the project a key is bound to", func(w *world) request { return request{"PATCH", "/projects/" + w.projectA, name{"name": "renamed"}} },
 			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"rename another project of the org", func(w *world) request { return request{"PATCH", "/projects/" + w.projectA2, name{"name": "renamed"}} },
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": notFound, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"rename a project that does not exist", func(w *world) request { return request{"PATCH", "/projects/prj-missing", name{"name": "renamed"}} },
+			map[string]int{"owner": notFound, "member": notFound, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": notFound, "staff-user": notFound}},
 		{"create an org-wide key", func(w *world) request { return request{"POST", "/orgs/" + w.orgA + "/api-keys", name{"name": "new"}} },
 			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
 		{"create a key of one project", func(w *world) request {
@@ -207,6 +236,12 @@ func TestWhoMayCallWhat(t *testing.T) {
 			return request{"PATCH", "/orgs/" + w.orgA + "/clusters/" + w.clusterA, map[string]any{"shared": true}}
 		},
 			map[string]int{"owner": forbidden, "member": forbidden, "outsider": forbidden, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": ok, "staff-user": ok}},
+		{"remove a cluster", func(w *world) request { return request{"DELETE", "/orgs/" + w.orgA + "/clusters/" + w.clusterA, nil} },
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"forget a cluster's identity", func(w *world) request {
+			return request{"DELETE", "/orgs/" + w.orgA + "/clusters/" + w.clusterA + "/identity", nil}
+		},
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 	} {
 		for caller, want := range derived {
 			op.want[caller] = want
@@ -317,7 +352,7 @@ func TestAnOrgIsCreatedForItsOwner(t *testing.T) {
 	if rec := w.call("staff", "POST", "/orgs", name{"name": "x", "owner_user_id": "u-nobody"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("an org for a user that does not exist: got = %d %s, want = 404", rec.Code, rec.Body)
 	}
-	for _, invalid := range []string{"", "   ", strings.Repeat("n", maxNameLength+1)} {
+	for _, invalid := range []string{"", "   ", strings.Repeat("n", domain.MaxNameLength+1)} {
 		if rec := w.call("owner", "POST", "/orgs", name{"name": invalid}); rec.Code != http.StatusBadRequest {
 			t.Fatalf("org named %q: got = %d %s, want = 400", invalid, rec.Code, rec.Body)
 		}
@@ -674,6 +709,129 @@ func TestAnOrgThatDoesNotExistIsNotFoundForStaffToo(t *testing.T) {
 		for _, caller := range []string{"staff", "staff-user", "owner", "org-key"} {
 			if rec := w.call(caller, c.method, c.path, c.body); rec.Code != http.StatusNotFound {
 				t.Errorf("%s %s %s: got = %d %s, want = 404", caller, c.method, c.path, rec.Code, rec.Body)
+			}
+		}
+	}
+}
+
+func TestEndingTheSharingNamesTheJobsItRequeued(t *testing.T) {
+	w := newWorld(t)
+	w.store.placed[w.clusterA] = map[string]string{"job-of-a": w.orgA, "job-of-b": w.orgB, "job-of-b-2": w.orgB}
+	var cluster WithdrawnCluster
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, &cluster)
+	if !cluster.Shared || len(cluster.Requeued) != 0 || len(w.store.placed[w.clusterA]) != 3 {
+		t.Fatalf("sharing: got = %+v with %d jobs left placed, want it shared and every job left where it is", cluster, len(w.store.placed[w.clusterA]))
+	}
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": false}, http.StatusOK, &cluster)
+	if cluster.Shared || strings.Join(cluster.Requeued, ",") != "job-of-b,job-of-b-2" {
+		t.Fatalf("ending the sharing: got = %+v, want the two jobs of org b requeued", cluster)
+	}
+	if _, kept := w.store.placed[w.clusterA]["job-of-a"]; !kept {
+		t.Fatal("the owner's own job was withdrawn from its cluster")
+	}
+}
+
+func TestRemovingAClusterEndsItAndFreesItsName(t *testing.T) {
+	w := newWorld(t)
+	w.store.placed[w.clusterA] = map[string]string{"job-1": w.orgA, "job-2": w.orgB}
+	for _, path := range []string{"/orgs/" + w.orgB + "/clusters/" + w.clusterA, "/orgs/" + w.orgA + "/clusters/" + w.clusterB, "/orgs/" + w.orgA + "/clusters/never-registered"} {
+		for _, caller := range []string{"owner", "outsider", "staff"} {
+			if rec := w.call(caller, "DELETE", path, nil); rec.Code != http.StatusNotFound {
+				t.Fatalf("%s DELETE %s: got = %d %s, want = 404", caller, path, rec.Code, rec.Body)
+			}
+		}
+	}
+	if len(w.store.clusters) != 2 || len(w.store.placed[w.clusterA]) != 2 {
+		t.Fatal("a refused removal changed the clusters")
+	}
+
+	var removed WithdrawnCluster
+	w.ok("org-key", "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, nil, http.StatusOK, &removed)
+	if removed.Name != w.clusterA || strings.Join(removed.Requeued, ",") != "job-1,job-2" {
+		t.Fatalf("removed: got = %+v, want %s with both of its jobs requeued", removed, w.clusterA)
+	}
+	if _, still := w.store.clusters[w.clusterA]; still {
+		t.Fatal("the removed cluster is still registered, so its runtime token still names a cluster")
+	}
+	if rec := w.call("owner", "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("remove it again: got = %d %s, want = 404", rec.Code, rec.Body)
+	}
+	var registered RegisteredCluster
+	w.ok("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": w.clusterA}, http.StatusOK, &registered)
+	if registered.OrgID != w.orgB {
+		t.Fatalf("the freed name registered by another org: got = %+v, want it of %s", registered, w.orgB)
+	}
+}
+
+func TestForgettingAClustersIdentityIsItsOwnersAlone(t *testing.T) {
+	w := newWorld(t)
+	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
+	for caller, want := range map[string]int{"outsider": http.StatusNotFound, "foreign-key": http.StatusNotFound, "member": http.StatusForbidden, "runtime": http.StatusForbidden} {
+		if rec := w.call(caller, "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/identity", nil); rec.Code != want {
+			t.Fatalf("%s forgets the identity of org a's cluster: got = %d %s, want = %d", caller, rec.Code, rec.Body, want)
+		}
+	}
+	if rec := w.call("outsider", "DELETE", "/orgs/"+w.orgB+"/clusters/"+w.clusterA+"/identity", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("org a's cluster named under org b: got = %d %s, want = 404", rec.Code, rec.Body)
+	}
+	if w.store.clusters[w.clusterA].ReportedID != "id-of-a" || len(w.store.clearedIDs) != 0 {
+		t.Fatal("a refused request cleared the identity")
+	}
+	var cluster ClusterView
+	w.ok("owner", "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/identity", nil, http.StatusOK, &cluster)
+	if cluster.ClusterID != "" || cluster.Name != w.clusterA || len(w.store.clearedIDs) != 1 || w.store.clearedIDs[0] != "id-of-a" {
+		t.Fatalf("forgotten: got = %+v, cleared %v, want %s with no identity", cluster, w.store.clearedIDs, w.clusterA)
+	}
+}
+
+// failingStore fails the one read every route of an org starts from.
+type failingStore struct{ *memStore }
+
+func (failingStore) ListProjects(context.Context, []string) ([]*domain.Project, error) {
+	return nil, errors.New(`pq: relation "projects" of org_b does not exist (SQLSTATE 42P01)`)
+}
+
+func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
+	w := newWorld(t)
+	router := chi.NewRouter()
+	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
+	connected := func(context.Context) (map[string]bool, error) {
+		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
+	}
+	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, testSigningSecret, testRuntimeAddresses, zap.NewNop()))
+	w.router = router
+	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
+		rec := w.call("owner", "GET", path, nil)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("GET %s: got = %d %s, want = 500", path, rec.Code, rec.Body)
+		}
+		for _, leak := range []string{"pq:", "SQLSTATE", "org_b", "10.0.0.7", "relation"} {
+			if strings.Contains(rec.Body.String(), leak) {
+				t.Fatalf("GET %s answers with the failure's own text (%q): %s", path, leak, rec.Body)
+			}
+		}
+		if !strings.Contains(rec.Body.String(), auth.InternalError) {
+			t.Fatalf("GET %s: got = %s, want the one generic answer", path, rec.Body)
+		}
+	}
+}
+
+func TestANameHoldsNoControlCharacterWhateverItNames(t *testing.T) {
+	w := newWorld(t)
+	for _, bad := range []string{"nul\x00byte", "two\nlines", "bell\a", strings.Repeat("a", domain.MaxNameLength+1), "   "} {
+		for _, r := range []request{
+			{"POST", "/orgs", name{"name": bad}},
+			{"PATCH", "/orgs/" + w.orgA, name{"name": bad}},
+			{"POST", "/orgs/" + w.orgA + "/projects", name{"name": bad}},
+			{"PATCH", "/projects/" + w.projectA, name{"name": bad}},
+			{"POST", "/orgs/" + w.orgA + "/api-keys", name{"name": bad}},
+		} {
+			before := snapshot(t, w.store)
+			if rec := w.call("owner", r.method, r.path, r.body); rec.Code != http.StatusBadRequest {
+				t.Errorf("%s %s named %q: got = %d %s, want = 400", r.method, r.path, bad, rec.Code, rec.Body)
+			}
+			if snapshot(t, w.store) != before {
+				t.Errorf("%s %s named %q changed the store", r.method, r.path, bad)
 			}
 		}
 	}

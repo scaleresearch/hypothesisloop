@@ -74,6 +74,7 @@ var faultClasses = map[EvictionReason]FaultClass{
 	EvictionPreemptedForGuaranteed: FaultPolicy,
 	EvictionExperimentClosed:       FaultPolicy,
 	EvictionCancelled:              FaultPolicy,
+	EvictionClusterWithdrawn:       FaultPolicy,
 }
 
 // Classify returns the fault class of an eviction reason, and whether the reason is one this

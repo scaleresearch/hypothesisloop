@@ -15,7 +15,9 @@ type Placement interface {
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
 	DonationTenancy(ctx context.Context, donationID string) (*domain.Tenancy, error)
 	AgentOrg(ctx context.Context, agentID string) (orgID string, found bool, err error)
-	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
+	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
+	GetOrg(ctx context.Context, id string) (*domain.Org, error)
+	OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error)
 	GetProject(ctx context.Context, id string) (*domain.Project, error)
 	PlatformExperimentIDs(ctx context.Context, scope domain.TenantScope) ([]string, error)
 }
@@ -211,28 +213,6 @@ func (a *Access) Agent(ctx context.Context, agentID string) error {
 	}
 	if !found || !p.Scope().AdmitsOrg(orgID) {
 		return NotFound("agent")
-	}
-	return nil
-}
-
-// Cluster admits the principal to one cluster's settings and to placing a job on it by hand:
-// staff, and a caller that reaches the whole of the org that registered it. A token narrowed to
-// one project or one platform experiment reaches no cluster.
-func (a *Access) Cluster(ctx context.Context, name string) error {
-	p, err := principal(ctx)
-	if err != nil {
-		return err
-	}
-	if p.Kind == KindStaff {
-		return nil
-	}
-	orgID, found, err := a.placement.ClusterOrg(ctx, name)
-	if err != nil {
-		return err
-	}
-	scope := p.Scope()
-	if !found || !scope.AdmitsOrg(orgID) || scope.ProjectID != "" || scope.PlatformExperimentID != "" {
-		return NotFound("cluster")
 	}
 	return nil
 }

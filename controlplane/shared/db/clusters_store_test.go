@@ -50,7 +50,7 @@ func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 	if listed, err := clusters.ClustersHosting(ctx, orgB); err != nil || len(listed) != 0 {
 		t.Fatalf("clusters of another org: got = %+v, %v, want none", listed, err)
 	}
-	if _, err := clusters.SetClusterShared(ctx, name, true); err != nil {
+	if _, _, err := clusters.SetClusterShared(ctx, name, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, orgID := range []string{orgA, orgB} {
@@ -58,7 +58,7 @@ func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 			t.Fatalf("clusters hosting %s once %s is shared: got = %+v, %v, want only it", orgID, name, listed, err)
 		}
 	}
-	if _, err := clusters.SetClusterShared(ctx, name, false); err != nil {
+	if _, _, err := clusters.SetClusterShared(ctx, name, false); err != nil {
 		t.Fatal(err)
 	}
 	if listed, err := clusters.ClustersHosting(ctx, orgB); err != nil || len(listed) != 0 {
@@ -73,14 +73,14 @@ func TestSharingAClusterIsStoredAndSurvivesRegisteringAgain(t *testing.T) {
 	ctx := context.Background()
 	_, orgA := newTestUserHome(t, accounts)
 	name := "cluster-" + uuid.New().String()[:8]
-	if _, err := clusters.SetClusterShared(ctx, name, true); !errors.Is(err, ErrClusterNotFound) {
+	if _, _, err := clusters.SetClusterShared(ctx, name, true); !errors.Is(err, ErrClusterNotFound) {
 		t.Fatalf("share an unregistered cluster: got = %v, want = %v", err, ErrClusterNotFound)
 	}
 	if _, err := clusters.RegisterCluster(ctx, name, orgA); err != nil {
 		t.Fatalf("register: got = %v, want = nil", err)
 	}
 
-	shared, err := clusters.SetClusterShared(ctx, name, true)
+	shared, _, err := clusters.SetClusterShared(ctx, name, true)
 	if err != nil || !shared.Shared || shared.OrgID != orgA {
 		t.Fatalf("share: got = %+v, %v, want it shared and still owned by %s", shared, err, orgA)
 	}
@@ -91,7 +91,7 @@ func TestSharingAClusterIsStoredAndSurvivesRegisteringAgain(t *testing.T) {
 	if err != nil || !again.Shared {
 		t.Fatalf("register again: got = %+v, %v, want it still shared", again, err)
 	}
-	unshared, err := clusters.SetClusterShared(ctx, name, false)
+	unshared, _, err := clusters.SetClusterShared(ctx, name, false)
 	if err != nil || unshared.Shared || unshared.Hosts("org-other") || !unshared.Hosts(orgA) {
 		t.Fatalf("stop sharing: got = %+v, %v, want it to host %s alone", unshared, err, orgA)
 	}
@@ -132,16 +132,5 @@ func TestAReportedClusterIDIsBoundToOneRegisteredName(t *testing.T) {
 	}
 	if err := clusters.BindReportedID(ctx, ofB, idB); err != nil {
 		t.Fatalf("bind the second cluster to its own id: got = %v, want = nil", err)
-	}
-
-	rebuilt := "id-a-rebuilt-" + suffix
-	if err := clusters.BindReportedID(ctx, ofA, rebuilt); err != nil {
-		t.Fatalf("a cluster rebuilt under its name: got = %v, want = nil", err)
-	}
-	if got, _ := clusters.ClusterByReportedID(ctx, idA); got != nil {
-		t.Fatalf("the id the cluster left: got = %+v, want nil", got)
-	}
-	if got, _ := clusters.GetCluster(ctx, ofA); got == nil || got.ReportedID != rebuilt {
-		t.Fatalf("the rebuilt cluster: got = %+v, want reported id %s", got, rebuilt)
 	}
 }

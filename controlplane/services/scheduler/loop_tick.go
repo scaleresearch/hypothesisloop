@@ -725,10 +725,12 @@ func exceedsClusterCapacityReason(exp *domain.Experiment) string {
 // be double-booked by one placed through the full one.
 //
 // ineligible is the not_admitted_reason when a filter is what emptied the result, and it is the
-// only thing that makes an empty result diagnosable. With no cluster connected at all a
-// single-node job gets an empty set and no reason: that is a heartbeat gap, and reporting it as
-// a missing cluster or a missing capability would tell the submitter to fix something that is
-// not broken.
+// only thing that makes an empty result diagnosable. Whether the job's org has a cluster at all
+// is read from what is registered, never from what is connected: an org whose own cluster is
+// away has a cluster, and what other orgs have connected is not its business to learn. With no
+// cluster of its own connected a single-node job gets an empty set and no reason: that is a
+// heartbeat gap, and reporting it as a missing cluster or a missing capability would tell the
+// submitter to fix something that is not broken.
 func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) (clusters map[string]domain.Footprint, ineligible string) {
 	hosted := make(map[string]domain.Footprint, len(avail))
 	for cluster, footprint := range avail {
@@ -739,7 +741,7 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 	// A job never reaches the queue holding a cluster, so this refuses only a pin written
 	// around admission.
 	pinnedElsewhere := exp.ClusterName != "" && !hostsJob(registered, exp.ClusterName, exp)
-	if pinnedElsewhere || (len(hosted) == 0 && len(avail) > 0) {
+	if pinnedElsewhere || !orgHasCluster(registered, exp.OrgID) {
 		return map[string]domain.Footprint{}, domain.NotAdmittedNoClusterForOrg
 	}
 	if exp.Job.Nodes() <= 1 {
@@ -755,6 +757,16 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 		return out, domain.NotAdmittedNoMultiNodeCluster
 	}
 	return out, ""
+}
+
+// orgHasCluster reports whether any registered cluster takes the org's jobs, connected or not.
+func orgHasCluster(registered map[string]domain.Cluster, orgID string) bool {
+	for _, cluster := range registered {
+		if cluster.Hosts(orgID) {
+			return true
+		}
+	}
+	return false
 }
 
 // hostsJob reports whether cluster is registered and takes jobs of exp's org.

@@ -111,6 +111,29 @@ func (w *world) ClusterOrg(_ context.Context, name string) (string, bool, error)
 	return org, ok, nil
 }
 
+func (w *world) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
+	org, ok := worldClusterOrg[name]
+	if !ok {
+		return nil, nil
+	}
+	return &domain.Cluster{Name: name, OrgID: org}, nil
+}
+
+func (w *world) GetOrg(_ context.Context, id string) (*domain.Org, error) {
+	if id != "org-a" && id != "org-b" {
+		return nil, nil
+	}
+	return &domain.Org{ID: id}, nil
+}
+
+// OrgRole makes the one signed-in person of this world an owner, as every person in production
+// is: no route adds a member. What a member is refused is held where a member can be made, by
+// TestWhoReadsAndWhoAdministersAnOrgAndItsClusters (shared/auth) for the rule and
+// TestWhoMayCallWhat (services/accounts) for each accounts route.
+func (w *world) OrgRole(context.Context, string, string) (domain.OrgRole, bool, error) {
+	return domain.OrgRoleOwner, true, nil
+}
+
 func (w *world) LauncherKnown(_ context.Context, name string) (bool, error) {
 	return name == worldLauncher, nil
 }
@@ -214,7 +237,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0))
-	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}))
+	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", logger).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, worldGraph{world: w}, logger, "http://metrics.invalid", nil), logger))

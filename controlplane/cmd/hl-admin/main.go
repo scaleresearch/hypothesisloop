@@ -78,8 +78,13 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		}
 		return withPool(func(ctx context.Context, pool *db.Pool) error {
-			_, err := db.NewClustersStore(pool).SetClusterShared(ctx, args[2], shared)
-			return err
+			_, requeued, err := db.NewClustersStore(pool).SetClusterShared(ctx, args[2], shared)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(stdout).Encode(struct {
+				Requeued []string `json:"requeued"`
+			}{append([]string{}, requeued...)})
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "add":
 		return withPool(func(ctx context.Context, pool *db.Pool) error {

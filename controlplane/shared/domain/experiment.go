@@ -112,7 +112,11 @@ type Experiment struct {
 	// refused on, with the time it was appended. Candidate selection excludes any entry still
 	// within scheduler.tried_cluster_ttl_seconds — this is the failover budget; there is no
 	// separate counter. Never cleared, only grown; stale entries simply age out of the TTL check.
-	TriedClusters []TriedCluster `json:"tried_clusters,omitempty"`
+	//
+	// Kept out of every answer of the API: a cluster's id is the name its settings are kept
+	// under, and a job tried on a shared cluster would show its org the id of a cluster another
+	// org owns. No client reads the list.
+	TriedClusters []TriedCluster `json:"-"`
 
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -134,6 +138,31 @@ func (e *Experiment) EffectiveJob() JobSpec {
 		return *e.ResolvedJob
 	}
 	return e.Job
+}
+
+// ForRuntime is the job as a cluster's runtime is handed it: what a runtime builds a workload
+// from, and nothing it has no use for. A runtime may be another org's, so the hypothesis, the
+// objective, the theory and where the job sits in its org stay with the platform. The fields
+// kept are the ones the executors and the workload environment read
+// (runtime/shared/workloadenv), under the names they already decode.
+func (e *Experiment) ForRuntime() *Experiment {
+	return &Experiment{
+		ID:                     e.ID,
+		AgentID:                e.AgentID,
+		ProjectID:              e.ProjectID,
+		CodeRef:                e.CodeRef,
+		ConfigHash:             e.ConfigHash,
+		DataRef:                e.DataRef,
+		Job:                    e.Job,
+		ResolvedJob:            e.ResolvedJob,
+		AcceleratorType:        e.AcceleratorType,
+		AcceleratorCount:       e.AcceleratorCount,
+		EstimatedDurationHours: e.EstimatedDurationHours,
+		CapacityTier:           e.CapacityTier,
+		AttemptCount:           e.AttemptCount,
+		Data:                   e.Data,
+		Token:                  e.Token,
+	}
 }
 
 // NodeShapes is the placement view of e's EffectiveJob — see JobSpec.NodeShapes. It is on

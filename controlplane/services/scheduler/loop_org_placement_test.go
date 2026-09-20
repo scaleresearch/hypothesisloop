@@ -247,13 +247,16 @@ func TestTickKeepsAJobWaitingForItsOwnClusterBesideAnotherOrgsIdleOne(t *testing
 }
 
 func TestTickTellsAJobWhoseOrgHasNoClusterSo(t *testing.T) {
-	registered := threeOrgClusters()
-	registered["of-a-auto"] = domain.Cluster{Name: "of-a-auto", OrgID: "org-a"}
+	registered := map[string]domain.Cluster{
+		"of-a":      {Name: "of-a", OrgID: "org-a"},
+		"of-b":      {Name: "of-b", OrgID: "org-b"},
+		"of-a-auto": {Name: "of-a-auto", OrgID: "org-a"},
+	}
 	for name, clusters := range map[string]map[string]orgCluster{
-		"only other orgs' clusters are connected":   {"of-a": {free: 4, installed: 4}, "of-b": {free: 4, installed: 4}},
-		"another org's cluster scales up":           {"of-a-auto": {installed: 4, autoscaler: true}},
-		"the shared cluster is registered and away": {"of-b": {free: 4, installed: 4}},
-		"a cluster nobody registered has room":      {"phantom": {free: 4, installed: 4, autoscaler: true}},
+		"only other orgs' clusters are connected": {"of-a": {free: 4, installed: 4}, "of-b": {free: 4, installed: 4}},
+		"another org's cluster scales up":         {"of-a-auto": {installed: 4, autoscaler: true}},
+		"a cluster nobody registered has room":    {"phantom": {free: 4, installed: 4, autoscaler: true}},
+		"nothing is connected":                    {},
 	} {
 		for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
 			t.Run(name+"/"+string(tier), func(t *testing.T) {
@@ -269,6 +272,42 @@ func TestTickTellsAJobWhoseOrgHasNoClusterSo(t *testing.T) {
 					t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedNoClusterForOrg)
 				}
 			})
+		}
+	}
+}
+
+// An org with a cluster registered has a cluster, connected or not. Its job waits for it, and the
+// reason it reads is the same whatever other orgs have connected, so it learns nothing of them.
+func TestTickDoesNotCallAnAwayClusterMissing(t *testing.T) {
+	for name, registered := range map[string]map[string]domain.Cluster{
+		"its own cluster is away":    {"of-a": {Name: "of-a", OrgID: "org-a"}, "of-c": {Name: "of-c", OrgID: "org-c"}},
+		"the shared cluster is away": threeOrgClusters(),
+	} {
+		reasons := map[string]string{}
+		for others, clusters := range map[string]map[string]orgCluster{
+			"another org's cluster is connected": {"of-a": {free: 4, installed: 4}},
+			"nothing is connected":               {},
+		} {
+			for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+				t.Run(name+"/"+others+"/"+string(tier), func(t *testing.T) {
+					store := &orgStore{registered: registered}
+					l := orgLoop(store, clusters, orgJob("c1", "org-c", tier, 1))
+
+					tickOnce(t, l)
+
+					if cluster, admitted := store.submitted["c1"]; admitted {
+						t.Fatalf("the job was placed on %s, a cluster of another org", cluster)
+					}
+					got := store.notAdmitted["c1"]
+					if got == domain.NotAdmittedNoClusterForOrg {
+						t.Fatalf("not_admitted_reason = %q for an org whose cluster is registered and away", got)
+					}
+					if seen, ok := reasons[string(tier)]; ok && seen != got {
+						t.Fatalf("not_admitted_reason = %q with %s and %q otherwise: the reason tells an org what others have connected", got, others, seen)
+					}
+					reasons[string(tier)] = got
+				})
+			}
 		}
 	}
 }
@@ -377,7 +416,12 @@ func TestTickPreemptsAcrossOrgsOnASharedClusterOnly(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			victim := runningBurst("victim", "org-b", tc.cluster)
-			store := &orgStore{registered: threeOrgClusters()}
+			registered := threeOrgClusters()
+			delete(registered, "of-a")
+			if !tc.preempted {
+				delete(registered, "shared")
+			}
+			store := &orgStore{registered: registered}
 			store.running = []*domain.Experiment{victim}
 			l := orgLoop(store, map[string]orgCluster{tc.cluster: {free: 0, installed: 1}},
 				orgJob("a1", "org-a", domain.CapacityGuaranteed, 1))
