@@ -117,7 +117,7 @@ SELECT agent_id, capacity_tier,
 FROM experiments
 WHERE platform_experiment_id = $1
   AND (
-      status IN ('QUEUED', 'SUBMITTED', 'ADMITTED', 'RUNNING')
+      status IN ('QUEUED', 'SUBMITTED', 'RUNNING')
       OR (status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED') AND quota_settled_at IS NULL)
   )
 GROUP BY agent_id, capacity_tier`

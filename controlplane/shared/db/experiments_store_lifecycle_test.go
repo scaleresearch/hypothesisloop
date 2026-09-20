@@ -161,7 +161,7 @@ func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t 
 		t.Fatalf("Evidence: %v", err)
 	}
 	entry := func(jobs, completed, running, rejected, findings, comments int64) map[string]any {
-		return map[string]any{"jobs": jobs, "submitted": int64(0), "queued": int64(0), "admitted": int64(0), "running": running,
+		return map[string]any{"jobs": jobs, "submitted": int64(0), "queued": int64(0), "running": running,
 			"completed": completed, "failed": int64(0), "evicted": int64(0), "rejected": rejected, "findings": findings, "comments": comments}
 	}
 	busyEntry := entry(3, 2, 1, 1, 1, 1)

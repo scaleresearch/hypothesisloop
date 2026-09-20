@@ -257,7 +257,7 @@ func TestSpeculativeCandidatesRespectsMaxSpeculativeAccelerators(t *testing.T) {
 // nilCallbackClaimStore captures submitJobTo's capacityAvailable callback so tests can both
 // distinguish "no recheck at all" from "rechecks something" and drive the callback itself against
 // a chosen `desired` set — ClaimSubmitted (the real store implementation) passes it the
-// SUBMITTED/ADMITTED rows on the target cluster, read fresh under its own per-cluster advisory
+// SUBMITTED rows on the target cluster, read fresh under its own per-cluster advisory
 // lock.
 type nilCallbackClaimStore struct {
 	LoopStore

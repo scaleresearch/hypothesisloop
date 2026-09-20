@@ -184,7 +184,7 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='burst'), 0)
 		FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2
-		  AND (status IN ('QUEUED','SUBMITTED','ADMITTED','RUNNING')
+		  AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
 		exp.AgentID, exp.PlatformExperimentID).Scan(
 		&desiredGuaranteedAcc, &desiredBurstAcc); err != nil {
@@ -248,7 +248,7 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 	var desired float64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch),0) FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2 AND capacity_tier=$3
-		AND (status IN ('QUEUED','SUBMITTED','ADMITTED','RUNNING')
+		AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
 		agentID, platformExpID, tier).Scan(&desired); err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: desired usage: %w", err)

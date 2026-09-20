@@ -290,7 +290,7 @@ FROM unnest($1::text[]) AS ids(id)`
 
 // evidenceStatuses are the job statuses an Evidence entry counts, each under its lowercase name.
 var evidenceStatuses = []domain.ExperimentStatus{
-	domain.StatusSubmitted, domain.StatusQueued, domain.StatusAdmitted, domain.StatusRunning,
+	domain.StatusSubmitted, domain.StatusQueued, domain.StatusRunning,
 	domain.StatusCompleted, domain.StatusFailed, domain.StatusEvicted, domain.StatusRejected,
 }
 

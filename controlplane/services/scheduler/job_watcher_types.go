@@ -1,7 +1,7 @@
 package scheduler
 
-// JobWatcher watches backend-executed workloads for experiments in SUBMITTED or ADMITTED
-// state and drives the DB transitions SUBMITTED/ADMITTED → RUNNING → COMPLETED/FAILED.
+// JobWatcher watches backend-executed workloads for experiments in SUBMITTED
+// state and drives the DB transitions SUBMITTED → RUNNING → COMPLETED/FAILED.
 // It talks only to the workload.Backend interface, so it has no idea whether jobs are
 // actually running as Kubernetes Jobs, Slurm allocations, or anything else.
 //
@@ -26,7 +26,7 @@ import (
 // JobStatusStore is the persistence interface needed by JobWatcher.
 type JobStatusStore interface {
 	ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error)
-	// MarkStarted transitions SUBMITTED/ADMITTED -> RUNNING. Returns false (no error) if the
+	// MarkStarted transitions SUBMITTED -> RUNNING. Returns false (no error) if the
 	// experiment already left that state (e.g. cancelled/evicted concurrently) — the caller
 	// must skip every other onRunning side effect in that case.
 	MarkStarted(ctx context.Context, id string) (bool, error)
@@ -36,7 +36,7 @@ type JobStatusStore interface {
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error)
 	// TransitionStatusFromNonTerminal atomically updates status unless the row is already
 	// COMPLETED/FAILED/EVICTED — used where the caller can't name the exact prior status (see
-	// onFinished's ADMITTED-terminal branch) but still must not resurrect an already-terminal job.
+	// onFinished's branch for a job never observed RUNNING) but still must not resurrect an already-terminal job.
 	TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus) (bool, error)
 	// ResolveTermination atomically sets status and eviction_reason together in one UPDATE,
 	// guarded on from. Used by evictNeverStarted so an eviction can never persist a status
@@ -87,7 +87,7 @@ type JobWatcher struct {
 	logger       *zap.Logger
 	settler      QuotaSettler // durably settles final usage on job end
 	pollInterval time.Duration
-	// stuckPendingTimeout bounds how long a job may stay SUBMITTED/ADMITTED without reporting
+	// stuckPendingTimeout bounds how long a job may stay SUBMITTED without reporting
 	// RUNNING before it is evicted with reason stuck_pending and fully refunded.
 	stuckPendingTimeout time.Duration
 
@@ -125,7 +125,7 @@ func (w *JobWatcher) WithPollInterval(d time.Duration) *JobWatcher {
 	return w
 }
 
-// WithStuckPendingTimeout sets how long a job may stay SUBMITTED/ADMITTED without reporting
+// WithStuckPendingTimeout sets how long a job may stay SUBMITTED without reporting
 // RUNNING before job_watcher evicts it as stuck_pending.
 func (w *JobWatcher) WithStuckPendingTimeout(d time.Duration) *JobWatcher {
 	w.stuckPendingTimeout = d

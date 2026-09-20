@@ -18,7 +18,7 @@ import (
 // re-queried once per queued job.
 type resolutionCache struct {
 	l             *Loop
-	claimed       []*domain.Experiment // RUNNING, SUBMITTED, and ADMITTED — see loadClaimed
+	claimed       []*domain.Experiment // RUNNING and SUBMITTED — see loadClaimed
 	claimedLoaded bool
 	nodeOf        map[string]string // experiment ID -> node, filled lazily
 }
@@ -28,8 +28,8 @@ func newResolutionCache(l *Loop) *resolutionCache {
 }
 
 // loadClaimed returns every experiment that has already claimed accelerator capacity toward the
-// nodes it landed on — RUNNING, SUBMITTED, and ADMITTED, not just RUNNING. A RUNNING-only view
-// undercounts: SUBMITTED/ADMITTED jobs have already reduced nodeAvail's free count but have not
+// nodes it landed on — RUNNING and SUBMITTED, not just RUNNING. A RUNNING-only view
+// undercounts: SUBMITTED jobs have already reduced nodeAvail's free count but have not
 // yet reached RUNNING, so leaving them out of "installed" here would corrupt every FairShare
 // computed against the reconstructed total.
 func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment, error) {
@@ -47,7 +47,7 @@ func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment
 
 // installedAcceleratorsByNode returns, for every node cluster's nodeAvail reports, its installed
 // (not free) count of flavor: currently free (nodeAvail) plus what is already claimed there by a
-// RUNNING, SUBMITTED, or ADMITTED experiment (see loadClaimed — SUBMITTED/ADMITTED jobs have
+// RUNNING or SUBMITTED experiment (see loadClaimed — SUBMITTED jobs have
 // already reduced nodeAvail's free count and must be counted here too, or "installed" undercounts
 // and every FairShare computed against it is wrong), attributed the same way loop_disbalance.go's
 // disbalance evictor attributes running work to a node — one metrics-store node-attribution query
@@ -55,7 +55,7 @@ func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment
 // comment), not per queued job.
 //
 // Node attribution (metricsdb.LatestExperimentNode) is keyed by observed placement, so a
-// SUBMITTED/ADMITTED job the backend has not yet scheduled anywhere may not resolve to a node yet
+// SUBMITTED job the backend has not yet scheduled anywhere may not resolve to a node yet
 // (found=false below) and is simply not counted at that node until it does — same as it would be
 // missed entirely under the old RUNNING-only view, never worse.
 //

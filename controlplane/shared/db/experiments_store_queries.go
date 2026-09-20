@@ -50,13 +50,13 @@ ORDER BY created_at ASC`
 }
 
 // SumDesiredFootprintByCluster returns each cluster's total committed footprint — the sum of
-// every experiment's Footprint() currently RUNNING, SUBMITTED, or ADMITTED there. This is the
+// every experiment's Footprint() currently RUNNING or SUBMITTED there. This is the
 // control plane's own desired state, updated immediately on each status transition, independent
 // of how long the cluster takes to converge. Available capacity is nominal total minus this sum,
 // never total minus a separately live-reported "actual usage" number.
 func (s *ExperimentsStore) SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE status IN ('RUNNING', 'SUBMITTED', 'ADMITTED') AND cluster_name != ''`
+WHERE status IN ('RUNNING', 'SUBMITTED') AND cluster_name != ''`
 
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {
@@ -91,16 +91,16 @@ ORDER BY created_at ASC`
 	return collectExperiments(rows)
 }
 
-// ListCapacityClaimedExperiments returns every experiment in RUNNING, SUBMITTED, or ADMITTED
+// ListCapacityClaimedExperiments returns every experiment in RUNNING or SUBMITTED
 // status — the same three statuses SumDesiredFootprintByCluster sums, i.e. every experiment that
 // has already claimed physical capacity whether or not the workload backend has confirmed it
 // RUNNING yet. QUEUED is deliberately excluded: a queued job has not claimed anything. Used by the
 // scheduler's tick-time node-attribution reconstruction (see loop_resolve.go's
-// installedAcceleratorsByNode), which must count SUBMITTED/ADMITTED holds too — ListRunningExperiments
+// installedAcceleratorsByNode), which must count SUBMITTED holds too — ListRunningExperiments
 // alone undercounts a node's already-claimed capacity whenever such jobs exist.
 func (s *ExperimentsStore) ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE status IN ('RUNNING', 'SUBMITTED', 'ADMITTED')
+WHERE status IN ('RUNNING', 'SUBMITTED')
 ORDER BY created_at ASC`
 
 	rows, err := s.pool.pool.Query(ctx, q)
@@ -125,12 +125,11 @@ ORDER BY created_at DESC`
 	return collectExperiments(rows)
 }
 
-// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, ADMITTED,
-// RUNNING) for a platform experiment. Used to evict jobs when an experiment is closed.
+// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for a platform experiment. Used to evict jobs when an experiment is closed.
 func (s *ExperimentsStore) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE platform_experiment_id = $1
-  AND status IN ('QUEUED', 'SUBMITTED', 'ADMITTED', 'RUNNING')
+  AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING')
 ORDER BY created_at DESC`
 
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
@@ -147,18 +146,6 @@ func (s *ExperimentsStore) ListSubmittedExperiments(ctx context.Context) ([]*dom
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.ListSubmittedExperiments: %w", err)
-	}
-	defer rows.Close()
-	return collectExperiments(rows)
-}
-
-// ListAdmittedExperiments returns all experiments in ADMITTED state (submitted to the workload
-// backend, not yet observed RUNNING) — still holding physical capacity, same as SUBMITTED/RUNNING.
-func (s *ExperimentsStore) ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
-	q := `SELECT` + experimentColumns + `FROM experiments WHERE status = 'ADMITTED' ORDER BY submitted_at ASC`
-	rows, err := s.pool.pool.Query(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.ListAdmittedExperiments: %w", err)
 	}
 	defer rows.Close()
 	return collectExperiments(rows)
@@ -188,13 +175,11 @@ ORDER BY updated_at ASC`
 	return collectExperiments(rows)
 }
 
-// GetAgentQueuedExperiments returns QUEUED, SUBMITTED, and ADMITTED experiments for an agent in a
-// platform experiment. Used by the quota-exhaustion path to cancel waiting jobs and return their
-// reservations. ADMITTED is included because a workload is already being created for it — leaving
-// it out lets a cut/exhausted agent's job start after the sweep believes it stopped everything.
+// GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent in a platform
+// experiment.
 func (s *ExperimentsStore) GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ('QUEUED', 'SUBMITTED', 'ADMITTED')
+WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ('QUEUED', 'SUBMITTED')
 ORDER BY queued_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID)
 	if err != nil {

@@ -314,12 +314,12 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 	}
 }
 
-// The regression this whole cache exists to prevent: SUBMITTED and ADMITTED claims (not just
+// The regression this whole cache exists to prevent: SUBMITTED claims (not just
 // RUNNING) must be counted toward a node's installed total, because they have already reduced
 // nodeAvail's free count without yet reaching RUNNING. Undercounting them corrupts every
 // FairShare computed against the reconstructed total. Named explicitly so this can never quietly
 // regress back to a RUNNING-only view.
-func TestInstalledAcceleratorsByNodeCountsSubmittedAndAdmittedNotJustRunning(t *testing.T) {
+func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) {
 	const flavor = domain.AcceleratorType("example.com/product=test-accelerator")
 	claimByStatus := func(id string, status domain.ExperimentStatus, count int) *domain.Experiment {
 		return &domain.Experiment{
@@ -334,11 +334,10 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedAndAdmittedNotJustRunning(t *
 	}
 	claimed := []*domain.Experiment{
 		claimByStatus("exp-submitted", domain.StatusSubmitted, 1),
-		claimByStatus("exp-admitted", domain.StatusAdmitted, 2),
 		claimByStatus("exp-running", domain.StatusRunning, 3),
 	}
 
-	loop := &Loop{store: &resolveTestStore{running: claimed}, logger: zap.NewNop(), observed: observedOnNode([]string{"exp-submitted", "exp-admitted", "exp-running"}, "node-a")}
+	loop := &Loop{store: &resolveTestStore{running: claimed}, logger: zap.NewNop(), observed: observedOnNode([]string{"exp-submitted", "exp-running"}, "node-a")}
 	cache := newResolutionCache(loop)
 	nodeAvail := map[string]map[string]int64{"node-a": {string(flavor): 0}}
 
@@ -346,8 +345,8 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedAndAdmittedNotJustRunning(t *
 	if err != nil {
 		t.Fatalf("installedAcceleratorsByNode: %v", err)
 	}
-	if want := int64(1 + 2 + 3); installed["node-a"] != want {
-		t.Errorf("installed[node-a] = %d, want %d (SUBMITTED + ADMITTED + RUNNING all counted)", installed["node-a"], want)
+	if want := int64(1 + 3); installed["node-a"] != want {
+		t.Errorf("installed[node-a] = %d, want %d (SUBMITTED and RUNNING both counted)", installed["node-a"], want)
 	}
 }
 

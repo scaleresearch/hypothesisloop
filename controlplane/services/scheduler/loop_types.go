@@ -28,7 +28,6 @@ import (
 type LoopStore interface {
 	ListQueuedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	ListAdmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	MarkQueued(ctx context.Context, id, reason string) error
 	// ClaimSubmitted persists resolvedJob (exp.ResolvedJob, required) alongside the SUBMITTED
@@ -47,7 +46,7 @@ type LoopStore interface {
 	// jobs queued before the ladder moved.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	// ListCapacityClaimedExperiments returns every experiment that has already claimed
-	// accelerator capacity toward the nodes it landed on — RUNNING, SUBMITTED, and ADMITTED, not
+	// accelerator capacity toward the nodes it landed on — RUNNING and SUBMITTED, not
 	// just RUNNING — see resolutionCache.loadClaimed for why the narrower RUNNING-only view
 	// undercounts "installed" capacity during tick-time "max" resolution.
 	ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error)

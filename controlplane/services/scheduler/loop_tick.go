@@ -162,7 +162,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	nodeResourcesAtTickStart := cloneNodeAvailByCluster(nodeResources)
 
 	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
-	// ADMITTED/RUNNING). No second reservation or live-usage subtraction here — either would
+	// RUNNING). No second reservation or live-usage subtraction here — either would
 	// double-count. MarkSubmitted is itself the durable capacity claim.
 
 	// 3. Get all QUEUED experiments.

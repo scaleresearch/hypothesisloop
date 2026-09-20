@@ -17,7 +17,7 @@ import (
 // outbox, no claim/lease/ack bookkeeping needed.
 //
 // Callers that need a Job gone immediately (preemption, eviction) must update the
-// experiment's status away from the desired set (SUBMITTED/ADMITTED/RUNNING) *before*
+// experiment's status away from the desired set (SUBMITTED/RUNNING) *before*
 // waiting for deletion to be confirmed — see services/scheduler/loop.go's preempt() and
 // services/controller's eviction paths, all of which do the status update first specifically
 // so this table stays the only source of truth for "should a Job exist."
@@ -34,7 +34,6 @@ func NewClusterQueueStore(pool *Pool) *ClusterQueueStore {
 // in this set (QUEUED, COMPLETED, FAILED, EVICTED, REJECTED) should not.
 var desiredStatuses = []string{
 	string(domain.StatusSubmitted),
-	string(domain.StatusAdmitted),
 	string(domain.StatusRunning),
 }
 

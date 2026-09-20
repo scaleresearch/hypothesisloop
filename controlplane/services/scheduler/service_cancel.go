@@ -9,17 +9,17 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// CancelExperiment cancels a QUEUED or RUNNING/ADMITTED experiment.
+// CancelExperiment cancels a QUEUED or RUNNING experiment.
 //   - QUEUED/SUBMITTED: marks as REJECTED.
-//   - ADMITTED/RUNNING: marks as EVICTED (which is itself the deletion signal — the
-//     cluster-agent reconciles its Jobs to the set of SUBMITTED/ADMITTED/RUNNING
+//   - RUNNING: marks as EVICTED (which is itself the deletion signal — the
+//     cluster-agent reconciles its Jobs to the set of SUBMITTED/RUNNING
 //     experiments, so moving out of that set is what makes the Job go away).
 //
 // Every path then uses the canonical settlement service; there is no cancellation-specific
 // accounting implementation.
 
 // cancelMaxAttempts bounds the re-read-and-retry loop below. A lost CAS almost always means
-// admission progressed the status by exactly one step (QUEUED->SUBMITTED->ADMITTED->RUNNING);
+// admission progressed the status by exactly one step (QUEUED->SUBMITTED->RUNNING);
 // a handful of attempts comfortably outruns that without risking a livelock against a truly
 // concurrent cancel (which converges immediately: the second cancel's CAS is a no-op because
 // the first one already moved the row to terminal).
@@ -52,7 +52,7 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			s.settle(ctx, "cancel", exp)
 			return nil
 
-		case domain.StatusAdmitted, domain.StatusRunning:
+		case domain.StatusRunning:
 			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled), "")
 			if err != nil {
 				return fmt.Errorf("cancel: update status: %w", err)
@@ -75,10 +75,10 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 	return fmt.Errorf("cancel: experiment %s status kept changing underneath the cancel; give up after %d attempts", id, cancelMaxAttempts)
 }
 
-// EvictExperiment terminates a RUNNING or ADMITTED experiment through the same canonical path
+// EvictExperiment terminates a RUNNING experiment through the same canonical path
 // CancelExperiment uses — EVICTED is itself the deletion signal, and settlement writes the real
 // observed usage. Implements ExperimentEvictor for the scheduler loop's disbalance evictor.
-// A job that has already left RUNNING/ADMITTED (finished or was cancelled concurrently) is a
+// A job that has already left RUNNING (finished or was cancelled concurrently) is a
 // no-op, not an error: the outcome the caller wanted has happened either way.
 func (s *Service) EvictExperiment(ctx context.Context, id string, reason domain.EvictionReason) error {
 	exp, err := s.store.GetExperiment(ctx, id)
@@ -89,7 +89,7 @@ func (s *Service) EvictExperiment(ctx context.Context, id string, reason domain.
 		return &AdmissionError{Reason: "not_found", Message: "experiment not found"}
 	}
 	switch exp.Status {
-	case domain.StatusAdmitted, domain.StatusRunning:
+	case domain.StatusRunning:
 	default:
 		return nil
 	}

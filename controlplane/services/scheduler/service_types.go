@@ -68,7 +68,7 @@ type QuotaService interface {
 
 // WorkloadClient manages backend-executed workloads, potentially across multiple target
 // clusters. No DeleteWorkload: a job's desired existence derives from the experiment's own
-// status, so "deleting" just means transitioning away from SUBMITTED/ADMITTED/RUNNING.
+// status, so "deleting" just means transitioning away from SUBMITTED/RUNNING.
 type WorkloadClient interface {
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
 	// GetFlavorCapacity returns available physical capacity per cluster (see

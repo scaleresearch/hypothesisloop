@@ -142,16 +142,6 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	if err != nil {
 		return err
 	}
-	// ADMITTED jobs already hold their reservation and are about to have a workload created for
-	// them — without stopping these too, a cut/exhausted agent's job can still start after this
-	// sweep believes it has stopped everything (GetAgentQueuedExperiments also returns QUEUED and
-	// SUBMITTED, which never spent observed hours and are excluded by tierExhausted's usage check
-	// below being about observed consumption, not queue membership).
-	admitted, err := c.store.GetAgentQueuedExperiments(ctx, agentID, platformExpID)
-	if err != nil {
-		return err
-	}
-
 	// 0.99 not 1.0: floating-point accumulation across many debit/refund calls means "exactly
 	// exhausted" may never compare equal/greater than the raw budget — a 1% margin avoids a
 	// budget that's genuinely spent sitting just under the threshold forever.
@@ -188,44 +178,6 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		exp.Status = domain.StatusEvicted
 		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
 		c.settleAndMark(ctx, exp)
-	}
-
-	for _, exp := range admitted {
-		if exp.Status != domain.StatusAdmitted {
-			continue // QUEUED/SUBMITTED haven't claimed a reservation the way ADMITTED has
-		}
-		tierExhausted := (guaranteedExhausted && exp.CapacityTier == domain.CapacityGuaranteed) ||
-			(burstExhausted && exp.CapacityTier == domain.CapacityBurst)
-		if !tierExhausted {
-			continue
-		}
-		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusAdmitted, domain.StatusEvicted,
-			string(domain.EvictionQuotaExhaustion), "")
-		if err != nil {
-			c.logger.Error("quota exhaustion evict admitted", zap.String("id", exp.ID), zap.Error(err))
-			continue
-		}
-		if outcome != domain.TerminationWritten {
-			continue
-		}
-		obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
-		// Never reached RUNNING; settlement derives zero usage from absent metrics. EVICTED (not
-		// REJECTED) to match CancelExperiment's convention: ADMITTED already has a workload being
-		// created for it, so moving it out of the SUBMITTED/ADMITTED/RUNNING desired-state set is
-		// what makes the cluster-agent tear that workload down.
-		exp.Status = domain.StatusEvicted
-		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
-		c.settleAndMark(ctx, exp)
-		// Status is already EVICTED above — that's what removes it from the cluster-agent's
-		// desired-running set; the Job disappears on the agent's next reconcile pass.
-		c.logger.Info("quota exhaustion eviction",
-			zap.String("agent", agentID),
-			zap.String("exp", exp.ID),
-			zap.Float64("actual_guaranteed_acch", aq.UsedGuaranteedAccH),
-			zap.Float64("actual_burst_acch", aq.UsedBurstAccH),
-			zap.Float64("quota_guaranteed_acch", aq.GuaranteedAcceleratorHours),
-			zap.Float64("quota_burst_acch", aq.BurstAcceleratorHours),
-		)
 	}
 
 	// Cancel QUEUED and SUBMITTED jobs and return their reservations — spec 7b.

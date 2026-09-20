@@ -354,7 +354,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	if speculative {
 		// There is no live node to re-check a fit predicate against (that's why this is
 		// speculative), but ClaimSubmitted's per-cluster advisory lock and its `desired` read
-		// (every SUBMITTED/ADMITTED row on clusterName) are still the one place a fresh,
+		// (every SUBMITTED row on clusterName) are still the one place a fresh,
 		// serialized-across-replicas view of this cluster's speculative footprint exists —
 		// reuse them to recheck max_speculative_accelerators here rather than trusting the
 		// tick-local snapshot speculativeCandidates saw a moment ago (a snapshot other replicas
@@ -380,7 +380,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 			if cap == nil {
 				return true, nil
 			}
-			// desired is every SUBMITTED/ADMITTED row on this cluster, not only the speculative
+			// desired is every SUBMITTED row on this cluster, not only the speculative
 			// ones — the doc's "None: derived from autoscaler_enabled ∧ scheduled_nodes <
 			// Nodes()" decision means whether a given row is still riding on a scale-up or has
 			// since landed on live capacity is metrics-store state, unavailable inside this

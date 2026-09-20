@@ -27,7 +27,7 @@ func startOverdue(exp *domain.Experiment) time.Duration {
 
 // evictIfPastAdmissionDeadline evicts a job that has stayed pre-RUNNING for longer than
 // stuckPendingTimeout, with the reason naming what actually failed to resolve. Called only for
-// experiments still in SUBMITTED/ADMITTED, from the one place that has just observed why the
+// experiments still in SUBMITTED, from the one place that has just observed why the
 // lifecycle could not advance — the deadline is the bound on every such "still can't tell" state,
 // so none of them can hold a reservation indefinitely.
 func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) error {
@@ -35,7 +35,7 @@ func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *doma
 		return nil
 	}
 	if exp.SubmittedAt == nil {
-		// Every SUBMITTED/ADMITTED row is written with submitted_at (ClaimSubmitted sets it in
+		// Every SUBMITTED row is written with submitted_at (ClaimSubmitted sets it in
 		// the same UPDATE). Without it there is no deadline to measure against, and silently
 		// skipping is what makes a job immortal — surface it instead.
 		return fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
@@ -64,7 +64,7 @@ func (w *JobWatcher) evictIfPastAdmissionDeadline(ctx context.Context, exp *doma
 // deadline and reason are exactly today's stuckPendingTimeout/EvictionStuckPending.
 func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
 	if exp.SubmittedAt == nil {
-		// Every SUBMITTED/ADMITTED row is written with submitted_at (ClaimSubmitted sets it in
+		// Every SUBMITTED row is written with submitted_at (ClaimSubmitted sets it in
 		// the same UPDATE); a RUNNING row keeps whatever the current attempt's submitted_at was.
 		return false, fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
 	}
@@ -227,7 +227,7 @@ type runningOutcome int
 const (
 	// runningMarked: the experiment is now RUNNING.
 	runningMarked runningOutcome = iota
-	// runningLeftState: it left SUBMITTED/ADMITTED underneath us (cancelled or evicted
+	// runningLeftState: it left SUBMITTED underneath us (cancelled or evicted
 	// concurrently). Nothing to do — and nothing to bound, since it is already terminal.
 	runningLeftState
 	// runningTypeUnobservable: the pod is up but its accelerator type is not readable. Usually a
@@ -239,7 +239,7 @@ const (
 	runningTypeMismatch
 )
 
-// onRunning attempts the SUBMITTED/ADMITTED → RUNNING transition, returning the accelerator type
+// onRunning attempts the SUBMITTED → RUNNING transition, returning the accelerator type
 // this admission landed on (empty unless the outcome is runningMarked).
 func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, runningOutcome) {
 	w.logger.Info("job_watcher: experiment running", zap.String("id", exp.ID))
@@ -263,7 +263,7 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 		return "", runningTypeUnobservable
 	}
 	if !started {
-		w.logger.Info("job_watcher: experiment left SUBMITTED/ADMITTED before Running was observed — skipping", zap.String("id", exp.ID))
+		w.logger.Info("job_watcher: experiment left SUBMITTED before Running was observed — skipping", zap.String("id", exp.ID))
 		return "", runningLeftState
 	}
 
@@ -293,7 +293,7 @@ func (w *JobWatcher) backfillStartedFromObservations(ctx context.Context, exp *d
 		return false, fmt.Errorf("job_watcher: backfill running state for %s: %w", exp.ID, err)
 	}
 	if !started {
-		// Already left SUBMITTED/ADMITTED by some other path — nothing to backfill.
+		// Already left SUBMITTED by some other path — nothing to backfill.
 		return false, nil
 	}
 	w.logger.Info("job_watcher: backfilling lifecycle state, metrics show it ran", zap.String("id", exp.ID))
@@ -331,7 +331,7 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 			return nil
 		}
 	} else {
-		// Completed without this cycle observing a RUNNING poll — usually a true ADMITTED →
+		// Completed without this cycle observing a RUNNING poll — usually a true SUBMITTED →
 		// terminal transition, but a pod recreation can also land a genuinely-RUNNING job here.
 		// Guard with the non-terminal check, or a late completion from an already-evicted job's
 		// stale pod could resurrect it past a terminal state.

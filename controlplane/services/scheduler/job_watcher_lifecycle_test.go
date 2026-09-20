@@ -184,7 +184,7 @@ func (s *countingSettler) Settle(context.Context, *domain.Experiment) error { s.
 func TestAnInfrastructureFaultRequeuesWithoutSpendingARetryAttempt(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 3, requeueBudget: 2}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
-	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}
+	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}
 
 	w.evictNotYetRunning(context.Background(), exp, domain.EvictionClusterUnreachable)
 
@@ -213,7 +213,7 @@ func TestAnInfrastructureRequeueIsNeverMarkedQuotaSettled(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 3}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
-	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionWorkloadGone)
+	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}, domain.EvictionWorkloadGone)
 
 	if store.markedSettled != 0 {
 		t.Errorf("MarkQuotaSettled calls got = %v, want %v", store.markedSettled, 0)
@@ -229,7 +229,7 @@ func TestInfrastructureRequeuesStopExactlyAtTheConfiguredCeiling(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		w.evictNotYetRunning(ctx, &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionStuckPending)
+		w.evictNotYetRunning(ctx, &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}, domain.EvictionStuckPending)
 	}
 
 	if len(store.requeuedReasons) != 2 {
@@ -250,7 +250,7 @@ func TestAPolicyTerminationIsNotRequeued(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 3}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
-	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionStageCut)
+	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}, domain.EvictionStageCut)
 
 	if len(store.requeuedReasons) != 0 {
 		t.Errorf("free requeues got = %v, want %v", len(store.requeuedReasons), 0)
@@ -266,7 +266,7 @@ func TestAWorkloadTerminationIsNotRequeued(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 3}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
-	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusAdmitted}, domain.EvictionUnschedulable)
+	w.evictNotYetRunning(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}, domain.EvictionUnschedulable)
 
 	if len(store.requeuedReasons) != 0 {
 		t.Errorf("free requeues got = %v, want %v", len(store.requeuedReasons), 0)

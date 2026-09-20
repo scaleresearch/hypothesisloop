@@ -130,7 +130,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
 		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
 		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
-		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, ADMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
+		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
 		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
 		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`

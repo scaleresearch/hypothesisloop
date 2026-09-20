@@ -37,7 +37,6 @@ func (w *JobWatcher) Start(ctx context.Context) {
 func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	statuses := []domain.ExperimentStatus{
 		domain.StatusSubmitted,
-		domain.StatusAdmitted,
 		domain.StatusRunning,
 	}
 	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via

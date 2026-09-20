@@ -65,7 +65,7 @@ func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) er
 	}
 	const q = `UPDATE experiments SET status = 'QUEUED', queued_at = COALESCE(queued_at, NOW()),
 	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, resolved_job_spec = NULL, updated_at = NOW()
-	WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
+	WHERE id = $1 AND status = 'SUBMITTED'`
 	_, err := s.pool.pool.Exec(ctx, q, id, reason)
 	return err
 }
@@ -88,7 +88,7 @@ func (s *ExperimentsStore) ClaimSubmitted(ctx context.Context, id, clusterName s
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: lock: %w", err)
 	}
 	rows, err := tx.Query(ctx, `SELECT`+experimentColumns+`FROM experiments
-WHERE cluster_name = $1 AND status IN ('SUBMITTED', 'ADMITTED')
+WHERE cluster_name = $1 AND status = 'SUBMITTED'
 ORDER BY submitted_at ASC, id ASC`, clusterName)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: desired placements: %w", err)
@@ -133,14 +133,14 @@ WHERE id = $1 AND status = 'QUEUED'`
 	return true, nil
 }
 
-// MarkStarted sets status=RUNNING, but only if still SUBMITTED/ADMITTED. Guards against a
+// MarkStarted sets status=RUNNING, but only if still SUBMITTED. Guards against a
 // job_watcher poll observing a stale "Running" phase after the experiment was already
 // cancelled/evicted (the backend Job can report Running briefly until cluster-agent reconciles
 // it away). Returns whether the transition happened, so callers can skip onRunning side effects
 // (accelerator-type recording, flavor-substitution debit) when it didn't.
 func (s *ExperimentsStore) MarkStarted(ctx context.Context, id string) (bool, error) {
 	const q = `UPDATE experiments SET status = 'RUNNING', updated_at = NOW()
-WHERE id = $1 AND status IN ('SUBMITTED', 'ADMITTED')`
+WHERE id = $1 AND status = 'SUBMITTED'`
 	tag, err := s.pool.pool.Exec(ctx, q, id)
 	if err != nil {
 		return false, err
