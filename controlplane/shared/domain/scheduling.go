@@ -26,9 +26,6 @@ type QuotaConfig struct {
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
 	// a single platform experiment. 0 means unlimited.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`
-	// MetricDeclineFraction triggers metric-decline eviction when a job's primary metric
-	// has been declining for this fraction of its estimated_duration_hours (e.g. 0.3 = 30%).
-	MetricDeclineFraction float64 `json:"metric_decline_fraction"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a job's
 	// total resource request (per node × num_nodes) at admission, before any quota debit.
