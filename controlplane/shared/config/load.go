@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -23,6 +24,9 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: expand %s: %w", path, err)
 	}
+	if err := refusePlaceholders(data); err != nil {
+		return nil, fmt.Errorf("config: %s: %w", path, err)
+	}
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -33,6 +37,39 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: validate: %w", err)
 	}
 	return &cfg, nil
+}
+
+// Placeholder marks a value of the committed settings file that a deployment must fill in.
+const Placeholder = "REPLACE-WITH-"
+
+// refusePlaceholders fails on any value still holding a placeholder. A placeholder inside an
+// address is a well-formed address, so no later check would catch it, and the platform would
+// start and hand it out.
+func refusePlaceholders(data []byte) error {
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return err
+	}
+	var walk func(node *yaml.Node) error
+	walk = func(node *yaml.Node) error {
+		if node.Kind == yaml.ScalarNode && strings.Contains(node.Value, Placeholder) {
+			return fmt.Errorf("line %d: %q is a placeholder the deployment has not filled in (locally: make render-settings)", node.Line, node.Value)
+		}
+		for _, child := range node.Content {
+			if err := walk(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(&document)
+}
+
+// unreachableFromElsewhere reports a host that names only the machine a process itself runs on:
+// localhost, a loopback address, or the unspecified address a server binds to.
+func unreachableFromElsewhere(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || ip.IsLoopback() || ip.IsUnspecified()
 }
 
 var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
@@ -169,8 +206,8 @@ func (c *Config) build() error {
 	if err != nil {
 		return fmt.Errorf("data_store endpoint %q is not a URL: %w", c.DataStore.Endpoint, err)
 	}
-	if host := endpointHost.Hostname(); host == "localhost" || net.ParseIP(host).IsLoopback() {
-		return fmt.Errorf("data_store endpoint %q is loopback — job pods run in their own network namespace and cannot reach it. Use an address job pods reach (host.containers.internal under podman machine, else the host's LAN address)", c.DataStore.Endpoint)
+	if unreachableFromElsewhere(endpointHost.Hostname()) {
+		return fmt.Errorf("data_store endpoint %q is loopback or unspecified — job pods run in their own network namespace and cannot reach it. Use an address job pods reach (host.containers.internal under podman machine, else the host's LAN address)", c.DataStore.Endpoint)
 	}
 	if err := domain.ValidateStages(c.Stages.Default); err != nil {
 		return fmt.Errorf("stages.default: %w", err)
@@ -198,8 +235,8 @@ func (c *Config) build() error {
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("runtimes %s %q must be the http(s) address a cluster's runtime reaches the platform at", key, address)
 		}
-		if host := parsed.Hostname(); host == "localhost" || net.ParseIP(host).IsLoopback() {
-			return fmt.Errorf("runtimes %s %q is loopback: a runtime inside a cluster cannot reach it", key, address)
+		if unreachableFromElsewhere(parsed.Hostname()) {
+			return fmt.Errorf("runtimes %s %q is loopback or unspecified: a runtime inside a cluster cannot reach it", key, address)
 		}
 	}
 	if c.Auth.UIOrigin == "" {

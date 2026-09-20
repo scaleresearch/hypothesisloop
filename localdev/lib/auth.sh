@@ -33,7 +33,9 @@ lib_render_settings() {
     grep -q "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
 }
-export HYPOTHESISLOOP_CONFIG="${HYPOTHESISLOOP_CONFIG:-${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml}"
+# hl-admin reads the settings the local control plane runs with. The committed file holds
+# placeholders and is refused at load, so `make render-settings` comes first.
+export HYPOTHESISLOOP_CONFIG="${HYPOTHESISLOOP_CONFIG:-${LIB_AUTH_REPO}/controlplane/settings/.hypothesisloop.rendered.yaml}"
 export DATABASE_URL="${DATABASE_URL:-postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable}"
 
 lib_hl_admin() {

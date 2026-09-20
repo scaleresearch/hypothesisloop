@@ -13,14 +13,17 @@ const signingSecretEnv = "HYPOTHESISLOOP_SIGNING_SECRET"
 
 // productionConfig is the committed settings file, with the deployment's secret in the
 // environment as every deployment supplies it.
+var committedConfig = filepath.Join("..", "..", "settings", "hypothesisloop.yaml")
+
+// productionConfig is the committed settings file as a deployment renders it.
 func productionConfig(t *testing.T) string {
 	t.Helper()
 	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
-	b, err := os.ReadFile(filepath.Join("..", "..", "settings", "hypothesisloop.yaml"))
+	b, err := os.ReadFile(committedConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	return strings.ReplaceAll(string(b), Placeholder+"HOST-ADDRESS", "host.example.invalid")
 }
 
 func loadText(t *testing.T, text string) error {
@@ -165,8 +168,33 @@ func TestLoadRequiresAnIssuerAndAnAudienceOnceJWTKeysAreListed(t *testing.T) {
 	}
 }
 
+func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T) {
+	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
+	if _, err := Load(committedConfig); err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("Load of the committed settings: got = %v, want it refused for its placeholders", err)
+	}
+	rendered := productionConfig(t)
+	for _, line := range []string{
+		"  api_url: http://host.example.invalid:8081\n\n# Where a cluster",
+		"  api_url: http://host.example.invalid:8081\n  metrics_url",
+		"  metrics_url: http://host.example.invalid:8084",
+		"  endpoint: http://host.example.invalid:9000",
+	} {
+		if !strings.Contains(rendered, line) {
+			t.Fatalf("the settings file has no %q", line)
+		}
+		unfilled := strings.Replace(rendered, line, strings.Replace(line, "host.example.invalid", Placeholder+"HOST-ADDRESS", 1), 1)
+		if err := loadText(t, unfilled); err == nil || !strings.Contains(err.Error(), "placeholder") {
+			t.Errorf("one value left unfilled (%q): Load = %v, want it refused as a placeholder", line, err)
+		}
+	}
+	if err := loadText(t, strings.Replace(rendered, "  endpoint: http://host.example.invalid:9000", "  endpoint: http://0.0.0.0:9000", 1)); err == nil {
+		t.Error("a data store at the unspecified address: Load = nil, want it refused")
+	}
+}
+
 func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
-	const api, metrics = "  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081\n  metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084", "  metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084"
+	const api, metrics = "  api_url: http://host.example.invalid:8081\n  metrics_url: http://host.example.invalid:8084", "  metrics_url: http://host.example.invalid:8084"
 	for name, edit := range map[string][2]string{
 		"no section":            {"runtimes:\n" + api, ""},
 		"no api url":            {api, "  metrics_url: http://metrics.example.invalid"},
@@ -175,6 +203,8 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 		"metrics url not http":  {metrics, "  metrics_url: grpc://metrics.example.invalid"},
 		"metrics url localhost": {metrics, "  metrics_url: http://localhost:8084"},
 		"metrics url loopback":  {metrics, "  metrics_url: http://127.0.0.1:8084"},
+		"metrics url any":       {metrics, "  metrics_url: http://0.0.0.0:8084"},
+		"metrics url any v6":    {metrics, "  metrics_url: http://[::]:8084"},
 		"api url loopback":      {api, "  api_url: http://[::1]:8081\n  metrics_url: http://metrics.example.invalid"},
 		"misspelled key":        {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
 	} {
@@ -186,11 +216,15 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 			t.Errorf("%s: Load = %v, want it refused naming the runtimes section", name, err)
 		}
 	}
-	cfg, err := Load(filepath.Join("..", "..", "settings", "hypothesisloop.yaml"))
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Runtimes.APIURL != "http://REPLACE-WITH-HOST-ADDRESS:8081" || cfg.Runtimes.MetricsURL != "http://REPLACE-WITH-HOST-ADDRESS:8084" {
+	if cfg.Runtimes.APIURL != "http://host.example.invalid:8081" || cfg.Runtimes.MetricsURL != "http://host.example.invalid:8084" {
 		t.Errorf("runtimes = %+v, want both addresses of the settings file", cfg.Runtimes)
 	}
 }
@@ -200,9 +234,9 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"no launcher":           {"  launcher: main", `  launcher: ""`},
 		"launcher not an id":    {"  launcher: main", "  launcher: Main_1"},
 		"no image":              {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
-		"no api url":            {"  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081", `  api_url: ""`},
-		"api url with no host":  {"  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081", "  api_url: /api"},
-		"api url not http":      {"  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081", "  api_url: ftp://example.invalid"},
+		"no api url":            {"  api_url: http://host.example.invalid:8081", `  api_url: ""`},
+		"api url with no host":  {"  api_url: http://host.example.invalid:8081", "  api_url: /api"},
+		"api url not http":      {"  api_url: http://host.example.invalid:8081", "  api_url: ftp://example.invalid"},
 		"misspelled agents key": {"  launcher: main", "  launcher: main\n  launchers: [main]"},
 	} {
 		text := productionConfig(t)

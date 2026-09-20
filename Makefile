@@ -51,10 +51,13 @@ check-tag:
 # and Linux hosts. This renders HOST_ADDRESS in at start-up; the control plane rejects a
 # loopback endpoint outright, so a wrong address fails here, not hours into a run with nothing saved.
 # HOST_ADDRESS_FILE hands the same address to the scripts and tests that run outside make.
+# Everything that runs hl-admin depends on this: it reads the rendered settings, since the
+# committed file is refused at load for its placeholders. The recipe prints nothing, so a
+# target whose output is a token stays just the token.
 render-settings:
 	@test -n "$(HOST_ADDRESS)" || { echo "make: could not detect this host's address" >&2; exit 1; }
-	bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS)'
-	echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
+	@bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS)'
+	@echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
 
 registry-up:
 	podman compose -f $(COMPOSE_FILE) up -d registry
@@ -72,18 +75,18 @@ controlplane-up: registry-up render-settings images
 # Every request to the control plane carries a token. These two print the ones local work needs,
 # derived from auth.signing_secret in the settings file (localdev/lib/auth.sh).
 # Usage: export HL_TOKEN="$(make -s staff-token)"
-staff-token:
+staff-token: render-settings
 	@bash -c '. localdev/lib/auth.sh && lib_hl_admin token staff'
 
 # Usage: make -s token SCOPE=agent:<platform experiment>/<agent> (or coordinator:<platform experiment>, job:<id>)
-token:
+token: render-settings
 	@test -n "$(SCOPE)" || { echo "make token: SCOPE=<scope> is required" >&2; exit 1; }
 	@bash -c '. localdev/lib/auth.sh && lib_hl_admin token "$(SCOPE)"'
 
 # Registers CLUSTER for ORG and prints the runtime token its agents start with.
 # Usage: make -s runtime-token CLUSTER=<name> [ORG=default]
 ORG ?= default
-runtime-token:
+runtime-token: render-settings
 	@test -n "$(CLUSTER)" || { echo "make runtime-token: CLUSTER=<name> is required" >&2; exit 1; }
 	@bash -c '. localdev/lib/auth.sh && lib_hl_admin cluster add "$(CLUSTER)" "$(ORG)"'
 
@@ -126,7 +129,7 @@ cluster-agent-down:
 # runtime/k8s/infra/install.sh itself) and provisions the dev nodes (see k3s-dev-nodes-up below),
 # so this target alone produces a fully working local dev cluster. Set NODE_COUNT=0 to stay
 # control-plane only.
-k3s-up: images
+k3s-up: render-settings images
 	bash localdev/k3s-macos/install.sh
 
 # Unlike controlplane-down, this one IS destructive: the k3s cluster's own state (etcd/sqlite,
@@ -154,7 +157,7 @@ E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
 E2E_ENV = . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
 
 # Provisions dev nodes, runs the portable e2e suite, tears them back down — pass/fail either way.
-k3s-e2e:
+k3s-e2e: render-settings
 	bash -c '$(E2E_ENV) bash localdev/k3s-macos/run-e2e.sh'
 
 # ---- Convenience: local cluster + control plane in one command -------------
@@ -180,7 +183,7 @@ reload: render-settings images
 # Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
 # fake-accelerator nodes. Also control-plane-only by default (tainted no-workload) — see
 # tt-dev-nodes-up below.
-tt-up: images
+tt-up: render-settings images
 	bash localdev/k3s-tenstorrent/install.sh
 
 # Destructive the same way k3s-down is (see its comment) — tears down the whole k3s cluster on
@@ -203,11 +206,11 @@ tt-hardware-image: check-tag
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 
-tt-e2e: tt-hardware-image
+tt-e2e: render-settings tt-hardware-image
 	bash -c '$(E2E_ENV) bash localdev/k3s-tenstorrent/run-e2e.sh'
 
 # Counterpart to `reload` for the real Tenstorrent host.
-tt-reload: images
+tt-reload: render-settings images
 	bash localdev/k3s-tenstorrent/reload.sh
 
 # Removes the fake nodes and detaches box-a, returning the cluster to control-plane-only.
@@ -351,7 +354,7 @@ agent-test:
 
 # Portable e2e suite (pytest), API-only/parallel lane -- fast local loop. See tests/improve.md for
 # the marker scheme (parallel/exclusive/slow/hardware/accelerator) and the migration this replaces.
-e2e-py:
+e2e-py: render-settings
 	bash -c '$(E2E_ENV) cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"'
 
 lint:
