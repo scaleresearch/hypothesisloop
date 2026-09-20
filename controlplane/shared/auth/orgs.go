@@ -149,9 +149,6 @@ func (a *Access) ProjectAdmin(ctx context.Context, projectID string) (*domain.Pr
 	if err != nil {
 		return nil, err
 	}
-	if err := validID("project", projectID); err != nil {
-		return nil, err
-	}
 	project, err := a.placement.GetProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -168,9 +165,6 @@ func (a *Access) ProjectAdmin(ctx context.Context, projectID string) (*domain.Pr
 func (a *Access) APIKey(ctx context.Context, keyID string) (*domain.APIKey, error) {
 	p, err := a.Account(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if err := validID("api key", keyID); err != nil {
 		return nil, err
 	}
 	key, err := a.placement.GetAPIKey(ctx, keyID)

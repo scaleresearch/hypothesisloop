@@ -113,3 +113,23 @@ func TestLiveClusterAcceleratorCapacityBeforeAnyReportIsEmpty(t *testing.T) {
 		t.Fatalf("got (%v, %v, %v), want empty capacity and no error", available, total, err)
 	}
 }
+
+// One cluster heartbeating under two identities inside the window is one live cluster. It used
+// to fail the read, which stopped the scheduler for every org until the older series aged out.
+func TestAClusterWhoseIdentityChangedIsStillOneLiveClusterBesideTheOthers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[`+
+			`{"metric":{"cluster_name":"rebuilt","cluster_id":"uid-old"},"value":[10,"1"]},`+
+			`{"metric":{"cluster_name":"rebuilt","cluster_id":"uid-new"},"value":[20,"1"]},`+
+			`{"metric":{"cluster_name":"steady","cluster_id":"uid-steady"},"value":[20,"1"]}]}}`)
+	}))
+	defer server.Close()
+
+	live, err := LiveClusterHeartbeats(context.Background(), server.URL, time.Minute)
+	if err != nil {
+		t.Fatalf("live clusters with one identity changed: %v", err)
+	}
+	if len(live) != 2 || !live["rebuilt"] || !live["steady"] {
+		t.Fatalf("live = %v, want the rebuilt cluster and the steady one", live)
+	}
+}

@@ -188,13 +188,23 @@ func LiveClusterIDs(ctx context.Context, dbURL string, window time.Duration) (ma
 	return out, nil
 }
 
+// LiveClusterHeartbeats returns the clusters that reported within window. The heartbeat carries
+// the cluster's reported identity as a label, so a cluster whose identity changed inside the
+// window, as it does when its machines are rebuilt, has two series. That is one live cluster:
+// treating it as an ambiguity failed the read for every cluster and stopped admission for all
+// orgs until the older series aged out.
 func LiveClusterHeartbeats(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
-	beats, err := lastValuePerCluster(ctx, dbURL, clusterHeartbeatMetric, window)
+	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, clusterHeartbeatMetric, promSeconds(window))
+	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
-		return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: %w", err)
+		return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: query %s: %w", clusterHeartbeatMetric, err)
 	}
-	out := make(map[string]bool, len(beats))
-	for cluster := range beats {
+	out := make(map[string]bool, len(samples))
+	for _, sample := range samples {
+		cluster := sample.Labels["cluster_name"]
+		if cluster == "" {
+			return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: %s: sample missing cluster_name", clusterHeartbeatMetric)
+		}
 		out[cluster] = true
 	}
 	return out, nil

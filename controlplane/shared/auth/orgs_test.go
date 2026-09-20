@@ -152,3 +152,19 @@ func TestCapacityIsReadForOneOrgTheCallerReaches(t *testing.T) {
 		}
 	}
 }
+
+// Project and key ids are the store's own and carry an underscore (prj_<uuid>), which the shape
+// rule for ids that become paths and object names refuses. They go nowhere but a query parameter.
+func TestAProjectAndAKeyAreFoundUnderTheIdsTheStoreIssues(t *testing.T) {
+	access := auth.NewAccess(authtest.Placement{
+		Projects: map[string]domain.Project{"prj_01a10af4-8f68": {ID: "prj_01a10af4-8f68", OrgID: "org-a"}},
+		Keys:     map[string]domain.APIKey{"key_01A10AF4": {ID: "key_01A10AF4", OrgID: "org-a"}},
+	})
+	ctx := auth.WithPrincipal(context.Background(), accountCallers["owner"])
+	if project, err := access.ProjectAdmin(ctx, "prj_01a10af4-8f68"); err != nil || project == nil {
+		t.Errorf("a project under the id the store issued: got = %v, %v", project, err)
+	}
+	if key, err := access.APIKey(ctx, "key_01A10AF4"); err != nil || key == nil {
+		t.Errorf("a key under the id the store issued: got = %v, %v", key, err)
+	}
+}
