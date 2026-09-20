@@ -64,7 +64,7 @@ func TestAnInstanceThatVanishesMidRunReadsAsGoneAndIsRentedAgain(t *testing.T) {
 	mustCreate(t, e, exp)
 	p.Start("hl-exp-1-a4-cpu-0")
 
-	if err := p.Destroy(ctx, "fake-1"); err != nil {
+	if err := p.Destroy(ctx, "fake-0001"); err != nil {
 		t.Fatal(err)
 	}
 	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhaseGone || attempt != workload.AttemptUnknown {

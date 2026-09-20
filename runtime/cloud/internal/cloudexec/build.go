@@ -81,8 +81,7 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 
 	return provider.Spec{
 		Image:            e.jobImage,
-		Command:          wrapperCommand(max(grace, checkpointGrace), command),
-		Args:             args,
+		Command:          wrapperCommand(max(grace, checkpointGrace), append(append([]string(nil), command...), args...)),
 		Env:              env,
 		AcceleratorType:  string(exp.AcceleratorType),
 		AcceleratorCount: group.AcceleratorCount,

@@ -108,9 +108,9 @@ func TestAJobIsRentedAsOneInstanceRunningItsCommandUnderTheWrapper(t *testing.T)
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 
 	spec := p.Spec("hl-exp-1-a0-h100-0")
-	wantCommand := []string{"hl", "exec", "--stop-grace", "600", "--", "python", "train.py"}
-	if !reflect.DeepEqual(spec.Command, wantCommand) || !reflect.DeepEqual(spec.Args, []string{"--epochs", "3"}) {
-		t.Errorf("command = %q %q", spec.Command, spec.Args)
+	wantCommand := []string{"hl", "exec", "--stop-grace", "600", "--", "python", "train.py", "--epochs", "3"}
+	if !reflect.DeepEqual(spec.Command, wantCommand) {
+		t.Errorf("command = %q", spec.Command)
 	}
 	if spec.Image != "registry.example.invalid/job:1" || spec.AcceleratorType != h100 || spec.AcceleratorCount != 1 ||
 		spec.CPUMillis != 1000 || spec.MemoryBytes != gib || spec.DiskBytes != gib {
@@ -213,7 +213,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 
 	// The account is the only record: an instance that goes away outside this process frees its
 	// slot on the next read.
-	if err := p.Destroy(ctx, "fake-1"); err != nil {
+	if err := p.Destroy(ctx, "fake-0001"); err != nil {
 		t.Fatal(err)
 	}
 	if cpu, accelerators, _, _ = read(); cpu != 20 || accelerators != 2 {
