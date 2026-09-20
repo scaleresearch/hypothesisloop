@@ -118,7 +118,8 @@ func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Ex
 //
 // Desired-free closes the creation-delay race right after MarkSubmitted; actual-free closes
 // the deletion-delay race after preemption/eviction. Taking the minimum prevents overcommit.
-// Missing/stale metrics abort the pass instead of being replaced with zero.
+// A cluster whose snapshot is missing a metric or contradicts itself is left out of both maps,
+// like a disconnected one, so the other clusters are still admitted to.
 //
 // CPU, memory and storage totals are the per-node figures net of non-platform pods, so a
 // desiredFree above available there is always a platform job still terminating. Accelerator
@@ -153,14 +154,12 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (available, desiredFree
 		return nil, nil, fmt.Errorf("queuebackend: desired footprint: %w", err)
 	}
 	cpuTotal, ramTotal, storageTotal := sumNodeTotals(nodeTotals)
-	if err := b.validateCapacitySnapshot(heartbeats, cpuAvailable, cpuTotal, acceleratorAvailable, acceleratorTotal, ramAvailable, ramTotal, storageAvailable, storageTotal); err != nil {
-		return nil, nil, err
-	}
+	inconsistent := b.validateCapacitySnapshot(heartbeats, cpuAvailable, cpuTotal, acceleratorAvailable, acceleratorTotal, ramAvailable, ramTotal, storageAvailable, storageTotal)
 
 	available = make(map[string]domain.Footprint, len(heartbeats))
 	desiredFree = make(map[string]domain.Footprint, len(heartbeats))
 	for cluster, connected := range heartbeats {
-		if !connected {
+		if !connected || inconsistent[cluster] != nil {
 			continue
 		}
 		total := domain.CapacityFootprint(0, acceleratorTotal[cluster], ramTotal[cluster], storageTotal[cluster])
@@ -186,47 +185,61 @@ func sumNodeTotals(byNode map[string]map[string]map[string]int64) (cpuMillicores
 	return cpuMillicores, ramBytes, storageBytes
 }
 
+// validateCapacitySnapshot returns, per connected cluster whose snapshot cannot be trusted, why.
 func (b *Backend) validateCapacitySnapshot(
 	heartbeats map[string]bool,
 	cpuAvailable map[string]float64, cpuTotalMillicores map[string]int64,
 	acceleratorAvailable, acceleratorTotal map[string]map[string]int64,
 	ramAvailable, ramTotal, storageAvailable, storageTotal map[string]int64,
-) error {
+) map[string]error {
+	inconsistent := map[string]error{}
 	for cluster, connected := range heartbeats {
 		if !connected {
 			continue
 		}
-		cpuAvail, cpuAvailOK := cpuAvailable[cluster]
-		cpuTot, cpuTotalOK := cpuTotalMillicores[cluster]
-		ramAvail, ramAvailOK := ramAvailable[cluster]
-		ramTot, ramTotalOK := ramTotal[cluster]
-		storageAvail, storageAvailOK := storageAvailable[cluster]
-		storageTot, storageTotalOK := storageTotal[cluster]
-		accelAvail, accelAvailOK := acceleratorAvailable[cluster]
-		accelTotal, accelTotalOK := acceleratorTotal[cluster]
-		if !cpuAvailOK || !cpuTotalOK || !ramAvailOK || !ramTotalOK || !storageAvailOK || !storageTotalOK {
-			return fmt.Errorf("queuebackend: incomplete live capacity snapshot for active cluster %q", cluster)
+		if err := validateClusterSnapshot(cluster, cpuAvailable, cpuTotalMillicores, acceleratorAvailable, acceleratorTotal, ramAvailable, ramTotal, storageAvailable, storageTotal); err != nil {
+			inconsistent[cluster] = err
 		}
-		if accelAvailOK != accelTotalOK {
-			return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q", cluster)
+	}
+	return inconsistent
+}
+
+func validateClusterSnapshot(
+	cluster string,
+	cpuAvailable map[string]float64, cpuTotalMillicores map[string]int64,
+	acceleratorAvailable, acceleratorTotal map[string]map[string]int64,
+	ramAvailable, ramTotal, storageAvailable, storageTotal map[string]int64,
+) error {
+	cpuAvail, cpuAvailOK := cpuAvailable[cluster]
+	cpuTot, cpuTotalOK := cpuTotalMillicores[cluster]
+	ramAvail, ramAvailOK := ramAvailable[cluster]
+	ramTot, ramTotalOK := ramTotal[cluster]
+	storageAvail, storageAvailOK := storageAvailable[cluster]
+	storageTot, storageTotalOK := storageTotal[cluster]
+	accelAvail, accelAvailOK := acceleratorAvailable[cluster]
+	accelTotal, accelTotalOK := acceleratorTotal[cluster]
+	if !cpuAvailOK || !cpuTotalOK || !ramAvailOK || !ramTotalOK || !storageAvailOK || !storageTotalOK {
+		return fmt.Errorf("queuebackend: incomplete live capacity snapshot for active cluster %q", cluster)
+	}
+	if accelAvailOK != accelTotalOK {
+		return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q", cluster)
+	}
+	if !accelAvailOK {
+		accelAvail, accelTotal = map[string]int64{}, map[string]int64{}
+	}
+	if int64(cpuAvail*1000) > cpuTot || ramAvail > ramTot || storageAvail > storageTot {
+		return fmt.Errorf("queuebackend: available capacity exceeds total for active cluster %q", cluster)
+	}
+	if len(accelAvail) != len(accelTotal) {
+		return fmt.Errorf("queuebackend: mismatched live accelerator capacity sets for cluster %q", cluster)
+	}
+	for flavor, total := range accelTotal {
+		available, availableOK := accelAvail[flavor]
+		if !availableOK {
+			return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q flavor %q", cluster, flavor)
 		}
-		if !accelAvailOK {
-			accelAvail, accelTotal = map[string]int64{}, map[string]int64{}
-		}
-		if int64(cpuAvail*1000) > cpuTot || ramAvail > ramTot || storageAvail > storageTot {
-			return fmt.Errorf("queuebackend: available capacity exceeds total for active cluster %q", cluster)
-		}
-		if len(accelAvail) != len(accelTotal) {
-			return fmt.Errorf("queuebackend: mismatched live accelerator capacity sets for cluster %q", cluster)
-		}
-		for flavor, total := range accelTotal {
-			available, availableOK := accelAvail[flavor]
-			if !availableOK {
-				return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q flavor %q", cluster, flavor)
-			}
-			if available > total {
-				return fmt.Errorf("queuebackend: available accelerator capacity exceeds total for cluster %q flavor %q", cluster, flavor)
-			}
+		if available > total {
+			return fmt.Errorf("queuebackend: available accelerator capacity exceeds total for cluster %q flavor %q", cluster, flavor)
 		}
 	}
 	return nil

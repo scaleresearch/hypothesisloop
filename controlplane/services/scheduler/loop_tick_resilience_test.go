@@ -209,3 +209,36 @@ func (p panickingEvictor) EvictExperiment(context.Context, string, domain.Evicti
 	p.t.Fatal("disbalance eviction ran after preemption failed to establish a plan")
 	return nil
 }
+
+type failingAgentQuota struct {
+	LoopQuotaStore
+	agent string
+}
+
+func (q failingAgentQuota) GetAgentQuota(_ context.Context, agentID, _ string) (*domain.AgentQuota, error) {
+	if agentID == q.agent {
+		return nil, errors.New("quota row unreadable")
+	}
+	return &domain.AgentQuota{}, nil
+}
+
+func TestTickSkipsAnAgentWhoseQuotaCannotBeRead(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		broken := queuedJob("exp-broken", "pe-live", tier)
+		broken.AgentID = "agent-broken"
+		store := &resilienceStore{queued: []*domain.Experiment{broken, queuedJob("exp-healthy", "pe-live", tier)}}
+		l := resilienceLoop(store)
+		l.quota = failingAgentQuota{agent: "agent-broken"}
+
+		err := l.tick(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "exp-broken") {
+			t.Errorf("%s: tick error = %v, want it to name the skipped job", tier, err)
+		}
+		if _, considered := store.notAdmitted["exp-healthy"]; !considered {
+			t.Errorf("%s: one agent's unreadable quota kept another agent's job from being considered", tier)
+		}
+		if _, ok := store.notAdmitted["exp-broken"]; ok {
+			t.Errorf("%s: the job with no readable quota was judged anyway", tier)
+		}
+	}
+}

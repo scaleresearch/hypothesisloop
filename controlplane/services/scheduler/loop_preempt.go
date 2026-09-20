@@ -449,23 +449,35 @@ func quotaKey(agentID, platformExpID string) string {
 // run multiple platform experiments concurrently each with its own quota pool. The full
 // AgentQuota (not a precomputed ratio) is kept so sortGuaranteed/sortBurst can compute each
 // experiment's own dominant-utilization ratio against the dimensions that job actually requests.
-func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment) (map[string]*domain.AgentQuota, error) {
-	seen := map[string]bool{}
+//
+// An agent whose quota cannot be read has its jobs skipped this tick; the returned slice is exps
+// without them.
+func (l *Loop) fetchQuotaMap(ctx context.Context, exps []*domain.Experiment, tickErrs *[]error) ([]*domain.Experiment, map[string]*domain.AgentQuota) {
 	result := map[string]*domain.AgentQuota{}
+	failed := map[string]error{}
+	kept := exps[:0]
 	for _, exp := range exps {
-		key := quotaKey(exp.AgentID, exp.PlatformExperimentID)
-		if seen[key] || exp.PlatformExperimentID == "" {
+		if exp.PlatformExperimentID == "" {
+			kept = append(kept, exp)
 			continue
 		}
-		seen[key] = true
-		aq, err := l.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
-		if err != nil {
-			return nil, fmt.Errorf("fetch quota for %s: %w", key, err)
+		key := quotaKey(exp.AgentID, exp.PlatformExperimentID)
+		if result[key] == nil && failed[key] == nil {
+			aq, err := l.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
+			if err == nil && aq == nil {
+				err = errors.New("quota not found")
+			}
+			if err != nil {
+				failed[key] = fmt.Errorf("fetch quota for %s: %w", key, err)
+			} else {
+				result[key] = aq
+			}
 		}
-		if aq == nil {
-			return nil, fmt.Errorf("fetch quota for %s: quota not found", key)
+		if err := failed[key]; err != nil {
+			l.skipExperiment(tickErrs, exp, err)
+			continue
 		}
-		result[key] = aq
+		kept = append(kept, exp)
 	}
-	return result, nil
+	return kept, result
 }

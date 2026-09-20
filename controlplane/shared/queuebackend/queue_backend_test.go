@@ -63,7 +63,7 @@ func TestMinimumFootprintDesiredClaimWinsBeforeActualCatchesUp(t *testing.T) {
 
 func TestValidateCapacitySnapshotRejectsMissingAuthoritativeMetric(t *testing.T) {
 	b := &Backend{}
-	err := b.validateCapacitySnapshot(
+	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
 		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
 		map[string]map[string]int64{"cluster-a": {"flavor-h100": 1}},
@@ -71,14 +71,14 @@ func TestValidateCapacitySnapshotRejectsMissingAuthoritativeMetric(t *testing.T)
 		map[string]int64{"cluster-a": 8}, map[string]int64{"cluster-a": 16},
 		map[string]int64{}, map[string]int64{"cluster-a": 32},
 	)
-	if err == nil {
+	if inconsistent["cluster-a"] == nil {
 		t.Fatal("validateCapacitySnapshot accepted missing storage availability")
 	}
 }
 
 func TestValidateCapacitySnapshotAllowsClusterSpecificAcceleratorTypes(t *testing.T) {
 	b := &Backend{}
-	err := b.validateCapacitySnapshot(
+	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
 		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
 		map[string]map[string]int64{"cluster-a": {"flavor-h100": 1}},
@@ -86,7 +86,24 @@ func TestValidateCapacitySnapshotAllowsClusterSpecificAcceleratorTypes(t *testin
 		map[string]int64{"cluster-a": 8}, map[string]int64{"cluster-a": 16},
 		map[string]int64{"cluster-a": 16}, map[string]int64{"cluster-a": 32},
 	)
-	if err != nil {
-		t.Fatalf("validateCapacitySnapshot rejected a valid heterogeneous cluster: %v", err)
+	if len(inconsistent) != 0 {
+		t.Fatalf("validateCapacitySnapshot rejected a valid heterogeneous cluster: %v", inconsistent)
+	}
+}
+
+func TestAnInconsistentClusterSnapshotCondemnsOnlyThatCluster(t *testing.T) {
+	b := &Backend{}
+	inconsistent := b.validateCapacitySnapshot(
+		map[string]bool{"cluster-a": true, "cluster-b": true},
+		map[string]float64{"cluster-a": 4, "cluster-b": 64}, map[string]int64{"cluster-a": 8000, "cluster-b": 8000},
+		nil, nil,
+		map[string]int64{"cluster-a": 8, "cluster-b": 8}, map[string]int64{"cluster-a": 16, "cluster-b": 16},
+		map[string]int64{"cluster-a": 16, "cluster-b": 16}, map[string]int64{"cluster-a": 32, "cluster-b": 32},
+	)
+	if inconsistent["cluster-b"] == nil {
+		t.Error("cluster-b reports more free CPU than it has installed and was accepted")
+	}
+	if err := inconsistent["cluster-a"]; err != nil {
+		t.Errorf("cluster-a was rejected for cluster-b's snapshot: %v", err)
 	}
 }

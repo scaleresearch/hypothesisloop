@@ -100,6 +100,11 @@ func (l *Loop) tick(ctx context.Context) error {
 	// (see queuebackend.Backend.GetFlavorCapacity) — reusing its key set here is the same
 	// "unreachable cluster is never a speculative candidate" rule the doc calls out as a
 	// pre-existing bug fixed in step 0, applied to the speculative path too.
+	for cluster := range nodeLabels {
+		if _, ok := gAvail[cluster]; !ok {
+			l.logger.Warn("cluster reports nodes but no consistent capacity snapshot; skipping it this tick", zap.String("cluster", cluster))
+		}
+	}
 	connectedClusters := make(map[string]bool, len(gAvail))
 	for cluster := range gAvail {
 		connectedClusters[cluster] = true
@@ -243,10 +248,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 4. Guaranteed pass: FIFO by age bucket, quota-ratio tiebreak within a bucket, then
 	// completion proximity DESC, then shortest job first.
 	guaranteed := filterTier(queued, domain.CapacityGuaranteed)
-	guaranteedQuotas, err := l.fetchQuotaMap(ctx, guaranteed)
-	if err != nil {
-		return err
-	}
+	guaranteed, guaranteedQuotas := l.fetchQuotaMap(ctx, guaranteed, &tickErrs)
 	sortGuaranteed(guaranteed, guaranteedQuotas, completion, l.guaranteedFairnessWindow)
 	// Both snapshots are taken here, before either pass claims anything. Taking the burst one
 	// after the guaranteed pass told a burst job displaced by a guaranteed one that the cluster
@@ -529,10 +531,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// domain.Fits in the loop below, which writes the same capacity_unavailable reason.
 
 	// Fetch quota usage for fairness ordering.
-	quotaMap, err := l.fetchQuotaMap(ctx, burst)
-	if err != nil {
-		return err
-	}
+	burst, quotaMap := l.fetchQuotaMap(ctx, burst, &tickErrs)
 	sortBurst(burst, quotaMap, completion)
 	// Interleave by agent so one agent's queue depth can't claim every unit of burst capacity
 	// that frees up this tick ahead of another agent with fewer jobs waiting — see
