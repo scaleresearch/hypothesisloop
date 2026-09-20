@@ -133,7 +133,7 @@ func (p *Provider) awaitListed(ctx context.Context, id, name string) error {
 	defer ticker.Stop()
 	for {
 		listed, err := p.listed(ctx, id, name)
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			return fmt.Errorf("fly: machine %s was created for %q and could not be confirmed in the list: %w", id, name, err)
 		}
 		if listed {
