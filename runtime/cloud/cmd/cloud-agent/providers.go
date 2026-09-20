@@ -8,12 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vast"
 )
 
 // providers is every vendor this binary can rent from, by the name the config file uses. This is
 // the one place a vendor is named outside its own package: adding one is its package and a line
 // here, `"name": adapter(pkg.New)`, where pkg.New takes the package's own settings struct.
-var providers = map[string]constructor{}
+var providers = map[string]constructor{
+	"vast": adapter(vast.New),
+}
 
 type constructor func(settings yaml.Node) (provider.Provider, error)
 
