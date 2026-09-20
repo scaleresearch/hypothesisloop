@@ -9,13 +9,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// seedExperimentForCapTest inserts a minimal experiment row via CreateExperiment, then forces its
-// status directly (CreateExperiment always inserts QUEUED) — not going through AdmitExperimentTx,
+// seedExperimentForCapTest inserts a minimal experiment row via createExperiment, then forces its
+// status directly (createExperiment always inserts QUEUED) — not going through AdmitExperimentTx,
 // which is quota-gated on accelerator-hours, not concurrency: the cap this file tests is a
 // second, independent gate on the same submit path.
 func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string, acceleratorCount int, status domain.ExperimentStatus) {
 	t.Helper()
-	exps := NewExperimentsStore(pool)
 	exp := &domain.Experiment{
 		ID: id, AgentID: agentID, PlatformExperimentID: peID,
 		HypothesisID: "cap-test-hypothesis-" + id, Hypothesis: "h", Objective: "o",
@@ -25,7 +24,7 @@ func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string
 		Job:     domain.JobSpec{AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount},
 		DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 	}
-	if err := exps.CreateExperiment(context.Background(), exp); err != nil {
+	if err := createExperiment(context.Background(), pool.pool, exp); err != nil {
 		t.Fatalf("seed experiment %s: got = %v, want = nil", id, err)
 	}
 	t.Cleanup(func() {

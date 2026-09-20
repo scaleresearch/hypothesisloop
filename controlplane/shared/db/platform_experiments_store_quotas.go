@@ -11,7 +11,7 @@ import (
 
 // ---- agent_quotas ----
 
-// UpsertAgentQuota creates or replaces an agent's quota allocation for a platform experiment.
+// upsertAgentQuotaSQL creates or replaces an agent's quota allocation for a platform experiment.
 // Only the allocation (capacity setting) lives here — consumption (used_*) lives solely in the
 // metrics DB, see metricsdb.UsageTracker; Postgres never holds a copy of observed consumption.
 const upsertAgentQuotaSQL = `
@@ -31,14 +31,6 @@ func agentQuotaUpsertArgs(q *domain.AgentQuota) []any {
 		q.GuaranteedAcceleratorHours, q.BurstAcceleratorHours,
 		q.CreatedAt,
 	}
-}
-
-func (s *PlatformExperimentsStore) UpsertAgentQuota(ctx context.Context, q *domain.AgentQuota) error {
-	_, err := s.pool.pool.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(q)...)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.UpsertAgentQuota: %w", err)
-	}
-	return nil
 }
 
 // agentQuotaColumns is the canonical column list for agent_quotas SELECT queries, shared by

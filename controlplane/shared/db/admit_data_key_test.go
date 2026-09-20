@@ -19,10 +19,10 @@ func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.E
 	createTestAgent(t, pool, agent, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 	store := NewPlatformExperimentsFullStore(NewStore(pool, "http://metrics.invalid", 1))
-	if err := store.UpsertAgentQuota(context.Background(), &domain.AgentQuota{
+	if _, err := pool.pool.Exec(context.Background(), upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
 		ID: uuid.New().String(), AgentID: agent, PlatformExperimentID: pe,
 		GuaranteedAcceleratorHours: 10, BurstAcceleratorHours: 5, CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	})...); err != nil {
 		t.Fatalf("upsert quota: %v", err)
 	}
 	retries := 0

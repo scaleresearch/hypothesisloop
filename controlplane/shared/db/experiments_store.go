@@ -58,17 +58,13 @@ const experimentColumns = `
 	created_at, updated_at
 `
 
-// CreateExperiment inserts a new experiment row.
-func (s *ExperimentsStore) CreateExperiment(ctx context.Context, exp *domain.Experiment) error {
-	return createExperiment(ctx, s.pool.pool, exp)
-}
-
 // pgUniqueViolation is PostgreSQL's SQLSTATE for a unique-constraint violation.
 const pgUniqueViolation = "23505"
 
 // ErrDuplicateExperiment reports that an experiment with this id already exists.
 var ErrDuplicateExperiment = errors.New("experiment already exists")
 
+// createExperiment inserts a new experiment row.
 func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Experiment) error {
 	if exp.CapacityTier == "" {
 		exp.CapacityTier = domain.CapacityGuaranteed
