@@ -363,11 +363,11 @@ e2e-py: render-settings
 
 # The repository tests against GitHub itself: an agent clones a project's repository and pushes a
 # branch with credentials the platform mints. Needs the local stack started with a GitHub App
-# (.env names one, localdev/lib/auth.sh) and the three HL_E2E_GITHUB_* keys of .env.example. The
+# (.env names one, localdev/lib/auth.sh) and the two HL_E2E_GITHUB_* keys of .env.example. The
 # repository's id is looked up from GitHub with gh.
 e2e-github: render-settings
 	bash -c '$(E2E_ENV) set -euo pipefail; \
-	  for key in INSTALLATION REPO DEFAULT_BRANCH; do \
+	  for key in INSTALLATION REPO; do \
 	    name="HL_E2E_GITHUB_$$key"; value="$$(lib_env_value "$$name")"; \
 	    test -n "$$value" || { echo "make e2e-github: .env does not set $$name" >&2; exit 1; }; \
 	    export "$$name=$$value"; \
@@ -375,6 +375,24 @@ e2e-github: render-settings
 	  test -n "$$HL_GITHUB_APP_ID" || { echo "make e2e-github: .env does not set GITHUB_APP_ID, so the local stack has no GitHub App" >&2; exit 1; }; \
 	  HL_E2E_GITHUB_REPO_ID="$$(gh api "repos/$$HL_E2E_GITHUB_REPO" --jq .id)"; export HL_E2E_GITHUB_REPO_ID; \
 	  cd tests && uv run pytest e2e/test_project_repo.py'
+
+# The GitHub client's checks against github.com itself, as the App .env names
+# (controlplane/shared/github/github_live_test.go). Both the token checks and the push check use
+# the sandbox repository of HL_E2E_GITHUB_REPO; the push check pushes a branch there and deletes
+# it. The App's key reaches the test in a file that exists only for the run.
+test-github-live:
+	@bash -c 'set -euo pipefail; . localdev/lib/auth.sh; \
+	  test -n "$$HL_GITHUB_APP_ID" || { echo "make test-github-live: .env does not set GITHUB_APP_ID" >&2; exit 1; }; \
+	  for key in INSTALLATION REPO; do \
+	    test -n "$$(lib_env_value "HL_E2E_GITHUB_$$key")" || { echo "make test-github-live: .env does not set HL_E2E_GITHUB_$$key" >&2; exit 1; }; \
+	  done; \
+	  key_file="$$(umask 077 && mktemp)"; trap "rm -f \"$$key_file\"" EXIT; \
+	  printf "%s\n" "$$HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY" > "$$key_file"; \
+	  HYPOTHESISLOOP_GITHUB_LIVE_APP_ID="$$HL_GITHUB_APP_ID" HYPOTHESISLOOP_GITHUB_LIVE_KEY_FILE="$$key_file" \
+	  HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION="$$(lib_env_value HL_E2E_GITHUB_INSTALLATION)" \
+	  HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
+	  HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
+	  go test ./controlplane/shared/github -run Live -count=1 -v -timeout 180s'
 
 lint:
 	golangci-lint run ./...
