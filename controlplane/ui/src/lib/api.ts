@@ -41,9 +41,9 @@ function apiURL(): string {
   return url
 }
 
-/** A refusal or failure the API answered with, carrying its status and its own message. */
+/** A refusal or failure the API answered with: its status, its own message, and its reason code when it gave one. */
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly reason?: string) {
     super(message)
     this.name = 'ApiError'
   }
@@ -53,13 +53,15 @@ export class ApiError extends Error {
 async function failure(res: Response): Promise<ApiError> {
   const text = await res.text()
   let message = text
+  let reason: string | undefined
   try {
     const body = JSON.parse(text)
     message = body.message ?? body.error ?? text
+    reason = body.reason
   } catch {
     // A proxy in front of the API answers in its own format.
   }
-  return new ApiError(res.status, message || `API error ${res.status}`)
+  return new ApiError(res.status, message || `API error ${res.status}`, reason)
 }
 
 // Every call to the API goes through here: it carries the session's access token, and a session
@@ -637,21 +639,28 @@ export function fetchGitHubApp(): Promise<GitHubApp> {
   return apiFetch<GitHubApp>('/github/app')
 }
 
-// A project with no repository is answered 404, which is an answer and no failure here.
+// A project with no repository is answered 404 with this reason, which is an answer and no
+// failure. Any other 404, such as a project that is gone, is a failure like the rest.
+const NO_REPOSITORY = 'no_repository'
+
 export async function fetchProjectRepo(projectID: string): Promise<ProjectRepo | null> {
   const res = await request('GET', `/projects/${projectID}/repo`)
-  if (res.status === 404) return null
-  if (!res.ok) throw await failure(res)
-  return res.json()
+  if (res.ok) return res.json()
+  const refusal = await failure(res)
+  if (refusal.status === 404 && refusal.reason === NO_REPOSITORY) return null
+  throw refusal
 }
+
+/** The reason the API gives for refusing an attach when the GitHub App is not on the repository. */
+export const APP_NOT_INSTALLED = 'app_not_installed'
 
 // `code` is what GitHub returned from authorising the App, to `redirectURI`: it proves the person
 // can push to the repository, and works once.
 export function attachProjectRepo(
-  projectID: string, attach: { installationID: number; repo: string; code: string; redirectURI: string },
+  projectID: string, attach: { repo: string; code: string; redirectURI: string },
 ): Promise<ProjectRepo> {
   return apiSend<ProjectRepo>('POST', `/projects/${projectID}/repo`, {
-    installation_id: attach.installationID, repo: attach.repo, code: attach.code, redirect_uri: attach.redirectURI,
+    repo: attach.repo, code: attach.code, redirect_uri: attach.redirectURI,
   })
 }
 

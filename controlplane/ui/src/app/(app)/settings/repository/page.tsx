@@ -1,31 +1,29 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import { ApiError, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo } from '@/lib/api'
-import { useProjectRouter, useRecordProject } from '@/lib/query-state'
-import { REPOSITORY_PATH, attachStep, authorizeAddress, endAttach, installAddress, leaveFor, redirectURI } from '@/lib/repo-attach'
+import { APP_NOT_INSTALLED, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo } from '@/lib/api'
+import {
+  REPOSITORY_PATH, beginAttach, isReturn, leaveFor, redirectURI, resetAttach, takeReturn, useAttach, validRepository,
+} from '@/lib/repo-attach'
+import type { Attach } from '@/lib/repo-attach'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, ProjectRepo } from '@/types'
 import { Button } from '@/components/ui/button'
-import { Link } from '@/components/ui/link'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+function InstallLink({ app }: { app: GitHubApp }) {
+  return (
+    <a href={app.install_url} target="_blank" rel="noreferrer" className="text-link">
+      Install the App on a repository
+    </a>
+  )
 }
 
-function AppUnavailable({ error }: { error: Error }) {
-  if (error instanceof ApiError && error.status === 503) {
-    return <ErrorMessage>GitHub is not configured on this deployment, so no repository can be attached.</ErrorMessage>
-  }
-  return <ErrorMessage>Could not load the platform&apos;s GitHub App: {error.message}</ErrorMessage>
-}
-
-function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => Promise<unknown> }) {
+function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => void }) {
   const { project, administers } = useTenant()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -36,11 +34,12 @@ function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => P
     setError('')
     try {
       await detachProjectRepo(project.id)
-      await onDetached()
     } catch (e) {
-      setError(message(e))
+      setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
+      return
     }
+    onDetached()
   }
 
   return (
@@ -57,126 +56,112 @@ function Attached({ repo, onDetached }: { repo: ProjectRepo; onDetached: () => P
         Protecting other branches is the repository&apos;s own setting on GitHub.
       </p>
       {administers
-        ? <div><Button variant="danger" size="sm" disabled={busy} onClick={detach}>{busy ? 'Detaching…' : 'Detach repository'}</Button></div>
+        ? (
+          <>
+            <div><Button variant="danger" size="sm" disabled={busy} onClick={detach}>{busy ? 'Detaching…' : 'Detach repository'}</Button></div>
+            <p className="text-muted" style={{ fontSize: 13 }}>To attach another repository, detach this one first.</p>
+          </>
+        )
         : <p className="text-muted" style={{ fontSize: 13 }}>Only an owner of the organization can detach it.</p>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
     </div>
   )
 }
 
-function Install({ app }: { app: GitHubApp }) {
+// `failed` is the last attempt for this project, when GitHub or the API refused it: its name is
+// kept in the field, and trying again starts over on GitHub, since a code works once.
+function Connect({ app, failed }: { app: GitHubApp; failed: Extract<Attach, { state: 'failed' }> | null }) {
   const { project } = useTenant()
-  return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <p className="text-muted" style={{ fontSize: 13 }}>
-        No repository is attached to {project.name}. Attaching one takes three steps: install the
-        platform&apos;s GitHub App on the repository, confirm on GitHub who you are, and name the
-        repository here. You must be able to push to it, since agents will.
-      </p>
-      <div>
-        <Button variant="primary" onClick={() => leaveFor(installAddress(app.install_url, project.id))}>
-          Install the GitHub App
-        </Button>
-      </div>
-    </div>
-  )
-}
+  const [repo, setRepo] = useState(failed?.repo ?? '')
+  const [invalid, setInvalid] = useState(false)
+  const [leaving, setLeaving] = useState(false)
 
-function Authorize({ app, installationID }: { app: GitHubApp; installationID: number }) {
-  // Leaving is done once: an effect that runs again would ask GitHub for a second code.
-  const left = useRef(false)
-  useEffect(() => {
-    if (left.current) return
-    left.current = true
-    leaveFor(authorizeAddress(app.authorize_url, installationID))
-  }, [app, installationID])
-  return <Loading text="Going to GitHub to confirm who you are…" />
-}
-
-function Attach({ app, installationID, code, onAttached }: {
-  app: GitHubApp
-  installationID: number
-  code: string
-  onAttached: () => Promise<unknown>
-}) {
-  const { project } = useTenant()
-  const [repo, setRepo] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  async function attach(e: React.FormEvent) {
+  function connect(e: React.FormEvent) {
     e.preventDefault()
-    setBusy(true)
-    setError('')
-    try {
-      await attachProjectRepo(project.id, { installationID, repo: repo.trim(), code, redirectURI: redirectURI() })
-      endAttach()
-      await onAttached()
-    } catch (e) {
-      setError(message(e))
-      setBusy(false)
+    const name = repo.trim()
+    if (!validRepository(name)) {
+      setInvalid(true)
+      return
     }
+    setLeaving(true)
+    leaveFor(beginAttach(app.authorize_url, project.id, name))
   }
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <p className="text-muted" style={{ fontSize: 13 }}>
-        The App is installed and GitHub confirmed who you are. Name the repository to attach to {project.name}.
+        No repository is attached to {project.name}. Name one the platform&apos;s GitHub App is installed
+        on, then confirm on GitHub who you are. You must be able to push to it, since agents will.
       </p>
-      <form className="settings-row" onSubmit={attach}>
+      <form className="settings-row" onSubmit={connect}>
         <input
           className="field-sm mono"
           style={{ width: 320 }}
           aria-label="Repository"
           placeholder="owner/name"
           value={repo}
-          onChange={e => setRepo(e.target.value)}
+          onChange={e => { setRepo(e.target.value); setInvalid(false) }}
         />
-        <Button size="sm" variant="primary" type="submit" disabled={busy || repo.trim() === ''}>
-          {busy ? 'Attaching…' : 'Attach repository'}
+        <Button size="sm" variant="primary" type="submit" disabled={leaving || repo.trim() === ''}>
+          {leaving ? 'Going to GitHub…' : 'Connect on GitHub'}
         </Button>
       </form>
-      {error && (
-        <>
-          <ErrorMessage>{error}</ErrorMessage>
-          <p className="text-muted" style={{ fontSize: 13 }}>
-            GitHub&apos;s confirmation works once and for ten minutes. To try again after it was used:{' '}
-            <Button variant="link" onClick={() => leaveFor(authorizeAddress(app.authorize_url, installationID))}>
-              confirm on GitHub again
-            </Button>
-          </p>
-        </>
-      )}
+      {invalid && <ErrorMessage>The repository must be owner/name, as in its address on GitHub.</ErrorMessage>}
+      {failed && !invalid && <ErrorMessage>{failed.message}</ErrorMessage>}
+      <p className="text-muted" style={{ fontSize: 13 }}>
+        {failed?.reason === APP_NOT_INSTALLED ? 'Install it, then connect again: ' : 'Not installed there yet? '}
+        <InstallLink app={app} />
+      </p>
     </div>
   )
 }
 
 function Repository() {
   const { org, project, administers } = useTenant()
-  const router = useProjectRouter()
+  const router = useRouter()
   const params = useSearchParams()
   const query = params.toString()
-  const at = useMemo(() => attachStep(new URLSearchParams(query)), [query])
-  const returning = at.step === 'authorize' || at.step === 'attach' ? at : null
-  useRecordProject(returning?.projectID)
+  const attach = useAttach()
+  const returned = isReturn(params)
+  // The App's install page comes back here too, with parameters this page has no use for.
+  const stray = returned || params.has('installation_id') || params.has('setup_action')
 
   const repo = useSWR(['project-repo', project.id], () => fetchProjectRepo(project.id))
   const app = useSWR(administers ? 'github-app' : null, fetchGitHubApp, { shouldRetryOnError: false })
 
-  if (at.step === 'refused') {
+  useEffect(() => {
+    if (!stray) return
+    const returnedTo = returned
+      ? takeReturn(new URLSearchParams(query), (projectID, name, code) => attachProjectRepo(projectID, { repo: name, code, redirectURI: redirectURI() }))
+      : null
+    router.replace(`${REPOSITORY_PATH}?project=${returnedTo ?? project.id}`)
+  }, [stray, returned, query, project.id, router])
+
+  const attached = attach.state === 'attached' && attach.projectID === project.id ? attach.view : null
+  const { mutate } = repo
+  useEffect(() => {
+    if (!attached) return
+    void mutate(attached, { revalidate: false })
+    resetAttach()
+  }, [attached, mutate])
+
+  if (attach.state === 'refused') {
     return (
       <>
-        <ErrorMessage>{at.reason}</ErrorMessage>
-        <p style={{ fontSize: 13 }}><Link href={REPOSITORY_PATH} className="text-link">Start again</Link></p>
+        <ErrorMessage>{attach.message}</ErrorMessage>
+        <div><Button size="sm" onClick={resetAttach}>Start again</Button></div>
       </>
     )
   }
-  // GitHub's return names no project: the URL is being pointed at the one the attempt began in.
-  if (returning && returning.projectID !== project.id) return <Loading />
+  if (stray) return <Loading />
+  if (attach.state === 'attaching' && attach.projectID === project.id) {
+    return <Loading text={`Attaching ${attach.repo} to ${project.name}…`} />
+  }
+  const detached = () => void mutate(null, { revalidate: false })
+  if (attached) return <Attached repo={attached} onDetached={detached} />
   if (repo.error) return <ErrorMessage>Could not load the repository of {project.name}: {repo.error.message}</ErrorMessage>
   if (repo.data === undefined) return <Loading />
-
-  if (!returning && repo.data) return <Attached repo={repo.data} onDetached={() => repo.mutate()} />
+  if (repo.data) return <Attached repo={repo.data} onDetached={detached} />
   if (!administers) {
     return (
       <p className="text-muted" style={{ fontSize: 13 }}>
@@ -184,23 +169,9 @@ function Repository() {
       </p>
     )
   }
-  if (app.error) return <AppUnavailable error={app.error} />
+  if (app.error) return <ErrorMessage>No repository can be attached right now: {app.error.message}</ErrorMessage>
   if (!app.data) return <Loading />
-  if (at.step === 'authorize') return <Authorize app={app.data} installationID={at.installationID} />
-  if (at.step === 'attach') {
-    return (
-      <Attach
-        app={app.data}
-        installationID={at.installationID}
-        code={at.code}
-        onAttached={async () => {
-          await repo.mutate()
-          router.replace(REPOSITORY_PATH)
-        }}
-      />
-    )
-  }
-  return <Install app={app.data} />
+  return <Connect app={app.data} failed={attach.state === 'failed' && attach.projectID === project.id ? attach : null} />
 }
 
 export default function RepositoryPage() {

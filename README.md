@@ -143,12 +143,13 @@ npm run e2e                                        # a real browser against the 
 
 ### Repository
 
-Settings, then Repository, attaches a GitHub repository to the selected project: the person
-installs the platform's GitHub App, confirms on GitHub who they are, and names the repository.
-GitHub returns both times to `<ui origin>/settings/repository`, so the App's setup URL and its
-callback URL must be that address (`infra/github/app-manifest.json`). The page builds the address
-from the origin it is served on and takes the App's addresses from `GET /github/app`. A
-deployment without a GitHub App says so on the page.
+Settings, then Repository, attaches a GitHub repository to the selected project: an owner names
+the repository as `owner/name` and confirms on GitHub who they are, and the platform finds the
+installation of its GitHub App that covers the repository. A link on the page leads to installing
+the App where it is not installed yet. GitHub returns to `<ui origin>/settings/repository`, so the
+App's callback URL and its setup URL must be that address (`infra/github/app-manifest.json`). The
+page builds the address from the origin it is served on and takes the App's addresses from
+`GET /github/app`. A deployment without a GitHub App says so on the page.
 
 Another sign-in method is an entry in `SIGN_IN_METHODS` (`controlplane/ui/src/lib/auth.ts`) and
 the provider switched on in Supabase.

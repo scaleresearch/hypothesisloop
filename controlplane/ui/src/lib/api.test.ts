@@ -211,23 +211,35 @@ describe('registering a cluster', () => {
 })
 
 describe('a project\'s repository', () => {
-  it('is null for a project that has none, which the API answers 404', async () => {
-    fetchMock().mockResolvedValue(answer(404, { message: 'no repository is attached to this project' }))
+  it('is null for a project that has none, which the API answers 404 with its reason', async () => {
+    fetchMock().mockResolvedValue(answer(404, { reason: 'no_repository', message: 'no repository is attached to this project' }))
     await expect(fetchProjectRepo('prj_1')).resolves.toBeNull()
     expect(sent().url.pathname).toBe('/projects/prj_1/repo')
   })
 
-  it('is a failure when the read fails any other way', async () => {
-    fetchMock().mockResolvedValue(answer(500, { message: 'internal error' }))
+  it('is a failure for any other 404, such as a project that is gone', async () => {
+    fetchMock().mockResolvedValue(answer(404, { message: 'project not found' }))
+    await expect(fetchProjectRepo('prj_1')).rejects.toMatchObject({ status: 404, message: 'project not found' })
+  })
+
+  it('is a failure when the read fails any other way, whatever reason it carries', async () => {
+    fetchMock().mockResolvedValue(answer(500, { reason: 'no_repository', message: 'internal error' }))
     await expect(fetchProjectRepo('prj_1')).rejects.toThrow('internal error')
   })
 
-  it('is attached with the installation, the name and the code GitHub returned', async () => {
+  it('is attached with the name, the code GitHub returned and where it returned it', async () => {
     fetchMock().mockResolvedValue(answer(200, { project_id: 'prj_1', repo: 'acme/widgets' }))
-    await attachProjectRepo('prj_1', { installationID: 4242, repo: 'acme/widgets', code: 'code-1', redirectURI: 'http://ui.test/settings/repository' })
+    await attachProjectRepo('prj_1', { repo: 'acme/widgets', code: 'code-1', redirectURI: 'http://ui.test/settings/repository' })
     expect(sent().init.method).toBe('POST')
     expect(sent().url.pathname).toBe('/projects/prj_1/repo')
-    expect(sent().body).toEqual({ installation_id: 4242, repo: 'acme/widgets', code: 'code-1', redirect_uri: 'http://ui.test/settings/repository' })
+    expect(sent().body).toEqual({ repo: 'acme/widgets', code: 'code-1', redirect_uri: 'http://ui.test/settings/repository' })
+  })
+
+  it('carries the API\'s reason for a refusal, as when the App is not on the repository', async () => {
+    fetchMock().mockResolvedValue(answer(422, { reason: 'app_not_installed', message: 'the GitHub App is not installed on acme/widgets' }))
+    await expect(attachProjectRepo('prj_1', { repo: 'acme/widgets', code: 'c', redirectURI: 'u' })).rejects.toMatchObject({
+      status: 422, reason: 'app_not_installed', message: 'the GitHub App is not installed on acme/widgets',
+    })
   })
 
   it('is detached by a call that answers with no body', async () => {
@@ -237,7 +249,7 @@ describe('a project\'s repository', () => {
   })
 
   it('cannot be attached on a deployment without a GitHub App, which answers 503', async () => {
-    fetchMock().mockResolvedValue(answer(503, { message: 'this deployment has no GitHub App configured' }))
-    await expect(fetchGitHubApp()).rejects.toMatchObject({ status: 503 })
+    fetchMock().mockResolvedValue(answer(503, { reason: 'github_not_configured', message: 'this deployment has no GitHub App configured' }))
+    await expect(fetchGitHubApp()).rejects.toMatchObject({ status: 503, reason: 'github_not_configured' })
   })
 })
