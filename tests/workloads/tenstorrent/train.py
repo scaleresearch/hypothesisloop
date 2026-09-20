@@ -65,7 +65,15 @@ def post_metric(fraction: float, value: float, metric_name: str) -> None:
     try:
         urllib.request.urlopen(req, timeout=5)
     except Exception as e:
-        print(f"  [warn] metric POST failed: {e}", file=sys.stderr)
+        # The response body is the control plane's reason. A refused token stays refused, so
+        # that is said once, not on every sample.
+        reason = e.read().decode(errors="replace")[:300] if hasattr(e, "read") else ""
+        if getattr(e, "code", None) in (401, 403):
+            if not getattr(post_metric, "refused", False):
+                post_metric.refused = True
+                print(f"  [error] metric POST refused, this run's metrics are not being recorded: {e} {reason}", file=sys.stderr, flush=True)
+            return
+        print(f"  [warn] metric POST failed: {e} {reason}", file=sys.stderr, flush=True)
 
 
 def main() -> None:
