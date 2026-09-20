@@ -26,7 +26,7 @@ func TestGraceFromTheSharedReconcileAnswer(t *testing.T) {
 	if err := json.Unmarshal(raw, &golden); err != nil {
 		t.Fatal(err)
 	}
-	job, err := (&JobWorkloadClient{apiURL: APIURLDefault}).BuildJob(&golden.Experiment, AcceleratorPlacement{})
+	job, err := (&JobWorkloadClient{apiURL: testAPIURL}).BuildJob(&golden.Experiment, AcceleratorPlacement{})
 	if err != nil {
 		t.Fatal(err)
 	}

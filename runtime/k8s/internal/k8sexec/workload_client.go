@@ -32,8 +32,6 @@ const (
 	priorityValueGuaranteed = int32(1000000)
 	priorityValueBurst      = int32(100000)
 
-	APIURLDefault = "http://metrics-service:8083"
-
 	// DistributedMasterPort is the fixed rendezvous port advertised to every rank of a
 	// distributed (NumNodes > 1) job via HYPOTHESISLOOP_MASTER_PORT — fine as a fixed port since
 	// each job gets its own pods/Service, so no cross-job collision is possible.

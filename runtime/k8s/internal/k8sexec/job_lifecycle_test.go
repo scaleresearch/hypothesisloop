@@ -84,7 +84,7 @@ func TestAPodWithNoReadableShutdownGraceIsAnErrorRatherThanAGuess(t *testing.T) 
 // Job object. Resolution has to be attempted, which here surfaces as the type's own validation
 // error rather than a silent empty placement.
 func TestAGroupedJobResolvesPlacementFromItsGroupsNotItsEmptyTopLevelCount(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		ID:              "grouped-placement",
 		AcceleratorType: "unqualified-type",
@@ -106,7 +106,7 @@ func TestAGroupedJobResolvesPlacementFromItsGroupsNotItsEmptyTopLevelCount(t *te
 // the zero placement without touching the cluster, so an ordinary CPU job neither reads DRA
 // inventory nor fails on an accelerator type it never named.
 func TestAJobWithNoAcceleratorsInAnyGroupTakesTheZeroPlacement(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		ID:              "cpu-only",
 		AcceleratorType: "unqualified-type",

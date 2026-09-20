@@ -12,8 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+const testAPIURL = "http://metrics-service:8083"
+
 func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "hugepage-test", AgentID: "agent", ProjectID: "project",
@@ -46,7 +48,7 @@ func TestBuildJobReturnsAnErrorForAnUnparseableQuantity(t *testing.T) {
 		"shm_size": func(j *domain.JobSpec) { j.ShmSize = "4GB" },
 		"memory":   func(j *domain.JobSpec) { j.Memory = "8GB" },
 	} {
-		c := &JobWorkloadClient{apiURL: APIURLDefault}
+		c := &JobWorkloadClient{apiURL: testAPIURL}
 		exp := &domain.Experiment{
 			Data: testDataAccess(),
 			ID:   "bad-quantity", AgentID: "agent", ProjectID: "project",
@@ -71,7 +73,7 @@ func TestBuildJobReturnsAnErrorForAnUnparseableQuantity(t *testing.T) {
 // stuck_pending once job_watcher's scale-up deadline passed. Live: pe-example,
 // example-experiment (v1/v2/v4/v5), see fix-later.md.
 func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "attempt-label-test", AgentID: "agent", ProjectID: "project",
@@ -102,7 +104,7 @@ func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 }
 
 func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "host-mount-test", AgentID: "agent", ProjectID: "project",
@@ -194,7 +196,7 @@ func jobWithRetries(retries int) *domain.Experiment {
 // for zero retries was still restarted — seen live as restart_count=1 with max_retries=0 on a
 // diagnostic chosen to fail once and cheaply.
 func TestBuildJobMaxRetriesZeroDisablesInPlaceRestart(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	job, err := c.BuildJob(jobWithRetries(0), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +212,7 @@ func TestBuildJobMaxRetriesZeroDisablesInPlaceRestart(t *testing.T) {
 // With retries actually requested, in-place restart stays on — it is the cheaper recovery for a
 // transient fault, and the caller has said retrying is acceptable.
 func TestBuildJobKeepsInPlaceRestartWhenRetriesRequested(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	job, err := c.BuildJob(jobWithRetries(2), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +261,7 @@ func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 // --nproc_per_node from it launched four times the processes it had hardware for. The total
 // stays on the experiment, which is what admission and billing read.
 func TestBuildJobInjectsPerNodeAcceleratorCountNotTheJobTotal(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "per-node-count", AgentID: "agent", ProjectID: "project",
@@ -323,7 +325,7 @@ func distributedExperiment(nodes, maxRetries int) *domain.Experiment {
 // accelerators until the gloo/NCCL timeout while the replacement rejoined a rendezvous the
 // others had already left. FailJob on any non-zero exit is what tears the survivors down.
 func TestDistributedJobFailsTheWholeGangOnAnyRankFailure(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	job, err := c.BuildJob(distributedExperiment(3, 2), nvidiaPlacement)
 	if err != nil {
 		t.Fatal(err)
@@ -364,7 +366,7 @@ func TestDistributedJobFailsTheWholeGangOnAnyRankFailure(t *testing.T) {
 // Single-node jobs keep the runtime's own retry budget: for a one-pod job BackoffLimit really
 // does restart the failed unit, so there is nothing for the control plane to take over.
 func TestSingleNodeJobKeepsRuntimeRetryBudget(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	job, err := c.BuildJob(distributedExperiment(1, 2), nvidiaPlacement)
 	if err != nil {
 		t.Fatal(err)
@@ -397,7 +399,7 @@ func testDataAccess() *domain.DataAccess {
 // the address would make a checkpoint's location depend on where the job happened to land — and
 // the eval job reading it back has no way to know where that was.
 func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "data-env", AgentID: "agent", ProjectID: "project",
@@ -437,7 +439,7 @@ func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
 // A job's key is permanent and stored with it, so it is desired state like the prefix: a
 // different key means a different job, and the hash must say so.
 func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "key-change", AgentID: "agent", ProjectID: "project",
@@ -471,7 +473,7 @@ func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
 // different prefix is a different job, and a reconcile that could not see that would leave it
 // writing to the old one forever.
 func TestDesiredSpecHashChangesWithDurableDataPrefix(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "prefix-change", AgentID: "agent", ProjectID: "project",
@@ -504,7 +506,7 @@ func TestDesiredSpecHashChangesWithDurableDataPrefix(t *testing.T) {
 // control-plane misconfiguration, not something a runtime may paper over: silently starting the
 // run wastes the whole run to discover it.
 func TestBuildJobRefusesAnExperimentWithNoDurableDataAccess(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		ID: "no-data", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
@@ -546,7 +548,7 @@ func groupedExperiment() *domain.Experiment {
 // group Job sized to the whole node count would start three extra learners on hardware the job
 // never asked for and never paid for.
 func TestGroupedJobCompilesToOneIndexedJobPerGroupSizedToThatGroup(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 
 	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
@@ -585,7 +587,7 @@ func TestGroupedJobCompilesToOneIndexedJobPerGroupSizedToThatGroup(t *testing.T)
 // selecting on experiment id alone: a Service per group, or a selector carrying the group label,
 // would give each group its own DNS domain and leave the actors unable to find the learner.
 func TestGroupedJobPodsShareOneHeadlessServiceAcrossEveryGroup(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 
 	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
@@ -609,7 +611,7 @@ func TestGroupedJobPodsShareOneHeadlessServiceAcrossEveryGroup(t *testing.T) {
 // would form separate process groups and a collective spanning them would hang until the backend
 // timeout with no error anyone can read.
 func TestEveryGroupsPodsAreGivenTheFirstGroupsNodeZeroAsMasterAddr(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 
 	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
@@ -634,7 +636,7 @@ func TestEveryGroupsPodsAreGivenTheFirstGroupsNodeZeroAsMasterAddr(t *testing.T)
 // constant to it. A group whose offset was wrong would put two pods at the same global rank,
 // which is a silent hang or a corrupt all-reduce rather than an error.
 func TestGroupedJobPublishesBothGroupLocalAndJobGlobalRankFacts(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 
 	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
@@ -670,7 +672,7 @@ func TestGroupedJobPublishesBothGroupLocalAndJobGlobalRankFacts(t *testing.T) {
 // a group Job left with a positive BackoffLimit would restart its own index while the other
 // group's pods sat blocked in a collective, burning the whole allocation to fail anyway.
 func TestAFailureInEitherGroupIsSetToFailThatGroupsJobOutright(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 
 	jobs, err := c.BuildJobs(groupedExperiment(), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
 	if err != nil {
@@ -699,7 +701,7 @@ func TestAFailureInEitherGroupIsSetToFailThatGroupsJobOutright(t *testing.T) {
 // per-node shape, same rank vars, same Service — because the ungrouped path now runs through the
 // same group machinery, and any divergence would rewrite every job already running in a cluster.
 func TestAnUngroupedJobStillCompilesToExactlyTheJobItAlwaysDid(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "ungrouped", AgentID: "agent", ProjectID: "project",
@@ -786,7 +788,7 @@ func int64Ptr(v int64) *int64 { return &v }
 // that every existing submission keeps dying in five seconds rather than in ten minutes.
 func TestPodGraceIsTheOrdinaryShutdownGraceWhenNoCheckpointWindowIsDeclared(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL: APIURLDefault,
+		apiURL: testAPIURL,
 	}
 	exp := checkpointWindowExperiment(nil)
 
@@ -805,7 +807,7 @@ func TestPodGraceIsTheOrdinaryShutdownGraceWhenNoCheckpointWindowIsDeclared(t *t
 // declares. A window recorded anywhere else would be a window the job never receives.
 func TestPodGraceIsTheDeclaredCheckpointWindow(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL: APIURLDefault,
+		apiURL: testAPIURL,
 	}
 	exp := checkpointWindowExperiment(int64Ptr(300))
 
@@ -824,7 +826,7 @@ func TestPodGraceIsTheDeclaredCheckpointWindow(t *testing.T) {
 // spending the full checkpoint window on hardware it has nothing to save on.
 func TestPodRecordsItsOrdinaryShutdownGraceAlongsideAWidenedCheckpointWindow(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL: APIURLDefault,
+		apiURL: testAPIURL,
 	}
 	exp := checkpointWindowExperiment(int64Ptr(300))
 	exp.Job.TerminationGracePeriodSeconds = int64Ptr(20)
@@ -844,7 +846,7 @@ func TestPodRecordsItsOrdinaryShutdownGraceAlongsideAWidenedCheckpointWindow(t *
 // this platform already refuses to do on failure.
 func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
 	c := &JobWorkloadClient{
-		apiURL: APIURLDefault,
+		apiURL: testAPIURL,
 	}
 	exp := checkpointWindowExperiment(int64Ptr(300))
 	exp.Job.AcceleratorCount = 0
@@ -872,7 +874,7 @@ func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
 func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
 	exp := checkpointWindowExperiment(nil)
 	exp.Job.TerminationGracePeriodSeconds = nil
-	if _, err := (&JobWorkloadClient{apiURL: APIURLDefault}).BuildJob(exp, nvidiaPlacement); err == nil {
+	if _, err := (&JobWorkloadClient{apiURL: testAPIURL}).BuildJob(exp, nvidiaPlacement); err == nil {
 		t.Fatal("built a Job for a job whose grace admission never resolved")
 	}
 }
@@ -899,7 +901,7 @@ func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 // corrupt all-reduce and never an error anyone sees. Enumerating the pairs the way a pod would
 // is the only way to assert the sum rather than the two halves separately.
 func TestEveryPodOfATwoGroupJobComputesADistinctGlobalRank(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: APIURLDefault}
+	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
 		Data: testDataAccess(),
 		ID:   "grouped-rank-test", AgentID: "agent", ProjectID: "project",
