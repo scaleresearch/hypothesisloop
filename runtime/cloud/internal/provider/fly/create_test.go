@@ -180,7 +180,30 @@ func TestCreateIsNotConfirmedByAnotherMachineOfTheSameName(t *testing.T) {
 	}
 }
 
-func TestCreateDestroysAMachineItCannotConfirm(t *testing.T) {
+func TestCreateReadsTheListAgainAfterAListThatFailed(t *testing.T) {
+	cases := map[string]http.HandlerFunc{
+		"rate limited": answer(429, `{"error":"rate limit exceeded"}`),
+		"server error": answer(500, `oops`),
+	}
+	for name, refusal := range cases {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			creatable(api, "hl-agent-pe1-a2")
+			api.on(http.MethodGet, machinesPath, inSequence(refusal, refusal,
+				answer(200, machines(machineJSON("9001", "hl-agent-pe1-a2", "created", 0)))))
+			p := newTestProvider(t, api)
+
+			if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != "9001" {
+				t.Fatalf("Create = %q, %v, want the machine: one refused list says nothing about it", id, err)
+			}
+			if got := len(api.sent(http.MethodDelete, machinesPath+"/9001")); got != 0 {
+				t.Errorf("destroys = %d: a machine that exists was destroyed over a list that failed", got)
+			}
+		})
+	}
+}
+
+func TestCreateDestroysAMachineItCouldNotConfirmInTheWholeWindow(t *testing.T) {
 	cases := map[string]http.HandlerFunc{
 		"the list fails":        answer(500, `oops`),
 		"the list is rate held": answer(429, `{"error":"rate limit exceeded"}`),
@@ -194,8 +217,11 @@ func TestCreateDestroysAMachineItCannotConfirm(t *testing.T) {
 			p := newTestProvider(t, api)
 
 			_, err := p.Create(context.Background(), agentSpec())
-			if err == nil || !strings.Contains(err.Error(), "it was destroyed") {
-				t.Fatalf("err = %v, want one saying the machine was destroyed", err)
+			if err == nil || !strings.Contains(err.Error(), "could not be confirmed in the list") || !strings.Contains(err.Error(), "it was destroyed") {
+				t.Fatalf("err = %v, want one saying the machine could not be confirmed and was destroyed", err)
+			}
+			if got := len(api.sent(http.MethodGet, machinesPath)); got < 3 {
+				t.Errorf("lists = %d, want the list read again for the whole window", got)
 			}
 			if got := api.sent(http.MethodDelete, machinesPath+"/9001"); len(got) != 1 || got[0].Query != "force=true" {
 				t.Errorf("destroys = %+v, want one, forced", got)
@@ -204,7 +230,7 @@ func TestCreateDestroysAMachineItCannotConfirm(t *testing.T) {
 	}
 }
 
-func TestCreateSaysWhenTheMachineItCannotConfirmMayStillBeBilled(t *testing.T) {
+func TestCreateSaysWhenTheMachineItCannotConfirmMayStillBeRented(t *testing.T) {
 	api := newFakeAPI(t)
 	creatable(api, "hl-agent-pe1-a2")
 	api.on(http.MethodGet, machinesPath, answer(500, `oops`))
@@ -212,8 +238,8 @@ func TestCreateSaysWhenTheMachineItCannotConfirmMayStillBeBilled(t *testing.T) {
 	p := newTestProvider(t, api)
 
 	_, err := p.Create(context.Background(), agentSpec())
-	if err == nil || !strings.Contains(err.Error(), "may still be billed") || !strings.Contains(err.Error(), "9001") {
-		t.Fatalf("err = %v, want one naming the machine that may still be billed", err)
+	if err == nil || !strings.Contains(err.Error(), "may still be rented") || !strings.Contains(err.Error(), "9001") {
+		t.Fatalf("err = %v, want one naming the machine that may still be rented", err)
 	}
 }
 

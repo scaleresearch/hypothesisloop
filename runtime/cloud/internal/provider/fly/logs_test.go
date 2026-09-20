@@ -23,7 +23,7 @@ func TestLogsKeepsTheCommandsLinesAndDropsTheVendorsOwn(t *testing.T) {
 		"hl-out|hl-out|a line that starts like the prefix",
 		"\x1b[32m INFO\x1b[0m Sending signal SIGTERM to main child process w/ PID 637",
 		"hl-out|last, without a newline",
-		"hl-ended|3",
+		"hl-ended",
 		shutdownLine,
 		"[    6.975632] reboot: Restarting system",
 		policyLine,
@@ -46,7 +46,7 @@ func TestLogsKeepsTheCommandsLinesAndDropsTheVendorsOwn(t *testing.T) {
 
 func TestLogsReturnsTheLastTailLines(t *testing.T) {
 	api := newFakeAPI(t)
-	api.on(http.MethodGet, logsPath, answer(200, logJSON("hl-out|1", "hl-out|2", shutdownLine, "hl-out|3", "hl-ended|0")))
+	api.on(http.MethodGet, logsPath, answer(200, logJSON("hl-out|1", "hl-out|2", shutdownLine, "hl-out|3", "hl-ended")))
 	p := newTestProvider(t, api)
 
 	got, err := p.Logs(context.Background(), "9001", 2)

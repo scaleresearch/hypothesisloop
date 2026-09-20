@@ -156,5 +156,6 @@ func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	}
 	p.machinesURL, p.logsURL = api.server.URL, api.server.URL
 	p.poll = 5 * time.Millisecond
+	p.confirm = 200 * time.Millisecond
 	return p
 }

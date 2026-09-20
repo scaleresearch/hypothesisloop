@@ -4,19 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vendorapi"
 )
-
-const listedTimeout = 30 * time.Second
 
 // nameKey is the metadata key a Machine carries its instance name under. The Machine's own name
 // is left to the vendor: it must be unique in the app, and an instance name need not be.
 const nameKey = "hl_name"
-
-var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type createRequest struct {
 	Region string        `json:"region"`
@@ -64,7 +60,8 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 		return "", fmt.Errorf("fly: creating a machine for %q answered without an id", spec.Name)
 	}
 	if err := p.awaitListed(ctx, created.ID, spec.Name); err != nil {
-		return "", p.giveBack(ctx, created.ID, err)
+		destroy := func(ctx context.Context) error { return p.Destroy(ctx, created.ID) }
+		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
 	}
 	return created.ID, nil
 }
@@ -100,17 +97,6 @@ func (p *Provider) newCreateRequest(spec provider.Spec) (createRequest, error) {
 	}, nil
 }
 
-// giveBack destroys a Machine Create made and could not confirm, so that a failed Create leaves
-// nothing behind. ctx may be what ended the wait, so the destroy runs on its own time.
-func (p *Provider) giveBack(ctx context.Context, id string, cause error) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestTimeout)
-	defer cancel()
-	if err := p.Destroy(ctx, id); err != nil {
-		return fmt.Errorf("%w; destroying it failed and it may still be billed: %v", cause, err)
-	}
-	return fmt.Errorf("%w; it was destroyed", cause)
-}
-
 func (p *Provider) listed(ctx context.Context, id, name string) (bool, error) {
 	instances, err := p.List(ctx, name)
 	if err != nil {
@@ -125,22 +111,28 @@ func (p *Provider) listed(ctx context.Context, id, name string) (bool, error) {
 }
 
 // awaitListed holds Create until the Machine is in List, which is what tells a caller with no
-// memory of this call that the name is taken.
+// memory of this call that the name is taken. A list that fails is read again, since one refused
+// call says nothing about the Machine, and the Machine is given up only when the window ends
+// without a sighting.
 func (p *Provider) awaitListed(ctx context.Context, id, name string) error {
-	ctx, cancel := context.WithTimeout(ctx, listedTimeout)
+	ctx, cancel := context.WithTimeout(ctx, p.confirm)
 	defer cancel()
 	ticker := time.NewTicker(p.poll)
 	defer ticker.Stop()
+	var failed error
 	for {
 		listed, err := p.listed(ctx, id, name)
-		if err != nil && ctx.Err() == nil {
-			return fmt.Errorf("fly: machine %s was created for %q and could not be confirmed in the list: %w", id, name, err)
-		}
 		if listed {
 			return nil
 		}
+		if ctx.Err() == nil {
+			failed = err
+		}
 		select {
 		case <-ctx.Done():
+			if failed != nil {
+				return fmt.Errorf("fly: machine %s was created for %q and could not be confirmed in the list: %w", id, name, failed)
+			}
 			return fmt.Errorf("fly: machine %s was created for %q and is not in the list: %w", id, name, ctx.Err())
 		case <-ticker.C:
 		}
@@ -148,25 +140,11 @@ func (p *Provider) awaitListed(ctx context.Context, id, name string) error {
 }
 
 func validateSpec(spec provider.Spec) error {
-	if err := provider.ValidateName(spec.Name); err != nil {
+	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("fly: %w", err)
-	}
-	if spec.Image == "" {
-		return fmt.Errorf("fly: spec %q has no image", spec.Name)
-	}
-	if len(spec.Command) == 0 || spec.Command[0] == "" {
-		return fmt.Errorf("fly: spec %q has no command", spec.Name)
 	}
 	if spec.AcceleratorCount != 0 {
 		return fmt.Errorf("fly: spec %q asks for %d accelerators of type %q, and this adapter rents none", spec.Name, spec.AcceleratorCount, spec.AcceleratorType)
-	}
-	if spec.CPUMillis <= 0 || spec.MemoryBytes <= 0 || spec.DiskBytes <= 0 {
-		return fmt.Errorf("fly: spec %q must state cpu, memory and disk", spec.Name)
-	}
-	for name := range spec.Env {
-		if !envName.MatchString(name) {
-			return fmt.Errorf("fly: spec %q: %q is not an environment variable name", spec.Name, name)
-		}
 	}
 	return nil
 }

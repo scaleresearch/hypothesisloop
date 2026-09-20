@@ -40,7 +40,7 @@ var guestRules = map[string]guestRule{
 // least a core count comes with; a spec whose memory no core count can hold is refused.
 func (c Settings) guestFor(spec provider.Spec) (guest, error) {
 	rule := guestRules[c.CPUKind]
-	memory := ceilDiv(ceilDiv(spec.MemoryBytes, bytesPerMB), rule.StepMB) * rule.StepMB
+	memory := provider.CeilDiv(provider.CeilDiv(spec.MemoryBytes, bytesPerMB), rule.StepMB) * rule.StepMB
 	for _, cpus := range rule.CPUs {
 		if cpus*1000 < spec.CPUMillis || cpus*rule.MaxPerCPU < memory {
 			continue
@@ -49,17 +49,13 @@ func (c Settings) guestFor(spec provider.Spec) (guest, error) {
 	}
 	largest := rule.CPUs[len(rule.CPUs)-1]
 	return guest{}, fmt.Errorf("fly: spec %q asks for %d millicores and %d MB of memory, and the largest %s machine has %d cores and %d MB",
-		spec.Name, spec.CPUMillis, ceilDiv(spec.MemoryBytes, bytesPerMB), c.CPUKind, largest, largest*rule.MaxPerCPU)
+		spec.Name, spec.CPUMillis, provider.CeilDiv(spec.MemoryBytes, bytesPerMB), c.CPUKind, largest, largest*rule.MaxPerCPU)
 }
 
 func rootfsGB(spec provider.Spec) (int64, error) {
-	size := ceilDiv(spec.DiskBytes, bytesPerGB)
+	size := provider.CeilDiv(spec.DiskBytes, bytesPerGB)
 	if size > maxRootfsGB {
 		return 0, fmt.Errorf("fly: spec %q asks for %d GB of disk, and a machine's root filesystem holds at most %d GB", spec.Name, size, maxRootfsGB)
 	}
 	return size, nil
-}
-
-func ceilDiv(value, unit int64) int64 {
-	return (value + unit - 1) / unit
 }

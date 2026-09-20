@@ -111,13 +111,13 @@ func TestAStoppedMachineIsExitedOnlyOnceItsOutputIsComplete(t *testing.T) {
 		logReads    int
 	}{
 		"the end mark is in the log": {"stopped", 2 * time.Second,
-			answer(200, logJSON("hl-out|last line", "hl-ended|3", shutdownLine, policyLine)), provider.StateExited, 1},
+			answer(200, logJSON("hl-out|last line", "hl-ended", shutdownLine, policyLine)), provider.StateExited, 1},
 		"the log trails the machine": {"stopped", 2 * time.Second,
 			answer(200, logJSON("hl-out|not the last line")), provider.StateRunning, 1},
 		"the log is still empty": {"stopped", 2 * time.Second,
 			answer(200, logJSON()), provider.StateRunning, 1},
 		"the command printed the mark itself": {"stopped", 2 * time.Second,
-			answer(200, logJSON("hl-out|hl-ended|0")), provider.StateRunning, 1},
+			answer(200, logJSON("hl-out|hl-ended", "hl-ended and more")), provider.StateRunning, 1},
 		"the log cannot be read": {"stopped", 2 * time.Second,
 			answer(503, `unavailable`), provider.StateRunning, 1},
 		"stopped without a mark, a while ago": {"stopped", logSettle + time.Second,
@@ -166,6 +166,17 @@ func TestListReadsNoLogOfAStoppedMachineOutsideThePrefix(t *testing.T) {
 	}
 	if api.total() != 1 {
 		t.Errorf("requests = %d, want the list alone", api.total())
+	}
+}
+
+func TestListOfAnAppThatDoesNotExistSaysSo(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, machinesPath, answer(404, `{"error":"app not found"}`))
+	p := newTestProvider(t, api)
+
+	_, err := p.List(context.Background(), "hl-")
+	if err == nil || !strings.Contains(err.Error(), `app "hl-agents" does not exist`) {
+		t.Fatalf("err = %v, want one naming the app the settings point at", err)
 	}
 }
 

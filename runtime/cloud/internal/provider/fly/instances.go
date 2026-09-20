@@ -2,7 +2,6 @@ package fly
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -28,6 +27,9 @@ type machine struct {
 func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Instance, error) {
 	var machines []machine
 	header, err := p.call(ctx, http.MethodGet, p.machinesPath(""), nil, &machines)
+	if hasStatus(err, http.StatusNotFound) {
+		return nil, fmt.Errorf("fly: app %q does not exist, or the token is for another app; the adapter does not create it: %w", p.cfg.App, err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -89,16 +91,11 @@ func (p *Provider) outputComplete(ctx context.Context, found machine, now time.T
 		return false
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry, endMark) {
+		if entry == endMark {
 			return true
 		}
 	}
 	return false
-}
-
-func isGone(err error) bool {
-	var failure *statusError
-	return errors.As(err, &failure) && failure.Status == http.StatusNotFound
 }
 
 // Destroy deletes the Machine whatever its state. The API answers 200 for a Machine it deleted
@@ -108,7 +105,7 @@ func (p *Provider) Destroy(ctx context.Context, id string) error {
 		OK bool `json:"ok"`
 	}
 	_, err := p.call(ctx, http.MethodDelete, p.machinesPath("/"+url.PathEscape(id))+"?force=true", nil, &destroyed)
-	if isGone(err) {
+	if hasStatus(err, http.StatusNotFound) {
 		return nil
 	}
 	if err != nil {

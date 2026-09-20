@@ -2,7 +2,6 @@ package fly
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/url"
 )
@@ -16,8 +15,7 @@ import (
 // later pass, since Stop is repeated while the instance runs.
 func (p *Provider) Stop(ctx context.Context, id string) error {
 	_, err := p.call(ctx, http.MethodPost, p.machinesPath("/"+url.PathEscape(id)+"/signal"), map[string]string{"signal": "SIGTERM"}, nil)
-	var failure *statusError
-	if errors.As(err, &failure) && (failure.Status == http.StatusNotFound || failure.Status == http.StatusPreconditionFailed) {
+	if hasStatus(err, http.StatusNotFound, http.StatusPreconditionFailed) {
 		return nil
 	}
 	return err

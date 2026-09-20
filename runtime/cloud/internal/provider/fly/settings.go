@@ -10,8 +10,10 @@ import (
 
 // Settings is the adapter's own section of the config file, provider.settings.
 type Settings struct {
-	// APITokenEnv names the environment variable holding a token for the app's organization, as
-	// `fly tokens create org` prints it: the scheme "FlyV1" and the token.
+	// APITokenEnv names the environment variable holding a deploy token for App, as
+	// `fly tokens create deploy -a <app>` prints it: the scheme "FlyV1" and the token. The
+	// adapter calls nothing above the app, and a token for the organization would let whoever
+	// holds it into every other app there.
 	APITokenEnv string `yaml:"api_token_env"`
 	// App is the one Fly app every Machine is created in. It exists before the adapter starts.
 	App string `yaml:"app"`

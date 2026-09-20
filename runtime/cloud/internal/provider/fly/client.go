@@ -15,18 +15,21 @@
 //     stop kills after a timeout, so Stop does not use it.
 //   - Nothing of the account is inside a Machine: its API socket answers unauthorized. Machines
 //     of one organization do share a private network and its DNS.
+//   - A token for the one app does everything here; no call is made above the app.
 package fly
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vendorapi"
 )
 
 var _ provider.Provider = (*Provider)(nil)
@@ -36,8 +39,14 @@ const (
 	// defaultLogsURL is the API the vendor's CLI reads logs from. The Machines API has no logs.
 	defaultLogsURL = "https://api.fly.io"
 	requestTimeout = 30 * time.Second
-	maxErrorBody   = 512
 	pollInterval   = time.Second
+
+	// confirmWindow is how long Create waits to see the Machine it made in the list.
+	confirmWindow = 30 * time.Second
+
+	// maxAnswer bounds one answer of either API. The largest are the list, a few kilobytes a
+	// Machine, and a page of the log, whose lines the command writes.
+	maxAnswer = 32 << 20
 )
 
 type Provider struct {
@@ -47,6 +56,7 @@ type Provider struct {
 	logsURL     string
 	http        *http.Client
 	poll        time.Duration
+	confirm     time.Duration
 }
 
 // New refuses any accelerator type: the adapter rents CPU-only Machines, so a shape that asks
@@ -69,19 +79,24 @@ func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 		logsURL:     defaultLogsURL,
 		http:        &http.Client{Timeout: requestTimeout},
 		poll:        pollInterval,
+		confirm:     confirmWindow,
 	}, nil
 }
 
-// statusError is a non-2xx answer from the API.
-type statusError struct {
-	Method string
-	Path   string
-	Status int
-	Body   string
-}
+const vendor = "fly"
 
-func (e *statusError) Error() string {
-	return fmt.Sprintf("fly: %s %s: HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
+// hasStatus tells whether err is the API's answer with one of the given HTTP statuses.
+func hasStatus(err error, statuses ...int) bool {
+	var failure *vendorapi.StatusError
+	if !errors.As(err, &failure) {
+		return false
+	}
+	for _, status := range statuses {
+		if failure.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) machinesPath(suffix string) string {
@@ -108,30 +123,15 @@ func (p *Provider) call(ctx context.Context, method, url string, body, out any) 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := p.http.Do(req)
+	raw, header, err := vendorapi.Do(p.http, req, vendor, maxAnswer)
 	if err != nil {
-		return nil, fmt.Errorf("fly: %s %s: %w", method, url, err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("fly: read %s %s: %w", method, url, err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, &statusError{Method: method, Path: req.URL.Path, Status: resp.StatusCode, Body: truncate(raw)}
+		return nil, err
 	}
 	if out == nil {
-		return resp.Header, nil
+		return header, nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return nil, fmt.Errorf("fly: decode %s %s: %w", method, url, err)
 	}
-	return resp.Header, nil
-}
-
-func truncate(raw []byte) string {
-	if len(raw) > maxErrorBody {
-		return string(raw[:maxErrorBody])
-	}
-	return string(raw)
+	return header, nil
 }

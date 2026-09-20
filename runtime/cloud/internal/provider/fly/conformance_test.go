@@ -12,7 +12,8 @@ import (
 )
 
 // The conformance tests rent real Machines and cost real money, under a cent a run. They run
-// when FLY_API_TOKEN is set, in an app of their own that they create and delete:
+// when FLY_API_TOKEN holds a token for the organization, in an app of their own that they
+// create and delete, and rent with a deploy token they make for that app:
 //
 //	FLY_API_TOKEN=... FLY_CONFORMANCE_ORG=<org slug> FLY_CONFORMANCE_APP=<app name> FLY_CONFORMANCE_REGION=ams \
 //	  go test ./runtime/cloud/internal/provider/fly -run Conformance -v -timeout 45m
@@ -44,11 +45,27 @@ func conformanceProvider(t *testing.T) *Provider {
 	if org == "" || app == "" || region == "" {
 		t.Fatal("FLY_CONFORMANCE_ORG, FLY_CONFORMANCE_APP and FLY_CONFORMANCE_REGION must be set")
 	}
-	p, err := New(Settings{APITokenEnv: "FLY_API_TOKEN", App: app, Region: region, CPUKind: "shared"}, nil)
+	settings := Settings{APITokenEnv: "FLY_API_TOKEN", App: app, Region: region, CPUKind: "shared"}
+	owner, err := New(settings, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	ownApp(t, p, org)
+	ownApp(t, owner, org)
+
+	// The suite itself runs on a deploy token for the one app, which is what the settings ask
+	// for, so a call the adapter made above the app would fail here.
+	var deploy struct {
+		Token string `json:"token"`
+	}
+	if _, err := owner.call(t.Context(), http.MethodPost, owner.machinesURL+"/v1/apps/"+app+"/deploy_token", map[string]string{"expiry": "2h"}, &deploy); err != nil {
+		t.Fatalf("create a deploy token for app %s: %v", app, err)
+	}
+	t.Setenv("FLY_CONFORMANCE_DEPLOY_TOKEN", deploy.Token)
+	settings.APITokenEnv = "FLY_CONFORMANCE_DEPLOY_TOKEN"
+	p, err := New(settings, nil)
+	if err != nil {
+		t.Fatalf("New with the app's deploy token: %v", err)
+	}
 	return p
 }
 
@@ -63,7 +80,7 @@ func ownApp(t *testing.T, p *Provider, org string) {
 	}
 	_, err := p.call(t.Context(), http.MethodGet, appURL, nil, &shown)
 	switch {
-	case isGone(err):
+	case hasStatus(err, http.StatusNotFound):
 		if _, err := p.call(t.Context(), http.MethodPost, p.machinesURL+"/v1/apps", map[string]string{"name": p.cfg.App, "org_slug": org}, nil); err != nil {
 			t.Fatalf("create app %s: %v", p.cfg.App, err)
 		}
