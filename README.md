@@ -286,14 +286,15 @@ On macOS:
 
 ```bash
 # Point kubectl at your cluster, then:
-API_URL=https://your-control-plane:8081 \
+API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084 \
   make cluster-agent-up CLUSTER=my-cluster
 make controlplane-up
 ```
 
 `make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
 and `REGISTRY` must name a registry every node can pull from (`make images` pushes there).
-`API_URL` just needs to be reachable *outbound* from inside the target cluster - the control
+`API_URL` (control-service) and `METRICS_URL` (metrics-service) are both required and just need
+to be reachable *outbound* from inside the target cluster - the control
 plane never needs to reach the cluster at all, so there's no kubeconfig or credential to hand
 it. Repeat `make cluster-agent-up CLUSTER=<name>` for every additional target cluster. There is nothing to register
 control-plane side: a cluster exists as soon as its agent reports a heartbeat, and its
@@ -365,7 +366,7 @@ between.
 |-----------------------------------|----------------------------------------------------------------------|
 | `make controlplane-up`            | Build images + start the control plane                             |
 | `make controlplane-down`          | Stop the control plane                                              |
-| `make cluster-agent-up CLUSTER=x` | Install node-agent + cluster-agent on the cluster `kubectl` currently points at (or `KUBECONFIG_PATH`/`KUBE_CONTEXT`), one per target cluster |
+| `make cluster-agent-up CLUSTER=x API_URL=... METRICS_URL=...` | Install node-agent + cluster-agent on the cluster `kubectl` currently points at (or `KUBECONFIG_PATH`/`KUBE_CONTEXT`), one per target cluster |
 | `make cluster-agent-down`         | Remove node-agent + cluster-agent from that target cluster          |
 | `make k3s-up`                     | Bootstrap a local k3s cluster and install the cluster-agent bundle onto it |
 | `make k3s-down`                   | Destroy the local k3s cluster                                       |

@@ -85,9 +85,10 @@ reset:
 # Installs/removes the runtime/k8s/infra/chart helm release (node-agent DaemonSet + cluster-agent
 # Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
 # KUBECONFIG_PATH point at (or current kubectl context).
-# Usage: make cluster-agent-up CLUSTER=<name> [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [API_URL=...]
+# Usage: make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
 cluster-agent-up:
-	CLUSTER_NAME="$(CLUSTER)" REGISTRY_URL="$(REGISTRY)" bash runtime/k8s/infra/install.sh
+	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" \
+	  bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
 	bash runtime/k8s/infra/destroy.sh

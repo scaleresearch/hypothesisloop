@@ -7,8 +7,8 @@
 #
 # Parameters (env vars; see chart/values.yaml for what each value means):
 #   CLUSTER_NAME       -> clusterName (required)
-#   API_URL            -> apiURL (default: http://host.containers.internal:8081)
-#   METRICS_URL        -> metricsURL (default: http://host.containers.internal:8084)
+#   API_URL            -> apiURL (required)
+#   METRICS_URL        -> metricsURL (required)
 #   AUTOSCALER_ENABLED -> autoscalerEnabled (default: false)
 #   REGISTRY_URL       -> images.registry. Must already be reachable from every node; providing
 #                         that reachability is the cluster provisioner's job (default: localhost:5000)
@@ -18,8 +18,8 @@
 set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:?CLUSTER_NAME must name this cluster (make cluster-agent-up CLUSTER=<name>)}"
-API_URL="${API_URL:-http://host.containers.internal:8081}"
-METRICS_URL="${METRICS_URL:-http://host.containers.internal:8084}"
+API_URL="${API_URL:?API_URL must be the control-plane API base URL, reachable from inside a pod in this cluster}"
+METRICS_URL="${METRICS_URL:?METRICS_URL must be the metrics-service base URL, reachable from every node in this cluster}"
 AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"
 REGISTRY_URL="${REGISTRY_URL:-localhost:5000}"
 TAG="${TAG:?TAG must name the image tag make images pushed}"

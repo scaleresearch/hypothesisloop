@@ -16,6 +16,7 @@ TAG="${TAG:?run make reload, which builds the images and exports their TAG}"
 # manifest itself must be re-applied with the new TAG for a delete+recreate to fetch anything.
 HOST_ADDRESS="$(cat "${SCRIPT_DIR}/../.host-address")"
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
+  API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
   REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
 
