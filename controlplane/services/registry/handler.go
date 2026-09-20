@@ -212,11 +212,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			MetricValue      float64 `json:"metric_value"`
 		}
 	}) (*struct{}, error) {
-		name := in.Body.MetricName
-		if name == "" {
-			name = "default"
-		}
-		if err := h.svc.RecordMetric(ctx, in.ID, name, in.Body.MetricBasis, in.Body.FractionComplete, in.Body.MetricValue); err != nil {
+		if err := h.svc.RecordMetric(ctx, in.ID, in.Body.MetricName, in.Body.MetricBasis, in.Body.FractionComplete, in.Body.MetricValue); err != nil {
 			if errors.Is(err, ErrExperimentNotFound) {
 				return nil, huma.Error404NotFound(err.Error())
 			}
