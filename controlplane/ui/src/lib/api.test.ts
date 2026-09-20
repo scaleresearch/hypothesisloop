@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
   ApiError, addHumanHypothesisComment, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
-  fetchPlatformExperimentsPage, putClusterSettings, registerHumanHypothesis, revokeAPIKey,
+  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings,
+  registerHumanHypothesis, revokeAPIKey,
 } from '@/lib/api'
 
 vi.mock('@/lib/auth', () => ({ accessToken: vi.fn(), endSession: vi.fn() }))
@@ -76,12 +77,39 @@ describe('every request carries the session token', () => {
   })
 
   it('asks for the token again on each request, so a refreshed one is used at once', async () => {
-    fetchMock().mockImplementation(async () => answer(200, []))
+    fetchMock().mockImplementation(async () => answer(200, [], { 'X-Total-Count': '0' }))
     await fetchAgentsPage({ project_id: 'prj_1' })
     vi.mocked(accessToken).mockResolvedValue('token-2')
     await fetchAgentsPage({ project_id: 'prj_1' })
     const tokens = fetchMock().mock.calls.map(([, init]) => (init!.headers as Record<string, string>).Authorization)
     expect(tokens).toEqual(['Bearer token-1', 'Bearer token-2'])
+  })
+})
+
+describe('an answer that is not what was asked for is an error', () => {
+  it('for a list without its total', async () => {
+    fetchMock().mockResolvedValue(answer(200, [{ id: 'ag-1' }]))
+    await expect(fetchAgentsPage({ project_id: 'prj_1' })).rejects.toThrow('/agents?project_id=prj_1 answered a list without X-Total-Count')
+  })
+
+  it('for a token request answered with no agent', async () => {
+    fetchMock().mockResolvedValue(answer(200, { agents: [] }))
+    await expect(fetchPlatformExperimentAgentToken('pe-1', 'ag-1')).rejects.toThrow('asked for the token of agent ag-1 and was answered 0 agents')
+  })
+
+  it('for a call made with no API address configured', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_URL', '')
+    await expect(fetchMe()).rejects.toThrow('NEXT_PUBLIC_API_URL is not set')
+    expect(fetchMock()).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
+  })
+})
+
+describe('live capacity', () => {
+  it('is read for the org named', async () => {
+    fetchMock().mockResolvedValue(answer(200, { clusters: [] }))
+    await fetchResourceCapacity('org_b')
+    expect(sent().url.href).toBe('http://api.test/resource-catalog/capacity?org_id=org_b')
   })
 })
 

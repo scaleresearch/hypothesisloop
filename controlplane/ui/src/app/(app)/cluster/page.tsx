@@ -12,6 +12,25 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
 
+function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
+  const connected = clusters.filter(c => c.connected).length
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+      <StatTile label="Clusters, every org" value={clusters.length} />
+      <StatTile
+        label="Connected"
+        value={connected}
+        color={clusters.length > 0 && connected === clusters.length ? semantic.success : connected > 0 ? semantic.warning : semantic.danger}
+      />
+      <StatTile
+        label="Disconnected"
+        value={clusters.length - connected}
+        color={clusters.length - connected > 0 ? semantic.danger : undefined}
+      />
+    </div>
+  )
+}
+
 // Every org's clusters with their live occupancy, which the API answers for staff alone.
 function AllClusters() {
   const { data, error, isLoading } = useSWR<ClustersResponse>(
@@ -20,24 +39,9 @@ function AllClusters() {
     { refreshInterval: 5_000 },
   )
 
-  const clusterList = data?.clusters ?? []
-  const connectedCount = clusterList.filter(c => c.connected).length
-
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
-        <StatTile label="Clusters, every org" value={clusterList.length} />
-        <StatTile
-          label="Connected"
-          value={connectedCount}
-          color={clusterList.length > 0 && connectedCount === clusterList.length ? semantic.success : connectedCount > 0 ? semantic.warning : semantic.danger}
-        />
-        <StatTile
-          label="Disconnected"
-          value={clusterList.length - connectedCount}
-          color={clusterList.length - connectedCount > 0 ? semantic.danger : undefined}
-        />
-      </div>
+      {data && !error && <AllClustersCounts clusters={data.clusters} />}
 
       <Pod>
         <PodHeader>All Clusters · every org · staff only</PodHeader>
@@ -104,9 +108,10 @@ function AllClusters() {
 }
 
 function LiveCapacity() {
+  const { org } = useTenant()
   const { data, error, isLoading } = useSWR(
-    'resource-capacity',
-    fetchResourceCapacity,
+    ['resource-capacity', org.id],
+    () => fetchResourceCapacity(org.id),
     { refreshInterval: 5_000 },
   )
 
@@ -119,15 +124,15 @@ function LiveCapacity() {
 
   return (
     <Pod>
-      <PodHeader>Capacity</PodHeader>
+      <PodHeader>Capacity {org.name} can use</PodHeader>
       <PodContent>
         {isLoading && <Loading />}
         {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
         {data && rows.length === 0 && (
           <EmptyState>
-            No cluster your jobs can be placed on reports live accelerator capacity right now.
-            A cluster-agent reports allocatable-minus-requested accelerators per type on every
-            desired-state poll, so this table fills once one of your clusters, or one the
+            No cluster the jobs of {org.name} can be placed on reports live accelerator capacity
+            right now. A cluster-agent reports allocatable-minus-requested accelerators per type
+            on every desired-state poll, so this table fills once one of its clusters, or one the
             platform shares, has polled.
           </EmptyState>
         )}

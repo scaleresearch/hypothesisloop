@@ -362,4 +362,4 @@ lint:
 
 check: build test agent-test helm-lint
 	go vet ./...
-	cd controlplane/ui && npm run build
+	cd controlplane/ui && npm test && npm run build

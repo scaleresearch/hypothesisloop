@@ -31,8 +31,13 @@ import type {
 import { isZeroDate } from '@/lib/format'
 import { accessToken, endSession } from '@/lib/auth'
 
-// One API, one base URL — quota, scheduler and registry operations are all served together.
-const API_URL = process.env.NEXT_PUBLIC_API_URL as string
+// One API, one base URL: quota, scheduler and registry operations are all served together.
+// Next.js inlines a NEXT_PUBLIC_ variable only where it is named in full.
+function apiURL(): string {
+  const url = process.env.NEXT_PUBLIC_API_URL
+  if (!url) throw new Error('NEXT_PUBLIC_API_URL is not set: copy .env.example to .env.local and fill it in')
+  return url
+}
 
 /** A refusal or failure the API answered with, carrying its status and its own message. */
 export class ApiError extends Error {
@@ -57,50 +62,45 @@ async function failure(res: Response): Promise<ApiError> {
 
 // Every call to the API goes through here: it carries the session's access token, and a session
 // that is gone or that the API refuses has one outcome, the sign-in page.
-async function request(url: string, init: RequestInit = {}): Promise<Response> {
+async function request(method: string, path: string, body?: unknown): Promise<Response> {
   const token = await accessToken()
   if (!token) return endSession('ended')
-  const res = await fetch(url, {
-    ...init,
+  const res = await fetch(`${apiURL()}${path}`, {
+    method,
     cache: 'no-store',
-    headers: { ...init.headers, Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (res.status === 401) return endSession('refused')
   return res
 }
 
-function send(method: string, path: string, body?: unknown): Promise<Response> {
-  return request(`${API_URL}${path}`, body === undefined ? { method } : {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+async function answer(method: string, path: string, body?: unknown): Promise<Response> {
+  const res = await request(method, path, body)
+  if (!res.ok) throw await failure(res)
+  return res
 }
 
 async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await send(method, path, body)
-  if (!res.ok) throw await failure(res)
-  return res.json() as Promise<T>
+  return (await answer(method, path, body)).json() as Promise<T>
 }
 
-async function apiFetch<T>(url: string): Promise<T> {
-  const res = await request(url)
-  if (!res.ok) throw await failure(res)
-  return res.json() as Promise<T>
+function apiFetch<T>(path: string): Promise<T> {
+  return apiSend<T>('GET', path)
 }
 
 // Query params are the fields of `params` sent under their own names, unset ones left out.
 function withQuery(path: string, params: object): string {
-  const url = new URL(`${API_URL}${path}`)
+  const query = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
+    if (v !== undefined && v !== '') query.set(k, String(v))
   }
-  return url.toString()
+  return query.size ? `${path}?${query}` : path
 }
 
 // A paginated list response: the page of items plus the total match count across all pages,
-// read off the X-Total-Count response header — see the unified pagination convention shared by
-// every list endpoint (?limit, ?offset, ?sort; total in X-Total-Count).
+// read off the X-Total-Count response header, as every list endpoint sends it (?limit, ?offset,
+// ?sort; total in X-Total-Count).
 export interface Page<T> {
   items: T[]
   total: number
@@ -110,13 +110,11 @@ export interface Page<T> {
 // the job list clamps to 50.
 export const MAX_LIST_PAGE_SIZE = 200
 
-async function apiFetchPage<T>(url: string): Promise<Page<T>> {
-  const res = await request(url)
-  if (!res.ok) throw await failure(res)
-  const items = (await res.json()) as T[]
-  const totalHeader = res.headers.get('X-Total-Count')
-  const total = totalHeader != null ? Number(totalHeader) : items.length
-  return { items, total }
+async function apiFetchPage<T>(path: string): Promise<Page<T>> {
+  const res = await answer('GET', path)
+  const total = res.headers.get('X-Total-Count')
+  if (total == null) throw new Error(`${path} answered a list without X-Total-Count`)
+  return { items: (await res.json()) as T[], total: Number(total) }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,14 +123,14 @@ async function apiFetchPage<T>(url: string): Promise<Page<T>> {
 
 // Every org's clusters with their live occupancy. Staff only: anyone else is answered 403.
 export function fetchAllClusters(): Promise<ClustersResponse> {
-  return apiFetch<ClustersResponse>(`${API_URL}/internal/clusters`)
+  return apiFetch<ClustersResponse>(`/internal/clusters`)
 }
 
 // The clusters an org's jobs run on, its own and the ones the platform shares, and whether each
 // one's cluster-agent is connected right now (has polled desired-state recently). The control
 // plane never dials a cluster itself.
 export function fetchOrgClusters(orgID: string): Promise<OrgCluster[]> {
-  return apiFetch<{ clusters: OrgCluster[] }>(`${API_URL}/orgs/${orgID}/clusters`).then(r => r.clusters)
+  return apiFetch<{ clusters: OrgCluster[] }>(`/orgs/${orgID}/clusters`).then(r => r.clusters)
 }
 
 // Registering a name the org already owns changes nothing and answers with the same token.
@@ -143,7 +141,7 @@ export function registerCluster(orgID: string, name: string): Promise<Registered
 // Per-cluster autoscaler-speculation overrides — null fields mean "use the global scheduler
 // default." Keyed by cluster_id (survives a rename), not cluster_name.
 export function fetchClusterSettings(clusterID: string): Promise<ClusterSettings> {
-  return apiFetch<ClusterSettings>(`${API_URL}/clusters/${clusterID}/settings`)
+  return apiFetch<ClusterSettings>(`/clusters/${clusterID}/settings`)
 }
 
 // The body replaces the whole row: a null field falls back to the scheduler default.
@@ -241,23 +239,23 @@ export function fetchExperimentStats(
 
 // The same counts over every org's jobs. Staff only: anyone else gets their own orgs' jobs.
 export function fetchAllExperimentStats(): Promise<ExperimentStats> {
-  return apiFetch<ExperimentStats>(`${API_URL}/experiments/stats`)
+  return apiFetch<ExperimentStats>(`/experiments/stats`)
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {
-  return apiFetch<Experiment>(`${API_URL}/experiments/${id}`)
+  return apiFetch<Experiment>(`/experiments/${id}`)
 }
 
 
 export function fetchExperimentMetrics(id: string): Promise<MetricDataPoint[]> {
-  return apiFetch<MetricDataPoint[]>(`${API_URL}/experiments/${id}/metrics`)
+  return apiFetch<MetricDataPoint[]>(`/experiments/${id}/metrics`)
 }
 
 // The job's most recently reported stdout/stderr tail. For a failed job this is usually the
 // only place the error itself appears — the record carries a status and a phase_detail reason,
 // but the traceback lives here.
 export function fetchExperimentLogs(id: string, n = 200): Promise<string[]> {
-  return apiFetch<string[]>(`${API_URL}/experiments/${id}/logs?n=${n}`)
+  return apiFetch<string[]>(`/experiments/${id}/logs?n=${n}`)
 }
 
 // Metric history of every job in a platform experiment over its own run, one series per job. The
@@ -268,15 +266,14 @@ export function fetchPlatformExperimentTimeseries(
   pe: PlatformExperiment,
   metricName: string,
 ): Promise<{ series: AgentMetricSeries[] }> {
-  const url = new URL(`${API_URL}/platform-experiments/${pe.id}/metrics-timeseries`)
-  url.searchParams.set('metric_name', metricName)
+  const query = new URLSearchParams({ metric_name: metricName })
   if (!isZeroDate(pe.starts_at)) {
     const end = Math.min(Date.now(), new Date(pe.ends_at as string).getTime())
     const quarters = Math.ceil((end - new Date(pe.starts_at as string).getTime()) / 900_000)
-    url.searchParams.set('lookback_hours', String(Math.max(1, quarters) / 4))
-    url.searchParams.set('end', new Date(pe.ends_at as string).toISOString())
+    query.set('lookback_hours', String(Math.max(1, quarters) / 4))
+    query.set('end', new Date(pe.ends_at as string).toISOString())
   }
-  return apiFetch<{ series: AgentMetricSeries[] }>(url.toString())
+  return apiFetch<{ series: AgentMetricSeries[] }>(`/platform-experiments/${pe.id}/metrics-timeseries?${query}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +290,7 @@ export interface HypothesisStats {
 
 export function fetchHypothesisStats(platformExperimentID: string): Promise<HypothesisStats> {
   return apiFetch<HypothesisStats>(
-    `${API_URL}/hypotheses/stats?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
+    `/hypotheses/stats?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
   )
 }
 
@@ -307,16 +304,16 @@ export interface HypothesisEvidence extends Hypothesis {
 
 // Drawn from the 200 newest hypotheses.
 export function fetchFindings(platformExperimentID: string): Promise<HypothesisEvidence[]> {
-  return apiFetch<HypothesisEvidence[]>(`${API_URL}/platform-experiments/${platformExperimentID}/findings`)
+  return apiFetch<HypothesisEvidence[]>(`/platform-experiments/${platformExperimentID}/findings`)
 }
 
 export function fetchHypothesis(id: string): Promise<HypothesisWithJobs> {
-  return apiFetch<HypothesisWithJobs>(`${API_URL}/hypotheses/${id}`)
+  return apiFetch<HypothesisWithJobs>(`/hypotheses/${id}`)
 }
 
 export function fetchHypothesisGraph(platformExperimentID: string): Promise<HypothesisGraph> {
   return apiFetch<HypothesisGraph>(
-    `${API_URL}/hypotheses/graph?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
+    `/hypotheses/graph?platform_experiment_id=${encodeURIComponent(platformExperimentID)}`,
   )
 }
 
@@ -385,7 +382,7 @@ export interface HeldBack {
 export async function registerHumanHypothesis(
   platformExperimentID: string, text: string, links: HypothesisLinkInput[], distinctFrom: string[] = [],
 ): Promise<RegisteredHypothesis | HeldBack> {
-  const res = await send('POST', '/hypotheses', { platform_experiment_id: platformExperimentID, text, links, distinct_from: distinctFrom })
+  const res = await request('POST', '/hypotheses', { platform_experiment_id: platformExperimentID, text, links, distinct_from: distinctFrom })
   if (res.status === 409) return { similar: (await res.json()).similar }
   if (!res.ok) throw await failure(res)
   return res.json()
@@ -446,7 +443,7 @@ export function fetchPlatformExperimentsPage(params: PlatformExperimentsParams):
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {
-  return apiFetch<PlatformExperiment>(`${API_URL}/platform-experiments/${id}`)
+  return apiFetch<PlatformExperiment>(`/platform-experiments/${id}`)
 }
 
 interface AgentStanding {
@@ -471,11 +468,11 @@ export interface PlatformExperimentResults {
 }
 
 export function fetchPlatformExperimentResults(id: string): Promise<PlatformExperimentResults> {
-  return apiFetch<PlatformExperimentResults>(`${API_URL}/platform-experiments/${id}/results`)
+  return apiFetch<PlatformExperimentResults>(`/platform-experiments/${id}/results`)
 }
 
 export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<AgentQuota[]> {
-  return apiFetch<AgentQuota[]>(`${API_URL}/platform-experiments/${platformExpID}/quotas`)
+  return apiFetch<AgentQuota[]>(`/platform-experiments/${platformExpID}/quotas`)
 }
 
 // Live, per-cluster accelerator capacity: what is schedulable right now, read from the metrics
@@ -487,8 +484,9 @@ export interface ResourceCapacity {
   }>
 }
 
-export function fetchResourceCapacity(): Promise<ResourceCapacity> {
-  return apiFetch<ResourceCapacity>(`${API_URL}/resource-catalog/capacity`)
+// What the jobs of one org can be placed on: its own clusters and the ones the platform shares.
+export function fetchResourceCapacity(orgID: string): Promise<ResourceCapacity> {
+  return apiFetch<ResourceCapacity>(withQuery('/resource-catalog/capacity', { org_id: orgID }))
 }
 
 export function updatePlatformExperiment(id: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
@@ -548,7 +546,7 @@ export interface StagesStatus {
 }
 
 export function fetchStages(platformExpID: string): Promise<StagesStatus> {
-  return apiFetch<StagesStatus>(`${API_URL}/platform-experiments/${platformExpID}/stages`)
+  return apiFetch<StagesStatus>(`/platform-experiments/${platformExpID}/stages`)
 }
 
 // ---------------------------------------------------------------------------
@@ -556,7 +554,7 @@ export function fetchStages(platformExpID: string): Promise<StagesStatus> {
 // ---------------------------------------------------------------------------
 
 export function fetchPlatformExperimentAgents(platformExpID: string): Promise<AgentSignup[]> {
-  return apiFetch<{ agents: AgentSignup[] }>(`${API_URL}/platform-experiments/${platformExpID}/agents`).then(r => r.agents)
+  return apiFetch<{ agents: AgentSignup[] }>(`/platform-experiments/${platformExpID}/agents`).then(r => r.agents)
 }
 
 export interface AddAgentsRequest {
@@ -576,6 +574,7 @@ export function addPlatformExperimentAgents(platformExpID: string, req: AddAgent
 // same token, which is derived from the agent's place in the experiment.
 export async function fetchPlatformExperimentAgentToken(platformExpID: string, agentID: string): Promise<JoinedAgent> {
   const { agents } = await apiSend<{ agents: JoinedAgent[] }>('POST', `/platform-experiments/${platformExpID}/agents`, { agent_id: agentID })
+  if (agents.length !== 1) throw new Error(`asked for the token of agent ${agentID} and was answered ${agents.length} agents`)
   return agents[0]
 }
 
@@ -589,7 +588,7 @@ export async function removePlatformExperimentAgent(platformExpID: string, agent
 // ---------------------------------------------------------------------------
 
 export function fetchMe(): Promise<Me> {
-  return apiFetch<Me>(`${API_URL}/me`)
+  return apiFetch<Me>(`/me`)
 }
 
 // The new org starts with the caller as owner and a project named default.
@@ -612,7 +611,7 @@ export function renameProject(projectID: string, name: string): Promise<Project>
 
 // Newest first, revoked ones included. No token is listed.
 export function fetchAPIKeys(orgID: string): Promise<APIKey[]> {
-  return apiFetch<{ api_keys: APIKey[] }>(`${API_URL}/orgs/${orgID}/api-keys`).then(r => r.api_keys)
+  return apiFetch<{ api_keys: APIKey[] }>(`/orgs/${orgID}/api-keys`).then(r => r.api_keys)
 }
 
 // The answer is the only place the key's token ever appears. Without a project the key reaches
