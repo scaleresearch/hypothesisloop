@@ -1,45 +1,90 @@
 import type { Config } from 'tailwindcss'
 
+const token = (name: string) => `rgb(var(--${name}) / <alpha-value>)`
+
+// The whole palette: every colour class resolves to a token in globals.css.
 const config: Config = {
   content: [
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
   ],
-  darkMode: 'class',
+  darkMode: 'media',
   theme: {
+    colors: {
+      transparent: 'transparent',
+      current: 'currentColor',
+      inherit: 'inherit',
+      background: token('background'),
+      surface: {
+        DEFAULT: token('surface'),
+        inset: token('surface-inset'),
+        raised: token('surface-raised'),
+      },
+      border: {
+        DEFAULT: token('border'),
+        strong: token('border-strong'),
+      },
+      foreground: token('text'),
+      muted: token('text-muted'),
+      subtle: token('text-subtle'),
+      primary: {
+        DEFAULT: token('primary'),
+        hover: token('primary-hover'),
+        foreground: token('primary-foreground'),
+      },
+      accent: token('accent'),
+      success: token('success'),
+      warning: token('warning'),
+      danger: token('danger'),
+      info: token('info'),
+      purple: token('purple'),
+      pink: token('pink'),
+      orange: token('orange'),
+      neutral: token('neutral'),
+      ring: token('ring'),
+      overlay: token('overlay'),
+    },
+    fontSize: {
+      '2xs': ['10.5px', '1.4'],
+      xs: ['12px', '1.5'],
+      sm: ['13px', '1.5'],
+      base: ['13.5px', '1.55'],
+      lg: ['15px', '1.45'],
+      xl: ['18px', '1.35'],
+      '2xl': ['23px', '1.25'],
+    },
+    borderRadius: {
+      none: '0',
+      sm: 'var(--radius-sm)',
+      DEFAULT: 'var(--radius)',
+      lg: 'var(--radius-lg)',
+      full: '9999px',
+    },
+    boxShadow: {
+      none: 'none',
+      sm: 'var(--shadow-sm)',
+      md: 'var(--shadow-md)',
+      lg: 'var(--shadow-lg)',
+      glow: 'var(--shadow-glow)',
+    },
     extend: {
-      colors: {
-        background: '#08090c',
-        surface: '#0f1116',
-        'surface-2': '#14161d',
-        'surface-raised': '#191c24',
-        foreground: '#f2f3f7',
-        border: 'rgba(255, 255, 255, 0.08)',
-        'border-dark': 'rgba(255, 255, 255, 0.16)',
-        muted: 'rgba(255, 255, 255, 0.045)',
-        'muted-fg': '#8d92a6',
-        'dim-fg': '#62697e',
-        accent: {
-          DEFAULT: '#7c6cf0',
-          dark: '#5a48d6',
-          light: '#a698ff',
-        },
-        error: '#f2596b',
-      },
       fontFamily: {
-        sans: ['var(--font-sans)'],
-        mono: ['var(--font-mono)'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
-      borderRadius: {
-        DEFAULT: '12px',
-        sm: '8px',
+      keyframes: {
+        rise: {
+          from: { opacity: '0', transform: 'translateY(6px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        shimmer: {
+          from: { backgroundPosition: '100% 50%' },
+          to: { backgroundPosition: '0% 50%' },
+        },
       },
-      boxShadow: {
-        xs: '0 1px 2px rgba(0, 0, 0, 0.3)',
-        sm: '0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.03)',
-        md: '0 10px 30px -8px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35)',
-        lg: '0 24px 60px -16px rgba(0, 0, 0, 0.65)',
-        glow: '0 0 0 1px rgba(124, 108, 240, 0.4), 0 4px 18px rgba(124, 108, 240, 0.35)',
+      animation: {
+        rise: 'rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both',
+        shimmer: 'shimmer 1.6s ease-in-out infinite',
       },
     },
   },

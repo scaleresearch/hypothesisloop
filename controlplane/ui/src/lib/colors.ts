@@ -1,35 +1,64 @@
-/**
- * Single source of truth for semantic + status colors used outside CSS
- * (recharts fills, inline dots, etc). Keep these in sync with the
- * `--status-*` custom properties and `.badge-*` rules in globals.css —
- * nothing here should invent a color CSS doesn't already know about.
- */
+const token = (name: string) => `rgb(var(--${name}))`
 
+/** The theme tokens of globals.css as colour values, for charts, graph strokes and inline status colours. */
 export const semantic = {
-  success: '#4ade80',
-  warning: '#fbbf24',
-  danger: '#f2596b',
-  info: '#2dd4bf',
-  accent: '#a698ff',
-  accentStrong: '#7c6cf0',
-  purple: '#d093f7',
-  pink: '#f472b6',
-  neutral: '#b7bcc9',
+  success: token('success'),
+  warning: token('warning'),
+  danger: token('danger'),
+  info: token('info'),
+  accent: token('accent'),
+  primary: token('primary'),
+  purple: token('purple'),
+  pink: token('pink'),
+  orange: token('orange'),
+  neutral: token('neutral'),
+  text: token('text'),
+  muted: token('text-muted'),
+  subtle: token('text-subtle'),
+  border: token('border'),
+  borderStrong: token('border-strong'),
+  surface: token('surface'),
+  surfaceInset: token('surface-inset'),
+  surfaceRaised: token('surface-raised'),
 } as const
 
-const statusColors: Record<string, string> = {
-  RUNNING: semantic.success,
-  COMPLETED: semantic.accent,
-  QUEUED: semantic.warning,
-  SUBMITTED: semantic.neutral,
-  FAILED: semantic.danger,
-  EVICTED: semantic.pink,
-  REJECTED: semantic.danger,
-  CANCELLED: semantic.neutral,
+/** A colour at the given opacity (0 to 1), for fills behind a line or dot of the same colour. */
+export function tint(color: string, opacity: number): string {
+  return `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`
 }
 
-export function statusColor(s?: string | null): string {
-  return statusColors[s ?? ''] ?? semantic.neutral
+export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'purple' | 'pink' | 'neutral'
+
+// Job, platform experiment, capacity tier, hypothesis and participant states, lowercased.
+const tones: Record<string, Tone> = {
+  running: 'success',
+  completed: 'accent',
+  queued: 'warning',
+  failed: 'danger',
+  evicted: 'purple',
+  admitted: 'info',
+  submitted: 'neutral',
+  promoted: 'pink',
+  rejected: 'danger',
+  cancelled: 'neutral',
+  draft: 'neutral',
+  open: 'accent',
+  closed: 'neutral',
+  guaranteed: 'accent',
+  burst: 'purple',
+  confirmed: 'success',
+  refuted: 'danger',
+  inconclusive: 'neutral',
+  human: 'warning',
+  agent: 'neutral',
+}
+
+export function statusTone(status?: string | null): Tone {
+  return tones[(status ?? '').toLowerCase()] ?? 'neutral'
+}
+
+export function statusColor(status?: string | null): string {
+  return semantic[statusTone(status)]
 }
 
 /** Categorical palette for per-agent series in charts (recharts Line/Cell colors). */
@@ -40,17 +69,11 @@ export const agentPalette = [
   semantic.pink,
   semantic.danger,
   semantic.info,
-  '#f57f17',
-  semantic.accentStrong,
+  semantic.orange,
+  semantic.purple,
 ]
 
-/** Hypothesis verdicts, matching the `.badge-<status>` rules in globals.css. */
-export const hypothesisStatusColors: Record<string, string> = {
-  open: semantic.accent,
-  confirmed: semantic.success,
-  refuted: semantic.danger,
-  inconclusive: semantic.neutral,
-}
+export const hypothesisStatuses = ['open', 'confirmed', 'refuted', 'inconclusive'] as const
 
 /**
  * Hypothesis graph edges. builds_on is the hierarchy; a cross link carries its label on the edge
@@ -58,7 +81,24 @@ export const hypothesisStatusColors: Record<string, string> = {
  * and long cross links in a graph of thousands made every pan frame take seconds.
  */
 export const hypothesisLinkStyles = {
-  builds_on: { color: 'rgba(255, 255, 255, 0.28)', label: 'builds on' },
+  builds_on: { color: semantic.borderStrong, label: 'builds on' },
   contradicts: { color: semantic.danger, label: 'contradicts' },
   related: { color: semantic.info, label: 'related' },
+} as const
+
+/** Props every recharts chart shares, so axes, grid and tooltip look the same on each. */
+export const chart = {
+  grid: semantic.border,
+  tick: { fontSize: 10, fill: semantic.muted },
+  tooltip: {
+    contentStyle: {
+      background: semantic.surfaceRaised,
+      border: `1px solid ${semantic.borderStrong}`,
+      borderRadius: 'var(--radius)',
+      fontSize: 12,
+    },
+    labelStyle: { color: semantic.text },
+    cursor: { fill: tint(semantic.text, 0.04) },
+  },
+  legend: { fontSize: 10 },
 } as const
