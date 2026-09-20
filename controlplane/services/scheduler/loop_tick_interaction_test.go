@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -431,5 +432,53 @@ func TestTickHoldsEveryQueuedJobOfAnAgentThatOwesASummary(t *testing.T) {
 	}
 	if got := store.notAdmitted["exp-3"]; got == domain.NotAdmittedSummaryGate {
 		t.Errorf("exp-3 of an agent owing nothing was held by the summary gate")
+	}
+}
+
+// --- Tick-level: a job no cluster has the hardware for is told apart from one that waits ---
+
+// fullWorkload is one node with two accelerators installed, both taken.
+type fullWorkload struct{ shareWorkload }
+
+func (fullWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	free := func() domain.Footprint {
+		return domain.CapacityFootprint(6, map[string]int64{h100: 0}, 64<<30, 64<<30)
+	}
+	return map[string]domain.Footprint{"cluster-a": free()}, map[string]domain.Footprint{"cluster-a": free()}, nil
+}
+func (fullWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 0}}}, nil
+}
+func (fullWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
+	return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(6, map[string]int64{h100: 2}, 64<<30, 64<<30)}, nil
+}
+
+func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		for count, want := range map[int]string{2: domain.NotAdmittedCapacityUnavailable, 3: domain.NotAdmittedExceedsClusterCapacity} {
+			t.Run(fmt.Sprintf("%s/%d", tier, count), func(t *testing.T) {
+				exp := &domain.Experiment{
+					ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", CapacityTier: tier,
+					AcceleratorType: h100, AcceleratorCount: count,
+					Job: domain.JobSpec{AcceleratorType: h100, AcceleratorCount: count},
+				}
+				store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
+				l := NewLoop(store, tickQuota{}, fullWorkload{}, testGraceLimits, zap.NewNop())
+				l.evictor = noopEvictor{}
+				l.disbalanceTolerance = DefaultDisbalanceTolerance
+				l.reprioritizer = noopReprioritizer{}
+
+				if err := l.tick(context.Background()); err != nil {
+					t.Fatalf("tick() = %v, want nil", err)
+				}
+				got := store.notAdmitted[exp.ID]
+				if code, _, _ := strings.Cut(got, ":"); code != want {
+					t.Fatalf("not_admitted_reason = %q, want code %q", got, want)
+				}
+				if domain.QueueReasonClearsByWaiting(got) != (want == domain.NotAdmittedCapacityUnavailable) {
+					t.Fatalf("QueueReasonClearsByWaiting(%q) is wrong: only the job that fits the cluster waits", got)
+				}
+			})
+		}
 	}
 }

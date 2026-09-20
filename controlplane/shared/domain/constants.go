@@ -66,6 +66,10 @@ const (
 	// the share its accelerator count gets on the chosen cluster's nodes. Waiting does not help;
 	// a smaller request does, or a node with more of that resource per accelerator joining.
 	NotAdmittedExceedsAcceleratorShare = "exceeds_accelerator_share"
+	// NotAdmittedExceedsClusterCapacity means the job asks for more than any connected cluster
+	// that can run it has installed, on every accelerator type it accepts, and none of them
+	// scales up. Waiting does not help; a smaller request does.
+	NotAdmittedExceedsClusterCapacity = "exceeds_cluster_capacity"
 )
 
 // IsTerminal reports whether the status is a final lifecycle state that no further execution

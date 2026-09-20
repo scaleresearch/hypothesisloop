@@ -37,6 +37,7 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   no_scalable_capacity: 'No autoscaler cluster had room to try — will retry as clusters free up',
   concurrency_cap: 'At its experiment’s max concurrent accelerators',
   exceeds_accelerator_share: 'Requests more cpu/memory/storage than its accelerators’ share of a node',
+  exceeds_cluster_capacity: 'Asks for more than any connected cluster has installed',
 }
 
 export function notAdmittedLabel(reason?: string | null): string {

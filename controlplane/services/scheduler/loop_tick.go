@@ -479,6 +479,8 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedNoScalableCapacity
 			case misfit != "":
 				reason = misfit
+			case exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, exp):
+				reason = exceedsClusterCapacityReason(exp)
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
@@ -600,6 +602,9 @@ func (l *Loop) tick(ctx context.Context) error {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			backlog.record(start, cluster, "burst", exp, shortage)
 			reason := misfit
+			if reason == "" && exceedsInstalled(totalCapacity, autoscalerEnabled, bAvail, multiNodeCapable, exp) {
+				reason = exceedsClusterCapacityReason(exp)
+			}
 			if reason == "" {
 				fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
@@ -658,6 +663,33 @@ func notAdmittedReasonFor(fitAtTickStart bool, footprint domain.Footprint, short
 		return domain.NotAdmittedCapacityUnavailable + ": short " + footprintStr(shortage)
 	}
 	return domain.NotAdmittedCapacityUnavailable
+}
+
+// exceedsInstalled reports whether exp asks for more than every cluster that may run it has
+// installed, on each accelerator type it accepts: a job no wait will admit. A cluster that scales
+// up, or whose installed capacity was not read, may yet hold it. Only the cluster-wide sum is
+// judged, so a job that fits the sum and no layout of the nodes still reads as waiting.
+func exceedsInstalled(installed map[string]domain.Footprint, autoscalerEnabled map[string]bool, avail map[string]domain.Footprint, multiNodeCapable map[string]bool, exp *domain.Experiment) bool {
+	clusters, _ := eligibleClusters(avail, multiNodeCapable, exp)
+	if len(clusters) == 0 {
+		return false
+	}
+	probe := *exp
+	for _, t := range candidateAcceleratorTypes(exp) {
+		probe.AcceleratorType = t
+		fp := probe.Footprint()
+		for cluster := range clusters {
+			total, read := installed[cluster]
+			if !read || autoscalerEnabled[cluster] || domain.Fits(total, fp) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func exceedsClusterCapacityReason(exp *domain.Experiment) string {
+	return domain.NotAdmittedExceedsClusterCapacity + ": needs " + footprintStr(exp.Footprint()) + ", more than any connected cluster has installed"
 }
 
 // eligibleClusters narrows the clusters a job may be placed on to the ones that can actually run

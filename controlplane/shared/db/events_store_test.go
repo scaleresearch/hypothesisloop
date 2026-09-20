@@ -756,6 +756,7 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"},
 		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-a"},
 		{Kind: EventAgentCut, Value: "1", AgentID: "agent-a"},
 		{Kind: EventStageBoundary, Value: "1", Detail: "advanced"},
