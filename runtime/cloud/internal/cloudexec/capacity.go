@@ -3,6 +3,7 @@ package cloudexec
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -56,22 +57,23 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 }
 
 // labels are the node labels of a slot: the one that makes it a slot and names it, so admission
-// puts one job on it and says which, and the one its accelerator type stands for, as a device
-// plugin would publish it.
+// sizes one job to it and says which slot it placed the job on, and for a slot with accelerators
+// how many it has and the label its type stands for, as a device plugin would publish it.
 func (s slot) labels() map[string]string {
 	labels := map[string]string{domain.NodeSlotLabel: s.name}
 	if key, value, ok := strings.Cut(s.shape.AcceleratorType, "="); ok {
 		labels[key] = value
+		labels[domain.NodeSlotAcceleratorsLabel] = strconv.Itoa(s.shape.Accelerators)
 	}
 	return labels
 }
 
-// holds says whether a slot of this shape may be asked for want. Admission chose the slot; this
-// keeps a job from renting more than the shape allows, whatever desired state says. The type is
-// compared exactly because the control plane compares the reported one exactly: a job that wrote
-// its type in another casing would be rented, run, and then evicted for a type mismatch.
+// holds says whether a slot of this shape may be asked for want. Admission chose the slot and
+// sized the job to it; this keeps a job from renting more than the shape allows, whatever desired
+// state says. The type is compared the way admission compares it (domain.AcceleratorType.Is), so
+// a job admitted to this slot is never refused here for how it cased its type.
 func (s Shape) holds(want provider.Spec) error {
-	if want.AcceleratorCount > 0 && want.AcceleratorType != s.AcceleratorType {
+	if want.AcceleratorCount > 0 && !domain.AcceleratorType(want.AcceleratorType).Is(domain.AcceleratorType(s.AcceleratorType)) {
 		return fmt.Errorf("accelerator type %q is not the slot's %q", want.AcceleratorType, s.AcceleratorType)
 	}
 	if want.AcceleratorCount > s.Accelerators || want.CPUMillis > s.CPUMillis || want.MemoryBytes > s.MemoryBytes || want.DiskBytes > s.StorageBytes {

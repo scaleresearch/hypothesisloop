@@ -204,8 +204,6 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 	tooLarge := job(t, "exp-large", 0, 0)
 	tooLarge.ResolvedJob.CPU = "6"
 	otherType := on(job(t, "exp-type", 0, 1), "cpu-0")
-	otherCasing := on(job(t, "exp-casing", 0, 1), "cpu-0")
-	otherCasing.AcceleratorType = "nvidia.com/gpu.product=nvidia-h100"
 	for want, exp := range map[string]*domain.Experiment{
 		"without a slot":         unpinned,
 		"not configured":         on(job(t, "exp-nowhere", 0, 0), "h100-2"),
@@ -217,26 +215,31 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 			t.Errorf("%s: err = %v, want one saying %q", exp.ID, err, want)
 		}
 	}
-	// The control plane compares the reported type with the requested one exactly.
-	if err := e.destroyAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.CreateWorkload(ctx, on(otherCasing, "h100-0")); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
-		t.Errorf("a type in another casing: err = %v", err)
-	}
-	if names := p.Names(); len(names) != 0 {
+	if names := p.Names(); len(names) != 2 {
 		t.Fatalf("a refused job was rented: %v", names)
 	}
 }
 
-func (e *Executor) destroyAll(ctx context.Context) error {
-	ids, err := e.ListManagedJobsForStatus(ctx)
-	for _, id := range ids {
-		if err := e.DeleteWorkload(ctx, id, false); err != nil {
-			return err
-		}
+// Admission folds the case of an accelerator type, so a job that wrote its type in another
+// casing than the shape is admitted to the slot. Refused here it went round admit, refuse and
+// evict for as long as it had requeues left.
+func TestAJobIsNotRefusedForHowItCasedItsAcceleratorType(t *testing.T) {
+	e, p := newTestExecutor(t)
+	lowercase := job(t, "exp-1", 0, 1)
+	lowercase.AcceleratorType = "nvidia.com/gpu.product=nvidia-h100"
+	mustCreate(t, e, lowercase)
+	p.Start("hl-job-t1-exp-1-a0-h100-0")
+	// What is reported is the shape's type, which the control plane reads as the one asked for.
+	admitted, _, _, err := e.ResolveAdmittedAcceleratorType(context.Background(), "exp-1")
+	if err != nil || !admitted.Is(lowercase.AcceleratorType) {
+		t.Fatalf("admitted %q, %v", admitted, err)
 	}
-	return err
+
+	another := on(job(t, "exp-2", 0, 1), "h100-1")
+	another.AcceleratorType = "nvidia.com/gpu.product=NVIDIA-L40"
+	if err := e.CreateWorkload(context.Background(), another); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
+		t.Fatalf("another type: err = %v", err)
+	}
 }
 
 func TestAnInstanceNameThatTheProviderCannotHoldIsRefused(t *testing.T) {
@@ -279,7 +282,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 		}
 		available, total, byNode, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 		if err != nil || total[h100] != 2 || len(labels) != 3 || labels["h100-1"]["nvidia.com/gpu.product"] != "NVIDIA-H100" ||
-			labels["h100-1"][domain.NodeSlotLabel] != "h100-1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{domain.NodeSlotLabel: "cpu-0"}) {
+			labels["h100-1"][domain.NodeSlotLabel] != "h100-1" || labels["h100-1"][domain.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{domain.NodeSlotLabel: "cpu-0"}) {
 			t.Fatalf("accelerator snapshot = %v %v %v, %v", total, byNode, labels, err)
 		}
 		nodes, err = e.GetLiveNodeResourceCapacity(ctx)

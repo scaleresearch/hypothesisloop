@@ -45,10 +45,7 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, att
 	if i.State != provider.StateExited {
 		return "", "", 0, 1, "", nil
 	}
-	switch how, code, readErr := e.ending(ctx, v, i); how {
-	case endingUnread:
-		return "", fmt.Sprintf("instance has exited and its output cannot be read yet: %v", readErr), 0, 1, "", nil
-	case endingFailed:
+	if how, code, _ := e.ending(ctx, v, i); how == endingFailed {
 		return domain.PhaseReasonContainerFailed, fmt.Sprintf("command exited with code %d", code), 0, 1, "", nil
 	}
 	return "", "", 0, 1, "", nil

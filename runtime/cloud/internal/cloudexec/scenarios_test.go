@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -194,32 +193,33 @@ func TestAFailedStopLeavesTheInstanceRunningForTheNextPass(t *testing.T) {
 
 // An exited instance whose output cannot be read has no known outcome. Reporting one would
 // finish the job on a guess, and failing the poll would withhold every other job's status with
-// it, so it is reported as still running, with why, until the output can be read.
-func TestAnExitedInstanceWithUnreadableOutputIsReportedRunningWithTheReadError(t *testing.T) {
+// it. Reported as still running it would never end: a running report counts as liveness, so the
+// control plane never finds the job silent. It is reported gone, which the control plane
+// confirms over several snapshots, so a read that fails once costs nothing, and then requeues as
+// an infrastructure fault.
+func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	const name = "hl-job-t1-exp-1-a0-cpu-0"
-	mustCreate(t, e, job(t, "exp-1", 0, 0))
+	exp := job(t, "exp-1", 0, 0)
+	mustCreate(t, e, exp)
 	p.Start(name)
 	p.Exit(name, exitline.Format(0))
 	p.Fail = failing("Logs", name)
 
 	observed, err := e.PollJobStatus(ctx, "exp-1")
-	if err != nil || observed.Phase != workload.JobPhaseRunning || observed.Attempt != 0 {
+	if err != nil || observed.Phase != workload.JobPhaseGone || observed.Attempt != 0 {
 		t.Fatalf("poll = %+v, %v", observed, err)
 	}
-	reason, message, _, scheduled, _, err := e.PollPhaseDetail(ctx, "exp-1", 0)
-	if err != nil || reason != "" || scheduled != 1 || !strings.Contains(message, "cannot be read") || !strings.Contains(message, errVendor.Error()) {
-		t.Fatalf("detail = %q %q scheduled %d, %v", reason, message, scheduled, err)
+	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 0); err != nil || reason != "" || message != "" {
+		t.Fatalf("detail = %q %q, %v", reason, message, err)
 	}
-	if _, node, _, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-1"); err != nil || node != "cpu-0" {
-		t.Fatalf("node = %q, %v", node, err)
+	// While its attempt is desired the instance is kept and not rented again, so a read that
+	// works on a later push still finds the outcome.
+	mustCreate(t, e, exp)
+	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err != nil || len(p.IDs(name)) != 1 {
+		t.Fatalf("reap: %v, rented %v", err, p.Names())
 	}
-	// It is not live, so no pass stops it or compares it, and it is kept while desired.
-	if ids, _ := e.ListManagedJobs(ctx); len(ids) != 0 {
-		t.Fatalf("actual = %v", ids)
-	}
-
 	p.Fail = nil
 	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseSucceeded {
 		t.Fatalf("phase = %v once the output is readable", phase)

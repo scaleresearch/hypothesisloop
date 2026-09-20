@@ -28,8 +28,9 @@ func callsOf(p *fake.Provider) vendorCalls {
 // time each status push arrived.
 type controlPlane struct {
 	*httptest.Server
-	mu     sync.Mutex
-	pushes []vendorCalls
+	mu      sync.Mutex
+	pushes  []vendorCalls
+	reports []pushedReport
 }
 
 func newControlPlane(t *testing.T, p *fake.Provider, desired ...*domain.Experiment) *controlPlane {
@@ -44,8 +45,13 @@ func newControlPlane(t *testing.T, p *fake.Provider, desired ...*domain.Experime
 			_, _ = w.Write(answer)
 			return
 		}
+		var body struct {
+			Reports []pushedReport `json:"reports"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		cp.mu.Lock()
 		cp.pushes = append(cp.pushes, callsOf(p))
+		cp.reports = append(cp.reports, body.Reports...)
 		cp.mu.Unlock()
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
@@ -57,6 +63,12 @@ func (cp *controlPlane) seen() []vendorCalls {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	return append([]vendorCalls(nil), cp.pushes...)
+}
+
+func (cp *controlPlane) reported() []pushedReport {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	return append([]pushedReport(nil), cp.reports...)
 }
 
 // run drives the real loop until done reports true.
@@ -195,8 +207,8 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 	}
 }
 
-// One exited job whose output the vendor will not return is reported with the rest, and the
-// rest are reported.
+// One exited job whose output the vendor will not return is reported with the rest, as gone, and
+// the rest are reported.
 func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T) {
 	e, p := newTestExecutor(t)
 	keep, done, booting := rented(t, e, p)
@@ -236,10 +248,32 @@ func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T)
 		t.Fatalf("pushed %+v", reports)
 	}
 	unread := reports["exp-done"]
-	if unread.Phase != workload.JobPhaseRunning.String() || !strings.Contains(unread.Message, "cannot be read") || unread.Attempt == nil || *unread.Attempt != 2 {
+	if unread.Phase != workload.JobPhaseGone.String() || unread.Attempt == nil || *unread.Attempt != 2 {
 		t.Fatalf("the unreadable job was pushed as %+v", unread)
 	}
 	if len(p.Names()) != 3 {
 		t.Fatalf("rented %v", p.Names())
+	}
+}
+
+// Through the real loop: a job preempted from h100-0 is desired again under the same attempt on
+// h100-1 while its old instance, stopped for the preemption, has exited with 143. The loop rents
+// the job on its new slot and no push ever reports the old exit as the job having failed.
+func TestTheLoopNeverReportsAPreemptedRunsExitAsTheReadmittedJobsResult(t *testing.T) {
+	e, p := newTestExecutor(t)
+	const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
+	mustCreate(t, e, job(t, "exp-1", 3, 1))
+	p.Start(old)
+	p.Exit(old, "Terminated", exitline.Format(143))
+	cp := newControlPlane(t, p, on(job(t, "exp-1", 3, 1), "h100-1"))
+
+	run(t, e, cp, 5*time.Millisecond, 5*time.Millisecond, func() bool {
+		return reflect.DeepEqual(p.Names(), []string{placed}) && len(cp.reported()) >= 3
+	})
+
+	for _, report := range cp.reported() {
+		if report.Phase == workload.JobPhaseFailed.String() || report.Phase == workload.JobPhaseSucceeded.String() {
+			t.Fatalf("pushed %+v", report)
+		}
 	}
 }

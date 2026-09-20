@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -11,13 +12,24 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
+// workloadOf reports whether i is exp's workload: the instance of its current attempt in the slot
+// admission pinned it to. The attempt alone does not say so. A preempted job is readmitted under
+// the attempt it had, and the instance it left in another slot would otherwise pass for it, and
+// that instance's exit for the job's result.
+func workloadOf(exp *domain.Experiment, i instance) bool {
+	return i.experimentID == exp.ID && i.attempt == exp.AttemptCount && i.slot() == exp.EffectiveJob().NodeSelector[domain.NodeSlotLabel]
+}
+
 // CreateWorkload rents the instance for exp's current attempt, in the slot admission placed the
 // job on. It makes no placement decision of its own: desired state names the slot, and a slot
 // that cannot take the job is an error, never a reason to pick another.
 //
-// An instance of that attempt that already exists, in any state, is the workload: one that has
-// exited is waiting for the control plane to read its outcome, and renting another would run the
-// job twice.
+// The instance of that attempt in that slot, in any state, is the workload: one that has exited
+// is waiting for the control plane to read its outcome, and renting another would run the job
+// twice. Any other instance of the experiment is left over from an earlier attempt or an earlier
+// placement. An exited one is destroyed before the new instance is rented, so a status read
+// never finds two instances of one job to choose between. A live one is the reconcile pass's to
+// delete first, and until it has, nothing is rented.
 func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
 	spec, err := e.buildSpec(exp)
 	if err != nil {
@@ -39,8 +51,14 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		return err
 	}
 	for _, i := range v.of(exp.ID) {
-		if i.attempt == exp.AttemptCount {
+		switch {
+		case workloadOf(exp, i):
 			return nil
+		case i.live():
+			return fmt.Errorf("cloudexec: experiment %s is placed on slot %s while instance %s of it still runs", exp.ID, name, i.Name)
+		}
+		if err := e.destroy(ctx, v, i); err != nil {
+			return err
 		}
 	}
 	for _, i := range v.instances {
@@ -135,8 +153,9 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, err
 	return nil, nil
 }
 
-// WorkloadMatchesDesired is true when every live instance of exp is of its current attempt. The
-// attempt in the name is all an instance can be compared on, and it is what a requeue changes.
+// WorkloadMatchesDesired is true when every live instance of exp is its workload: of its current
+// attempt and in the slot it is pinned to. Both are in the name, which is all an instance can be
+// compared on. A requeue changes the first, a readmission the second.
 func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -147,7 +166,7 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 		if !i.live() {
 			continue
 		}
-		if i.attempt != exp.AttemptCount {
+		if !workloadOf(exp, i) {
 			return false, nil
 		}
 		matches = true
@@ -159,15 +178,15 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 // between attempts and between slots.
 //
 // An exited instance is terminal only once its output has been read and holds the wrapper's exit
-// line. Two cases are not, and neither is allowed to fail the poll, since one job that cannot be
-// polled withholds the whole cluster's status push:
+// line. Without the line the workload is reported gone, as an instance the vendor removed is,
+// whether the output has no line (the wrapper died with its machine) or cannot be read at all.
+// Neither fails the poll, since one job that cannot be polled withholds the whole cluster's
+// status push. The control plane confirms a gone report over several snapshots before it acts,
+// which is what lets a read that fails once recover, and then requeues the job as an
+// infrastructure fault: its own retries are not spent, and nothing is finished on a guess.
 //
-//   - The output cannot be read. How the command ended is unknown, so the job is reported still
-//     running and the read is tried again on the next push. A job that stays unreadable sends no
-//     metrics either, which the control plane already evicts as silent.
-//   - The output is readable and has no exit line. The wrapper died with its machine, so the
-//     workload is reported gone, the same as an instance the vendor removed: the control plane
-//     requeues that as an infrastructure fault and the job's own retries are not spent.
+// Reporting an unreadable instance as still running instead is not bounded by anything: every
+// running report is recorded as liveness, so the job never reads as silent.
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -182,12 +201,14 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 	case provider.StateRunning:
 		observed.Phase = workload.JobPhaseRunning
 	case provider.StateExited:
-		how, _, _ := e.ending(ctx, v, i)
+		how, _, readErr := e.ending(ctx, v, i)
+		if readErr != nil {
+			log.Printf("cloudexec: reporting %s as gone: %v", i.Name, readErr)
+		}
 		observed.Phase = map[ending]workload.JobPhase{
-			endingUnread:     workload.JobPhaseRunning,
-			endingSucceeded:  workload.JobPhaseSucceeded,
-			endingFailed:     workload.JobPhaseFailed,
-			endingUnreported: workload.JobPhaseGone,
+			endingUnknown:   workload.JobPhaseGone,
+			endingSucceeded: workload.JobPhaseSucceeded,
+			endingFailed:    workload.JobPhaseFailed,
 		}[how]
 	}
 	return observed, nil
@@ -208,12 +229,12 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 	return domain.AcceleratorType(shape.AcceleratorType), i.slot(), true, nil
 }
 
-// ReapTerminal destroys what no pass has a use for any more: every instance of an attempt beyond
-// the first, and every exited instance that is not the current attempt of a desired experiment,
-// which is a job the control plane has finished with or the attempt a requeue left behind. One
-// failed destroy does not keep the rest rented.
+// ReapTerminal destroys what no pass has a use for any more: every instance of one name beyond
+// the first, and every exited instance that is not the workload of a desired experiment, which
+// is a job the control plane has finished with, or what a requeue or a readmission to another
+// slot left behind. One failed destroy does not keep the rest rented.
 //
-// A second instance of one attempt is a create the vendor carried out and reported failed, or a
+// A second instance of one name is a create the vendor carried out and reported failed, or a
 // list that lagged behind a create. The lowest id is kept, which is also the one every status
 // read reports, so which of the two survives does not depend on the pass that finds them.
 func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error {
@@ -221,18 +242,13 @@ func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.
 	if err != nil {
 		return err
 	}
-	type attempt struct {
-		experimentID string
-		number       int
-	}
-	kept := map[attempt]bool{}
+	kept := map[string]bool{}
 	var errs []error
 	for _, i := range append([]instance(nil), v.instances...) {
-		key := attempt{i.experimentID, i.attempt}
 		exp := desired[i.experimentID]
-		current := exp != nil && exp.AttemptCount == i.attempt
-		if !kept[key] && (i.live() || current) {
-			kept[key] = true
+		wanted := i.live() || (exp != nil && workloadOf(exp, i))
+		if wanted && !kept[i.Name] {
+			kept[i.Name] = true
 			continue
 		}
 		if err := e.destroy(ctx, v, i); err != nil {

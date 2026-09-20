@@ -126,6 +126,10 @@ func (v *view) of(experimentID string) []instance {
 // waiting on when a requeue has left an older one behind. Of two instances of that attempt,
 // which a vendor's lagging list or a create that failed after it succeeded can leave, it is the
 // one with the lowest id, the one ReapTerminal keeps.
+//
+// A status read has no desired state to tell it which slot the job is pinned to. CreateWorkload
+// never rents an attempt while an instance of it stands in another slot, so there is one
+// placement of an attempt to report at a time.
 func (v *view) newest(experimentID string) (instance, bool) {
 	var found instance
 	ok := false
@@ -172,24 +176,23 @@ const exitLineTail = 50
 type ending int
 
 const (
-	// endingUnread: the output could not be read, so how the command ended is not known yet.
-	endingUnread ending = iota
+	// endingUnknown: the wrapper's exit line cannot be found. Either the output is readable and
+	// has none, because the wrapper died with its machine or never ran, or the output cannot be
+	// read, in which case readErr says why.
+	endingUnknown ending = iota
 	endingSucceeded
 	endingFailed
-	// endingUnreported: the output is readable and holds no exit line. The wrapper did not get
-	// to write one: the vendor took the machine back, killed it for memory, or it never ran.
-	endingUnreported
 )
 
-func (e *Executor) ending(ctx context.Context, v *view, i instance) (ending, int, error) {
+func (e *Executor) ending(ctx context.Context, v *view, i instance) (how ending, code int, readErr error) {
 	read := e.output(ctx, v, i)
 	if read.err != nil {
-		return endingUnread, 0, read.err
+		return endingUnknown, 0, read.err
 	}
 	code, reported := exitline.Find(read.lines)
 	switch {
 	case !reported:
-		return endingUnreported, 0, nil
+		return endingUnknown, 0, nil
 	case code == 0:
 		return endingSucceeded, 0, nil
 	}
