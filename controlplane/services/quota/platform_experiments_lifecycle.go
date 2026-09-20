@@ -223,19 +223,10 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID, 
 		return fmt.Errorf("signup_closed: experiment is %s", pe.Status)
 	}
 
-	// max_agents sizes the field being ranked, so it counts competitors only: adding a baseline
-	// or a reviewer must not shrink the competition it exists to measure.
-	if role == domain.SignupRoleCompetitor {
-		count, err := s.store.CountSignupsByRole(ctx, platformExpID, domain.SignupRoleCompetitor)
-		if err != nil {
-			return err
-		}
-		if count >= pe.MaxAgents {
-			return fmt.Errorf("max_agents_reached: limit is %d", pe.MaxAgents)
-		}
-	}
-
 	inserted, err := s.store.Signup(ctx, platformExpID, agentID, role, quotaTierOverride)
+	if errors.Is(err, db.ErrMaxAgentsReached) {
+		return fmt.Errorf("max_agents_reached: limit is %d", pe.MaxAgents)
+	}
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -37,13 +38,12 @@ func (f *signupStore) GetPlatformExperiment(ctx context.Context, id string) (*do
 	return f.pe, nil
 }
 
-func (f *signupStore) CountSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) (int, error) {
-	return f.byRole[role], nil
-}
-
 func (f *signupStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
-	f.insertedFor = role
 	f.insertCalled = true
+	if role == domain.SignupRoleCompetitor && f.byRole[role] >= f.pe.MaxAgents {
+		return false, db.ErrMaxAgentsReached
+	}
+	f.insertedFor = role
 	return !f.refuseInsert, nil
 }
 

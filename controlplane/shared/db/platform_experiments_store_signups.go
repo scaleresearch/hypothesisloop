@@ -12,16 +12,18 @@ import (
 
 // ---- experiment_signups ----
 
+// ErrMaxAgentsReached is a competitor signup refused because the field is full.
+var ErrMaxAgentsReached = errors.New("max_agents reached")
+
 // Signup records an agent's intent to participate in a platform experiment. inserted=false means
 // the experiment is no longer open, or the agent was already signed up.
 //
-// The experiment row is locked FOR SHARE before its status is tested, which is what actually
-// serializes this against StartPlatformExperimentTx: that transaction's status UPDATE takes a
-// conflicting row lock, so a signup either completes before the start and is seen by it, or
-// blocks until the start commits and then observes 'running' and refuses. A bare
-// `WHERE EXISTS (... status='open')` predicate takes no lock at all, so it could read 'open'
-// under its own snapshot and still commit after the start had chosen the participants — landing
-// a durable signup with no quota row and no path to ever get one.
+// The experiment row is locked FOR UPDATE before its status is tested. That serializes this
+// against StartPlatformExperimentTx, whose status UPDATE takes the same row lock: a signup either
+// completes before the start and is seen by it, or blocks until the start commits and then
+// observes 'running' and refuses. It also serializes signups against each other, which is what
+// makes the max_agents count below exact: a count taken outside this lock let concurrent
+// competitors each see room and all commit.
 func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -30,7 +32,8 @@ func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID, ag
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id=$1 FOR SHARE`, platformExpID).Scan(&status); err != nil {
+	var maxAgents int
+	if err := tx.QueryRow(ctx, `SELECT status, max_agents FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &maxAgents); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
@@ -46,10 +49,24 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, agent
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	// max_agents sizes the field being ranked, so it counts competitors only.
+	if role == domain.SignupRoleCompetitor {
+		var competitors int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2`,
+			platformExpID, string(role)).Scan(&competitors); err != nil {
+			return false, fmt.Errorf("platform_experiments_store.Signup: count competitors: %w", err)
+		}
+		if competitors > maxAgents {
+			return false, ErrMaxAgentsReached
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return true, nil
 }
 
 // ListSignups returns all agent IDs signed up for a platform experiment.
@@ -186,16 +203,6 @@ func (s *PlatformExperimentsStore) CountSignups(ctx context.Context, platformExp
 	var n int
 	if err := s.pool.pool.QueryRow(ctx, q, platformExpID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("platform_experiments_store.CountSignups: %w", err)
-	}
-	return n, nil
-}
-
-// CountSignupsByRole returns how many agents signed up for a platform experiment in one role.
-func (s *PlatformExperimentsStore) CountSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) (int, error) {
-	const q = `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2`
-	var n int
-	if err := s.pool.pool.QueryRow(ctx, q, platformExpID, string(role)).Scan(&n); err != nil {
-		return 0, fmt.Errorf("platform_experiments_store.CountSignupsByRole: %w", err)
 	}
 	return n, nil
 }

@@ -26,19 +26,19 @@ type PlatformExperimentsStore interface {
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	// Signup inserts only while the experiment is still open; inserted=false means it is closed
-	// or the agent was already signed up. quotaTier is the resolved (override-or-kind-default)
+	// or the agent was already signed up. A competitor past max_agents is db.ErrMaxAgentsReached,
+	// decided inside the insert's own transaction. quotaTier is the resolved (override-or-kind-default)
 	// tier this signup lands in — see domain.ResolveQuotaTier.
 	Signup(ctx context.Context, platformExpID, agentID string, role domain.SignupRole, quotaTier domain.QuotaTier) (bool, error)
 	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
 	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
-	// ListSignupsByRole/CountSignupsByRole are the ranking-side reads: standings and the
-	// max_agents field are about competitors, never about the whole roster.
+	// ListSignupsByRole is the ranking-side read: standings are about competitors, never about
+	// the whole roster.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	GetSignupRole(ctx context.Context, platformExpID, agentID string) (domain.SignupRole, bool, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	CountSignups(ctx context.Context, platformExpID string) (int, error)
-	CountSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) (int, error)
 	// UpsertAgentQuota/GetAgentQuota/ListAgentQuotas cover allocation only (guaranteed/burst
 	// capacity settings) — consumption (used_*) is never stored here; PlatformExperimentsService
 	// merges it in from the metrics DB on every read via metricsdb.PopulateUsage(One).
