@@ -54,6 +54,29 @@ runtimes:
   api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084
 
+# The GitHub App a project's repository is reached through (infra/github). A person installs the
+# App on repositories they choose and attaches one to a project; agents and jobs then clone it
+# with tokens minted per repository, each good for about an hour and stored nowhere.
+#
+# Left out, as here, the deployment has no App: attaching a repository answers 503 and nothing
+# else changes. To switch it on, add the section with all five values:
+#
+#   github:
+#     app_id: 123456
+#     app_slug: hypothesisloop
+#     client_id: Iv23...
+#     client_secret: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}
+#     private_key: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}
+#
+#   app_id, app_slug   the App's number and the name in its URL.
+#   client_id, client_secret
+#                      the App's own OAuth pair. They prove, once per attach, that the person
+#                      attaching a repository can push to it. The person's token is dropped after.
+#   private_key        the PEM GitHub issued for the App. It signs the request for every token.
+#
+# client_secret and private_key are secrets of the deployment, so this file names the environment
+# variables and never holds the values.
+
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #
 # An S3-compatible object store, addressed rather than attached: a volume belongs to one cluster

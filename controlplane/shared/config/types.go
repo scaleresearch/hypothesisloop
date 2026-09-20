@@ -240,6 +240,23 @@ type RuntimesConfig struct {
 	MetricsURL string `yaml:"metrics_url"`
 }
 
+// GitHubConfig is the GitHub App a project's repository is reached through. Left empty, the
+// deployment has no App and no repository can be attached. Set, all of it is required.
+type GitHubConfig struct {
+	AppID   int64  `yaml:"app_id"`
+	AppSlug string `yaml:"app_slug"`
+	// ClientID and ClientSecret are the App's own OAuth pair. They prove, once per attach, that
+	// the person attaching a repository can push to it.
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// PrivateKey is the PEM GitHub issued for the App. ClientSecret and PrivateKey are secrets of
+	// the deployment: the settings file names the environment variables that hold them.
+	PrivateKey string `yaml:"private_key"`
+}
+
+// Configured reports whether the deployment has a GitHub App.
+func (c GitHubConfig) Configured() bool { return c != GitHubConfig{} }
+
 // MinSigningSecretLength keeps the HMAC key at least as long as its output.
 const MinSigningSecretLength = 32
 
@@ -254,6 +271,7 @@ type Config struct {
 	Auth             AuthConfig              `yaml:"auth"`
 	Agents           AgentsConfig            `yaml:"agents"`
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`
+	GitHub           GitHubConfig            `yaml:"github"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName map[string]float64 // accelerator name → AccH rate

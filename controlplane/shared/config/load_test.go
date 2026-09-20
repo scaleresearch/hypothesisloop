@@ -248,3 +248,62 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		}
 	}
 }
+
+const githubSection = `
+github:
+  app_id: 4242
+  app_slug: hypothesisloop
+  client_id: Iv23test
+  client_secret: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}
+  private_key: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}
+`
+
+func TestLoadTakesTheGitHubAppSecretsFromTheEnvironment(t *testing.T) {
+	text := productionConfig(t) + githubSection
+	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "HYPOTHESISLOOP_GITHUB_APP_") {
+		t.Fatalf("Load with the App's secrets unset: got = %v, want it to name the missing variable", err)
+	}
+	t.Setenv("HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET", "client-secret")
+	t.Setenv("HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nabc: def # not a comment\n-----END RSA PRIVATE KEY-----\n")
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.GitHub.Configured() || cfg.GitHub.AppID != 4242 || cfg.GitHub.ClientSecret != "client-secret" ||
+		cfg.GitHub.PrivateKey != os.Getenv("HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY") {
+		t.Fatalf("github = %+v, want the section with both secrets as the environment holds them", cfg.GitHub.AppID)
+	}
+}
+
+func TestTheCommittedConfigHasNoGitHubApp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.GitHub.Configured() {
+		t.Fatal("the committed settings file configures a GitHub App, which no repo file may hold the secrets of")
+	}
+}
+
+func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
+	t.Setenv("HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET", "client-secret")
+	t.Setenv("HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY", "pem")
+	for _, line := range []string{"  app_id: 4242\n", "  app_slug: hypothesisloop\n", "  client_id: Iv23test\n",
+		"  client_secret: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}\n", "  private_key: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}\n"} {
+		section := strings.Replace(githubSection, line, "", 1)
+		if section == githubSection {
+			t.Fatalf("the test section has no line %q", line)
+		}
+		if err := loadText(t, productionConfig(t)+section); err == nil || !strings.Contains(err.Error(), "github") {
+			t.Errorf("Load without %q: got = %v, want a refusal naming github", strings.TrimSpace(line), err)
+		}
+	}
+}

@@ -169,8 +169,11 @@ type PlatformExperiment struct {
 	// DefaultQuotaTier is used when a signup does not choose its own tier. Empty means this row
 	// predates the policy and ResolveQuotaTier must use the legacy kind-based default.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	// CodeRepoURL is the clone address of the repository attached to the project, as it stands
+	// when read. It is not stored with the platform experiment and is set on a single read only.
+	CodeRepoURL string    `json:"code_repo_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // SignupRole is what an agent was signed up to do in one platform experiment. It lives on the

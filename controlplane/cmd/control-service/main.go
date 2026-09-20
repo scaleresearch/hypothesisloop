@@ -29,6 +29,7 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -125,7 +126,19 @@ func main() {
 	}
 	gate := apiGate{authenticator: authenticator, access: auth.NewAccess(directory)}
 
-	apiServer := newAPIServer(runCtx, gate, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	// A deployment with no GitHub App runs with no client for it: attaching a repository and
+	// minting a git credential answer that there is none.
+	var githubApp accounts.GitHub
+	if pcfg.GitHub.Configured() {
+		client, err := github.New(pcfg.GitHub)
+		if err != nil {
+			logger.Fatal("control-service: configure the GitHub App", zap.Error(err))
+		}
+		githubApp = client
+	}
+	repos := accounts.NewRepos(db.NewAccountsStore(pool), directory, githubApp, logger)
+
+	apiServer := newAPIServer(runCtx, gate, repos, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -154,7 +167,7 @@ type apiGate struct {
 	access        *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -182,7 +195,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, logger).
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
-		WithAgentLaunch(pcfg.Agents.Launcher, pcfg.Auth.SigningSecret)
+		WithAgentLaunch(pcfg.Agents.Launcher, pcfg.Auth.SigningSecret).
+		WithProjectRepos(repos)
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
@@ -235,6 +249,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
 	}
 	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL}, logger))
+	accounts.RegisterReposHuma(doc, repos)
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so

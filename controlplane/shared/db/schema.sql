@@ -956,4 +956,17 @@ CREATE INDEX IF NOT EXISTS idx_human_writes_subject ON human_writes(subject);
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 UPDATE platform_experiments SET closed_at = updated_at WHERE status = 'closed' AND closed_at IS NULL;
 
+-- The GitHub repository a project's agents and jobs clone, reached through an installation of
+-- the platform's GitHub App. Only what names it is kept: every token is minted when asked for
+-- and stored nowhere. repository_id is GitHub's own and survives a rename; repo is owner/name as
+-- GitHub stated it when the repository was attached.
+CREATE TABLE IF NOT EXISTS project_repos (
+    project_id      TEXT        PRIMARY KEY REFERENCES projects(id),
+    installation_id BIGINT      NOT NULL,
+    repository_id   BIGINT      NOT NULL,
+    repo            TEXT        NOT NULL,
+    default_branch  TEXT        NOT NULL,
+    attached_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 COMMIT;

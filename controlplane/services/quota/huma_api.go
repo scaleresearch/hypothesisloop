@@ -142,18 +142,31 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Operator/dashboard endpoint. project_id, name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
-			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\".",
+			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\". " +
+			"With from_repo: true every field the request leaves out is read from .hypothesisloop/experiment.yaml at the head of the default branch " +
+			"of the project's repository, a YAML file shaped like this body without project_id. What the request sets wins, so a run states its own " +
+			"dates and budget over the base its repository carries.",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
-		if in.Body.Name == "" || in.Body.BudgetAcceleratorHours <= 0 {
-			return nil, huma.Error400BadRequest("name and budget_accelerator_hours are required")
-		}
 		if in.Body.ProjectID == "" {
 			return nil, huma.Error400BadRequest("project_id is required")
 		}
 		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
 			return nil, err
+		}
+		if in.Body.FromRepo {
+			body, err := peh.fromRepo(ctx, in.Body)
+			if errors.Is(err, ErrInvalidPlatformExperiment) {
+				return nil, huma.Error422UnprocessableEntity(err.Error())
+			}
+			if err != nil {
+				return nil, err
+			}
+			in.Body = body
+		}
+		if in.Body.Name == "" || in.Body.BudgetAcceleratorHours <= 0 {
+			return nil, huma.Error400BadRequest("name and budget_accelerator_hours are required")
 		}
 		pe, err := peh.svc.Create(ctx, in.Body)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
@@ -246,7 +259,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, the stage ladder and the list of signed-up agents.",
+		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. code_repo_url is the repository attached to its project, " +
+			"which agents clone and jobs check out; absent while none is attached.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -266,6 +280,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
+		if pe.CodeRepoURL, err = peh.repos.CloneURL(ctx, pe.ProjectID); err != nil {
+			return nil, huma.Error500InternalServerError("failed to read the project's repository")
+		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
 
@@ -284,6 +301,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
+		}
+		if in.Body.FromRepo {
+			return nil, huma.Error400BadRequest("from_repo is read when a platform experiment is created, and cannot be set on an update")
 		}
 		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
 		if err != nil {

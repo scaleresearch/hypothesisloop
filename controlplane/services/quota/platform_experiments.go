@@ -111,19 +111,24 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 // CreatePlatformExperimentRequest is the input for Create.
 type CreatePlatformExperimentRequest struct {
 	// ProjectID places the platform experiment. Required on create, and fixed from then on.
-	ProjectID              string  `json:"project_id,omitempty"`
-	Name                   string  `json:"name"`
-	Description            string  `json:"description"`
-	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
-	MaxAgents              int     `json:"max_agents"`
+	ProjectID string `json:"project_id,omitempty"`
+	// FromRepo takes every field the request leaves out from .hypothesisloop/experiment.yaml at
+	// the head of the default branch of the project's repository. Create only. It is why the
+	// fields below are not required of the body: what must be set is checked after the file is
+	// laid under the request.
+	FromRepo               bool    `json:"from_repo,omitempty"`
+	Name                   string  `json:"name" required:"false"`
+	Description            string  `json:"description" required:"false"`
+	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours" required:"false"`
+	MaxAgents              int     `json:"max_agents" required:"false"`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
 	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
 	// change" on update; a present zero is rejected by domain validation, not treated as unset.
 	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
-	Metrics                   []domain.MetricDefinition `json:"metrics"`                 // metric keys jobs must emit
-	ReportIntervalSeconds     int                       `json:"report_interval_seconds"` // expected reporting cadence
-	StartsAt                  time.Time                 `json:"starts_at"`
-	EndsAt                    time.Time                 `json:"ends_at"`
+	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"`                 // metric keys jobs must emit
+	ReportIntervalSeconds     int                       `json:"report_interval_seconds" required:"false"` // expected reporting cadence
+	StartsAt                  time.Time                 `json:"starts_at" required:"false"`
+	EndsAt                    time.Time                 `json:"ends_at" required:"false"`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`

@@ -38,6 +38,17 @@ type Project struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// ProjectRepo is the GitHub repository attached to a project, which its agents and jobs clone.
+// RepositoryID is GitHub's own id and survives a rename. Repo is owner/name.
+type ProjectRepo struct {
+	ProjectID      string    `json:"project_id"`
+	InstallationID int64     `json:"installation_id"`
+	RepositoryID   int64     `json:"repository_id"`
+	Repo           string    `json:"repo"`
+	DefaultBranch  string    `json:"default_branch"`
+	AttachedAt     time.Time `json:"attached_at"`
+}
+
 // DefaultProjectName is the project every org starts with.
 const DefaultProjectName = "default"
 

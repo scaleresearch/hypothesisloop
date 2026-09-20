@@ -28,6 +28,9 @@ type PlatformExperimentsHandler struct {
 	// agent's token is derived from.
 	launcher      string
 	signingSecret string
+
+	// Set via WithProjectRepos.
+	repos ProjectRepos
 }
 
 // NewPlatformExperimentsHandler constructs the handler.

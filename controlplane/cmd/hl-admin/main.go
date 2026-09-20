@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 )
 
 const usage = `usage: hl-admin <command>
@@ -29,6 +31,10 @@ const usage = `usage: hl-admin <command>
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
+  repo attach PROJECT INSTALLATION REPOSITORY_ID OWNER/NAME DEFAULT_BRANCH
+                                   record a GitHub repository as the project's, as an operator who
+                                   vouches for it: the API's own attach asks the person to prove on
+                                   GitHub that they can push to it, and this does not
 
 token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL.`
 
@@ -97,6 +103,26 @@ func run(args []string, stdout io.Writer) error {
 			}
 			fmt.Fprintln(stdout, token)
 			return nil
+		})
+	case len(args) == 7 && args[0] == "repo" && args[1] == "attach":
+		installation, err := strconv.ParseInt(args[3], 10, 64)
+		if err != nil || installation <= 0 {
+			return fmt.Errorf("INSTALLATION must be the installation's number, got %q", args[3])
+		}
+		repository, err := strconv.ParseInt(args[4], 10, 64)
+		if err != nil || repository <= 0 {
+			return fmt.Errorf("REPOSITORY_ID must be the repository's number on GitHub, got %q", args[4])
+		}
+		if err := github.ValidRepository(args[5]); err != nil {
+			return err
+		}
+		if args[6] == "" {
+			return errors.New("DEFAULT_BRANCH is required")
+		}
+		return withPool(func(ctx context.Context, pool *db.Pool) error {
+			return db.NewAccountsStore(pool).AttachProjectRepo(ctx, &domain.ProjectRepo{
+				ProjectID: args[2], InstallationID: installation, RepositoryID: repository, Repo: args[5], DefaultBranch: args[6],
+			})
 		})
 	default:
 		return errors.New(usage)

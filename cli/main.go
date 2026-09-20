@@ -100,6 +100,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCapacity(client, rest, stdout, stderr)
 	case "data-key":
 		return cmdDataKey(client, rest, stdout, stderr)
+	case "git-credential":
+		return cmdGitCredential(client, rest, os.Stdin, stdout, stderr)
 	case "donation":
 		return cmdDonation(client, rest, stdout, stderr)
 	case "hypothesis":
@@ -133,6 +135,7 @@ const usage = `usage: hl <command> ...
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
   data-key              your S3 key to the experiment's data: eval "$(hl data-key)"
+  git-credential        git's credential helper for your project's repository; git runs it
   donation              list | request | fulfill ID | cancel ID
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats

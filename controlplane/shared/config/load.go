@@ -245,5 +245,8 @@ func (c *Config) build() error {
 	if len(c.Auth.JWTKeys) > 0 && (c.Auth.Issuer == "" || c.Auth.Audience == "") {
 		return fmt.Errorf("auth issuer and audience are required when jwt_keys are listed")
 	}
+	if g := c.GitHub; g.Configured() && (g.AppID <= 0 || g.AppSlug == "" || g.ClientID == "" || g.ClientSecret == "" || g.PrivateKey == "") {
+		return fmt.Errorf("github app_id, app_slug, client_id, client_secret and private_key are all required once any of them is set")
+	}
 	return nil
 }
