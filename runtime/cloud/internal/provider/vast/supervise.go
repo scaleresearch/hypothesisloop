@@ -14,15 +14,33 @@ package vast
 // host rebooted, the container was restarted) stops the instance without running the command a
 // second time.
 //
-// It needs sh, sleep, grep and curl in the image, and a temporary directory that outlives a
-// restart of the container. Without curl it could neither see a stop nor stop the instance, so it
+// It needs sh, sleep and curl in the image, and a temporary directory that outlives a restart of
+// the container. Without curl or sleep it could neither see a stop nor stop the instance, so it
 // refuses to run the command.
+//
+// The command is started without the instance's key in its environment. That keeps the key out
+// of what a job prints or passes on by accident and nothing more: the supervisor is process 1 of
+// the same container under the same user (root, on every instance looked at), and its own
+// environment, key included, stays readable at /proc/1/environ.
 const supervisor = `instance="` + defaultBaseURL + `/api/v0/instances/$CONTAINER_ID/"
+key=$CONTAINER_API_KEY
+unset CONTAINER_API_KEY
 stop() {
-  until curl -sS -f -o /dev/null -X PUT -H "Authorization: Bearer $CONTAINER_API_KEY" -H 'Content-Type: application/json' -d '{"state":"stopped"}' "$instance"; do sleep 5; done
+  until curl -sS -f -o /dev/null -X PUT -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d '{"state":"stopped"}' "$instance"; do sleep 5; done
   while :; do sleep 3600 & wait $!; done
 }
-command -v curl >/dev/null || { echo "hl-supervisor: the image has no curl, the command was not run" >&2; exit 127; }
+marked() {
+  shown=$(curl -s -f -m 20 -H "Authorization: Bearer $key" "$instance?owner=me") || return 1
+  label=${shown#*\"label\":}
+  label=${label# }
+  case $label in \"*) ;; *) return 1 ;; esac
+  label=${label#\"}
+  case ${label%%\"*} in *` + stopMark + `) return 0 ;; esac
+  return 1
+}
+for tool in curl sleep; do
+  command -v "$tool" >/dev/null || { echo "hl-supervisor: the image has no $tool, the command was not run" >&2; exit 127; }
+done
 started="${TMPDIR:-/tmp}/.hl-supervisor-started"
 [ -e "$started" ] && stop
 : > "$started" || stop
@@ -31,7 +49,7 @@ child=$!
 trap 'kill -TERM "$child" 2>/dev/null' TERM
 (
   trap - TERM
-  until curl -s -f -m 20 -H "Authorization: Bearer $CONTAINER_API_KEY" "$instance?owner=me" | grep -q '"label": *"[^"]*\` + stopMark + `"'; do sleep ` + stopPollSeconds + `; done
+  until marked; do sleep ` + stopPollSeconds + `; done
   kill -TERM "$child" 2>/dev/null
 ) &
 watcher=$!

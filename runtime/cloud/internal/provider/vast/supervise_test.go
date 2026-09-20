@@ -125,7 +125,7 @@ const savingCommand = `trap 'echo term >> "$OUT.terms"; sleep 1; echo saved > "$
 
 func (r *supervisedRun) showInstance(t *testing.T, label string) {
 	t.Helper()
-	body := `{"instances": {"actual_status": "running", "extra_env": [["NOTE", "\"label\": \"x.stop\""]], "label": "` + label + `", "id": 9001}}`
+	body := `{"instances": {"actual_status": "running", "extra_env": [["NOTE", "\"label\": \"x.stop\""]], "label": "` + label + `", "status_msg": "pulled x.stop", "template_label": "t.stop"}}`
 	if err := os.WriteFile(filepath.Join(r.dir, "instance.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -193,21 +193,66 @@ func TestSupervisorPassesOnASIGTERMOfItsOwn(t *testing.T) {
 	}
 }
 
-func TestSupervisorRefusesToRunTheCommandInAnImageWithoutCurl(t *testing.T) {
-	dir := t.TempDir()
-	entrypoint, args := supervised([]string{"/bin/sh", "-c", `echo run > "$OUT"`})
-	cmd := exec.Command(entrypoint, args...)
-	cmd.Env = []string{"PATH=" + dir, "TMPDIR=" + dir, "OUT=" + filepath.Join(dir, "out")}
+func TestSupervisorReadsTheMarkFromALabelWrittenWithoutSpaces(t *testing.T) {
+	t.Parallel()
+	run := startSupervised(t, t.TempDir(), "/bin/sh", "-c", savingCommand)
+	run.awaitFile(t, "out.ready")
+	compact := `{"instances":{"extra_env":[],"label":"hl-exp1-a2.stop","status_msg":null}}`
+	if err := os.WriteFile(filepath.Join(run.dir, "instance.json"), []byte(compact), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	output, err := cmd.CombinedOutput()
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 127 {
-		t.Fatalf("supervisor ended with %v, want exit code 127", err)
+	run.awaitFile(t, "curl-calls")
+	if terms := run.awaitFile(t, "out.terms"); terms != "term\n" {
+		t.Errorf("the command got SIGTERM %d times, want once", strings.Count(terms, "term"))
 	}
-	if !strings.Contains(string(output), "the image has no curl") {
-		t.Errorf("output = %q, want the reason", output)
+}
+
+func TestSupervisorStartsTheCommandWithoutTheInstanceKey(t *testing.T) {
+	t.Parallel()
+	run := startSupervised(t, t.TempDir(), "/bin/sh", "-c", `env > "$OUT"`)
+
+	if calls := run.awaitFile(t, "curl-calls"); !strings.Contains(calls, "Authorization: Bearer instance-key\n") {
+		t.Errorf("the supervisor lost the key it stops the instance with: %q", calls)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "out")); err == nil {
-		t.Error("the command ran in an image the supervisor cannot stop")
+	seen := run.awaitFile(t, "out")
+	if strings.Contains(seen, "CONTAINER_API_KEY") || strings.Contains(seen, "instance-key") {
+		t.Errorf("the command's environment carries the instance key:\n%s", seen)
+	}
+	if !strings.Contains(seen, "CONTAINER_ID=9001") {
+		t.Errorf("the rest of the environment did not reach the command:\n%s", seen)
+	}
+}
+
+// Without sleep the supervisor could not pace its reads, and without curl it could neither see a
+// stop nor stop the instance, so a job would run with no way to end it but destroying it.
+func TestSupervisorRefusesToRunTheCommandInAnImageWithoutItsTools(t *testing.T) {
+	for _, missing := range []string{"curl", "sleep"} {
+		t.Run(missing, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, present := range []string{"curl", "sleep"} {
+				if present == missing {
+					continue
+				}
+				if err := os.WriteFile(filepath.Join(dir, present), []byte("#!/bin/sh\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			entrypoint, args := supervised([]string{"/bin/sh", "-c", `echo run > "$OUT"`})
+			cmd := exec.Command(entrypoint, args...)
+			cmd.Env = []string{"PATH=" + dir, "TMPDIR=" + dir, "OUT=" + filepath.Join(dir, "out")}
+
+			output, err := cmd.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 127 {
+				t.Fatalf("supervisor ended with %v, want exit code 127", err)
+			}
+			if !strings.Contains(string(output), "the image has no "+missing) {
+				t.Errorf("output = %q, want the reason", output)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "out")); err == nil {
+				t.Error("the command ran in an image the supervisor cannot stop")
+			}
+		})
 	}
 }
