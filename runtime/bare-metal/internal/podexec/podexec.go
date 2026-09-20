@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/moby/moby/client"
 
@@ -94,6 +95,45 @@ type engine interface {
 	ImagePull(ctx context.Context, refStr string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 }
 
+// engineCallTimeout bounds every engine call that should answer at once.
+const engineCallTimeout = 30 * time.Second
+
+// bounded puts engineCallTimeout on list, inspect, start and remove, so a hung engine socket
+// fails the pass instead of stalling both loops. Create, pull and stop keep the caller's
+// context: they legitimately run long, and a deadline on a stop would cut a job's grace short.
+// FetchLogTail bounds its own call, since the deadline has to cover reading the stream.
+type bounded struct{ engine }
+
+func (b bounded) ContainerList(ctx context.Context, options client.ContainerListOptions) (client.ContainerListResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
+	return b.engine.ContainerList(ctx, options)
+}
+
+func (b bounded) ContainerInspect(ctx context.Context, containerID string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
+	return b.engine.ContainerInspect(ctx, containerID, options)
+}
+
+func (b bounded) ContainerStart(ctx context.Context, containerID string, options client.ContainerStartOptions) (client.ContainerStartResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
+	return b.engine.ContainerStart(ctx, containerID, options)
+}
+
+func (b bounded) ContainerRemove(ctx context.Context, containerID string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
+	return b.engine.ContainerRemove(ctx, containerID, options)
+}
+
+func (b bounded) ImageInspect(ctx context.Context, imageID string, inspectOpts ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
+	return b.engine.ImageInspect(ctx, imageID, inspectOpts...)
+}
+
 func New(cfg Config) (*Executor, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("podexec: APIURL is required")
@@ -130,7 +170,7 @@ func New(cfg Config) (*Executor, error) {
 		nodeLabels:           labels,
 		nodeName:             nodeName,
 		clusterID:            clusterID,
-		docker:               docker,
+		docker:               bounded{docker},
 		engineName:           engineName,
 		storageQuotaEnforced: quotaSupported,
 		probe:                probeAccelerators,

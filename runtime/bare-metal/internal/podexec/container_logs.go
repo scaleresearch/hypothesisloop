@@ -33,6 +33,8 @@ func (e *Executor) FetchLogTail(ctx context.Context, experimentID string, maxLin
 		return nil, nil
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+	defer cancel()
 	tail := fmt.Sprintf("%d", maxLines)
 	stream, err := e.docker.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: tail,

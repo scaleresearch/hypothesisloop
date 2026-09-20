@@ -32,6 +32,8 @@ type fakeEngine struct {
 	images       map[string]bool
 	pulls, stops map[string]int
 	stopGraces   map[string]*int
+	// deadlines is, per kind of call, whether the last one carried a deadline.
+	deadlines    map[string]bool
 	gates        map[string]chan struct{}
 	waiting      map[string]bool
 	pullFailures map[string]int
@@ -45,9 +47,17 @@ func newFakeEngine() *fakeEngine {
 	return &fakeEngine{
 		containers: map[string]*fakeContainer{}, images: map[string]bool{},
 		pulls: map[string]int{}, stops: map[string]int{}, stopGraces: map[string]*int{},
-		gates: map[string]chan struct{}{}, waiting: map[string]bool{}, pullFailures: map[string]int{},
+		deadlines: map[string]bool{},
+		gates:     map[string]chan struct{}{}, waiting: map[string]bool{}, pullFailures: map[string]int{},
 		stoppingState: "stopping",
 	}
+}
+
+func (f *fakeEngine) sawDeadline(ctx context.Context, kind string) {
+	_, has := ctx.Deadline()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deadlines[kind] = has
 }
 
 func (f *fakeEngine) blockedIn(call string) func() bool {
@@ -111,7 +121,8 @@ func (f *fakeEngine) devices(experimentID string) []string {
 	return out
 }
 
-func (f *fakeEngine) ContainerList(context.Context, client.ContainerListOptions) (client.ContainerListResult, error) {
+func (f *fakeEngine) ContainerList(ctx context.Context, _ client.ContainerListOptions) (client.ContainerListResult, error) {
+	f.sawDeadline(ctx, "list")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out client.ContainerListResult
@@ -123,7 +134,8 @@ func (f *fakeEngine) ContainerList(context.Context, client.ContainerListOptions)
 	return out, nil
 }
 
-func (f *fakeEngine) ContainerInspect(_ context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+func (f *fakeEngine) ContainerInspect(ctx context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	f.sawDeadline(ctx, "inspect")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	c := f.containers[id]
@@ -134,6 +146,7 @@ func (f *fakeEngine) ContainerInspect(_ context.Context, id string, _ client.Con
 }
 
 func (f *fakeEngine) ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
+	f.sawDeadline(ctx, "create")
 	if err := f.wait(ctx, "create "+options.Name); err != nil {
 		return client.ContainerCreateResult{}, err
 	}
@@ -155,7 +168,8 @@ func (f *fakeEngine) ContainerCreate(ctx context.Context, options client.Contain
 	return client.ContainerCreateResult{ID: options.Name}, nil
 }
 
-func (f *fakeEngine) ContainerStart(_ context.Context, id string, _ client.ContainerStartOptions) (client.ContainerStartResult, error) {
+func (f *fakeEngine) ContainerStart(ctx context.Context, id string, _ client.ContainerStartOptions) (client.ContainerStartResult, error) {
+	f.sawDeadline(ctx, "start")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.containers[id].state = "running"
@@ -163,6 +177,7 @@ func (f *fakeEngine) ContainerStart(_ context.Context, id string, _ client.Conta
 }
 
 func (f *fakeEngine) ContainerStop(ctx context.Context, id string, options client.ContainerStopOptions) (client.ContainerStopResult, error) {
+	f.sawDeadline(ctx, "stop")
 	f.mu.Lock()
 	c := f.containers[id]
 	if c == nil {
@@ -186,18 +201,21 @@ func (f *fakeEngine) ContainerStop(ctx context.Context, id string, options clien
 	return client.ContainerStopResult{}, nil
 }
 
-func (f *fakeEngine) ContainerRemove(_ context.Context, id string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+func (f *fakeEngine) ContainerRemove(ctx context.Context, id string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+	f.sawDeadline(ctx, "remove")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.containers, id)
 	return client.ContainerRemoveResult{}, nil
 }
 
-func (f *fakeEngine) ContainerLogs(context.Context, string, client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
+func (f *fakeEngine) ContainerLogs(ctx context.Context, _ string, _ client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
+	f.sawDeadline(ctx, "logs")
 	return nil, fmt.Errorf("fake engine keeps no logs")
 }
 
-func (f *fakeEngine) ImageInspect(_ context.Context, image string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+func (f *fakeEngine) ImageInspect(ctx context.Context, image string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	f.sawDeadline(ctx, "image inspect")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.images[image] {
@@ -212,6 +230,7 @@ func (fakePull) Read([]byte) (int, error) { return 0, io.EOF }
 func (fakePull) Close() error             { return nil }
 
 func (f *fakeEngine) ImagePull(ctx context.Context, image string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+	f.sawDeadline(ctx, "pull")
 	f.mu.Lock()
 	f.pulls[image]++
 	fail := f.pullFailures[image] > 0
@@ -234,7 +253,7 @@ func (f *fakeEngine) ImagePull(ctx context.Context, image string, _ client.Image
 func newFakeExecutor(f *fakeEngine, devicePaths ...string) *Executor {
 	return &Executor{
 		apiURL: "http://example.invalid:8083",
-		docker: f,
+		docker: bounded{f},
 		probe: func(context.Context) ([]acceleratorDevice, error) {
 			var devices []acceleratorDevice
 			for _, p := range devicePaths {
@@ -672,5 +691,40 @@ func TestAContainerWithNoReadableGraceIsStoppedOnTheEngineDefault(t *testing.T) 
 	}
 	if free := freeAccelerators(t, ctx, e); free != 1 {
 		t.Fatalf("%d accelerators free after the stop, want the device back", free)
+	}
+}
+
+// A hung engine socket must fail a quick call, and must never cut a pull or a stop grace short.
+func TestQuickEngineCallsCarryADeadlineAndSlowOnesDoNot(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f, "/dev/fake/0")
+	ctx := t.Context()
+	job := fakeJob("job", "image", 1)
+
+	pass(t, ctx, e, job)
+	eventually(t, "the job runs", func() bool { return f.state("job") == "running" })
+	eventually(t, "its start has returned", idle(e, "job"))
+	if _, err := e.FetchLogTail(ctx, "job", 10); err == nil {
+		t.Fatal("the fake engine keeps no logs, want its error")
+	}
+	pass(t, ctx, e)
+	eventually(t, "the job is stopped", func() bool { return f.state("job") != "running" })
+	eventually(t, "its stop has returned", idle(e, "job"))
+	pass(t, ctx, e)
+	eventually(t, "the container is reaped", func() bool { return f.state("job") == "" })
+	eventually(t, "the reap has returned", idle(e, "job"))
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for kind, want := range map[string]bool{
+		"list": true, "inspect": true, "image inspect": true, "start": true, "remove": true, "logs": true,
+		"create": false, "pull": false, "stop": false,
+	} {
+		got, called := f.deadlines[kind]
+		if !called {
+			t.Errorf("the job's life made no %s call", kind)
+		} else if got != want {
+			t.Errorf("%s call carried a deadline: %v, want %v", kind, got, want)
+		}
 	}
 }
