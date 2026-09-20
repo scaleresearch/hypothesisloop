@@ -1,4 +1,4 @@
-.PHONY: reset build test agent-test e2e-py lint check images sparse-sdpa-workload-image \
+.PHONY: dev reset build test agent-test e2e-py lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up registry-prune \
 	helm-prepare helm-lint \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
@@ -73,6 +73,11 @@ controlplane-up: registry-up render-settings images
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 	bash -c '. localdev/lib/auth.sh && lib_register_local_clusters'
+
+# The control plane and the UI as host processes against the compose datastores: starts in
+# seconds, and a code change needs no image build. Runtimes still pull images (make reload).
+dev: render-settings
+	bash localdev/dev.sh
 
 # Every request to the control plane carries a token. These two print the ones local work needs,
 # derived from auth.signing_secret in the settings file (localdev/lib/auth.sh).
