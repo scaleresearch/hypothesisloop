@@ -306,10 +306,12 @@ func ValidSortField(sort string, allowed map[string]string) bool {
 }
 
 // Placement is where an experiment's workload is supposed to be running and which generation of
-// it is current — the pair a cluster's status report is fenced against. Both halves must come
-// from one row read: judged against a cluster from one read and an attempt from another, a report
-// can be accepted for a generation that no longer exists.
+// it is current — what a cluster's status report is fenced against. All of it must come from one
+// row read: judged against a cluster from one read and an attempt from another, a report can be
+// accepted for a generation that no longer exists.
 type Placement struct {
 	ClusterName  string
 	AttemptCount int
+	// Slot is the slot the job was admitted to (NodeSlotLabel), "" on a cluster without slots.
+	Slot string
 }

@@ -214,8 +214,8 @@ ORDER BY updated_at ASC`
 	return collectExperiments(rows)
 }
 
-// PlacementByID returns each named experiment's assigned cluster and current attempt, for the ids
-// that exist. One query instead of a lookup per report: a cluster-agent pushes a complete snapshot
+// PlacementByID returns each named experiment's assigned cluster, current attempt and the slot it
+// was admitted to, for the ids that exist. One query instead of a lookup per report: a cluster-agent pushes a complete snapshot
 // every few seconds, and a per-report round trip made that cost scale with the number of jobs it
 // runs. Both columns come from the same row read, so a report can never be judged against one
 // experiment's cluster and another read's generation.
@@ -223,7 +223,9 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 	if len(ids) == 0 {
 		return map[string]domain.Placement{}, nil
 	}
-	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name, attempt_count FROM experiments WHERE id = ANY($1)`, ids)
+	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name, attempt_count,
+		COALESCE(resolved_job_spec -> 'node_selector' ->> $2, '')
+		FROM experiments WHERE id = ANY($1)`, ids, domain.NodeSlotLabel)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.PlacementByID: %w", err)
 	}
@@ -232,7 +234,7 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 	for rows.Next() {
 		var id string
 		var p domain.Placement
-		if err := rows.Scan(&id, &p.ClusterName, &p.AttemptCount); err != nil {
+		if err := rows.Scan(&id, &p.ClusterName, &p.AttemptCount, &p.Slot); err != nil {
 			return nil, fmt.Errorf("experiments_store.PlacementByID: scan: %w", err)
 		}
 		out[id] = p

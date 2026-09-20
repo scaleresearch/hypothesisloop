@@ -96,6 +96,36 @@ func TestAFirstAttemptIsFencedLikeAnyOtherNumber(t *testing.T) {
 	}
 }
 
+// A preempted job keeps its attempt. Readmitted to another slot of the same cluster, the instance
+// it was preempted from still reports under that attempt, and its exit must not become the
+// readmitted job's result.
+func TestAReportFromASlotTheJobIsNoLongerPlacedOnIsDropped(t *testing.T) {
+	const cluster = "rented"
+	placed := domain.Placement{ClusterName: cluster, AttemptCount: 3, Slot: "h100-1"}
+	from := func(node, phase string) statusReport {
+		rep := reportOfAttempt(3)
+		rep.AdmittedNode, rep.Phase = node, phase
+		return rep
+	}
+	if reason, ok := rejectReport(from("h100-0", "failed"), placed, cluster); ok || reason == "" {
+		t.Errorf("the old slot's exit was accepted (reason %q)", reason)
+	}
+	if _, ok := rejectReport(from("h100-0", "running"), placed, cluster); ok {
+		t.Error("the old slot's instance was accepted as the job running")
+	}
+	if _, ok := rejectReport(from("h100-1", "running"), placed, cluster); !ok {
+		t.Error("the report from the slot the job is placed on was dropped")
+	}
+	// A report with no node describes no instance: the job has none yet, or it is gone.
+	if _, ok := rejectReport(from("", "gone"), placed, cluster); !ok {
+		t.Error("a report naming no node was dropped")
+	}
+	// A job on a cluster without slots is fenced on cluster and attempt alone, as before.
+	if _, ok := rejectReport(from("node-7", "running"), domain.Placement{ClusterName: cluster, AttemptCount: 3}, cluster); !ok {
+		t.Error("a report was dropped for its node on a cluster without slots")
+	}
+}
+
 func reportOfAttempt(n int) statusReport {
 	return statusReport{ExperimentID: "exp-1", Phase: "running", Attempt: &n}
 }

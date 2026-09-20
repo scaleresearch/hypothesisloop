@@ -298,3 +298,32 @@ func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 		})
 	}
 }
+
+// The status ingest fences a report on the slot the job was admitted to, read with its cluster
+// and attempt in one row read.
+func TestPlacementCarriesTheSlotAJobWasAdmittedTo(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	exps := NewExperimentsStore(pool)
+	ctx := context.Background()
+	onSlot, plain := "placement-slot-"+peID, "placement-plain-"+peID
+	seedExperimentForCapTest(t, pool, onSlot, agentID, peID, 1, domain.StatusSubmitted)
+	seedExperimentForCapTest(t, pool, plain, agentID, peID, 1, domain.StatusSubmitted)
+	pinned := `{"cpu":"8","node_selector":{"zone":"a","` + domain.NodeSlotLabel + `":"h100-1"}}`
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET resolved_job_spec = $2::jsonb, cluster_name = 'rented', attempt_count = 3 WHERE id = $1`, onSlot, pinned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET resolved_job_spec = '{"cpu":"8"}'::jsonb, cluster_name = 'k8s' WHERE id = $1`, plain); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := exps.PlacementByID(ctx, []string{onSlot, plain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (domain.Placement{ClusterName: "rented", AttemptCount: 3, Slot: "h100-1"}); got[onSlot] != want {
+		t.Errorf("on a slot: %+v, want %+v", got[onSlot], want)
+	}
+	if want := (domain.Placement{ClusterName: "k8s"}); got[plain] != want {
+		t.Errorf("on no slot: %+v, want %+v", got[plain], want)
+	}
+}

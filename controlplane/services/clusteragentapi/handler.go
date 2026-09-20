@@ -569,12 +569,21 @@ type statusReport struct {
 // AttemptUnknown is accepted rather than dropped. Every cluster-agent sends it for a job it holds
 // no workload for (phase gone), which has no generation to name, so absence must survive decoding
 // as absence rather than as attempt 0.
+//
+// A job admitted to a slot has a third thing to match, the slot. A preempted job keeps its
+// attempt, so readmitted to another slot of the cluster it was preempted on, the workload it left
+// behind is of the right cluster and the right generation, and its exit would be recorded as the
+// readmitted job's result. A report naming no node is accepted: it describes no workload in
+// particular.
 func rejectReport(rep statusReport, placement domain.Placement, clusterName string) (string, bool) {
 	if placement.ClusterName != clusterName {
 		return "dropping status report for an experiment this cluster no longer owns", false
 	}
 	if attempt := reportedAttempt(rep); attempt != workload.AttemptUnknown && attempt != placement.AttemptCount {
 		return "dropping status report from a superseded attempt", false
+	}
+	if placement.Slot != "" && rep.AdmittedNode != "" && rep.AdmittedNode != placement.Slot {
+		return "dropping status report from a slot the experiment is no longer placed on", false
 	}
 	return "", true
 }
