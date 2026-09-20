@@ -3,9 +3,11 @@ package quota
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -35,14 +37,14 @@ func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
 // reachable but simply has no fresh reports) — this test just pins that WithLiveCapacity flips the
 // handler out of the unconfigured error path; the live-read behavior itself is metricsdb's own.
 func TestLiveCapacityConfiguredDoesNotFailFast(t *testing.T) {
-	h := NewPlatformExperimentsHandler(nil, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute)
+	h := NewPlatformExperimentsHandler(nil, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute, nil)
 	if h.metricsDBURL == "" {
 		t.Fatalf("WithLiveCapacity did not set metricsDBURL")
 	}
 	// Not asserting on the outcome of an actual dial here — that's metricsdb's own concern and
 	// would require a live DB. This only pins that liveCapacity no longer takes the "unconfigured"
 	// branch once WithLiveCapacity has been called.
-	_, err := h.liveCapacity(context.Background())
+	_, err := h.liveCapacity(auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindStaff}))
 	if errors.Is(err, ErrLiveCapacityUnconfigured) {
 		t.Fatalf("liveCapacity() still reports unconfigured after WithLiveCapacity was called")
 	}
@@ -61,5 +63,34 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 	want := AcceleratorCapacity{AcceleratorType: "gpu.product=L40", Available: 3, Total: 8, AccHPerHour: 0.25}
 	if len(clusters) != 1 || len(clusters[0].Accelerators) != 1 || clusters[0].Accelerators[0] != want {
 		t.Fatalf("capacity = %+v, want one cluster with %+v", clusters, want)
+	}
+}
+
+// A caller reads the capacity of the clusters its jobs can land on and of no other: knowing what
+// another org runs on is knowing something of that org.
+func TestCapacityShowsOnlyClustersThatTakeTheCallersJobs(t *testing.T) {
+	registered := map[string]domain.Cluster{
+		"of-a":   {Name: "of-a", OrgID: "org-a"},
+		"of-b":   {Name: "of-b", OrgID: "org-b"},
+		"shared": {Name: "shared", OrgID: "org-staff", Shared: true},
+	}
+	connected := []ClusterCapacity{{ClusterName: "of-a"}, {ClusterName: "of-b"}, {ClusterName: "phantom"}, {ClusterName: "shared"}}
+	for name, tc := range map[string]struct {
+		orgs []string
+		want []string
+	}{
+		"a caller of one org":         {[]string{"org-a"}, []string{"of-a", "shared"}},
+		"a person in two orgs":        {[]string{"org-a", "org-b"}, []string{"of-a", "of-b", "shared"}},
+		"an org with no cluster":      {[]string{"org-c"}, []string{"shared"}},
+		"a person who is in no org":   {nil, []string{"shared"}},
+		"the org that shares its own": {[]string{"org-staff"}, []string{"shared"}},
+	} {
+		got := []string{}
+		for _, c := range placeableBy(tc.orgs, registered, connected) {
+			got = append(got, c.ClusterName)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got = %v, want = %v", name, got, tc.want)
+		}
 	}
 }

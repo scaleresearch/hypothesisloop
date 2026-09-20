@@ -3,11 +3,13 @@ package quota
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -22,6 +24,12 @@ type PlatformExperimentsHandler struct {
 	// Live-capacity lookup (GET /resource-catalog/capacity) — set via WithLiveCapacity.
 	metricsDBURL      string
 	capacityFreshness time.Duration
+	clusters          ClusterRegistry
+
+	// Set via WithAgentLaunch: the launcher hosted agents are given to, and the secret an
+	// agent's token is derived from.
+	launcher      string
+	signingSecret string
 }
 
 // NewPlatformExperimentsHandler constructs the handler.
@@ -35,12 +43,19 @@ func (h *PlatformExperimentsHandler) WithCatalog(catalog ResourceCatalog) *Platf
 	return h
 }
 
+// ClusterRegistry says whose each registered cluster is and whether the platform shares it.
+// *db.ClustersStore satisfies it.
+type ClusterRegistry interface {
+	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
+}
+
 // WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the metrics DB URL
-// per-flavor capacity reports land in, and the freshness window past which a cluster's last
-// report is treated as stale.
-func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, freshness time.Duration) *PlatformExperimentsHandler {
+// per-flavor capacity reports land in, the freshness window past which a cluster's last
+// report is treated as stale, and the registry that says which clusters a caller may see.
+func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry) *PlatformExperimentsHandler {
 	h.metricsDBURL = metricsDBURL
 	h.capacityFreshness = freshness
+	h.clusters = clusters
 	return h
 }
 
@@ -82,17 +97,43 @@ type AcceleratorCapacity struct {
 // (important.md: "no fallbacks - one path or error, fail fast").
 var ErrLiveCapacityUnconfigured = errors.New("resource-catalog/capacity: metrics DB URL not configured (WithLiveCapacity was never called)")
 
-// liveCapacity reads live per-cluster accelerator capacity, or fails fast if this handler was
-// never wired to a metrics DB.
+// liveCapacity reads the live accelerator capacity of the clusters the caller's jobs can be
+// placed on, or fails fast if this handler was never wired to a metrics DB.
 func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context) ([]ClusterCapacity, error) {
 	if h.metricsDBURL == "" {
 		return nil, ErrLiveCapacityUnconfigured
+	}
+	caller, ok := auth.FromContext(ctx)
+	if !ok {
+		return nil, auth.Unauthenticated("the request carries no principal")
 	}
 	available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, h.metricsDBURL, h.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	return buildClusterCapacity(available, total), nil
+	clusters := buildClusterCapacity(available, total)
+	if caller.Kind == auth.KindStaff {
+		return clusters, nil
+	}
+	registered, err := h.clusters.RegisteredClusters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return placeableBy(caller.OrgIDs, registered, clusters), nil
+}
+
+// placeableBy keeps the clusters that take jobs of one of orgIDs: the orgs' own and the shared
+// ones. It is the view of the rule admission places by (domain.Cluster.Hosts), so what a caller
+// reads here is where their jobs can land. A name nobody registered is no cluster.
+func placeableBy(orgIDs []string, registered map[string]domain.Cluster, clusters []ClusterCapacity) []ClusterCapacity {
+	kept := make([]ClusterCapacity, 0, len(clusters))
+	for _, c := range clusters {
+		cluster, ok := registered[c.ClusterName]
+		if ok && (cluster.Shared || slices.ContainsFunc(orgIDs, cluster.Hosts)) {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // buildClusterCapacity assembles the agent-facing view from live per-cluster/per-type counts.

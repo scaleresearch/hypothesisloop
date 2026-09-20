@@ -7,19 +7,17 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// ClusterName returns the name of the connected cluster reporting clusterID, or "" when none
-// does. Settings are keyed by the id a cluster reports, and a cluster is owned by name.
+// ClusterName returns the name of the registered cluster bound to clusterID, or "" when none is.
+// Settings are keyed by the id a cluster reports and a cluster is owned by name, so whose the
+// settings are is what the platform recorded when it bound the two, never what a runtime states
+// on this request. The binding outlives the connection: settings are reachable while the
+// cluster is away.
 func (s *Service) ClusterName(ctx context.Context, clusterID string) (string, error) {
-	ids, err := s.workload.GetClusterIDs(ctx)
-	if err != nil {
+	cluster, err := s.store.ClusterByReportedID(ctx, clusterID)
+	if err != nil || cluster == nil {
 		return "", err
 	}
-	for name, id := range ids {
-		if id == clusterID {
-			return name, nil
-		}
-	}
-	return "", nil
+	return cluster.Name, nil
 }
 
 // GetClusterSettings returns the operator overrides for clusterID, or nil if none were ever set.

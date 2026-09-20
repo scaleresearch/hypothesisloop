@@ -51,6 +51,11 @@ type Store interface {
 	// db.ClusterSettingsStore.
 	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
 	PutClusterSettings(ctx context.Context, cs *domain.ClusterSettings) error
+	// GetCluster returns a registered cluster, nil for a name nobody registered.
+	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
+	// ClusterByReportedID returns the registered cluster bound to the identity a runtime
+	// reported, nil when none is.
+	ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error)
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource

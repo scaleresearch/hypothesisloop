@@ -62,6 +62,11 @@ func (*noRunningListStore) RegisteredClusters(context.Context) (map[string]domai
 	return singleOrg, nil
 }
 
+// A force-admit in a deployment with one org: the named cluster is registered and the job's own.
+func (*admitStore) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
+	return &domain.Cluster{Name: name}, nil
+}
+
 // orgCluster is one connected cluster of the placement tests: a single node holding h100
 // accelerators, some of them free.
 type orgCluster struct {
