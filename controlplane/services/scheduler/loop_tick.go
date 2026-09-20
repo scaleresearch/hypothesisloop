@@ -53,7 +53,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// 1. Get available physical capacity as a domain.Footprint per cluster — a pooled total
 	// would hide which cluster has room, admitting against a combined number while the actual
 	// target cluster is full.
-	gAvail, desiredFree, err := l.workload.GetFlavorCapacity(ctx)
+	gAvail, desiredFree, err := readFlavorCapacity(ctx, l.workload, l.logger)
 	if err != nil {
 		return err
 	}
@@ -100,11 +100,6 @@ func (l *Loop) tick(ctx context.Context) error {
 	// (see queuebackend.Backend.GetFlavorCapacity) — reusing its key set here is the same
 	// "unreachable cluster is never a speculative candidate" rule the doc calls out as a
 	// pre-existing bug fixed in step 0, applied to the speculative path too.
-	for cluster := range nodeLabels {
-		if _, ok := gAvail[cluster]; !ok {
-			l.logger.Warn("cluster reports nodes but no consistent capacity snapshot; skipping it this tick", zap.String("cluster", cluster))
-		}
-	}
 	connectedClusters := make(map[string]bool, len(gAvail))
 	for cluster := range gAvail {
 		connectedClusters[cluster] = true

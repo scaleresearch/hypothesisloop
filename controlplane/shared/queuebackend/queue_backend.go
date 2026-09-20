@@ -9,6 +9,8 @@ package queuebackend
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -119,7 +121,8 @@ func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Ex
 // Desired-free closes the creation-delay race right after MarkSubmitted; actual-free closes
 // the deletion-delay race after preemption/eviction. Taking the minimum prevents overcommit.
 // A cluster whose snapshot is missing a metric or contradicts itself is left out of both maps,
-// like a disconnected one, so the other clusters are still admitted to.
+// like a disconnected one, so the other clusters are still admitted to. The maps are then valid
+// and err is an InconsistentSnapshots naming each cluster left out and why.
 //
 // CPU, memory and storage totals are the per-node figures net of non-platform pods, so a
 // desiredFree above available there is always a platform job still terminating. Accelerator
@@ -168,8 +171,25 @@ func (b *Backend) GetFlavorCapacity(ctx context.Context) (available, desiredFree
 		desiredFree[cluster] = total.Sub(desiredByCluster[cluster])
 		available[cluster] = minimumFootprint(desiredFree[cluster], actualFree)
 	}
+	if len(inconsistent) > 0 {
+		return available, desiredFree, InconsistentSnapshots(inconsistent)
+	}
 	return available, desiredFree, nil
 }
+
+// InconsistentSnapshots is why each connected cluster was left out of a capacity read.
+type InconsistentSnapshots map[string]error
+
+func (e InconsistentSnapshots) Error() string {
+	reasons := make([]string, 0, len(e))
+	for _, err := range e {
+		reasons = append(reasons, err.Error())
+	}
+	sort.Strings(reasons)
+	return strings.Join(reasons, "; ")
+}
+
+func (e InconsistentSnapshots) SkippedClusters() map[string]error { return e }
 
 // sumNodeTotals adds up each cluster's per-node capacity left to platform jobs: CPU in
 // millicores, memory and storage in bytes.

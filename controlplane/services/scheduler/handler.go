@@ -474,7 +474,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	fp := exp.Footprint()
 	clusterActive := false
 	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, &resolved, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-		gAvail, _, err := h.svc.workload.GetFlavorCapacity(ctx)
+		gAvail, _, err := readFlavorCapacity(ctx, h.svc.workload, h.svc.logger)
 		if err != nil {
 			return false, err
 		}

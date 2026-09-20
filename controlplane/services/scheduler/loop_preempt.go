@@ -21,6 +21,25 @@ var errAdmissionCapacityChanged = errors.New("capacity changed during admission"
 // rejection from a generic submit failure without importing the quota package's concrete type.
 type concurrencyCapExceeded interface{ ConcurrencyCapExceeded() bool }
 
+// skippedClusters is implemented by queuebackend.InconsistentSnapshots: the capacity read is
+// valid for every other cluster and names the ones it left out.
+type skippedClusters interface{ SkippedClusters() map[string]error }
+
+// readFlavorCapacity is GetFlavorCapacity with the clusters it left out logged and the read kept.
+func readFlavorCapacity(ctx context.Context, client interface {
+	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
+}, logger *zap.Logger) (available, desiredFree map[string]domain.Footprint, err error) {
+	available, desiredFree, err = client.GetFlavorCapacity(ctx)
+	var skipped skippedClusters
+	if errors.As(err, &skipped) {
+		for cluster, why := range skipped.SkippedClusters() {
+			logger.Warn("cluster left out of the capacity read", zap.String("cluster", cluster), zap.Error(why))
+		}
+		return available, desiredFree, nil
+	}
+	return available, desiredFree, err
+}
+
 type insufficientQuota interface {
 	error
 	InsufficientQuota() bool
@@ -400,7 +419,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		}
 	} else {
 		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-			available, _, err := l.workload.GetFlavorCapacity(ctx)
+			available, _, err := readFlavorCapacity(ctx, l.workload, l.logger)
 			if err != nil {
 				return false, err
 			}

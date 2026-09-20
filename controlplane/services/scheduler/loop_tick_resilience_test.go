@@ -3,10 +3,12 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -240,5 +242,36 @@ func TestTickSkipsAnAgentWhoseQuotaCannotBeRead(t *testing.T) {
 		if _, ok := store.notAdmitted["exp-broken"]; ok {
 			t.Errorf("%s: the job with no readable quota was judged anyway", tier)
 		}
+	}
+}
+
+type skippedClusterWorkload struct{ resilienceWorkload }
+
+type skippedReport map[string]error
+
+func (skippedReport) Error() string                       { return "inconsistent snapshots" }
+func (r skippedReport) SkippedClusters() map[string]error { return r }
+
+func (w skippedClusterWorkload) GetFlavorCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	available, desiredFree, _ := w.resilienceWorkload.GetFlavorCapacity(ctx)
+	return available, desiredFree, skippedReport{"c2": errors.New("available capacity exceeds total")}
+}
+
+func TestTickLogsASkippedClusterWithItsReasonAndContinues(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	store := &resilienceStore{queued: []*domain.Experiment{queuedJob("exp-a", "pe-live", domain.CapacityGuaranteed)}}
+	l := resilienceLoop(store)
+	l.workload = skippedClusterWorkload{}
+	l.logger = zap.New(core)
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatalf("tick() = %v, want the other cluster still served", err)
+	}
+	if _, considered := store.notAdmitted["exp-a"]; !considered {
+		t.Fatal("the job on the healthy cluster was never considered")
+	}
+	entries := logs.FilterField(zap.String("cluster", "c2")).All()
+	if len(entries) != 1 || !strings.Contains(fmt.Sprint(entries[0].ContextMap()["error"]), "exceeds total") {
+		t.Fatalf("skipped cluster log = %v, want one entry carrying the inconsistency", entries)
 	}
 }

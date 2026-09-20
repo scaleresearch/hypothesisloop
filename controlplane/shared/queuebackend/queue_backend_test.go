@@ -2,6 +2,8 @@ package queuebackend
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +107,23 @@ func TestAnInconsistentClusterSnapshotCondemnsOnlyThatCluster(t *testing.T) {
 	}
 	if err := inconsistent["cluster-a"]; err != nil {
 		t.Errorf("cluster-a was rejected for cluster-b's snapshot: %v", err)
+	}
+}
+
+func TestInconsistentSnapshotsNamesEachSkippedClusterWithItsReason(t *testing.T) {
+	b := &Backend{}
+	var err error = InconsistentSnapshots(b.validateCapacitySnapshot(
+		map[string]bool{"cluster-b": true},
+		map[string]float64{"cluster-b": 64}, map[string]int64{"cluster-b": 8000},
+		nil, nil,
+		map[string]int64{"cluster-b": 8}, map[string]int64{"cluster-b": 16},
+		map[string]int64{"cluster-b": 16}, map[string]int64{"cluster-b": 32},
+	))
+	var skipped interface{ SkippedClusters() map[string]error }
+	if !errors.As(err, &skipped) || skipped.SkippedClusters()["cluster-b"] == nil {
+		t.Fatalf("err = %v, want it to carry cluster-b's inconsistency", err)
+	}
+	if !strings.Contains(err.Error(), "exceeds total") {
+		t.Fatalf("err = %q, want the specific inconsistency", err)
 	}
 }
