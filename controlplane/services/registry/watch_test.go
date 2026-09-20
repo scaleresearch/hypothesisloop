@@ -32,6 +32,8 @@ import (
 // whatever the database announced. It applies db.EventFilter itself rather than a test-local
 // approximation, so a test here fails for the same reason production would.
 type fakeEvents struct {
+	// mu guards stored: a test adds to it while the server's handler goroutines replay from it.
+	mu     sync.Mutex
 	stored []db.Event
 	live   chan db.Event
 	// owner maps a hypothesis id to the agent that registered it; links maps a hypothesis id to the
@@ -62,12 +64,20 @@ func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int6
 	if since < 0 {
 		since = 0
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for _, e := range f.stored {
 		if e.Position >= since && filter.Matches(e) {
 			out = append(out, e)
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeEvents) store(e db.Event) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stored = append(f.stored, e)
 }
 
 func (f *fakeEvents) Concerns(_ context.Context, filter db.EventFilter, events []db.Event) ([]db.Event, error) {
@@ -885,7 +895,7 @@ func TestReAddingANarrowedKindDoesNotResendTheEventsItAlreadyDeliveredLive(t *te
 		"since":                  {"100"},
 	})
 
-	source.stored = append(source.stored, pool)
+	source.store(pool)
 	source.live <- pool
 	if got := client.next(t); got.Subject != "hyp-1" {
 		t.Fatalf("live pool event: got = %v, want = %v", got.Subject, "hyp-1")
@@ -1131,7 +1141,7 @@ func TestHLWatchResumesFromItsSavedCursorWithoutRepeatsOrGaps(t *testing.T) {
 		t.Fatalf("first watch: got = exit %v, positions %v, want = exit 0, [100 110] (stderr: %s)", code, got, stderr)
 	}
 
-	source.stored = append(source.stored, statusEvent("exp-3", "EVICTED", "agent-a", 120))
+	source.store(statusEvent("exp-3", "EVICTED", "agent-a", 120))
 	code, out, stderr = runHLWatchEnv(t, env, server.URL, "--timeout", "10")
 	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[120]" {
 		t.Errorf("second watch: got = exit %v, positions %v, want = exit 0, [120] (stderr: %s)", code, got, stderr)
