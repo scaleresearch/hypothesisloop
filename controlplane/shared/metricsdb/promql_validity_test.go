@@ -173,6 +173,10 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 			_, err := TotalObservedAccH(ctx, dbURL, zero, "pe-1")
 			return err
 		}},
+		{"SettledAccHByJob (zero start)", func(dbURL string) error {
+			_, err := SettledAccHByJob(ctx, dbURL, zero, "pe-1")
+			return err
+		}},
 	}
 
 	for _, c := range cases {

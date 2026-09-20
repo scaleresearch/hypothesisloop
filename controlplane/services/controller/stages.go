@@ -109,11 +109,14 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 // Reservations never contribute — see shared/metricsdb/usage.go for why a large queued job
 // must not be able to trip a boundary.
 func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment, obs *tickObservations, now time.Time) (float64, error) {
-	committed, err := c.observed.TotalObservedAccH(ctx, pe.CreatedAt, pe.ID)
+	settled, err := c.observed.SettledAccHByJob(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
-		return 0, fmt.Errorf("stages: TotalObservedAccH: %w", err)
+		return 0, fmt.Errorf("stages: SettledAccHByJob: %w", err)
 	}
-	var inFlight float64
+	var consumed float64
+	for _, accH := range settled {
+		consumed += accH
+	}
 	for _, exp := range runningExps {
 		if exp.PlatformExperimentID != pe.ID {
 			continue
@@ -124,10 +127,12 @@ func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExper
 		if !ok {
 			continue
 		}
-		inFlight += observedAcceleratorCost(exp, hours)
+		// Observed hours are cumulative over the job's whole life, so they already contain any
+		// stint a requeue settled.
+		consumed += observedAcceleratorCost(exp, hours) - settled[exp.ID]
 	}
 
-	return domain.StageProgress(committed+inFlight, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, now), nil
+	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, now), nil
 }
 
 // reconcileCuts retries job-stopping for every agent already cut in this platform experiment.

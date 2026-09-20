@@ -96,7 +96,7 @@ func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testi
 	svc, logs := newObservedTestService(t, server.URL, []*domain.Experiment{exp})
 
 	q := &domain.AgentQuota{AgentID: "agent-1", PlatformExperimentID: "pe-1"}
-	if err := svc.addRunningActualCosts(context.Background(), "pe-1", q); err != nil {
+	if err := svc.addRunningActualCosts(context.Background(), testPE, q); err != nil {
 		t.Fatalf("addRunningActualCosts: %v", err)
 	}
 	if n := logs.Len(); n != 0 {
@@ -131,7 +131,7 @@ func TestCorrectRunningCostsBillsNormallyOnRetiredRate(t *testing.T) {
 	svc, logs := newObservedTestService(t, server.URL, []*domain.Experiment{exp})
 
 	q := &domain.AgentQuota{AgentID: "agent-1", PlatformExperimentID: "pe-1", UsedGuaranteedAccH: 5}
-	if err := svc.correctRunningCosts(context.Background(), "pe-1", []*domain.AgentQuota{q}); err != nil {
+	if err := svc.correctRunningCosts(context.Background(), testPE, []*domain.AgentQuota{q}); err != nil {
 		t.Fatalf("correctRunningCosts: %v", err)
 	}
 	if n := logs.Len(); n != 0 {
@@ -175,7 +175,7 @@ func TestCorrectRunningCostsNeverObservedIsNotTreatedAsRetiredRate(t *testing.T)
 	svc, logs := newObservedTestService(t, server.URL, []*domain.Experiment{exp})
 
 	q := &domain.AgentQuota{AgentID: "agent-1", PlatformExperimentID: "pe-1", UsedGuaranteedAccH: 1}
-	if err := svc.correctRunningCosts(context.Background(), "pe-1", []*domain.AgentQuota{q}); err != nil {
+	if err := svc.correctRunningCosts(context.Background(), testPE, []*domain.AgentQuota{q}); err != nil {
 		t.Fatalf("correctRunningCosts: %v", err)
 	}
 	if n := logs.Len(); n != 0 {
@@ -184,5 +184,55 @@ func TestCorrectRunningCostsNeverObservedIsNotTreatedAsRetiredRate(t *testing.T)
 	if q.UsedGuaranteedAccH != 1 {
 		t.Fatalf("used_guaranteed_acch = %v, want unchanged at 1 — an unobserved job must keep its estimate, not be treated as a rate failure",
 			q.UsedGuaranteedAccH)
+	}
+}
+
+var testPE = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour)}
+
+// A requeue settles the interrupted stint into the job's own series while the job lives on, and
+// observed elapsed is cumulative over the job's whole life. Once it runs again the first stint is
+// in both figures, and must be charged once.
+func TestARequeuedJobRunningAgainIsChargedOnceForItsSettledStint(t *testing.T) {
+	now := time.Now().UTC()
+	const observed = 30 * time.Minute
+	sqlBody := fmt.Sprintf(`{"output":[{"records":{"rows":[[%d,%d,%d,%d]]}}]}`,
+		now.Add(-observed).UnixMilli(), now.UnixMilli(), observed.Milliseconds(), (10 * time.Minute).Milliseconds())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/v1/sql") {
+			_, _ = w.Write([]byte(sqlBody))
+			return
+		}
+		// The first stint, 20 minutes at 8 AccH/h, settled when the job was requeued.
+		_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"experiment_id":"exp-requeued"},"value":[%d,"2.6666666667"]}]}}`, now.Unix())
+	}))
+	defer server.Close()
+
+	exp := &domain.Experiment{
+		ID:                     "exp-requeued",
+		CreatedAt:              now.Add(-time.Hour),
+		AcceleratorType:        "h100",
+		AcceleratorCount:       2,
+		EstimatedDurationHours: 1,
+		EstimatedCostAccH:      8,
+		CapacityTier:           domain.CapacityGuaranteed,
+	}
+	svc := newTestService(t, server.URL, []*domain.Experiment{exp})
+	const settledStint, lifetime = 8.0 / 3, 4.0 // 30 observed minutes at 8 AccH/h
+
+	observedOnly := &domain.AgentQuota{AgentID: "agent-1", PlatformExperimentID: "pe-1", UsedGuaranteedAccH: settledStint}
+	if err := svc.addRunningActualCosts(context.Background(), testPE, observedOnly); err != nil {
+		t.Fatalf("addRunningActualCosts: %v", err)
+	}
+	if got := observedOnly.UsedGuaranteedAccH; got < lifetime-0.01 || got > lifetime+0.01 {
+		t.Errorf("observed usage = %v, want %v: the settled stint is counted twice", got, lifetime)
+	}
+
+	withReservation := &domain.AgentQuota{AgentID: "agent-1", PlatformExperimentID: "pe-1", UsedGuaranteedAccH: settledStint + exp.EstimatedCostAccH}
+	if err := svc.correctRunningCosts(context.Background(), testPE, []*domain.AgentQuota{withReservation}); err != nil {
+		t.Fatalf("correctRunningCosts: %v", err)
+	}
+	if got := withReservation.UsedGuaranteedAccH; got < lifetime-0.01 || got > lifetime+0.01 {
+		t.Errorf("usage = %v, want %v: the settled stint is counted twice", got, lifetime)
 	}
 }

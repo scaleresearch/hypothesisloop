@@ -50,6 +50,10 @@ type fakeObserved struct {
 	best   map[string]metricsdb.AgentBest
 	nonRaw []string
 
+	// settledAccH is each job's settled accelerator cost, including stints a requeue settled for a
+	// job that is running again.
+	settledAccH map[string]float64
+
 	// failOn names one method that returns an error, so a test can prove the controller declines
 	// to act on an answer it could not get rather than guessing one.
 	failOn string
@@ -94,8 +98,8 @@ func (f fakeObserved) HasEverReportedMetric(_ context.Context, _ string, _, _ ti
 	return f.everReportedAny, f.fail("HasEverReportedMetric")
 }
 
-func (f fakeObserved) TotalObservedAccH(_ context.Context, _ time.Time, _ string) (float64, error) {
-	return 0, f.fail("TotalObservedAccH")
+func (f fakeObserved) SettledAccHByJob(_ context.Context, _ time.Time, _ string) (map[string]float64, error) {
+	return f.settledAccH, f.fail("SettledAccHByJob")
 }
 
 func (f fakeObserved) PopulateUsage(_ context.Context, _ time.Time, _ string, _ []*domain.AgentQuota) error {

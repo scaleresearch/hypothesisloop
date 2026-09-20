@@ -32,7 +32,7 @@ func (s *PlatformExperimentsService) GetQuota(ctx context.Context, agentID, plat
 	if err := s.store.AddDesiredQuotaUsageOne(ctx, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetQuota: desired usage: %w", err)
 	}
-	if err := s.correctRunningCosts(ctx, platformExpID, []*domain.AgentQuota{aq}); err != nil {
+	if err := s.correctRunningCosts(ctx, pe, []*domain.AgentQuota{aq}); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetQuota: running cost correction: %w", err)
 	}
 	return aq, nil
@@ -72,7 +72,7 @@ func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, 
 	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: populate usage: %w", err)
 	}
-	if err := s.addRunningActualCosts(ctx, platformExpID, aq); err != nil {
+	if err := s.addRunningActualCosts(ctx, pe, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: %w", err)
 	}
 	return aq, nil
@@ -98,7 +98,7 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 	if err := s.store.AddDesiredQuotaUsage(ctx, platformExpID, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: desired usage: %w", err)
 	}
-	if err := s.correctRunningCosts(ctx, platformExpID, quotas); err != nil {
+	if err := s.correctRunningCosts(ctx, pe, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: running cost correction: %w", err)
 	}
 	return quotas, nil

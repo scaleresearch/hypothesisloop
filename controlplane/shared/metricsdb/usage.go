@@ -202,3 +202,21 @@ func TotalObservedAccH(ctx context.Context, dbURL string, platformExpStart time.
 	}
 	return samples[0].Value, nil
 }
+
+// SettledAccHByJob returns each job's settled accelerator cost in a platform experiment, keyed by
+// experiment id. A requeue settles the interrupted stint while the job stays alive, so a reader
+// adding a running job's cumulative observed cost on top of settled usage must subtract that
+// job's entry here or the earlier stints count twice.
+func SettledAccHByJob(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string) (map[string]float64, error) {
+	promQL := fmt.Sprintf(`sum by (experiment_id) (last_over_time(%s{platform_experiment_id=%q, resource_type=%q, kind=%q}[%s]))`,
+		usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved, ObservedLookback(platformExpStart))
+	samples, err := QueryVector(ctx, dbURL, promQL)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.SettledAccHByJob: %w", err)
+	}
+	out := make(map[string]float64, len(samples))
+	for _, s := range samples {
+		out[s.Labels["experiment_id"]] = s.Value
+	}
+	return out, nil
+}

@@ -34,7 +34,7 @@ type ObservedState interface {
 	AnyDeclaredMetricChanged(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error)
 	AnyDeclaredMetricReported(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, error)
 	HasEverReportedMetric(ctx context.Context, experimentID string, createdAt, now time.Time) (bool, error)
-	TotalObservedAccH(ctx context.Context, platformExpStart time.Time, platformExpID string) (float64, error)
+	SettledAccHByJob(ctx context.Context, platformExpStart time.Time, platformExpID string) (map[string]float64, error)
 	PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error
 	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error)
 }
@@ -74,8 +74,8 @@ func (o metricsDBObserver) HasEverReportedMetric(ctx context.Context, experiment
 	return metricsdb.HasEverReportedMetric(ctx, o.url, experimentID, createdAt, now)
 }
 
-func (o metricsDBObserver) TotalObservedAccH(ctx context.Context, platformExpStart time.Time, platformExpID string) (float64, error) {
-	return metricsdb.TotalObservedAccH(ctx, o.url, platformExpStart, platformExpID)
+func (o metricsDBObserver) SettledAccHByJob(ctx context.Context, platformExpStart time.Time, platformExpID string) (map[string]float64, error) {
+	return metricsdb.SettledAccHByJob(ctx, o.url, platformExpStart, platformExpID)
 }
 
 func (o metricsDBObserver) PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {

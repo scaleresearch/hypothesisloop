@@ -58,6 +58,8 @@ func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID s
 	if err != nil {
 		return nil, fmt.Errorf("quota.JobCost: %w", err)
 	}
+	// A requeue settles the interrupted stint, so a live job can already own a settled series.
+	ok = ok && exp.Status.IsTerminal()
 	if ok {
 		out.Settled = true
 		out.AcceleratorHours = settled[domain.ResourceAcceleratorHours]

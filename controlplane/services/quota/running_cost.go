@@ -78,14 +78,18 @@ func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (r
 // correctRunningCosts adjusts quotas in place: for every currently-RUNNING experiment owned by
 // one of the agents in quotas, it swaps that job's static EstimatedCostAccH (already included via
 // AddDesiredQuotaUsage) for its actual observed-elapsed accelerator cost so far.
-func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error {
+func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe *domain.PlatformExperiment, quotas []*domain.AgentQuota) error {
 	if len(quotas) == 0 {
 		return nil
 	}
 	calc := s.newRunningCostCalc()
+	settled, err := metricsdb.SettledAccHByJob(ctx, s.metricsDBURL, pe.CreatedAt, pe.ID)
+	if err != nil {
+		return fmt.Errorf("quota.correctRunningCosts: %w", err)
+	}
 
 	for _, q := range quotas {
-		running, err := s.store.GetAgentRunningExperiments(ctx, q.AgentID, platformExpID)
+		running, err := s.store.GetAgentRunningExperiments(ctx, q.AgentID, pe.ID)
 		if err != nil {
 			return fmt.Errorf("quota.correctRunningCosts: %w", err)
 		}
@@ -105,7 +109,9 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pl
 				// the original over-estimate this fix exists to correct.
 				continue
 			}
-			delta := rc.accH - exp.EstimatedCostAccH // negative when the job is under its estimate so far
+			// rc.accH is cumulative over the job's whole life, and a requeued job's earlier
+			// stints are already in q as settled usage.
+			delta := rc.accH - settled[exp.ID] - exp.EstimatedCostAccH
 			if exp.CapacityTier == domain.CapacityGuaranteed {
 				q.UsedGuaranteedAccH += delta
 			} else {
@@ -120,9 +126,13 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pl
 // anywhere: q must arrive carrying settled observed usage only. A job that has never reported adds
 // nothing — it is not yet visible in the actual state, and this figure exists to answer "has this
 // budget been spent?", which nothing unobserved can answer.
-func (s *PlatformExperimentsService) addRunningActualCosts(ctx context.Context, platformExpID string, q *domain.AgentQuota) error {
+func (s *PlatformExperimentsService) addRunningActualCosts(ctx context.Context, pe *domain.PlatformExperiment, q *domain.AgentQuota) error {
 	calc := s.newRunningCostCalc()
-	running, err := s.store.GetAgentRunningExperiments(ctx, q.AgentID, platformExpID)
+	settled, err := metricsdb.SettledAccHByJob(ctx, s.metricsDBURL, pe.CreatedAt, pe.ID)
+	if err != nil {
+		return fmt.Errorf("quota.addRunningActualCosts: %w", err)
+	}
+	running, err := s.store.GetAgentRunningExperiments(ctx, q.AgentID, pe.ID)
 	if err != nil {
 		return fmt.Errorf("quota.addRunningActualCosts: %w", err)
 	}
@@ -134,10 +144,13 @@ func (s *PlatformExperimentsService) addRunningActualCosts(ctx context.Context, 
 		if !rc.found {
 			continue
 		}
+		// rc.accH is cumulative over the job's whole life, and a requeued job's earlier stints
+		// are already in q as settled usage.
+		accH := rc.accH - settled[exp.ID]
 		if exp.CapacityTier == domain.CapacityGuaranteed {
-			q.UsedGuaranteedAccH += rc.accH
+			q.UsedGuaranteedAccH += accH
 		} else {
-			q.UsedBurstAccH += rc.accH
+			q.UsedBurstAccH += accH
 		}
 	}
 	return nil
