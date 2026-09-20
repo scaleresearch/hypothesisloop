@@ -190,6 +190,15 @@ echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"
 lib_detach_node "${CONTEXT_NAME}" "${CONTROL_PLANE_NODE}"
 
+# k3s's own pods were scheduled before the taint and do not tolerate it. Once one is evicted it
+# can only land on a dev node, and CoreDNS then dies with every dev-node teardown: the
+# cluster-agent cannot resolve the control plane until the next dev node has pulled and started
+# it, and the cluster reads as disconnected meanwhile. They belong on the node that stays.
+for system_deployment in coredns local-path-provisioner metrics-server; do
+  kubectl --context "${CONTEXT_NAME}" -n kube-system patch deployment "${system_deployment}" --type merge -p \
+    "{\"spec\":{\"template\":{\"spec\":{\"tolerations\":[{\"key\":\"${LIB_NODE_TAINT_KEY}\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"},{\"key\":\"CriticalAddonsOnly\",\"operator\":\"Exists\"},{\"key\":\"node-role.kubernetes.io/control-plane\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}],\"nodeSelector\":{\"node-role.kubernetes.io/control-plane\":\"true\"}}}}}"
+done
+
 echo "${HOST_ADDRESS}" > "${SCRIPT_DIR}/../.host-address"
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
