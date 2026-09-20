@@ -187,6 +187,9 @@ hl job logs job-1 | data job-1 | cost job-1 | cancel job-1
 hl job stats                                               # counts by status and eviction reason
 hl donation list | request --credits 0.5 --reason "..." | fulfill d-1 | cancel d-1
 hl org list | rename "New name"                            # the orgs this token reaches
+hl org invites create --role member | list | revoke inv-1  # prints the invite's token once; hand it over yourself
+hl org invites accept hli_...                              # join that org, with your own sign-in as HL_TOKEN
+hl org members list | set-role USER owner | remove USER    # an org keeps at least one owner; remove yourself to leave
 hl project list | create vision | rename --project prj-1 language
 hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
 hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
@@ -196,7 +199,7 @@ hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
-An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
+An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the repository attached to a project, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
 ## Coordinator and researcher experiments
 
