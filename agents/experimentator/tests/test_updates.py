@@ -16,16 +16,18 @@ COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","
 ENV = {**os.environ, "AGENT_ID": "agent-a"}
 
 
-def fake_hl(script: str, status: str = "", stats: str = "") -> tuple[list[str], str]:
+def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "") -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
-    `hl job status` and `hl job stats` print status and stats and record their arguments."""
+    `hl job status`, `hl job stats` and `hl quota` print status, stats and quota and record their
+    arguments."""
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
-    for name, text in (("status", status), ("stats", stats)):
+    for name, text in (("status", status), ("stats", stats), ("quota", quota)):
         with open(f"{path}.{name}", "w") as f:
             f.write(text)
     with open(path, "w") as f:
         f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.$2\"; exit 0; }\n"
+                "[ \"$1\" = quota ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.quota\"; exit 0; }\n"
                 "count=$(cat \"$0.runs\" 2>/dev/null || echo 0)\nRUNS=$((count + 1))\n"
                 "echo $RUNS > \"$0.runs\"\n" + script)
     os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
@@ -74,21 +76,24 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
             '{"name":"loss","best":0.2608416958176093,"last":0.31,"basis":"per_token"}]}\n'
             '{"id":"exp-2","status":"COMPLETED"}\n')
     STATS = '{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"QUEUED":1}}\n'
+    QUOTA = ('{"agent_id":"agent-a","guaranteed_accelerator_hours":2,"burst_accelerator_hours":4,'
+             '"used_guaranteed_acch":0.11336604166666665,"used_burst_acch":0}\n')
 
     async def test_ended_jobs_arrive_with_their_metrics_and_what_is_unfinished_from_one_read_each(self):
         second = COMPLETED.replace("exp-1", "exp-2").replace(":5", ":7")
         evicted = COMPLETED.replace("exp-1", "exp-3").replace("COMPLETED", "EVICTED").replace('"detail":""', '"detail":"oom"')
         command, counter = fake_hl("\n".join(f"echo '{e}'" for e in (COMPLETED, COMMENT, second, evicted, COMPLETED)) + "\n",
-                                   self.JOBS, self.STATS)
+                                   self.JOBS, self.STATS, self.QUOTA)
         events = await updates.next_batch(ENV, lambda: False, 10, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
                          "experiment.status exp-1 COMPLETED acc best 0.9 last 0.85, loss best 0.260842 last 0.31 (per_token)\n"
                          "comment.new hyp-1 agent by agent-b\n"
                          "experiment.status exp-2 COMPLETED\n"
                          "experiment.status exp-3 EVICTED oom\n"
-                         "unfinished_jobs 1 QUEUED, 2 RUNNING")
+                         "unfinished_jobs 1 QUEUED, 2 RUNNING\n"
+                         "quota_used 0.113 of 2 guaranteed, 0 of 4 burst AccH")
         with open(counter.replace(".runs", ".reads")) as f:
-            self.assertEqual(f.read(), "job status exp-1 exp-2\njob stats --agent agent-a\n")
+            self.assertEqual(f.read(), "job status exp-1 exp-2\njob stats --agent agent-a\nquota\n")
 
     async def test_the_last_job_ending_says_none_is_unfinished(self):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, '{"total":1,"by_status":{"COMPLETED":1}}\n')

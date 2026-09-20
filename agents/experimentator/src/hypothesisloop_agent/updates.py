@@ -4,8 +4,8 @@ The harness runs `hl watch` whenever the agent ends its turn, and briefly after 
 calls: the platform holds whatever happened while the agent worked and replays it from the cursor
 hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
 delivered once whichever of the two reads it. An event is a pointer; a job that ended is handed
-over with its metrics and the count of the agent's jobs still unfinished, read once per batch, so
-that learning of it costs the agent no call.
+over with its metrics, the count of the agent's jobs still unfinished and the quota it has used,
+read once per batch, so that learning of it costs the agent no call.
 """
 from __future__ import annotations
 
@@ -69,8 +69,9 @@ _UNFINISHED = ("QUEUED", "SUBMITTED", "ADMITTED", "RUNNING")
 
 async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
     """events, completed with what an agent told of an ended job would otherwise read: each
-    COMPLETED job's declared metrics as its event's detail, and one closing event counting the
-    agent's unfinished jobs. Two hl calls per batch; what one could not read is left out."""
+    COMPLETED job's declared metrics as its event's detail, and two closing events: the count of
+    the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
+    read is left out."""
     if not any(e.get("kind") == "experiment.status" for e in events):
         return events
 
@@ -90,6 +91,11 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
         counts = stats.get("by_status", {})
         events.append({"kind": "unfinished_jobs",
                        "value": ", ".join(f"{counts[s]} {s}" for s in _UNFINISHED if counts.get(s)) or "none"})
+    _, stdout = await _run_hl([hl, "quota"], env, lambda: False)
+    for q in _events(stdout):
+        events.append({"kind": "quota_used", "value": (
+            f"{q['used_guaranteed_acch']:.3g} of {q['guaranteed_accelerator_hours']:g} guaranteed, "
+            f"{q['used_burst_acch']:.3g} of {q['burst_accelerator_hours']:g} burst AccH")})
     return events
 
 
