@@ -13,15 +13,19 @@ COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","
 COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","position":6,"cursor":6}'
 
 
-def fake_hl(script: str, jobs: str = "") -> tuple[list[str], str]:
+ENV = {**os.environ, "AGENT_ID": "agent-a"}
+
+
+def fake_hl(script: str, status: str = "", stats: str = "") -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
-    `hl job status` prints jobs and records its arguments."""
+    `hl job status` and `hl job stats` print status and stats and record their arguments."""
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
-    with open(path + ".jobs", "w") as f:
-        f.write(jobs)
+    for name, text in (("status", status), ("stats", stats)):
+        with open(f"{path}.{name}", "w") as f:
+            f.write(text)
     with open(path, "w") as f:
-        f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.jobs\"; exit 0; }\n"
+        f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.$2\"; exit 0; }\n"
                 "count=$(cat \"$0.runs\" 2>/dev/null || echo 0)\nRUNS=$((count + 1))\n"
                 "echo $RUNS > \"$0.runs\"\n" + script)
     os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
@@ -39,19 +43,19 @@ def runs(counter: str) -> int:
 class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_batch_is_returned_as_events(self):
         command, _ = fake_hl(f"echo 'hl watch: connected' >&2\necho '{COMPLETED}'\necho '{COMMENT}'\n")
-        events = await updates.next_batch(os.environ.copy(), lambda: False, 10, command=command)
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command)
         self.assertEqual([e["kind"] for e in events], ["experiment.status", "comment.new"])
 
     async def test_an_empty_window_returns_nothing_and_watches_again(self):
         command, counter = fake_hl("exit 0\n")
-        events = await updates.next_batch(os.environ.copy(), lambda: runs(counter) > 1, 60, command=command)
+        events = await updates.next_batch(ENV, lambda: runs(counter) > 1, 60, command=command)
         self.assertEqual(events, [])
         self.assertGreater(runs(counter), 1)
-        self.assertEqual(await updates.next_batch(os.environ.copy(), lambda: False, 0, command=command), [])
+        self.assertEqual(await updates.next_batch(ENV, lambda: False, 0, command=command), [])
 
     async def test_a_failed_watch_is_retried(self):
         command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
-        events = await updates.next_batch(os.environ.copy(), lambda: False, 10, command=command, retry_s=0.1)
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
         self.assertEqual([e["subject"] for e in events], ["exp-1"])
         self.assertEqual(runs(counter), 2)
 
@@ -60,48 +64,58 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         stop_at = time.monotonic() + 0.3
         started = time.monotonic()
         events = await asyncio.wait_for(
-            updates.next_batch(os.environ.copy(), lambda: time.monotonic() > stop_at, 60, command=command), timeout=10)
+            updates.next_batch(ENV, lambda: time.monotonic() > stop_at, 60, command=command), timeout=10)
         self.assertEqual(events, [])
         self.assertLess(time.monotonic() - started, 5)
 
 
-class MetricsTest(unittest.IsolatedAsyncioTestCase):
+class JobStateTest(unittest.IsolatedAsyncioTestCase):
     JOBS = ('{"id":"exp-1","status":"COMPLETED","metrics":[{"name":"acc","best":0.9,"last":0.85,"basis":"raw"},'
             '{"name":"loss","best":0.2608416958176093,"last":0.31,"basis":"per_token"}]}\n'
             '{"id":"exp-2","status":"COMPLETED"}\n')
+    STATS = '{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"QUEUED":1}}\n'
 
-    async def test_completed_jobs_arrive_with_their_metrics_from_one_read(self):
+    async def test_ended_jobs_arrive_with_their_metrics_and_what_is_unfinished_from_one_read_each(self):
         second = COMPLETED.replace("exp-1", "exp-2").replace(":5", ":7")
-        command, counter = fake_hl(f"echo '{COMPLETED}'\necho '{COMMENT}'\necho '{second}'\necho '{COMPLETED}'\n", self.JOBS)
-        events = await updates.next_batch(os.environ.copy(), lambda: False, 10, command=command)
+        evicted = COMPLETED.replace("exp-1", "exp-3").replace("COMPLETED", "EVICTED").replace('"detail":""', '"detail":"oom"')
+        command, counter = fake_hl("\n".join(f"echo '{e}'" for e in (COMPLETED, COMMENT, second, evicted, COMPLETED)) + "\n",
+                                   self.JOBS, self.STATS)
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
                          "experiment.status exp-1 COMPLETED acc best 0.9 last 0.85, loss best 0.260842 last 0.31 (per_token)\n"
                          "comment.new hyp-1 agent by agent-b\n"
-                         "experiment.status exp-2 COMPLETED")
+                         "experiment.status exp-2 COMPLETED\n"
+                         "experiment.status exp-3 EVICTED oom\n"
+                         "unfinished_jobs 1 QUEUED, 2 RUNNING")
         with open(counter.replace(".runs", ".reads")) as f:
-            self.assertEqual(f.read(), "job status exp-1 exp-2\n")
+            self.assertEqual(f.read(), "job status exp-1 exp-2\njob stats --agent agent-a\n")
 
-    async def test_a_batch_without_a_completed_job_reads_no_job(self):
-        command, counter = fake_hl(f"echo '{COMMENT}'\n", self.JOBS)
-        events = await updates.drain(os.environ.copy(), command=command)
+    async def test_the_last_job_ending_says_none_is_unfinished(self):
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, '{"total":1,"by_status":{"COMPLETED":1}}\n')
+        events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a").splitlines()[-1], "unfinished_jobs none")
+
+    async def test_a_batch_without_an_ended_job_reads_no_job(self):
+        command, counter = fake_hl(f"echo '{COMMENT}'\n", self.JOBS, self.STATS)
+        events = await updates.drain(ENV, command=command)
         self.assertEqual([e["kind"] for e in events], ["comment.new"])
         self.assertFalse(os.path.exists(counter.replace(".runs", ".reads")))
 
     async def test_a_job_that_could_not_be_read_keeps_its_update(self):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n")
-        events = await updates.drain(os.environ.copy(), command=command)
+        events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED")
 
 
 class DrainTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_drain_returns_what_waits_without_listening_for_more(self):
         command, _ = fake_hl(f"[ \"$2\" = '--no-wait' ] || exit 2\necho '{COMPLETED}'\n")
-        events = await updates.drain(os.environ.copy(), command=command)
+        events = await updates.drain(ENV, command=command)
         self.assertEqual([e["subject"] for e in events], ["exp-1"])
 
     async def test_a_failed_drain_returns_nothing(self):
         command, _ = fake_hl("echo refused >&2; exit 2\n")
-        self.assertEqual(await updates.drain(os.environ.copy(), command=command), [])
+        self.assertEqual(await updates.drain(ENV, command=command), [])
 
 
 class HookTest(unittest.IsolatedAsyncioTestCase):

@@ -3,8 +3,9 @@
 The harness runs `hl watch` whenever the agent ends its turn, and briefly after each of its tool
 calls: the platform holds whatever happened while the agent worked and replays it from the cursor
 hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
-delivered once whichever of the two reads it. An event is a pointer; a job that completed is
-handed over with its metrics, read once per batch, so that learning of it costs the agent no call.
+delivered once whichever of the two reads it. An event is a pointer; a job that ended is handed
+over with its metrics and the count of the agent's jobs still unfinished, read once per batch, so
+that learning of it costs the agent no call.
 """
 from __future__ import annotations
 
@@ -63,27 +64,39 @@ def _events(stdout: str) -> list[dict]:
     return [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
 
 
-def _completed(event: dict) -> bool:
-    return event.get("kind") == "experiment.status" and event.get("value") == "COMPLETED"
+_UNFINISHED = ("QUEUED", "SUBMITTED", "ADMITTED", "RUNNING")
 
 
-async def _with_metrics(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
-    """events, each COMPLETED job's carrying its declared metrics as detail: one hl call for all
-    of them. An event whose job could not be read stays as it came."""
-    ids = list(dict.fromkeys(e["subject"] for e in events if _completed(e)))
-    if not ids:
+async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
+    """events, completed with what an agent told of an ended job would otherwise read: each
+    COMPLETED job's declared metrics as its event's detail, and one closing event counting the
+    agent's unfinished jobs. Two hl calls per batch; what one could not read is left out."""
+    if not any(e.get("kind") == "experiment.status" for e in events):
         return events
-    _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
-    detail = {job.get("id"): ", ".join(
-        f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
-        for m in job.get("metrics", [])) for job in _events(stdout)}
-    return [dict(e, detail=detail.get(e["subject"], "")) if _completed(e) else e for e in events]
+
+    def completed(e: dict) -> bool:
+        return e.get("kind") == "experiment.status" and e.get("value") == "COMPLETED"
+
+    ids = list(dict.fromkeys(e["subject"] for e in events if completed(e)))
+    detail = {}
+    if ids:
+        _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
+        detail = {job.get("id"): ", ".join(
+            f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
+            for m in job.get("metrics", [])) for job in _events(stdout)}
+    events = [dict(e, detail=detail[e["subject"]]) if completed(e) and e["subject"] in detail else e for e in events]
+    _, stdout = await _run_hl([hl, "job", "stats", "--agent", env["AGENT_ID"]], env, lambda: False)
+    for stats in _events(stdout):
+        counts = stats.get("by_status", {})
+        events.append({"kind": "unfinished_jobs",
+                       "value": ", ".join(f"{counts[s]} {s}" for s in _UNFINISHED if counts.get(s)) or "none"})
+    return events
 
 
 async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict]:
     """The events already waiting on the cursor, without waiting for more."""
     _, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False)
-    return await _with_metrics(_events(stdout), env, command[0])
+    return await _with_job_state(_events(stdout), env, command[0])
 
 
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
@@ -95,7 +108,7 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
         code, stdout = await _run_hl(command, env, stopped)
         events = _events(stdout)
         if events:
-            return await _with_metrics(events, env, command[0])
+            return await _with_job_state(events, env, command[0])
         if code not in (0, None):
             deadline = min(give_up, time.monotonic() + retry_s)
             while not stopped() and time.monotonic() < deadline:
