@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from 'react'
 import useSWR from 'swr'
+import { clsx } from 'clsx'
 import { Link } from '@/components/ui/link'
 import { fetchExperimentsPage, fetchExperimentStats, fetchUnsummarizedJobIDs, cancelExperiment, fetchOrgClusters } from '@/lib/api'
 import type { Experiment } from '@/types'
@@ -13,9 +14,11 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
-import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { ConfirmDialog } from '@/components/ui/dialog'
+import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { SortableTh, Table } from '@/components/ui/table'
+import { Eyebrow } from '@/components/ui/text'
 import { Pagination } from '@/components/ui/pagination'
-import { semantic } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
@@ -24,24 +27,8 @@ import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
-const ELLIPSIS: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
 type SortKey = 'created_at' | 'priority_score' | 'status'
-
-function SortHeader({ label, sortKey, active, dir, onClick, width }: {
-  label: string
-  sortKey: SortKey
-  active: boolean
-  dir: 'asc' | 'desc'
-  onClick: (k: SortKey) => void
-  width: number
-}) {
-  return (
-    <th style={{ width, cursor: 'pointer', userSelect: 'none' }} onClick={() => onClick(sortKey)}>
-      {label} {active ? (dir === 'desc' ? '▼' : '▲') : ''}
-    </th>
-  )
-}
 
 export default function JobsPage() {
   return (
@@ -58,6 +45,8 @@ function JobsPageContent() {
   const [peFilter, setPEFilter] = useQueryParam('platform_experiment_id')
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [cancelling, setCancelling] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState('')
   const [page, setPage] = useState(0)
   const [sortKey, setSortKey] = useState<SortKey>('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -100,15 +89,15 @@ function JobsPageContent() {
     { refreshInterval: 8_000, keepPreviousData: true },
   )
 
-  async function handleCancel(e: React.MouseEvent, id: string) {
-    e.stopPropagation()
-    if (!confirm('Cancel this job?')) return
+  async function handleCancel(id: string) {
+    setConfirming(null)
     setCancelling(id)
+    setCancelError('')
     try {
       await cancelExperiment(id)
       mutate()
     } catch (err: any) {
-      alert('Cancel failed: ' + (err?.message ?? String(err)))
+      setCancelError('Cancel failed: ' + (err?.message ?? String(err)))
     } finally {
       setCancelling(null)
     }
@@ -146,18 +135,18 @@ function JobsPageContent() {
       />
 
       {/* KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
-        <StatTile label="Running" value={running} color={semantic.success} />
-        <StatTile label="Queued / Pending" value={queued} color={semantic.warning} />
-        <StatTile label="Completed" value={completed} color={semantic.accent} />
-        <StatTile label="Evicted" value={evicted} color={semantic.danger} />
+      <div className="mb-4 grid grid-cols-4 gap-2.5">
+        <StatTile label="Running" value={running} tone="success" />
+        <StatTile label="Queued / Pending" value={queued} tone="warning" />
+        <StatTile label="Completed" value={completed} tone="accent" />
+        <StatTile label="Evicted" value={evicted} tone="danger" />
       </div>
 
       {/* Filters */}
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="uppercase-label">Status</span>
-          <div style={{ display: 'flex', gap: 6 }}>
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Eyebrow>Status</Eyebrow>
+          <div className="flex gap-1.5">
             <Chip active={statusFilter === ''} onClick={() => { setStatusFilter(''); setPage(0) }}>All</Chip>
             <Chip active={statusFilter === 'RUNNING'} onClick={() => { setStatusFilter('RUNNING'); setPage(0) }}>Running</Chip>
             <Chip active={statusFilter === 'QUEUED'} onClick={() => { setStatusFilter('QUEUED'); setPage(0) }}>Queued</Chip>
@@ -167,13 +156,13 @@ function JobsPageContent() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="uppercase-label">Agent</span>
+        <div className="flex items-center gap-2">
+          <Eyebrow>Agent</Eyebrow>
           <AgentSelect value={agentFilter} onChange={v => { setAgentFilter(v); setPage(0) }} />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="uppercase-label">Platform Experiment</span>
+        <div className="flex items-center gap-2">
+          <Eyebrow>Platform Experiment</Eyebrow>
           <PlatformExperimentSelect
             value={peFilter}
             onChange={v => { setPEFilter(v); setPage(0) }}
@@ -184,6 +173,7 @@ function JobsPageContent() {
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
+      {cancelError && <ErrorMessage className="mb-4">{cancelError}</ErrorMessage>}
       {clustersError && (
         <ErrorMessage>
           Could not load the clusters of {org.name}, so no job shows whether its cluster is connected: {clustersError.message}
@@ -193,35 +183,35 @@ function JobsPageContent() {
       <Card>
         <CardHeader>
           Job List
-          {total > 0 && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8 }}>({total})</span>}
+          {total > 0 && <span className="ml-2 text-xs font-normal text-muted">({total})</span>}
         </CardHeader>
         <CardContent scrollX>
           {/* Fixed widths for the short columns; experiment and hypothesis share what is left. An
               experiment filter makes the experiment column the same on every row, so it goes. */}
-          <table className="wa-table" style={{ tableLayout: 'fixed', minWidth: 1040 }}>
+          <Table className="min-w-[1040px] table-fixed">
             <thead>
               <tr>
-                <th style={{ width: 84 }}>Job ID</th>
-                <th style={{ width: 150 }}>Agent</th>
+                <th className="w-[84px]">Job ID</th>
+                <th className="w-[150px]">Agent</th>
                 {!peFilter && <th>Experiment</th>}
-                <SortHeader label="Status" sortKey="status" active={sortKey === 'status'} dir={sortDir} onClick={toggleSort} width={140} />
-                <th style={{ width: 130 }}>Accelerator</th>
-                <th style={{ width: 120, textAlign: 'right' }}>Best metric</th>
-                <th style={{ width: 92, textAlign: 'right' }}>Est. Cost</th>
+                <SortableTh className="w-[140px]" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
+                <th className="w-[130px]">Accelerator</th>
+                <th className="w-[120px] text-right">Best metric</th>
+                <th className="w-[92px] text-right">Est. Cost</th>
                 <th title="Under each hypothesis: the settings that differ between this page's jobs of it">Hypothesis · varied settings</th>
-                <SortHeader label="Submitted" sortKey="created_at" active={sortKey === 'created_at'} dir={sortDir} onClick={toggleSort} width={104} />
-                <th style={{ width: 80 }}></th>
+                <SortableTh className="w-[104px]" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
+                <th className="w-20"></th>
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={10}>
-                    <div className="empty-state">
+                    <EmptyState>
                       No jobs found{statusFilter ? ` for status "${statusFilter}"` : ''}
                       {agentFilter ? ` from agent "${agentFilter}"` : ''}
                       {peFilter && <> in <PlatformExperimentName id={peFilter} /></>}.
-                    </div>
+                    </EmptyState>
                   </td>
                 </tr>
               ) : visible.map((job: Experiment) => {
@@ -233,18 +223,18 @@ function JobsPageContent() {
                     key={job.id}
                     tabIndex={0}
                     role="link"
-                    style={{ cursor: 'pointer' }}
+                    className="cursor-pointer"
                     onClick={() => router.push(`/jobs/${job.id}`)}
                     onKeyDown={e => { if (e.key === 'Enter') router.push(`/jobs/${job.id}`) }}
                   >
-                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{job.id.slice(0, 8)}…</td>
-                    <td className="mono" style={ELLIPSIS} title={job.agent_id}>{job.agent_id}</td>
+                    <td className="whitespace-nowrap font-mono text-2xs text-subtle">{job.id.slice(0, 8)}…</td>
+                    <td className="truncate font-mono text-xs" title={job.agent_id}>{job.agent_id}</td>
                     {!peFilter && (
-                      <td className="mono" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>
+                      <td className="font-mono text-2xs [overflow-wrap:anywhere]">
                         {j.platform_experiment_id ? (
                           <Link
                             href={`/platform-experiments/${j.platform_experiment_id}`}
-                            className="text-link"
+                            className="text-accent hover:underline"
                             onClick={e => e.stopPropagation()}
                           >
                             <PlatformExperimentName id={j.platform_experiment_id} />
@@ -254,23 +244,23 @@ function JobsPageContent() {
                     )}
                     <td>
                       <Badge status={status}>{status}</Badge>
-                      {unsummarized?.has(job.id) && <div style={{ marginTop: 3 }}><NoSummary /></div>}
+                      {unsummarized?.has(job.id) && <div className="mt-0.5"><NoSummary /></div>}
                       {status === 'QUEUED' && j.not_admitted_reason && (
-                        <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3 }}>
+                        <div className="mt-0.5 font-mono text-2xs text-muted">
                           {notAdmittedLabel(j.not_admitted_reason)}
                         </div>
                       )}
                       {(j.capacity_tier || j.cluster_name) && (
-                        <div className="text-muted mono" style={{ fontSize: 10, marginTop: 3, whiteSpace: 'nowrap' }}>
+                        <div className="mt-0.5 whitespace-nowrap font-mono text-2xs text-muted">
                           {j.capacity_tier}
                           {j.capacity_tier && j.cluster_name && ' · '}
                           {j.cluster_name && (
                             <>
                               {connectedByCluster.has(j.cluster_name) && (
-                                <span style={{
-                                  width: 6, height: 6, borderRadius: '50%', display: 'inline-block', marginRight: 4,
-                                  background: connectedByCluster.get(j.cluster_name) ? semantic.success : semantic.danger,
-                                }} title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'} />
+                                <span
+                                  className={clsx('mr-1 inline-block h-1.5 w-1.5 rounded-full', connectedByCluster.get(j.cluster_name) ? 'bg-success' : 'bg-danger')}
+                                  title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'}
+                                />
                               )}
                               {j.cluster_name}
                             </>
@@ -278,19 +268,18 @@ function JobsPageContent() {
                         </div>
                       )}
                     </td>
-                    <td className="mono" style={{ ...ELLIPSIS, fontSize: 11 }} title={j.accelerator_type}>
+                    <td className="truncate font-mono text-2xs" title={j.accelerator_type}>
                       {j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}
                     </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
+                    <td className="text-right font-mono text-xs">
                       {j.metric ? j.metric.best.toFixed(4) : '—'}
-                      {j.metric && <div className="text-muted" style={{ ...ELLIPSIS, fontSize: 10, marginTop: 3 }} title={j.metric.name}>{j.metric.name}</div>}
+                      {j.metric && <div className="mt-0.5 truncate text-2xs text-muted" title={j.metric.name}>{j.metric.name}</div>}
                     </td>
-                    <td className="mono" style={{ textAlign: 'right', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    <td className="whitespace-nowrap text-right font-mono text-2xs">
                       {cost != null ? `${cost} AccH` : '—'}
                     </td>
                     <td
-                      className={j.hypothesis_id ? 'accent' : undefined}
-                      style={{ ...ELLIPSIS, fontSize: 12, cursor: j.hypothesis_id ? 'pointer' : undefined }}
+                      className={clsx('truncate text-xs', j.hypothesis_id && 'cursor-pointer text-accent')}
                       title={j.hypothesis}
                       onClick={e => {
                         if (!j.hypothesis_id) return
@@ -299,11 +288,11 @@ function JobsPageContent() {
                       }}
                     >
                       {j.hypothesis}
-                      <div className="mono text-muted" style={{ fontSize: 10, marginTop: 3, whiteSpace: 'normal' }}>
+                      <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
                         {envSettings(j, variedByHypothesis.get(j.hypothesis_id) ?? [])}
                       </div>
                     </td>
-                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                    <td className="whitespace-nowrap font-mono text-2xs text-subtle">
                       {relTime(j.created_at)}
                     </td>
                     <td onClick={e => e.stopPropagation()}>
@@ -312,8 +301,8 @@ function JobsPageContent() {
                           variant="danger"
                           size="sm"
                           disabled={cancelling === job.id}
-                          onClick={e => handleCancel(e, job.id)}
-                          style={{ whiteSpace: 'nowrap' }}
+                          onClick={() => setConfirming(job.id)}
+                          className="whitespace-nowrap"
                         >
                           {cancelling === job.id ? '…' : 'Cancel'}
                         </Button>
@@ -323,10 +312,21 @@ function JobsPageContent() {
                 )
               })}
             </tbody>
-          </table>
+          </Table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title="Cancel this job?"
+        confirmLabel="Cancel job"
+        cancelLabel="Keep job"
+        onConfirm={() => handleCancel(confirming!)}
+        onCancel={() => setConfirming(null)}
+      >
+        The job stops and the compute it holds is released.
+      </ConfirmDialog>
     </div>
   )
 }

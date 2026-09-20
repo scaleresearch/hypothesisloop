@@ -10,18 +10,20 @@ import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/
 import type { MetricDataPoint } from '@/types'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { PageHeader } from '@/components/ui/page-header'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
-import { semantic, agentPalette } from '@/lib/colors'
+import { Table } from '@/components/ui/table'
+import { semantic, agentPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
 import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
 import { graphHref } from '@/lib/hypothesis-graph'
 
-function Row({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: string }) {
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <tr>
-      <td className="text-muted" style={{ width: 180, verticalAlign: 'top', paddingRight: 12, whiteSpace: 'nowrap' }}>{label}</td>
-      <td className="mono" style={highlight ? { color: highlight, fontWeight: 600 } : undefined}>{value ?? '—'}</td>
+      <td className="w-[180px] whitespace-nowrap pr-3 align-top text-xs text-muted">{label}</td>
+      <td className="font-mono text-xs">{value ?? '—'}</td>
     </tr>
   )
 }
@@ -43,9 +45,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   )
   if (error) return (
     <div>
-      <div className="wa-title"><h1>Job Not Found</h1></div>
-      <p className="text-error">Could not load job {id}</p>
-      <Link href="/jobs" className="text-link" style={{ fontSize: 13 }}>← Back to jobs</Link>
+      <PageHeader title="Job Not Found" />
+      <ErrorMessage className="mb-3">Could not load job {id}</ErrorMessage>
+      <Link href="/jobs" className="text-sm text-accent hover:underline">← Back to jobs</Link>
     </div>
   )
 
@@ -90,52 +92,46 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   })
 
   const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
-  const axisColor = 'rgba(255,255,255,.45)'
-  const gridColor = 'rgba(255,255,255,.08)'
 
   return (
     <div>
-      <div className="wa-title" style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="mono text-dim" style={{ fontSize: 14 }}>{j.id}</span>
+      <PageHeader
+        title={
+          <>
+            <span className="font-mono text-base font-normal text-subtle">{j.id}</span>
             <Badge status={j.status ?? 'UNKNOWN'}>{j.status ?? 'UNKNOWN'}</Badge>
             <TierBadge tier={j.capacity_tier} />
-          </h1>
-          <p style={{ fontStyle: 'italic' }}>
+          </>
+        }
+        description={
+          <span className="italic">
             {j.hypothesis}
             {j.hypothesis_id && (
               <>
                 {' '}
-                <Link href={`/hypotheses/${j.hypothesis_id}`} className="text-link" style={{ fontStyle: 'normal', fontSize: 12, whiteSpace: 'nowrap' }}>
+                <Link href={`/hypotheses/${j.hypothesis_id}`} className="whitespace-nowrap text-xs not-italic text-accent hover:underline">
                   View hypothesis →
                 </Link>
                 {' '}
-                <Link href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="text-link" style={{ fontStyle: 'normal', fontSize: 12, whiteSpace: 'nowrap' }}>
+                <Link href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap text-xs not-italic text-accent hover:underline">
                   In graph →
                 </Link>
               </>
             )}
-          </p>
-        </div>
-        <Link href={`/jobs?platform_experiment_id=${j.platform_experiment_id}`} className="text-link" style={{ fontSize: 12, marginBottom: 4, whiteSpace: 'nowrap' }}>
-          ← This experiment&apos;s jobs
-        </Link>
-      </div>
+          </span>
+        }
+        actions={
+          <Link href={`/jobs?platform_experiment_id=${j.platform_experiment_id}`} className="whitespace-nowrap text-xs text-accent hover:underline">
+            ← This experiment&apos;s jobs
+          </Link>
+        }
+      />
 
       {/* Eviction alert */}
       {j.status === 'EVICTED' && evictionText && (
-        <div
-          style={{
-            background: 'rgba(166,152,255,.08)',
-            border: '1px solid rgba(166,152,255,.35)',
-            borderRadius: 8,
-            padding: '10px 14px',
-            marginBottom: 14,
-          }}
-        >
-          <strong style={{ color: semantic.accent }}>Evicted:</strong>{' '}
-          <span style={{ color: semantic.accent, fontSize: 13 }}>{evictionText}</span>
+        <div className="mb-3.5 rounded border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-sm text-accent">
+          <strong>Evicted:</strong>{' '}
+          <span>{evictionText}</span>
         </div>
       )}
 
@@ -144,28 +140,20 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           container that died. For a failed job this is the difference between "it broke" and
           knowing what broke. */}
       {j.phase_detail && (j.phase_detail.reason || j.phase_detail.message) && (
-        <div
-          style={{
-            background: 'rgba(255,153,153,.07)',
-            border: '1px solid rgba(255,153,153,.3)',
-            borderRadius: 8,
-            padding: '10px 14px',
-            marginBottom: 14,
-          }}
-        >
-          <strong style={{ color: semantic.danger }}>Runtime:</strong>{' '}
+        <div className="mb-3.5 rounded border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-sm">
+          <strong className="text-danger">Runtime:</strong>{' '}
           {j.phase_detail.reason && (
-            <span className="mono" style={{ color: semantic.danger, fontSize: 13 }}>
+            <span className="font-mono text-danger">
               {j.phase_detail.reason}
             </span>
           )}
           {j.phase_detail.message && (
-            <span className="text-muted" style={{ marginLeft: 8, fontSize: 13 }}>
+            <span className="ml-2 text-muted">
               {j.phase_detail.message}
             </span>
           )}
           {j.phase_detail.restart_count ? (
-            <span className="mono text-muted" style={{ marginLeft: 12, fontSize: 12 }}>
+            <span className="ml-3 font-mono text-xs text-muted">
               restarts: {j.phase_detail.restart_count}
             </span>
           ) : null}
@@ -174,51 +162,43 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {/* A queued job never errors on its own; this is the scheduler's current reason. */}
       {j.status === 'QUEUED' && j.not_admitted_reason && (
-        <div
-          style={{
-            background: 'rgba(166,152,255,.06)',
-            border: '1px solid rgba(166,152,255,.25)',
-            borderRadius: 8,
-            padding: '10px 14px',
-            marginBottom: 14,
-          }}
-        >
-          <strong style={{ color: semantic.accent }}>Not admitted:</strong>{' '}
-          <span className="mono text-muted" style={{ fontSize: 12 }}>{notAdmittedLabel(j.not_admitted_reason)}</span>
+        <div className="mb-3.5 rounded border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-sm">
+          <strong className="text-accent">Not admitted:</strong>{' '}
+          <span className="font-mono text-xs text-muted">{notAdmittedLabel(j.not_admitted_reason)}</span>
         </div>
       )}
 
       {(j.metrics || j.summary || j.status === 'COMPLETED') && (
-        <Card style={{ marginBottom: 12 }}>
+        <Card>
           <CardHeader>Result</CardHeader>
           <CardContent>
             {(j.metrics ?? []).map(m => (
-              <div key={m.name} className="mono" style={{ marginBottom: 10 }}>
-                <span style={m.name === primaryMetricName ? { fontSize: 22, fontWeight: 700, color: semantic.success } : { fontSize: 15, fontWeight: 600 }}>
+              <div key={m.name} className="mb-2.5 font-mono">
+                <span className={m.name === primaryMetricName ? 'text-2xl font-bold text-success' : 'text-lg font-semibold'}>
                   {m.best.toFixed(4)}
                 </span>
-                <span className="text-muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                <span className="ml-2 text-xs text-muted">
                   best {m.name} · last {m.last.toFixed(4)}{m.basis !== 'raw' && ` · basis ${m.basis}`}
                 </span>
               </div>
             ))}
-            {j.summary && <p style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxWidth: 900 }}>{j.summary}</p>}
+            {j.summary && <p className="max-w-[900px] whitespace-pre-wrap text-sm leading-[1.6]">{j.summary}</p>}
             {!j.summary && j.status === 'COMPLETED' && (
-              <p style={{ fontSize: 13, color: semantic.warning }}>No summary: the agent did not write up what this job found.</p>
+              <p className="text-sm text-warning">No summary: the agent did not write up what this job found.</p>
             )}
           </CardContent>
         </Card>
       )}
 
       {/* Job metadata */}
-      <Card style={{ marginBottom: 12 }}>
+      <Card>
         <CardHeader>Job Details</CardHeader>
         <CardContent>
-          <table className="wa-table">
+          <Table>
             <tbody>
               <Row label="Agent" value={j.agent_id} />
               <Row label="Platform Experiment" value={
-                <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-link"><PlatformExperimentName id={j.platform_experiment_id} /></Link>
+                <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-accent hover:underline"><PlatformExperimentName id={j.platform_experiment_id} /></Link>
               } />
               <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
@@ -238,24 +218,24 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               {j.theory && <Row label="Rationale" value={j.theory} />}
               {j.job?.env && Object.keys(j.job.env).length > 0 && (
                 <Row label="Environment" value={
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
                     {Object.entries(j.job.env).sort().map(([k, v]) => <span key={k}>{k}={v}</span>)}
                   </div>
                 } />
               )}
             </tbody>
-          </table>
+          </Table>
         </CardContent>
       </Card>
 
       {/* Metric trajectories — one chart per reported metric, the ranking metric first */}
-      <Card style={{ marginBottom: 12 }}>
+      <Card>
         <CardHeader>Metric Trajectories</CardHeader>
         <CardContent>
           {metricsError ? (
             <ErrorMessage>Could not read this job&apos;s metrics.</ErrorMessage>
           ) : metricNames.length > 0 ? (
-            <div style={{ display: 'grid', gridTemplateColumns: metricNames.length > 1 ? '1fr 1fr' : '1fr', gap: 16 }}>
+            <div className={metricNames.length > 1 ? 'grid grid-cols-2 gap-4' : 'grid gap-4'}>
               {metricNames.map((name, i) => {
                 const bases = Array.from(basesByMetric.get(name) ?? [])
                 const nonRaw = bases.filter(b => b !== 'raw')
@@ -267,16 +247,12 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 const showDots = points.length < 2
                 return (
                 <div key={name}>
-                  <div className="mono text-muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                  <div className="mb-1 font-mono text-2xs text-muted">
                     {name}{name === primaryMetricName ? ' (ranking metric)' : ''}
                     {nonRaw.length > 0 && (
                       <span
-                        className="mono"
+                        className="ml-2 rounded-sm border border-danger bg-danger/10 px-1.5 py-px font-mono text-2xs text-danger"
                         title="One or more values on this chart are not on the metric's normal ('raw') scale — do not compare them to a raw-basis run."
-                        style={{
-                          marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4,
-                          background: 'rgba(255,153,153,.12)', border: `1px solid ${semantic.danger}`, color: semantic.danger,
-                        }}
                       >
                         basis: {bases.join(', ')}
                       </span>
@@ -284,27 +260,27 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                   </div>
                   <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
                     <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 14 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
                       <XAxis
                         dataKey="frac"
                         type="number"
                         domain={[0, 100]}
                         tickFormatter={(v) => `${v}%`}
-                        tick={{ fontSize: 11, fill: axisColor }}
-                        stroke={gridColor}
-                        label={{ value: 'Training progress', position: 'insideBottom', offset: -2, fontSize: 11, fill: axisColor }}
+                        tick={chart.tick}
+                        stroke={chart.grid}
+                        label={{ value: 'Training progress', position: 'insideBottom', offset: -2, ...chart.tick }}
                       />
-                      <YAxis domain={['auto', 'auto']} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} />
+                      <YAxis domain={['auto', 'auto']} tick={chart.tick} stroke={chart.grid} />
                       <Tooltip
                         formatter={(v: number) => v.toFixed(4)}
                         labelFormatter={(l) => `${l}% complete`}
-                        contentStyle={{ background: 'var(--surface-raised)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 8, fontSize: 12 }}
-                        labelStyle={{ color: 'var(--foreground)' }}
+                        contentStyle={chart.tooltip.contentStyle}
+                        labelStyle={chart.tooltip.labelStyle}
                       />
                       <Line
                         dataKey="value"
                         name={name}
-                        stroke={name === primaryMetricName ? semantic.accentStrong : agentPalette[i % agentPalette.length]}
+                        stroke={name === primaryMetricName ? semantic.primary : agentPalette[i % agentPalette.length]}
                         dot={showDots ? { r: 3 } : false}
                         strokeWidth={2}
                         type="monotone"
@@ -322,17 +298,17 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {/* Lineage */}
       {(j.job?.image || j.code_ref || j.config_hash || j.data_ref) && (
-        <Card style={{ marginBottom: 12 }}>
+        <Card>
           <CardHeader>Lineage &amp; Reproducibility</CardHeader>
           <CardContent>
-            <table className="wa-table">
+            <Table>
               <tbody>
                 {j.job?.image && <Row label="Image" value={j.job.image} />}
                 {j.code_ref && <Row label="Code ref (git SHA)" value={j.code_ref} />}
                 {j.config_hash && <Row label="Config hash (sha256)" value={j.config_hash} />}
                 {j.data_ref && <Row label="Data ref" value={j.data_ref} />}
               </tbody>
-            </table>
+            </Table>
           </CardContent>
         </Card>
       )}
@@ -342,8 +318,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         <Card>
           <CardHeader>Derived From</CardHeader>
           <CardContent>
-            <p style={{ fontSize: 12 }}>
-              Parent job: <Link href={`/jobs/${j.parent_id}`} className="text-link mono">{j.parent_id}</Link>
+            <p className="text-xs">
+              Parent job: <Link href={`/jobs/${j.parent_id}`} className="font-mono text-accent hover:underline">{j.parent_id}</Link>
             </p>
           </CardContent>
         </Card>
@@ -352,19 +328,13 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       {/* The job's own output. For a failed job the traceback usually lives only here — the
           record carries a reason code, not the error. Includes the crashed instance's output
           when a container restarted, which is otherwise unreachable. */}
-      <Card style={{ marginBottom: 12 }}>
+      <Card>
         <CardHeader>Logs</CardHeader>
         <CardContent>
           {logsError ? (
             <ErrorMessage>Could not read this job&apos;s log tail.</ErrorMessage>
           ) : logs && logs.length > 0 ? (
-            <pre
-              className="mono"
-              style={{
-                margin: 0, fontSize: 12, lineHeight: 1.5, maxHeight: 420,
-                overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}
-            >
+            <pre className="m-0 max-h-[420px] overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
               {logs.join('\n')}
             </pre>
           ) : (

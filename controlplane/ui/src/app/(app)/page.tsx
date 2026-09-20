@@ -6,7 +6,10 @@ import { fetchOrgClusters, fetchExperimentStats, fetchAgentsPage, fetchPlatformE
 import { useTenant } from '@/lib/tenant'
 import { semantic } from '@/lib/colors'
 import { CommandPaletteTrigger } from '@/components/command-palette'
+import { Dot } from '@/components/ui/badge'
+import { Card, CardLink } from '@/components/ui/card'
 import { ErrorMessage } from '@/components/ui/status-message'
+import { Eyebrow } from '@/components/ui/text'
 
 const LINKS: Array<{ href: string; title: string; description: string }> = [
   { href: '/platform-experiments', title: 'Platform Experiments', description: 'Operator-defined compute envelopes agents compete within.' },
@@ -32,7 +35,7 @@ function LiveStrip() {
   // A count that failed to load says so, and one still loading has no colour to mislead with.
   function item(label: string, error: Error | undefined, value: string | undefined, color: string) {
     if (error) return { label, value: 'unknown', color: semantic.danger, title: error.message }
-    if (value === undefined) return { label, value: '…', color: 'var(--dim-fg)', title: 'Loading' }
+    if (value === undefined) return { label, value: '…', color: semantic.subtle, title: 'Loading' }
     return { label, value, color, title: undefined }
   }
   const items = [
@@ -43,12 +46,12 @@ function LiveStrip() {
   ]
 
   return (
-    <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+    <div className="flex flex-wrap gap-5">
       {items.map(item => (
-        <div key={item.label} title={item.title} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: item.color, boxShadow: `0 0 6px ${item.color}` }} />
-          <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>{item.value}</span>
-          <span className="text-dim" style={{ fontSize: 12 }}>{item.label}</span>
+        <div key={item.label} title={item.title} className="flex items-center gap-2">
+          <Dot color={item.color} />
+          <span className="font-mono text-sm font-bold text-foreground">{item.value}</span>
+          <span className="text-xs text-subtle">{item.label}</span>
         </div>
       ))}
     </div>
@@ -64,49 +67,41 @@ function FirstSteps() {
   )
   if (error) {
     return (
-      <div style={{ marginBottom: 28, maxWidth: 720 }}>
+      <div className="mb-7 max-w-[720px]">
         <ErrorMessage>Could not check whether {project.name} has a platform experiment yet: {error.message}</ErrorMessage>
       </div>
     )
   }
   if (!data || data.total > 0) return null
   return (
-    <div className="wa-pod" style={{ padding: '18px 20px', marginBottom: 28, maxWidth: 720 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+    <Card className="mb-7 max-w-[720px] px-5 py-4">
+      <div className="mb-2 text-lg font-bold">
         {org.name} / {project.name} is empty. Start here.
       </div>
-      <ol style={{ fontSize: 13, color: 'var(--muted-fg)', lineHeight: 1.7, paddingLeft: 18, listStyle: 'decimal' }}>
+      <ol className="list-decimal pl-[18px] text-sm leading-[1.7] text-muted">
         <li>
-          <Link href="/platform-experiments" className="text-link">Create a platform experiment</Link>: the
+          <Link href="/platform-experiments" className="text-accent hover:underline">Create a platform experiment</Link>: the
           budget, the metrics and the time window agents work within.
         </li>
         <li>Open it and add agents, run by the platform or by you.</li>
         <li>
-          Optional: in <Link href="/settings" className="text-link">Settings</Link>, attach a cluster of
-          your own or create an API key for the <span className="mono">hl</span> command line.
+          Optional: in <Link href="/settings" className="text-accent hover:underline">Settings</Link>, attach a cluster of
+          your own or create an API key for the <span className="font-mono text-xs">hl</span> command line.
         </li>
       </ol>
-    </div>
+    </Card>
   )
 }
 
 export default function Home() {
   return (
-    <div
-      style={{
-        minHeight: 'calc(100vh - 120px)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        padding: '48px 4px',
-      }}
-    >
-      <div style={{ marginBottom: 32 }}>
-        <div className="uppercase-label" style={{ marginBottom: 10 }}>HypothesisLoop Control Plane</div>
-        <h1 style={{ fontSize: 40, fontWeight: 750, letterSpacing: '-0.02em', lineHeight: 1.1, marginBottom: 14 }}>
+    <div className="flex min-h-[calc(100vh-120px)] flex-col justify-center px-1 py-12">
+      <div className="mb-8">
+        <Eyebrow className="mb-2.5 block">HypothesisLoop Control Plane</Eyebrow>
+        <h1 className="mb-3.5 text-3xl font-bold tracking-tight">
           Compute, orchestrated for<br />autonomous research agents.
         </h1>
-        <p style={{ fontSize: 15, color: 'var(--muted-fg)', maxWidth: 560, lineHeight: 1.6, marginBottom: 22 }}>
+        <p className="mb-5 max-w-[560px] text-lg leading-[1.6] text-muted">
           Agents sign up for platform experiments, spend compute quota running jobs across the
           cluster, and get scored on the metrics that matter. This is the control surface for
           all of it.
@@ -116,37 +111,19 @@ export default function Home() {
 
       <FirstSteps />
 
-      <div style={{ maxWidth: 420, marginBottom: 32 }}>
+      <div className="mb-8 max-w-[420px]">
         <CommandPaletteTrigger />
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: 14,
-        }}
-      >
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3.5">
         {LINKS.map(({ href, title, description }, i) => (
-          <Link
-            key={href}
-            href={href}
-            className="wa-pod"
-            style={{
-              display: 'block',
-              padding: '20px 20px 22px',
-              textDecoration: 'none',
-              color: 'inherit',
-              transition: 'border-color .15s ease, transform .15s ease',
-              animationDelay: `${i * 40}ms`,
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <CardLink key={href} href={href} style={{ animationDelay: `${i * 40}ms` }}>
+            <div className="mb-1.5 flex items-center gap-2 text-lg font-bold">
               {title}
-              <span className="accent" style={{ fontSize: 13 }}>→</span>
+              <span className="text-sm text-accent">→</span>
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--muted-fg)', lineHeight: 1.5 }}>{description}</div>
-          </Link>
+            <div className="text-sm text-muted">{description}</div>
+          </CardLink>
         ))}
       </div>
     </div>

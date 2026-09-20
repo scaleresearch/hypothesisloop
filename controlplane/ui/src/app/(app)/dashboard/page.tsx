@@ -9,12 +9,13 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
-import { Badge } from '@/components/ui/badge'
+import { Badge, Dot } from '@/components/ui/badge'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Table } from '@/components/ui/table'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import { statusColor, semantic } from '@/lib/colors'
+import { chart, statusColor } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetail, faultBreakdown } from '@/lib/eviction'
 import { acceleratorLabel } from '@/lib/format'
 
@@ -26,13 +27,10 @@ const RECENT_EVICTIONS = 10
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
   return (
-    <div style={{
-      background: 'var(--surface-raised)', border: '1px solid var(--border-dark)', borderRadius: 8,
-      padding: '6px 10px', fontSize: 12, boxShadow: 'var(--shadow-md)',
-    }}>
-      {label && <div style={{ color: 'var(--muted-fg)', marginBottom: 2 }}>{label}</div>}
+    <div className="rounded border border-border-strong bg-surface-raised px-2.5 py-1.5 text-xs shadow-md">
+      {label && <div className="mb-0.5 text-muted">{label}</div>}
       {payload.map((p: any, i: number) => (
-        <div key={i} className="mono" style={{ color: p.color ?? p.fill }}>{p.name}: {p.value}</div>
+        <div key={i} className="font-mono" style={{ color: p.color ?? p.fill }}>{p.name}: {p.value}</div>
       ))}
     </div>
   )
@@ -75,53 +73,53 @@ function SchedulerQuality() {
     <Card>
       <CardHeader>Scheduler Quality · every org · staff only</CardHeader>
       <CardContent>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+        <div className="mb-4 grid grid-cols-3 gap-2.5">
           <StatTile label="Total Jobs" value={total} />
           <StatTile
             label="Clusters"
             value={`${connectedCount}/${clusterList.length}`}
-            color={connectedCount === clusterList.length && clusterList.length > 0 ? semantic.success : semantic.danger}
+            tone={connectedCount === clusterList.length && clusterList.length > 0 ? 'success' : 'danger'}
             sub="connected / registered"
           />
           <StatTile
             label="Accelerator Occupancy"
             value={occupancyPct != null ? `${occupancyPct}%` : '—'}
-            color={semantic.accent}
+            tone="accent"
             sub={acceleratorTotal > 0 ? `${acceleratorBusy}/${acceleratorTotal} chips busy, live across connected clusters` : 'no live capacity reported'}
           />
         </div>
-        <table className="wa-table" style={{ maxWidth: 640 }}>
+        <Table className="max-w-[640px]">
           <thead>
             <tr><th>Metric</th><th>Definition</th><th>Value</th></tr>
           </thead>
           <tbody>
             <tr>
               <td>Completion rate</td>
-              <td className="text-muted" style={{ fontSize: 12 }}>Completed ÷ (completed + failed + evicted)</td>
-              <td className="mono">{rate != null ? `${rate}%` : 'n/a'}</td>
+              <td className="text-xs text-muted">Completed ÷ (completed + failed + evicted)</td>
+              <td className="font-mono text-xs">{rate != null ? `${rate}%` : 'n/a'}</td>
             </tr>
             <tr>
               <td>Early-stop rate</td>
-              <td className="text-muted" style={{ fontSize: 12 }}>Evicted ÷ (completed + evicted)</td>
-              <td className="mono">{completed + evicted > 0 ? `${Math.round(evicted / (completed + evicted) * 100)}%` : 'n/a'}</td>
+              <td className="text-xs text-muted">Evicted ÷ (completed + evicted)</td>
+              <td className="font-mono text-xs">{completed + evicted > 0 ? `${Math.round(evicted / (completed + evicted) * 100)}%` : 'n/a'}</td>
             </tr>
             <tr>
               <td>Clusters connected</td>
-              <td className="text-muted" style={{ fontSize: 12 }}>Registered clusters with a live cluster-agent heartbeat</td>
-              <td className="mono">{clusterList.length > 0 ? `${connectedCount}/${clusterList.length}` : 'n/a'}</td>
+              <td className="text-xs text-muted">Registered clusters with a live cluster-agent heartbeat</td>
+              <td className="font-mono text-xs">{clusterList.length > 0 ? `${connectedCount}/${clusterList.length}` : 'n/a'}</td>
             </tr>
             <tr>
               <td>Crash rate</td>
-              <td className="text-muted" style={{ fontSize: 12 }}>Failed jobs ÷ total</td>
-              <td className="mono">{total > 0 ? `${Math.round(failed / total * 100)}%` : 'n/a'}</td>
+              <td className="text-xs text-muted">Failed jobs ÷ total</td>
+              <td className="font-mono text-xs">{total > 0 ? `${Math.round(failed / total * 100)}%` : 'n/a'}</td>
             </tr>
             <tr>
               <td>Burst eviction rate</td>
-              <td className="text-muted" style={{ fontSize: 12 }}>Burst evictions ÷ total burst jobs</td>
-              <td className="mono">{burstTotal > 0 ? `${Math.round(burstEvicted / burstTotal * 100)}%` : 'n/a'}</td>
+              <td className="text-xs text-muted">Burst evictions ÷ total burst jobs</td>
+              <td className="font-mono text-xs">{burstTotal > 0 ? `${Math.round(burstEvicted / burstTotal * 100)}%` : 'n/a'}</td>
             </tr>
           </tbody>
-        </table>
+        </Table>
       </CardContent>
     </Card>
   )
@@ -185,17 +183,17 @@ export default function DashboardPage() {
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
 
       {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+      <div className="mb-4 grid grid-cols-3 gap-2.5">
         <StatTile label="Total Jobs" value={total} />
-        <StatTile label="Running" value={running} color={semantic.success} />
-        <StatTile label="Pending" value={pending} color={semantic.warning} sub="submitted + queued + admitted" />
+        <StatTile label="Running" value={running} tone="success" />
+        <StatTile label="Pending" value={pending} tone="warning" sub="submitted + queued + admitted" />
         <StatTile label="Completion Rate" value={rate != null ? `${rate}%` : '—'} sub="completed of all terminal jobs" />
-        <StatTile label="Completed" value={completed} color={semantic.accent} />
-        <StatTile label="Evicted" value={evicted} color={semantic.pink} />
-        <StatTile label="Failed" value={failed} color={semantic.danger} />
+        <StatTile label="Completed" value={completed} tone="accent" />
+        <StatTile label="Evicted" value={evicted} tone="purple" />
+        <StatTile label="Failed" value={failed} tone="danger" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
+      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
         {/* Job status breakdown as donut chart */}
         <Card>
           <CardHeader>Job Status Breakdown</CardHeader>
@@ -203,8 +201,8 @@ export default function DashboardPage() {
             {total === 0 ? (
               <EmptyState>No jobs yet.</EmptyState>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 140, height: 140, flexShrink: 0 }}>
+              <div className="flex items-center gap-3">
+                <div className="h-[140px] w-[140px] flex-none">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -224,19 +222,19 @@ export default function DashboardPage() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 0 }}>
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   {statusBreakdown.map(([s, n]) => (
                     <div
                       key={s}
                       tabIndex={0}
                       role="link"
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                      className="flex cursor-pointer items-center gap-2"
                       onClick={() => router.push(`/jobs`)}
                       onKeyDown={e => { if (e.key === 'Enter') router.push('/jobs') }}
                     >
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(s), flexShrink: 0 }} />
-                      <Badge status={s} style={{ flexShrink: 0 }}>{s}</Badge>
-                      <span className="mono text-muted" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                      <Dot color={statusColor(s)} />
+                      <Badge status={s} className="flex-none">{s}</Badge>
+                      <span className="ml-auto font-mono text-2xs text-muted">
                         {n} · {Math.round(n / total * 100)}%
                       </span>
                     </div>
@@ -251,25 +249,25 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>Jobs by Capacity Tier</CardHeader>
           <CardContent>
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr><th>Tier</th><th>Running</th><th>Total</th><th>Evicted</th></tr>
               </thead>
               <tbody>
                 <tr>
                   <td><Badge status="guaranteed">Guaranteed</Badge></td>
-                  <td className="mono">{tierRunning.guaranteed ?? 0}</td>
-                  <td className="mono">{tierTotal.guaranteed ?? 0}</td>
-                  <td className="mono">{tierEvicted.guaranteed ?? 0}</td>
+                  <td className="font-mono text-xs">{tierRunning.guaranteed ?? 0}</td>
+                  <td className="font-mono text-xs">{tierTotal.guaranteed ?? 0}</td>
+                  <td className="font-mono text-xs">{tierEvicted.guaranteed ?? 0}</td>
                 </tr>
                 <tr>
                   <td><Badge status="burst">Burst</Badge></td>
-                  <td className="mono">{tierRunning.burst ?? 0}</td>
-                  <td className="mono">{tierTotal.burst ?? 0}</td>
-                  <td className="mono">{tierEvicted.burst ?? 0}</td>
+                  <td className="font-mono text-xs">{tierRunning.burst ?? 0}</td>
+                  <td className="font-mono text-xs">{tierTotal.burst ?? 0}</td>
+                  <td className="font-mono text-xs">{tierEvicted.burst ?? 0}</td>
                 </tr>
               </tbody>
-            </table>
+            </Table>
           </CardContent>
         </Card>
 
@@ -278,27 +276,27 @@ export default function DashboardPage() {
           <CardHeader>Eviction Reasons</CardHeader>
           <CardContent>
             {faultSummary && (
-              <div style={{ color: 'var(--muted-fg)', fontSize: 11, marginBottom: 8 }}>{faultSummary}</div>
+              <div className="mb-2 text-2xs text-muted">{faultSummary}</div>
             )}
             {evictionChartData.length === 0 ? (
               <EmptyState>No evictions recorded.</EmptyState>
             ) : (
-              <div style={{ width: '100%', height: evictionChartData.length * 30 + 30 }}>
+              <div className="w-full" style={{ height: evictionChartData.length * 30 + 30 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={evictionChartData} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 4 }}>
-                    <CartesianGrid stroke="var(--border)" horizontal={false} />
-                    <XAxis type="number" tick={{ fill: 'var(--muted-fg)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <CartesianGrid stroke={chart.grid} horizontal={false} />
+                    <XAxis type="number" tick={chart.tick} axisLine={false} tickLine={false} allowDecimals={false} />
                     <YAxis
                       type="category"
                       dataKey="reason"
                       width={170}
                       interval={0}
-                      tick={{ fill: 'var(--muted-fg)', fontSize: 10 }}
+                      tick={chart.tick}
                       axisLine={false}
                       tickLine={false}
                     />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                    <Bar dataKey="count" fill={semantic.pink} radius={[0, 4, 4, 0]} barSize={14} />
+                    <Tooltip content={<ChartTooltip />} cursor={chart.tooltip.cursor} />
+                    <Bar dataKey="count" fill={statusColor('EVICTED')} radius={[0, 4, 4, 0]} barSize={14} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -312,7 +310,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>Recent Evictions — Audit Log</CardHeader>
           <CardContent scrollX>
-            <table className="wa-table">
+            <Table>
               <thead>
                 <tr>
                   <th>Job ID</th>
@@ -329,25 +327,25 @@ export default function DashboardPage() {
                     key={e.id}
                     tabIndex={0}
                     role="link"
-                    style={{ cursor: 'pointer' }}
+                    className="cursor-pointer"
                     onClick={() => router.push(`/jobs/${e.id}`)}
                     onKeyDown={ev => { if (ev.key === 'Enter') router.push(`/jobs/${e.id}`) }}
                   >
-                    <td className="mono text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.id.slice(0, 8)}…</td>
-                    <td className="mono" style={{ whiteSpace: 'nowrap' }}>{e.agent_id}</td>
-                    <td className="text-link" style={{ fontSize: 12 }}>
+                    <td className="whitespace-nowrap font-mono text-2xs text-subtle">{e.id.slice(0, 8)}…</td>
+                    <td className="whitespace-nowrap font-mono text-xs">{e.agent_id}</td>
+                    <td className="text-xs text-accent">
                       <PlatformExperimentName id={e.platform_experiment_id} />
                     </td>
-                    <td style={{ fontSize: 12 }}>
+                    <td className="text-xs">
                       <Badge status="evicted">{evictionCodeLabel(evictionCode(e.eviction_reason))}</Badge>
-                      <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>{evictionDetail(e.eviction_reason)}</div>
+                      <div className="mt-0.5 text-2xs text-subtle">{evictionDetail(e.eviction_reason)}</div>
                     </td>
-                    <td className="mono" style={{ fontSize: 11 }}>{e.accelerator_count}× {acceleratorLabel(e.accelerator_type)}</td>
+                    <td className="font-mono text-2xs">{e.accelerator_count}× {acceleratorLabel(e.accelerator_type)}</td>
                     <td><Badge status={e.capacity_tier ?? 'unknown'}>{e.capacity_tier ?? '—'}</Badge></td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </CardContent>
         </Card>
       )}
