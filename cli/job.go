@@ -72,7 +72,9 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	if err != nil {
 		return parseExit(err)
 	}
-	*agent = orEnv(*agent, agentEnv)
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
 	if *agent == "" {
 		return parseExit(misuse(fs, "--agent is required"))
 	}

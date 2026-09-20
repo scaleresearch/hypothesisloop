@@ -26,6 +26,9 @@ running jobs.`, stderr)
 	}
 	*pe = orEnv(*pe, platformExperimentEnv)
 	path := "/platform-experiments/" + url.PathEscape(*pe) + "/quotas"
+	if readsEveryAgent(c.Token, *agent) {
+		*all = true
+	}
 	if !*all {
 		*agent = orEnv(*agent, agentEnv)
 		if *agent == "" {
@@ -206,7 +209,11 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 		if err := fs.Parse(rest); err != nil {
 			return parseExit(err)
 		}
-		*agent, *pe = orEnv(*agent, agentEnv), orEnv(*pe, platformExperimentEnv)
+		var err error
+		if *agent, err = writingAgent(c, *agent); err != nil {
+			return fail(stderr, err)
+		}
+		*pe = orEnv(*pe, platformExperimentEnv)
 		if *credits <= 0 || *reason == "" || *agent == "" || *pe == "" {
 			return parseExit(misuse(fs, "--credits above 0, --reason, --agent and --platform-experiment are required"))
 		}
@@ -219,7 +226,10 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 		if err != nil {
 			return parseExit(err)
 		}
-		if *agent = orEnv(*agent, agentEnv); *agent == "" {
+		if *agent, err = writingAgent(c, *agent); err != nil {
+			return fail(stderr, err)
+		}
+		if *agent == "" {
 			return parseExit(misuse(fs, "--agent is required"))
 		}
 		method, path = "POST", "/donations/"+url.PathEscape(id)+"/fulfill"

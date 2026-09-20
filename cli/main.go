@@ -130,7 +130,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   register              --id ID --kind agent|human
-  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | agents add|remove|list
+  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -499,7 +499,10 @@ where your jobs write. The same key every time; it does not expire. Any S3 clien
 		return parseExit(err)
 	}
 	*pe = orEnv(*pe, platformExperimentEnv)
-	*agent = orEnv(*agent, agentEnv)
+	var err error
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
 	if *pe == "" || *agent == "" || fs.NArg() > 0 {
 		return parseExit(misuse(fs, "--platform-experiment and --agent are required, and nothing else"))
 	}
@@ -537,6 +540,10 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsCreate(c, args[1:], stdout, stderr)
 		case "start":
 			return cmdPlatformExperimentsStart(c, args[1:], stdout, stderr)
+		case "close":
+			return cmdPlatformExperimentsClose(c, args[1:], stdout, stderr)
+		case "summary":
+			return cmdPlatformExperimentsSummary(c, args[1:], stdout, stderr)
 		case "update":
 			return cmdPlatformExperimentsUpdate(c, args[1:], stdout, stderr)
 		case "get":
@@ -547,7 +554,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] | get [PE] | create [FILE] | start PE | update PE [FILE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	if len(args) > 0 && args[0] == "list" {
@@ -727,6 +734,64 @@ func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, std
 	return 0
 }
 
+func cmdPlatformExperimentsClose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [PE]
+
+Ends the platform experiment (default $PLATFORM_EXPERIMENT_ID) for good: every job still running
+is evicted, nothing more is accepted, and the standings are taken from the metrics reported. Its
+summary can still be written afterwards.`, stderr)
+	id, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id")
+	if err != nil {
+		return parseExit(err)
+	}
+	var out any
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/close", map[string]any{}, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
+}
+
+func cmdPlatformExperimentsSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments summary", `usage: hl platform-experiments summary [PE] --text T | --file FILE|-
+
+Writes the summary of the platform experiment (default $PLATFORM_EXPERIMENT_ID): what the run
+found and what the next one should do differently. Each write replaces the one before, so write
+the whole text; hl platform-experiments get shows it as summary. It can be written while the
+experiment runs and after it closed.`, stderr)
+	text := fs.String("text", "", "the summary")
+	file := fs.String("file", "", "read the summary from this file, - for stdin")
+	id, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id")
+	if err != nil {
+		return parseExit(err)
+	}
+	if (*text == "") == (*file == "") {
+		return parseExit(misuse(fs, "one of --text and --file is required"))
+	}
+	if *file != "" {
+		var raw []byte
+		if *file == "-" {
+			raw, err = io.ReadAll(os.Stdin)
+		} else {
+			raw, err = os.ReadFile(*file)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "hl: %s\n", err)
+			return 2
+		}
+		*text = string(raw)
+	}
+	if strings.TrimSpace(*text) == "" {
+		return parseExit(misuse(fs, "the summary is empty"))
+	}
+	var out any
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": *text}, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
+}
+
 func readYAMLBody(path string) (map[string]any, error) {
 	var raw []byte
 	var err error
@@ -843,6 +908,9 @@ agent's own resources, resuming from where its last watch stopped. --all resumes
 
 	if *experiment == "" {
 		*platformExperiment = orEnv(*platformExperiment, platformExperimentEnv)
+		if readsEveryAgent(token, *agent) {
+			*all = true
+		}
 		if !*all {
 			*agent = orEnv(*agent, agentEnv)
 		}

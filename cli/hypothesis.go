@@ -124,8 +124,12 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		}
 	}
 
+	writer, err := writingAgent(c, *agent)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
-		"agent_id": orEnv(*agent, agentEnv), "platform_experiment_id": orEnv(*pe, platformExperimentEnv), "text": *text,
+		"agent_id": writer, "platform_experiment_id": orEnv(*pe, platformExperimentEnv), "text": *text,
 	})
 	if err != nil {
 		return parseExit(misuse(fs, "%s", err))
@@ -395,7 +399,9 @@ the updated outgoing links.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	*agent = orEnv(*agent, agentEnv)
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
 	if *agent == "" || *typ == "" || *to == "" {
 		return parseExit(misuse(fs, "--agent, --type and --to are required"))
 	}
@@ -423,7 +429,9 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 	if err != nil {
 		return parseExit(err)
 	}
-	*agent = orEnv(*agent, agentEnv)
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
 	if *agent == "" || *text == "" {
 		return parseExit(misuse(fs, "--agent and --text are required"))
 	}
@@ -450,7 +458,9 @@ Sets the verdict on your own hypothesis, or on a human-submitted one. --status V
 	if len(operands) == 2 && *status == "" {
 		*status, operands = operands[1], operands[:1]
 	}
-	*agent = orEnv(*agent, agentEnv)
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
 	if len(operands) != 1 || *agent == "" || *status == "" {
 		return parseExit(misuse(fs, "want ID and a verdict, with --agent or $AGENT_ID set"))
 	}
