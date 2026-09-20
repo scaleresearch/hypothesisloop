@@ -394,12 +394,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Set a cluster's autoscaler-speculation overrides", Tags: []string{"clusters"},
 		Description: "scale_up_timeout_seconds overrides the global deadline for this cluster (must be < 1800s — " +
 			"PyTorch's default rendezvous timeout). max_speculative_accelerators caps this cluster's outstanding " +
-			"speculative footprint. Omit a field (null) to fall back to the global default / no cap.",
+			"speculative footprint. stuck_pending_timeout_seconds overrides how long a job admitted to this cluster " +
+			"may stay unplaced. The body replaces the whole row: omit a field (null) to fall back to the global default / no cap.",
 	}, func(ctx context.Context, in *struct {
 		ClusterID string `path:"cluster_id"`
 		Body      struct {
 			ScaleUpTimeoutSeconds      *int `json:"scale_up_timeout_seconds,omitempty"`
 			MaxSpeculativeAccelerators *int `json:"max_speculative_accelerators,omitempty"`
+			StuckPendingTimeoutSeconds *int `json:"stuck_pending_timeout_seconds,omitempty"`
 		}
 	}) (*struct {
 		Body domain.ClusterSettings
@@ -408,6 +410,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			ClusterID:                  in.ClusterID,
 			ScaleUpTimeoutSeconds:      in.Body.ScaleUpTimeoutSeconds,
 			MaxSpeculativeAccelerators: in.Body.MaxSpeculativeAccelerators,
+			StuckPendingTimeoutSeconds: in.Body.StuckPendingTimeoutSeconds,
 		}
 		if err := h.svc.PutClusterSettings(ctx, cs); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())

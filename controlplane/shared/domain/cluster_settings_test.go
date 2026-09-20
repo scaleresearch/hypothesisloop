@@ -17,6 +17,9 @@ func TestValidateClusterSettings(t *testing.T) {
 		{"zero timeout rejected", &ClusterSettings{ClusterID: "c1", ScaleUpTimeoutSeconds: scaleUp(0)}, true},
 		{"valid speculative cap", &ClusterSettings{ClusterID: "c1", MaxSpeculativeAccelerators: scaleUp(4)}, false},
 		{"zero speculative cap rejected", &ClusterSettings{ClusterID: "c1", MaxSpeculativeAccelerators: scaleUp(0)}, true},
+		{"valid stuck-pending timeout", &ClusterSettings{ClusterID: "c1", StuckPendingTimeoutSeconds: scaleUp(900)}, false},
+		{"stuck-pending timeout may exceed the scale-up ceiling", &ClusterSettings{ClusterID: "c1", StuckPendingTimeoutSeconds: scaleUp(3600)}, false},
+		{"zero stuck-pending timeout rejected", &ClusterSettings{ClusterID: "c1", StuckPendingTimeoutSeconds: scaleUp(0)}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

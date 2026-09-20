@@ -73,7 +73,7 @@ export function fetchClusterSettings(clusterID: string): Promise<ClusterSettings
 
 export async function putClusterSettings(
   clusterID: string,
-  req: { scale_up_timeout_seconds?: number | null; max_speculative_accelerators?: number | null },
+  req: Omit<ClusterSettings, 'cluster_id'>,
 ): Promise<ClusterSettings> {
   const res = await fetch(`${API_URL}/clusters/${clusterID}/settings`, {
     method: 'PUT',

@@ -328,6 +328,7 @@ export interface ClusterSettings {
   cluster_id: string
   scale_up_timeout_seconds?: number | null
   max_speculative_accelerators?: number | null
+  stuck_pending_timeout_seconds?: number | null
 }
 
 // ---------------------------------------------------------------------------

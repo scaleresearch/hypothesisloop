@@ -533,6 +533,10 @@ CREATE TABLE IF NOT EXISTS cluster_settings (
     cluster_id                   TEXT        PRIMARY KEY,
     scale_up_timeout_seconds     INTEGER,
     max_speculative_accelerators INTEGER,
+    -- How long a job admitted to this cluster may stay unplaced before it is evicted as
+    -- stuck_pending, in place of the global scheduler.stuck_pending_timeout_seconds. A cluster of
+    -- rented instances boots slowly and sets it longer.
+    stuck_pending_timeout_seconds INTEGER,
     updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT cluster_settings_scale_up_timeout CHECK (
         scale_up_timeout_seconds IS NULL OR
@@ -540,8 +544,20 @@ CREATE TABLE IF NOT EXISTS cluster_settings (
     ),
     CONSTRAINT cluster_settings_max_speculative_accelerators CHECK (
         max_speculative_accelerators IS NULL OR max_speculative_accelerators > 0
+    ),
+    CONSTRAINT cluster_settings_stuck_pending_timeout CHECK (
+        stuck_pending_timeout_seconds IS NULL OR stuck_pending_timeout_seconds > 0
     )
 );
+
+ALTER TABLE cluster_settings ADD COLUMN IF NOT EXISTS stuck_pending_timeout_seconds INTEGER;
+DO $$ BEGIN
+    ALTER TABLE cluster_settings ADD CONSTRAINT cluster_settings_stuck_pending_timeout CHECK (
+        stuck_pending_timeout_seconds IS NULL OR stuck_pending_timeout_seconds > 0
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Change notification — the source of GET /watch's live event stream

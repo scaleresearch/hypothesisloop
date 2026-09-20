@@ -60,6 +60,8 @@ function ClusterSettingsEditor({ clusterID }: { clusterID: string }) {
           await putClusterSettings(clusterID, {
             scale_up_timeout_seconds: timeout_ === '' ? null : Number(timeout_),
             max_speculative_accelerators: cap === '' ? null : Number(cap),
+            // The PUT replaces the whole row, so the field this editor does not show is sent back as read.
+            stuck_pending_timeout_seconds: data?.stuck_pending_timeout_seconds ?? null,
           })
           await mutate()
           setEditing(false)

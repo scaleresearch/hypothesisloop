@@ -33,6 +33,7 @@ func TestClusterSettingsGetAndPutRoundTrip(t *testing.T) {
 		ClusterID:                  id,
 		ScaleUpTimeoutSeconds:      intPtr(300),
 		MaxSpeculativeAccelerators: intPtr(8),
+		StuckPendingTimeoutSeconds: intPtr(900),
 	}
 	if err := store.PutClusterSettings(ctx, in); err != nil {
 		t.Fatalf("put: got = %v, want = nil", err)
@@ -42,8 +43,9 @@ func TestClusterSettingsGetAndPutRoundTrip(t *testing.T) {
 		t.Fatalf("get after put: got = %v, want = nil", err)
 	}
 	if got == nil || got.ScaleUpTimeoutSeconds == nil || *got.ScaleUpTimeoutSeconds != 300 ||
-		got.MaxSpeculativeAccelerators == nil || *got.MaxSpeculativeAccelerators != 8 {
-		t.Fatalf("get after put: got = %+v, want ScaleUpTimeoutSeconds=300 MaxSpeculativeAccelerators=8", got)
+		got.MaxSpeculativeAccelerators == nil || *got.MaxSpeculativeAccelerators != 8 ||
+		got.StuckPendingTimeoutSeconds == nil || *got.StuckPendingTimeoutSeconds != 900 {
+		t.Fatalf("get after put: got = %+v, want ScaleUpTimeoutSeconds=300 MaxSpeculativeAccelerators=8 StuckPendingTimeoutSeconds=900", got)
 	}
 
 	// Upsert clears a field back to nil (global default / no cap) rather than leaving it stuck.
@@ -55,7 +57,7 @@ func TestClusterSettingsGetAndPutRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after re-put: got = %v, want = nil", err)
 	}
-	if got == nil || got.ScaleUpTimeoutSeconds == nil || *got.ScaleUpTimeoutSeconds != 120 || got.MaxSpeculativeAccelerators != nil {
-		t.Fatalf("get after re-put: got = %+v, want ScaleUpTimeoutSeconds=120 MaxSpeculativeAccelerators=nil", got)
+	if got == nil || got.ScaleUpTimeoutSeconds == nil || *got.ScaleUpTimeoutSeconds != 120 || got.MaxSpeculativeAccelerators != nil || got.StuckPendingTimeoutSeconds != nil {
+		t.Fatalf("get after re-put: got = %+v, want ScaleUpTimeoutSeconds=120 and the other two nil", got)
 	}
 }

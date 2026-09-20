@@ -163,6 +163,7 @@ scheduler:
   # evicts it (reason stuck_pending) and fully refunds its reservation. Bounds capacity held by
   # jobs that never actually start (e.g. unschedulable). A job's own checkpoint window is added,
   # since a requeued job cannot start before its previous pod has finished checkpointing.
+  # Overridable per cluster via cluster_settings, for a cluster whose nodes boot slowly.
   stuck_pending_timeout_seconds: 300
 
   # How long a placed job may stay pending (image pull, container creation) before the same eviction.

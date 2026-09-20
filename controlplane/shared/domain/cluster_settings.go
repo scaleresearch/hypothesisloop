@@ -3,7 +3,7 @@ package domain
 import "fmt"
 
 // ClusterSettings holds operator-set overrides for one cluster's autoscaler speculation
-// behaviour, keyed by the runtime-derived cluster_id (kube-system namespace UID / machine-id) —
+// behaviour and its stuck-pending deadline, keyed by the runtime-derived cluster_id (kube-system namespace UID / machine-id) —
 // never by cluster_name, so a rename or a duplicate display name can't split or merge them. A
 // row exists only once an operator has set at least one value; a cluster with no row uses the
 // global scheduler defaults.
@@ -17,6 +17,11 @@ type ClusterSettings struct {
 	// speculative (SUBMITTED, capacity not yet live) footprint at once. Nil means no per-cluster
 	// cap — only the platform experiment's max_concurrent_accelerators bounds it.
 	MaxSpeculativeAccelerators *int `json:"max_speculative_accelerators,omitempty"`
+	// StuckPendingTimeoutSeconds overrides scheduler.stuck_pending_timeout_seconds for this
+	// cluster: how long a job admitted here may stay unplaced before it is evicted as
+	// stuck_pending. Nil defers to the global value. A cluster whose nodes are rented when a job
+	// arrives boots slowly and sets it longer.
+	StuckPendingTimeoutSeconds *int `json:"stuck_pending_timeout_seconds,omitempty"`
 }
 
 // MaxScaleUpTimeoutSeconds is the hard ceiling ScaleUpTimeoutSeconds (and the global
@@ -36,6 +41,9 @@ func ValidateClusterSettings(cs *ClusterSettings) error {
 	}
 	if cs.MaxSpeculativeAccelerators != nil && *cs.MaxSpeculativeAccelerators <= 0 {
 		return fmt.Errorf("max_speculative_accelerators must be positive")
+	}
+	if cs.StuckPendingTimeoutSeconds != nil && *cs.StuckPendingTimeoutSeconds <= 0 {
+		return fmt.Errorf("stuck_pending_timeout_seconds must be positive")
 	}
 	return nil
 }

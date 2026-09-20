@@ -51,6 +51,23 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 	return nil
 }
 
+// stuckPendingTimeoutOn is the stuck-pending deadline for a job admitted to the cluster with
+// this id: the value its operator set in cluster_settings, and the global one where none is set.
+// A cluster that has reported no id has no settings row to read.
+func (w *JobWatcher) stuckPendingTimeoutOn(ctx context.Context, clusterID string) (time.Duration, error) {
+	if clusterID == "" {
+		return w.stuckPendingTimeout, nil
+	}
+	cs, err := w.store.GetClusterSettings(ctx, clusterID)
+	if err != nil {
+		return 0, err
+	}
+	if cs != nil && cs.StuckPendingTimeoutSeconds != nil {
+		return time.Duration(*cs.StuckPendingTimeoutSeconds) * time.Second, nil
+	}
+	return w.stuckPendingTimeout, nil
+}
+
 // checkScaleUpDeadline evicts exp if its gang has not fully bound (called only while
 // scheduledNodes < Nodes()) past its placement deadline, or if the runtime's latest
 // schedulingReason names a terminal scale-up refusal. See autoscaler.md's "Watching" section.
@@ -60,15 +77,15 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 // scale_up_timeout — an infrastructure fault recorded as a tried_clusters failover rather than
 // spending infra_requeue_count, so a run of slow clusters cannot exhaust a job's environment-fault
 // budget. On every other cluster (or when this deployment never called WithScaleUpTimeout), the
-// deadline and reason are exactly today's stuckPendingTimeout/EvictionStuckPending.
-func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
+// deadline and reason are the cluster's stuckPendingTimeout and EvictionStuckPending.
+func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, stuckPendingTimeout time.Duration, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
 	if exp.SubmittedAt == nil {
 		// Every SUBMITTED row is written with submitted_at (ClaimSubmitted sets it in
 		// the same UPDATE); a RUNNING row keeps whatever the current attempt's submitted_at was.
 		return false, fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
 	}
 
-	timeout := w.stuckPendingTimeout
+	timeout := stuckPendingTimeout
 	evictionReason := domain.EvictionStuckPending
 	triedClusterID := ""
 	// clusterIDs[exp.ClusterName] can be legitimately empty either because this cluster isn't

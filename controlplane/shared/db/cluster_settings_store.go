@@ -24,9 +24,9 @@ func NewClusterSettingsStore(pool *Pool) *ClusterSettingsStore {
 // nil (not an error) when the operator has never set anything for this cluster — callers fall
 // back to the global defaults.
 func (s *ClusterSettingsStore) GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error) {
-	const q = `SELECT cluster_id, scale_up_timeout_seconds, max_speculative_accelerators FROM cluster_settings WHERE cluster_id = $1`
+	const q = `SELECT cluster_id, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds FROM cluster_settings WHERE cluster_id = $1`
 	cs := &domain.ClusterSettings{}
-	err := s.pool.pool.QueryRow(ctx, q, clusterID).Scan(&cs.ClusterID, &cs.ScaleUpTimeoutSeconds, &cs.MaxSpeculativeAccelerators)
+	err := s.pool.pool.QueryRow(ctx, q, clusterID).Scan(&cs.ClusterID, &cs.ScaleUpTimeoutSeconds, &cs.MaxSpeculativeAccelerators, &cs.StuckPendingTimeoutSeconds)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -36,17 +36,18 @@ func (s *ClusterSettingsStore) GetClusterSettings(ctx context.Context, clusterID
 	return cs, nil
 }
 
-// PutClusterSettings upserts the settings row for clusterID. Both fields are nullable — passing
+// PutClusterSettings upserts the settings row for clusterID. Every field is nullable — passing
 // nil clears that field back to the global default / no cap, exactly like never having set it.
 func (s *ClusterSettingsStore) PutClusterSettings(ctx context.Context, cs *domain.ClusterSettings) error {
 	const q = `
-INSERT INTO cluster_settings (cluster_id, scale_up_timeout_seconds, max_speculative_accelerators, updated_at)
-VALUES ($1, $2, $3, NOW())
+INSERT INTO cluster_settings (cluster_id, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, updated_at)
+VALUES ($1, $2, $3, $4, NOW())
 ON CONFLICT (cluster_id) DO UPDATE SET
     scale_up_timeout_seconds = EXCLUDED.scale_up_timeout_seconds,
     max_speculative_accelerators = EXCLUDED.max_speculative_accelerators,
+    stuck_pending_timeout_seconds = EXCLUDED.stuck_pending_timeout_seconds,
     updated_at = NOW()`
-	_, err := s.pool.pool.Exec(ctx, q, cs.ClusterID, cs.ScaleUpTimeoutSeconds, cs.MaxSpeculativeAccelerators)
+	_, err := s.pool.pool.Exec(ctx, q, cs.ClusterID, cs.ScaleUpTimeoutSeconds, cs.MaxSpeculativeAccelerators, cs.StuckPendingTimeoutSeconds)
 	if err != nil {
 		return fmt.Errorf("cluster_settings_store.Put: %w", err)
 	}
