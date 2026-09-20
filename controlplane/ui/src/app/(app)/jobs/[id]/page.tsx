@@ -1,6 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
+import { useRecordProject } from '@/lib/query-state'
 import { Link } from '@/components/ui/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -29,6 +30,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
 
   const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
+  useRecordProject(job?.project_id)
   const { data: logs, error: logsError } = useSWR(
     job ? `logs-${id}` : null,
     () => fetchExperimentLogs(id),

@@ -6,6 +6,7 @@ import { fetchOrgClusters, fetchExperimentStats, fetchAgentsPage, fetchPlatformE
 import { useTenant } from '@/lib/tenant'
 import { semantic } from '@/lib/colors'
 import { CommandPaletteTrigger } from '@/components/command-palette'
+import { ErrorMessage } from '@/components/ui/status-message'
 
 const LINKS: Array<{ href: string; title: string; description: string }> = [
   { href: '/platform-experiments', title: 'Platform Experiments', description: 'Operator-defined compute envelopes agents compete within.' },
@@ -19,26 +20,32 @@ const LINKS: Array<{ href: string; title: string; description: string }> = [
 
 function LiveStrip() {
   const { org, project } = useTenant()
-  const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const { data: clusters, error: clustersError } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
   // Both counts are server-side totals, not the length of a fetched page — see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
-  const { data: stats } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
-  const { data: agents } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
+  const { data: stats, error: statsError } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
+  const { data: agents, error: agentsError } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
 
-  const clusterList = (clusters ?? []).filter(c => c.owned)
-  const connected = clusterList.filter(c => c.connected).length
-  const running = stats?.by_status?.RUNNING ?? 0
+  const own = clusters?.filter(c => c.owned)
+  const connected = own?.filter(c => c.connected).length
 
+  // A count that failed to load says so, and one still loading has no colour to mislead with.
+  function item(label: string, error: Error | undefined, value: string | undefined, color: string) {
+    if (error) return { label, value: 'unknown', color: semantic.danger, title: error.message }
+    if (value === undefined) return { label, value: '…', color: 'var(--dim-fg)', title: 'Loading' }
+    return { label, value, color, title: undefined }
+  }
   const items = [
-    { label: 'Own clusters online', value: clusters ? `${connected}/${clusterList.length}` : '—', color: connected === clusterList.length ? semantic.success : semantic.warning },
-    { label: 'Jobs running', value: stats ? String(running) : '—', color: semantic.success },
-    { label: 'Registered agents', value: agents ? String(agents.total) : '—', color: semantic.accent },
+    item('Own clusters online', clustersError, own && `${connected}/${own.length}`, connected === own?.length ? semantic.success : semantic.warning),
+    // A status no job holds is absent from the answer.
+    item('Jobs running', statsError, stats && String(stats.by_status?.RUNNING ?? 0), semantic.success),
+    item('Registered agents', agentsError, agents && String(agents.total), semantic.accent),
   ]
 
   return (
     <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
       {items.map(item => (
-        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div key={item.label} title={item.title} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: item.color, boxShadow: `0 0 6px ${item.color}` }} />
           <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>{item.value}</span>
           <span className="text-dim" style={{ fontSize: 12 }}>{item.label}</span>
@@ -51,10 +58,17 @@ function LiveStrip() {
 // What a project with nothing in it needs next, shown until its first platform experiment exists.
 function FirstSteps() {
   const { org, project } = useTenant()
-  const { data } = useSWR(
+  const { data, error } = useSWR(
     ['platform-experiment-count', project.id],
     () => fetchPlatformExperimentsPage({ project_id: project.id, limit: 1 }),
   )
+  if (error) {
+    return (
+      <div style={{ marginBottom: 28, maxWidth: 720 }}>
+        <ErrorMessage>Could not check whether {project.name} has a platform experiment yet: {error.message}</ErrorMessage>
+      </div>
+    )
+  }
   if (!data || data.total > 0) return null
   return (
     <div className="wa-pod" style={{ padding: '18px 20px', marginBottom: 28, maxWidth: 720 }}>

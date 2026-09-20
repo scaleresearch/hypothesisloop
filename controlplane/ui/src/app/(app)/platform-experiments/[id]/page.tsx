@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useMemo, useState } from 'react'
-import { useProjectRouter } from '@/lib/query-state'
+import { useProjectRouter, useRecordProject } from '@/lib/query-state'
 import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
@@ -558,6 +558,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     () => fetchPlatformExperiment(id),
     { refreshInterval: 15_000 },
   )
+  useRecordProject(pe?.project_id)
 
   const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
     ['pe-quotas', id],

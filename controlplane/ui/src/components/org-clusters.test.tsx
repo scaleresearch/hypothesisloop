@@ -106,6 +106,37 @@ describe('the org\'s clusters', () => {
   })
 })
 
+describe('a member who is no owner', () => {
+  const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member' }] }
+
+  it('is told who sets a cluster\'s settings, and is asked for none the API would refuse', async () => {
+    show({ as: member })
+    const lab = (await screen.findByRole('cell', { name: /^lab/ })).closest('tr')!
+    expect(within(lab).getByText('set by an owner of Ada')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add cluster' })).toBeNull()
+    expect(fetchClusterSettings).not.toHaveBeenCalled()
+  })
+})
+
+describe('a cluster name the API refuses', () => {
+  it('stays in the field with the refusal beside it, and is cleared once one is taken', async () => {
+    vi.mocked(registerCluster).mockRejectedValueOnce(new Error('cluster name "Lab K8s" must be lowercase letters, digits and dashes'))
+    show()
+    const field = await screen.findByLabelText('Cluster name') as HTMLInputElement
+    await userEvent.type(field, 'Lab K8s')
+    await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
+    expect(await screen.findByText(/must be lowercase letters, digits and dashes/)).toBeTruthy()
+    expect(field.value).toBe('Lab K8s')
+
+    await userEvent.clear(field)
+    await userEvent.type(field, 'lab-k8s')
+    await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
+    expect(await screen.findByTestId('secret')).toBeTruthy()
+    expect(field.value).toBe('')
+  })
+})
+
 describe('a cluster the platform shares with the org', () => {
   beforeEach(() => {
     clusters = [...clusters, { name: 'platform-gpu', shared: true, created_at: at, owned: false, connected: true }]

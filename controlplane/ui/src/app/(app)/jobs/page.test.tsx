@@ -72,6 +72,19 @@ describe('the cluster of a job', () => {
     expect(dotOf('gone-0001')).toBeNull()
   })
 
+  it('shows no dot, and says why, when the clusters cannot be read', async () => {
+    vi.mocked(fetchOrgClusters).mockRejectedValue(new Error('Failed to fetch'))
+    const resolved = resolveTenant(me, '')
+    if (resolved.state !== 'selected') throw new Error('no tenant')
+    render(
+      <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false }}>
+        <TenantContext.Provider value={resolved.tenant}><JobsPage /></TenantContext.Provider>
+      </SWRConfig>,
+    )
+    expect(await screen.findByText(/Could not load the clusters of Ada, so no job shows whether its cluster is connected: Failed to fetch/)).toBeTruthy()
+    expect(dotOf('own-0001')).toBeNull()
+  })
+
   it('asks for the jobs of the selected project', async () => {
     const resolved = resolveTenant(me, '')
     if (resolved.state !== 'selected') throw new Error('no tenant')

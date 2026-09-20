@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 // A filter/sort control backed by a URL query param instead of local state, so the current
@@ -48,6 +48,22 @@ export function useProjectRouter() {
     push: (to: string) => router.push(href(to)),
     replace: (to: string) => router.replace(href(to)),
   }), [router, href])
+}
+
+/**
+ * Puts the project a record belongs to in the URL once the record has loaded. A record is reached
+ * by its id whatever project the link named, and the switcher, the nav links and the back link
+ * all read the project from the URL.
+ */
+export function useRecordProject(projectID: string | undefined) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const query = searchParams.toString()
+  const current = searchParams.get(PROJECT_PARAM)
+  useEffect(() => {
+    if (projectID && projectID !== current) router.replace(withProject(`${pathname}?${query}`, projectID))
+  }, [projectID, current, pathname, query, router])
 }
 
 /**

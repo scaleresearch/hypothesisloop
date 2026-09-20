@@ -57,11 +57,21 @@ export function AppShell({ children }: { children: ReactNode }) {
     )
   }
 
+  // Keyed by project, so a switch remounts the page: a token on show, a half-filled form or an
+  // open palette belongs to the project it was opened in.
+  const { project } = resolution.tenant
   return (
     <TenantContext.Provider value={resolution.tenant}>
       <Nav />
-      <main className="flex-1 overflow-auto wa-main">{children}</main>
-      <CommandPalette />
+      <main key={project.id} className="flex-1 overflow-auto wa-main">
+        {error && (
+          <ErrorMessage>
+            Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.
+          </ErrorMessage>
+        )}
+        {children}
+      </main>
+      <CommandPalette key={`palette-${project.id}`} />
     </TenantContext.Provider>
   )
 }

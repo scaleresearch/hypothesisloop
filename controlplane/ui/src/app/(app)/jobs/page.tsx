@@ -64,8 +64,9 @@ function JobsPageContent() {
 
   // Every cluster a job of this org can be on, its own and the ones the platform shares. A job
   // on a cluster no longer listed, such as one that stopped being shared, shows its name alone.
-  const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
-  const connectedByCluster = new Map((clusters ?? []).map(c => [c.name, c.connected]))
+  // Until that read answers, and when it fails, no job shows a connection dot.
+  const { data: clusters, error: clustersError } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const connectedByCluster = new Map(clustersError ? [] : clusters?.map(c => [c.name, c.connected]))
 
   function toggleSort(key: SortKey) {
     setPage(0)
@@ -183,6 +184,11 @@ function JobsPageContent() {
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
+      {clustersError && (
+        <ErrorMessage>
+          Could not load the clusters of {org.name}, so no job shows whether its cluster is connected: {clustersError.message}
+        </ErrorMessage>
+      )}
 
       <Pod>
         <PodHeader>

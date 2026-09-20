@@ -26,8 +26,20 @@ const navItems = [
 
 function SystemStatus() {
   const { org } = useTenant()
-  const { data } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
-  const clusters = (data ?? []).filter(c => c.owned)
+  const { data, error } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  if (error || !data) {
+    const color = error ? semantic.danger : 'var(--dim-fg)'
+    return (
+      <div className="wa-nav-status">
+        <span className="wa-nav-status-dot" style={{ background: color }} />
+        <div style={{ minWidth: 0 }}>
+          <div className="wa-nav-status-label" style={{ color }}>{error ? 'Cluster status unknown' : 'Checking clusters…'}</div>
+          {error && <div className="wa-nav-status-sub" title={error.message}>{error.message}</div>}
+        </div>
+      </div>
+    )
+  }
+  const clusters = data.filter(c => c.owned)
   const connected = clusters.filter(c => c.connected).length
   const allUp = clusters.length > 0 && connected === clusters.length
   const someUp = connected > 0

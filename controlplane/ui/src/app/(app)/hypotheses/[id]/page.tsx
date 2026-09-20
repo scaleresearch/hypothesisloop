@@ -2,7 +2,7 @@
 
 import useSWR from 'swr'
 import { Link } from '@/components/ui/link'
-import { useProjectRouter } from '@/lib/query-state'
+import { useProjectRouter, useRecordProject } from '@/lib/query-state'
 import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -48,6 +48,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
     data ? ['pe', data.platform_experiment_id] : null,
     () => fetchPlatformExperiment(data!.platform_experiment_id),
   )
+  useRecordProject(pe?.project_id)
 
   if (error) return (
     <div>

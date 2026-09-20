@@ -27,9 +27,9 @@ function Status({ connected }: { connected: boolean }) {
 }
 
 /**
- * The clusters the org's jobs can run on: its own, with their scheduler settings, and any the
- * platform shares with it, which are read-only here. With `manage` an owner also registers a
- * cluster and reads the command that starts its agent.
+ * The clusters the org's jobs can run on: its own, with the scheduler settings an owner reads and
+ * changes, and any the platform shares with it. With `manage` an owner also registers a cluster
+ * and reads the command that starts its agent.
  */
 export function OrgClusters({ manage }: { manage: boolean }) {
   const { org, administers } = useTenant()
@@ -42,14 +42,16 @@ export function OrgClusters({ manage }: { manage: boolean }) {
 
   // Registering a name the org already owns changes nothing and answers with the same token,
   // so adding a cluster and reading an existing one's command again are the same call.
-  async function register(clusterName: string) {
+  async function register(clusterName: string): Promise<boolean> {
     setBusy(true)
     setActionError('')
     try {
       setRegistered(await registerCluster(org.id, clusterName))
       await mutate()
+      return true
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setBusy(false)
     }
@@ -57,8 +59,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
 
   async function add(e: React.FormEvent) {
     e.preventDefault()
-    await register(name.trim())
-    setName('')
+    if (await register(name.trim())) setName('')
   }
 
   return (
@@ -128,9 +129,11 @@ export function OrgClusters({ manage }: { manage: boolean }) {
                 <td>
                   {!c.owned
                     ? <span className="text-muted" style={{ fontSize: 12 }}>set by the platform</span>
-                    : c.cluster_id
-                      ? <ClusterSettingsEditor clusterID={c.cluster_id} />
-                      : <span className="text-muted" style={{ fontSize: 12 }}>available once its agent has connected</span>}
+                    : !administers
+                      ? <span className="text-muted" style={{ fontSize: 12 }}>set by an owner of {org.name}</span>
+                      : c.cluster_id
+                        ? <ClusterSettingsEditor clusterID={c.cluster_id} />
+                        : <span className="text-muted" style={{ fontSize: 12 }}>available once its agent has connected</span>}
                 </td>
                 {manages && (
                   <td>
