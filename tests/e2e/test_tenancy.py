@@ -14,6 +14,7 @@ import requests
 
 from support import admin
 from support.api import API
+from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
 
@@ -366,3 +367,75 @@ def test_requests_without_a_valid_token_are_refused(tenants, api):
         r = requests.get(f"{api.base_url}{path}", headers={"Authorization": f"Bearer {token}"}, timeout=30)
         assert r.status_code == 401, f"token {token!r}: {r.status_code} {r.text}"
     assert api.get(path).status_code == 200, "staff reads every org"
+
+
+def _accounts_of(t: Tenant) -> list[tuple[str, str, dict | None]]:
+    """Every accounts call that names something of one tenant's org."""
+    return [
+        ("PATCH", f"/orgs/{t.org_id}", {"name": "taken over"}),
+        ("GET", f"/orgs/{t.org_id}/projects", None),
+        ("POST", f"/orgs/{t.org_id}/projects", {"name": "intruding"}),
+        ("PATCH", f"/projects/{t.project_id}", {"name": "taken over"}),
+        ("GET", f"/orgs/{t.org_id}/api-keys", None),
+        ("POST", f"/orgs/{t.org_id}/api-keys", {"name": "intruding"}),
+        ("POST", f"/orgs/{t.org_id}/api-keys", {"name": "intruding", "project_id": t.project_id}),
+        ("DELETE", f"/api-keys/{t.api.get_json('/me')['key_id']}", None),
+        ("GET", f"/orgs/{t.org_id}/clusters", None),
+        ("POST", f"/orgs/{t.org_id}/clusters", {"name": f"intruding-{uuid.uuid4().hex[:8]}"}),
+    ]
+
+
+def test_another_orgs_accounts_are_out_of_reach(tenants):
+    a, b = tenants
+    before = {
+        "me": b.api.get_json("/me"),
+        "keys": b.api.get_json(f"/orgs/{b.org_id}/api-keys"),
+        "clusters": [c["name"] for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]],
+    }
+    assert before["clusters"] == [b.cluster]
+    for method, path, body in _accounts_of(b):
+        r = a.api.session.request(method, a.api._url(path), json=body, timeout=30)
+        assert r.status_code == 404, f"org A {method} {path}: {r.status_code} {r.text}"
+    taken = a.api.post(f"/orgs/{a.org_id}/clusters", {"name": b.cluster})
+    assert taken.status_code == 409 and "hls_" not in taken.text, f"org A registering org B's cluster: {taken.status_code} {taken.text}"
+    crossing = a.api.post(f"/orgs/{a.org_id}/api-keys", {"name": "crossing", "project_id": b.project_id})
+    assert crossing.status_code == 404, f"a key of org A bound to a project of org B: {crossing.status_code} {crossing.text}"
+
+    me = a.api.get_json("/me")
+    assert [o["id"] for o in me["orgs"]] == [a.org_id] and {p["org_id"] for p in me["projects"]} == {a.org_id}
+    assert before == {
+        "me": b.api.get_json("/me"),
+        "keys": b.api.get_json(f"/orgs/{b.org_id}/api-keys"),
+        "clusters": [c["name"] for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]],
+    }
+    assert admin.add_cluster(b.cluster, b.org_id) == admin.token(f"runtime:{b.cluster}"), "org B's runtime token changed"
+
+
+def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
+    """The connected clusters of the local stack belong to the default org and are not shared."""
+    a, _ = tenants
+    connected = {c["cluster_name"] for c in api.list_internal_clusters() if c["connected"]}
+    assert connected, "no connected cluster to check capacity against"
+    assert connected <= {c["cluster_name"] for c in api.capacity()["clusters"]}, "staff do not read every cluster's capacity"
+    shown = {c["cluster_name"] for c in a.api.capacity()["clusters"]}
+    assert not shown & connected, f"a tenant reads the capacity of clusters it cannot be placed on: {shown & connected}"
+    capacity = a.api.hl("capacity")
+    assert not any(name in capacity for name in connected)
+
+    assert a.api.post("/experiments/reprioritize").status_code == 403
+    for scope in (f"agent:{a.pe_id}/{a.agent}", f"coordinator:{a.pe_id}"):
+        assert a.api.as_caller(admin.token(scope)).post("/experiments/reprioritize").status_code == 403, scope
+
+
+def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenants, api, deadline):
+    """A job any local cluster could run, from an org that owns none of them and with none shared."""
+    a, _ = tenants
+    job_id = a.api.submit_job(a.pe_id, a.agent, job_overrides={"accelerator_count": 0, "accelerator_type": None,
+                                                              "acceptable_accelerator_types": None})
+    try:
+        waiting = eventually("the job says its org has no cluster", lambda: a.api.experiment(job_id), deadline=deadline, interval=2,
+                             accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
+        assert waiting["status"] == "QUEUED" and not waiting.get("cluster_name")
+        assert waiting["org_id"] == a.org_id
+    finally:
+        a.api.post(f"/experiments/{job_id}/cancel")
