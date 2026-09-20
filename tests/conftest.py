@@ -21,26 +21,12 @@ from support.wait import Deadline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_URL = os.environ.get("API_URL", "http://localhost:8081")
-HL_BIN = Path(os.environ.get("HL_BIN", REPO_ROOT / "bin" / "hl"))
+HL_BIN = REPO_ROOT / "bin" / "hl"
 
-# Which accelerator the generic scenarios schedule onto -- matches tests/lib/common.sh's default,
-# so a ported scenario keeps proving the same thing against the same local dev cluster.
-TEST_ACCELERATOR_TYPE = os.environ.get("TEST_ACCELERATOR_TYPE", "nvidia.com/gpu.product=NVIDIA-L40")
-# Must match TEST_ACCELERATOR_TYPE's acch_rate in controlplane/settings/hypothesisloop.yaml --
-# scenarios that assert on reserved/settled cost derive their expected numbers from this (mirrors
-# tests/lib/common.sh::TEST_ACCH_RATE).
-TEST_ACCH_RATE = float(os.environ.get("TEST_ACCH_RATE", "0.25"))
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    for marker, doc in [
-        ("parallel", "owns only UUID-namespaced API resources and a bounded share of capacity"),
-        ("exclusive", "needs global inventory/full capacity/node state; run with -n 0"),
-        ("slow", "duration-only marker, orthogonal to isolation"),
-        ("hardware", "needs real accelerator hardware; skipped unless explicitly requested"),
-        ("accelerator", "touches at least one real accelerator"),
-    ]:
-        config.addinivalue_line("markers", f"{marker}: {doc}")
+# Which accelerator the generic scenarios schedule onto.
+TEST_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-L40"
+# Must match TEST_ACCELERATOR_TYPE's acch_rate in controlplane/settings/hypothesisloop.yaml.
+TEST_ACCH_RATE = 0.25
 
 
 @pytest.fixture(scope="session")
@@ -49,8 +35,6 @@ def run_id() -> str:
 
 
 def _build_hl_binary() -> Path:
-    if "HL_BIN" in os.environ:
-        return HL_BIN
     HL_BIN.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["go", "build", "-o", str(HL_BIN), "./cli"], cwd=REPO_ROOT, check=True)
     return HL_BIN
@@ -61,8 +45,7 @@ def preflight() -> None:
     """Fail-fast cluster preconditions, ported from tests/lib/preflight.sh. Every scenario's first
     HTTP call fails fast anyway if the control plane isn't up; checking once here turns dozens of
     unrelated-looking per-test failures into one clear message naming the actual cause."""
-    hl_bin = _build_hl_binary()
-    assert hl_bin.is_file(), f"hl CLI did not build at {hl_bin}"
+    _build_hl_binary()
 
     deadline = Deadline.in_seconds(120)
     last_error: Exception | None = None
@@ -98,14 +81,9 @@ def deadline(request: pytest.FixtureRequest) -> Deadline:
     pytest-timeout kills the process mid-assertion -- an explicit failure naming the awaited
     condition, not a bare SIGALRM."""
     marker = request.node.get_closest_marker("timeout")
-    budget = marker.args[0] if marker and marker.args else request.config.getini("timeout") or 240
+    budget = marker.args[0] if marker and marker.args else request.config.getini("timeout")
     margin = 15
     return Deadline.in_seconds(max(1.0, float(budget) - margin))
-
-
-@pytest.fixture
-def agent_id(run_id: str) -> str:
-    return f"agent-{uuid.uuid4().hex[:8]}-{run_id}"
 
 
 def make_agent(api: API, run_id: str, label: str = "agent") -> str:
@@ -163,15 +141,9 @@ def idle_cluster(request: pytest.FixtureRequest, api: API):
     idle when it starts (tests/improve.md #2.2). A failure to reach idle is a test/setup failure,
     not a warning followed by execution -- never "continue anyway" (that turns one contamination
     problem into unrelated failures downstream, see lib/scope.sh's header comment).
-
-    No `exclusive`-marked scenario is ported yet (this round covers `parallel` only), so this
-    currently never triggers a real wait; SCOPE_TOKENS is empty until the exclusive-scenario round
-    fills it in per scenario, at which point wait_scope_idle's no-op-on-empty-scope path below
-    stops applying.
     """
     if "exclusive" not in {m.name for m in request.node.iter_markers()}:
         yield
         return
-    scope_tokens = getattr(request.node.get_closest_marker("exclusive"), "args", None) or ["cluster"]
-    wait_scope_idle(api, list(scope_tokens))
+    wait_scope_idle(api, list(request.node.get_closest_marker("exclusive").args))
     yield

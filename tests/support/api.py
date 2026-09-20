@@ -31,20 +31,6 @@ def workload_image() -> str:
     return f"{host}:5000/hypothesisloop-workload:{tag}"
 
 
-def load_yaml(path: Path, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Load a YAML config (mirroring `hl`'s own config shape) and apply a shallow dict of
-    overrides on top. `None` in overrides deletes the key, matching mk_body.py's JOB_OVERRIDE_JSON
-    convention (the merge/delete escape hatch for fields with no dedicated CLI arg)."""
-    doc = yaml.safe_load(path.read_text())
-    if overrides:
-        for k, v in overrides.items():
-            if v is None:
-                doc.pop(k, None)
-            else:
-                doc[k] = v
-    return doc
-
-
 def link(type_: str, to: str) -> dict:
     """One entry of a POST /hypotheses `links` list; `to` is a hypothesis id or the platform
     experiment id for the objective root."""
@@ -77,8 +63,7 @@ class JobRequest:
     metadata_overrides: dict[str, Any] = field(default_factory=dict)
 
     def to_yaml(self) -> str:
-        doc = load_yaml(JOB_SPEC_PATH)
-        job = dict(doc.get("job", doc))
+        job = yaml.safe_load(JOB_SPEC_PATH.read_text())["job"]
         job["image"] = workload_image()
         for k, v in self.job_overrides.items():
             if v is None:
@@ -130,11 +115,11 @@ class API:
             input=input,
             capture_output=True,
             text=True,
-            env={"API_URL": self.base_url, "PATH": "/usr/bin:/bin:/usr/local/bin"},
+            env=self.hl_env(),
             timeout=60,
         )
         if proc.returncode != 0:
-            raise HLError(cmd, proc.returncode, (proc.stdout or "") + (proc.stderr or ""))
+            raise HLError(cmd, proc.returncode, proc.stdout + proc.stderr)
         if args[:2] == ("platform-experiments", "create"):
             self.created_platform_experiments.append(json.loads(proc.stdout)["id"])
         return proc.stdout
@@ -221,8 +206,8 @@ class API:
 
     def cluster_id_for_name(self, cluster_name: str) -> str | None:
         for c in self.list_internal_clusters():
-            if c.get("cluster_name") == cluster_name:
-                return c.get("cluster_id") or None
+            if c["cluster_name"] == cluster_name:
+                return c["cluster_id"] or None
         return None
 
     def put_cluster_settings(
@@ -289,21 +274,17 @@ class API:
         self.start_platform_experiment(pe_id)
 
     def close_platform_experiment(self, pe_id: str) -> None:
-        # Idempotent, bounded, and best-effort on cleanup: a test's fixture teardown must not raise
-        # over a PE that failed to create or was already closed by the test body.
-        try:
-            self.post(f"/platform-experiments/{pe_id}/close", {"top_results": []})
-        except requests.RequestException:
-            pass
+        # The status is not checked: teardown also closes what the test body already closed.
+        self.post(f"/platform-experiments/{pe_id}/close", {"top_results": []})
 
     def platform_experiment_quotas(self, pe_id: str) -> list[dict]:
         return self.get_json(f"/platform-experiments/{pe_id}/quotas")
 
     def quota_field(self, pe_id: str, agent_id: str, field_name: str) -> float:
         for q in self.platform_experiment_quotas(pe_id):
-            if q.get("agent_id") == agent_id:
-                return q.get(field_name, 0)
-        return 0
+            if q["agent_id"] == agent_id:
+                return q[field_name]
+        raise LookupError(f"agent {agent_id} has no quota in {pe_id}")
 
     def stages(self, pe_id: str) -> dict:
         return self.get_json(f"/platform-experiments/{pe_id}/stages")
@@ -450,9 +431,6 @@ class API:
         r.raise_for_status()
         return r.json()
 
-    def experiment_status_code(self, job_id: str) -> int:
-        return self.get(f"/experiments/{job_id}").status_code
-
     def cancel_job(self, job_id: str) -> None:
         self.post(f"/experiments/{job_id}/cancel").raise_for_status()
 
@@ -488,13 +466,14 @@ class API:
 
     def logs(self, job_id: str, n: int = 200) -> str:
         r = self.get(f"/experiments/{job_id}/logs", params={"n": n})
-        return r.text if r.ok else ""
+        r.raise_for_status()
+        return r.text
 
     def metrics(self, job_id: str) -> list[dict]:
         return self.get_json(f"/experiments/{job_id}/metrics")
 
     def metric_values(self, job_id: str, metric_name: str) -> list[float]:
-        return [p["metric_value"] for p in self.metrics(job_id) if p.get("metric_name") == metric_name]
+        return [p["metric_value"] for p in self.metrics(job_id) if p["metric_name"] == metric_name]
 
     def metric_max(self, job_id: str, metric_name: str) -> float | None:
         values = self.metric_values(job_id, metric_name)
@@ -554,8 +533,8 @@ class API:
         total = 0
         for cluster in self.capacity().get("clusters") or []:
             for a in cluster.get("accelerators") or []:
-                if (a.get("accelerator_type") or "").lower() == want:
-                    total += int(a.get("available") or 0)
+                if a["accelerator_type"].lower() == want:
+                    total += a["available"]
         return total
 
     def accelerators_free_settled(self, accelerator_type: str, *, stable_reads: int = 3, budget: float = 60.0) -> int:
@@ -585,9 +564,8 @@ class API:
         """The keys a job left behind under its own address, live from the store -- ported from
         tests/lib/api.sh's inline listing used by preemption-requeue.sh's checkpoint check."""
         resp = self.experiment_data(job_id)
-        if resp.status_code != 200:
-            return []
-        return [o.get("key") for o in resp.json() if o.get("key")]
+        resp.raise_for_status()
+        return [o["key"] for o in resp.json()]
 
     # ---- internal cluster-agent-facing endpoints, read for assertions only ---------------------
 
@@ -595,10 +573,10 @@ class API:
         """GET /internal/clusters/: every cluster that has ever polled and whether it is
         connected right now. Used by fault tests to observe cluster-agent connectivity/liveness
         from the control plane's own point of view."""
-        return self.get_json("/internal/clusters/").get("clusters", [])
+        return self.get_json("/internal/clusters/")["clusters"]
 
     def cluster_absent_from_live_metrics(self, cluster_name: str) -> bool:
         """Ported from tests/scenarios/connectivity-loss.sh::cluster_absent_from_live_metrics:
         true once `cluster_name` no longer appears in /internal/clusters/ at all -- not merely
         marked disconnected, but aged out of the live-heartbeat window entirely."""
-        return all(c.get("cluster_name") != cluster_name for c in self.internal_clusters())
+        return all(c["cluster_name"] != cluster_name for c in self.internal_clusters())

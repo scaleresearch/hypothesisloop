@@ -8,15 +8,14 @@ presently just the drain barrier `idle_cluster` needs. Fault-injection kubectl h
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from dataclasses import dataclass
 
 from .api import API
 
-JOB_NS = os.environ.get("JOB_NS", "hypothesisloop-jobs")
-CLUSTER_NS = os.environ.get("CLUSTER_NS", "hypothesisloop")
+JOB_NS = "hypothesisloop-jobs"
+CLUSTER_NS = "hypothesisloop"
 
 
 def node_allocatable_gpu_total(label_selector: str) -> int:
@@ -27,45 +26,11 @@ def node_allocatable_gpu_total(label_selector: str) -> int:
         ["kubectl", "get", "nodes", "-l", label_selector, "-o", "json"],
         capture_output=True, text=True, timeout=15,
     ).stdout
-    try:
-        doc = json.loads(out)
-    except Exception:
-        return 0
-    return sum(int(n.get("status", {}).get("allocatable", {}).get("nvidia.com/gpu", 0)) for n in doc.get("items") or [])
-
-
-def pod_cpu_resources(experiment_id: str) -> tuple[str | None, str | None]:
-    """(requests.cpu, limits.cpu) of the one pod labeled for `experiment_id`, or (None, None) if
-    no pod is found. A bounded, UUID-namespaced lookup -- safe for `parallel` tests, unlike the
-    cluster-wide kubectl helpers reserved for `exclusive` fault scenarios."""
-    try:
-        pod = subprocess.run(
-            ["kubectl", "-n", JOB_NS, "get", "pods", "-l", f"hypothesisloop.io/experiment-id={experiment_id}",
-             "-o", "jsonpath={.items[0].metadata.name}"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout.strip()
-        if not pod:
-            return None, None
-        req = subprocess.run(
-            ["kubectl", "-n", JOB_NS, "get", "pod", pod, "-o", "jsonpath={.spec.containers[0].resources.requests.cpu}"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout.strip()
-        lim = subprocess.run(
-            ["kubectl", "-n", JOB_NS, "get", "pod", pod, "-o", "jsonpath={.spec.containers[0].resources.limits.cpu}"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout.strip()
-        return req or None, lim or None
-    except Exception:
-        return None, None
+    return sum(int(n["status"]["allocatable"].get("nvidia.com/gpu", 0)) for n in json.loads(out)["items"])
 
 
 def _kubectl(*args: str) -> str:
-    try:
-        return subprocess.run(
-            ["kubectl", *args], capture_output=True, text=True, timeout=15
-        ).stdout.strip()
-    except Exception:
-        return ""
+    return subprocess.run(["kubectl", *args], capture_output=True, text=True, timeout=15).stdout.strip()
 
 
 def job_pod(experiment_id: str) -> str | None:
@@ -353,11 +318,7 @@ def single_eligible_node_cpu_fair_share(accel_type: str) -> tuple[str, int, int]
     """
     vendor = accel_type.split("/", 1)[0]
     key, _, value = accel_type.partition("=")
-    nodes_json = _kubectl("get", "nodes", "-o", "json")
-    try:
-        nodes = json.loads(nodes_json).get("items") or []
-    except Exception:
-        return None
+    nodes = json.loads(_kubectl("get", "nodes", "-o", "json"))["items"]
 
     carriers: list[tuple[str, int, int]] = []
     for node in nodes:
@@ -378,11 +339,7 @@ def single_eligible_node_cpu_fair_share(accel_type: str) -> tuple[str, int, int]
         "get", "pods", "--all-namespaces", "--field-selector", f"spec.nodeName={node_name}", "-o", "json",
     )
     free = raw_milli
-    try:
-        pods = json.loads(pods_json).get("items") or []
-    except Exception:
-        pods = []
-    for pod in pods:
+    for pod in json.loads(pods_json)["items"]:
         if (pod.get("status") or {}).get("phase") in ("Succeeded", "Failed"):
             continue
         if (pod.get("metadata", {}).get("labels") or {}).get("hypothesisloop.io/managed-by") == "hypothesisloop":
@@ -416,10 +373,7 @@ class DisbalanceNodeShape:
 def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
     vendor = accel_type.split("/", 1)[0]
     key, _, value = accel_type.partition("=")
-    try:
-        nodes = json.loads(_kubectl("get", "nodes", "-o", "json")).get("items") or []
-    except Exception:
-        return DisbalanceNodeShape("", 0, 0.0, 0)
+    nodes = json.loads(_kubectl("get", "nodes", "-o", "json"))["items"]
 
     best_node, best_count, best_cpu_milli, flavor_nodes = "", 0, 0, 0
     for node in nodes:
@@ -442,11 +396,7 @@ def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
         "get", "pods", "--all-namespaces", "--field-selector", f"spec.nodeName={best_node}", "-o", "json",
     )
     free_milli = best_cpu_milli
-    try:
-        pods = json.loads(pods_json).get("items") or []
-    except Exception:
-        pods = []
-    for pod in pods:
+    for pod in json.loads(pods_json)["items"]:
         if (pod.get("status") or {}).get("phase") in ("Succeeded", "Failed"):
             continue
         if (pod.get("metadata", {}).get("labels") or {}).get("hypothesisloop.io/managed-by") == "hypothesisloop":
@@ -462,8 +412,7 @@ def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
 
 def pod_resource(experiment_id: str, resource: str) -> tuple[str | None, str | None]:
     """(requests.<resource>, limits.<resource>) of the one pod labeled for `experiment_id`, or
-    (None, None) if no pod is found. Generalizes pod_cpu_resources to memory/accelerator
-    resource names (e.g. "memory", "nvidia.com/gpu")."""
+    (None, None) if no pod is found, for any resource name (e.g. "cpu", "nvidia.com/gpu")."""
     pod = job_pod(experiment_id)
     if not pod:
         return None, None
@@ -520,10 +469,10 @@ def _read_busy(api: API, want_types: set[str]) -> _Reading:
     found: set[str] = set()
     for cluster in doc.get("clusters") or []:
         for a in cluster.get("accelerators") or []:
-            t = a.get("accelerator_type")
+            t = a["accelerator_type"]
             if t in want_types:
                 found.add(t)
-                busy += int(a.get("total") or 0) - int(a.get("available") or 0)
+                busy += a["total"] - a["available"]
     return _Reading(busy=busy, present=len(found))
 
 
