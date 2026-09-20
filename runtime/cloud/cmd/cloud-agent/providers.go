@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/cloudexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/configfile"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/vast"
 )
@@ -32,7 +33,7 @@ func adapter[S any, P provider.Provider](construct func(S, []string) (P, error))
 			return nil, err
 		}
 		var settings S
-		if err := decodeStrict(raw, &settings); err != nil {
+		if err := configfile.Decode(raw, &settings); err != nil {
 			return nil, fmt.Errorf("provider.settings: %w", err)
 		}
 		return construct(settings, acceleratorTypes)

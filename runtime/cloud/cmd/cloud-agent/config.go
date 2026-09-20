@@ -1,14 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/cloudexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/configfile"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
@@ -51,13 +50,9 @@ type shapeConfig struct {
 }
 
 func loadConfig(path string) (*config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("config: read %s: %w", path, err)
-	}
 	var cfg config
-	if err := decodeStrict(data, &cfg); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	if err := configfile.Load(path, &cfg); err != nil {
+		return nil, err
 	}
 	if cfg.ClusterName == "" || cfg.Provider.Name == "" || cfg.Provider.AccountID == "" {
 		return nil, fmt.Errorf("config: cluster_name, provider.name and provider.account_id are required")
@@ -115,12 +110,4 @@ func (s shapeConfig) shape() (cloudexec.Shape, error) {
 		StorageBytes:    storage.Value(),
 		MaxInstances:    s.MaxInstances,
 	}, nil
-}
-
-// decodeStrict refuses a key the target does not have: a misspelled setting is an error at
-// startup instead of a default nobody chose.
-func decodeStrict(data []byte, into any) error {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	return decoder.Decode(into)
 }
