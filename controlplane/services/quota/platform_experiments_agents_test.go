@@ -27,12 +27,24 @@ type rosterStore struct {
 	pe      *domain.PlatformExperiment
 	agents  map[string]*domain.Agent
 	signups []domain.AgentSignup
+	// cloneURL is the repository attached to the experiment's project, empty for none.
+	cloneURL string
 }
+
+func (f *rosterStore) CloneURL(_ context.Context, projectID string) (string, error) {
+	if projectID != f.pe.ProjectID {
+		return "", nil
+	}
+	return f.cloneURL, nil
+}
+
+func (f *rosterStore) ExperimentBase(context.Context, string) ([]byte, error) { return nil, nil }
 
 func newRosterStore(status domain.PlatformExperimentStatus, maxAgents int) *rosterStore {
 	return &rosterStore{
-		pe:     &domain.PlatformExperiment{ID: "pe-1", Status: status, MaxAgents: maxAgents},
-		agents: map[string]*domain.Agent{},
+		pe:       &domain.PlatformExperiment{ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents},
+		agents:   map[string]*domain.Agent{},
+		cloneURL: "https://git.example.invalid/org/repo.git",
 	}
 }
 
@@ -65,6 +77,9 @@ func (f *rosterStore) IsSignedUp(_ context.Context, _, agentID string) (bool, er
 func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSignup) (bool, error) {
 	if f.pe.Status != domain.PlatformExpOpen {
 		return false, nil
+	}
+	if f.agents[signup.AgentID] == nil || f.agents[signup.AgentID].OrgID != "org-a" {
+		return false, db.ErrAgentOutsideOrg
 	}
 	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
@@ -133,9 +148,13 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), &fakeProjectRepos{}, zap.NewNop()).WithAgentLaunch("launcher-main", agentsTestSecret)
+	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), store, zap.NewNop()).WithAgentLaunch(agentsTestLaunch())
 	RegisterAgentsHuma(doc, handler)
 	return r
+}
+
+func agentsTestLaunch() AgentLaunch {
+	return AgentLaunch{Launcher: "launcher-main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret}
 }
 
 func call(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {
@@ -301,6 +320,8 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"count with agent_id":     {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","count":2}`, 400, "invalid_request"},
 		"name with agent_id":      {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
 		"flavor not an id":        {domain.PlatformExpOpen, "pe-1", `{"flavor":"../x"}`, 400, "invalid_request"},
+		"unknown flavor":          {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search"}`, 400, "invalid_request"},
+		"unknown flavor, hosted":  {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search","hosted":true,"count":2}`, 400, "invalid_request"},
 		"model with a space":      {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -437,5 +458,82 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 	}()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, newRosterStore(domain.PlatformExpOpen, 1)), &fakeProjectRepos{}, zap.NewNop()))
+	store := newRosterStore(domain.PlatformExpOpen, 1)
+	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, zap.NewNop()))
+}
+
+func TestAHostedAgentIsRefusedWhileItsProjectHasNoRepository(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	store.cloneURL = ""
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	r := agentsRouter(t, store, staff)
+	for _, body := range []string{`{"count":2,"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+		if code != http.StatusConflict || out["reason"] != "no_repository" {
+			t.Fatalf("%s: got = %d %v, want = 409 no_repository", body, code, out)
+		}
+		if message := out["message"].(string); !strings.Contains(message, "project-a") || !strings.Contains(message, "attach") {
+			t.Errorf("%s: the refusal does not say which project or what to do: %q", body, message)
+		}
+	}
+	if len(store.signups) != 0 || len(store.agents) != 1 {
+		t.Fatalf("a refused hosted join left %d signups and %d agents behind", len(store.signups), len(store.agents)-1)
+	}
+	// An agent the caller runs itself needs nothing of the platform's to start, and joins.
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2}`); code != http.StatusCreated {
+		t.Fatalf("self-run agents in a project with no repository: got = %d %v, want = 201", code, out)
+	}
+	// With a repository attached the same hosted request goes through.
+	store.cloneURL = "https://git.example.invalid/org/repo.git"
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"count":2,"hosted":true}`); code != http.StatusCreated {
+		t.Fatalf("hosted agents once a repository is attached: got = %d %v, want = 201", code, out)
+	}
+}
+
+func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	r := agentsRouter(t, store, staff)
+	code, body := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`)
+	if code != http.StatusCreated {
+		t.Fatalf("status = %d: %v", code, body)
+	}
+	if a := joined(t, body)[0]; a["flavor"] != "generalist" || a["model"] != "platform-model-1" {
+		t.Errorf("an agent that named neither: flavor %v, model %v, want the defaults", a["flavor"], a["model"])
+	}
+	if s := store.signups[0]; s.Flavor != "generalist" || s.Model != "platform-model-1" {
+		t.Errorf("stored signup: flavor %q, model %q", s.Flavor, s.Model)
+	}
+	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"flavor":"data-search","model":"another-model"}`)
+	if a := joined(t, body)[0]; code != http.StatusCreated || a["flavor"] != "data-search" || a["model"] != "another-model" {
+		t.Errorf("an agent that named both: %d %v", code, a)
+	}
+}
+
+func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 200)
+	r := agentsRouter(t, store, staff)
+	big := `{"count":100,"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
+	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", big)
+	if code != http.StatusBadRequest || out["reason"] != "invalid_request" || !strings.Contains(out["message"].(string), "4096") {
+		t.Fatalf("got = %d %v, want = 400 naming the limit", code, out)
+	}
+	if len(store.signups) != 0 {
+		t.Fatalf("%d signups were written", len(store.signups))
+	}
+	fits := `{"count":100,"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes-len(`{"blob":""}`)) + `"}}`
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", fits); code != http.StatusCreated {
+		t.Fatalf("hyperparameters of exactly the limit: got = %d %v", code, out)
+	}
+}
+
+// A person in two orgs is admitted to both, so the access check passes for an agent of org B and
+// an experiment of org A: the store is what keeps the two apart.
+func TestARegisteredAgentOfAnotherOrgIsNotFoundEvenForACallerOfBothOrgs(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	store.agents["outsider"] = &domain.Agent{ID: "outsider", Kind: domain.AgentKindAgent, OrgID: "org-b"}
+	r := agentsRouter(t, store, auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a", "org-b"}})
+	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"outsider"}`)
+	if code != http.StatusNotFound || out["reason"] != "agent_not_found" || len(store.signups) != 0 {
+		t.Fatalf("got = %d %v with %d signups, want = 404 agent_not_found and none", code, out, len(store.signups))
+	}
 }

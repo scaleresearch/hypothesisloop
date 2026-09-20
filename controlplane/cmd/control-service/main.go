@@ -195,7 +195,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, repos, logger).
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
-		WithAgentLaunch(pcfg.Agents.Launcher, pcfg.Auth.SigningSecret)
+		WithAgentLaunch(quota.AgentLaunch{
+			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
+			SigningSecret: pcfg.Auth.SigningSecret,
+		})
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch

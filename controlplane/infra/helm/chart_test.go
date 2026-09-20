@@ -61,6 +61,8 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 		Launcher: "main",
 		Image:    "registry.example.invalid/hypothesisloop-experimentator-base:test",
 		APIURL:   "http://api.example.invalid:30081",
+		// Not a value of the chart: the staged settings file decides it.
+		DefaultModel: "claude-sonnet-5",
 	}); got != want {
 		t.Errorf("in-cluster agents = %+v, want %+v", got, want)
 	}

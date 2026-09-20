@@ -443,6 +443,16 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS launcher        TEXT    
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS flavor          TEXT    NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS hyperparameters JSONB   NOT NULL DEFAULT '{}';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS model           TEXT    NOT NULL DEFAULT '';
+-- What became of a hosted agent's machine, written by its launcher's reconcile call.
+-- instance_name is the name it was last asked for under, kept so that an agent whose run is over
+-- is still named as it was created when config has changed since. A machine reported as exited
+-- counts one restart and is asked for again under a new name, until instance_stopped: then the
+-- agent is no longer asked for, and instance_exited_at and instance_exit_log say how it ended.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_name      TEXT        NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_restarts  INTEGER     NOT NULL DEFAULT 0;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_stopped   BOOLEAN     NOT NULL DEFAULT false;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exited_at TIMESTAMPTZ;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exit_log  TEXT        NOT NULL DEFAULT '';
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN

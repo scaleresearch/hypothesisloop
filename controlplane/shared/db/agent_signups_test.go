@@ -40,7 +40,11 @@ func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExpe
 	if err := NewPlatformExperimentsStore(pool).UpdatePlatformExperimentStatus(ctx, pe, status); err != nil {
 		t.Fatalf("set status %s: got = %v, want = nil", status, err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status_changed_at = now() - make_interval(secs => $2) WHERE id = $1`, pe, ago.Seconds()); err != nil {
+	if _, err := pool.pool.Exec(ctx, `
+UPDATE platform_experiments
+SET status_changed_at = now() - make_interval(secs => $2),
+    closed_at = CASE WHEN closed_at IS NULL THEN NULL ELSE now() - make_interval(secs => $2) END
+WHERE id = $1`, pe, ago.Seconds()); err != nil {
 		t.Fatalf("age status change: got = %v, want = nil", err)
 	}
 }
@@ -261,9 +265,174 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	}
 
 	for name, wantHas := range map[string]bool{launcher: true, launcher + "-other": true, launcher + "-nobody": false} {
-		if has, err := pes.LauncherHasAgents(ctx, name); err != nil || has != wantHas {
+		if has, err := pes.LauncherHasAgents(ctx, name, windDown); err != nil || has != wantHas {
 			t.Errorf("LauncherHasAgents(%s): got = %v, %v, want = %v", name, has, err, wantHas)
 		}
+	}
+}
+
+// A launcher is known for as long as it is listed anything, and no longer: once the wind-down
+// of its last agent has passed, a launcher that only signups name has nothing to ask for.
+func TestALauncherWhoseLastAgentHasEndedHasNoAgents(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const windDown = 120 * time.Second
+	launcher := "launcher-" + uuid.New().String()[:8]
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher})
+
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, windDown-10*time.Second)
+	if has, err := pes.LauncherHasAgents(ctx, launcher, windDown); err != nil || !has {
+		t.Errorf("inside the wind-down: got = %v, %v, want = true", has, err)
+	}
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, windDown+time.Second)
+	if has, err := pes.LauncherHasAgents(ctx, launcher, windDown); err != nil || has {
+		t.Errorf("after the wind-down: got = %v, %v, want = false", has, err)
+	}
+	if listed, err := pes.ListLauncherAgents(ctx, launcher, windDown); err != nil || len(listed) != 0 {
+		t.Errorf("after the wind-down: listed = %+v, %v, want none", listed, err)
+	}
+}
+
+// The wind-down is counted from closed_at, the moment the authenticator counts an agent token's
+// last minutes from, and never from a later status change.
+func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const windDown = 120 * time.Second
+	launcher := "launcher-" + uuid.New().String()[:8]
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher})
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Hour)
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status_changed_at = now() WHERE id = $1`, pe); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := pes.ListLauncherAgents(ctx, launcher, windDown); err != nil || len(listed) != 0 {
+		t.Errorf("closed an hour ago with a fresh status change: listed = %+v, %v, want none", listed, err)
+	}
+}
+
+func TestARegisteredAgentJoinsOnlyAnExperimentOfItsOwnOrg(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	accounts := NewAccountsStore(pool)
+	pes := NewPlatformExperimentsStore(pool)
+	_, orgA := newTestUserHome(t, accounts)
+	_, orgB := newTestUserHome(t, accounts)
+	peA, peB := "pe-"+uuid.New().String()[:8], "pe-"+uuid.New().String()[:8]
+	createTestPEIn(t, pool, peA, defaultProjectOf(t, accounts, orgA).ID)
+	createTestPEIn(t, pool, peB, defaultProjectOf(t, accounts, orgB).ID)
+	agentOfA := spawnTestAgents(t, pes, peA, domain.AgentSignup{})[0]
+
+	signup := domain.AgentSignup{AgentID: agentOfA, Role: domain.SignupRoleCompetitor}
+	if inserted, err := pes.Signup(ctx, peB, signup); !errors.Is(err, ErrAgentOutsideOrg) || inserted {
+		t.Fatalf("an agent of org A into an experiment of org B: got = %v, %v, want = ErrAgentOutsideOrg", inserted, err)
+	}
+	if in, _ := pes.IsSignedUp(ctx, peB, agentOfA); in {
+		t.Fatal("the agent is signed up in the other org's experiment")
+	}
+	signup.AgentID = "agent-nobody-" + uuid.New().String()[:8]
+	if _, err := pes.Signup(ctx, peA, signup); !errors.Is(err, ErrAgentOutsideOrg) {
+		t.Fatalf("an agent that does not exist: got = %v, want = ErrAgentOutsideOrg", err)
+	}
+}
+
+// Removal takes the agent's place and leaves the agent: it is added again by its id.
+func TestARemovedAgentStaysInItsOrgAndJoinsAgainByItsID(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	accounts := NewAccountsStore(pool)
+	pes := NewPlatformExperimentsStore(pool)
+	_, orgID := newTestUserHome(t, accounts)
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPEIn(t, pool, pe, defaultProjectOf(t, accounts, orgID).ID)
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{})[0]
+	if err := pes.RemoveAgent(ctx, pe, agent); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := accounts.AgentOrg(ctx, agent); err != nil || !found || got != orgID {
+		t.Fatalf("org of the removed agent: got = %q, %v, %v, want = %q", got, found, err, orgID)
+	}
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !inserted {
+		t.Fatalf("join again: got = %v, %v, want = true, nil", inserted, err)
+	}
+}
+
+func TestAnExitedInstanceIsRecordedRestartedAndFinallyStopsItsAgent(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const windDown = 120 * time.Second
+	const maxRestarts = 2
+	launcher := "launcher-" + uuid.New().String()[:8]
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	ids := spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher}, domain.AgentSignup{})
+	agent, selfRun := ids[0], ids[1]
+	instance := func() domain.AgentInstance {
+		t.Helper()
+		signup, err := pes.GetAgentSignup(ctx, pe, agent)
+		if err != nil || signup == nil || signup.Instance == nil {
+			t.Fatalf("signup: got = %+v, %v", signup, err)
+		}
+		return *signup.Instance
+	}
+	if got := instance(); got != (domain.AgentInstance{}) {
+		t.Fatalf("a fresh hosted agent's instance: got = %+v, want nothing recorded", got)
+	}
+	if own, _ := pes.GetAgentSignup(ctx, pe, selfRun); own.Instance != nil {
+		t.Fatalf("a self-run agent has an instance: %+v", own.Instance)
+	}
+
+	if recorded, err := pes.RecordAgentInstanceExit(ctx, pe, agent, "name-0", "boom", maxRestarts); err != nil || recorded {
+		t.Fatalf("an exit under a name the agent was never asked for: got = %v, %v, want = false", recorded, err)
+	}
+	if recorded, err := pes.RecordAgentInstanceExit(ctx, pe, agent, "", "boom", maxRestarts); err != nil || recorded {
+		t.Fatalf("an exit with no name: got = %v, %v, want = false", recorded, err)
+	}
+	for exit := 1; exit <= maxRestarts+1; exit++ {
+		name := "name-" + string(rune('0'+exit))
+		if err := pes.SetAgentInstanceName(ctx, pe, agent, name); err != nil {
+			t.Fatal(err)
+		}
+		if got := instance().Name; got != name {
+			t.Fatalf("instance name: got = %q, want = %q", got, name)
+		}
+		if recorded, err := pes.RecordAgentInstanceExit(ctx, pe, agent, "another-name", "boom", maxRestarts); err != nil || recorded {
+			t.Fatalf("exit %d under a stale name: got = %v, %v, want = false", exit, recorded, err)
+		}
+		if recorded, err := pes.RecordAgentInstanceExit(ctx, pe, agent, name, "log of "+name, maxRestarts); err != nil || !recorded {
+			t.Fatalf("exit %d: got = %v, %v, want = true", exit, recorded, err)
+		}
+		if recorded, err := pes.RecordAgentInstanceExit(ctx, pe, agent, name, "said twice", maxRestarts); err != nil || recorded {
+			t.Fatalf("exit %d reported again: got = %v, %v, want = false", exit, recorded, err)
+		}
+		got := instance()
+		wantRestarts, wantStopped := exit, false
+		if exit > maxRestarts {
+			wantRestarts, wantStopped = maxRestarts, true
+		}
+		if got.Name != "" || got.Restarts != wantRestarts || got.Stopped != wantStopped || got.ExitLog != "log of "+name ||
+			got.ExitedAt == nil || time.Since(*got.ExitedAt) > time.Minute {
+			t.Fatalf("after exit %d: got = %+v, want restarts %d stopped %v", exit, got, wantRestarts, wantStopped)
+		}
+		listed, err := pes.ListLauncherAgents(ctx, launcher, windDown)
+		if err != nil || (len(listed) == 1) == wantStopped {
+			t.Fatalf("after exit %d: listed = %+v, %v, want listed = %v", exit, listed, err, !wantStopped)
+		}
+	}
+	if has, err := pes.LauncherHasAgents(ctx, launcher, windDown); err != nil || has {
+		t.Errorf("a launcher whose only agent stopped: got = %v, %v, want = false", has, err)
+	}
+	if err := pes.SetAgentInstanceName(ctx, pe, selfRun, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if own, _ := pes.GetAgentSignup(ctx, pe, selfRun); own.Instance != nil {
+		t.Errorf("a self-run agent was given an instance name")
 	}
 }
 
@@ -275,7 +444,7 @@ func TestALauncherNamedOnASelfRunSignupHasNoAgents(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 	launcher := "launcher-" + uuid.New().String()[:8]
 	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: false, Launcher: launcher})
-	if has, err := pes.LauncherHasAgents(context.Background(), launcher); err != nil || has {
+	if has, err := pes.LauncherHasAgents(context.Background(), launcher, time.Minute); err != nil || has {
 		t.Errorf("got = %v, %v, want = false, nil", has, err)
 	}
 }

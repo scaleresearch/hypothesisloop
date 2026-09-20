@@ -24,10 +24,8 @@ type PlatformExperimentsHandler struct {
 	capacityFreshness time.Duration
 	clusters          ClusterRegistry
 
-	// Set via WithAgentLaunch: the launcher hosted agents are given to, and the secret an
-	// agent's token is derived from.
-	launcher      string
-	signingSecret string
+	// Set via WithAgentLaunch.
+	launch AgentLaunch
 
 	// repos reaches the repository attached to a project.
 	repos ProjectRepos

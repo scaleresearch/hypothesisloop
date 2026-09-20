@@ -21,6 +21,10 @@ var ErrMaxAgentsReached = errors.New("max_agents reached")
 // open, or does not exist: the roster is fixed when the experiment starts.
 var ErrSignupClosed = errors.New("platform experiment is not open")
 
+// ErrAgentOutsideOrg is a signup refused because the agent is not one of the platform
+// experiment's org, or does not exist.
+var ErrAgentOutsideOrg = errors.New("agent is not of the platform experiment's org")
+
 // Signup records an existing agent's place in a platform experiment. inserted=false means the
 // experiment is no longer open, or the agent was already signed up.
 //
@@ -80,8 +84,22 @@ VALUES ($1, $2, $3, $4, $5, $6)`, agent.ID, agent.Name, agent.OrgID, agent.Kind,
 			return 0, fmt.Errorf("platform_experiments_store.Signup: create agent %s: %w", agent.ID, err)
 		}
 	}
+	created := make(map[string]bool, len(create))
+	for _, agent := range create {
+		created[agent.ID] = true
+	}
 	inserted, competitors := 0, false
 	for _, signup := range signups {
+		if !created[signup.AgentID] {
+			var agentOrg string
+			err := tx.QueryRow(ctx, `SELECT org_id FROM agents WHERE id=$1`, signup.AgentID).Scan(&agentOrg)
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && agentOrg != orgID) {
+				return 0, ErrAgentOutsideOrg
+			}
+			if err != nil {
+				return 0, fmt.Errorf("platform_experiments_store.Signup: read agent %s: %w", signup.AgentID, err)
+			}
+		}
 		hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: encode hyperparameters: %w", err)
@@ -127,7 +145,9 @@ func nonNilObject(m map[string]any) map[string]any {
 }
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. ErrSignupClosed
-// once it has, ErrNotSignedUp when the agent is not in it. The experiment row is locked as in
+// once it has, ErrNotSignedUp when the agent is not in it. Only its place goes: the agent itself
+// stays in its org however it came to be, as every agent that ever joined does, and can be added
+// again by its id. The experiment row is locked as in
 // enrol, so a removal and a start cannot both believe they came first.
 func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpID, agentID string) error {
 	tx, err := s.pool.pool.Begin(ctx)
@@ -160,15 +180,21 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 }
 
 const agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
-       s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at`
+       s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
+       s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log`
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var signup domain.AgentSignup
 	var hyperparameters []byte
+	var instance domain.AgentInstance
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
-		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt}, more...)...); err != nil {
+		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
+		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
+	}
+	if signup.Hosted {
+		signup.Instance = &instance
 	}
 	if err := json.Unmarshal(hyperparameters, &signup.Hyperparameters); err != nil {
 		return domain.AgentSignup{}, fmt.Errorf("decode hyperparameters of %s: %w", signup.AgentID, err)
@@ -221,20 +247,24 @@ type LauncherAgent struct {
 	Ending bool
 }
 
-// ListLauncherAgents returns the hosted agents whose machine the launcher keeps or leaves alone
-// right now: those of an open or running platform experiment that were not cut, and those whose
-// experiment closed or who were cut less than windDown ago. Both moments and the comparison are
-// on the database's clock.
-func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
-	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, (pe.status = 'closed' OR c.agent_id IS NOT NULL)
+// launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
+// of an open or running platform experiment that were not cut, and those whose experiment closed
+// or who were cut less than $2 seconds ago. An agent whose machine exited for the last time is
+// none of them. Both moments and the comparison are on the database's clock.
+const launcherAgentsFrom = `
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 LEFT JOIN agents a ON a.id = s.agent_id
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
-WHERE s.hosted AND s.launcher = $1
-  AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.status_changed_at > now() - make_interval(secs => $2)))
-  AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
+WHERE s.hosted AND s.launcher = $1 AND NOT s.instance_stopped
+  AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)))
+  AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))`
+
+// ListLauncherAgents returns the hosted agents whose machine the launcher keeps or leaves alone
+// right now.
+func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT `+agentSignupColumns+`, (pe.status = 'closed' OR c.agent_id IS NOT NULL)`+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
@@ -252,14 +282,41 @@ ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	return agents, rows.Err()
 }
 
-// LauncherHasAgents reports whether any hosted signup names the launcher.
-func (s *PlatformExperimentsStore) LauncherHasAgents(ctx context.Context, launcher string) (bool, error) {
+// LauncherHasAgents reports whether ListLauncherAgents would return anything for the launcher.
+func (s *PlatformExperimentsStore) LauncherHasAgents(ctx context.Context, launcher string, windDown time.Duration) (bool, error) {
 	var has bool
-	if err := s.pool.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM experiment_signups WHERE hosted AND launcher = $1)`, launcher).Scan(&has); err != nil {
+	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1`+launcherAgentsFrom+`)`, launcher, windDown.Seconds()).Scan(&has); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.LauncherHasAgents: %w", err)
 	}
 	return has, nil
+}
+
+// SetAgentInstanceName records the name a hosted agent's machine is asked for under.
+func (s *PlatformExperimentsStore) SetAgentInstanceName(ctx context.Context, platformExpID, agentID, name string) error {
+	if _, err := s.pool.pool.Exec(ctx, `
+UPDATE experiment_signups SET instance_name = $3
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted`, platformExpID, agentID, name); err != nil {
+		return fmt.Errorf("platform_experiments_store.SetAgentInstanceName: %w", err)
+	}
+	return nil
+}
+
+// RecordAgentInstanceExit records that the machine a hosted agent was asked for under name has
+// exited, with the end of its output. It counts a restart while fewer than maxRestarts were
+// counted, and stops the agent otherwise. The name is cleared, so the same exit reported again
+// records nothing: recorded=false, as for a name the agent is not asked for under.
+func (s *PlatformExperimentsStore) RecordAgentInstanceExit(ctx context.Context, platformExpID, agentID, name, exitLog string, maxRestarts int) (recorded bool, err error) {
+	tag, err := s.pool.pool.Exec(ctx, `
+UPDATE experiment_signups
+SET instance_name = '', instance_exited_at = now(), instance_exit_log = $4,
+    instance_stopped = instance_restarts >= $5,
+    instance_restarts = CASE WHEN instance_restarts >= $5 THEN instance_restarts ELSE instance_restarts + 1 END
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND hosted AND NOT instance_stopped
+  AND instance_name = $3 AND instance_name <> ''`, platformExpID, agentID, name, exitLog, maxRestarts)
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RecordAgentInstanceExit: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // ListSignups returns all agent IDs signed up for a platform experiment.

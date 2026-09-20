@@ -25,9 +25,19 @@ type AddAgentsRequest struct {
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	Hosted          bool           `json:"hosted,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
-	Flavor          string         `json:"flavor,omitempty" doc:"Which specialization the agent runs, handed to it as AGENT_FLAVOR."`
-	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object handed to the agent as AGENT_HYPERPARAMETERS."`
-	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, handed to it as ANTHROPIC_MODEL."`
+	Flavor          string         `json:"flavor,omitempty" doc:"Which specialization the agent runs, handed to it as AGENT_FLAVOR: generalist (default), hyperparameter-search, architecture-search or data-search."`
+	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object handed to the agent as AGENT_HYPERPARAMETERS, at most 4096 bytes as JSON."`
+	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, handed to it as AGENT_MODEL. Omitted, the platform's default applies and is what the answer shows."`
+}
+
+// AgentLaunch is what joining needs beyond the store.
+type AgentLaunch struct {
+	// Launcher is the launcher a hosted agent is given to.
+	Launcher string
+	// DefaultModel is what an agent that names no model runs on.
+	DefaultModel string
+	// SigningSecret derives an agent's own token.
+	SigningSecret string
 }
 
 // JoinedAgent is one agent's place in a platform experiment as the API answers with it. Token is
@@ -52,8 +62,9 @@ func refuseSignup(status int, reason, format string, args ...any) error {
 }
 
 // AddAgents joins agents to a platform experiment: the registered agent req names, or req.Count
-// new ones created in the experiment's org. launcher is the launcher a hosted agent is given to.
-func (s *PlatformExperimentsService) AddAgents(ctx context.Context, platformExpID string, req AddAgentsRequest, launcher string) ([]domain.AgentSignup, error) {
+// new ones created in the experiment's org. repos says whether the experiment's project has the
+// repository a hosted agent works in.
+func (s *PlatformExperimentsService) AddAgents(ctx context.Context, platformExpID string, req AddAgentsRequest, launch AgentLaunch, repos ProjectRepos) ([]domain.AgentSignup, error) {
 	role, err := domain.ParseSignupRole(req.Role)
 	if err != nil {
 		return nil, refuseSignup(400, "unknown_role", "%s", err)
@@ -61,20 +72,45 @@ func (s *PlatformExperimentsService) AddAgents(ctx context.Context, platformExpI
 	if !domain.ValidQuotaTierOverride(req.QuotaTier) {
 		return nil, refuseSignup(400, "invalid_request", "quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got %s", req.QuotaTier)
 	}
-	if err := domain.ValidateAgentLaunch(req.Flavor, req.Model); err != nil {
+	flavor, model, err := domain.ResolveAgentLaunch(req.Flavor, req.Model, launch.DefaultModel, req.Hyperparameters)
+	if err != nil {
 		return nil, refuseSignup(400, "invalid_request", "%s", err)
 	}
 	signup := domain.AgentSignup{
 		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
-		Hosted: req.Hosted, Flavor: req.Flavor, Hyperparameters: req.Hyperparameters, Model: req.Model,
+		Hosted: req.Hosted, Flavor: flavor, Hyperparameters: req.Hyperparameters, Model: model,
 	}
 	if req.Hosted {
-		signup.Launcher = launcher
+		signup.Launcher = launch.Launcher
+		if err := s.requireRepo(ctx, platformExpID, repos); err != nil {
+			return nil, err
+		}
 	}
 	if req.AgentID != "" {
 		return s.joinRegistered(ctx, platformExpID, req, signup)
 	}
 	return s.spawn(ctx, platformExpID, req, signup)
+}
+
+// requireRepo refuses to host an agent in a project with no repository attached: the agent
+// clones the project's repository before its first turn, and a machine rented for it would only
+// start and exit.
+func (s *PlatformExperimentsService) requireRepo(ctx context.Context, platformExpID string, repos ProjectRepos) error {
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.AddAgents: %w", err)
+	}
+	if pe == nil {
+		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+	}
+	cloneURL, err := repos.CloneURL(ctx, pe.ProjectID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.AddAgents: %w", err)
+	}
+	if cloneURL == "" {
+		return refuseSignup(409, "no_repository", "project %s has no repository attached, and a hosted agent works in the project's repository: attach one to the project, then add the agents again", pe.ProjectID)
+	}
+	return nil
 }
 
 func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platformExpID string, req AddAgentsRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
@@ -198,11 +234,9 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 	return nil
 }
 
-// WithAgentLaunch attaches what joining needs beyond the store: the launcher hosted agents are
-// given to, and the secret an agent's own token is derived from.
-func (h *PlatformExperimentsHandler) WithAgentLaunch(launcher, signingSecret string) *PlatformExperimentsHandler {
-	h.launcher = launcher
-	h.signingSecret = signingSecret
+// WithAgentLaunch attaches what joining needs beyond the store.
+func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsHandler {
+	h.launch = launch
 	return h
 }
 
@@ -223,8 +257,8 @@ type joinedAgentsBody struct {
 
 // RegisterAgentsHuma registers how agents join and leave a platform experiment.
 func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
-	if h.launcher == "" || h.signingSecret == "" {
-		panic("quota.RegisterAgentsHuma: WithAgentLaunch must be called first")
+	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.repos == nil {
+		panic("quota.RegisterAgentsHuma: the handler needs its project repositories and WithAgentLaunch with every field set")
 	}
 	access := doc.Access
 
@@ -234,7 +268,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		DefaultStatus: 201,
 		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present. " +
 			"Creates count agents with generated ids and signs them up, all of them or none; or, with agent_id, signs up that registered agent. " +
-			"hosted=true has the platform start and keep one machine per agent until the experiment closes or the agent is cut. " +
+			"hosted=true has the platform start and keep one machine per agent until the experiment closes or the agent is cut; it is refused " +
+			"with 409 no_repository while the project has no repository attached, since the agent works in it. " +
+			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns each agent's token: run the agent yourself with it as HL_TOKEN, beside AGENT_ID and PLATFORM_EXPERIMENT_ID. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
@@ -251,7 +287,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 				return nil, err
 			}
 		}
-		signups, err := h.svc.AddAgents(ctx, in.ID, in.Body, h.launcher)
+		signups, err := h.svc.AddAgents(ctx, in.ID, in.Body, h.launch, h.repos)
 		if err != nil {
 			return nil, h.refusal("add agents", err)
 		}
@@ -262,7 +298,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			if signup.Hosted {
 				continue
 			}
-			token, err := auth.Mint(h.signingSecret, auth.AgentScope(in.ID, signup.AgentID))
+			token, err := auth.Mint(h.launch.SigningSecret, auth.AgentScope(in.ID, signup.AgentID))
 			if err != nil {
 				return nil, h.refusal("mint agent token", err)
 			}
@@ -274,7 +310,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-platform-experiment-agents", Method: "GET", Path: "/platform-experiments/{id}/agents",
 		Summary: "List the agents of a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Every agent that joined, in the order they did, with its role and what it was launched with. No token is listed.",
+		Description: "Every agent that joined, in the order they did, with its role and what it was launched with. No token is listed. " +
+			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
+			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body joinedAgentsBody }, error) {
@@ -305,6 +343,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Remove an agent from a platform experiment that has not started", Tags: []string{"platform-experiments"},
 		DefaultStatus: 200,
 		Description: "Takes the agent out while the experiment is open: its token stops working and, if the platform runs it, its machine is taken down. " +
+			"Only its place goes: the agent stays in the org and joins again with agent_id. " +
 			"409 once the experiment has started, when the roster is what quota was divided over: from then on an agent leaves by being cut or by the experiment closing.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`

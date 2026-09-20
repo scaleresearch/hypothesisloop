@@ -1,9 +1,11 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,12 +25,50 @@ type AgentSignup struct {
 	Hosted bool `json:"hosted"`
 	// Launcher is the launcher that runs a hosted agent, written when it joins so that a later
 	// change of the configured launcher moves new agents only.
-	Launcher        string         `json:"launcher,omitempty"`
-	Flavor          string         `json:"flavor,omitempty"`
+	Launcher string `json:"launcher,omitempty"`
+	// Flavor and Model are resolved when the agent joins: what it asked for, or the platform's
+	// default at that moment. Neither is ever empty on a stored signup.
+	Flavor          string         `json:"flavor"`
 	Hyperparameters map[string]any `json:"hyperparameters"`
-	Model           string         `json:"model,omitempty"`
+	Model           string         `json:"model"`
 	SignedUpAt      time.Time      `json:"signed_up_at"`
+	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
+	// not run.
+	Instance *AgentInstance `json:"instance,omitempty"`
 }
+
+// AgentInstance is the recorded outcome of a hosted agent's machine, as its launcher reported it.
+type AgentInstance struct {
+	// Name is the name the machine was last asked for under, without the launcher's prefix.
+	// Empty until the launcher first asked, and after an exit until it asks again.
+	Name string `json:"name,omitempty"`
+	// Restarts counts the machines that exited and were asked for again.
+	Restarts int `json:"restarts"`
+	// Stopped means the last machine exited with no restart left: the platform no longer asks
+	// for one, and the agent takes no further turn.
+	Stopped  bool       `json:"stopped"`
+	ExitedAt *time.Time `json:"exited_at,omitempty"`
+	// ExitLog is the end of what the last exited machine's command wrote.
+	ExitLog string `json:"exit_log,omitempty"`
+}
+
+// MaxAgentInstanceRestarts is how many times an exited machine of one hosted agent is asked for
+// again. The next exit stops the agent.
+const MaxAgentInstanceRestarts = 3
+
+// MaxAgentInstanceLogBytes bounds the log tail kept of an exited machine.
+const MaxAgentInstanceLogBytes = 4 << 10
+
+// MaxHyperparametersBytes bounds an agent's hyperparameters as JSON. They travel in every answer
+// to the agent's launcher and in the agent's environment.
+const MaxHyperparametersBytes = 4 << 10
+
+// AgentFlavors are the specializations an agent can be started as: the briefs the agent image
+// holds under prompts/flavors.
+var AgentFlavors = []string{"generalist", "hyperparameter-search", "architecture-search", "data-search"}
+
+// DefaultAgentFlavor is what an agent runs when it joins without naming one.
+const DefaultAgentFlavor = "generalist"
 
 // MaxAgentsPerSpawn bounds how many agents one request may create.
 const MaxAgentsPerSpawn = 100
@@ -37,18 +77,29 @@ const maxModelLength = 128
 
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$`)
 
-// ValidateAgentLaunch checks what an agent is started with. Each value becomes an environment
-// variable of the agent's machine, and an empty one leaves the harness's own default in place.
-func ValidateAgentLaunch(flavor, model string) error {
-	if flavor != "" {
-		if err := ValidateIdentifier("flavor", flavor); err != nil {
-			return err
-		}
+// ResolveAgentLaunch checks what an agent asked to be started with and fills what it left out, so
+// that a signup always says exactly what its agent runs. defaultModel is the platform's own.
+func ResolveAgentLaunch(flavor, model, defaultModel string, hyperparameters map[string]any) (resolvedFlavor, resolvedModel string, err error) {
+	if flavor == "" {
+		flavor = DefaultAgentFlavor
 	}
-	if model != "" && (len(model) > maxModelLength || !modelPattern.MatchString(model)) {
-		return fmt.Errorf("model %q must be at most %d characters of letters, digits and . _ : - [ ]", model, maxModelLength)
+	if !slices.Contains(AgentFlavors, flavor) {
+		return "", "", fmt.Errorf("flavor %q is not one an agent can run: %s", flavor, strings.Join(AgentFlavors, ", "))
 	}
-	return nil
+	if model == "" {
+		model = defaultModel
+	}
+	if len(model) > maxModelLength || !modelPattern.MatchString(model) {
+		return "", "", fmt.Errorf("model %q must be at most %d characters of letters, digits and . _ : - [ ]", model, maxModelLength)
+	}
+	encoded, err := json.Marshal(hyperparameters)
+	if err != nil {
+		return "", "", fmt.Errorf("hyperparameters cannot be encoded: %w", err)
+	}
+	if len(encoded) > MaxHyperparametersBytes {
+		return "", "", fmt.Errorf("hyperparameters are %d bytes as JSON, the limit is %d", len(encoded), MaxHyperparametersBytes)
+	}
+	return flavor, model, nil
 }
 
 // NewAgentID returns the id of an agent the platform creates: time-ordered, and within the

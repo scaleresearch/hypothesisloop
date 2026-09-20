@@ -31,9 +31,13 @@ const (
 const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength + 1 + nameDigestLength
 
 // instanceFor is the machine a hosted agent runs in. Everything in it follows from the agent's
-// signup and the platform's config, so every reconcile answers with the same one until either
-// changes.
-func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret string) (Instance, error) {
+// signup, the platform's config and what the launcher says it starts machines with, so every
+// reconcile answers with the same one until one of them changes. This is the one place the
+// agent's environment is put together: a value an agent needs at startup is added here.
+func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
+	if agent.Flavor == "" || agent.Model == "" {
+		return Instance{}, fmt.Errorf("signup of %s has no flavor or no model", agent.AgentID)
+	}
 	hyperparameters := []byte("{}")
 	var err error
 	if agent.Hyperparameters != nil {
@@ -46,16 +50,15 @@ func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret string) 
 		"API_URL":                apiURL,
 		"AGENT_ID":               agent.AgentID,
 		"PLATFORM_EXPERIMENT_ID": agent.PlatformExperimentID,
+		"AGENT_FLAVOR":           agent.Flavor,
+		"AGENT_MODEL":            agent.Model,
 		"AGENT_HYPERPARAMETERS":  string(hyperparameters),
 	}
-	// An unset flavor or model leaves the harness's own default in place.
-	if agent.Flavor != "" {
-		env["AGENT_FLAVOR"] = agent.Flavor
+	restarts := 0
+	if agent.Instance != nil {
+		restarts = agent.Instance.Restarts
 	}
-	if agent.Model != "" {
-		env["ANTHROPIC_MODEL"] = agent.Model
-	}
-	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, image, env)
+	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, image, env, launchDigest, restarts)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -67,18 +70,22 @@ func instanceFor(agent domain.AgentSignup, image, apiURL, signingSecret string) 
 	return Instance{Name: name, Image: image, Env: env}, nil
 }
 
-// instanceName names the machine of one agent started from one image with one environment. The
-// digest covers all of it, so an agent whose image or launch values change is asked for under a
-// new name: the launcher sees a machine that is no longer wanted and one that is missing, and
-// replaces it without being told to. env must not hold the agent's token, which has no place in
-// a name. The result is lowercase letters, digits and dashes, at most MaxInstanceNameLength long.
-func instanceName(platformExperimentID, agentID, image string, env map[string]string) (string, error) {
+// instanceName names one machine of one agent. The digest covers everything the machine is
+// started with: the image, the environment, the launcher's own launch inputs (its digest of
+// them) and how many machines of this agent exited before it. An agent for whom any of that
+// changes is asked for under a new name: the launcher sees a machine that is no longer wanted
+// and one that is missing, and replaces it without being told to. env must not hold the agent's
+// token, which has no place in a name. The result is lowercase letters, digits and dashes, at
+// most MaxInstanceNameLength long.
+func instanceName(platformExperimentID, agentID, image string, env map[string]string, launchDigest string, restarts int) (string, error) {
 	identity, err := json.Marshal(struct {
 		PlatformExperimentID string            `json:"platform_experiment_id"`
 		AgentID              string            `json:"agent_id"`
 		Image                string            `json:"image"`
 		Env                  map[string]string `json:"env"`
-	}{platformExperimentID, agentID, image, env})
+		LaunchDigest         string            `json:"launch_digest"`
+		Restarts             int               `json:"restarts"`
+	}{platformExperimentID, agentID, image, env, launchDigest, restarts})
 	if err != nil {
 		return "", fmt.Errorf("name instance of %s: %w", agentID, err)
 	}

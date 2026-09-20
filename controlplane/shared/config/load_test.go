@@ -175,7 +175,7 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 	}
 	rendered := productionConfig(t)
 	for _, line := range []string{
-		"  api_url: http://host.example.invalid:8081\n\n# Where a cluster",
+		"  api_url: http://host.example.invalid:8081\n  default_model",
 		"  api_url: http://host.example.invalid:8081\n  metrics_url",
 		"  metrics_url: http://host.example.invalid:8084",
 		"  endpoint: http://host.example.invalid:9000",
@@ -238,6 +238,8 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"api url with no host":  {"  api_url: http://host.example.invalid:8081", "  api_url: /api"},
 		"api url not http":      {"  api_url: http://host.example.invalid:8081", "  api_url: ftp://example.invalid"},
 		"misspelled agents key": {"  launcher: main", "  launcher: main\n  launchers: [main]"},
+		"no default model":      {"  default_model: claude-sonnet-5\n", ""},
+		"default model unsafe":  {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {

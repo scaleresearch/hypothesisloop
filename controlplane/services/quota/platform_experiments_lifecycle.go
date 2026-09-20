@@ -229,6 +229,10 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 	if errors.Is(err, db.ErrMaxAgentsReached) {
 		return refuseSignup(400, "max_agents_reached", "limit is %d", pe.MaxAgents)
 	}
+	// Not found either way: an agent of another org is not this experiment's to learn of.
+	if errors.Is(err, db.ErrAgentOutsideOrg) {
+		return refuseSignup(404, "agent_not_found", "no agent %s is registered", agentID)
+	}
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
 	}

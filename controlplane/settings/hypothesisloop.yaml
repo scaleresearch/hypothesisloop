@@ -35,14 +35,18 @@ auth:
 #
 #   launcher   the launcher a newly hosted agent is given to. It is written onto the agent when it
 #              joins, so changing this moves new agents only and running ones finish where they
-#              started. A launcher's token is accepted while this names it or an agent is still
-#              assigned to it.
-#   image      what every hosted agent's machine boots.
+#              started. A launcher's token is accepted while this names it or its list still names
+#              an agent, running or in the two minutes after its run ended.
+#   image      what every hosted agent's machine boots. The launcher's provider must be able to
+#              pull it. A change replaces every running agent's machine.
 #   api_url    the address a hosted agent reaches this API at, from wherever its launcher rents.
+#   default_model  the model an agent runs on when it joins without naming one. Written onto the
+#              agent when it joins, so a change moves new agents only.
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
   api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
+  default_model: claude-sonnet-5
 
 # Where a cluster's runtime reaches the platform. Registering a cluster returns both beside its
 # runtime token, so the command that starts the cluster's agents has one source. Both must be

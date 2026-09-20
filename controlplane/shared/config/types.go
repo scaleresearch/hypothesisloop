@@ -231,6 +231,9 @@ type AgentsConfig struct {
 	Image string `yaml:"image"`
 	// APIURL is the address a hosted agent reaches this API at, from wherever its launcher rents.
 	APIURL string `yaml:"api_url"`
+	// DefaultModel is the model an agent runs on when it joins without naming one. It is
+	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
+	DefaultModel string `yaml:"default_model"`
 }
 
 // RuntimesConfig is where a cluster's runtime reaches the platform. Both are handed out when a
