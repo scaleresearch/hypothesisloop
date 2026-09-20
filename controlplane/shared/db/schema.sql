@@ -33,7 +33,6 @@ DO $$ BEGIN
     CREATE TYPE experiment_status AS ENUM (
         'SUBMITTED',
         'QUEUED',
-        'ADMITTED',
         'RUNNING',
         'COMPLETED',
         'FAILED',
@@ -82,12 +81,12 @@ CREATE TABLE IF NOT EXISTS agents (
     -- keeps the burst-only tier an autonomous participant gets.
     kind              TEXT             NOT NULL DEFAULT 'agent',
     performance_score DOUBLE PRECISION NOT NULL DEFAULT 0.5,
-    top3_count        INTEGER          NOT NULL DEFAULT 0,
     created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT agents_kind CHECK (kind IN ('agent', 'human'))
 );
 
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'agent';
+ALTER TABLE agents DROP COLUMN IF EXISTS top3_count;
 
 -- The inline CONSTRAINT above only ever runs on a database that does not have this table yet:
 -- CREATE TABLE IF NOT EXISTS is a no-op otherwise, and ADD COLUMN IF NOT EXISTS adds a column,
@@ -288,7 +287,7 @@ UPDATE experiments
 SET status = CASE WHEN status IN ('QUEUED', 'SUBMITTED') THEN 'REJECTED' ELSE 'EVICTED' END::experiment_status,
     eviction_reason = 'cancelled: submitted before per-job storage keys, resubmit it',
     not_admitted_reason = NULL
-WHERE data_access_key_id = '' AND status IN ('QUEUED', 'SUBMITTED', 'ADMITTED', 'RUNNING');
+WHERE data_access_key_id = '' AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING');
 DO $$ BEGIN
     ALTER TABLE experiments ADD CONSTRAINT experiments_active_has_data_key
         CHECK (data_access_key_id <> '' OR status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED'));
@@ -306,11 +305,11 @@ CREATE INDEX IF NOT EXISTS idx_experiments_project    ON experiments(project_id)
 CREATE INDEX IF NOT EXISTS idx_experiments_platform   ON experiments(platform_experiment_id);
 CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis ON experiments(hypothesis_id);
 -- Every cluster-agent polls its desired workload set continuously, and ClaimSubmitted re-reads it
--- while holding the cross-replica admission lock. Partial on the three desired statuses so the
+-- while holding the cross-replica admission lock. Partial on the two desired statuses so the
 -- index stays proportional to what is in flight rather than to everything ever run — without it
 -- both sequential-scan the whole table as it grows, the second one inside the lock.
 CREATE INDEX IF NOT EXISTS idx_experiments_desired ON experiments(cluster_name, status)
-    WHERE status IN ('SUBMITTED', 'ADMITTED', 'RUNNING');
+    WHERE status IN ('SUBMITTED', 'RUNNING');
 -- Quota and stage sweeps ask per (agent, platform experiment, status) — see
 -- GetAgentRunningExperiments/GetAgentQueuedExperiments, called once per agent per reconcile tick.
 CREATE INDEX IF NOT EXISTS idx_experiments_agent_platform_status ON experiments(agent_id, platform_experiment_id, status);
