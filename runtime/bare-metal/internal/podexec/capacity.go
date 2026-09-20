@@ -314,8 +314,9 @@ func nvidiaDevicePath(deviceID string) string {
 	return "/dev/nvidia" + deviceID
 }
 
-// currentDevicesFor returns the device paths the experiment's live container already holds, in
-// the order they were assigned, or nil if it has no live container.
+// currentDevicesFor returns the device paths the experiment's container was created with, in the
+// order they were assigned, or nil if it has no container. An exited container counts: placing
+// it afresh would change its spec hash, so reconcile would remove it and run the job again.
 func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) ([]string, error) {
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
@@ -323,9 +324,6 @@ func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) (
 	}
 	for _, c := range containers {
 		if c.Labels[LabelExperimentID] != experimentID {
-			continue
-		}
-		if c.State != "running" && c.State != "created" {
 			continue
 		}
 		resp, err := e.docker.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
