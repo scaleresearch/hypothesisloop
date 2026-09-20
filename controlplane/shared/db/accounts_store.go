@@ -18,9 +18,9 @@ var (
 	ErrOrgNotFound     = errors.New("org not found")
 	ErrProjectNotFound = errors.New("project not found")
 	ErrAPIKeyNotFound  = errors.New("api key not found")
-	// ErrAPIKeyCreatorLacksOrg reports a key asked for in the name of a user who neither owns
-	// the key's org nor is staff: such a key would not authenticate.
-	ErrAPIKeyCreatorLacksOrg = errors.New("the key's creator neither owns the org nor is staff")
+	// ErrAPIKeyCreatorLacksOrg reports a key asked for in the name of a user who may not hold
+	// it (apiKeyHeldBy): such a key would not authenticate.
+	ErrAPIKeyCreatorLacksOrg = errors.New("the key's creator may not hold such a key in the org")
 	// ErrProjectNameTaken reports that the org already has a project of that name.
 	ErrProjectNameTaken = errors.New("the org already has a project with that name")
 )
@@ -230,20 +230,6 @@ ORDER BY m.created_at, o.id`, userID)
 	return out, rows.Err()
 }
 
-// AddOrgMember adds a user to an org, or changes the role of one already in it.
-func (s *AccountsStore) AddOrgMember(ctx context.Context, orgID, userID string, role domain.OrgRole) error {
-	if !domain.ValidOrgRole(role) {
-		return fmt.Errorf("accounts_store.AddOrgMember: unknown role %q", role)
-	}
-	_, err := s.pool.pool.Exec(ctx, `
-INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, $3)
-ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role`, orgID, userID, string(role))
-	if err != nil {
-		return fmt.Errorf("accounts_store.AddOrgMember: %w", err)
-	}
-	return nil
-}
-
 // OrgRole returns a user's role in an org; found is false when they are not a member.
 func (s *AccountsStore) OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2`, orgID, userID).Scan(&role)
@@ -329,9 +315,9 @@ SELECT id, org_id, name, created_at FROM projects WHERE org_id = ANY($1) ORDER B
 
 // apiKeySelect reads keys as they stand now. Whether a key works is decided here, at the read,
 // from rows that can change after the key was made: revoked_at is the earliest revocation of the
-// key or of any key it descends from, and orphaned says its creator no longer administers its org.
+// key or of any key it descends from, and orphaned says its creator could no longer create it.
 // Deciding it at the read leaves no moment in which a key minted beside a revocation, or kept
-// past its creator's demotion, is live.
+// past its creator's demotion or removal, is live.
 const apiKeySelect = `
 SELECT k.id, k.org_id, COALESCE(k.project_id, ''), k.created_by, COALESCE(k.minted_by, ''), k.name, k.created_at,
        (WITH RECURSIVE ancestry AS (
@@ -339,9 +325,15 @@ SELECT k.id, k.org_id, COALESCE(k.project_id, ''), k.created_by, COALESCE(k.mint
             UNION ALL
             SELECT p.minted_by, p.revoked_at FROM api_keys p JOIN ancestry a ON p.id = a.parent
         ) SELECT min(revoked_at) FROM ancestry),
-       NOT EXISTS (SELECT 1 FROM users u WHERE u.id = k.created_by AND u.staff)
-       AND NOT EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = k.org_id AND m.user_id = k.created_by AND m.role = 'owner')
+       NOT ` + apiKeyHeldBy + `
 FROM api_keys k `
+
+// apiKeyHeldBy is the one statement of who may hold key k, read where a key is created and
+// wherever one is read: staff, an owner of its org, and a member of its org when the key is
+// bound to one project.
+const apiKeyHeldBy = `(EXISTS (SELECT 1 FROM users u WHERE u.id = k.created_by AND u.staff)
+        OR EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = k.org_id AND m.user_id = k.created_by
+                   AND (m.role = 'owner' OR k.project_id IS NOT NULL)))`
 
 func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
@@ -352,8 +344,8 @@ func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 }
 
 // CreateAPIKey stores a key under the hash of its token. key.ID, OrgID, CreatedBy and Name are
-// required; the project, when set, must belong to the org, and the creator must own the org or
-// be staff, which is what the key is held to for as long as it lives (apiKeySelect).
+// required; the project, when set, must belong to the org, and the creator must be one who may
+// hold the key (apiKeyHeldBy), which is what the key is held to for as long as it lives.
 func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, keyHash string) error {
 	var projectID, mintedBy *string
 	if key.MintedBy != "" {
@@ -371,9 +363,10 @@ func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, ke
 	}
 	err := s.pool.pool.QueryRow(ctx, `
 INSERT INTO api_keys (id, key_hash, org_id, project_id, created_by, minted_by, name)
-SELECT $1, $2, $3, $4, $5, $6, $7
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = $5 AND u.staff)
-   OR EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = $3 AND m.user_id = $5 AND m.role = 'owner')
+SELECT k.id, k.key_hash, k.org_id, k.project_id, k.created_by, k.minted_by, k.name
+FROM (SELECT $1::text AS id, $2::text AS key_hash, $3::text AS org_id, $4::text AS project_id,
+             $5::text AS created_by, $6::text AS minted_by, $7::text AS name) k
+WHERE `+apiKeyHeldBy+`
 RETURNING created_at`, key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, mintedBy, key.Name).Scan(&key.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrAPIKeyCreatorLacksOrg

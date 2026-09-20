@@ -167,7 +167,8 @@ func TestAKeyEndsWhenItsCreatorNoLongerAdministersItsOrg(t *testing.T) {
 		t.Fatal("a key follows its creator's standing as it is now")
 	}
 
-	if err := accounts.AddOrgMember(ctx, orgID, ownerID, domain.OrgRoleMember); err != nil {
+	addTestMember(t, accounts, orgID, ownerID, staffID, domain.OrgRoleOwner)
+	if _, err := accounts.SetOrgMemberRole(ctx, orgID, ownerID, domain.OrgRoleMember); err != nil {
 		t.Fatal(err)
 	}
 	if working("by-owner") || working("minted") {

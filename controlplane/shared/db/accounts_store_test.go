@@ -162,11 +162,9 @@ func TestMembershipIsPerOrg(t *testing.T) {
 	if role, found, err := accounts.OrgRole(ctx, orgID, guest); err != nil || found {
 		t.Fatalf("role of a non-member: got = %q, %v, %v, want not found", role, found, err)
 	}
-	if err := accounts.AddOrgMember(ctx, orgID, guest, domain.OrgRoleMember); err != nil {
-		t.Fatalf("add member: got = %v, want = nil", err)
-	}
-	if err := accounts.AddOrgMember(ctx, orgID, guest, "admin"); err == nil {
-		t.Fatal("add member with an unknown role: got = nil, want an error")
+	addTestMember(t, accounts, orgID, owner, guest, domain.OrgRoleMember)
+	if _, err := accounts.SetOrgMemberRole(ctx, orgID, guest, "admin"); err == nil {
+		t.Fatal("a role nobody defined: got = nil, want an error")
 	}
 	if role, found, err := accounts.OrgRole(ctx, orgID, guest); err != nil || !found || role != domain.OrgRoleMember {
 		t.Fatalf("role of the new member: got = %q, %v, %v, want member", role, found, err)
