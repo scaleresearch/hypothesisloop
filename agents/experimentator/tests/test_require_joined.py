@@ -18,6 +18,7 @@ class FakePlatform(BaseHTTPRequestHandler):
     calls: list = []
     tokens: set = set()
     status_for_strangers = 401
+    code_repo_url = "https://github.com/acme/model.git"
 
     def _reply(self, status, body):
         self.send_response(status)
@@ -33,6 +34,11 @@ class FakePlatform(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"## platform rules\n")
             return
+        if self.path == "/platform-experiments/pe-1":
+            body = {"id": "pe-1", "status": "running"}
+            if FakePlatform.code_repo_url:
+                body["code_repo_url"] = FakePlatform.code_repo_url
+            return self._reply(200, body)
         agent_id = self.path.rsplit("/", 1)[-1]
         if agent_id in FakePlatform.joined:
             return self._reply(200, {"agent_id": agent_id, "role": "competitor"})
@@ -50,6 +56,7 @@ class PlatformCase(unittest.TestCase):
     def setUp(self):
         FakePlatform.joined, FakePlatform.calls, FakePlatform.tokens = {"agent-a"}, [], set()
         FakePlatform.status_for_strangers = 401
+        FakePlatform.code_repo_url = "https://github.com/acme/model.git"
         self.server = HTTPServer(("127.0.0.1", 0), FakePlatform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -106,7 +113,7 @@ class StartupTest(PlatformCase):
 
     def environment(self, **overrides):
         env = {"API_URL": self.url, "HL_TOKEN": "agent-token", "AGENT_ID": "agent-a", "PLATFORM_EXPERIMENT_ID": "pe-1",
-               "CODE_REPO_URL": "git://example.invalid/repo", "AGENT_WORKDIR": self.workdir}
+               "AGENT_WORKDIR": self.workdir}
         env.update(overrides)
         return {k: v for k, v in env.items() if v is not None}
 
@@ -125,8 +132,21 @@ class StartupTest(PlatformCase):
         self.assertEqual(setup.cfg.agent_id, "agent-a")
         self.assertEqual(FakePlatform.calls, [
             ("GET", "/platform-experiments/pe-1/signups/agent-a"),
+            ("GET", "/platform-experiments/pe-1"),
             ("GET", "/explore/rules"),
         ])
+        self.assertIn("clone https://github.com/acme/model.git", setup.system_prompt)
+
+    def test_prepare_stops_when_the_project_has_no_repository(self):
+        FakePlatform.code_repo_url = ""
+        with self.assertRaises(SystemExit) as ctx:
+            self.prepare()
+        self.assertIn("no repository attached", str(ctx.exception))
+
+    def test_the_repository_address_is_the_platforms_and_never_the_environments(self):
+        setup = self.prepare(CODE_REPO_URL="git://example.invalid/other", GIT_TOKEN="a-token")
+        self.assertNotIn("example.invalid", setup.system_prompt)
+        self.assertNotIn("a-token", setup.system_prompt)
 
     def test_prepare_stops_an_agent_nobody_added_before_it_reads_the_rules(self):
         with self.assertRaises(SystemExit):

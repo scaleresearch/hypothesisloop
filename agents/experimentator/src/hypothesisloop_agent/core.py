@@ -29,11 +29,11 @@ def hl_commands() -> str:
         for group in _HL_HELP)
 
 
-def system_prompt(cfg: config.Config, rules: str, commands: str) -> str:
+def system_prompt(cfg: config.Config, rules: str, commands: str, code_repo_url: str) -> str:
     return (_PROMPTS_DIR / "system_prompt.md").read_text().format(
         rules=rules.strip(), hl_commands=commands, agent_id=cfg.agent_id, flavor=cfg.flavor,
         flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip(),
-        platform_experiment_id=cfg.platform_experiment_id, code_repo_url=cfg.code_repo_url,
+        platform_experiment_id=cfg.platform_experiment_id, code_repo_url=code_repo_url,
         hyperparameters=json.dumps(cfg.hyperparameters),
     )
 
@@ -74,7 +74,14 @@ def prepare() -> RunSetup:
     client = api_client.PlatformClient(cfg.api_url, cfg.token)
     client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
 
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands())
+    # The repository is the project's, attached on the platform: the agent clones it through
+    # `hl git-credential`, so no address and no git token is handed to it at launch.
+    code_repo_url = client.get_platform_experiment(cfg.platform_experiment_id).get("code_repo_url")
+    if not code_repo_url:
+        raise SystemExit(f"agent: the project of platform experiment {cfg.platform_experiment_id} has no repository "
+                         "attached: attach one to the project, then start the agent again")
+
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands(), code_repo_url)
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
 
 

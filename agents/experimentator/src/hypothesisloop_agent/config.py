@@ -47,12 +47,6 @@ class Config:
     # the agent discovers itself from the experiment's `description` (see core.py's prompt).
     platform_experiment_id: str = field(default_factory=lambda: _required("PLATFORM_EXPERIMENT_ID"))
 
-    # THE shared code repo, pre-created by the operator — every agent clones the same one and works
-    # on its own branch ({agent_id}-{platform_experiment_id}). Must be a real remote pods can clone: code_ref =
-    # "{code_repo_url}@<sha>" is the commit a job pod checks out to run. Auth via GIT_TOKEN (see the
-    # Dockerfile's git credential helper); a local git:// remote needs no token.
-    code_repo_url: str = field(default_factory=lambda: _required("CODE_REPO_URL"))
-
     # Which specialization this agent runs: the coordinator decides it and passes it in, the agent
     # never picks its own. Every flavor competes identically — nothing here is a ranking axis — it
     # only selects which brief is inlined into the prompt (prompts/flavors/<flavor>.md), which

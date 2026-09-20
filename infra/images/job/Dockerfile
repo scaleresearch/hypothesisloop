@@ -16,4 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
 COPY agents/coordinator/experiments/hl-clone /usr/local/bin/hl-clone
+# hl-clone fetches the job's commit from the project's repository. git asks hl for the credential,
+# and hl asks the platform as the job: a read token for that one repository, minted per call.
+RUN git config --system credential.https://github.com.helper \
+      '!API_URL="$HYPOTHESISLOOP_API_URL" HL_TOKEN="$HYPOTHESISLOOP_TOKEN" hl git-credential' \
+ && git config --system credential.https://github.com.useHttpPath true
 WORKDIR /workspace

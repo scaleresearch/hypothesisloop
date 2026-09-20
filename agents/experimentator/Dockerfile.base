@@ -32,20 +32,21 @@ RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed -exec rm -rf {} + \
 
 FROM python:3.13-slim
 
-# git: the agent pushes the exact code each job runs to its branch in the shared CODE_REPO_URL
+# git: the agent pushes the exact code each job runs to its branch in the project's repository
 # (system prompt step 5), so every experiment's code_ref resolves to a real, cloneable commit —
 # that is the trace from a submitted job back to its source.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Non-interactive git auth, baked so the agent never handles credentials: a helper emits $GIT_TOKEN
-# (injected at runtime as a secret, never baked) for HTTPS clone/push to CODE_REPO_URL, plus a
-# default commit identity so commits don't fail on a fresh container, and a first push of a new
-# branch that needs no -u. The agent hands the same token to job pods via job.env, so the pod can
-# clone the code_ref it runs.
-RUN git config --system credential.helper \
-      '!f() { echo "username=x-access-token"; echo "password=${GIT_TOKEN}"; }; f' \
+# Non-interactive git auth, baked so the agent never handles credentials: git asks `hl
+# git-credential` (the hl copied in below), which asks the platform for a token minted for that
+# call and limited to the project's repository. Nothing is stored and no git token is in the
+# environment. useHttpPath makes git name the repository, so the helper answers for that one only.
+# Plus a default commit identity so commits don't fail on a fresh container, and a first push of
+# a new branch that needs no -u.
+RUN git config --system credential.https://github.com.helper '!hl git-credential' \
+ && git config --system credential.https://github.com.useHttpPath true \
  && git config --system user.name  "hypothesisloop-agent" \
  && git config --system user.email "agent@hypothesisloop.local" \
  && git config --system init.defaultBranch main \

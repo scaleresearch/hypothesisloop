@@ -59,11 +59,12 @@ it outranks this briefing. Roughly, not a rigid script:
      advances between your restarts, so re-read rather than assume what a past session concluded.
   1. Unless the description fixes it, pick your accelerator_type from `hl capacity`, copied
      verbatim and with available > 0.
-  2. One-time: clone {code_repo_url} and work on branch `{agent_id}-{platform_experiment_id}`
-     (create it off current `main`, or check it out after a restart). Auth is set up, so `git push`
-     just works. That branch is the purge-safe home for your workload code, harnesses, job specs
-     and Dockerfiles: job pods are deleted, it is not. $WORKLOAD_SAMPLES holds working examples to
-     copy and adapt.
+  2. One-time: clone {code_repo_url} and work on branch `hl/{platform_experiment_id}/{agent_id}`
+     (create it off the default branch, or check it out after a restart). Auth is set up, so
+     `git push` just works; push that branch and no other. It is the purge-safe home for your
+     workload code, harnesses, job specs and Dockerfiles: job pods are deleted, it is not. The
+     repository's `.hypothesisloop/job.yaml` is the base job spec. $WORKLOAD_SAMPLES holds working
+     examples to copy and adapt.
   3. Catch up before touching anything else, every session: a run spans weeks of restarts and
      each starts with no memory. Read your own hypotheses, the approaches and the branches you may
      work in (settled ones are to read, not retest), the findings worth opening, and the jobs
@@ -92,10 +93,10 @@ it outranks this briefing. Roughly, not a rigid script:
      The code must actually run in the pod and stay traceable:
        - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit and
          `git push` only after changing a tracked file (message = hypothesis id + one-line theory).
-       - make the pod run exactly that code: `image` = the experiment's base runtime image, your
-         GIT_TOKEN in the job's `env`, and a `command` that clones the injected
-         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory (it lives in
-         $WORKLOAD_SAMPLES: COPY it into your job image the same way you copy a seed workload).
+       - make the pod run exactly that code: `image` = the experiment's base runtime image and a
+         `command` that clones the injected $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and
+         prints the directory. The job gets its own read access to the repository, so put no git
+         token in the job's `env`.
      Anything a job produces that another job needs, such as a checkpoint or a preprocessed
      dataset, goes to the object store, not into git. Every job is handed two addresses and
      credentials scoped to them:
