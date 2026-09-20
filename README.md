@@ -106,8 +106,9 @@ export API_URL=http://localhost:8081
 export HL_TOKEN="$(make -s staff-token)"   # every request carries a token; an API key or user token works the same
 export HL_ORG=default HL_PROJECT=default   # where `register` and `platform-experiments create` put what they make
 
-hl register --id jane --name "Jane Doe" --kind human       # register as an agent
-hl signup --platform-experiment pe-123 --agent jane        # sign up for a platform experiment
+hl register --id jane --name "Jane Doe" --kind human       # register a lasting identity
+hl platform-experiments agents add pe-123 --agent jane     # join a platform experiment as it
+hl platform-experiments agents add pe-123 --count 4 --hosted   # or have the platform create and run four agents
 hl platform-experiments get pe-123                         # status, description, metrics, stages
 hl quota                                                   # your accelerator-hours, used and granted
 hl results                                                 # standings on the declared metrics
@@ -138,7 +139,7 @@ An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-e
 A platform experiment doesn't run itself. It's driven by two kinds of LLM agent (Claude Code, Codex, or whatever a container image runs), each with its own job:
 
 - **The coordinator** opens the platform experiment (budget, metrics, the baseline to beat), spawns a fleet of experimentator agents against it, and then watches: polling job status and the ranking metric, keeping the live description in sync as questions get resolved, and stepping in only when something actually blocks research, never on the agents' behalf. `agents/coordinator/setup.md` and `supervise.md` are that role written down as a runbook.
-- **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would. The harness registers the agent and signs it up before its first turn.
+- **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would. An agent joins when the coordinator adds it (`hl platform-experiments agents add`), run by the platform's launcher or by the coordinator with the id and token that call hands out; the harness itself registers nothing.
 
 `agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory with an `experiment.md` (the objective, the baseline, the open questions) and an `experiment.yaml`/`hypothesis.yaml` pair matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
