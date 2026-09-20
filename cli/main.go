@@ -105,6 +105,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
 		return runGroup("job", jobCommands, client, rest, stdout, stderr)
+	case "org":
+		return runGroup("org", orgCommands, client, rest, stdout, stderr)
+	case "project":
+		return runGroup("project", projectCommands, client, rest, stdout, stderr)
+	case "api-key":
+		return runGroup("api-key", apiKeyCommands, client, rest, stdout, stderr)
+	case "cluster":
+		return runGroup("cluster", clusterCommands, client, rest, stdout, stderr)
 	case "watch":
 		return cmdWatch(apiURL, token, rest, stdout, stderr)
 	case "experiments", "experiment":
@@ -128,12 +136,17 @@ const usage = `usage: hl <command> ...
   donation              list | request | fulfill ID | cancel ID
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
+  org                   list | create NAME | rename NAME
+  project               list | create NAME | rename NAME
+  api-key               create NAME | list | revoke ID
+  cluster               add NAME | list
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
   exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
 An ID is positional; --id ID works too. --agent and --platform-experiment default to $AGENT_ID
-and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. hl job --help and
-hl hypothesis --help list their commands with every flag.`
+and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. --org defaults to $HL_ORG and
+then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
+--help and the --help of org, project, api-key and cluster list their commands with every flag.`
 
 // notStarted is what an agent can do about an open platform experiment: nothing but wait. It
 // says how long when startsAt is the experiment's start time.
@@ -564,8 +577,9 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdResults(c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] | get [PE] | create [FILE] | start PE | update PE [FILE]", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] | get [PE] | create [FILE] | start PE | update PE [FILE]", stderr)
 	limit := fs.Int("limit", 20, "max results")
+	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	if len(args) > 0 && args[0] == "list" {
 		args = args[1:]
 	}
@@ -575,8 +589,12 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 	if fs.NArg() > 0 {
 		return parseExit(misuse(fs, "unknown subcommand %q", fs.Arg(0)))
 	}
+	q := url.Values{"limit": {strconv.Itoa(*limit)}}
+	if p := orEnv(*project, projectEnv); p != "" {
+		q.Set("project_id", p)
+	}
 	var out any
-	if err := c.Do("GET", fmt.Sprintf("/platform-experiments?limit=%d", *limit), nil, &out); err != nil {
+	if err := c.Do("GET", "/platform-experiments?"+q.Encode(), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
