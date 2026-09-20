@@ -23,8 +23,7 @@ import (
 // The signal is deliberately the *requested* footprint, not observed utilization. Requests are
 // known at submission time and are exactly what the runtime reserves, so they are what actually
 // blocks a neighbour — and they can never be missing, which removes any chance of reading absent
-// telemetry as a violation. See docs at the bottom of this file for the usage-based refinement
-// and why it is not implemented yet.
+// telemetry as a violation.
 
 // DefaultDisbalanceTolerance is the multiple of a node's per-accelerator CPU/memory/storage share
 // a job may request before it counts as disbalanced. A job holding A of its node's N accelerators
@@ -510,16 +509,3 @@ func selectDisbalanceVictims(
 	}
 	return best
 }
-
-// Follow-up, deliberately not implemented here: a usage-based refinement that also catches a job
-// whose request is proportionate on paper but whose real CPU/memory consumption is a fraction of
-// it. That check cannot be written today — the k8s node agent
-// (runtime/k8s/cmd/node-agent/main.go) walks pod cgroups but discards the cpu.stat usage_usec it
-// reads, publishing only a per-pod liveness heartbeat, and never opens memory.current at all; the
-// bare-metal runtime has no per-pod collector whatsoever. Every "capacity" number in the metrics
-// store is allocatable-minus-*requests*, not consumption. Implementing it means: emit
-// experiment_cpu_usage_seconds_total (a counter, from the usage_usec already parsed) and
-// experiment_memory_working_set_bytes from the node agent, add the matching bare-metal collector,
-// add Live* query helpers to shared/metricsdb, and only then extend the score above with a
-// used/requested term — gated on the sample being fresh, so a job that has not reported yet keeps
-// scoring as proportionate.

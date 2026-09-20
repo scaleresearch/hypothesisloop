@@ -304,7 +304,7 @@ func TestSubmitJobSpeculativeWithNoClusterIDSkipsCapRecheck(t *testing.T) {
 // A speculative submit's capacityAvailable callback re-reads max_speculative_accelerators against
 // ClaimSubmitted's own fresh, lock-serialized `desired` set — not the tick-local snapshot
 // speculativeCandidates saw, which another scheduler replica could have raced past concurrently
-// (codex review caught this: the tick-local-only check let concurrent replicas overshoot the
+// (the tick-local-only check let concurrent replicas overshoot the
 // per-cluster cap by the sum of all their jobs, not just a few accelerators).
 func TestSubmitJobSpeculativeReChecksClusterCapAgainstFreshDesired(t *testing.T) {
 	exp := distributedExperiment(1, 1)
@@ -343,7 +343,7 @@ func TestSubmitJobSpeculativeReChecksClusterCapAgainstFreshDesired(t *testing.T)
 // scheduler replicas — only ClaimSubmitted's fresh, lock-serialized `desired` read can. Without this
 // same default applied there too, many different jobs (each seeing zero footprint in their own
 // tick-local snapshot) could each land their own "one job's worth" on the same unproven cluster
-// before any single failure ever triggers tried_clusters backoff (codex review).
+// before any single failure ever triggers tried_clusters backoff.
 func TestSubmitJobSpeculativeWithNoProvenFitAndNoCapDefaultsToOneJob(t *testing.T) {
 	exp := distributedExperiment(1, 1)
 	exp.ID = "exp-1"

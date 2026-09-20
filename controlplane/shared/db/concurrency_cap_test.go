@@ -97,7 +97,7 @@ func TestReserveAdmittedFlavorTxRejectsOverCap(t *testing.T) {
 	}
 }
 
-// TestReserveAdmittedFlavorTxCapIsAcrossAllAgents covers a real bug codex review found: the
+// TestReserveAdmittedFlavorTxCapIsAcrossAllAgents covers a real bug: the
 // in-flight SUM and its serializing advisory lock were both scoped to (agent_id,
 // platform_experiment_id), so max_concurrent_accelerators was actually enforced per agent, not
 // across the whole platform experiment as schema.sql documents it and autoscaler.md's concurrency

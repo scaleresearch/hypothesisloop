@@ -326,7 +326,7 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 // submit, where it is unused) — the claim-time recheck below must apply the exact same default cap
 // speculativeCandidates applied a moment ago, or a cluster with no live proof and no operator cap
 // stays unbounded at the one place multiple concurrent scheduler replicas actually serialize
-// against each other (codex review: the tick-local snapshot alone cannot close this).
+// against each other: the tick-local snapshot alone cannot close this.
 func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName, clusterID string, persistedFlavor domain.AcceleratorType, speculative, provenFit bool) error {
 	// ReserveAdmittedFlavor is called on every submit now, not only on a flavor substitution: it
 	// is also where the max_concurrent_accelerators cap (autoscaler.md's concurrency cap) is
@@ -388,7 +388,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 			// conservative: it can delay a legitimate speculative submit behind a cluster's
 			// live-fit traffic (retried next tick, nothing lost), which is the safe direction to
 			// err in for an optional operator-set cap — the opposite (undercounting) is the
-			// unbounded-overshoot failure mode this recheck exists to close (codex review).
+			// unbounded-overshoot failure mode this recheck exists to close.
 			footprint := exp.AcceleratorCount
 			for _, d := range desired {
 				footprint += d.AcceleratorCount

@@ -125,7 +125,8 @@ ORDER BY created_at DESC`
 	return collectExperiments(rows)
 }
 
-// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for a platform experiment. Used to evict jobs when an experiment is closed.
+// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for
+// a platform experiment. Used to evict jobs when an experiment is closed.
 func (s *ExperimentsStore) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE platform_experiment_id = $1

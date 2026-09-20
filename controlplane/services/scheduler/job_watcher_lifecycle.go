@@ -77,7 +77,7 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	// still succeeded (the two are fetched independently in scanAndWatch). The two failure modes
 	// must not be conflated: treating the latter as "not an autoscaler cluster" would spend
 	// infra_requeue_count and skip tried_clusters for a job whose real fault is scheduler-policy,
-	// not the job's environment (codex review caught this).
+	// not the job's environment.
 	onAutoscalerCluster := w.scaleUpTimeout > 0 && autoscalerEnabled[exp.ClusterName] && clusterIDs[exp.ClusterName] != ""
 	if onAutoscalerCluster {
 		timeout = w.scaleUpTimeout

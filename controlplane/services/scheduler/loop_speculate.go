@@ -218,10 +218,9 @@ func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, co
 // node — a rank must fit one real node in every dimension at once, not a synthetic shape assembled
 // from one node's CPU and another's accelerators — because an autoscaler adds nodes matching its
 // existing node-group templates, and no template looks like a maximum-of-every-dimension composite
-// unless some single node actually has that shape. Codex review caught the earlier
-// per-dimension-max version as exactly this: it could pass a job that fits neither a CPU-heavy node
-// nor a GPU-heavy node, onto a cluster with only those two, and the job would Pend forever since no
-// addable node matches the synthesized shape.
+// unless some single node actually has that shape. A per-dimension maximum could pass a job that
+// fits neither a CPU-heavy node nor a GPU-heavy node onto a cluster with only those two, and the
+// job would Pend forever since no addable node matches the synthesized shape.
 //
 // False does NOT mean "this cluster can never fit exp" — a cluster commonly runs several
 // heterogeneous node groups at once (different accelerator flavors, some scaled to zero), and the

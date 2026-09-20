@@ -353,8 +353,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				// that pre-check. Re-resolve against the actual speculative target now that
 				// it's chosen: a stale resolution would either persist a "max" share sized for
 				// the wrong cluster's nodes, or (if never resolved at all) leave the literal
-				// "max" sentinel in the submitted spec -- codex review caught this as a real
-				// hazard.
+				// "max" sentinel in the submitted spec.
 				if specCluster != cluster {
 					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvail[specCluster], nodeLabels[specCluster])
 					if rerr != nil {
