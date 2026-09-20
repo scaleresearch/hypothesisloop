@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -119,36 +120,63 @@ func main() {
 			}
 			pending = append(pending, pushPayload{Node: nodeName, Timestamp: now, Pods: samples})
 		}
-		// Oldest first, stopping at the first failure: the payloads carry their own collection
-		// time, so a backlog delivered late still lands on the instants it was observed at.
-		for len(pending) > 0 && push(client, endpoint, token, pending[0]) {
-			pending = pending[1:]
-		}
+		pending = flush(client, endpoint, token, pending)
 	}
 }
 
-func push(client *http.Client, endpoint, token string, payload pushPayload) bool {
+// flush sends the backlog oldest first and returns what is left to send. The payloads carry
+// their own collection time, so a backlog delivered late still lands on the instants it was
+// observed at. It stops at the first payload the control plane could not take, which is retried
+// next tick; one it refused is dropped, since sending it again gets the same answer and would
+// hold everything behind it.
+func flush(client *http.Client, endpoint, token string, pending []pushPayload) []pushPayload {
+	for len(pending) > 0 {
+		if push(client, endpoint, token, pending[0]) == pushRetry {
+			break
+		}
+		pending = pending[1:]
+	}
+	return pending
+}
+
+type pushOutcome int
+
+const (
+	pushDelivered pushOutcome = iota
+	pushRefused
+	pushRetry
+)
+
+// refusalBodyLimit bounds how much of a refusal's body is logged.
+const refusalBodyLimit = 512
+
+func push(client *http.Client, endpoint, token string, payload pushPayload) pushOutcome {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("push marshal error: %v", err)
-		return false
+		log.Printf("push marshal error, dropping the observation from %s: %v", payload.Timestamp, err)
+		return pushRefused
 	}
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("push request error: %v", err)
-		return false
+		return pushRetry
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("push error: %v", err)
-		return false
+		return pushRetry
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		log.Printf("push rejected: status %d", resp.StatusCode)
-		return false
+	if resp.StatusCode/100 == 2 {
+		return pushDelivered
 	}
-	return true
+	reason, _ := io.ReadAll(io.LimitReader(resp.Body, refusalBodyLimit))
+	if resp.StatusCode/100 == 4 {
+		log.Printf("push refused with status %d, dropping the observation from %s: %s", resp.StatusCode, payload.Timestamp, bytes.TrimSpace(reason))
+		return pushRefused
+	}
+	log.Printf("push failed with status %d, will retry: %s", resp.StatusCode, bytes.TrimSpace(reason))
+	return pushRetry
 }

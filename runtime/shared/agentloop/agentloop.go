@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -285,7 +286,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return nil, nil, refusal(resp)
 	}
 	var body struct {
 		Experiments []*domain.Experiment `json:"experiments"`
@@ -449,6 +450,17 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	}, true
 }
 
+// refusalBodyLimit bounds how much of a refusal's body is carried into the log.
+const refusalBodyLimit = 512
+
+// refusal is the control plane's own words for why it did not take a request. The loop goes on
+// either way: a 401 or 403 is a token or a registration somebody has to fix, and the reason is
+// what tells them which.
+func refusal(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, refusalBodyLimit))
+	return fmt.Errorf("control plane answered %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+}
+
 type pushStatusResponse struct {
 	Status string `json:"status"`
 }
@@ -474,7 +486,7 @@ func (a *Agent) pushStatus(ctx context.Context, reports []statusReportWire) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		a.Log("push status: unexpected status %d", resp.StatusCode)
+		a.Log("push status: %v", refusal(resp))
 		return
 	}
 
