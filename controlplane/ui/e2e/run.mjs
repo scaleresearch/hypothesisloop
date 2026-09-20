@@ -41,6 +41,12 @@ async function idpState() {
   return (await fetch(`${IDP}/test/state`)).json()
 }
 
+// A token of the user straight from the identity provider, for reading back what a page did.
+async function tokenOf(user) {
+  const res = await fetch(`${IDP}/test/token`, { method: 'POST', body: JSON.stringify({ user }) })
+  return (await res.json()).access_token
+}
+
 async function api(token, path) {
   return fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } })
 }
@@ -87,6 +93,28 @@ async function selectInNav(page, label, option) {
   const field = page.locator('.wa-nav-tenant label', { hasText: label }).getByRole('combobox')
   await field.click()
   await page.getByRole('option', { name: option, exact: true }).click()
+}
+
+// Opens the "New ..." field in the switcher, types a name and submits it.
+async function createInNav(page, what, name) {
+  await page.getByRole('button', { name: `+ New ${what}` }).click()
+  await page.getByLabel(`New ${what} name`).first().fill(name)
+  await page.locator('.wa-nav-create').getByRole('button', { name: 'Create' }).click()
+}
+
+// What a cluster agent with nothing to offer reports: its identity and no capacity. One report
+// is what binds the cluster's settings to it.
+function idleReport(clusterID) {
+  return {
+    cluster_id: clusterID,
+    cpu_available_cores: 0, cpu_total_cores: 0,
+    ram_available_bytes: 0, ram_total_bytes: 0,
+    storage_available_bytes: 0, storage_total_bytes: 0,
+    accelerator_available_by_type: {}, accelerator_total_by_type: {},
+    accelerator_available_by_node: {}, node_resources_by_node: {},
+    node_resources_total_by_node: {}, node_labels_by_node: {},
+    multi_node_capable: false, autoscaler_enabled: false,
+  }
 }
 
 async function main() {
@@ -210,8 +238,13 @@ async function scenarios(browser) {
   assert.equal((await api(agentToken, `/platform-experiments/${experimentURL.split('/').pop().split('?')[0]}`)).status, 200, 'the agent token works')
   await page.reload()
   await page.getByRole('row').nth(2).waitFor()
-  assert.equal(await page.getByTestId('secret').count(), 0, 'a reload does not bring an agent token back')
+  assert.equal(await page.getByTestId('secret').count(), 0, 'a reload takes the tokens off the screen')
   assert.ok(!(await page.content()).includes('hls_'), 'no token anywhere in the page')
+  await page.getByRole('button', { name: 'Show token' }).first().click()
+  assert.equal(await page.getByTestId('secret').innerText(), agentEnv, 'asking again shows the same token')
+  await page.getByText('brings the same one back').waitFor()
+  await page.getByRole('button', { name: 'Hide' }).click()
+  assert.equal(await page.getByTestId('secret').count(), 0)
   await page.getByRole('button', { name: 'The platform' }).click()
   await page.getByText('Count').locator('..').getByRole('textbox').fill('1')
   await page.getByRole('button', { name: 'Add agent' }).click()
@@ -232,11 +265,13 @@ async function scenarios(browser) {
 
   section('settings: a second project, then switching projects shows only what each holds')
   await page.goto(`${UI}/settings`)
-  await page.getByLabel('New project name').fill('second')
-  await page.getByRole('button', { name: 'Create project' }).click()
-  await page.getByLabel('Name of project second').waitFor()
-  await selectInNav(page, 'Project', 'second')
+  await createInNav(page, 'project', 'default')
+  await page.locator('.wa-nav-create').getByText('already').waitFor()
+  await page.getByLabel('New project name').first().fill('second')
+  await page.locator('.wa-nav-create').getByRole('button', { name: 'Create' }).click()
   await page.waitForURL(/\/settings\?project=/)
+  assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'second', 'the new project is selected')
+  await page.getByLabel('Name of project second').waitFor()
   await page.getByRole('link', { name: 'Platform Experiments' }).click()
   await page.waitForURL(/\/platform-experiments\?project=/)
   await page.getByText('second has no platform experiments yet').waitFor()
@@ -248,12 +283,16 @@ async function scenarios(browser) {
 
   section('settings: renaming the project and the org')
   await page.goto(`${UI}/settings`)
+  await page.getByLabel('Name of project second').fill('default')
+  await page.getByLabel('Name of project second').locator('..').getByRole('button', { name: 'Rename' }).click()
+  await page.getByLabel('Name of project second').locator('..').getByText('already').waitFor()
+  await shot(page, 'project-rename-collision', page.getByLabel('Name of project second'))
   await page.getByLabel('Name of project second').fill('renamed')
   await page.getByLabel('Name of project second').locator('..').getByRole('button', { name: 'Rename' }).click()
   await page.getByLabel('Name of project renamed').waitFor()
-  await page.getByLabel('New project name').fill('default')
+  await page.getByLabel('New project name').last().fill('default')
   await page.getByRole('button', { name: 'Create project' }).click()
-  await page.getByText('already').waitFor()
+  await page.getByLabel('New project name').last().locator('..').getByText('already').waitFor()
   await page.getByLabel('Organization name').fill(`${ada.name} Lab`)
   await page.getByLabel('Organization name').locator('..').getByRole('button', { name: 'Rename' }).click()
   await page.waitForFunction(name => document.querySelector('.wa-nav-tenant input')?.value === name, `${ada.name} Lab`)
@@ -277,19 +316,51 @@ async function scenarios(browser) {
   assert.equal((await api(keyToken, '/me')).status, 401, 'a revoked key is refused')
   await shot(page, 'api-key-revoked', page.getByText(/^revoked /))
 
-  section('settings: adding a cluster shows its start command once, and the cluster page lists it')
+  section('settings: adding a cluster shows its start command, which can be shown again')
   const clusterName = `ui-e2e-${run}`
   await page.getByLabel('Cluster name').fill(clusterName)
   await page.getByRole('button', { name: 'Add cluster' }).click()
   const command = await page.getByTestId('secret').innerText()
-  assert.match(command, new RegExp(`^make cluster-agent-up CLUSTER=${clusterName} API_URL=${API} METRICS_URL=<metrics-service-url> RUNTIME_TOKEN=hls_`))
+  assert.match(command, new RegExp(`^RUNTIME_TOKEN=hls_\\S+ make cluster-agent-up CLUSTER=${clusterName} API_URL=https?://\\S+ METRICS_URL=https?://\\S+$`), 'the command carries the addresses the platform answered with')
   await page.getByRole('cell', { name: clusterName }).waitFor()
   await shot(page, 'cluster-added', page.getByRole('cell', { name: clusterName }))
+  await page.getByRole('button', { name: 'Hide' }).click()
+  await page.getByRole('button', { name: 'Show start command' }).click()
+  assert.equal(await page.getByTestId('secret').innerText(), command, 'asking again shows the same command and token')
+  await page.getByRole('button', { name: 'Hide' }).click()
+
+  section('the settings editor on an owned cluster, once its agent has reported')
+  const runtimeToken = command.match(/RUNTIME_TOKEN=(\S+)/)[1]
+  const clusterID = `id-${clusterName}`
+  const reported = await fetch(`${API}/internal/clusters/${clusterName}/reconcile`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${runtimeToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(idleReport(clusterID)),
+  })
+  assert.equal(reported.status, 200, `the stand-in agent's report: ${await reported.clone().text()}`)
+  const clusterRow = page.getByRole('row', { name: new RegExp(clusterName) })
+  await clusterRow.getByText('Connected', { exact: true }).waitFor()
+  await clusterRow.getByText('stuck-pending timeout: default').waitFor()
+  await clusterRow.getByRole('button', { name: 'Edit' }).click()
+  await clusterRow.getByLabel('stuck-pending timeout').fill('900')
+  await clusterRow.getByLabel('scale-up timeout').fill('5000')
+  await clusterRow.getByRole('button', { name: 'Save' }).click()
+  await clusterRow.locator('.text-error').waitFor()
+  await shot(page, 'cluster-settings-refused', clusterRow)
+  await clusterRow.getByLabel('scale-up timeout').fill('600')
+  await clusterRow.getByRole('button', { name: 'Save' }).click()
+  await clusterRow.getByText('scale-up timeout: 600s · speculative cap: default · stuck-pending timeout: 900s').waitFor()
+  await shot(page, 'cluster-settings-saved', clusterRow)
+  const savedSettings = await (await api(await tokenOf(ada), `/clusters/${clusterID}/settings`)).json()
+  assert.equal(savedSettings.stuck_pending_timeout_seconds, 900)
+  assert.equal(savedSettings.scale_up_timeout_seconds, 600)
+  assert.equal(savedSettings.max_speculative_accelerators ?? null, null)
   await page.getByText('Repository').first().waitFor()
   await page.getByText('Not available yet.').waitFor()
   await page.getByRole('link', { name: 'Compute Resources' }).click()
-  await page.getByRole('cell', { name: clusterName }).waitFor()
-  await page.getByText('Disconnected').first().waitFor()
+  await page.getByRole('heading', { name: 'Compute Resources' }).waitFor()
+  await page.getByRole('cell', { name: new RegExp(clusterName) }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Show start command' }).count(), 0, 'the cluster page manages nothing')
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
   await shot(page, 'cluster-page')
   await page.getByRole('link', { name: 'Dashboard' }).click()
@@ -297,16 +368,17 @@ async function scenarios(browser) {
   assert.equal(await page.getByText('staff only').count(), 0)
 
   section('a person in two orgs switches between them, and each shows its own work')
-  const adaToken = (await (await fetch(`${IDP}/test/token`, { method: 'POST', body: JSON.stringify({ user: ada }) })).json()).access_token
-  const secondOrg = await fetch(`${API}/orgs`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${adaToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `${ada.name} Second` }),
-  })
-  assert.equal(secondOrg.status, 201)
   await page.goto(`${UI}/platform-experiments`)
   await page.getByText(experimentName).first().waitFor()
-  await selectInNav(page, 'Organization', `${ada.name} Second`)
+  await page.route(`${API}/orgs`, route => route.abort())
+  await createInNav(page, 'organization', `${ada.name} Second`)
+  await page.locator('.wa-nav-create .text-error').waitFor()
+  await shot(page, 'new-organization-api-failing')
+  await page.unroute(`${API}/orgs`)
+  await page.locator('.wa-nav-create').getByRole('button', { name: 'Create' }).click()
+  await page.waitForURL(/\/platform-experiments\?project=/)
+  assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), `${ada.name} Second`, 'the new org is selected')
+  assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'default')
   await page.getByText(`${ada.name} Second / default has no platform experiments yet`).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0)
   await shot(page, 'second-org-is-empty')
@@ -314,8 +386,18 @@ async function scenarios(browser) {
   await page.getByRole('heading', { name: 'Settings' }).waitFor()
   assert.equal(await page.getByRole('cell', { name: 'laptop' }).count(), 0, 'the other org\'s API key is not listed')
   assert.equal(await page.getByRole('cell', { name: clusterName }).count(), 0, 'the other org\'s cluster is not listed')
+  await page.getByLabel('Organization name').fill(`${ada.name} Lab`)
+  await page.getByLabel('Organization name').locator('..').getByRole('button', { name: 'Rename' }).click()
+  await page.waitForFunction(name => document.querySelector('.wa-nav-tenant input')?.value.startsWith(`${name} (`), `${ada.name} Lab`)
+  await page.locator('.wa-nav-tenant').getByRole('combobox').first().click()
+  assert.equal(await page.getByRole('option', { name: new RegExp(`^${ada.name} Lab \\(`) }).count(), 2, 'two orgs of one name are told apart')
+  await shot(page, 'two-orgs-same-name')
+  await page.keyboard.press('Escape')
+  await page.getByLabel('Organization name').fill(`${ada.name} Second`)
+  await page.getByLabel('Organization name').locator('..').getByRole('button', { name: 'Rename' }).click()
+  await page.waitForFunction(name => document.querySelector('.wa-nav-tenant input')?.value === name, `${ada.name} Second`)
   await selectInNav(page, 'Organization', `${ada.name} Lab`)
-  await page.getByRole('cell', { name: clusterName }).waitFor()
+  await page.getByRole('cell', { name: new RegExp(clusterName) }).waitFor()
 
   section('an API that fails is said to fail: no empty page')
   await page.route(`${API}/me`, route => route.abort())
@@ -355,7 +437,7 @@ async function scenarios(browser) {
   hlAdmin('user', 'staff', bob.id, 'on')
   try {
     await otherPage.goto(`${UI}/cluster`)
-    await otherPage.getByText(`Clusters of ${bob.name}`).waitFor()
+    await otherPage.getByText(`Clusters ${bob.name} can run on`).waitFor()
     await otherPage.getByText('All Clusters · every org · staff only').waitFor()
     await otherPage.getByRole('columnheader', { name: 'Autoscaler' }).waitFor()
     await shot(otherPage, 'staff-cluster-page', otherPage.getByRole('columnheader', { name: 'Autoscaler' }))
