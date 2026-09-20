@@ -459,7 +459,9 @@ export interface AgentStanding {
   agent_id: string
   best: number
   experiment_id?: string
+  // The hypothesis that job tested and the env it ran with.
   hypothesis_id?: string
+  env?: Record<string, string>
 }
 
 // Standings rank the competitors on each ranking metric, the first being the primary one. bests

@@ -38,7 +38,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { semantic, agentPalette } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { envSettings, filedAfterVerdict, hypothesisActivity, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 
 const TWO_LINES: React.CSSProperties = {
@@ -678,6 +678,10 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const standingOf = new Map((primaryStandings?.standings ?? []).map(st => [st.agent_id, st]))
   const unranked = Number.MAX_SAFE_INTEGER
   const scoreboard = [...knownAgentIds].sort((a, b) => (standingOf.get(a)?.rank ?? unranked) - (standingOf.get(b)?.rank ?? unranked))
+  // What tells the agents' best jobs apart; a lone agent's best job shows every setting.
+  const standingEnvs = (primaryStandings?.standings ?? []).map(st => st.env)
+  const standingKeys = standingEnvs.length > 1 ? variedKeys(standingEnvs) : Object.keys(standingEnvs[0] ?? {}).sort()
+  const hypothesisText = new Map((findings ?? []).map(h => [h.id, h.text]))
   const bestOf = (metricKey: string, agentId: string) =>
     results?.bests.find(b => b.metric === metricKey)?.agents.find(a => a.agent_id === agentId)
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
@@ -1015,6 +1019,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       Best {m.key} <span className="text-dim" style={{ fontWeight: 400 }}>({m.direction === 'maximize' ? '↑' : '↓'})</span>
                     </th>
                   )) : <th style={{ textAlign: 'right' }}>Best Metric</th>}
+                  <th title={`The hypothesis each agent's best ${primaryStandings?.metric ?? 'ranked'} job tested, and the settings that differ between those jobs`}>
+                    Best job: hypothesis · settings
+                  </th>
                   <th style={{ textAlign: 'right' }}>Jobs</th>
                   <th style={{ textAlign: 'right' }}>Completed</th>
                   <th>Quota Used</th>
@@ -1029,8 +1036,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   const isActive = !isCut && (stagesStatus?.cut_agents.length ?? 0) > 0
                     && (stagesStatus?.active_agents ?? []).includes(agentId)
                   const isExpanded = expandedAgentId === agentId
-                  const colCount = 5 + Math.max(metrics.length, 1)
-                  const rank = standingOf.get(agentId)?.rank
+                  const colCount = 6 + Math.max(metrics.length, 1)
+                  const standing = standingOf.get(agentId)
+                  const rank = standing?.rank
                   const isWinner = rank === 1
                   const nonRawMetrics = (results?.bests ?? []).filter(b => b.non_raw_basis_agents?.includes(agentId)).map(b => b.metric)
                   const jobs = jobsByAgent[agentId]
@@ -1044,7 +1052,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         }}
                       >
                         <td className="mono" style={{ fontWeight: 600 }}>{rank != null ? `#${rank}` : '—'}</td>
-                        <td className="mono" style={{ fontWeight: 600 }}>
+                        <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
                           <span className="text-muted" style={{ display: 'inline-block', width: 12 }}>{isExpanded ? '▾' : '▸'}</span>
                           {agentId}
                           {isCut && <span style={{ marginLeft: 8, fontSize: 10, color: semantic.danger, fontWeight: 400 }}>CUT</span>}
@@ -1080,6 +1088,24 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                             </td>
                           )
                         }) : <td className="mono" style={{ textAlign: 'right' }}>—</td>}
+                        <td style={{ fontSize: 12, maxWidth: 360 }}>
+                          {standing?.hypothesis_id ? (
+                            <>
+                              <Link
+                                href={`/hypotheses/${standing.hypothesis_id}`}
+                                className="text-link"
+                                style={TWO_LINES}
+                                title={hypothesisText.get(standing.hypothesis_id)}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                {hypothesisText.get(standing.hypothesis_id) ?? standing.hypothesis_id}
+                              </Link>
+                              <div className="mono text-muted" style={{ fontSize: 11 }} title={settings(standing.env, Object.keys(standing.env ?? {}).sort())}>
+                                {settings(standing.env, standingKeys)}
+                              </div>
+                            </>
+                          ) : <span className="text-muted">—</span>}
+                        </td>
                         <td className="mono" style={{ textAlign: 'right' }}>{jobs?.total ?? 0}</td>
                         <td className="mono" style={{ textAlign: 'right' }}>{jobs?.by_status.COMPLETED ?? 0}</td>
                         <td style={{ width: 160 }}>

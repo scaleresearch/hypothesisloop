@@ -32,12 +32,20 @@ export function filedAfterVerdict(h: { status_changed_at: string | null }, findi
 
 // The env settings that are not the same in every one of the jobs: what a hypothesis's runs varied.
 export function variedEnvKeys(jobs: Experiment[]): string[] {
-  const keys = Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
-  return keys.filter(k => new Set(jobs.map(j => j.job?.env?.[k])).size > 1)
+  return variedKeys(jobs.map(j => j.job?.env))
+}
+
+export function variedKeys(envs: Array<Record<string, string> | undefined>): string[] {
+  const keys = Array.from(new Set(envs.flatMap(env => Object.keys(env ?? {})))).sort()
+  return keys.filter(k => new Set(envs.map(env => env?.[k])).size > 1)
 }
 
 export function envSettings(job: Experiment, keys: string[]): string {
-  return keys.map(k => job.job?.env?.[k] === undefined ? `${k} not set` : `${k}=${job.job.env[k]}`).join(' ')
+  return settings(job.job?.env, keys)
+}
+
+export function settings(env: Record<string, string> | undefined, keys: string[]): string {
+  return keys.map(k => env?.[k] === undefined ? `${k} not set` : `${k}=${env[k]}`).join(' ')
 }
 
 // Per hypothesis, the settings its jobs in the list do not share: what tells those rows apart.
