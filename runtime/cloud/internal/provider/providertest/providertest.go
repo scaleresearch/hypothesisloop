@@ -31,11 +31,12 @@ const (
 	logTail      = 200
 )
 
-// Run rents three small instances side by side and destroys them when it returns, whatever
-// failed. Each subtest is one part of the contract, so a vendor's result reads check by check.
+// Run rents three small instances side by side and destroys them however it ends (see guard).
+// Each subtest is one part of the contract, so a vendor's result reads check by check.
 func Run(t *testing.T, p provider.Provider, opts Options) {
 	opts.validate(t)
 	p = &paced{Provider: p}
+	ctx := guard(t, p)
 	checks := map[string]func(*testing.T, *run){
 		"Lifecycle":                lifecycle,
 		"CommandThatEnds":          commandThatEnds,
@@ -44,7 +45,7 @@ func Run(t *testing.T, p provider.Provider, opts Options) {
 	for name, check := range checks {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			check(t, newRun(t, p, opts))
+			check(t, newRun(t, ctx, p, opts))
 		})
 	}
 }
@@ -59,18 +60,19 @@ func (o Options) validate(t *testing.T) {
 // run is one check's own corner of the account: every instance it rents carries its prefix, and
 // everything under the prefix is destroyed when the check ends.
 type run struct {
+	ctx    context.Context
 	p      provider.Provider
 	opts   Options
 	prefix string
 }
 
-func newRun(t *testing.T, p provider.Provider, opts Options) *run {
+func newRun(t *testing.T, ctx context.Context, p provider.Provider, opts Options) *run {
 	t.Helper()
 	raw := make([]byte, 4)
 	if _, err := rand.Read(raw); err != nil {
 		t.Fatalf("random prefix: %v", err)
 	}
-	r := &run{p: p, opts: opts, prefix: "hlconf-" + hex.EncodeToString(raw) + "-"}
+	r := &run{ctx: ctx, p: p, opts: opts, prefix: suitePrefix + hex.EncodeToString(raw) + "-"}
 	t.Cleanup(func() { r.destroyAll(t) })
 	return r
 }

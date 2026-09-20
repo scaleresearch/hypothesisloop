@@ -28,7 +28,7 @@ var lifecycleArgs = []string{"two  spaces", `quotes ' " and $HOME \ kept`, "--fl
 // may ask for, and only under its prefix, env and argv delivered byte for byte, an outbound HTTPS request, output readable while
 // running and after Stop, and Destroy that can be repeated.
 func lifecycle(t *testing.T, r *run) {
-	ctx := t.Context()
+	ctx := r.ctx
 	spec := r.spec("lifecycle-", lifecycleScript, lifecycleArgs...)
 	spec.Name += strings.Repeat("x", provider.MaxNameLength-len(spec.Name))
 	spec.Env = map[string]string{"HL_CONFORMANCE_VALUE": envValue, "HL_CONFORMANCE_URL": r.opts.OutboundURL}
@@ -44,7 +44,7 @@ func lifecycle(t *testing.T, r *run) {
 	if listed.State != provider.StateStarting && listed.State != provider.StateRunning {
 		t.Errorf("a fresh instance is %q", listed.State)
 	}
-	foreign, err := r.p.List(ctx, "hlconf-another-prefix-")
+	foreign, err := r.p.List(ctx, suitePrefix+"another-prefix-")
 	if err != nil {
 		t.Fatalf("List of another prefix: %v", err)
 	}

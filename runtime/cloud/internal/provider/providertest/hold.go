@@ -21,8 +21,9 @@ while :; do echo "conformance-beat $n"; n=$((n+1)); sleep 30; done`
 // running at every look, it counted without a gap, and it was not started a second time.
 func RunHold(t *testing.T, p provider.Provider, opts Options, hold time.Duration) {
 	opts.validate(t)
-	r := newRun(t, p, opts)
-	ctx := t.Context()
+	p = &paced{Provider: p}
+	ctx := guard(t, p)
+	r := newRun(t, ctx, p, opts)
 	id, _ := r.create(t, ctx, r.spec("hold", holdScript))
 	r.awaitLine(t, ctx, id, "conformance-started", opts.StartTimeout)
 
@@ -30,7 +31,7 @@ func RunHold(t *testing.T, p provider.Provider, opts Options, hold time.Duration
 	for time.Since(held) < hold {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("test context ended: %v", ctx.Err())
+			t.Fatalf("the hold ran out of time before the test timeout: %v", ctx.Err())
 		case <-time.After(beatInterval):
 		}
 		if i, listed := r.find(t, ctx, id); !listed || i.State != provider.StateRunning {

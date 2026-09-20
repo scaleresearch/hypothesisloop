@@ -74,7 +74,7 @@ func pause(t *testing.T, ctx context.Context) {
 	t.Helper()
 	select {
 	case <-ctx.Done():
-		t.Fatalf("test context ended: %v", ctx.Err())
+		t.Fatalf("the checks ran out of time before the test timeout: %v", ctx.Err())
 	case <-time.After(pollInterval):
 	}
 }

@@ -25,7 +25,7 @@ while :; do sleep 1 & wait $!; done`
 // exited instance, the first look that shows it exited can read its output to the last byte (a
 // final line with no newline is the hardest to get), and it is not run a second time.
 func commandThatEnds(t *testing.T, r *run) {
-	ctx := t.Context()
+	ctx := r.ctx
 	id, asked := r.create(t, ctx, r.spec("ends", endingScript))
 
 	deadline := time.Now().Add(r.opts.StartTimeout + r.opts.SettleTimeout)
@@ -75,7 +75,7 @@ func commandThatEnds(t *testing.T, r *run) {
 // stopLetsTheCommandFinish holds the vendor to Stop's sentence that the instance is running
 // until the command exits: a command that takes twenty seconds to save after SIGTERM gets them.
 func stopLetsTheCommandFinish(t *testing.T, r *run) {
-	ctx := t.Context()
+	ctx := r.ctx
 	id, _ := r.create(t, ctx, r.spec("saves", savingScript))
 	r.awaitLine(t, ctx, id, "conformance-ready", r.opts.StartTimeout)
 
