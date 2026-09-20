@@ -68,6 +68,8 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"api-key", "revoke", "--id", "abc123"}, "DELETE", "/api-keys/abc123", nil},
 		{[]string{"cluster", "list", "--org", "org-1"}, "GET", "/orgs/org-1/clusters", nil},
 		{[]string{"cluster", "add", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters", map[string]any{"name": "gpu-east"}},
+		{[]string{"cluster", "remove", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east", nil},
+		{[]string{"cluster", "forget-identity", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east/identity", nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			calls := accountsServer(t, nil, `{"id":"x","projects":[],"api_keys":[],"clusters":[],"name":"gpu-east","runtime_token":"hls_t"}`)
@@ -116,6 +118,7 @@ func TestACommandNeedingAnOrgNamesNoneWhenTheTokenReachesSeveral(t *testing.T) {
 		for _, args := range [][]string{
 			{"project", "list"}, {"project", "create", "x"}, {"org", "rename", "x"}, {"api-key", "list"},
 			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x"},
+			{"cluster", "token", "x"}, {"cluster", "remove", "x"}, {"cluster", "forget-identity", "x"},
 		} {
 			before := len(*calls)
 			code, stdout, stderr := hl(t, args...)
@@ -164,15 +167,51 @@ func TestAPIKeyCreateNeverNarrowsTheKeyFromTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestClusterAddPrintsTheCommandThatStartsItsAgent(t *testing.T) {
-	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example","metrics_url":"https://metrics.example"}`)
+// The printed command lands in scrollback and, once run, in shell history, so it carries no
+// token: it reads the token when it runs. What the platform answered is quoted as one word each.
+func TestClusterAddPrintsACommandThatHoldsNoToken(t *testing.T) {
+	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example/it's"}`)
 	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
-	want := "RUNTIME_TOKEN=hls_cnVudGltZQ.c2ln make cluster-agent-up CLUSTER=gpu-east API_URL=https://api.example METRICS_URL=https://metrics.example\n"
+	if strings.Contains(stdout+stderr, "hls_cnVudGltZQ") {
+		t.Fatalf("the runtime token is printed: stdout = %q, stderr = %q", stdout, stderr)
+	}
+	want := `RUNTIME_TOKEN="$(hl cluster token 'gpu-east' --org 'org-1')" make cluster-agent-up CLUSTER='gpu-east' ` +
+		`API_URL='https://api.example/a?b=1&c=$(id)' METRICS_URL='https://metrics.example/it'\''s'` + "\n"
 	if stdout != want {
-		t.Fatalf("stdout: got = %q, want = %q, with the addresses the platform answered and not the one hl itself called", stdout, want)
+		t.Fatalf("stdout: got = %q, want = %q, with the addresses the platform answered, each quoted", stdout, want)
+	}
+}
+
+func TestClusterTokenPrintsTheTokenOfAClusterTheOrgRegisteredAndRegistersNothing(t *testing.T) {
+	var posted []string
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"clusters":[{"name":"gpu-east","owned":true},{"name":"platform","owned":false,"shared":true}]}`))
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		posted = append(posted, body["name"])
+		_, _ = w.Write([]byte(`{"name":"` + body["name"] + `","runtime_token":"hls_token_of_` + body["name"] + `"}`))
+	})
+	setAPIURL(t, url)
+
+	code, stdout, stderr := hl(t, "cluster", "token", "gpu-east", "--org", "org-1")
+	if code != 0 || stdout != "hls_token_of_gpu-east\n" {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the token alone on stdout", code, stdout, stderr)
+	}
+	for _, name := range []string{"platform", "gpu-esat"} {
+		code, stdout, stderr := hl(t, "cluster", "token", name, "--org", "org-1")
+		if code == 0 || stdout != "" || !strings.Contains(stderr, "not a cluster org org-1 registered") {
+			t.Fatalf("token of %s: exit code = %d, stdout = %q, stderr = %q, want a refusal", name, code, stdout, stderr)
+		}
+	}
+	if len(posted) != 1 || posted[0] != "gpu-east" {
+		t.Fatalf("registered %v, want only the cluster the org already had: a mistyped name must not become a cluster", posted)
 	}
 }
 
@@ -203,7 +242,7 @@ func TestAccountGroupsListTheirCommands(t *testing.T) {
 	setAPIURL(t, "http://unused")
 	for group, commands := range map[string][]string{
 		"org": {"list", "create NAME", "rename NAME"}, "project": {"list", "create NAME", "rename NAME"},
-		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list"},
+		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "forget-identity NAME", "remove NAME"},
 	} {
 		code, stdout, _ := hl(t, group, "--help")
 		if code != 0 {

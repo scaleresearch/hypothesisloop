@@ -12,6 +12,7 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
   quota_exhaustion: 'Quota exhausted',
   experiment_closed: 'Platform experiment closed',
   cancelled: 'Cancelled',
+  cluster_withdrawn: 'Its cluster stopped taking this org’s jobs: requeued, no retry spent',
   stage_cut: 'Cut at stage boundary',
   job_too_long: 'Ran past the stage job-length limit',
   // Historical rows from before the stage ladder replaced the two-phase mechanism.
@@ -33,7 +34,7 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   job_too_long: 'Would run past the stage job-length limit',
   workload_creation_failed: 'Workload creation failed',
   no_multi_node_cluster: 'No connected cluster can run a multi-node job of this shape',
-  no_cluster_for_org: 'No connected cluster takes this org’s jobs: register one, or ask for a shared one',
+  no_cluster_for_org: 'No cluster takes this org’s jobs: register one, or ask for a shared one',
   'waiting-for-scale-up': 'Waiting for an autoscaler node already booting on this cluster',
   no_scalable_capacity: 'No autoscaler cluster had room to try — will retry as clusters free up',
   concurrency_cap: 'At its experiment’s max concurrent accelerators',

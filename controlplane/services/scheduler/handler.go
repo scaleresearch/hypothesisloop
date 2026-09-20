@@ -472,6 +472,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 // clusterAccess admits the caller to the settings of the registered cluster bound to clusterID.
 // An id bound to no cluster resolves to no name, which only staff reach.
 func (h *Handler) clusterAccess(ctx context.Context, access *auth.Access, clusterID string) error {
+	// The id is a path segment and the key settings are stored under: one no runtime could
+	// have reported names nothing.
+	if domain.ValidateClusterID(clusterID) != nil {
+		return auth.NotFound("cluster")
+	}
 	name, err := h.svc.ClusterName(ctx, clusterID)
 	if err != nil {
 		return huma.Error500InternalServerError(err.Error())

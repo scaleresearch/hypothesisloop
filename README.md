@@ -179,6 +179,7 @@ hl org list | rename "New name"                            # the orgs this token
 hl project list | create vision | rename --project prj-1 language
 hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
 hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
+hl cluster token my-cluster | forget-identity my-cluster | remove my-cluster
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
@@ -342,15 +343,16 @@ On macOS:
 ```bash
 make controlplane-up
 # Register the cluster for your org. This prints the command that installs its agent, with
-# the cluster's runtime token and the addresses its agent reaches the platform at filled in:
+# the addresses its agent reaches the platform at filled in:
 hl cluster add my-cluster
 # Point kubectl at the cluster and run what it printed:
-RUNTIME_TOKEN=hls_... make cluster-agent-up CLUSTER=my-cluster \
-  API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084
+RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agent-up CLUSTER='my-cluster' \
+  API_URL='https://your-control-plane:8081' METRICS_URL='https://your-control-plane:8084'
 ```
 
 `RUNTIME_TOKEN` goes in the environment, as above, and reaches helm on stdin: a token given as
-a make argument or a flag is readable in the process list.
+a make argument or a flag is readable in the process list. The printed command reads the token
+with `hl cluster token` when it runs, so the token is in no scrollback and no shell history.
 
 `make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
 and `REGISTRY` must name a registry every node can pull from (`make images` pushes there).
@@ -365,7 +367,7 @@ A cluster exists for the platform once an org registers its name: `hl cluster ad
 `POST /orgs/{id}/clusters`. Registering returns the cluster's runtime token and the two addresses
 its agent reaches the platform at, which are the `runtimes` section of the control plane's
 settings. The token is derived from the name, so it is never lost: registering the same name
-again returns the same token. A name another org holds is refused. The control plane refuses a token for
+again returns the same token, and `hl cluster token` prints it. A name another org holds is refused. The control plane refuses a token for
 a name nobody registered, so a typo'd `CLUSTER=` is an error and never a second cluster.
 An operator who holds the signing secret and the database can do the same without an API key:
 `make -s runtime-token CLUSTER=my-cluster ORG=<org id>`.
@@ -379,7 +381,19 @@ A cluster runs the jobs of its own org and no other. Admission places a job on a
 the job's org or on a shared cluster, and a job whose org has neither waits with
 `not_admitted_reason: no_cluster_for_org`. Sharing is the platform's decision, set by staff:
 `hl-admin cluster share my-cluster on` or `PATCH /orgs/{id}/clusters/{name}` with
-`{"shared": true}`. Jobs already placed on a cluster stay there when it stops being shared.
+`{"shared": true}`. When a cluster stops being shared, the other orgs' jobs placed on it go back
+to the queue in the same step, keep their retries, get their checkpoint window and are placed
+elsewhere. A job with no cluster of its org registered waits with `no_cluster_for_org` whether
+or not other clusters are connected; one whose cluster is registered and away waits for it.
+
+`hl cluster remove` (`DELETE /orgs/{id}/clusters/{name}`) ends a cluster: its jobs are requeued
+the same way, its settings are deleted and its runtime token is refused from then on. That is
+also the only way to end a runtime token, since the token is derived from the name.
+
+A cluster is bound to the first `cluster_id` its runtime reports, and a runtime reporting
+another is refused with 409. After the machines behind a name are rebuilt, the owner runs
+`hl cluster forget-identity` (`DELETE /orgs/{id}/clusters/{name}/identity`), which also deletes
+the settings kept under the old id.
 
 `hl capacity` and `GET /resource-catalog/capacity` show the clusters your jobs can land on:
 your org's own and the shared ones. `hl cluster list` shows the same clusters and whether each

@@ -493,3 +493,94 @@ func TestADeploymentWithOneOrgSeesEveryConnectedCluster(t *testing.T) {
 		t.Fatal("the offered clusters do not share their footprints with the tick's own view, so a reservation made through one is lost")
 	}
 }
+
+// twoOrgsOnClusterA is cluster-a of the hold fixtures registered for two orgs' tests: shared by
+// the platform, or org-b's own. cluster-b is org-b's in both.
+func twoOrgsOnClusterA(shared bool) map[string]domain.Cluster {
+	clusterA := domain.Cluster{Name: "cluster-a", OrgID: "org-b"}
+	if shared {
+		clusterA = domain.Cluster{Name: "cluster-a", OrgID: "org-staff", Shared: true}
+	}
+	return map[string]domain.Cluster{"cluster-a": clusterA, "cluster-b": {Name: "cluster-b", OrgID: "org-b"}}
+}
+
+// A job that strands idle accelerators is evicted for a job of another org only on a cluster
+// that takes both. On a cluster of its own org it is not evicted for a job that cannot land
+// there, however its requests look.
+func TestTickEvictsADisbalancedJobForAnotherOrgOnASharedClusterOnly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		shared  bool
+		evicted []string
+	}{
+		"a shared cluster":      {true, []string{"hog"}},
+		"another org's cluster": {false, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// 14 cores for one of four accelerators leaves half a core and three idle accelerators.
+			hog := holdJob("hog", domain.CapacityBurst, h100, 1, "14")
+			hog.OrgID, hog.ClusterName, hog.Status = "org-b", "cluster-a", domain.StatusRunning
+			hog.Job.Memory = "8Gi"
+			blocked := holdJob("blocked", domain.CapacityBurst, h100, 1, "2")
+			blocked.OrgID = "org-a"
+			blocked.Job.Memory = "8Gi"
+
+			store := &orgStore{registered: twoOrgsOnClusterA(tc.shared)}
+			store.t, store.queued, store.running = t, []*domain.Experiment{blocked}, []*domain.Experiment{hog}
+			evictor := &recordingEvictor{}
+			l := holdLoop(store, holdWorkload{cpuCores: 0.5}, evictor)
+			l.settler = &recordingSettler{}
+			l.observed = observedOnNode([]string{"hog"}, "node-a")
+
+			tickOnce(t, l)
+
+			if !slices.Equal(evictor.evicted, tc.evicted) {
+				t.Fatalf("evicted %v, want %v", evictor.evicted, tc.evicted)
+			}
+			if _, admitted := store.submitted["blocked"]; admitted {
+				t.Fatalf("the blocked job was placed on %s, where nothing was free for it", store.submitted["blocked"])
+			}
+			if !tc.shared && store.notAdmitted["blocked"] != domain.NotAdmittedNoClusterForOrg {
+				t.Fatalf("not_admitted_reason = %q, want %q", store.notAdmitted["blocked"], domain.NotAdmittedNoClusterForOrg)
+			}
+		})
+	}
+}
+
+type twoOrgMaxStore struct {
+	resolvedCPUStore
+	registered map[string]domain.Cluster
+}
+
+func (s *twoOrgMaxStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
+	return s.registered, nil
+}
+
+// "max" is a share of the node per accelerator held, whoever holds it: two orgs' jobs on a
+// shared cluster resolve to the same share, and it is the share a job gets on its org's own
+// cluster, where the other org's job resolves to nothing because it is not placed.
+func TestMaxResolvesToTheSameShareForTwoOrgsOnASharedCluster(t *testing.T) {
+	resolve := func(registered map[string]domain.Cluster) map[string]string {
+		ofA := holdJob("of-a", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
+		ofB := holdJob("of-b", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
+		ofA.OrgID, ofB.OrgID = "org-a", "org-b"
+		ofA.ClusterName, ofB.ClusterName = "cluster-a", "cluster-a"
+		store := &twoOrgMaxStore{registered: registered}
+		store.t, store.queued = t, []*domain.Experiment{ofA, ofB}
+		l := holdLoop(store, holdWorkload{cpuCores: 16}, noopEvictor{})
+		tickOnce(t, l)
+		return store.cpu
+	}
+
+	shared := resolve(twoOrgsOnClusterA(true))
+	if shared["of-a"] == "" || shared["of-a"] != shared["of-b"] {
+		t.Fatalf("resolved cpu on a shared cluster = %q for org a and %q for org b, want the same share for both", shared["of-a"], shared["of-b"])
+	}
+
+	own := resolve(twoOrgsOnClusterA(false))
+	if own["of-b"] != shared["of-b"] {
+		t.Fatalf("resolved cpu on the org's own cluster = %q, want the %q it gets on a shared one", own["of-b"], shared["of-b"])
+	}
+	if cpu, placed := own["of-a"]; placed {
+		t.Fatalf("org a's job resolved %q on a cluster of org b, where it is never placed", cpu)
+	}
+}

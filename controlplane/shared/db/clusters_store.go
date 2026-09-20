@@ -145,7 +145,8 @@ func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]doma
 	return out, rows.Err()
 }
 
-// ListClusters returns the clusters of the given orgs by name.
+// ClustersHosting returns the clusters that take jobs of orgID, its own and the shared ones,
+// by name.
 func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY name`, orgID)
 	if err != nil {

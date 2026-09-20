@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
@@ -33,6 +34,9 @@ var apiKeyCommands = []subcommand{
 var clusterCommands = []subcommand{
 	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd},
 	{"list", "the clusters an org's jobs run on and whether each is connected", clusterList},
+	{"token", "print the runtime token of a cluster the org registered", clusterToken},
+	{"forget-identity", "let a cluster whose machines were rebuilt bind to the identity they report now", clusterForgetIdentity},
+	{"remove", "end a cluster: requeue its jobs and refuse its runtime token", clusterRemove},
 }
 
 const orgFlagHelp = "org (default $HL_ORG, then the one org this token reaches)"
@@ -206,13 +210,22 @@ func apiKeyRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 	return call(c, "DELETE", "/api-keys/"+url.PathEscape(id), nil, "", "", stdout, stderr)
 }
 
+// registeredCluster is what registering a cluster answers.
+type registeredCluster struct {
+	Name         string `json:"name"`
+	RuntimeToken string `json:"runtime_token"`
+	APIURL       string `json:"api_url"`
+	MetricsURL   string `json:"metrics_url"`
+}
+
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("cluster add", `usage: hl cluster add NAME [--org ORG]
 
 Registers the cluster name for the org and prints the command that installs its agent, with the
-cluster's runtime token and the addresses its agent reaches the platform at filled in. Run that
-command with kubectl pointed at the cluster. The token is derived from the name, so adding a name
-the org already has prints the same command again. A cluster takes its own org's jobs only.`, stderr)
+addresses its agent reaches the platform at filled in. Run that command with kubectl pointed at
+the cluster. It reads the cluster's runtime token with hl cluster token when it runs, so the token
+is in no terminal scrollback and no shell history. Adding a name the org already has prints the
+same command again. A cluster takes its own org's jobs only.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
@@ -222,18 +235,91 @@ the org already has prints the same command again. A cluster takes its own org's
 	if err != nil {
 		return fail(stderr, err)
 	}
-	var registered struct {
-		Name         string `json:"name"`
-		RuntimeToken string `json:"runtime_token"`
-		APIURL       string `json:"api_url"`
-		MetricsURL   string `json:"metrics_url"`
-	}
+	var registered registeredCluster
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "RUNTIME_TOKEN=%s make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s\n",
-		registered.RuntimeToken, registered.Name, registered.APIURL, registered.MetricsURL)
+	fmt.Fprintf(stdout, "RUNTIME_TOKEN=\"$(hl cluster token %s --org %s)\" make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s\n",
+		shellQuote(registered.Name), shellQuote(id), shellQuote(registered.Name), shellQuote(registered.APIURL), shellQuote(registered.MetricsURL))
 	return 0
+}
+
+// shellQuote writes text as one word of a POSIX shell command, whatever it holds.
+func shellQuote(text string) string {
+	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
+}
+
+func clusterToken(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster token", `usage: hl cluster token NAME [--org ORG]
+
+Prints the runtime token of a cluster the org registered, and nothing else. The token is derived
+from the cluster's name and never changes: removing the cluster is what ends it. Meant for
+command substitution, as in the command hl cluster add prints.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	name, err := parseOne(fs, args, "NAME", "", "name")
+	if err != nil {
+		return parseExit(err)
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	// Asking for a token registers nothing: the name must be a cluster the org already has.
+	var listing struct {
+		Clusters []struct {
+			Name  string `json:"name"`
+			Owned bool   `json:"owned"`
+		} `json:"clusters"`
+	}
+	if err := c.Do("GET", orgPath(id, "/clusters"), nil, &listing); err != nil {
+		return fail(stderr, err)
+	}
+	owned := false
+	for _, cluster := range listing.Clusters {
+		owned = owned || (cluster.Name == name && cluster.Owned)
+	}
+	if !owned {
+		return fail(stderr, fmt.Errorf("%s is not a cluster org %s registered: see hl cluster list, or register it with hl cluster add", name, id))
+	}
+	var registered registeredCluster
+	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintln(stdout, registered.RuntimeToken)
+	return 0
+}
+
+func clusterForgetIdentity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster forget-identity", `usage: hl cluster forget-identity NAME [--org ORG]
+
+A cluster is bound to the first cluster id its runtime reports, and a runtime reporting another is
+refused. After the machines behind a name are rebuilt, run this: the cluster binds to the id its
+runtime reports next. The settings kept under the old id are deleted.`, stderr)
+	return onCluster(c, fs, args, "DELETE", "/identity", stdout, stderr)
+}
+
+func clusterRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster remove", `usage: hl cluster remove NAME [--org ORG]
+
+Ends the cluster. Every job placed on it goes back to the queue, keeping its retries, and is
+placed on another cluster that takes its org; requeued lists them. The cluster's settings are
+deleted and its runtime token is refused from then on, so stop its agent. The name becomes free
+for any org to register.`, stderr)
+	return onCluster(c, fs, args, "DELETE", "", stdout, stderr)
+}
+
+// onCluster calls one operation of a cluster of the org and prints what it answers.
+func onCluster(c *apiclient.Client, fs *flagSet, args []string, method, rest string, stdout, stderr io.Writer) int {
+	org := fs.String("org", "", orgFlagHelp)
+	name, err := parseOne(fs, args, "NAME", "", "name")
+	if err != nil {
+		return parseExit(err)
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, method, orgPath(id, "/clusters/"+url.PathEscape(name)+rest), nil, "", "", stdout, stderr)
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

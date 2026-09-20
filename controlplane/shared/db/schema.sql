@@ -930,10 +930,10 @@ ALTER TABLE experiments DROP COLUMN IF EXISTS project_id;
 -- runtimes would be refused from the first boot on. An empty table is that first boot: later a
 -- cluster comes into being only by an org registering it, and one its org removed must not come
 -- back from the rows of the jobs it once ran, so this never runs against a table with a row.
--- Only a row that was placed names a cluster (submitted_at).
+-- last_cluster names every cluster a job was placed on, and only a placed job has one.
 INSERT INTO clusters (name, org_id)
-SELECT DISTINCT e.cluster_name, 'default' FROM experiments e
-WHERE e.submitted_at IS NOT NULL AND e.cluster_name <> '' AND NOT EXISTS (SELECT 1 FROM clusters)
+SELECT DISTINCT e.last_cluster, 'default' FROM experiments e
+WHERE e.last_cluster <> '' AND NOT EXISTS (SELECT 1 FROM clusters)
 ON CONFLICT (name) DO NOTHING;
 
 -- The account behind a person's hypothesis, link or comment. author on the contribution is the

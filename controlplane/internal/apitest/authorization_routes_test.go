@@ -1,6 +1,9 @@
 package apitest
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // rule is the answer a route gives a caller for an object of the given owner.
 type rule func(principal, owner string) int
@@ -291,6 +294,9 @@ var cases = []struct {
 	{"a data key under an id that is a path", "staff", "POST", "/platform-experiments/pe-a1%2F..%2Fpe-b/data-key", `{"agent_id":"agent-1"}`, 404},
 	{"a job id that is a path", "staff", "GET", "/experiments/job-own%2F..%2Fjob-foreign/data", "", 404},
 	{"an agent id that is a wildcard", "staff", "POST", "/platform-experiments/pe-a1/data-key", `{"agent_id":"agent-*"}`, 404},
+	{"settings under a cluster id that is a path", "staff", "GET", "/clusters/id%2F..%2Fother/settings", "", 404},
+	{"settings written under a cluster id no runtime could report", "staff", "PUT", "/clusters/id%20with%20spaces/settings", `{}`, 404},
+	{"settings written under an overlong cluster id", "staff", "PUT", "/clusters/" + strings.Repeat("a", 200) + "/settings", `{}`, 404},
 
 	{"an agent registering a hypothesis as a person", "agent", "POST", "/hypotheses", `{"author":"Mallory","platform_experiment_id":"pe-a1","text":"t","links":[{"type":"builds_on","to":"pe-a1"}]}`, 403},
 	{"an agent registering as itself and a person", "agent", "POST", "/hypotheses", `{"agent_id":"agent-1","author":"Mallory","platform_experiment_id":"pe-a1","text":"t","links":[{"type":"builds_on","to":"pe-a1"}]}`, 403},

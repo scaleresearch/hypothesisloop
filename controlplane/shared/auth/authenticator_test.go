@@ -275,6 +275,20 @@ func TestAUsersFirstRequestMakesTheirHomeAndLaterOnesReuseIt(t *testing.T) {
 		t.Fatalf("org name for a user with no name claim: got = %q, want the subject", directory.homeCreated[1])
 	}
 
+	// The name claim is the person's own text: it names their org only as a name may read.
+	loud := goodClaims()
+	loud["sub"] = "user-3"
+	loud["name"] = "Eve\x00\n" + strings.Repeat("x", 4*domain.MaxNameLength)
+	if _, err := a.Authenticate(ctx, ec.token(t, loud)); err != nil {
+		t.Fatalf("a user with an overlong name claim: %v", err)
+	}
+	if got := directory.homeCreated[2]; len(got) != domain.MaxNameLength || !strings.HasPrefix(got, "Evexxx") {
+		t.Fatalf("org name from an overlong name claim with control characters: got = %q (%d bytes), want it cleaned and cut to %d", got, len(got), domain.MaxNameLength)
+	}
+	if _, err := domain.ValidateName("org", directory.homeCreated[2]); err != nil {
+		t.Fatalf("the home org's name is one the API would refuse: %v", err)
+	}
+
 	directory.staff["user-1"] = true
 	staff, err := a.Authenticate(ctx, ec.token(t, goodClaims()))
 	if err != nil || staff.Kind != KindStaff || staff.UserID != "user-1" {
