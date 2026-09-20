@@ -80,7 +80,7 @@ func TestDesiredPlacementFitsGreedyReplayFalseNegative(t *testing.T) {
 	candidate := distributedExperiment(1, 2)
 	candidate.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
 	byNode := map[string]map[string]int64{"node-a": {h100: 2}, "node-b": {h100: 1}}
-	if !desiredPlacementFits(byNode, nil, nil, []*domain.Experiment{pending}, candidate) {
+	if !desiredPlacementFits(byNode, nil, nil, []*domain.Experiment{pending}, candidate, &domain.JobSpec{}) {
 		t.Fatal("pending→node-b leaves node-a for the 2-GPU candidate, but the greedy replay put pending on node-a and rejected the claim")
 	}
 }

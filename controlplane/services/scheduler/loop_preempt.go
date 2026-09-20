@@ -438,7 +438,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 			if err != nil {
 				return false, err
 			}
-			return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp), nil
+			return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp, exp.ResolvedJob), nil
 		}
 	}
 	resolved, err := l.grace.Resolve(exp.EffectiveJob())

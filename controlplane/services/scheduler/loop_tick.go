@@ -1006,15 +1006,69 @@ func labelsMatch(actual, required map[string]string) bool {
 	return true
 }
 
-func desiredPlacementFits(byNode map[string]map[string]int64, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment) bool {
+// desiredPlacementFits proves candidate fits the cluster beside the jobs already desired there.
+// resolved is the candidate's job as the runtime will be handed it: when the candidate lands on a
+// slot (domain.NodeSlotLabel), resolved is pinned to that slot.
+func desiredPlacementFits(byNode map[string]map[string]int64, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment, resolved *domain.JobSpec) bool {
+	byNode, nodeResources = cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources)
 	// Planned jointly, not one job after another: the runtime is free to put an already-desired
 	// job on whichever node it likes, so replaying it onto one fixed node and then asking whether
 	// the candidate fits around that guess rejected candidates the cluster could host.
+	//
+	// A desired job pinned to a slot is the exception, since its node is decided. It holds that
+	// slot whether or not the runtime has rented it yet, and is not planned again: its slot reads
+	// as taken from the moment its instance exists, and planning it there would find no room for
+	// a job that is already in place.
 	jobs := make([]*domain.Experiment, 0, len(desired)+1)
-	jobs = append(jobs, desired...)
+	for _, d := range desired {
+		if slot := d.EffectiveJob().NodeSelector[domain.NodeSlotLabel]; slot != "" {
+			for node, labels := range labelsByNode {
+				if labels[domain.NodeSlotLabel] == slot {
+					occupyNode(byNode, nodeResources, node)
+				}
+			}
+			continue
+		}
+		jobs = append(jobs, d)
+	}
 	jobs = append(jobs, candidate)
-	_, ok := planPlacement(cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources), labelsByNode, jobs)
-	return ok
+	plan, ok := planPlacement(byNode, nodeResources, labelsByNode, jobs)
+	if !ok {
+		return false
+	}
+	// A slot holds a whole job, so only a job that is one node can be pinned to one.
+	if candidate.Job.Nodes() == 1 {
+		for _, p := range plan {
+			if slot := labelsByNode[p.node][domain.NodeSlotLabel]; p.job == len(jobs)-1 && slot != "" {
+				selector := make(map[string]string, len(resolved.NodeSelector)+1)
+				for key, value := range resolved.NodeSelector {
+					selector[key] = value
+				}
+				selector[domain.NodeSlotLabel] = slot
+				resolved.NodeSelector = selector
+			}
+		}
+	}
+	return true
+}
+
+// occupyNode takes everything node has left and returns what it took, for a search that has to
+// give it back.
+func occupyNode(byNode, nodeResources map[string]map[string]int64, node string) (accelerators, resources map[string]int64) {
+	accelerators, resources = byNode[node], nodeResources[node]
+	if accelerators != nil {
+		byNode[node] = make(map[string]int64, len(accelerators))
+		for key := range accelerators {
+			byNode[node][key] = 0
+		}
+	}
+	if resources != nil {
+		nodeResources[node] = make(map[string]int64, len(resources))
+		for key := range resources {
+			nodeResources[node][key] = 0
+		}
+	}
+	return accelerators, resources
 }
 
 func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string]int64 {
@@ -1056,6 +1110,10 @@ func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsB
 		return false
 	}
 	for _, p := range plan {
+		if labelsByNode[p.node][domain.NodeSlotLabel] != "" {
+			occupyNode(byNode, nodeResources, p.node)
+			continue
+		}
 		if p.shape.AcceleratorCount > 0 {
 			byNode[p.node][p.key] -= p.shape.AcceleratorCount
 		}
@@ -1168,6 +1226,12 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 	// them as a duplicate of the other and lost every assignment that needed the discarded one,
 	// reporting a placeable job as not fitting.
 	equivalentState := func(r rank, node, nodeKey string) string {
+		// A slot is left empty by whatever is placed on it, so slots of different sizes would
+		// all read as the same state, and a later job may be pinned to one of them by name.
+		// Each is its own choice.
+		if slot := labelsByNode[node][domain.NodeSlotLabel]; slot != "" {
+			return "slot=" + slot
+		}
 		dimensions := make([]string, 0, len(nodeResources[node]))
 		for k := range nodeResources[node] {
 			dimensions = append(dimensions, k)
@@ -1223,19 +1287,35 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 				return false
 			}
 			budget--
-			if r.shape.AcceleratorCount > 0 {
-				byNode[c.node][c.key] -= r.shape.AcceleratorCount
+			// A slot is full once one job is on it, whatever that job asked for.
+			slot := labelsByNode[c.node][domain.NodeSlotLabel] != ""
+			var tookAccelerators, tookResources map[string]int64
+			if slot {
+				tookAccelerators, tookResources = occupyNode(byNode, nodeResources, c.node)
+			} else {
+				if r.shape.AcceleratorCount > 0 {
+					byNode[c.node][c.key] -= r.shape.AcceleratorCount
+				}
+				subtractNodeResources(nodeResources[c.node], r.shape.Resources)
 			}
-			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
 			used[r.job][c.node] = true
 			plan[i] = rankAssignment{job: r.job, shape: r.shape, node: c.node, key: c.key}
 			if place(i + 1) {
 				return true
 			}
 			used[r.job][c.node] = false
-			addNodeResources(nodeResources[c.node], r.shape.Resources)
-			if r.shape.AcceleratorCount > 0 {
-				byNode[c.node][c.key] += r.shape.AcceleratorCount
+			if slot {
+				if tookAccelerators != nil {
+					byNode[c.node] = tookAccelerators
+				}
+				if tookResources != nil {
+					nodeResources[c.node] = tookResources
+				}
+			} else {
+				addNodeResources(nodeResources[c.node], r.shape.Resources)
+				if r.shape.AcceleratorCount > 0 {
+					byNode[c.node][c.key] += r.shape.AcceleratorCount
+				}
 			}
 			if budget <= 0 {
 				return false
@@ -1264,10 +1344,12 @@ func addNodeResources(available, used map[string]int64) {
 }
 
 // qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels.
+// The selector is the effective job's: admission may have pinned an admitted job to a slot, and
+// for every other job the resolved selector is the submitted one.
 func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) []string {
 	nodes := make([]string, 0, len(capacity))
 	for node := range capacity {
-		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+		if labelsMatch(labelsByNode[node], exp.EffectiveJob().NodeSelector) {
 			nodes = append(nodes, node)
 		}
 	}

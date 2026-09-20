@@ -537,7 +537,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		if err != nil {
 			return false, err
 		}
-		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp), nil
+		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp, &resolved), nil
 	})
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
