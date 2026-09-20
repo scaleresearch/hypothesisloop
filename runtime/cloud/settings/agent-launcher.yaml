@@ -1,0 +1,40 @@
+# The agent-launcher's one config file: one provider account, known to the control plane as one
+# launcher. AGENT_LAUNCHER_CONFIG names the copy the process reads, and LAUNCHER_TOKEN holds its
+# token (scope launcher:<launcher_name>).
+
+# The name the control plane gives hosted agents to: its agents.launcher. The launcher asks for
+# its list under this name, and its token is accepted for this name only.
+launcher_name: main
+
+# Where this process reaches the control plane. The address the agents reach it at is the control
+# plane's own agents.api_url and arrives in each instance's environment.
+api_url: https://api.example.invalid
+
+# Part of every instance name: hl-agent-<namespace>-<name the control plane chose>. The launcher
+# lists, creates and destroys the instances of its namespace only, so launchers sharing an account
+# each take their own. 1 to 16 lowercase letters and digits.
+namespace: main
+
+# One pass costs the provider one list call, and a create or destroy call for each instance that
+# has to change. Set this against the provider's rate limit.
+reconcile_interval_seconds: 15
+
+provider:
+  # One of the adapters the binary was built with.
+  name: example
+  # The adapter's own section. Nothing else reads it.
+  settings: {}
+
+# What every agent instance runs and how large it is rented. Which image it boots and the
+# environment of each agent are the control plane's to say.
+instance:
+  # The whole argv, in place of the image's entrypoint.
+  command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
+  cpu: "2"
+  memory: 4Gi
+  storage: 20Gi
+
+# The environment variable of this process that holds the Claude credential every agent runs
+# with. The launcher adds it to each instance as CLAUDE_CODE_OAUTH_TOKEN, so it never passes
+# through the control plane or its database. The file names the variable and never the value.
+claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN

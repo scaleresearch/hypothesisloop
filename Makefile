@@ -251,6 +251,7 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
 	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
 	cloud-agent:runtime/cloud/build/Dockerfile.cloud-agent:. \
+	agent-launcher:runtime/cloud/build/Dockerfile.agent-launcher:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic \
 	ui:controlplane/build/Dockerfile.ui:controlplane/ui
 
