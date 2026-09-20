@@ -55,7 +55,7 @@ func main() {
 	metricsDBURL := pcfg.Services.MetricsDBURL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	pool, err := db.NewPool(ctx, db.Config{DSN: dsn})
+	pool, err := db.NewPool(ctx, db.Config{DSN: dsn, MaxConns: db.ServiceMaxConns})
 	cancel()
 	if err != nil {
 		logger.Fatal("control-service: connect db", zap.Error(err))

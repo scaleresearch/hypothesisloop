@@ -7,7 +7,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Config holds the database connection configuration.
+// ServiceMaxConns is the pool size every control-plane service runs with.
+const ServiceMaxConns = 20
+
+// Config holds the database connection configuration. MaxConns is required.
 type Config struct {
 	DSN      string
 	MaxConns int32
@@ -21,11 +24,8 @@ type Pool struct {
 
 // NewPool creates a new connection pool, connects, and pings the database.
 func NewPool(ctx context.Context, cfg Config) (*Pool, error) {
-	if cfg.MaxConns == 0 {
-		cfg.MaxConns = 20
-	}
-	if cfg.MinConns == 0 {
-		cfg.MinConns = 2
+	if cfg.MaxConns <= 0 {
+		return nil, fmt.Errorf("db.NewPool: MaxConns must be positive, got %d", cfg.MaxConns)
 	}
 
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
