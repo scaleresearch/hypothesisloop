@@ -1,11 +1,15 @@
 package scheduler
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 func TestBacklogAggregatorRecordAndPublish(t *testing.T) {
@@ -98,5 +102,24 @@ func TestAcceleratorShortfall(t *testing.T) {
 	}
 	if got := acceleratorShortfall(shortage, ""); got != 0 {
 		t.Fatalf("acceleratorShortfall(..., \"\") = %d, want 0", got)
+	}
+}
+
+func TestTickPublishesBacklogWhenNoBurstJobIsQueued(t *testing.T) {
+	obsmetrics.SchedulerUnmetDemand.Reset()
+	blocked := queuedJob("exp-a", "pe-live", domain.CapacityGuaranteed)
+	store := &resilienceStore{queued: []*domain.Experiment{blocked}}
+
+	if err := resilienceLoop(store).tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var m dto.Metric
+	gauge := obsmetrics.SchedulerUnmetDemand.WithLabelValues("c1", strings.ToLower(string(blocked.AcceleratorType)), "guaranteed")
+	if err := gauge.Write(&m); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.GetGauge().GetValue(); got != 1 {
+		t.Fatalf("unmet demand gauge = %v, want 1 for the blocked guaranteed job", got)
 	}
 }

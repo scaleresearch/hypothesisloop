@@ -43,8 +43,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	resolveCache := newResolutionCache(l)
 
 	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
-	// exit path (including early returns below) runs it, keeping queue order fresh even when
-	// nothing was queued for burst.
+	// exit path (including early returns below) runs it.
 	defer func() {
 		if err := l.reprioritizer.RePrioritize(ctx); err != nil {
 			l.logger.Warn("reprioritize after tick", zap.Error(err))
@@ -522,9 +521,6 @@ func (l *Loop) tick(ctx context.Context) error {
 
 	// 5. Burst pass: fairness-weighted (least quota used first), then completion proximity, shortest job first.
 	burst := filterTier(queued, domain.CapacityBurst)
-	if len(burst) == 0 {
-		return errors.Join(tickErrs...)
-	}
 
 	// No cluster-wide "is there any capacity at all" shortcut here: a footprint's dimensions are
 	// different units (millicores, bytes, device counts), so summing them into one number answers
