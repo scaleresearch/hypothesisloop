@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -285,4 +286,61 @@ FROM unnest($1::text[]) AS ids(id)`
 		out[id] = a
 	}
 	return out, rows.Err()
+}
+
+// evidenceStatuses are the job statuses an Evidence entry counts, each under its lowercase name.
+var evidenceStatuses = []domain.ExperimentStatus{
+	domain.StatusSubmitted, domain.StatusQueued, domain.StatusAdmitted, domain.StatusRunning,
+	domain.StatusCompleted, domain.StatusFailed, domain.StatusEvicted, domain.StatusRejected,
+}
+
+// Evidence returns what Postgres holds about each hypothesis of a platform experiment, keyed by
+// hypothesis id, in the form a graph query binds as $evidence: jobs (every job but rejected
+// ones), one count per lowercase job status, findings, comments, and last_finding_at when there
+// is a finding. Every count is present, zero included. A hypothesis with no job, finding or
+// comment has no entry.
+func (s *HypothesesStore) Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error) {
+	const q = `
+SELECT hypothesis_id, lower(status::text), COUNT(*), NULL::timestamptz FROM experiments
+WHERE platform_experiment_id = $1 GROUP BY 1, 2
+UNION ALL
+SELECT hypothesis_id, 'findings', COUNT(*), MAX(created_at) FROM hypothesis_findings
+WHERE platform_experiment_id = $1 GROUP BY 1
+UNION ALL
+SELECT hypothesis_id, 'comments', COUNT(*), NULL FROM hypothesis_comments
+WHERE platform_experiment_id = $1 GROUP BY 1`
+	rows, err := s.pool.pool.Query(ctx, q, platformExperimentID)
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.Evidence: %w", err)
+	}
+	defer rows.Close()
+	rejected := strings.ToLower(string(domain.StatusRejected))
+	out := map[string]any{}
+	for rows.Next() {
+		var id, key string
+		var n int64
+		var newest *time.Time
+		if err := rows.Scan(&id, &key, &n, &newest); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.Evidence: scan: %w", err)
+		}
+		e, ok := out[id].(map[string]any)
+		if !ok {
+			e = map[string]any{"jobs": int64(0), "findings": int64(0), "comments": int64(0)}
+			for _, status := range evidenceStatuses {
+				e[strings.ToLower(string(status))] = int64(0)
+			}
+			out[id] = e
+		}
+		e[key] = n
+		if key != "findings" && key != "comments" && key != rejected {
+			e["jobs"] = e["jobs"].(int64) + n
+		}
+		if newest != nil {
+			e["last_finding_at"] = newest.UTC()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("hypotheses_store.Evidence: %w", err)
+	}
+	return out, nil
 }

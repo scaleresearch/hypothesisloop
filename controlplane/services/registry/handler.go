@@ -110,7 +110,9 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"(refines, extends, combines; acyclic, every hypothesis has one or more), (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), " +
 	"(:Hypothesis)-[:RELATED]->(:Hypothesis). $pe is bound to platform_experiment_id: filter every MATCH and text search " +
 	"with it; a result holding a node or relationship of another platform experiment is refused with 400. " +
-	"$tested is bound to the ids of its hypotheses that a job tests (rejected jobs aside): `WHERE NOT h.id IN $tested` finds the untested ones. " +
+	"$evidence is bound to a map by hypothesis id of what is outside the graph: {jobs (rejected aside), submitted, queued, admitted, " +
+	"running, completed, failed, evicted, rejected, findings, comments} as counts and last_finding_at (datetime). A hypothesis with none " +
+	"of these has no entry and reads as null: `WHERE coalesce($evidence[h.id].jobs, 0) = 0` finds the untested ones. " +
 	"Full-text index " + graphdb.TextIndex + " over Hypothesis.text, ranked by how many of your words match: " +
 	"`CALL text_search.search_all('" + graphdb.TextIndex + "', 'warmup cosine schedule') YIELD node, score " +
 	"WHERE node.platform_experiment_id = $pe RETURN node.id, node.text, node.status, score ORDER BY score DESC LIMIT 10` " +

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -302,19 +301,4 @@ func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.D
 		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)
 	}
 	return out, nil
-}
-
-// TestedHypotheses returns the ids of the platform experiment's hypotheses that at least one job
-// tests, admission-rejected jobs aside.
-func (s *ExperimentsStore) TestedHypotheses(ctx context.Context, platformExperimentID string) ([]string, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT DISTINCT hypothesis_id FROM experiments
-WHERE platform_experiment_id = $1 AND status <> $2`, platformExperimentID, domain.StatusRejected)
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.TestedHypotheses: %w", err)
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.TestedHypotheses: %w", err)
-	}
-	return ids, nil
 }

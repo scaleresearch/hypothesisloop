@@ -38,7 +38,7 @@ type Store interface {
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)
-	TestedHypotheses(ctx context.Context, platformExperimentID string) ([]string, error)
+	Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error)
 }
 
 // Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.

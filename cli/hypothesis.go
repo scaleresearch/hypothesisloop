@@ -562,10 +562,9 @@ func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Write
    or: hl hypothesis query - [--param k=v ...]   (query read from stdin)
 
 Read-only Cypher over one platform experiment's hypothesis graph (default
-$PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded, use submit/link instead. Filter
+$PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded: use submit/link. Filter
 every MATCH and text search with platform_experiment_id = $pe: a result holding another
-experiment's nodes is refused. $tested holds the ids of its hypotheses that have a job. Prints
-one JSON object per row keyed by column, 200 rows at most.
+experiment's nodes is refused. Prints a JSON object per row keyed by column, 200 rows max.
 
 Schema:
   (:Objective {id})   the root, id = $pe
@@ -574,7 +573,8 @@ Schema:
   (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective)
   (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), (:Hypothesis)-[:RELATED]->(:Hypothesis)
   every relationship {agent_id, author, created_at}
-Findings, comments and jobs are not in the graph: hl hypothesis get ID has them.
+$evidence[h.id]: counts {jobs, each lowercase job status, findings, comments} and
+last_finding_at, or null. Text: hl hypothesis get ID.
 
 Examples:
 
@@ -591,9 +591,9 @@ Examples:
   hl hypothesis query 'MATCH (d:Hypothesis)-[:BUILDS_ON*]->(:Hypothesis {id: $id})
     RETURN DISTINCT d.id, d.status, d.text' --param id=HYP_ID
 
-  hypotheses no job has tested yet:
+  by job count, untested first:
   hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe})
-    WHERE NOT h.id IN $tested RETURN h.id, h.status, h.text'`, stderr)
+    RETURN h.id, h.text, coalesce($evidence[h.id].jobs, 0) AS n ORDER BY n'`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default $PLATFORM_EXPERIMENT_ID)")
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
@@ -603,7 +603,7 @@ Examples:
 		return parseExit(err)
 	}
 	if *paramsJSON != "" {
-		fmt.Fprintln(stderr, "hl: hypothesis query: $pe and $tested are already bound; pass any other parameter as --param k=v")
+		fmt.Fprintln(stderr, "hl: hypothesis query: $pe and $evidence are already bound; pass any other parameter as --param k=v")
 		return 2
 	}
 	if cypher == "-" {

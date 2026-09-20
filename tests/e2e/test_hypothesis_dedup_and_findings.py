@@ -20,6 +20,7 @@ guaranteed-tier job submission 402s with insufficient_guaranteed_quota).
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 
@@ -84,6 +85,10 @@ def test_finding_is_visible_to_a_different_agent(api, experiment, run_id, deadli
     assert any(summary_text in (f.get("summary") or "") for f in findings), (
         "finding filed by agent_a was not present in the hypothesis's shared findings list"
     )
+    (row,) = api.query_rows(pe_id, "MATCH (h:Hypothesis {id: $id}) RETURN $evidence[h.id] AS e", id=hyp["id"])
+    evidence = row["e"]
+    assert (evidence["jobs"], evidence["completed"], evidence["findings"], evidence["comments"]) == (1, 1, 1, 0), evidence
+    assert datetime.fromisoformat(evidence["last_finding_at"]) == datetime.fromisoformat(findings[0]["created_at"]), evidence
 
 
 def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id, deadline):

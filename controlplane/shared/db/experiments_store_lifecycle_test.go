@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -116,5 +118,59 @@ func TestFindingsReadsCoverManyHypothesesInOneQueryEach(t *testing.T) {
 	summaries, err := hyps.FindingSummaries(ctx, []string{first, other})
 	if err != nil || len(summaries) != 1 || summaries[first] != "summary of "+first {
 		t.Errorf("FindingSummaries: got = %v, %v, want the summary of %s only", summaries, err, first)
+	}
+}
+
+// $evidence is all a graph query sees of Postgres, so each entry has to count one platform
+// experiment's rows only, keep rejected jobs out of jobs, and leave a hypothesis nobody touched
+// without an entry.
+func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	_, _, otherAgent, otherPE := setupCapTestPool(t, 4)
+	hyps := NewHypothesesStore(pool)
+	ctx := context.Background()
+	busy, discussed, refused := "busy-"+peID, "discussed-"+peID, "refused-"+peID
+	seed := func(id, agent, pe, hypothesisID string, status domain.ExperimentStatus) {
+		t.Helper()
+		seedExperimentForCapTest(t, pool, id, agent, pe, 1, status)
+		if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET hypothesis_id = $1 WHERE id = $2`, hypothesisID, id); err != nil {
+			t.Fatalf("point %s at %s: %v", id, hypothesisID, err)
+		}
+	}
+	seed("done-1-"+peID, agentID, peID, busy, domain.StatusCompleted)
+	seed("done-2-"+peID, agentID, peID, busy, domain.StatusCompleted)
+	seed("running-"+peID, agentID, peID, busy, domain.StatusRunning)
+	seed("rejected-"+peID, agentID, peID, busy, domain.StatusRejected)
+	seed("only-rejected-"+peID, agentID, peID, refused, domain.StatusRejected)
+	seed("elsewhere-"+peID, otherAgent, otherPE, busy, domain.StatusCompleted)
+	finding, err := hyps.CreateHypothesisFinding(ctx, busy, peID, "done-1-"+peID, agentID, "it held")
+	if err != nil {
+		t.Fatalf("CreateHypothesisFinding: %v", err)
+	}
+	if _, err := hyps.CreateHypothesisFinding(ctx, busy, otherPE, "elsewhere-"+peID, otherAgent, "elsewhere"); err != nil {
+		t.Fatalf("CreateHypothesisFinding: %v", err)
+	}
+	for _, c := range [][3]string{{busy, peID, agentID}, {discussed, peID, agentID}, {discussed, peID, agentID}, {busy, otherPE, otherAgent}} {
+		if _, err := hyps.CreateHypothesisComment(ctx, c[0], c[1], domain.HypothesisSourceAgent, c[2], "", "note"); err != nil {
+			t.Fatalf("CreateHypothesisComment: %v", err)
+		}
+	}
+
+	got, err := hyps.Evidence(ctx, peID)
+	if err != nil {
+		t.Fatalf("Evidence: %v", err)
+	}
+	entry := func(jobs, completed, running, rejected, findings, comments int64) map[string]any {
+		return map[string]any{"jobs": jobs, "submitted": int64(0), "queued": int64(0), "admitted": int64(0), "running": running,
+			"completed": completed, "failed": int64(0), "evicted": int64(0), "rejected": rejected, "findings": findings, "comments": comments}
+	}
+	busyEntry := entry(3, 2, 1, 1, 1, 1)
+	busyEntry["last_finding_at"] = got[busy].(map[string]any)["last_finding_at"]
+	want := map[string]any{busy: busyEntry, discussed: entry(0, 0, 0, 0, 0, 2), refused: entry(0, 0, 0, 1, 0, 0)}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Evidence: got = %v, want %v", got, want)
+	}
+	if at, ok := busyEntry["last_finding_at"].(time.Time); !ok || at.Sub(finding.CreatedAt).Abs() > time.Millisecond {
+		t.Errorf("last_finding_at: got = %v, want %v", busyEntry["last_finding_at"], finding.CreatedAt)
 	}
 }

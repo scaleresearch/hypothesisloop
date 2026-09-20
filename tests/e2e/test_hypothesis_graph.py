@@ -306,6 +306,24 @@ def test_query_value_mapping(api, graph_pe, run_id):
     assert api.query_rows(pe_id, newer, id=child["id"], since=node["created_at"]) == [{"id": child["id"]}]
 
 
+def test_query_ranks_by_evidence(api, graph_pe, run_id):
+    pe_id, agent_a, _ = graph_pe
+    quiet = api.register_hypothesis(pe_id, agent_a, f"weight decay matters past ten epochs {run_id}")
+    discussed = api.register_hypothesis(pe_id, agent_a, f"gradient clipping hides divergence {run_id}")
+    api.post_hypothesis_comment(discussed["id"], "seen on two seeds", agent_id=agent_a).raise_for_status()
+
+    ranked = (
+        "MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.id IN $ids "
+        "RETURN h.id AS id, coalesce($evidence[h.id].comments, 0) AS comments, coalesce($evidence[h.id].jobs, 0) AS jobs "
+        "ORDER BY comments DESC"
+    )
+    assert api.query_rows(pe_id, ranked, ids=[quiet["id"], discussed["id"]]) == [
+        {"id": discussed["id"], "comments": 1, "jobs": 0},
+        {"id": quiet["id"], "comments": 0, "jobs": 0},
+    ]
+    assert api.query(pe_id, "RETURN 1", evidence={}).status_code == 400
+
+
 def test_query_reads_one_platform_experiment(api, graph_pe, experiment, run_id):
     pe_id, agent_a, _ = graph_pe
     other_pe = experiment("hypothesis-graph-scope", [agent_a], budget=BUDGET)

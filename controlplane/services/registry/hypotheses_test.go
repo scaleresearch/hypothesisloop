@@ -536,13 +536,13 @@ func TestHypothesisGraphOfAnUnknownPlatformExperimentIsNotFound(t *testing.T) {
 	}
 }
 
-type testedStore struct {
+type evidenceStore struct {
 	poolStore
-	tested []string
+	evidence map[string]any
 }
 
-func (s *testedStore) TestedHypotheses(_ context.Context, _ string) ([]string, error) {
-	return s.tested, nil
+func (s *evidenceStore) Evidence(_ context.Context, _ string) (map[string]any, error) {
+	return s.evidence, nil
 }
 
 type queryGraph struct {
@@ -555,20 +555,21 @@ func (g *queryGraph) Query(_ context.Context, _, _ string, params map[string]any
 	return &graphdb.QueryResult{}, nil
 }
 
-// Jobs live in Postgres, so a query can tell tested from untested hypotheses only through the
-// ids bound as $tested, and a caller's own $tested must not stand in for them.
-func TestQueryGraphBindsTheTestedHypotheses(t *testing.T) {
+// Jobs, findings and comments live in Postgres, so a query sees them only through the map bound
+// as $evidence, and a caller's own $evidence must not stand in for it.
+func TestQueryGraphBindsTheEvidence(t *testing.T) {
 	graph := &queryGraph{}
-	svc := &Service{store: &testedStore{tested: []string{"h-1"}}, graph: graph, logger: zap.NewNop()}
+	evidence := map[string]any{"h-1": map[string]any{"jobs": int64(1)}}
+	svc := &Service{store: &evidenceStore{evidence: evidence}, graph: graph, logger: zap.NewNop()}
 
-	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN $tested", map[string]any{"id": "h-2"}); err != nil {
+	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN $evidence", map[string]any{"id": "h-2"}); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(graph.params, map[string]any{"id": "h-2", "tested": []string{"h-1"}}) {
+	if !reflect.DeepEqual(graph.params, map[string]any{"id": "h-2", "evidence": evidence}) {
 		t.Fatalf("params = %v", graph.params)
 	}
-	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN 1", map[string]any{"tested": "x"}); !errors.Is(err, graphdb.ErrInvalidQuery) {
-		t.Fatalf("caller $tested: err = %v, want ErrInvalidQuery", err)
+	if _, err := svc.QueryGraph(context.Background(), "pe-1", "RETURN 1", map[string]any{"evidence": "x"}); !errors.Is(err, graphdb.ErrInvalidQuery) {
+		t.Fatalf("caller $evidence: err = %v, want ErrInvalidQuery", err)
 	}
 }
 

@@ -856,6 +856,49 @@ func TestAQueryReadsOnePlatformExperiment(t *testing.T) {
 	}
 }
 
+// Evidence reaches a query as a map parameter keyed by hypothesis id. A hypothesis without an
+// entry reads as null, so coalesce is what lets one query filter and rank all of them.
+func TestAQueryFiltersAndRanksHypothesesByABoundEvidenceMap(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	once := register(t, s, pe, "agent-1", "cosine decay helps", onRoot(pe))
+	twice := register(t, s, pe, "agent-1", "label smoothing hurts small models", onRoot(pe))
+	untested := register(t, s, pe, "agent-1", "wider layers beat deeper ones", onRoot(pe))
+	discussed := register(t, s, pe, "agent-1", "dropout is redundant with augmentation", onRoot(pe))
+	newest := time.Now().UTC()
+	params := map[string]any{"since": newest.Add(-30 * time.Minute).Format(time.RFC3339), "evidence": map[string]any{
+		once.ID:      map[string]any{"jobs": int64(1), "completed": int64(1), "last_finding_at": newest.Add(-time.Hour)},
+		twice.ID:     map[string]any{"jobs": int64(2), "completed": int64(2), "last_finding_at": newest},
+		discussed.ID: map[string]any{"jobs": int64(0), "completed": int64(0), "comments": int64(3)},
+	}}
+	ids := func(cypher string) string {
+		t.Helper()
+		result, err := s.Query(context.Background(), pe, cypher, params)
+		if err != nil {
+			t.Fatalf("Query %q: got = %v, want nil", cypher, err)
+		}
+		var out []string
+		for _, row := range result.Rows {
+			out = append(out, row[0].(string))
+		}
+		return strings.Join(out, ",")
+	}
+
+	const match = `MATCH (h:Hypothesis {platform_experiment_id: $pe}) `
+	if got, want := ids(match+`WHERE coalesce($evidence[h.id].jobs, 0) = 0 RETURN h.id ORDER BY h.created_at`), untested.ID+","+discussed.ID; got != want {
+		t.Errorf("untested: got = %s, want %s", got, want)
+	}
+	if got, want := ids(match+`WITH h, $evidence[h.id] AS e WHERE e.completed > 0 RETURN h.id ORDER BY e.completed DESC`), twice.ID+","+once.ID; got != want {
+		t.Errorf("most completed first: got = %s, want %s", got, want)
+	}
+	if got, want := ids(match+`RETURN h.id, coalesce($evidence[h.id].jobs, 0) AS jobs ORDER BY jobs DESC, h.created_at LIMIT 2`), twice.ID+","+once.ID; got != want {
+		t.Errorf("ranked by jobs: got = %s, want %s", got, want)
+	}
+	if got := ids(match + `WHERE $evidence[h.id].last_finding_at > datetime($since) RETURN h.id`); got != twice.ID {
+		t.Errorf("finding newer than half an hour ago: got = %s, want %s", got, twice.ID)
+	}
+}
+
 // An agent's watch carries other people's activity on hypotheses it registered: a comment or
 // finding on one, a link to one, a new hypothesis building on one. The graph is the only place
 // that knows who registered what. A hypothesis linked to one of the agent's only later stays out
