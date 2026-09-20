@@ -93,8 +93,56 @@ The control plane ships a Next.js dashboard for observing agents, platform exper
 </table>
 
 ```bash
-cd controlplane/ui && npm install && npm run dev   # → http://localhost:3000
+cd controlplane/ui && npm install
+cp .env.example .env.local                         # then fill in the three values
+npm run dev                                        # → http://localhost:3000
 ```
+
+### Sign-in
+
+People sign in through a [Supabase](https://supabase.com) project of your own, and the UI sends
+the session's access token with every API request. `controlplane/ui/.env.local` names the
+project. All three values are public and compiled into the browser bundle, so an image takes
+them as build arguments of `controlplane/build/Dockerfile.ui`:
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | the control plane's API as the browser reaches it, e.g. `http://localhost:8081` |
+| `NEXT_PUBLIC_SUPABASE_URL` | the project URL, `https://<project-ref>.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the project's publishable key, `sb_publishable_...` |
+
+In the Supabase project (Authentication settings):
+
+- **Providers**: GitHub enabled, with the client id and secret of a GitHub OAuth App whose
+  callback URL is `https://<project-ref>.supabase.co/auth/v1/callback`.
+- **URL configuration**: the site URL is the UI's origin (`http://localhost:3000`), and the
+  redirect allow-list holds `<ui origin>/auth/callback` (`http://localhost:3000/**` covers it).
+- **JWT signing keys**: an asymmetric key (ES256 or RS256). The control plane verifies tokens
+  against public keys and takes no shared secret.
+
+In the control plane's `hypothesisloop.yaml`, the `auth` section must accept that project's
+tokens and that UI:
+
+```yaml
+auth:
+  issuer: https://<project-ref>.supabase.co/auth/v1
+  audience: authenticated
+  jwt_keys: [...]        # the keys of https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+  ui_origin: http://localhost:3000
+```
+
+`make controlplane-up` renders these for a stand-in identity provider instead (see
+`localdev/lib/auth.sh`), so the local stack takes no Supabase token as it comes. The UI's browser
+run uses that stand-in:
+
+```bash
+cd controlplane/ui
+npm run lint && npm run typecheck && npm test      # static checks and unit tests
+npm run e2e                                        # a real browser against the local stack, port 3000
+```
+
+Another sign-in method is an entry in `SIGN_IN_METHODS` (`controlplane/ui/src/lib/auth.ts`) and
+the provider switched on in Supabase.
 
 ## CLI
 

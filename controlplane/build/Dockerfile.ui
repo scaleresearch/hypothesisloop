@@ -4,9 +4,15 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 # Next.js compiles NEXT_PUBLIC_* into the browser bundle, so the API address the browser calls
-# is fixed here and cannot be changed when the container starts.
+# and the Supabase project that signs people in are fixed here and cannot be changed when the
+# container starts. An image built without the Supabase values answers every page with an error
+# that names the missing one.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8081
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 RUN npm run build && npm prune --omit=dev
 
 FROM node:20-alpine
