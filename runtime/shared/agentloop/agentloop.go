@@ -238,12 +238,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, ma
 	}
 	clusterID, err := a.Executor.GetClusterID(ctx)
 	if err != nil {
-		// Identity is not on the critical path of "what can run where" -- a cluster whose
-		// identity read failed this tick still has real capacity to report. Logged and sent
-		// empty; the control plane's per-cluster settings/tried-history simply won't resolve for
-		// this cluster until the next successful read.
-		a.Log("get cluster id: %v", err)
-		clusterID = ""
+		return nil, nil, fmt.Errorf("get cluster id: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
