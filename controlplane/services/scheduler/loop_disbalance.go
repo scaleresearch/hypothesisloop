@@ -78,13 +78,13 @@ type pendingEviction struct {
 }
 
 // applyPendingEvictions credits every still-fresh pendingEviction's footprint back into gAvail,
-// bAvail, and nodeAvail before this tick's admission passes run, and prunes any entry older than
-// l.evictionTTL. Without this, a tick reads the victim's node/accelerator as still occupied
+// bAvail, nodeAvail and nodeResources before this tick's admission passes run, and prunes any
+// entry older than l.evictionTTL. Without this, a tick reads the victim's node/accelerator as still occupied
 // (the node/agent hasn't reported it back yet) even though the victim is already gone from
 // ListRunningExperiments, and re-derives the same shortage — driving a fresh eviction for
-// capacity that is already being freed. Mutates gAvail/bAvail/nodeAvail in place; not safe to
+// capacity that is already being freed. Mutates its capacity arguments in place; not safe to
 // call concurrently with itself, which tick()'s single-threaded invariant already guarantees.
-func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]domain.Footprint, nodeAvail map[string]map[string]map[string]int64) {
+func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]domain.Footprint, nodeAvail, nodeResources map[string]map[string]map[string]int64) {
 	for id, pe := range l.pendingEvictions {
 		if now.Sub(pe.evictedAt) > l.evictionTTL {
 			delete(l.pendingEvictions, id)
@@ -116,6 +116,15 @@ func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]do
 				if capacity, ok := byNode[pe.node]; ok {
 					key := foldMatchingKey(capacity, pe.acceleratorType)
 					capacity[key] += pe.acceleratorCount
+				}
+			}
+		}
+		// The victim was evicted for the CPU, memory or storage it held on its node, so that is
+		// the credit the next placement check reads.
+		if free, ok := nodeResources[pe.cluster][pe.node]; ok {
+			for key, amount := range pe.footprint {
+				if name, ok := nodeResourceName(key.Kind); ok {
+					free[name] += amount
 				}
 			}
 		}

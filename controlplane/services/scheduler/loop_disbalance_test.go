@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -426,5 +427,34 @@ func TestAGroupedJobBlockedByAHogIsStillSeenByTheDisbalancePass(t *testing.T) {
 
 	if len(got) != 1 || got[0].experiment.ID != "hog" {
 		t.Fatalf("victims = %v, want the hog stranding the accelerators a grouped job is waiting for", victimIDs(got))
+	}
+}
+
+// The hog is already evicted but its node still reports the CPU it held. Without the node credit
+// the blocked job derives the same CPU shortage and a second job is evicted for it.
+func TestAPendingEvictionCreditsItsNodeResources(t *testing.T) {
+	blocked := disbalanceJob("blocked", "2", 1)
+	hog := disbalanceJob("hog", "14", 1)
+	now := time.Now()
+	l := NewLoop(nil, nil, nil, testGraceLimits, zap.NewNop())
+	l.pendingEvictions["hog"] = pendingEviction{
+		cluster: "cluster-a", node: "node-a", footprint: hog.Footprint(),
+		acceleratorType: disbalanceFlavor, acceleratorCount: 1, evictedAt: now, nodeFreeAtEviction: 3,
+	}
+
+	avail := map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)}
+	nodeAvail := map[string]map[string]map[string]int64{"cluster-a": disbalanceNodes(3)}
+	nodeResources := map[string]map[string]map[string]int64{"cluster-a": {"node-a": {
+		domain.NodeResourceCPUMillicores: 500,
+		domain.NodeResourceMemoryBytes:   32 << 30,
+	}}}
+	l.applyPendingEvictions(now, avail, cloneAvail(avail), nodeAvail, nodeResources)
+
+	if got := nodeResources["cluster-a"]["node-a"][domain.NodeResourceCPUMillicores]; got != 14500 {
+		t.Fatalf("node CPU after credit = %d millicores, want 14500", got)
+	}
+	shortage := preemptionShortfall(avail["cluster-a"], nodeAvail["cluster-a"], nodeResources["cluster-a"], nil, blocked, blocked.Footprint())
+	if len(shortage) != 0 {
+		t.Fatalf("blocked job is still short %s while the hog's capacity is on its way back", footprintStr(shortage))
 	}
 }

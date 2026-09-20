@@ -156,7 +156,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// fresh read still can't see as free (the node/agent hasn't reported it back yet) — otherwise
 	// this tick re-derives the same shortage and evicts a fresh set of victims to free capacity
 	// that is already being freed. See loop_disbalance.go's applyPendingEvictions.
-	l.applyPendingEvictions(start, gAvail, bAvail, nodeAvail)
+	l.applyPendingEvictions(start, gAvail, bAvail, nodeAvail, nodeResources)
 
 	// The capacity this tick started with, before any admission below claims a slice of it. It
 	// is what separates "you lost this to jobs ahead of you, wait" from "this cluster cannot
