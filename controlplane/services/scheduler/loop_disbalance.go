@@ -173,9 +173,8 @@ func (v disbalanceVictim) explain() string {
 // cannot reach accelerators that are sitting idle on their node. Returns without acting unless
 // every one of those conditions is provable from fresh data.
 //
-// Like preempt(), this is fire-and-forget: it writes desired state (EVICTED) and returns. The
-// freed capacity is not visible this tick; whichever later tick first observes it genuinely free
-// admits `blocked` through the ordinary path.
+// It writes desired state (EVICTED) and returns. The freed capacity is not visible this tick;
+// whichever later tick first observes it genuinely free admits `blocked` through the ordinary path.
 func (l *Loop) evictDisbalanced(
 	ctx context.Context,
 	blocked *domain.Experiment,

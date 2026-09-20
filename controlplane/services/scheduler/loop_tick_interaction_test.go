@@ -482,3 +482,182 @@ func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
 		}
 	}
 }
+
+// --- Tick-level: a waiting guaranteed job holds free capacity against the burst pass ---
+
+const l40 = "nvidia.com/gpu.product=NVIDIA-L40"
+
+// holdWorkload is cluster-a with four h100 installed and three free, two free l40, and cluster-b
+// with one free h100. cpuCores is what cluster-a has free.
+type holdWorkload struct {
+	LoopWorkloadClient
+	cpuCores float64
+}
+
+func (w holdWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	free := func() map[string]domain.Footprint {
+		return map[string]domain.Footprint{
+			"cluster-a": domain.CapacityFootprint(w.cpuCores, map[string]int64{h100: 3, l40: 2}, 64<<30, 64<<30),
+			"cluster-b": domain.CapacityFootprint(16, map[string]int64{h100: 1}, 64<<30, 64<<30),
+		}
+	}
+	return free(), free(), nil
+}
+func (w holdWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{
+		"cluster-a": {"node-a": {h100: 3, l40: 2}},
+		"cluster-b": {"node-b": {h100: 1}},
+	}, nil
+}
+func (w holdWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	a := holdNodeTotal()
+	a[domain.NodeResourceCPUMillicores] = int64(w.cpuCores * 1000)
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": a}, "cluster-b": {"node-b": holdNodeTotal()}}, nil
+}
+func (holdWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": holdNodeTotal()}, "cluster-b": {"node-b": holdNodeTotal()}}, nil
+}
+func (holdWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
+	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}, "cluster-b": {"node-b": {}}}, nil
+}
+func (holdWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (holdWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
+	return map[string]domain.Footprint{
+		"cluster-a": domain.CapacityFootprint(16, map[string]int64{h100: 4, l40: 3}, 64<<30, 64<<30),
+		"cluster-b": domain.CapacityFootprint(16, map[string]int64{h100: 1}, 64<<30, 64<<30),
+	}, nil
+}
+func (holdWorkload) CreateWorkload(context.Context, *domain.Experiment) error { return nil }
+
+func holdNodeTotal() map[string]int64 {
+	return map[string]int64{
+		domain.NodeResourceCPUMillicores: 16000,
+		domain.NodeResourceMemoryBytes:   64 << 30,
+		domain.NodeResourceStorageBytes:  64 << 30,
+	}
+}
+
+type holdStore struct {
+	noRunningListStore
+	running   []*domain.Experiment
+	submitted map[string]string
+}
+
+func (s *holdStore) ListRunningExperiments(context.Context) ([]*domain.Experiment, error) {
+	return s.running, nil
+}
+func (s *holdStore) ListCapacityClaimedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return s.running, nil
+}
+func (s *holdStore) ClaimSubmitted(_ context.Context, id, cluster string, _ *domain.JobSpec, _ func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+	if s.submitted == nil {
+		s.submitted = map[string]string{}
+	}
+	s.submitted[id] = cluster
+	return true, nil
+}
+
+type holdQuota struct{ tickQuota }
+
+func (holdQuota) ReserveAdmittedFlavor(context.Context, string, domain.AcceleratorType, float64, int) error {
+	return nil
+}
+
+type recordingEvictor struct{ evicted []string }
+
+func (e *recordingEvictor) EvictExperiment(_ context.Context, id string, _ domain.EvictionReason) error {
+	e.evicted = append(e.evicted, id)
+	return nil
+}
+
+func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType, count int, cpu string) *domain.Experiment {
+	return &domain.Experiment{
+		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
+		AcceleratorType: flavor, AcceleratorCount: count,
+		Job: domain.JobSpec{CPU: cpu, AcceleratorType: flavor, AcceleratorCount: count},
+	}
+}
+
+func holdLoop(store LoopStore, workload LoopWorkloadClient, evictor ExperimentEvictor) *Loop {
+	l := NewLoop(store, holdQuota{}, workload, testGraceLimits, zap.NewNop())
+	l.evictor = evictor
+	l.disbalanceTolerance = DefaultDisbalanceTolerance
+	l.reprioritizer = noopReprioritizer{}
+	return l
+}
+
+func TestTickHoldsFreeCapacityForAWaitingGuaranteedJob(t *testing.T) {
+	// The guaranteed job is pinned to cluster-a, which has three h100 free of four installed.
+	for name, tc := range map[string]struct {
+		guaranteedCount int
+		burstFlavor     domain.AcceleratorType
+		burstCluster    string
+		admitted        bool
+	}{
+		"short by one holds the same flavor":     {4, h100, "cluster-a", false},
+		"above installed capacity holds nothing": {5, h100, "cluster-a", true},
+		"another flavor is admitted":             {4, l40, "cluster-a", true},
+		"another cluster is admitted":            {4, h100, "cluster-b", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, tc.guaranteedCount, "")
+			guaranteed.ClusterName = "cluster-a"
+			burst := holdJob("burst", domain.CapacityBurst, tc.burstFlavor, 1, "")
+			burst.ClusterName = tc.burstCluster
+			store := &holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{burst, guaranteed}}}
+			l := holdLoop(store, holdWorkload{cpuCores: 16}, noopEvictor{})
+
+			if err := l.tick(context.Background()); err != nil {
+				t.Fatalf("tick() = %v, want nil", err)
+			}
+			if _, ok := store.submitted["guaranteed"]; ok {
+				t.Fatal("the guaranteed job was admitted; the case needs it waiting")
+			}
+			if _, ok := store.submitted["burst"]; ok != tc.admitted {
+				t.Fatalf("burst job admitted = %v, want %v (reason %q)", ok, tc.admitted, store.notAdmitted["burst"])
+			}
+			if got := store.notAdmitted["burst"]; !tc.admitted && got != domain.NotAdmittedOutranked {
+				t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedOutranked)
+			}
+		})
+	}
+}
+
+// The guaranteed job is short one h100 and preempts for it, which leaves the cluster's disbalance
+// verdict to the burst pass. Its hold takes every free core, so the l40 burst job is short on cpu
+// alone beside a running job far above its cpu share: the disbalance premises.
+func TestTickEvictsNothingForABurstJobHeldByAWaitingGuaranteedJob(t *testing.T) {
+	guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, 4, "4")
+	guaranteed.ClusterName = "cluster-a"
+	burst := holdJob("burst", domain.CapacityBurst, l40, 1, "1")
+	hog := holdJob("hog", domain.CapacityBurst, l40, 1, "12")
+	hog.ClusterName = "cluster-a"
+	hog.Status = domain.StatusRunning
+	victim := holdJob("victim", domain.CapacityBurst, h100, 1, "1")
+	victim.ClusterName = "cluster-a"
+	victim.Status = domain.StatusRunning
+
+	store := &holdStore{
+		noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{burst, guaranteed}},
+		running:            []*domain.Experiment{hog, victim},
+	}
+	evictor := &recordingEvictor{}
+	l := holdLoop(store, holdWorkload{cpuCores: 4}, evictor)
+	l.observed = fakeObserved{node: map[string]string{"hog": "node-a", "victim": "node-a"}}
+	l.settler = &recordingSettler{}
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatalf("tick() = %v, want nil", err)
+	}
+	if !store.requeuePreemptedCall {
+		t.Fatal("the guaranteed job preempted nothing; the case needs the burst pass to own the disbalance verdict")
+	}
+	if len(evictor.evicted) != 0 {
+		t.Fatalf("evicted %v for a burst job that only waits behind a guaranteed one", evictor.evicted)
+	}
+	if got := store.notAdmitted["burst"]; got != domain.NotAdmittedOutranked {
+		t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedOutranked)
+	}
+}

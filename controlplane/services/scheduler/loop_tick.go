@@ -417,9 +417,6 @@ func (l *Loop) tick(ctx context.Context) error {
 				zap.String("avail", footprintStr(gAvail[cluster])), zap.String("need", footprintStr(fp)),
 				zap.String("shortage", footprintStr(shortage)),
 				zap.Int("burst_candidates", len(burstRunning)))
-			// preempt() only requeues victims — it never waits for their Jobs to disappear, so
-			// this tick can't know the accelerator is really free yet. exp stays QUEUED; a
-			// later tick's fresh capacity read admits it once the resource is genuinely gone.
 			// Preemption picks victims to cover a cluster-wide scalar shortage. When the cluster
 			// already has the capacity in total and only the layout does not work -- distinct
 			// hosts, labels, per-node distribution -- covering that scalar proves nothing: the
@@ -446,6 +443,12 @@ func (l *Loop) tick(ctx context.Context) error {
 				if err != nil {
 					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 				}
+			}
+			// A guaranteed job waiting for capacity it can get holds what is free against the burst
+			// pass, or burst refills the room a preemption is freeing and the job never fits.
+			aboveInstalled := exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, exp)
+			if cluster != "" && !scalarFits && !aboveInstalled {
+				subtractFootprint(bAvail[cluster], fp)
 			}
 			// Only a preempt that actually requeued victims makes the running set stale. Marking
 			// it stale unconditionally cost a full re-read for every blocked job behind it on a
@@ -479,7 +482,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedNoScalableCapacity
 			case misfit != "":
 				reason = misfit
-			case exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, exp):
+			case aboveInstalled:
 				reason = exceedsClusterCapacityReason(exp)
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
@@ -593,7 +596,11 @@ func (l *Loop) tick(ctx context.Context) error {
 				zap.String("exp", exp.ID), zap.String("cluster", cluster), zap.Bool("cluster_unresolved", cluster == ""),
 				zap.String("avail", footprintStr(bAvail[cluster])), zap.String("need", footprintStr(fp)),
 				zap.String("shortage", footprintStr(shortage)))
-			if !disbalanceRan[cluster] {
+			fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
+				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+			// A job that fit when the tick began lost its room to a higher rank and waits; nothing
+			// running is evicted for it.
+			if !fitAtTickStart && !disbalanceRan[cluster] {
 				disbalanceRan[cluster] = true
 				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
@@ -606,8 +613,6 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = exceedsClusterCapacityReason(exp)
 			}
 			if reason == "" {
-				fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
-					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
 				reason = notAdmittedReasonFor(fitAtTickStart, fp, shortage)
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {

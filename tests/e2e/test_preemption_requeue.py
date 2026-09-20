@@ -22,27 +22,6 @@ Parts 3-6 need kubectl for pod-level facts no API can report: whether a rank sur
 window the pod itself declares.
 
 PROVEN against the live stack: 3x solo green.
-
-Part 5 (test_checkpoint_resume_and_window_cap) needed one deliberate, disclosed deviation from a
-literal 1:1 port, made after the strict "exactly 2 distinct resume_step values" assertion (the
-bash original's own check) reproducibly failed -- 4, 10, 12, and 13 distinct values observed
-across repeated live runs, always with the job still correctly resuming from its checkpoint and
-completing (the feature under test genuinely works; only the STINT COUNT varied). Root cause,
-confirmed live via control-service logs and confirmed independently by codex: an ordinary
-preemption's freed capacity is never registered in Loop.pendingEvictions the way
-loop_disbalance.go's evictor's is (see loop_preempt.go's own "fire-and-forget" comment), so a
-requeued burst victim can be transiently re-admitted by the ordinary burst pass ahead of the
-guaranteed preemptor's own reservation, repeating until the guaranteed job finally wins -- real
-scheduler thrashing, not a fluke and not a porting defect. A proper fix (a durable,
-preemptor-specific capacity reservation mirroring pendingEvictions) was deliberately NOT attempted
-here: it is a new stateful mechanism on the admission hot path, and a rushed version risks a worse
-failure mode (a stuck reservation starving admission entirely) than the bounded, well-understood
-thrashing this now tolerates. The stints assertion was widened from `== 2` to `2 <= stints <= 25`
-(observed max 12, so this keeps real margin while still catching a regression that thrashes far
-beyond what has been observed) -- see that assertion's own comment for the full reasoning. Every
-other assertion in this part, including the wall-clock and step-count checks (which now account
-for `stints - 1` admission-cycle overhead boundaries instead of assuming exactly one), is
-unchanged and still strict.
 """
 from __future__ import annotations
 
@@ -624,52 +603,25 @@ def test_checkpoint_resume_and_window_cap(api, pe3, deadline):
     # reported before it was preempted. A stint that started before the checkpoint landed resumes
     # from an earlier step and overwrites it.
     assert resume_step >= step_at_preemption, f"the furthest resume was from step {resume_step}, behind step {step_at_preemption} reported before the preemption -- checkpointed work was redone"
-    # Exactly 2 is the clean case (one preemption, one resume) and is what the bash original
-    # asserted. Under real contention it can legitimately be more -- confirmed live to reach as
-    # high as 12 across repeated runs against this shared dev stack: loop_preempt.go's requeue is
-    # deliberately fire-and-forget (it never waits for a victim's Job to actually disappear before
-    # its tick ends), and -- unlike loop_disbalance.go's evictor -- an ordinary preemption's freed
-    # capacity is never registered in Loop.pendingEvictions, so a later tick's ordinary burst
-    # admission can transiently re-claim it ahead of the guaranteed preemptor's own reservation,
-    # causing the victim to be preempted again. Confirmed live (control-service logs showing
-    # "guaranteed job needs preemption" repeating for the same victim across 10+ ticks while avail
-    # capacity never moved) and confirmed with codex as real scheduler thrashing worth fixing
-    # properly (a durable, preemptor-specific capacity reservation mirroring pendingEvictions).
-    #
-    # That fix is deliberately NOT attempted here: it is a new stateful cross-tick reservation
-    # mechanism touching the admission hot path, and a rushed version risks a worse failure mode
-    # (a stuck reservation that starves admission entirely) than the bounded, understood thrashing
-    # this tolerates. Tracked as a known issue rather than silently masked. What this test actually
-    # verifies -- resumed from a checkpoint rather than from zero, no work lost, positive billing --
-    # holds regardless of how many times it was preempted, so only the upper bound below (a
-    # regression thrashing far beyond what has been observed) is asserted strictly.
-    assert 2 <= stints <= 25, f"{stints} distinct resume_step value(s) reported, want 2-25 -- either it never got preempted at all, or scheduler thrashing has gotten far worse than the known issue this bound accounts for"
+    assert stints == 2, f"{stints} distinct resume_step value(s) reported, want 2 -- one preemption, one resume"
 
     step_points = len(api.metric_values(job_ckpt, "train_step"))
     final_step = api.metric_max(job_ckpt, "train_step")
     assert final_step is not None and abs(final_step - CKPT_STEPS_TOTAL) < 0.001, f"the highest reported step is {final_step}, want {CKPT_STEPS_TOTAL}"
-    # One point of slack per stint boundary crossed: the step in flight when SIGTERM arrived may
-    # legitimately be reported by both the stint that was cut off and the one that resumes from
-    # it, since the checkpoint records the last COMPLETED step. With `stints` stints there are
-    # `stints - 1` such boundaries (see the stints assertion above for why more than 2 is possible).
-    slack = stints - 1
-    assert step_points <= CKPT_STEPS_TOTAL + slack, f"{step_points} step points for a {CKPT_STEPS_TOTAL}-step run across {stints} stints (slack {slack}) -- steps were reported more than once per boundary, so a stint redid work an earlier one had already done"
+    # One point of slack: the step in flight when SIGTERM arrived may legitimately be reported by
+    # both the stint that was cut off and the one that resumes from it, since the checkpoint
+    # records the last COMPLETED step.
+    assert step_points <= CKPT_STEPS_TOTAL + 1, f"{step_points} step points for a {CKPT_STEPS_TOTAL}-step run -- the second stint redid work the first had already done"
 
     # --- 5. one run's worth of work across every stint
     # Continuing from step 9 of 14 means 5 steps remain, ~25s of step work; starting over means
-    # all 14 do, ~70s. Neither figure alone is what stint2_elapsed measures, though: the clock
-    # starts once the checkpointing job is first preempted, so it also carries the fixed
-    # admission-cycle overhead each stint boundary pays regardless of which of the two outcomes it
-    # turns out to be -- one scheduler tick to admit that boundary's preemptor plus that
-    # preemptor's own runtime, times (stints - 1) boundaries (see the stints assertion above for
-    # why more than one boundary is a known, accepted possibility here, not just the clean case
-    # the bash original assumed). Read loop_heartbeat_seconds from the deployed settings rather
-    # than hardcoding it, for the same reason max_checkpoint_grace_seconds below is: a floor built
-    # from a stale copy of a configured number would keep passing after the configuration changed
-    # underneath it.
-    fixed_overhead = slack * (_deployed_setting("loop_heartbeat_seconds") + PREEMPTOR_RUN_SECONDS)
+    # all 14 do, ~70s. The clock starts once the checkpointing job is first preempted, so it also
+    # carries one scheduler tick to admit the preemptor plus the preemptor's own runtime.
+    # loop_heartbeat_seconds is read from the deployed settings so the floor follows the
+    # configuration.
+    fixed_overhead = _deployed_setting("loop_heartbeat_seconds") + PREEMPTOR_RUN_SECONDS
     ckpt_restart_floor = int(CKPT_FULL_RUN_SECONDS * 0.75) + fixed_overhead
-    assert stint2_elapsed < ckpt_restart_floor, f"the second stint took {stint2_elapsed:.0f}s, at or above the {ckpt_restart_floor}s a full {CKPT_FULL_RUN_SECONDS}s rerun (plus {fixed_overhead}s fixed admission-cycle overhead across {stints} stints) would take -- it redid the work it had checkpointed"
+    assert stint2_elapsed < ckpt_restart_floor, f"the second stint took {stint2_elapsed:.0f}s, at or above the {ckpt_restart_floor}s a full {CKPT_FULL_RUN_SECONDS}s rerun (plus {fixed_overhead}s admission overhead) would take -- it redid the work it had checkpointed"
 
     # Settlement bills lifetime observed hours, so the debit must be strictly positive -- a build
     # that dropped the preempted stint's hours would settle zero for a stint that ran. No upper

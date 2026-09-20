@@ -47,9 +47,7 @@ func submitErrorLevel(err error) zapcore.Level {
 // preempt selects and requeues burst victims sufficient to cover needed, a shortage Footprint
 // that may span multiple dimensions (e.g. CPU+accelerator both short). The whole victim set is
 // planned and verified before anything is evicted (see the fill-back pass below) — vector
-// preemption, not a scalar count. Requeuing is fire-and-forget: this tick never waits for a
-// victim's Job to disappear; whichever future tick first observes the resource genuinely free
-// admits the preempting job.
+// preemption, not a scalar count.
 // Returns committed=true when it requeued a victim set that covers the whole shortage. The
 // caller uses that to stand the disbalance evictor down: capacity for this job is already on its
 // way back, and a second destructive pass against the same unchanged availability would kill live
@@ -158,10 +156,6 @@ func (l *Loop) preempt(ctx context.Context, needed domain.Footprint, burstRunnin
 		)
 	}
 
-	// Requeue every victim (RUNNING -> QUEUED) and stop — never waits for its Job to actually
-	// disappear. Live capacity, read fresh each tick, reflects the resource as free once that's
-	// genuinely true.
-	//
 	// Do not refund quota on preemption: the job returns to QUEUED and will run again, so its
 	// remaining cost stays debited — but rescaled to the new, shortened estimate. All four
 	// resource dimensions are rescaled by the same ratio so a job's $/hour rate stays intact
