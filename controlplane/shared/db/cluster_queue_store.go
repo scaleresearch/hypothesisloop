@@ -57,11 +57,12 @@ ORDER BY id`
 // without a database: the one thing it must never do is narrow by a column the very write it is
 // looking for has just cleared.
 const recentlyUndesiredWorkloadsQuery = `SELECT` + experimentColumns + `FROM experiments
-WHERE status <> ALL($1) AND updated_at > now() - $2::interval
+WHERE status <> ALL($1) AND eviction_reason IS NOT NULL AND updated_at > now() - $2::interval
 ORDER BY id`
 
-// ListRecentlyUndesiredWorkloads returns every experiment that has left the desired set within
-// the last `within` — the rows a termination decision was just written to.
+// ListRecentlyUndesiredWorkloads returns every experiment a termination decision moved out of
+// the desired set within the last `within`. updated_at is the time of that move: only status
+// transitions write it.
 // It exists so the reconcile feed can say which of the workloads about to be deleted earned a
 // checkpoint window, without any new table, column or lifecycle state to hold that fact: the
 // termination is already recorded on the experiment (its status and its eviction reason), and

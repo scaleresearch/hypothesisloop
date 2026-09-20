@@ -44,9 +44,10 @@ func (s *ExperimentsStore) ListExperimentsWithStatus(ctx context.Context, status
 	return s.ListExperiments(ctx, domain.ExperimentFilter{Status: status})
 }
 
-// UpdateExperimentPriority updates only the priority_score field.
+// UpdateExperimentPriority writes a changed priority_score. updated_at stays: it is the time of
+// the row's last status transition, which ListRecentlyUndesiredWorkloads and finished_at read.
 func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id string, score float64) error {
-	const q = `UPDATE experiments SET priority_score = $2, updated_at = NOW() WHERE id = $1`
+	const q = `UPDATE experiments SET priority_score = $2 WHERE id = $1 AND priority_score IS DISTINCT FROM $2`
 	_, err := s.pool.pool.Exec(ctx, q, id, score)
 	if err != nil {
 		return fmt.Errorf("experiments_store.UpdateExperimentPriority: %w", err)
@@ -166,8 +167,8 @@ func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reas
 	if reason == "" {
 		return fmt.Errorf("experiments_store.UpdateNotAdmittedReason: reason is required")
 	}
-	const q = `UPDATE experiments SET not_admitted_reason = $2, updated_at = NOW()
-	WHERE id = $1 AND status = 'QUEUED'`
+	const q = `UPDATE experiments SET not_admitted_reason = $2
+	WHERE id = $1 AND status = 'QUEUED' AND not_admitted_reason IS DISTINCT FROM $2`
 	_, err := s.pool.pool.Exec(ctx, q, id, reason)
 	return err
 }

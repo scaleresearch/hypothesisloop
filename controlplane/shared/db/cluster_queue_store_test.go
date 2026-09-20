@@ -1,8 +1,12 @@
 package db
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // The checkpoint-window grant is derived from this query, and a preemption clears cluster_name in
@@ -25,7 +29,57 @@ func TestRecentlyUndesiredWorkloadsIsBoundedByStatusAndTime(t *testing.T) {
 	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "status <> ALL($1)") {
 		t.Fatalf("query does not exclude the desired statuses: %s", recentlyUndesiredWorkloadsQuery)
 	}
+	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "eviction_reason IS NOT NULL") {
+		t.Fatalf("query returns rows no termination was written to: %s", recentlyUndesiredWorkloadsQuery)
+	}
 	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "updated_at > now() - $2::interval") {
 		t.Fatalf("query is not time-bounded, so a grant would never expire: %s", recentlyUndesiredWorkloadsQuery)
+	}
+}
+
+// The scheduler rewrites a queued job's priority and queue reason every tick. Neither may move
+// updated_at, or a preempted job stays "recently undesired" for as long as it waits and its
+// checkpoint grant never expires.
+func TestAPreemptedJobStopsBeingRecentlyUndesiredWhileItWaitsInTheQueue(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	exps, queue := NewExperimentsStore(pool), NewClusterQueueStore(pool)
+	ctx := context.Background()
+	preempted, fresh := "undesired-preempted-"+peID, "undesired-fresh-"+peID
+	seedExperimentForCapTest(t, pool, preempted, agentID, peID, 1, domain.StatusRunning)
+	seedExperimentForCapTest(t, pool, fresh, agentID, peID, 1, domain.StatusQueued)
+	if ok, err := exps.RequeuePreempted(ctx, preempted, 1, 1); err != nil || !ok {
+		t.Fatalf("RequeuePreempted = %v, %v, want true", ok, err)
+	}
+	listed := func() map[string]bool {
+		t.Helper()
+		undesired, err := queue.ListRecentlyUndesiredWorkloads(ctx, time.Minute)
+		if err != nil {
+			t.Fatalf("ListRecentlyUndesiredWorkloads: %v", err)
+		}
+		ids := map[string]bool{}
+		for _, exp := range undesired {
+			ids[exp.ID] = true
+		}
+		return ids
+	}
+	if ids := listed(); !ids[preempted] || ids[fresh] {
+		t.Fatalf("listed = %v, want the preempted job and not the never-run one", ids)
+	}
+
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET updated_at = now() - interval '2 minutes' WHERE id = $1`, preempted); err != nil {
+		t.Fatalf("age the requeue: %v", err)
+	}
+	if err := exps.UpdateExperimentPriority(ctx, preempted, 0.75); err != nil {
+		t.Fatalf("UpdateExperimentPriority: %v", err)
+	}
+	if err := exps.UpdateNotAdmittedReason(ctx, preempted, domain.NotAdmittedCapacityUnavailable); err != nil {
+		t.Fatalf("UpdateNotAdmittedReason: %v", err)
+	}
+	if listed()[preempted] {
+		t.Fatal("a tick's priority and reason writes made an old requeue recent again")
+	}
+	got, err := exps.GetExperiment(ctx, preempted)
+	if err != nil || got.PriorityScore != 0.75 || got.NotAdmittedReason != domain.NotAdmittedCapacityUnavailable {
+		t.Fatalf("after the writes: priority %v, reason %q, err %v", got.PriorityScore, got.NotAdmittedReason, err)
 	}
 }

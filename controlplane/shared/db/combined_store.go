@@ -291,7 +291,7 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 			}
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE experiments SET accelerator_type=$2, estimated_cost_acch=$3, updated_at=NOW() WHERE id=$1`, experimentID, string(acceleratorType), estimatedCost); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE experiments SET accelerator_type=$2, estimated_cost_acch=$3 WHERE id=$1`, experimentID, string(acceleratorType), estimatedCost); err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: update: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
