@@ -175,7 +175,11 @@ func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
 // and so excludes exited containers), status reporting must see an exited container at least
 // once so its terminal phase (PollJobStatus's Succeeded/Failed) reaches the control plane
 // before reapTerminal prunes it.
+//
+// A job whose image is still being pulled has no container and is listed from its operation, so
+// the control plane hears it is pending instead of reading its absence as gone.
 func (e *Executor) ListManagedJobsForStatus(ctx context.Context) ([]string, error) {
+	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return nil, err
@@ -187,7 +191,13 @@ func (e *Executor) ListManagedJobsForStatus(ctx context.Context) ([]string, erro
 			log.Printf("podexec: skipping managed container %q with no experiment identity", c.name())
 			continue
 		}
+		delete(ops, id)
 		ids = append(ids, id)
+	}
+	for id, op := range ops {
+		if op.starting {
+			ids = append(ids, id)
+		}
 	}
 	return ids, nil
 }
@@ -231,6 +241,7 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 // a preempt-then-recreate race the same way status.go's reportChangedStatuses does.
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	pending := agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}
+	op, busy := e.operations()[experimentID]
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return pending, err
@@ -241,10 +252,7 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		}
 		// Unparseable or absent reads as unknown rather than as a number: the control plane
 		// fences status on this, and a wrong generation is worse than no generation.
-		observed := agentexec.JobStatus{UID: c.ID, Attempt: workload.AttemptUnknown}
-		if n, err := strconv.Atoi(c.Labels[LabelAttempt]); err == nil {
-			observed.Attempt = n
-		}
+		observed := agentexec.JobStatus{UID: c.ID, Attempt: attemptOf(c.Labels)}
 		switch c.State {
 		case "running":
 			observed.Phase = workload.JobPhaseRunning
@@ -266,7 +274,19 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		}
 		return observed, nil
 	}
+	if busy && op.starting {
+		pending.Attempt = attemptOf(op.labels)
+		return pending, nil
+	}
 	return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
+}
+
+func attemptOf(labels map[string]string) int {
+	n, err := strconv.Atoi(labels[LabelAttempt])
+	if err != nil {
+		return workload.AttemptUnknown
+	}
+	return n
 }
 
 // ResolveAdmittedAcceleratorType reports the accelerator type and node this experiment actually

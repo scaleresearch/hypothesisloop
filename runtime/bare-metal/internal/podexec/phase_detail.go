@@ -16,7 +16,12 @@ import (
 // generic stuck-pending timeout rather than a runtime-side cache of the launch failure, which
 // would be exactly the in-RAM state important.md #4 rules out. Returns empty reason/message and
 // nil error when there is nothing notable to report.
+//
+// A job whose image is being pulled reports what a k8s pod in ContainerCreating does: it has
+// landed on this node (scheduledNodes 1) and has no reason yet. Between two failed pulls it has
+// no operation and reads as gone, which is what the stuck-pending timeout bounds.
 func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
+	op, busy := e.operations()[experimentID]
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return "", "", 0, 0, "", err
@@ -44,6 +49,9 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 			return "", fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
 		}
 		return "", "", restartCount, scheduledNodes, "", nil
+	}
+	if busy && op.starting {
+		return "", "", 0, 1, "", nil
 	}
 	return "", "", 0, 0, "", nil
 }

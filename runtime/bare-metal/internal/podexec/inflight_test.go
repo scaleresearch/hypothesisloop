@@ -402,8 +402,8 @@ func testAJobInFlightGetsNoSecondOperation(t *testing.T, stoppingState string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 1 || ids[0] != "stopping" {
-		t.Fatalf("status covers %v, want only the job being stopped: a pulling job has no container to report", ids)
+	if len(ids) != 2 || ids[0] != "stopping" || ids[1] != "slow" {
+		t.Fatalf("status covers %v, want the job being stopped and the job pulling", ids)
 	}
 	status, err := e.PollJobStatus(ctx, "stopping")
 	if err != nil {
@@ -579,4 +579,61 @@ func TestShutdownCancelsOperationsAndWaitsForThem(t *testing.T) {
 	eventually(t, "the interrupted pull is run again", func() bool { return f.state("pulling") == "running" })
 	eventually(t, "the interrupted stop is run again", func() bool { return f.state("stopping") == "exited" })
 	eventually(t, "the restarted agent is idle", func() bool { return len(restarted.operations()) == 0 })
+}
+
+// A k8s pod pulling its image is pending, bound and has no reason. The job watcher exempts that
+// from the stuck-pending timeout, so a pull longer than the timeout must report the same here.
+func TestAJobPullingItsImageIsReportedPendingAndPlaced(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f)
+	ctx := t.Context()
+	release := f.block("pull slow")
+	defer release()
+	job := fakeJob("pulling", "slow", 0)
+	job.AttemptCount = 3
+
+	pass(t, ctx, e, job)
+	eventually(t, "the pull is under way", f.blockedIn("pull slow"))
+
+	ids, err := e.ListManagedJobsForStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "pulling" {
+		t.Fatalf("status lists %v while the image is pulled, want the pulling job", ids)
+	}
+	status, err := e.PollJobStatus(ctx, "pulling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Phase != workload.JobPhasePending || status.Attempt != 3 {
+		t.Fatalf("status = %s attempt %d, want pending attempt 3", status.Phase, status.Attempt)
+	}
+	reason, message, _, scheduledNodes, _, err := e.PollPhaseDetail(ctx, "pulling", status.Attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason != "" || message != "" || scheduledNodes != 1 {
+		t.Fatalf("phase detail = (%q, %q, %d nodes), want no reason and 1 node", reason, message, scheduledNodes)
+	}
+
+	release()
+	eventually(t, "the start has returned", idle(e, "pulling"))
+	ids, err = e.ListManagedJobsForStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("status lists %v once the container runs, want the job once", ids)
+	}
+
+	// Cancelled mid-pull, the job has neither container nor operation and reads as gone.
+	defer f.block("pull other")()
+	pass(t, ctx, e, fakeJob("dropped", "other", 0), job)
+	eventually(t, "the second pull is under way", f.blockedIn("pull other"))
+	pass(t, ctx, e, job)
+	eventually(t, "the cancelled pull has returned", idle(e, "dropped"))
+	if status, err := e.PollJobStatus(ctx, "dropped"); err != nil || status.Phase != workload.JobPhaseGone {
+		t.Fatalf("status of a job with no container and no operation = %s, %v, want gone", status.Phase, err)
+	}
 }
