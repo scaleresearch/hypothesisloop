@@ -73,23 +73,23 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     COMPLETED job's declared metrics as its event's detail, and two closing events: the count of
     the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
     read is left out."""
-    if not any(e.get("kind") == "experiment.status" for e in events):
+    if not any(e["kind"] == "experiment.status" for e in events):
         return events
 
     def completed(e: dict) -> bool:
-        return e.get("kind") == "experiment.status" and e.get("value") == "COMPLETED"
+        return e["kind"] == "experiment.status" and e["value"] == "COMPLETED"
 
     ids = list(dict.fromkeys(e["subject"] for e in events if completed(e)))
     detail = {}
     if ids:
         _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
-        detail = {job.get("id"): ", ".join(
+        detail = {job["id"]: ", ".join(
             f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
             for m in job.get("metrics", [])) for job in _events(stdout)}
     events = [dict(e, detail=detail[e["subject"]]) if completed(e) and e["subject"] in detail else e for e in events]
     _, stdout = await _run_hl([hl, "job", "stats", "--agent", env["AGENT_ID"]], env, lambda: False)
     for stats in _events(stdout):
-        counts = stats.get("by_status", {})
+        counts = stats["by_status"]
         events.append({"kind": "unfinished_jobs",
                        "value": ", ".join(f"{counts[s]} {s}" for s in _UNFINISHED if counts.get(s)) or "none"})
     _, stdout = await _run_hl([hl, "quota"], env, lambda: False)

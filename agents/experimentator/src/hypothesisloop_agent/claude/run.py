@@ -31,7 +31,6 @@ from claude_agent_sdk import (
     HookMatcher,
     RateLimitEvent,
     ResultMessage,
-    TextBlock,
 )
 
 from hypothesisloop_agent import core, updates
@@ -105,9 +104,7 @@ def _load_resume_id(setup: core.RunSetup) -> str | None:
         return None
 
 
-def _save_resume_id(setup: core.RunSetup, session_id: str | None) -> None:
-    if not session_id:
-        return
+def _save_resume_id(setup: core.RunSetup, session_id: str) -> None:
     with open(_session_file(setup), "w") as f:
         f.write(session_id)
 
@@ -214,10 +211,8 @@ async def _receive_turn(client):
         yield message
 
 
-def _context_tokens(usage: dict | None) -> int:
+def _context_tokens(usage: dict) -> int:
     """Context carried by one model call, from its usage block."""
-    if not usage:
-        return 0
     return sum(int(usage.get(key, 0) or 0) for key in (
         "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens",
     ))
@@ -284,9 +279,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     if isinstance(message, ResultMessage):
                         got_result = True
                         turn_is_error = message.is_error
-                        session_id = getattr(message, "session_id", None) or resume_id
-                        _save_resume_id(setup, session_id)
-                        resume_id = session_id or resume_id
+                        resume_id = message.session_id
+                        _save_resume_id(setup, resume_id)
                         if not message.is_error:
                             on_good_turn()
                             if initial_prompt:
@@ -330,21 +324,15 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if context_tokens >= _CONTEXT_COMPACTION_THRESHOLD_TOKENS:
                 log.info("context reached ~%d tokens — creating handoff before fresh session", context_tokens)
                 await client.query(_COMPACTION_PROMPT)
-                handoff_parts = []
                 handoff_result = None
                 async for message in _receive_turn(client):
                     _log_message(message, setup.cfg.agent_id)
-                    if isinstance(message, AssistantMessage):
-                        handoff_parts.extend(
-                            block.text for block in message.content
-                            if isinstance(block, TextBlock) and block.text.strip()
-                        )
-                    elif isinstance(message, ResultMessage):
+                    if isinstance(message, ResultMessage):
                         handoff_result = message
                 if not handoff_result or handoff_result.is_error:
                     log.warning("context handoff failed — preserving old session for retry")
                     return None, False
-                handoff = (handoff_result.result or "\n".join(handoff_parts)).strip()
+                handoff = (handoff_result.result or "").strip()
                 if not handoff:
                     log.warning("context handoff was empty — preserving old session for retry")
                     return None, False
