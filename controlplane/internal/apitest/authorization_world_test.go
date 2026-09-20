@@ -42,6 +42,7 @@ const (
 	worldIssuer   = "https://issuer.test/auth/v1"
 	worldAudience = "hypothesisloop-test"
 	worldLauncher = "main"
+	worldMember   = "user-m"
 )
 
 var (
@@ -125,8 +126,11 @@ func (w *world) ClusterByReportedID(ctx context.Context, reportedID string) (*do
 	return w.GetCluster(ctx, reportedID)
 }
 
-// GetAPIKey knows one key of each org, key-of-<org>, made by a person.
+// GetAPIKey knows one key of each org, key-of-<org>, made by a person, and the org key that calls.
 func (w *world) GetAPIKey(_ context.Context, id string) (*domain.APIKey, error) {
+	if id == "key-a" {
+		return &domain.APIKey{ID: id, OrgID: "org-a", CreatedBy: "user-a"}, nil
+	}
 	org, ok := strings.CutPrefix(id, "key-of-")
 	if !ok || (org != "org-a" && org != "org-b") {
 		return nil, nil
@@ -141,11 +145,11 @@ func (w *world) GetOrg(_ context.Context, id string) (*domain.Org, error) {
 	return &domain.Org{ID: id}, nil
 }
 
-// OrgRole makes the one signed-in person of this world an owner, as every person in production
-// is: no route adds a member. What a member is refused is held where a member can be made, by
-// TestWhoReadsAndWhoAdministersAnOrgAndItsClusters (shared/auth) for the rule and
-// TestWhoMayCallWhat (services/accounts) for each accounts route.
-func (w *world) OrgRole(context.Context, string, string) (domain.OrgRole, bool, error) {
+// OrgRole knows the two signed-in people of org-a: user-a owns it and user-m is a member.
+func (w *world) OrgRole(_ context.Context, _ string, userID string) (domain.OrgRole, bool, error) {
+	if userID == worldMember {
+		return domain.OrgRoleMember, true, nil
+	}
 	return domain.OrgRoleOwner, true, nil
 }
 
@@ -290,6 +294,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 		return token
 	}
 	api.tokens["user"] = signer(map[string]any{"iss": worldIssuer, "aud": worldAudience, "sub": "user-a", "name": "Ada", "exp": time.Now().Add(time.Hour).Unix()})
+	api.tokens["member"] = signer(map[string]any{"iss": worldIssuer, "aud": worldAudience, "sub": worldMember, "name": "Mel", "exp": time.Now().Add(time.Hour).Unix()})
 	api.tokens["org key"] = key(&domain.APIKey{ID: "key-a", OrgID: "org-a"})
 	api.tokens["project key"] = key(&domain.APIKey{ID: "key-a1", OrgID: "org-a", ProjectID: "prj-a1"})
 	api.tokens["agent"] = mint(auth.AgentScope("pe-a1", "agent-1"))

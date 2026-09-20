@@ -10,12 +10,19 @@ type rule func(principal, owner string) int
 
 // The audiences, as the callers of this table. Staff, who pass every one, are not in it.
 var (
-	agentAudience       = []string{"user", "org key", "project key", "agent", "coordinator"}
-	jobAudience         = []string{"user", "org key", "project key", "agent", "coordinator", "job"}
-	coordinatorAudience = []string{"user", "org key", "project key", "coordinator"}
-	people              = []string{"user", "org key", "project key"}
-	orgWide             = []string{"user", "org key"}
+	agentAudience       = []string{"user", "member", "org key", "project key", "agent", "coordinator"}
+	jobAudience         = []string{"user", "member", "org key", "project key", "agent", "coordinator", "job"}
+	coordinatorAudience = []string{"user", "member", "org key", "project key", "coordinator"}
+	people              = []string{"user", "member", "org key", "project key"}
+	orgWide             = []string{"user", "member", "org key"}
+	persons             = []string{"user", "member"}
 )
+
+// The member is a person of org-a who does not own it (plan 15.1). In everything that goes on
+// inside a platform experiment the member is answered as the owner is, so the rules below tell
+// the two apart only where an org and what it owns is changed: orgLevel and ofProject refuse the
+// member, orgRead admits them.
+const member = "member"
 
 func among(list []string, v string) bool {
 	for _, item := range list {
@@ -110,9 +117,22 @@ func ownedOrTheJob(admitted int) rule {
 	}
 }
 
-// orgLevel is a route on something an org holds (a cluster, the org itself): a token bound to a
-// project or to a platform experiment reaches none, which bound says how it is answered.
+// orgLevel is a change to something an org holds (a cluster, a member, the org itself): a token
+// bound to a project or to a platform experiment reaches none, which bound says how it is
+// answered, and a member is forbidden.
 func orgLevel(audience []string, bound, admitted int) rule {
+	read := orgRead(audience, bound, admitted)
+	return func(principal, owner string) int {
+		status := read(principal, owner)
+		if principal == member && status == admitted {
+			return http.StatusForbidden
+		}
+		return status
+	}
+}
+
+// orgRead is a read of something an org holds as a whole, which a member reads too.
+func orgRead(audience []string, bound, admitted int) rule {
 	return func(principal, owner string) int {
 		if status, refused := gate(audience, principal); refused {
 			return status
@@ -150,7 +170,7 @@ func ofProject(admitted int) rule {
 		if owner == "foreign" || owner == "absent" || (principal == "project key" && owner == "sibling") {
 			return http.StatusNotFound
 		}
-		if !among(orgWide, principal) {
+		if !among(orgWide, principal) || principal == member {
 			return http.StatusForbidden
 		}
 		return admitted
@@ -204,7 +224,7 @@ var routes = []route{
 	{method: "GET", path: "/experiments/{id}/cost", request: "/experiments/<job>/cost", rule: scoped(agentAudience, reached)},
 
 	// ---- cluster settings ----
-	{method: "GET", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", rule: orgLevel(coordinatorAudience, http.StatusNotFound, reached)},
+	{method: "GET", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", rule: orgRead(coordinatorAudience, http.StatusNotFound, reached)},
 	{method: "PUT", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", body: `{}`, rule: orgLevel(coordinatorAudience, http.StatusNotFound, reached)},
 
 	// ---- hypotheses ----
@@ -261,7 +281,7 @@ var routes = []route{
 
 	// ---- accounts ----
 	{method: "GET", path: "/me", rule: only(people, reached)},
-	{method: "POST", path: "/orgs", body: `{"name":"n"}`, rule: only([]string{"user"}, reached)},
+	{method: "POST", path: "/orgs", body: `{"name":"n"}`, rule: only(persons, reached)},
 	{method: "PATCH", path: "/orgs/{id}", request: "/orgs/<org>", body: `{"name":"n"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/projects", request: "/orgs/<org>/projects", rule: inOrg(reached)},
 	{method: "POST", path: "/orgs/{id}/projects", request: "/orgs/<org>/projects", body: `{"name":"n"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
@@ -269,8 +289,15 @@ var routes = []route{
 	{method: "POST", path: "/orgs/{id}/api-keys", request: "/orgs/<org>/api-keys", body: `{"name":"n"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/api-keys", request: "/orgs/<org>/api-keys", rule: inOrg(reached)},
 	{method: "DELETE", path: "/api-keys/{id}", request: "/api-keys/key-of-<org>", rule: orgLevel(people, http.StatusNotFound, reached)},
+	{method: "GET", path: "/orgs/{id}/members", request: "/orgs/<org>/members", rule: orgRead(people, http.StatusForbidden, reached)},
+	{method: "PATCH", path: "/orgs/{id}/members/{user_id}", request: "/orgs/<org>/members/user-a", body: `{"role":"member"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "DELETE", path: "/orgs/{id}/members/{user_id}", request: "/orgs/<org>/members/user-a", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "POST", path: "/orgs/{id}/invites", request: "/orgs/<org>/invites", body: `{"role":"member"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "GET", path: "/orgs/{id}/invites", request: "/orgs/<org>/invites", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "DELETE", path: "/invites/{id}", request: "/invites/inv-1", rule: only(people, reached)},
+	{method: "POST", path: "/invites/accept", body: `{"token":"hli_t"}`, rule: only(persons, reached)},
 	{method: "POST", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", body: `{"name":"cluster-new"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
-	{method: "GET", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "GET", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", rule: orgRead(people, http.StatusForbidden, reached)},
 	{method: "PATCH", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", body: `{"shared":true}`, rule: staffOnly},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}/identity", request: "/orgs/<org>/clusters/<cluster>/identity", rule: orgLevel(people, http.StatusForbidden, reached)},
@@ -358,6 +385,14 @@ var cases = []struct {
 	{"a watch on a job of the sibling project by a project key", "project key", "GET", "/watch?experiment_id=job-sibling", "", 404},
 	{"a watch on the caller's own job", "agent", "GET", "/watch?experiment_id=job-own", "", reached},
 	{"a watch with the token in the Authorization header", "user", "GET", "/watch-with-header", "", 401},
+
+	{"a member leaving their org", member, "DELETE", "/orgs/org-a/members/user-m", "", reached},
+	{"a member removing the owner", member, "DELETE", "/orgs/org-a/members/user-a", "", 403},
+	{"a member creating a key of one project", member, "POST", "/orgs/org-a/api-keys", `{"name":"n","project_id":"prj-a1"}`, reached},
+	{"a member creating a key of the whole org", member, "POST", "/orgs/org-a/api-keys", `{"name":"n"}`, 403},
+	{"a member writing a cluster's settings", member, "PUT", "/clusters/cluster-a/settings", `{}`, 403},
+	{"a member placing a job on a cluster by hand", member, "POST", "/experiments/job-own/admit", `{"cluster_name":"cluster-a"}`, 403},
+	{"an API key accepting an invite", "org key", "POST", "/invites/accept", `{"token":"hli_t"}`, 403},
 
 	{"a runtime reporting for a cluster of another org", "runtime", "POST", "/internal/clusters/cluster-b/status", `{"reports":[]}`, 403},
 	{"a launcher asking as another launcher", "launcher", "POST", "/internal/launchers/other/reconcile", `{"instances":[]}`, 403},

@@ -132,6 +132,19 @@ func (a *Access) Inviter(ctx context.Context, orgID string) (userID string, err 
 	return p.UserID, nil
 }
 
+// Invite admits the caller to end an invite: an administrator of its org. An invite with no row,
+// passed as nil, and one of an org outside the caller's reach are not found alike.
+func (a *Access) Invite(ctx context.Context, invite *domain.OrgInvite) error {
+	p, err := a.Account(ctx)
+	if err != nil {
+		return err
+	}
+	if invite == nil || !p.Scope().AdmitsOrg(invite.OrgID) {
+		return NotFound("invite")
+	}
+	return a.administers(ctx, p, invite.OrgID)
+}
+
 // MemberRemoval admits the caller to end userID's membership of the org: an administrator
 // anyone's, a person their own.
 func (a *Access) MemberRemoval(ctx context.Context, orgID, userID string) error {

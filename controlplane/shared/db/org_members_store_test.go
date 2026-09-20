@@ -35,7 +35,10 @@ func addTestMember(t *testing.T, accounts *AccountsStore, orgID, ownerID, userID
 
 func pendingInviteIDs(t *testing.T, accounts *AccountsStore, orgID string) []string {
 	t.Helper()
-	pending, err := accounts.ListPendingOrgInvites(context.Background(), orgID)
+	pending, total, err := accounts.ListPendingOrgInvites(context.Background(), orgID, 200, 0)
+	if err == nil && total != len(pending) {
+		t.Fatalf("pending invites: total = %d, listed = %d, want them equal on one page", total, len(pending))
+	}
 	if err != nil {
 		t.Fatalf("list pending invites: got = %v, want = nil", err)
 	}
@@ -48,7 +51,10 @@ func pendingInviteIDs(t *testing.T, accounts *AccountsStore, orgID string) []str
 
 func memberRoles(t *testing.T, accounts *AccountsStore, orgID string) map[string]domain.OrgRole {
 	t.Helper()
-	members, err := accounts.ListOrgMembers(context.Background(), orgID)
+	members, total, err := accounts.ListOrgMembers(context.Background(), orgID, 200, 0)
+	if err == nil && total != len(members) {
+		t.Fatalf("members: total = %d, listed = %d, want them equal on one page", total, len(members))
+	}
 	if err != nil {
 		t.Fatalf("list members: got = %v, want = nil", err)
 	}
@@ -90,7 +96,10 @@ func TestAnInviteMakesOneMemberWithItsRole(t *testing.T) {
 	if _, found, _ := accounts.OrgRole(ctx, orgID, late); found {
 		t.Fatal("the second accept made a member")
 	}
-	if _, err := accounts.RevokeOrgInvite(ctx, orgID, invite.ID); !errors.Is(err, ErrOrgInviteUsed) {
+	if page, total, err := accounts.ListOrgMembers(ctx, orgID, 1, 1); err != nil || total != 2 || len(page) != 1 || page[0].UserID != guest {
+		t.Fatalf("the second page of one: got = %+v of %d, %v, want the one who joined of 2", page, total, err)
+	}
+	if err := accounts.RevokeOrgInvite(ctx, invite.ID); !errors.Is(err, ErrOrgInviteUsed) {
 		t.Fatalf("revoking an accepted invite: got = %v, want = %v", err, ErrOrgInviteUsed)
 	}
 }
@@ -157,25 +166,30 @@ func TestAnInviteThatExpiredWasRevokedOrNeverExistedAdmitsNobody(t *testing.T) {
 	accounts := NewAccountsStore(pool)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
-	guest, otherOrg := newTestUserHome(t, accounts)
+	guest, _ := newTestUserHome(t, accounts)
 
 	expired, expiredHash := newTestInvite(t, accounts, orgID, owner, domain.OrgRoleMember, -time.Second)
 	revoked, revokedHash := newTestInvite(t, accounts, orgID, owner, domain.OrgRoleOwner, domain.InviteLifetime)
 	live, _ := newTestInvite(t, accounts, orgID, owner, domain.OrgRoleMember, domain.InviteLifetime)
 
-	if _, err := accounts.RevokeOrgInvite(ctx, otherOrg, revoked.ID); !errors.Is(err, ErrOrgInviteNotFound) {
-		t.Fatalf("revoking an invite under another org: got = %v, want = %v", err, ErrOrgInviteNotFound)
-	}
-	if _, err := accounts.RevokeOrgInvite(ctx, orgID, "inv-missing"); !errors.Is(err, ErrOrgInviteNotFound) {
+	if err := accounts.RevokeOrgInvite(ctx, "inv-missing"); !errors.Is(err, ErrOrgInviteNotFound) {
 		t.Fatalf("revoking an invite that does not exist: got = %v, want = %v", err, ErrOrgInviteNotFound)
 	}
-	first, err := accounts.RevokeOrgInvite(ctx, orgID, revoked.ID)
-	if err != nil || first.RevokedAt == nil {
-		t.Fatalf("revoke: got = %+v, %v, want it revoked", first, err)
+	if missing, err := accounts.GetOrgInvite(ctx, "inv-missing"); err != nil || missing != nil {
+		t.Fatalf("reading an invite that does not exist: got = %+v, %v, want nil, nil", missing, err)
 	}
-	again, err := accounts.RevokeOrgInvite(ctx, orgID, revoked.ID)
-	if err != nil || !again.RevokedAt.Equal(*first.RevokedAt) {
-		t.Fatalf("revoking a revoked invite: got = %+v, %v, want its first revocation time %v", again, err, first.RevokedAt)
+	if err := accounts.RevokeOrgInvite(ctx, revoked.ID); err != nil {
+		t.Fatalf("revoke: got = %v, want = nil", err)
+	}
+	first, err := accounts.GetOrgInvite(ctx, revoked.ID)
+	if err != nil || first == nil || first.RevokedAt == nil || first.OrgID != orgID || first.Role != domain.OrgRoleOwner {
+		t.Fatalf("the revoked invite: got = %+v, %v, want it revoked", first, err)
+	}
+	if err := accounts.RevokeOrgInvite(ctx, revoked.ID); err != nil {
+		t.Fatalf("revoking a revoked invite: got = %v, want = nil", err)
+	}
+	if again, _ := accounts.GetOrgInvite(ctx, revoked.ID); !again.RevokedAt.Equal(*first.RevokedAt) {
+		t.Fatalf("revoked_at of an invite already revoked: got = %v, want it unchanged from %v", again.RevokedAt, first.RevokedAt)
 	}
 	if got := pendingInviteIDs(t, accounts, orgID); !slices.Equal(got, []string{live.ID}) {
 		t.Fatalf("pending invites: got = %v, want only %s: %s expired and %s was revoked", got, live.ID, expired.ID, revoked.ID)

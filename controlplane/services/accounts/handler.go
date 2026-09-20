@@ -1,6 +1,6 @@
-// Package accounts serves who exists and what they own: orgs, projects, API keys and clusters.
-// Who may call what is decided in shared/auth/orgs.go for orgs and clusters and in policy.go for
-// projects and keys, and nowhere else.
+// Package accounts serves who exists and what they own: orgs, their members and invites,
+// projects, API keys and clusters. Who may call what is decided in shared/auth/orgs.go, and in
+// policy.go for what an API key reaches, and nowhere else.
 package accounts
 
 import (
@@ -19,7 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Accounts is the persistence the handler needs for orgs, projects and API keys.
+// Accounts is the persistence the handler needs for orgs, members, invites, projects and API keys.
 // *db.AccountsStore satisfies it.
 type Accounts interface {
 	CreateOrg(ctx context.Context, name, ownerUserID string) (*domain.Org, error)
@@ -36,6 +36,14 @@ type Accounts interface {
 	ListAPIKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error)
 	GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error)
 	RevokeAPIKey(ctx context.Context, id string) error
+	ListOrgMembers(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgMember, int, error)
+	SetOrgMemberRole(ctx context.Context, orgID, userID string, role domain.OrgRole) (*domain.OrgMember, error)
+	RemoveOrgMember(ctx context.Context, orgID, userID string) error
+	CreateOrgInvite(ctx context.Context, invite *domain.OrgInvite, tokenHash string) error
+	ListPendingOrgInvites(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgInvite, int, error)
+	GetOrgInvite(ctx context.Context, id string) (*domain.OrgInvite, error)
+	RevokeOrgInvite(ctx context.Context, inviteID string) error
+	AcceptOrgInvite(ctx context.Context, tokenHash, userID string) (*domain.OrgMember, error)
 }
 
 // Clusters is the persistence the handler needs for clusters. *db.ClustersStore satisfies it.
@@ -170,6 +178,20 @@ func (h *Handler) answer(op string, err error) error {
 		return huma.Error404NotFound("user not found")
 	case errors.Is(err, db.ErrClusterNotFound):
 		return huma.Error404NotFound("cluster not found")
+	case errors.Is(err, db.ErrOrgMemberNotFound):
+		return notFound("member")
+	case errors.Is(err, db.ErrOrgInviteNotFound):
+		return notFound("invite")
+	case errors.Is(err, db.ErrLastOwner):
+		return conflict(ReasonLastOwner, "an org keeps at least one owner: make someone else an owner first")
+	case errors.Is(err, db.ErrAlreadyOrgMember):
+		return conflict(ReasonAlreadyMember, "you are already a member of this org; the invite is still unused")
+	case errors.Is(err, db.ErrOrgInviteUsed):
+		return conflict(ReasonInviteUsed, "the invite was already accepted")
+	case errors.Is(err, db.ErrOrgInviteRevoked):
+		return conflict(ReasonInviteRevoked, "the invite was revoked")
+	case errors.Is(err, db.ErrOrgInviteExpired):
+		return conflict(ReasonInviteExpired, "the invite has expired: ask an owner of the org for a new one")
 	case errors.Is(err, db.ErrAPIKeyCreatorLacksOrg):
 		return auth.Forbidden("forbidden: " + err.Error())
 	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
@@ -194,6 +216,7 @@ func route[I, O any](doc *apidocs.Doc, h *Handler, op huma.Operation, handle fun
 // RegisterHuma registers the accounts operations on the shared API document.
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	h.access, h.policy = doc.Access, policy{access: doc.Access}
+	registerMembers(doc, h)
 	route(doc, h, huma.Operation{
 		OperationID: "get-me", Method: "GET", Path: "/me",
 		Summary: "Who this token is and what it reaches", Tags: []string{"accounts"},
@@ -340,7 +363,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Create an API key", Tags: []string{"accounts"},
 		Description: "Returns the token once: the platform keeps its hash only, so a lost token is replaced by a new key. " +
 			"It is the one secret of this API that cannot be read again; a cluster's runtime token and an agent's token are derived and are returned whenever asked. " +
-			"With project_id the key reaches that project only, without it the whole org. " +
+			"With project_id the key reaches that project only, without it the whole org. An owner creates either; a member one bound to a project. " +
+			"A key works while the person who created it could still create it: it stops when they leave the org, and one of the whole org when they stop being an owner. " +
 			"A key may mint keys no wider than itself, and revoking a key revokes every key minted from it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -359,7 +383,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	route(doc, h, huma.Operation{
 		OperationID: "list-api-keys", Method: "GET", Path: "/orgs/{id}/api-keys",
 		Summary: "List an org's API keys", Tags: []string{"accounts"},
-		Description: "Newest first, revoked ones included. No token is ever listed. An API key sees itself and the keys minted from it.",
+		Description: "Newest first, revoked ones included. No token is ever listed. Every member sees them all. An API key sees itself and the keys minted from it.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct {
@@ -383,7 +407,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	route(doc, h, huma.Operation{
 		OperationID: "revoke-api-key", Method: "DELETE", Path: "/api-keys/{id}",
 		Summary: "Revoke an API key", Tags: []string{"accounts"},
-		Description: "The key and every key minted from it stop working at once. Revoking a revoked key changes nothing.",
+		Description: "The key and every key minted from it stop working at once. Revoking a revoked key changes nothing. " +
+			"An owner revokes any key of the org, a member the keys they created, an API key itself and the keys minted from it.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body domain.APIKey }, error) {
@@ -634,30 +659,19 @@ func (h *Handler) revokeAPIKey(ctx context.Context, id string) (*domain.APIKey, 
 	if err != nil {
 		return nil, err
 	}
-	notFound := huma.Error404NotFound("api key not found")
-	reachable, err := h.reachableKeys(ctx, key.OrgID)
+	err = h.policy.endKey(ctx, key, func() ([]*domain.APIKey, error) { return h.accounts.ListAPIKeys(ctx, key.OrgID) })
 	if err != nil {
-		var refusal huma.StatusError
-		if errors.As(err, &refusal) && refusal.GetStatus() == http.StatusNotFound {
-			return nil, notFound
-		}
 		return nil, err
 	}
-	for _, k := range reachable {
-		if k.ID != id {
-			continue
-		}
-		if err := h.accounts.RevokeAPIKey(ctx, id); err != nil {
-			return nil, err
-		}
-		revoked, err := h.accounts.GetAPIKey(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if revoked == nil {
-			return nil, notFound
-		}
-		return revoked, nil
+	if err := h.accounts.RevokeAPIKey(ctx, id); err != nil {
+		return nil, err
 	}
-	return nil, notFound
+	revoked, err := h.accounts.GetAPIKey(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if revoked == nil {
+		return nil, auth.NotFound("api key")
+	}
+	return revoked, nil
 }

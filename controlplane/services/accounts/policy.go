@@ -9,8 +9,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// policy says who may do what to projects and API keys. Who reads and who administers an org and
-// its clusters is auth.Access's (shared/auth/orgs.go), which every rule here starts from.
+// policy says what an API key reaches among projects and keys. Who reads and who administers an
+// org, and what a member may do in it, is auth.Access's (shared/auth/orgs.go), which every rule
+// here starts from.
 //
 //   - an API key bound to one project reads that project and nothing else of the org.
 //   - an API key cannot create an org: it belongs to one.
@@ -108,7 +109,7 @@ func (pol policy) mintKey(ctx context.Context, orgID, projectID string) (auth.Pr
 		}
 		return p, nil
 	}
-	if p, err = pol.access.OrgAdmin(ctx, orgID); err != nil {
+	if p, err = pol.access.KeyMinter(ctx, orgID, projectID); err != nil {
 		return p, err
 	}
 	if p.UserID == "" {
@@ -117,8 +118,8 @@ func (pol policy) mintKey(ctx context.Context, orgID, projectID string) (auth.Pr
 	return p, nil
 }
 
-// reachableKeys narrows an org's keys to the ones the caller may see and revoke: all of them for
-// an owner and for staff, and for a key itself and its lineage.
+// reachableKeys narrows an org's keys to the ones the caller may see: all of them for a person
+// of the org and for staff, and for a key itself and its lineage.
 func (pol policy) reachableKeys(ctx context.Context, orgID string, keys []*domain.APIKey) ([]*domain.APIKey, error) {
 	p, err := pol.access.OrgMember(ctx, orgID)
 	if err != nil {
@@ -127,10 +128,30 @@ func (pol policy) reachableKeys(ctx context.Context, orgID string, keys []*domai
 	if p.Kind == auth.KindKey {
 		return lineage(keys, p.KeyID), nil
 	}
-	if _, err := pol.access.OrgAdmin(ctx, orgID); err != nil {
-		return nil, err
-	}
 	return keys, nil
+}
+
+// endKey admits the caller to end a key it was placed at. A key ends itself and the keys minted
+// from it, read from orgKeys, and any other is not found for it. A person is held to
+// auth.Access.KeyEnd.
+func (pol policy) endKey(ctx context.Context, key *domain.APIKey, orgKeys func() ([]*domain.APIKey, error)) error {
+	p, err := pol.access.Account(ctx)
+	if err != nil {
+		return err
+	}
+	if p.Kind != auth.KindKey {
+		return pol.access.KeyEnd(ctx, key)
+	}
+	keys, err := orgKeys()
+	if err != nil {
+		return err
+	}
+	for _, k := range lineage(keys, p.KeyID) {
+		if k.ID == key.ID {
+			return nil
+		}
+	}
+	return auth.NotFound("api key")
 }
 
 // lineage returns root and every key minted from it, directly or through another, in the order

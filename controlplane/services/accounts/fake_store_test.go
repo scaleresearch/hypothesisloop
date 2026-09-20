@@ -25,6 +25,9 @@ type memStore struct {
 	keys       map[string]*domain.APIKey
 	hashes     map[string]string // key id -> hash
 	clusters   map[string]*domain.Cluster
+	joined     map[string]map[string]time.Time // org -> user -> when
+	invites    map[string]*domain.OrgInvite
+	inviteIDs  map[string]string // token hash -> invite id
 }
 
 func newMemStore() *memStore {
@@ -32,7 +35,8 @@ func newMemStore() *memStore {
 		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		users: map[string]bool{}, staff: map[string]bool{"u-staff": true}, placed: map[string]map[string]string{}, orgs: map[string]*domain.Org{}, roles: map[string]map[string]domain.OrgRole{},
 		projects: map[string]*domain.Project{}, keys: map[string]*domain.APIKey{}, hashes: map[string]string{},
-		clusters: map[string]*domain.Cluster{},
+		clusters: map[string]*domain.Cluster{}, joined: map[string]map[string]time.Time{},
+		invites: map[string]*domain.OrgInvite{}, inviteIDs: map[string]string{},
 	}
 }
 
@@ -57,7 +61,8 @@ func (s *memStore) CreateOrg(_ context.Context, name, ownerUserID string) (*doma
 	}
 	org := &domain.Org{ID: s.id("org"), Name: name, CreatedAt: s.now()}
 	s.orgs[org.ID] = org
-	s.roles[org.ID] = map[string]domain.OrgRole{ownerUserID: domain.OrgRoleOwner}
+	s.roles[org.ID] = map[string]domain.OrgRole{}
+	s.join(org.ID, ownerUserID, domain.OrgRoleOwner)
 	projectID := s.id("prj")
 	s.projects[projectID] = &domain.Project{ID: projectID, OrgID: org.ID, Name: domain.DefaultProjectName, CreatedAt: s.now()}
 	owned := *org
@@ -170,7 +175,7 @@ func (s *memStore) CreateAPIKey(_ context.Context, key *domain.APIKey, keyHash s
 	if !s.users[key.CreatedBy] {
 		return fmt.Errorf("created_by %q is no user", key.CreatedBy)
 	}
-	if !s.staff[key.CreatedBy] && s.roles[key.OrgID][key.CreatedBy] != domain.OrgRoleOwner {
+	if role, member := s.roles[key.OrgID][key.CreatedBy]; !s.staff[key.CreatedBy] && role != domain.OrgRoleOwner && (!member || key.ProjectID == "") {
 		return db.ErrAPIKeyCreatorLacksOrg
 	}
 	if key.ProjectID != "" {
@@ -318,4 +323,138 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func (s *memStore) join(orgID, userID string, role domain.OrgRole) *domain.OrgMember {
+	if s.joined[orgID] == nil {
+		s.joined[orgID] = map[string]time.Time{}
+	}
+	s.roles[orgID][userID], s.joined[orgID][userID] = role, s.now()
+	return &domain.OrgMember{OrgID: orgID, UserID: userID, Role: role, JoinedAt: s.joined[orgID][userID]}
+}
+
+func window[T any](all []T, limit, offset int) []T {
+	if offset > len(all) {
+		offset = len(all)
+	}
+	return all[offset:min(len(all), offset+limit)]
+}
+
+func (s *memStore) ListOrgMembers(_ context.Context, orgID string, limit, offset int) ([]*domain.OrgMember, int, error) {
+	out := []*domain.OrgMember{}
+	for userID, role := range s.roles[orgID] {
+		out = append(out, &domain.OrgMember{OrgID: orgID, UserID: userID, Role: role, JoinedAt: s.joined[orgID][userID]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].JoinedAt.Before(out[j].JoinedAt) })
+	return window(out, limit, offset), len(out), nil
+}
+
+// leaveOwnership is what the database does when a member stops being an owner: it refuses to
+// leave the org with none, and revokes the invites the member made.
+func (s *memStore) leaveOwnership(orgID, userID string, change func()) error {
+	if _, ok := s.roles[orgID][userID]; !ok {
+		return db.ErrOrgMemberNotFound
+	}
+	for other, role := range s.roles[orgID] {
+		if other != userID && role == domain.OrgRoleOwner {
+			change()
+			for _, invite := range s.invites {
+				if invite.OrgID == orgID && invite.CreatedBy == userID && invite.AcceptedAt == nil && invite.RevokedAt == nil {
+					now := s.now()
+					invite.RevokedAt = &now
+				}
+			}
+			return nil
+		}
+	}
+	return db.ErrLastOwner
+}
+
+func (s *memStore) SetOrgMemberRole(_ context.Context, orgID, userID string, role domain.OrgRole) (*domain.OrgMember, error) {
+	if _, ok := s.roles[orgID][userID]; !ok {
+		return nil, db.ErrOrgMemberNotFound
+	}
+	if role == domain.OrgRoleOwner {
+		s.roles[orgID][userID] = role
+	} else if err := s.leaveOwnership(orgID, userID, func() { s.roles[orgID][userID] = role }); err != nil {
+		return nil, err
+	}
+	return &domain.OrgMember{OrgID: orgID, UserID: userID, Role: role, JoinedAt: s.joined[orgID][userID]}, nil
+}
+
+func (s *memStore) RemoveOrgMember(_ context.Context, orgID, userID string) error {
+	return s.leaveOwnership(orgID, userID, func() {
+		delete(s.roles[orgID], userID)
+		delete(s.joined[orgID], userID)
+	})
+}
+
+func (s *memStore) CreateOrgInvite(_ context.Context, invite *domain.OrgInvite, tokenHash string) error {
+	if !s.users[invite.CreatedBy] {
+		return fmt.Errorf("created_by %q is no user", invite.CreatedBy)
+	}
+	invite.CreatedAt = s.now()
+	stored := *invite
+	s.invites[invite.ID], s.inviteIDs[tokenHash] = &stored, invite.ID
+	return nil
+}
+
+// The fake's clock is its own, so an invite is expired when the test moved its expiry before it.
+func (s *memStore) pending(invite *domain.OrgInvite) bool {
+	return invite.AcceptedAt == nil && invite.RevokedAt == nil && invite.ExpiresAt.After(s.clock)
+}
+
+func (s *memStore) ListPendingOrgInvites(_ context.Context, orgID string, limit, offset int) ([]*domain.OrgInvite, int, error) {
+	out := []*domain.OrgInvite{}
+	for _, invite := range s.invites {
+		if invite.OrgID == orgID && s.pending(invite) {
+			copied := *invite
+			out = append(out, &copied)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return window(out, limit, offset), len(out), nil
+}
+
+func (s *memStore) GetOrgInvite(_ context.Context, id string) (*domain.OrgInvite, error) {
+	invite, ok := s.invites[id]
+	if !ok {
+		return nil, nil
+	}
+	out := *invite
+	return &out, nil
+}
+
+func (s *memStore) RevokeOrgInvite(_ context.Context, inviteID string) error {
+	invite, ok := s.invites[inviteID]
+	switch {
+	case !ok:
+		return db.ErrOrgInviteNotFound
+	case invite.AcceptedAt != nil:
+		return db.ErrOrgInviteUsed
+	case invite.RevokedAt == nil:
+		now := s.now()
+		invite.RevokedAt = &now
+	}
+	return nil
+}
+
+func (s *memStore) AcceptOrgInvite(_ context.Context, tokenHash, userID string) (*domain.OrgMember, error) {
+	invite, ok := s.invites[s.inviteIDs[tokenHash]]
+	switch {
+	case !ok:
+		return nil, db.ErrOrgInviteNotFound
+	case invite.AcceptedAt != nil:
+		return nil, db.ErrOrgInviteUsed
+	case invite.RevokedAt != nil:
+		return nil, db.ErrOrgInviteRevoked
+	case !s.pending(invite):
+		return nil, db.ErrOrgInviteExpired
+	}
+	if _, member := s.roles[invite.OrgID][userID]; member {
+		return nil, db.ErrAlreadyOrgMember
+	}
+	now := s.now()
+	invite.AcceptedBy, invite.AcceptedAt = userID, &now
+	return s.join(invite.OrgID, userID, invite.Role), nil
 }

@@ -71,12 +71,16 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"be a signed-in person":                  func(ctx context.Context) error { _, err := access.Person(ctx); return err },
 		"invite into org a":                      func(ctx context.Context) error { _, err := access.Inviter(ctx, "org-a"); return err },
 		"invite into an org that is missing":     func(ctx context.Context) error { _, err := access.Inviter(ctx, "org-missing"); return err },
-		"remove the owner from org a":            func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-a", "u-owner") },
-		"remove the member from org a":           func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-a", "u-member") },
-		"remove someone from a missing org":      func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-missing", "u-member") },
-		"mint an org-wide key of org a":          func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", ""); return err },
-		"mint a key of project prj-a":            func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", "prj-a"); return err },
-		"mint a key in an org that is missing":   func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-missing", "prj-a"); return err },
+		"end an invite into org a": func(ctx context.Context) error {
+			return access.Invite(ctx, &domain.OrgInvite{ID: "inv-a", OrgID: "org-a"})
+		},
+		"end an invite that does not exist":    func(ctx context.Context) error { return access.Invite(ctx, nil) },
+		"remove the owner from org a":          func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-a", "u-owner") },
+		"remove the member from org a":         func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-a", "u-member") },
+		"remove someone from a missing org":    func(ctx context.Context) error { return access.MemberRemoval(ctx, "org-missing", "u-member") },
+		"mint an org-wide key of org a":        func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", ""); return err },
+		"mint a key of project prj-a":          func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", "prj-a"); return err },
+		"mint a key in an org that is missing": func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-missing", "prj-a"); return err },
 		"end a key the owner made": func(ctx context.Context) error {
 			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", CreatedBy: "u-owner"})
 		},
@@ -113,6 +117,8 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"be a signed-in person":                  {200, 200, 200, 403, 403, 403, 403, 403, 403, 403, 403},
 		"invite into org a":                      {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 403},
 		"invite into an org that is missing":     {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
+		"end an invite into org a":               {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"end an invite that does not exist":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
 		"remove the owner from org a":            {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
 		"remove the member from org a":           {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
 		"remove someone from a missing org":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},

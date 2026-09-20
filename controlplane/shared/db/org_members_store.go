@@ -23,23 +23,28 @@ var (
 	ErrOrgInviteExpired  = errors.New("the invite has expired")
 )
 
-// ListOrgMembers returns an org's members, oldest first.
-func (s *AccountsStore) ListOrgMembers(ctx context.Context, orgID string) ([]*domain.OrgMember, error) {
+// ListOrgMembers returns one page of an org's members, oldest first, and how many it has.
+func (s *AccountsStore) ListOrgMembers(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgMember, int, error) {
+	var total int
+	if err := s.pool.pool.QueryRow(ctx, `SELECT count(*) FROM org_members WHERE org_id = $1`, orgID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: count: %w", err)
+	}
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT org_id, user_id, role, created_at FROM org_members WHERE org_id = $1 ORDER BY created_at, user_id`, orgID)
+SELECT org_id, user_id, role, created_at FROM org_members WHERE org_id = $1
+ORDER BY created_at, user_id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("accounts_store.ListOrgMembers: %w", err)
+		return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: %w", err)
 	}
 	defer rows.Close()
 	out := []*domain.OrgMember{}
 	for rows.Next() {
 		m := &domain.OrgMember{}
 		if err := rows.Scan(&m.OrgID, &m.UserID, &m.Role, &m.JoinedAt); err != nil {
-			return nil, fmt.Errorf("accounts_store.ListOrgMembers: scan: %w", err)
+			return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: scan: %w", err)
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // SetOrgMemberRole changes a member's role. ErrOrgMemberNotFound when the user is not in the
@@ -146,51 +151,66 @@ RETURNING created_at`, invite.ID, invite.OrgID, string(invite.Role), tokenHash, 
 	return nil
 }
 
-// ListPendingOrgInvites returns the invites of an org that can still be accepted, newest first.
-func (s *AccountsStore) ListPendingOrgInvites(ctx context.Context, orgID string) ([]*domain.OrgInvite, error) {
+const orgInvitePending = `accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()`
+
+// ListPendingOrgInvites returns one page of the invites of an org that can still be accepted,
+// newest first, and how many there are.
+func (s *AccountsStore) ListPendingOrgInvites(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgInvite, int, error) {
+	var total int
+	if err := s.pool.pool.QueryRow(ctx, `SELECT count(*) FROM org_invites WHERE org_id = $1 AND `+orgInvitePending, orgID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("accounts_store.ListPendingOrgInvites: count: %w", err)
+	}
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+orgInviteColumns+` FROM org_invites
-WHERE org_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
-ORDER BY created_at DESC, id`, orgID)
+SELECT `+orgInviteColumns+` FROM org_invites WHERE org_id = $1 AND `+orgInvitePending+`
+ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("accounts_store.ListPendingOrgInvites: %w", err)
+		return nil, 0, fmt.Errorf("accounts_store.ListPendingOrgInvites: %w", err)
 	}
 	defer rows.Close()
 	out := []*domain.OrgInvite{}
 	for rows.Next() {
 		i, err := scanOrgInvite(rows)
 		if err != nil {
-			return nil, fmt.Errorf("accounts_store.ListPendingOrgInvites: scan: %w", err)
+			return nil, 0, fmt.Errorf("accounts_store.ListPendingOrgInvites: scan: %w", err)
 		}
 		out = append(out, i)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
-// RevokeOrgInvite ends an invite of the org. One already revoked keeps its first revocation
-// time. ErrOrgInviteNotFound when the org has no such invite, ErrOrgInviteUsed when it was
-// accepted: the membership it made is ended as a membership.
-func (s *AccountsStore) RevokeOrgInvite(ctx context.Context, orgID, inviteID string) (*domain.OrgInvite, error) {
-	invite, err := scanOrgInvite(s.pool.pool.QueryRow(ctx, `
-UPDATE org_invites SET revoked_at = COALESCE(revoked_at, $3)
-WHERE id = $1 AND org_id = $2 AND accepted_at IS NULL
-RETURNING `+orgInviteColumns, inviteID, orgID, time.Now().UTC()))
-	if err == nil {
-		return invite, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("accounts_store.RevokeOrgInvite: %w", err)
-	}
-	// Accepted is final, so reading it after the write that passed it over cannot be overtaken.
-	var accepted bool
-	err = s.pool.pool.QueryRow(ctx, `SELECT accepted_at IS NOT NULL FROM org_invites WHERE id = $1 AND org_id = $2`, inviteID, orgID).Scan(&accepted)
+// GetOrgInvite returns an invite by id, or nil when there is none.
+func (s *AccountsStore) GetOrgInvite(ctx context.Context, id string) (*domain.OrgInvite, error) {
+	invite, err := scanOrgInvite(s.pool.pool.QueryRow(ctx, `SELECT `+orgInviteColumns+` FROM org_invites WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOrgInviteNotFound
+		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("accounts_store.RevokeOrgInvite: %w", err)
+		return nil, fmt.Errorf("accounts_store.GetOrgInvite: %w", err)
 	}
-	return nil, ErrOrgInviteUsed
+	return invite, nil
+}
+
+// RevokeOrgInvite ends an invite. One already revoked keeps its first revocation time.
+// ErrOrgInviteNotFound when there is no such invite, ErrOrgInviteUsed when it was accepted: the
+// membership it made is ended as a membership.
+func (s *AccountsStore) RevokeOrgInvite(ctx context.Context, inviteID string) error {
+	tag, err := s.pool.pool.Exec(ctx, `
+UPDATE org_invites SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1 AND accepted_at IS NULL`, inviteID, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("accounts_store.RevokeOrgInvite: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	// Accepted is final, so reading it after the write that passed it over cannot be overtaken.
+	invite, err := s.GetOrgInvite(ctx, inviteID)
+	if err != nil {
+		return err
+	}
+	if invite == nil {
+		return ErrOrgInviteNotFound
+	}
+	return ErrOrgInviteUsed
 }
 
 // AcceptOrgInvite makes userID a member of the invite's org with the invite's role, in one
@@ -207,7 +227,7 @@ func (s *AccountsStore) AcceptOrgInvite(ctx context.Context, tokenHash, userID s
 	member := &domain.OrgMember{UserID: userID}
 	err = tx.QueryRow(ctx, `
 UPDATE org_invites SET accepted_by = $2, accepted_at = now()
-WHERE token_hash = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+WHERE token_hash = $1 AND `+orgInvitePending+`
 RETURNING org_id, role`, tokenHash, userID).Scan(&member.OrgID, &member.Role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, whyNotAccepted(ctx, tx, tokenHash)

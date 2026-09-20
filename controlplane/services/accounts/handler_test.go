@@ -23,8 +23,8 @@ const testSigningSecret = "accounts-test-signing-secret"
 
 var testRuntimeAddresses = RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid"}
 
-// world is two orgs on one API. org A has an owner, a member, a second project, three API keys
-// and a cluster; org B has its own owner, key and cluster. Each caller is a token named after
+// world is two orgs on one API. org A has an owner, a member, a second project, four API keys,
+// a pending invite and a cluster; org B has its own owner, key and cluster. Each caller is a token named after
 // what it is.
 type world struct {
 	t       *testing.T
@@ -37,6 +37,8 @@ type world struct {
 	projectB             string
 	clusterA, clusterB   string
 	personKey, parentKey string
+	memberKey            string
+	inviteA, inviteToken string
 }
 
 // tokens resolves a token to the principal of that name, and refuses a revoked API key as the
@@ -91,19 +93,30 @@ func newWorld(t *testing.T) *world {
 	orgA, _ := w.store.CreateOrg(ctx, "org a", "u-owner")
 	orgB, _ := w.store.CreateOrg(ctx, "org b", "u-other")
 	w.orgA, w.orgB = orgA.ID, orgB.ID
-	w.store.roles[w.orgA]["u-member"] = domain.OrgRoleMember
+	w.store.join(w.orgA, "u-member", domain.OrgRoleMember)
 	projectsA, _ := w.store.ListProjects(ctx, []string{w.orgA})
 	projectsB, _ := w.store.ListProjects(ctx, []string{w.orgB})
 	w.projectA, w.projectB = projectsA[0].ID, projectsB[0].ID
 	second, _ := w.store.CreateProject(ctx, w.orgA, "second")
 	w.projectA2 = second.ID
-	w.personKey, w.parentKey = "k-person", "k-org"
+	w.personKey, w.parentKey, w.memberKey = "k-person", "k-org", "k-member"
+	w.inviteA, w.inviteToken = "inv-a", "hli_token-of-inv-a"
+	seeded := &domain.OrgInvite{ID: w.inviteA, OrgID: w.orgA, Role: domain.OrgRoleMember, CreatedBy: "u-owner", ExpiresAt: w.store.clock.Add(domain.InviteLifetime)}
+	if err := w.store.CreateOrgInvite(ctx, seeded, auth.HashAPIKey(w.inviteToken)); err != nil {
+		t.Fatalf("seed invite: %v", err)
+	}
 	for _, key := range []*domain.APIKey{
 		{ID: "k-person", OrgID: w.orgA, CreatedBy: "u-owner", Name: "made by the owner"},
 		{ID: "k-org", OrgID: w.orgA, CreatedBy: "u-owner", Name: "org-wide"},
 		{ID: "k-prj", OrgID: w.orgA, ProjectID: w.projectA, CreatedBy: "u-owner", Name: "one project"},
 		{ID: "k-foreign", OrgID: w.orgB, CreatedBy: "u-other", Name: "of org b"},
 	} {
+		if key.ID == "k-prj" {
+			member := &domain.APIKey{ID: "k-member", OrgID: w.orgA, ProjectID: w.projectA, CreatedBy: "u-member", Name: "made by the member"}
+			if err := w.store.CreateAPIKey(ctx, member, "hash-k-member"); err != nil {
+				t.Fatalf("seed key k-member: %v", err)
+			}
+		}
 		if err := w.store.CreateAPIKey(ctx, key, "hash-"+key.ID); err != nil {
 			t.Fatalf("seed key %s: %v", key.ID, err)
 		}
@@ -190,6 +203,8 @@ func TestWhoMayCallWhat(t *testing.T) {
 		ok        = http.StatusOK
 		created   = http.StatusCreated
 		bad       = http.StatusBadRequest
+		gone      = http.StatusNoContent
+		conflict  = http.StatusConflict
 		noToken   = http.StatusUnauthorized
 		forbidden = http.StatusForbidden
 		notFound  = http.StatusNotFound
@@ -221,15 +236,41 @@ func TestWhoMayCallWhat(t *testing.T) {
 		{"create a key of one project", func(w *world) request {
 			return request{"POST", "/orgs/" + w.orgA + "/api-keys", name{"name": "new", "project_id": w.projectA}}
 		},
-			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": created, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
+			map[string]int{"owner": created, "member": created, "outsider": notFound, "org-key": created, "project-key": created, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
 		{"create a key of another project", func(w *world) request {
 			return request{"POST", "/orgs/" + w.orgA + "/api-keys", name{"name": "new", "project_id": w.projectA2}}
 		},
-			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
+			map[string]int{"owner": created, "member": created, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
 		{"list keys", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/api-keys", nil} },
-			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"revoke a key a person made", func(w *world) request { return request{"DELETE", "/api-keys/" + w.personKey, nil} },
 			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"revoke a key the member made", func(w *world) request { return request{"DELETE", "/api-keys/" + w.memberKey, nil} },
+			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"list members", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/members", nil} },
+			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"make the member an owner", func(w *world) request {
+			return request{"PATCH", "/orgs/" + w.orgA + "/members/u-member", name{"role": "owner"}}
+		},
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"remove the member", func(w *world) request { return request{"DELETE", "/orgs/" + w.orgA + "/members/u-member", nil} },
+			map[string]int{"owner": gone, "member": gone, "outsider": notFound, "org-key": gone, "project-key": forbidden, "foreign-key": notFound, "staff": gone, "staff-user": gone}},
+		{"remove the only owner", func(w *world) request { return request{"DELETE", "/orgs/" + w.orgA + "/members/u-owner", nil} },
+			map[string]int{"owner": conflict, "member": forbidden, "outsider": notFound, "org-key": conflict, "project-key": forbidden, "foreign-key": notFound, "staff": conflict, "staff-user": conflict}},
+		{"demote the only owner", func(w *world) request {
+			return request{"PATCH", "/orgs/" + w.orgA + "/members/u-owner", name{"role": "member"}}
+		},
+			map[string]int{"owner": conflict, "member": forbidden, "outsider": notFound, "org-key": conflict, "project-key": forbidden, "foreign-key": notFound, "staff": conflict, "staff-user": conflict}},
+		{"invite into the org", func(w *world) request { return request{"POST", "/orgs/" + w.orgA + "/invites", name{"role": "member"}} },
+			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
+		{"list invites", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/invites", nil} },
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"revoke an invite", func(w *world) request { return request{"DELETE", "/invites/" + w.inviteA, nil} },
+			map[string]int{"owner": gone, "member": forbidden, "outsider": notFound, "org-key": gone, "project-key": forbidden, "foreign-key": notFound, "staff": gone, "staff-user": gone}},
+		{"revoke an invite that does not exist", func(w *world) request { return request{"DELETE", "/invites/inv-missing", nil} },
+			map[string]int{"owner": notFound, "member": notFound, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": notFound, "staff-user": notFound}},
+		{"accept an invite", func(w *world) request { return request{"POST", "/invites/accept", name{"token": w.inviteToken}} },
+			map[string]int{"owner": conflict, "member": conflict, "outsider": created, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": forbidden, "staff-user": created}},
 		{"register a cluster", func(w *world) request {
 			return request{"POST", "/orgs/" + w.orgA + "/clusters", name{"name": "new-cluster"}}
 		},
@@ -280,7 +321,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 // snapshot is everything the store holds, so a refused request can be shown to have written nothing.
 func snapshot(t *testing.T, s *memStore) string {
 	t.Helper()
-	raw, err := json.Marshal([]any{s.orgs, s.roles, s.projects, s.keys, s.hashes, s.clusters})
+	raw, err := json.Marshal([]any{s.orgs, s.roles, s.projects, s.keys, s.hashes, s.clusters, s.invites, s.joined})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -499,7 +540,7 @@ func TestAKeyReachesOnlyTheKeysMintedFromIt(t *testing.T) {
 		"child":       {grandchild.ID, child.ID},
 		"grandchild":  {grandchild.ID},
 		"project-key": {"k-prj"},
-		"owner":       {grandchild.ID, child.ID, "k-prj", "k-org", "k-person"},
+		"owner":       {grandchild.ID, child.ID, "k-prj", "k-member", "k-org", "k-person"},
 	} {
 		if got := w.listedKeys(caller); strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Errorf("keys %s lists: got = %v, want = %v", caller, got, want)

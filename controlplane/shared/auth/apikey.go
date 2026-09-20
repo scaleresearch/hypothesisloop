@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -15,22 +17,26 @@ const (
 // NewAPIKey generates an API key: its id, which names it in listings and revocation, and the
 // token hlk_<id>_<secret>, which is shown once and stored only as HashAPIKey of it.
 func NewAPIKey() (id, token string, err error) {
-	return newSecret(apiKeyPrefix)
-}
-
-// NewInvite generates an invite to an org: its id and the token hli_<id>_<secret>, shown once
-// and stored only as HashAPIKey of it, as an API key is.
-func NewInvite() (id, token string, err error) {
-	return newSecret(invitePrefix)
-}
-
-func newSecret(prefix string) (id, token string, err error) {
 	buf := make([]byte, 6+32)
 	if _, err := rand.Read(buf); err != nil {
-		return "", "", fmt.Errorf("auth: generate %s token: %w", prefix, err)
+		return "", "", fmt.Errorf("auth: generate api key: %w", err)
 	}
 	id = hex.EncodeToString(buf[:6])
-	return id, prefix + id + "_" + encoding.EncodeToString(buf[6:]), nil
+	return id, apiKeyPrefix + id + "_" + encoding.EncodeToString(buf[6:]), nil
+}
+
+// NewInvite generates an invite to an org: its id inv-<uuid7>, which names it in listings and
+// revocation, and the token hli_<secret>, shown once and stored only as HashAPIKey of it.
+func NewInvite() (id, token string, err error) {
+	uid, err := uuid.NewV7()
+	if err != nil {
+		return "", "", fmt.Errorf("auth: generate invite id: %w", err)
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", "", fmt.Errorf("auth: generate invite: %w", err)
+	}
+	return "inv-" + hex.EncodeToString(uid[:]), invitePrefix + encoding.EncodeToString(secret), nil
 }
 
 // HashAPIKey is the form an API key token, and an invite token, is stored and looked up under.
