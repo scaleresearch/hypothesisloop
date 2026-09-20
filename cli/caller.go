@@ -38,27 +38,19 @@ func kindOf(token string) callerKind {
 	return callerOther
 }
 
-// errCoordinatorWritesAsNoAgent refuses a command that acts as an agent to a coordinator that
-// named none: $AGENT_ID is not read for it, since a coordinator is no agent.
-var errCoordinatorWritesAsNoAgent = errors.New("this acts as an agent, and HL_TOKEN is a coordinator's, which is no agent. " +
-	"A coordinator writes the description (hl platform-experiments update) and the summary (hl platform-experiments summary); " +
-	"--agent A acts for one agent of the platform experiment")
+// errCoordinatorActsAsNoAgent refuses a coordinator every command that acts as an agent, whether
+// or not it names one: the platform refuses the same, and $AGENT_ID is not read for it.
+var errCoordinatorActsAsNoAgent = errors.New("this acts as an agent, and HL_TOKEN is a coordinator's, which is no agent and acts for none. " +
+	"A coordinator writes the description (hl platform-experiments update) and the summary (hl platform-experiments summary), " +
+	"adds agents (hl platform-experiments agents) and closes the run (hl platform-experiments close)")
 
-// writingAgent is the agent a command writes as: one branch per kind of caller. An agent and
-// anyone else default to $AGENT_ID. A coordinator has no agent id of its own, so it writes for
-// an agent only when --agent names one. An empty answer with no error means none was given.
+// writingAgent is the agent a command writes as: the one --agent names, else $AGENT_ID. An empty
+// answer with no error means none was given.
 func writingAgent(c *apiclient.Client, flagValue string) (string, error) {
-	switch kindOf(c.Token) {
-	case callerCoordinator:
-		if flagValue == "" {
-			return "", errCoordinatorWritesAsNoAgent
-		}
-		return flagValue, nil
-	case callerAgent:
-		return orEnv(flagValue, agentEnv), nil
-	default:
-		return orEnv(flagValue, agentEnv), nil
+	if kindOf(c.Token) == callerCoordinator {
+		return "", errCoordinatorActsAsNoAgent
 	}
+	return orEnv(flagValue, agentEnv), nil
 }
 
 // readsEveryAgent says whether a read that defaults to the caller's own agent covers the whole

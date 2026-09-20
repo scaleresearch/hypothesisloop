@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"reflect"
 	"strings"
 	"testing"
@@ -28,9 +29,28 @@ func TestTheKindOfCallerIsReadFromADerivedTokenAndNothingElse(t *testing.T) {
 	}
 }
 
-// A coordinator is no agent. Every command that acts as one says so before any request, and
-// $AGENT_ID is not read for it: a variable left in its environment must not decide who writes.
-func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgentUnlessItNamesOne(t *testing.T) {
+// kindOf reads the platform's own token format, so it is held to what the platform mints.
+func TestTheKindOfCallerIsReadFromTheTokensThePlatformMints(t *testing.T) {
+	const secret = "a-signing-secret-only-this-test-knows"
+	for scope, want := range map[string]callerKind{
+		auth.AgentScope("pe-1", "ag-1"): callerAgent,
+		auth.CoordinatorScope("pe-1"):   callerCoordinator,
+		auth.LauncherScope("main"):      callerOther,
+		"staff":                         callerOther,
+	} {
+		token, err := auth.Mint(secret, scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := kindOf(token); got != want {
+			t.Errorf("kindOf(the token minted for %q) = %v, want %v", scope, got, want)
+		}
+	}
+}
+
+// A coordinator is no agent and acts for none. Every command that acts as one says so before any
+// request, whether --agent names one or a variable left in its environment does.
+func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	job := writeFile(t, "job: {image: i}\nmetadata: {hypothesis_id: hyp-1}\n")
 	commands := map[string][]string{
 		"hypothesis submit":  {"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
@@ -43,28 +63,19 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgentUnlessItNamesOne(t *t
 		"data-key":           {"data-key"},
 	}
 	for name, args := range commands {
-		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-		t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-		t.Setenv("AGENT_ID", "left-over")
-		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 1 || len(*got) != 0 {
-			t.Errorf("%s: exit %d with %d requests, want 1 and none. stderr: %s", name, code, len(*got), stderr.String())
+		for _, named := range [][]string{nil, {"--agent", "ag-7"}} {
+			got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
+			t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
+			t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+			t.Setenv("AGENT_ID", "left-over")
+			var stdout, stderr bytes.Buffer
+			if code := run(append(append([]string{}, args...), named...), &stdout, &stderr); code != 1 || len(*got) != 0 {
+				t.Errorf("%s %v: exit %d with %d requests, want 1 and none. stderr: %s", name, named, code, len(*got), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "is no agent and acts for none") || !strings.Contains(stderr.String(), "hl platform-experiments summary") {
+				t.Errorf("%s %v: stderr = %q, want it to say why and what a coordinator writes", name, named, stderr.String())
+			}
 		}
-		if !strings.Contains(stderr.String(), "coordinator's, which is no agent") || !strings.Contains(stderr.String(), "hl platform-experiments summary") {
-			t.Errorf("%s: stderr = %q, want it to say why and what a coordinator writes", name, stderr.String())
-		}
-	}
-
-	// Naming the agent is the coordinator acting for it, which the platform decides on.
-	got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"hypothesis", "comment", "hyp-1", "--text", "t", "--agent", "ag-7"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d, stderr %s", code, stderr.String())
-	}
-	if body := (*got)[0].Body; !reflect.DeepEqual(body, map[string]any{"agent_id": "ag-7", "text": "t"}) {
-		t.Fatalf("body = %v", body)
 	}
 }
 

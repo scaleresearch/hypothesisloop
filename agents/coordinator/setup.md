@@ -161,8 +161,9 @@ description true to what is learned and writes its findings as the experiment's 
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
 (section 4). Its token still writes the summary after the close. It reads the repository and
 pushes nothing. It closes the experiment only when the run can produce nothing more, and says
-why in the summary first. It cannot start the experiment, run a baseline itself, or fix anything
-outside the description; it writes those down for you.
+why in the summary first. It cannot start the experiment, run a baseline itself, act as an
+agent, or change anything of the experiment but the description (the budget, `max_agents`, the
+schedule and the stages answer 403 to its token); it writes those down for you.
 
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.
@@ -288,11 +289,16 @@ Add `--hosted` and the platform runs them: its launcher starts one machine per a
 platform's own agent image, tells the agent to take its last turn when the experiment closes or
 the agent is cut, and takes the machine down two minutes after. It is refused (`no_repository`)
 while the project has no repository attached, since a hosted agent works in the project's
-repository. A machine whose harness exits is started again up to three times; after that the
-agent is stopped, and `hl platform-experiments agents list` shows it with `instance.stopped`,
-`instance.exited_at` and `instance.exit_log`, the end of what the harness wrote. A stopped agent
-keeps its place and its quota and takes no further turn. There is nothing more to do for a
-hosted agent than to read that list.
+repository, and (`max_hosted_reached`) beyond the number of machines the platform runs for one
+platform experiment, which `hl platform-experiments get` shows as `max_hosted` and which counts
+hosted agents of every role and a hosted coordinator. A machine whose harness exits, that the
+provider takes away, or that does not come up in time is started again up to three times; after
+that the agent is stopped, and `hl platform-experiments agents list` shows it with
+`instance.stopped`, `instance.exited_at` and `instance.exit_log`, the end of what the harness
+wrote or why the platform gave up on the machine. A stopped agent keeps its place and its quota
+and takes no further turn until the platform's operators change the agent image or the
+launcher's settings, which starts it again. There is nothing more to do for a hosted agent than
+to read that list.
 
 Without `--hosted` you run each agent yourself, which is how an experiment with its own agent
 image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
