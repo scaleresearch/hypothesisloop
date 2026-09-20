@@ -39,6 +39,8 @@ func main() {
 	// this agent starts as HYPOTHESISLOOP_API_URL, so it must be reachable from inside a
 	// workload container as well as from the agent process.
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
+	// The runtime token the cluster's owner was given when the cluster was registered.
+	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
@@ -81,6 +83,7 @@ func main() {
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
 		APIURL:            apiURL,
+		Token:             token,
 		Executor:          exec,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,

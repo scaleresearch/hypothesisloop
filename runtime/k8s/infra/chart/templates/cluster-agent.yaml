@@ -100,6 +100,11 @@ spec:
               value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: API_URL
               value: {{ required "apiURL is required" .Values.apiURL | quote }}
+            - name: RUNTIME_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hypothesisloop-runtime-token
+                  key: token
             # Operator-set claim that this cluster sits behind a native autoscaler
             # (cluster-autoscaler / Karpenter) that reacts to Pending pods. Fail-closed default
             # false: a false positive here costs a job a wasted scale-up deadline, so this is

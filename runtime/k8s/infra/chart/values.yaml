@@ -1,11 +1,13 @@
 # Installed by runtime/k8s/infra/install.sh, which sets every value from its env vars.
 
-# Name this cluster reports to the control plane. The name the agent reports is the cluster:
-# a typo creates a second one.
+# Name this cluster was registered under.
 clusterName: ""
 # Control-plane API base URL. Handed to training pods as well, so it must be reachable from inside
 # a pod in this cluster.
 apiURL: ""
+# This cluster's runtime token, given when the cluster was registered for its org. A token for
+# another name, or for a name nobody registered, is refused.
+runtimeToken: ""
 # metrics-service base URL node-agents push observations to. node-agent POSTs to
 # <metricsURL>/internal/node-metrics, served only by metrics-service: a control-service URL here
 # makes every push 404 silently.

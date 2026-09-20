@@ -26,7 +26,8 @@
       "region": "us-east-1",
       "access_key_id": "key",
       "secret_access_key": "secret"
-    }
+    },
+    "token": "job-token"
   },
   "ordinary_stop_grace_seconds": 30,
   "checkpoint_stop_grace_seconds": 600

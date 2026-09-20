@@ -27,6 +27,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
 		os.Exit(1)
 	}
+	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
 	rented, err := newProvider(cfg.Provider)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
@@ -55,6 +56,7 @@ func main() {
 	a := &agentloop.Agent{
 		ClusterName:       cfg.ClusterName,
 		APIURL:            cfg.APIURL,
+		Token:             token,
 		Executor:          exec,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,

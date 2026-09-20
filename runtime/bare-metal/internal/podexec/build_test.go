@@ -91,8 +91,8 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
-		Data: testDataAccess(),
-		ID:   "per-node-count", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(), Token: "test-job-token",
+		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		// Deliberately disagreeing with the spec: only reading the spec produces "2".
 		AcceleratorCount:       8,
@@ -132,8 +132,8 @@ func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
-		Data: testDataAccess(),
-		ID:   "data-env", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(), Token: "test-job-token",
+		ID: "data-env", AgentID: "agent", ProjectID: "project",
 		AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
 		AcceleratorCount:       1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
@@ -226,8 +226,8 @@ func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T)
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
-		Data: testDataAccess(),
-		ID:   "grouped", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(), Token: "test-job-token",
+		ID: "grouped", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
@@ -255,8 +255,8 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &domain.Experiment{
-		Data: testDataAccess(),
-		ID:   "one-group", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(), Token: "test-job-token",
+		ID: "one-group", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 2,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
@@ -336,8 +336,8 @@ func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
 
 func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 	return &domain.Experiment{
-		Data: testDataAccess(),
-		ID:   "checkpoint-window", AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(), Token: "test-job-token",
+		ID: "checkpoint-window", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{

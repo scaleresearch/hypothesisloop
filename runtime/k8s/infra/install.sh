@@ -9,6 +9,7 @@
 #   CLUSTER_NAME       -> clusterName (required)
 #   API_URL            -> apiURL (required)
 #   METRICS_URL        -> metricsURL (required)
+#   RUNTIME_TOKEN      -> runtimeToken (required)
 #   AUTOSCALER_ENABLED -> autoscalerEnabled (default: false)
 #   REGISTRY_URL       -> images.registry. Must already be reachable from every node; providing
 #                         that reachability is the cluster provisioner's job (default: localhost:5000)
@@ -20,6 +21,7 @@ set -euo pipefail
 CLUSTER_NAME="${CLUSTER_NAME:?CLUSTER_NAME must name this cluster (make cluster-agent-up CLUSTER=<name>)}"
 API_URL="${API_URL:?API_URL must be the control-plane API base URL, reachable from inside a pod in this cluster}"
 METRICS_URL="${METRICS_URL:?METRICS_URL must be the metrics-service base URL, reachable from every node in this cluster}"
+RUNTIME_TOKEN="${RUNTIME_TOKEN:?RUNTIME_TOKEN must be the runtime token this cluster was given when it was registered}"
 AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"
 REGISTRY_URL="${REGISTRY_URL:-localhost:5000}"
 TAG="${TAG:?TAG must name the image tag make images pushed}"
@@ -40,6 +42,7 @@ helm upgrade --install hypothesisloop-cluster-agent "${SCRIPT_DIR}/chart" \
   --set-string clusterName="${CLUSTER_NAME}" \
   --set-string apiURL="${API_URL}" \
   --set-string metricsURL="${METRICS_URL}" \
+  --set-string runtimeToken="${RUNTIME_TOKEN}" \
   --set-string autoscalerEnabled="${AUTOSCALER_ENABLED}" \
   --set-string images.registry="${REGISTRY_URL}" \
   --set-string images.tag="${TAG}"

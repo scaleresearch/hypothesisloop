@@ -34,8 +34,10 @@ const finalStatusCaptureBudget = 10 * time.Second
 
 // Agent drives one cluster/node's reconcile and status-report loops against an Executor.
 type Agent struct {
-	ClusterName       string
-	APIURL            string
+	ClusterName string
+	APIURL      string
+	// Token is this cluster's runtime token, sent on every call to the control plane.
+	Token             string
 	Executor          agentexec.Executor
 	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
@@ -262,6 +264,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context) ([]*domain.Experiment, ma
 		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.Token)
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -438,6 +441,7 @@ func (a *Agent) pushStatus(ctx context.Context, reports []statusReportWire) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.Token)
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		a.Log("push status: %v", err)

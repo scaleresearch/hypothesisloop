@@ -40,7 +40,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 	defer cancel()
 
 	exp := &domain.Experiment{
-		Data:         testDataAccess(),
+		Data: testDataAccess(), Token: "test-job-token",
 		ID:           "it-" + filepath.Base(t.TempDir()),
 		AgentID:      "agent-1",
 		ProjectID:    "proj-1",
@@ -162,7 +162,7 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5), NumNodes: 2,
 	}
-	exp := &domain.Experiment{ID: "reject-num-nodes", Job: spec, Data: testDataAccess()}
+	exp := &domain.Experiment{ID: "reject-num-nodes", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err == nil {
 		t.Fatal("expected rejection for num_nodes>1")
 	}
@@ -201,7 +201,7 @@ func TestIntegrationIgnoresK8sOnlyFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			exp := &domain.Experiment{ID: "ignore-" + tc.name, Job: tc.spec, Data: testDataAccess()}
+			exp := &domain.Experiment{ID: "ignore-" + tc.name, Job: tc.spec, Data: testDataAccess(), Token: "test-job-token"}
 			if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
 				t.Fatalf("expected %s to be ignored, not rejected: %v", tc.name, err)
 			}

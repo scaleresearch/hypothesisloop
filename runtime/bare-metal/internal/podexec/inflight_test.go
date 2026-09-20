@@ -266,8 +266,8 @@ func newFakeExecutor(f *fakeEngine, devicePaths ...string) *Executor {
 
 func fakeJob(id, image string, accelerators int) *domain.Experiment {
 	return &domain.Experiment{
-		Data: testDataAccess(),
-		ID:   id, AgentID: "agent", ProjectID: "project",
+		Data: testDataAccess(), Token: "test-job-token",
+		ID: id, AgentID: "agent", ProjectID: "project",
 		AcceleratorType: fakeAcceleratorType, CapacityTier: domain.CapacityGuaranteed,
 		Job: domain.JobSpec{
 			Image: image, CPU: "1", Memory: "1Gi", Storage: "1Gi",

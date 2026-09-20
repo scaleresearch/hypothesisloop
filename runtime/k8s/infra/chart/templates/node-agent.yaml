@@ -67,6 +67,11 @@ spec:
               value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: HYPOTHESISLOOP_CONTROL_PLANE_URL
               value: {{ required "metricsURL is required" .Values.metricsURL | quote }}
+            - name: RUNTIME_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hypothesisloop-runtime-token
+                  key: token
             - name: PUSH_INTERVAL_MS
               value: "2000"
           volumeMounts:

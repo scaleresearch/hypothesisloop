@@ -8,7 +8,7 @@ import (
 
 func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T) {
 	exp := &domain.Experiment{ID: "exp-1", AgentID: "agent-1", AttemptCount: 2,
-		Data: &domain.DataAccess{Endpoint: "http://localhost:9000", URI: "s3://bucket/exp-1"}}
+		Data: &domain.DataAccess{Endpoint: "http://localhost:9000", URI: "s3://bucket/exp-1"}, Token: "job-token"}
 	reach := func(url string) string { return url + "/reached" }
 
 	vars, err := Platform(exp, domain.JobGroup{AcceleratorCount: 4}, "http://localhost:8081", reach)
@@ -35,6 +35,24 @@ func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T
 	exp.Data = nil
 	if _, err := Platform(exp, domain.JobGroup{}, "http://localhost:8081", reach); err == nil {
 		t.Error("Platform for an experiment without durable-data access: got nil, want an error")
+	}
+}
+
+// The k8s runtime hashes the variable list, so a variable added anywhere but the end would
+// change the hash of every position after it.
+func TestPlatformEmitsTheJobTokenLastAndRefusesAJobWithoutOne(t *testing.T) {
+	exp := &domain.Experiment{ID: "exp-1", Data: &domain.DataAccess{Endpoint: "http://store:9000"}, Token: "job-token"}
+	same := func(url string) string { return url }
+	vars, err := Platform(exp, domain.JobGroup{}, "http://api:8081", same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := vars[len(vars)-1]; last.Name != "HYPOTHESISLOOP_TOKEN" || last.Value != "job-token" {
+		t.Errorf("last variable = %+v, want HYPOTHESISLOOP_TOKEN=job-token", last)
+	}
+	exp.Token = ""
+	if _, err := Platform(exp, domain.JobGroup{}, "http://api:8081", same); err == nil {
+		t.Error("Platform for an experiment without a job token: got nil, want an error")
 	}
 }
 

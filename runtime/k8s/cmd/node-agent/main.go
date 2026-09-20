@@ -61,6 +61,10 @@ func main() {
 		log.Fatal("HYPOTHESISLOOP_CONTROL_PLANE_URL is required")
 	}
 	endpoint := cpURL + "/internal/node-metrics"
+	token := os.Getenv("RUNTIME_TOKEN")
+	if token == "" {
+		log.Fatal("RUNTIME_TOKEN is required")
+	}
 
 	ms := os.Getenv("PUSH_INTERVAL_MS")
 	n, err := strconv.Atoi(ms)
@@ -117,19 +121,26 @@ func main() {
 		}
 		// Oldest first, stopping at the first failure: the payloads carry their own collection
 		// time, so a backlog delivered late still lands on the instants it was observed at.
-		for len(pending) > 0 && push(client, endpoint, pending[0]) {
+		for len(pending) > 0 && push(client, endpoint, token, pending[0]) {
 			pending = pending[1:]
 		}
 	}
 }
 
-func push(client *http.Client, endpoint string, payload pushPayload) bool {
+func push(client *http.Client, endpoint, token string, payload pushPayload) bool {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("push marshal error: %v", err)
 		return false
 	}
-	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("push request error: %v", err)
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("push error: %v", err)
 		return false

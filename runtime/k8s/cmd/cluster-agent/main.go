@@ -33,6 +33,8 @@ func main() {
 	// clusters where the control plane lives outside the cluster
 	// (e.g. http://host.docker.internal:8081).
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
+	// The runtime token the cluster's owner was given when the cluster was registered.
+	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
@@ -65,6 +67,7 @@ func main() {
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
 		APIURL:            apiURL,
+		Token:             token,
 		Executor:          jwc,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,

@@ -29,6 +29,9 @@ func Platform(exp *domain.Experiment, group domain.JobGroup, apiURL string, reac
 	if exp.Data == nil {
 		return nil, fmt.Errorf("experiment %s has no durable-data access in desired state", exp.ID)
 	}
+	if exp.Token == "" {
+		return nil, fmt.Errorf("experiment %s has no job token in desired state", exp.ID)
+	}
 	dataEndpoint := reach(exp.Data.Endpoint)
 	traceID := sha256.Sum256([]byte(exp.ID))
 	return []Var{
@@ -51,6 +54,7 @@ func Platform(exp *domain.Experiment, group domain.JobGroup, apiURL string, reac
 		{"HYPOTHESISLOOP_DURATION_SECONDS", fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
 		{"HYPOTHESISLOOP_ATTEMPT", fmt.Sprintf("%d", exp.AttemptCount)},
 		{"TRACEPARENT", fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
+		{"HYPOTHESISLOOP_TOKEN", exp.Token},
 	}, nil
 }
 
