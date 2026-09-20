@@ -33,6 +33,11 @@ type constructor func(settings yaml.Node, acceleratorTypes []string) (provider.P
 // refuses one it cannot rent, so a shape nothing could run on stops the process at startup.
 func adapter[S any, P provider.Provider](construct func(S, []string) (P, error)) constructor {
 	return func(node yaml.Node, acceleratorTypes []string) (provider.Provider, error) {
+		// A settings key with nothing under it is a section with no settings, the same as no
+		// key at all, and the package's own check then names what is missing.
+		if node.Tag == "!!null" {
+			node = yaml.Node{}
+		}
 		raw, err := yaml.Marshal(&node)
 		if err != nil {
 			return nil, err

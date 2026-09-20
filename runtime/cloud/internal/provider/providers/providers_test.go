@@ -110,3 +110,22 @@ func TestAShippedProviderSectionWithoutItsSecretIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A config that names a vendor and leaves out its settings must stop the process at startup,
+// with the setting that is missing, before anything is rented.
+func TestAVendorNamedWithoutASettingsSectionIsRefusedAtStartup(t *testing.T) {
+	t.Setenv("FLY_API_TOKEN", "FlyV1 not-a-real-token")
+	t.Setenv("E2B_API_KEY", "not-a-real-key")
+	for name, want := range map[string]string{
+		"fly": "fly: api_token_env is required",
+		"e2b": "e2b: api_key_env is required",
+	} {
+		for form, text := range map[string]string{"no settings key": "name: " + name, "an empty settings key": "name: " + name + "\nsettings:"} {
+			t.Run(name+", "+form, func(t *testing.T) {
+				if _, err := New(name, settingsNode(t, text), nil); err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %v, want %q", err, want)
+				}
+			})
+		}
+	}
+}
