@@ -29,7 +29,7 @@ func (r fakeExperimentRow) Scan(dest ...any) error {
 		(*time.Time)(nil), 0, 0, []byte("[]"),
 		"AK", "SK",
 		now, now,
-		"prj-1",
+		"prj-1", "org-1",
 	}
 	if len(values) != len(dest) {
 		panic("fakeExperimentRow: column count drifted from scanExperiment's Scan call")
