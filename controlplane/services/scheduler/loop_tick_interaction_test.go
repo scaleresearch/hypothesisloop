@@ -328,8 +328,8 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatalf("tick() = %v, want nil", err)
 	}
-	if store.notAdmitted[exp.ID] == "" {
-		t.Fatal("job should have been marked not-admitted for the layout-only shortfall")
+	if got := store.notAdmitted[exp.ID]; !strings.HasPrefix(got, domain.NotAdmittedCapacityUnavailable+": the cluster total has room, no node layout holds the job") {
+		t.Fatalf("not_admitted_reason = %q, want it to say the layout is what does not fit", got)
 	}
 	if store.requeuePreemptedCall {
 		t.Fatal("preemption requeued a victim for a shortfall that was purely about layout, not capacity")
