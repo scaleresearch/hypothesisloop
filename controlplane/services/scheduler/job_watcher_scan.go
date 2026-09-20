@@ -41,22 +41,19 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	}
 	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
 	// WithScaleUpTimeout — mirrors Loop.tick's own opt-in gate for the same reason: a backend
-	// that has not implemented these two methods must not be asked to. A fetch failure degrades
-	// this pass to today's stuckPendingTimeout-only behaviour rather than aborting the whole
-	// scan — an eviction pass for every other experiment must survive one infrastructure hiccup.
+	// that has not implemented these two methods must not be asked to. A fetch failure ends the
+	// pass: judging a placement deadline without them would apply the wrong timeout.
 	var autoscalerEnabled map[string]bool
 	var clusterIDs map[string]string
 	if w.scaleUpTimeout > 0 {
 		var err error
 		autoscalerEnabled, err = w.backend.GetAutoscalerCapability(ctx)
 		if err != nil {
-			w.logger.Warn("job_watcher: autoscaler capability unavailable, deferring to stuck_pending timeout this pass", zap.Error(err))
-			autoscalerEnabled = nil
+			return fmt.Errorf("autoscaler capability: %w", err)
 		}
 		clusterIDs, err = w.backend.GetClusterIDs(ctx)
 		if err != nil {
-			w.logger.Warn("job_watcher: cluster ids unavailable, deferring to stuck_pending timeout this pass", zap.Error(err))
-			clusterIDs = nil
+			return fmt.Errorf("cluster ids: %w", err)
 		}
 	}
 	for _, status := range statuses {
